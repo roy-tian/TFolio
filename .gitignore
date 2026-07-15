@@ -1,0 +1,27 @@
+# Frontend dependencies and build output
+node_modules/
+dist/
+
+# Rust build output
+target/
+src-tauri/target/
+
+# Tauri-generated capability schemas
+src-tauri/gen/schemas/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Logs and local overrides
+logs/
+*.log
+*.local
+
+# Editor and OS files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
