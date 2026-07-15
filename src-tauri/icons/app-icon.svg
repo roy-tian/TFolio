@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">TFolio</title>
+  <defs>
+    <linearGradient id="background" x1="128" y1="96" x2="896" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18181b" />
+      <stop offset="1" stop-color="#09090b" />
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#background)" />
+  <path d="M300 232h322l142 142v418H300V232Z" fill="#fafafa" />
+  <path d="M622 232v142h142" fill="#d4d4d8" />
+  <path d="M622 232 764 374H622V232Z" fill="#e4e4e7" />
+  <path d="M382 444h300v76H570v282h-76V520H382v-76Z" fill="#18181b" />
+</svg>
