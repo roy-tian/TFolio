@@ -6,6 +6,10 @@ dist/
 target/
 src-tauri/target/
 
+# Downloaded PDFium runtime libraries
+src-tauri/resources/pdfium/*
+!src-tauri/resources/pdfium/.gitkeep
+
 # Tauri-generated capability schemas
 src-tauri/gen/schemas/
 

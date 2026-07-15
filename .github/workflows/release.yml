@@ -41,18 +41,22 @@ jobs:
             platform: macos-latest
             args: --target aarch64-apple-darwin
             rust_targets: aarch64-apple-darwin
+            pdfium_target: aarch64-apple-darwin
           - name: macOS (Intel)
             platform: macos-latest
             args: --target x86_64-apple-darwin
             rust_targets: x86_64-apple-darwin
+            pdfium_target: x86_64-apple-darwin
           - name: Linux (x64)
             platform: ubuntu-22.04
             args: ""
             rust_targets: ""
+            pdfium_target: x86_64-unknown-linux-gnu
           - name: Windows (x64)
             platform: windows-latest
             args: ""
             rust_targets: ""
+            pdfium_target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Check out repository
@@ -79,6 +83,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun ci
+
+      - name: Download PDFium runtime
+        run: bun run pdfium:download --target ${{ matrix.pdfium_target }}
 
       - name: Build and publish Tauri bundles
         uses: tauri-apps/tauri-action@v1

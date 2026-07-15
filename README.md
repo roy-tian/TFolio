@@ -23,6 +23,21 @@ only when the product UI calls for them.
 
 Run the focused locale-selection tests with `bun run test`.
 
+## PDF security
+
+PDF files are parsed and rendered in the Rust backend by a locally bundled
+PDFium library. PDF bytes and rendered PNG pages cross the Tauri boundary as raw
+binary IPC payloads; PDF content is never interpreted by the WebView. The
+production Content Security Policy only permits same-origin application
+resources and Tauri IPC. The development-only CSP permits inline styles solely
+because Vite's CSS hot reload injects styles at runtime; production does not
+allow inline styles.
+
+`bun run tauri:dev`, `bun run tauri:build`, and `bun run tauri:bundle`
+automatically download the pinned PDFium runtime for the current platform. To
+prepare it explicitly, run `bun run pdfium:download`. Set `PDFIUM_LIB_PATH` to
+use a local PDFium library instead.
+
 ## Build the executable
 
 ```powershell

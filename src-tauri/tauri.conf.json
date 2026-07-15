@@ -19,16 +19,21 @@
         "minWidth": 800,
         "minHeight": 560,
         "center": true,
-        "resizable": true
+        "resizable": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; connect-src ipc: http://ipc.localhost; font-src 'self'; img-src 'self' data:; style-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 ws://localhost:1421; font-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "copyright": "Copyright © 2026 Roy Tian"
+    "copyright": "Copyright © 2026 Roy Tian",
+    "resources": {
+      "resources/pdfium/": "pdfium/"
+    }
   }
 }
