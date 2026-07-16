@@ -115,15 +115,33 @@ describe("TFolio PDF viewer", () => {
       "This document has no bookmarks.",
     )
 
-    await $("button[aria-label='More']").click()
-    await $("//button[@role='menuitem' and normalize-space()='About']").click()
-    await expect($("dialog[open]")).toBeDisplayed()
-    await $("button[aria-label='Close']").click()
+    await $("button[aria-label='Settings']").click()
+    await expect($("[role='dialog']")).toBeDisplayed()
 
-    await $("button[aria-label='More']").click()
-    await $("//button[@role='menuitem' and normalize-space()='Language']").click()
+    // The About section preserves the existing application information.
+    await $("[role='tab'][aria-controls='settings-panel-about']").click()
+    await expect($("#settings-panel-about")).toBeDisplayed()
+
+    // The Appearance section switches the color theme. Selecting Light then Dark
+    // proves the toggle works regardless of the operating system's default scheme
+    // (under "follow system" the app may already be dark before the click).
+    await $("[role='tab'][aria-controls='settings-panel-appearance']").click()
+    await $("//button[@role='radio' and normalize-space()='Light']").click()
+    const isDarkAfterLight = await browser.execute(() =>
+      document.documentElement.classList.contains("dark"),
+    )
+    expect(isDarkAfterLight).toBe(false)
+
+    await $("//button[@role='radio' and normalize-space()='Dark']").click()
+    const isDarkAfterDark = await browser.execute(() =>
+      document.documentElement.classList.contains("dark"),
+    )
+    expect(isDarkAfterDark).toBe(true)
+
+    // …and the interface language.
+    await $("#settings-language").click()
     await $(
-      "//button[@role='menuitemradio' and normalize-space()='Simplified Chinese']",
+      "//*[@role='option' and normalize-space()='Simplified Chinese']",
     ).click()
 
     const documentLanguage = await browser.execute(

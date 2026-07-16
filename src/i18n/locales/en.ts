@@ -7,9 +7,21 @@ const en = {
     showBookmarks: "Show bookmarks",
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
-    more: "More",
-    language: "Language",
+  },
+  settings: {
+    open: "Settings",
+    title: "Settings",
+    description: "Adjust appearance, language, and other app settings.",
+    appearance: "Appearance",
     about: "About",
+    theme: "Theme",
+    themeHint: "Choose a light or dark appearance.",
+    themeLight: "Light",
+    themeSystem: "Follow system",
+    themeDark: "Dark",
+    language: "Language",
+    languageHint: "Choose the interface language.",
+    close: "Close",
   },
   language: {
     simplifiedChinese: "Simplified Chinese",
@@ -37,7 +49,6 @@ const en = {
     title: "TFolio",
     description: "A focused desktop workspace for reading and editing PDF files.",
     copyright: "Copyright © 2026 Roy Tian",
-    close: "Close",
   },
 } as const
 

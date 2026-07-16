@@ -3,9 +3,12 @@ import { createRoot } from "react-dom/client"
 
 import App from "./App"
 import { initializeI18n } from "./i18n"
+import { initializeTheme } from "./lib/theme"
 import "./index.css"
 
 async function bootstrap() {
+  initializeTheme()
+
   if (import.meta.env.MODE === "e2e") {
     await import("@wdio/tauri-plugin")
   }

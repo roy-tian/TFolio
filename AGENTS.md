@@ -110,6 +110,17 @@ and `frame-src` disabled — and a separate `devCsp` permits only the WebSocket 
 Security-related changes must pass `bun run build`, `bun run tauri:build`, and a
 manual check for unexpected CSP violations in the WebView developer console.
 
+Known benign CSP violations: opening a Radix dialog or select (the settings
+dialog) emits a few `style-src-elem` "inline" violations. They come from
+`react-remove-scroll` / `react-remove-scroll-bar` (pulled in transitively by
+Radix), which inject a `<style>` element to lock background scroll — blocked by
+the production `style-src 'self'`, and expected. They have no functional impact
+because `body { overflow: hidden }` (`src/index.css`) already locks scroll, so
+the injected rule is redundant. React `style={{…}}` props, Radix positioning, and
+`element.style` writes (e.g. `colorScheme`) are applied via the CSSOM, which CSP
+does not govern, so those are unaffected. Treat only *new* violation sources as
+regressions during the manual console check.
+
 ## Commit & Pull Request Guidelines
 
 Use concise, imperative subjects with Conventional Commit prefixes (`feat:`,

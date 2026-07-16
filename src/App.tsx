@@ -14,9 +14,9 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { AboutMenu } from "@/components/AboutMenu"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PdfPage } from "@/components/PdfPage"
+import { SettingsDialog } from "@/components/SettingsDialog"
 import { Button } from "@/components/ui/button"
 import {
   isPdfFile,
@@ -388,7 +388,7 @@ export default function App() {
         </div>
 
         <div className="justify-self-end">
-          <AboutMenu />
+          <SettingsDialog />
         </div>
       </header>
 

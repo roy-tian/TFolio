@@ -15,9 +15,21 @@ const zhCN = {
     showBookmarks: "显示书签",
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
-    more: "更多",
-    language: "语言",
+  },
+  settings: {
+    open: "设置",
+    title: "设置",
+    description: "调整外观、语言等应用设置。",
+    appearance: "外观",
     about: "关于",
+    theme: "主题",
+    themeHint: "选择明亮或暗黑外观。",
+    themeLight: "明亮",
+    themeSystem: "跟随系统",
+    themeDark: "暗黑",
+    language: "语言",
+    languageHint: "选择界面显示语言。",
+    close: "关闭",
   },
   language: {
     simplifiedChinese: "简体中文",
@@ -45,7 +57,6 @@ const zhCN = {
     title: "TFolio",
     description: "专注于阅读和编辑 PDF 文件的桌面工作空间。",
     copyright: "版权所有 © 2026 Roy Tian",
-    close: "关闭",
   },
 } as const satisfies TranslationSchema<typeof en>
 
