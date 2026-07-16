@@ -39,6 +39,9 @@ jobs:
       - name: Check synchronized version
         run: bun run version:check
 
+      - name: Run frontend tests
+        run: bun run test
+
       - name: Build frontend
         run: bun run build
 
@@ -72,3 +75,53 @@ jobs:
 
       - name: Check Rust
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  e2e:
+    name: GUI E2E
+    needs: [frontend, rust]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun ci
+
+      - name: Build GUI test application
+        run: bun run test:e2e:build
+
+      - name: Exercise PDFium integration test
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored
+
+      - name: Run GUI tests with Xvfb
+        env:
+          NO_AT_BRIDGE: "1"
+        run: bun run test:e2e:headless
+
+      - name: Upload GUI failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-e2e-artifacts
+          path: artifacts/e2e/
+          if-no-files-found: ignore

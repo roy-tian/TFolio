@@ -23,6 +23,37 @@ only when the product UI calls for them.
 
 Run the focused locale-selection tests with `bun run test`.
 
+## GUI end-to-end tests
+
+The GUI suite drives a test-only Tauri binary through WebdriverIO's embedded
+WebDriver provider. The `e2e` Cargo feature, `e2e` capability, global Tauri API,
+and frontend WDIO bridge are enabled only by `src-tauri/tauri.e2e.conf.json`;
+normal development and release builds keep their existing CSP settings and
+default capability set unchanged.
+
+On a headless Debian or Ubuntu machine, install the normal Tauri build
+dependencies plus Xvfb:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev xvfb
+```
+
+Build the test binary and run the suite under its virtual display:
+
+```bash
+bun run test:e2e
+```
+
+For iteration, rebuild and run can be invoked separately:
+
+```bash
+bun run test:e2e:build
+bun run test:e2e:headless
+```
+
+Failed tests write screenshots and WebdriverIO logs under `artifacts/e2e/`.
+Run all frontend, Rust, and GUI tests with `bun run test:all`.
+
 ## PDF security
 
 PDF files are parsed and rendered in the Rust backend by a locally bundled

@@ -20,6 +20,7 @@ src-tauri/gen/schemas/
 
 # Logs and local overrides
 logs/
+artifacts/
 *.log
 *.local
 

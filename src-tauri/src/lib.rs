@@ -5,7 +5,14 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .setup(|app| {
             let pdfium = PdfiumState::new(app.handle()).map_err(std::io::Error::other)?;
             app.manage(pdfium);
