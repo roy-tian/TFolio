@@ -1,15 +1,31 @@
-import { $, browser, expect } from "@wdio/globals"
+import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
+import { viewModeStorageKey } from "../../src/lib/viewMode"
 
-function minimalPdf() {
+// A content-free PDF of `pageCount` 200x300 pages. Page objects take the odd
+// ids from 3 up, each followed by its (empty) contents stream.
+function minimalPdf(pageCount = 1) {
+  const kids = Array.from(
+    { length: pageCount },
+    (_, index) => `${3 + index * 2} 0 R`,
+  ).join(" ")
   const objects = [
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R >>\nendobj\n",
-    "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
+    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`,
   ]
+
+  for (let index = 0; index < pageCount; index += 1) {
+    const pageId = 3 + index * 2
+
+    objects.push(
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] ` +
+        `/Contents ${pageId + 1} 0 R >>\nendobj\n`,
+      `${pageId + 1} 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n`,
+    )
+  }
+
   const chunks = ["%PDF-1.4\n"]
   const offsets: number[] = []
   let byteLength = Buffer.byteLength(chunks[0], "ascii")
@@ -64,9 +80,14 @@ async function selectFile(name: string, type: string, contents: Uint8Array) {
 
 describe("TFolio PDF viewer", () => {
   before(async () => {
-    await browser.execute((storageKey) => {
-      window.localStorage.setItem(storageKey, "en")
-    }, languageStorageKey)
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        // The view mode persists, so drop it to start from the single view.
+        window.localStorage.removeItem(keys.viewMode)
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
     await browser.refresh()
     await $("input[aria-label='Choose a PDF file']").waitForExist()
   })
@@ -148,5 +169,77 @@ describe("TFolio PDF viewer", () => {
       () => document.documentElement.lang,
     )
     expect(documentLanguage).toBe("zh-CN")
+  })
+
+  it("switches between the single, book, and thumbnail views", async () => {
+    // This test both asserts the single-view default and leaves a mode behind,
+    // so it clears the key itself rather than leaning on the one-time `before`.
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        window.localStorage.removeItem(keys.viewMode)
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
+    await browser.refresh()
+    await selectFile("nine-pages.pdf", "application/pdf", minimalPdf(9))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const toggle = (label: string) => $(`[role='radio'][aria-label='${label}']`)
+    const pageInput = await $("input[aria-label='Page number']")
+
+    await expect(toggle("Single page")).toHaveAttribute("aria-checked", "true")
+
+    // Book view pairs from page 1, so pages 1 and 2 share a spread.
+    await toggle("Book").click()
+    await expect(toggle("Book")).toHaveAttribute("aria-checked", "true")
+    await $("[data-page-number='2']").waitForDisplayed()
+
+    const spread = await browser.execute(() => {
+      const rowOf = (pageNumber: number) =>
+        document.querySelector(`[data-page-number='${pageNumber}']`)
+          ?.parentElement
+
+      return {
+        pairsFirstTwo: rowOf(1) === rowOf(2),
+        startsNewRowOnThird: rowOf(1) !== rowOf(3),
+        // The trailing odd page keeps the left cell, alone in its row.
+        trailingRowSize: rowOf(9)?.childElementCount,
+      }
+    })
+    expect(spread.pairsFirstTwo).toBe(true)
+    expect(spread.startsNewRowOnThird).toBe(true)
+    expect(spread.trailingRowSize).toBe(1)
+
+    // Each layout stacks to a different height, and the viewer keeps its scroll
+    // offset across a switch, so the reader's page has to be sought back out.
+    await toggle("Single page").click()
+    await pageInput.setValue("5")
+    await browser.keys("Enter")
+    await browser.pause(1500)
+    await expect(pageInput).toHaveValue("5")
+    await toggle("Book").click()
+    // Give the page tracker time to settle. It only revises the current page
+    // once the new layout has mounted, so asserting right away would pass
+    // against the stale value before the layout can strand it.
+    await browser.pause(1500)
+    await expect(pageInput).toHaveValue("5")
+
+    // Thumbnails are navigation targets: an image, and no selectable text layer.
+    await toggle("Thumbnails").click()
+    const thirdThumbnail = await $("button[aria-label='Go to page 3']")
+    await thirdThumbnail.waitForDisplayed()
+    await expect($$(".pdf-text-layer")).toBeElementsArrayOfSize(0)
+
+    // Clicking one drops back into the single view at that page.
+    await thirdThumbnail.click()
+    await expect(toggle("Single page")).toHaveAttribute("aria-checked", "true")
+    await expect(pageInput).toHaveValue("3")
+
+    // The chosen mode outlives a reload.
+    await toggle("Book").click()
+    await browser.refresh()
+    await $("input[aria-label='Choose a PDF file']").waitForExist()
+    await expect(toggle("Book")).toHaveAttribute("aria-checked", "true")
   })
 })

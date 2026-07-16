@@ -10,6 +10,7 @@ task runner.
 - `src/`: frontend application code.
   - `src/components/`: reusable React components; shadcn-style primitives live
     under `src/components/ui/`.
+  - `src/hooks/`: reusable React hooks (e.g. `useNearViewport.ts`).
   - `src/lib/`: shared, framework-agnostic helpers (e.g. `pdf.ts`).
   - `src/i18n/`: i18next setup and `src/i18n/locales/` translation resources.
   - `src/index.css`: global styles and Tailwind layer configuration.
@@ -87,8 +88,10 @@ schema, so missing or misspelled keys in other locales fail the build.
 
 Treat PDFs, annotations, metadata, rich text, pasted HTML, and remote content as
 untrusted input. PDFs are parsed and rendered entirely in the Rust backend by the
-bundled PDFium library; PDF bytes and rendered PNG pages cross the Tauri boundary
-as raw binary IPC payloads and are never interpreted by the WebView.
+bundled PDFium library; PDF bytes and rendered pages (PNG for pages, WebP for
+thumbnails) cross the Tauri boundary as raw binary IPC payloads, and are decoded
+straight to a bitmap via `createImageBitmap`, never as a document-attached
+`blob:` source.
 
 The production CSP (`app.security.csp` in `tauri.conf.json`) is intentionally
 restrictive — `default-src 'self'`, no inline scripts or styles, `object-src`

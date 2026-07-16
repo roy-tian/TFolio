@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use image::ImageFormat;
+use image::{DynamicImage, ImageFormat};
 use pdfium_render::prelude::*;
 use serde::Serialize;
 use tauri::{
@@ -22,6 +22,9 @@ const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
 const MIN_RENDER_WIDTH: i32 = 64;
 const MAX_RENDER_WIDTH: i32 = 4096;
 const MAX_RENDER_HEIGHT: i32 = 4096;
+// Thumbnails are decorative navigation targets, never read at full size, so they
+// get a much tighter ceiling than a full page render.
+const MAX_THUMBNAIL_WIDTH: i32 = 512;
 
 #[cfg(target_os = "windows")]
 const PDFIUM_LIBRARY_NAME: &str = "pdfium.dll";
@@ -135,15 +138,19 @@ impl PdfiumEngine {
         })
     }
 
-    fn render_page(
+    /// Renders `page_number` to a bitmap `width` pixels wide, refusing anything
+    /// wider than `max_width`. Shared by the full-page and thumbnail paths,
+    /// which differ only in their ceiling and their encoder.
+    fn render_bitmap(
         &self,
         document_id: u64,
         page_number: i32,
         width: i32,
-    ) -> Result<Vec<u8>, String> {
-        if !(MIN_RENDER_WIDTH..=MAX_RENDER_WIDTH).contains(&width) {
+        max_width: i32,
+    ) -> Result<DynamicImage, String> {
+        if !(MIN_RENDER_WIDTH..=max_width).contains(&width) {
             return Err(format!(
-                "render width must be between {MIN_RENDER_WIDTH} and {MAX_RENDER_WIDTH} pixels"
+                "render width must be between {MIN_RENDER_WIDTH} and {max_width} pixels"
             ));
         }
 
@@ -165,14 +172,23 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
         let render_config = PdfRenderConfig::new()
             .set_target_width(width)
-            .set_maximum_width(MAX_RENDER_WIDTH)
+            .set_maximum_width(max_width)
             .set_maximum_height(MAX_RENDER_HEIGHT)
             .render_annotations(true)
             .render_form_data(true);
-        let image = page
-            .render_with_config(&render_config)
+
+        page.render_with_config(&render_config)
             .and_then(|bitmap| bitmap.as_image())
-            .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))?;
+            .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))
+    }
+
+    fn render_page(
+        &self,
+        document_id: u64,
+        page_number: i32,
+        width: i32,
+    ) -> Result<Vec<u8>, String> {
+        let image = self.render_bitmap(document_id, page_number, width, MAX_RENDER_WIDTH)?;
         let mut png = Cursor::new(Vec::new());
 
         image
@@ -180,6 +196,24 @@ impl PdfiumEngine {
             .map_err(|error| format!("could not encode page {page_number}: {error}"))?;
 
         Ok(png.into_inner())
+    }
+
+    fn render_thumbnail(
+        &self,
+        document_id: u64,
+        page_number: i32,
+        width: i32,
+    ) -> Result<Vec<u8>, String> {
+        let image = self.render_bitmap(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)?;
+        let mut webp = Cursor::new(Vec::new());
+
+        // The WebP encoder is lossless and accepts only Rgb8/Rgba8, but PDFium
+        // reports Luma8 for grayscale bitmaps, so normalize before encoding.
+        DynamicImage::ImageRgba8(image.into_rgba8())
+            .write_to(&mut webp, ImageFormat::WebP)
+            .map_err(|error| format!("could not encode page {page_number} thumbnail: {error}"))?;
+
+        Ok(webp.into_inner())
     }
 
     fn extract_text(&self, document_id: u64, page_number: i32) -> Result<Vec<PdfTextSpan>, String> {
@@ -394,6 +428,23 @@ pub async fn render_pdf_page(
 }
 
 #[tauri::command]
+pub async fn render_pdf_page_thumbnail(
+    document_id: u64,
+    page_number: i32,
+    width: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<Response, String> {
+    let engine = Arc::clone(&state.0);
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        engine.render_thumbnail(document_id, page_number, width)
+    })
+    .await
+    .map_err(|error| format!("PDFium thumbnail task failed: {error}"))??;
+
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
 pub async fn extract_pdf_page_text(
     document_id: u64,
     page_number: i32,
@@ -561,5 +612,27 @@ mod tests {
             .extract_text(document.id, 1)
             .expect("PDFium should extract text");
         assert!(spans.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn renders_thumbnail_as_webp() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        let webp = engine
+            .render_thumbnail(document.id, 1, 200)
+            .expect("PDFium should render the thumbnail");
+
+        // RIFF container magic, with the four-byte file size in between.
+        assert_eq!(&webp[..4], b"RIFF");
+        assert_eq!(&webp[8..12], b"WEBP");
+
+        // Thumbnails are capped well below the full-page render ceiling.
+        let error = engine
+            .render_thumbnail(document.id, 1, MAX_THUMBNAIL_WIDTH + 1)
+            .expect_err("thumbnails wider than the cap are rejected");
+        assert!(error.contains("render width must be between"));
     }
 }

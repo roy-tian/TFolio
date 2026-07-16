@@ -16,14 +16,22 @@ import {
 import { useTranslation } from "react-i18next"
 
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
-import { PdfPage } from "@/components/PdfPage"
+import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SettingsDialog } from "@/components/SettingsDialog"
+import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { Button } from "@/components/ui/button"
+import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import {
   isPdfFile,
   MAX_PDF_BYTES,
   type PdfDocumentInfo,
 } from "@/lib/pdf"
+import {
+  defaultViewMode,
+  readStoredViewMode,
+  storeViewMode,
+  type ViewMode,
+} from "@/lib/viewMode"
 
 type ViewerError = "fileTooLarge" | "invalidFile" | "openFailed" | null
 
@@ -43,10 +51,14 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
   const [viewerWidth, setViewerWidth] = useState(0)
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    () => readStoredViewMode() ?? defaultViewMode,
+  )
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(null)
   const requestIdRef = useRef(0)
   const dragDepthRef = useRef(0)
+  const pendingScrollPageRef = useRef<number | null>(null)
 
   const loadPdf = useCallback(async (file: File) => {
     if (!isPdfFile(file)) {
@@ -154,78 +166,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const viewer = viewerRef.current
+    storeViewMode(viewMode)
+  }, [viewMode])
 
-    if (!viewer || !pdfDocument) {
-      return
-    }
-
-    let animationFrame = 0
-    const visiblePages = new Set<HTMLElement>()
-
-    const updateCurrentPage = () => {
-      cancelAnimationFrame(animationFrame)
-      animationFrame = requestAnimationFrame(() => {
-        if (visiblePages.size === 0) {
-          return
-        }
-
-        const viewerBounds = viewer.getBoundingClientRect()
-        const readingLine = viewerBounds.top + Math.min(viewerBounds.height / 3, 240)
-        let nearestPage = 1
-        let nearestDistance = Number.POSITIVE_INFINITY
-
-        for (const page of visiblePages) {
-          const pageBounds = page.getBoundingClientRect()
-          const distance =
-            readingLine >= pageBounds.top && readingLine <= pageBounds.bottom
-              ? 0
-              : Math.min(
-                  Math.abs(readingLine - pageBounds.top),
-                  Math.abs(readingLine - pageBounds.bottom),
-                )
-
-          if (distance < nearestDistance) {
-            nearestDistance = distance
-            nearestPage = Number(page.dataset.pageNumber)
-          }
-        }
-
-        setCurrentPage(nearestPage)
-      })
-    }
-
-    const visibilityObserver = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const page = entry.target as HTMLElement
-
-          if (entry.isIntersecting) {
-            visiblePages.add(page)
-          } else {
-            visiblePages.delete(page)
-          }
-        }
-
-        updateCurrentPage()
-      },
-      { root: viewer },
-    )
-
-    for (const page of viewer.querySelectorAll<HTMLElement>(
-      "[data-page-number]",
-    )) {
-      visibilityObserver.observe(page)
-    }
-
-    viewer.addEventListener("scroll", updateCurrentPage, { passive: true })
-
-    return () => {
-      cancelAnimationFrame(animationFrame)
-      visibilityObserver.disconnect()
-      viewer.removeEventListener("scroll", updateCurrentPage)
-    }
-  }, [pdfDocument])
+  useCurrentPageTracker(viewerRef, pdfDocument?.id, viewMode, setCurrentPage)
 
   const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes("Files")) {
@@ -277,14 +221,48 @@ export default function App() {
     }
   }
 
-  const scrollToPage = (pageNumber: number) => {
+  const scrollToPage = (
+    pageNumber: number,
+    behavior: ScrollBehavior = "smooth",
+  ) => {
     const page = viewerRef.current?.querySelector<HTMLElement>(
       `[data-page-number="${pageNumber}"]`,
     )
 
     setCurrentPage(pageNumber)
-    page?.scrollIntoView({ behavior: "smooth", block: "start" })
+    page?.scrollIntoView({ behavior, block: "start" })
   }
+
+  // Picking a thumbnail leaves the grid for the page itself.
+  const selectThumbnail = (pageNumber: number) => {
+    pendingScrollPageRef.current = pageNumber
+    setViewMode("single")
+  }
+
+  // Each mode stacks its pages to a different total height, and the viewer keeps
+  // its scroll offset across the switch, so the old offset would land somewhere
+  // unrelated. Remember the page being read and seek back to it instead.
+  const changeViewMode = (mode: ViewMode) => {
+    if (mode !== viewMode) {
+      pendingScrollPageRef.current = currentPage
+    }
+
+    setViewMode(mode)
+  }
+
+  // The target only exists once the new layout has mounted, so the scroll waits
+  // for the commit rather than running alongside the mode change.
+  useEffect(() => {
+    const pendingPage = pendingScrollPageRef.current
+
+    if (pendingPage === null) {
+      return
+    }
+
+    pendingScrollPageRef.current = null
+    // The jump reads as a view swap rather than a scroll, so it lands instantly.
+    scrollToPage(pendingPage, "auto")
+  }, [viewMode])
 
   const submitPageNumber = () => {
     if (!pdfDocument) {
@@ -325,7 +303,7 @@ export default function App() {
       onDrop={handleDrop}
     >
       <header className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 shadow-xs backdrop-blur">
-        <div className="justify-self-start">
+        <div className="flex items-center gap-1 justify-self-start">
           <Button
             aria-label={
               bookmarksOpen
@@ -350,6 +328,11 @@ export default function App() {
           >
             <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
           </Button>
+          <ViewModeToggle
+            disabled={!pdfDocument}
+            onChange={changeViewMode}
+            value={viewMode}
+          />
         </div>
 
         <div
@@ -418,21 +401,16 @@ export default function App() {
           ref={viewerRef}
         >
           {pdfDocument ? (
-            <div
-              aria-label={fileName}
-              className="flex min-h-full flex-col items-center gap-5 px-8 py-8"
-            >
-              {pdfDocument.pages.map((page, index) => (
-                <PdfPage
-                  availableWidth={viewerWidth}
-                  documentId={pdfDocument.id}
-                  key={`${pdfDocument.id}-${index + 1}`}
-                  page={page}
-                  pageNumber={index + 1}
-                  rotation={rotation}
-                />
-              ))}
-            </div>
+            <PdfViewerLayout
+              currentPage={currentPage}
+              documentId={pdfDocument.id}
+              fileName={fileName}
+              onSelectThumbnail={selectThumbnail}
+              pages={pdfDocument.pages}
+              rotation={rotation}
+              viewMode={viewMode}
+              viewerWidth={viewerWidth}
+            />
           ) : (
             <div className="grid min-h-full place-items-center p-8">
               <label className="group flex w-full max-w-xl cursor-pointer flex-col items-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-14 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-within:ring-3 focus-within:ring-ring/50 dark:border-zinc-700">

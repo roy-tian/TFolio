@@ -5,6 +5,10 @@ const en = {
   toolbar: {
     hideBookmarks: "Hide bookmarks",
     showBookmarks: "Show bookmarks",
+    viewMode: "View mode",
+    viewModeSingle: "Single page",
+    viewModeBook: "Book",
+    viewModeThumbnail: "Thumbnails",
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
     rotate: "Rotate clockwise",
@@ -40,6 +44,7 @@ const en = {
     openFailed: "This PDF could not be opened.",
     pageLabel: "Page {{pageNumber}}",
     pageError: "Page {{pageNumber}} could not be rendered",
+    thumbnailLabel: "Go to page {{pageNumber}}",
   },
   bookmarks: {
     title: "Bookmarks",

@@ -17,7 +17,7 @@ e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 pdfium-render = { version = "=0.9.3", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }

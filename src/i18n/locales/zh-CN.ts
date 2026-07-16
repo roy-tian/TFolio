@@ -13,6 +13,10 @@ const zhCN = {
   toolbar: {
     hideBookmarks: "隐藏书签",
     showBookmarks: "显示书签",
+    viewMode: "视图模式",
+    viewModeSingle: "单页",
+    viewModeBook: "书本",
+    viewModeThumbnail: "缩略图",
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
     rotate: "顺时针旋转",
@@ -48,6 +52,7 @@ const zhCN = {
     openFailed: "无法打开此 PDF 文件。",
     pageLabel: "第 {{pageNumber}} 页",
     pageError: "第 {{pageNumber}} 页渲染失败",
+    thumbnailLabel: "跳转到第 {{pageNumber}} 页",
   },
   bookmarks: {
     title: "书签",
