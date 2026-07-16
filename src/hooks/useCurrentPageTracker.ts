@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react"
 
-import { pickNearestPage, type PageCandidate } from "@/lib/pdf"
+import { pickCurrentPage, type PageCandidate } from "@/lib/pdf"
 import type { ViewMode } from "@/lib/viewMode"
 
 /**
@@ -40,12 +40,7 @@ export function useCurrentPageTracker(
           return
         }
 
-        // The reader's eye sits above the middle of the viewport, so the line
-        // that decides the current page sits a third of the way down — capped,
-        // so a tall window does not push it past the top of a short page.
         const viewerBounds = viewer.getBoundingClientRect()
-        const readingLine =
-          viewerBounds.top + Math.min(viewerBounds.height / 3, 240)
         const candidates: PageCandidate[] = []
 
         for (const page of visiblePages) {
@@ -58,10 +53,14 @@ export function useCurrentPageTracker(
           })
         }
 
-        const nearestPage = pickNearestPage(candidates, readingLine)
+        const currentPage = pickCurrentPage(
+          candidates,
+          viewerBounds.top,
+          viewerBounds.bottom,
+        )
 
-        if (nearestPage !== null) {
-          onPageChangeRef.current(nearestPage)
+        if (currentPage !== null) {
+          onPageChangeRef.current(currentPage)
         }
       })
     }

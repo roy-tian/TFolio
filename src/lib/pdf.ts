@@ -66,40 +66,76 @@ export type PageCandidate = {
   top: number
 }
 
+// How much of itself a page has to show before it claims the reader from a page
+// above it. Half keeps the topmost page current until it is mostly gone.
+const MIN_CURRENT_PAGE_VISIBILITY = 0.5
+
 /**
- * The page nearest `readingLine`, or null when nothing is visible. A page
- * spanning the line has distance 0. Ties resolve to the lowest page number, so
- * a book spread reports its left page and a thumbnail row its leftmost cell,
- * regardless of the order in which the pages became visible.
+ * How much of `candidate` the viewport shows, against the most it could ever
+ * show. Measuring against the viewport rather than the page's own height keeps
+ * the score scale free: a page taller than the viewport reaches 1 by filling
+ * it, exactly as a short thumbnail row reaches 1 by fitting inside it.
  */
-export function pickNearestPage(
+function visibleFraction(
+  candidate: PageCandidate,
+  viewportTop: number,
+  viewportBottom: number,
+) {
+  const height = candidate.bottom - candidate.top
+  const viewportHeight = viewportBottom - viewportTop
+
+  if (height <= 0 || viewportHeight <= 0) {
+    return 0
+  }
+
+  const visible =
+    Math.min(candidate.bottom, viewportBottom) -
+    Math.max(candidate.top, viewportTop)
+
+  return Math.max(0, visible) / Math.min(height, viewportHeight)
+}
+
+/**
+ * The page the reader is on, or null when nothing is visible: the first page
+ * showing at least half of what it could, else whichever shows the most.
+ *
+ * Deliberately not a fixed line down the viewport. Navigation parks a page at
+ * the top of the viewer, so any line deep enough to sit inside a full page
+ * would fall past a short one — a thumbnail row, or a wide page in a book
+ * spread — and hand the reader the row below the one they asked for. Judging a
+ * page by how much of it shows holds for every row height.
+ *
+ * Ties resolve to the lowest page number, so a book spread reports its left
+ * page and a thumbnail row its leftmost cell, whatever order they arrived in.
+ */
+export function pickCurrentPage(
   candidates: PageCandidate[],
-  readingLine: number,
+  viewportTop: number,
+  viewportBottom: number,
 ): number | null {
-  let nearestPage: number | null = null
-  let nearestDistance = Number.POSITIVE_INFINITY
+  let currentPage: number | null = null
+  // A gap between two tall pages can leave both just under the bar, so keep the
+  // most visible page as a fallback rather than reporting nothing.
+  let fallbackPage: number | null = null
+  let fallbackFraction = -1
 
   for (const candidate of candidates) {
-    const distance =
-      readingLine >= candidate.top && readingLine <= candidate.bottom
-        ? 0
-        : Math.min(
-            Math.abs(readingLine - candidate.top),
-            Math.abs(readingLine - candidate.bottom),
-          )
+    const fraction = visibleFraction(candidate, viewportTop, viewportBottom)
 
-    // Comparing the page number on a tie makes the result independent of the
-    // order the pages arrived in, without sorting on every scroll frame.
-    if (
-      distance < nearestDistance ||
-      (distance === nearestDistance &&
-        nearestPage !== null &&
-        candidate.pageNumber < nearestPage)
+    if (fraction >= MIN_CURRENT_PAGE_VISIBILITY) {
+      if (currentPage === null || candidate.pageNumber < currentPage) {
+        currentPage = candidate.pageNumber
+      }
+    } else if (
+      fraction > fallbackFraction ||
+      (fraction === fallbackFraction &&
+        fallbackPage !== null &&
+        candidate.pageNumber < fallbackPage)
     ) {
-      nearestDistance = distance
-      nearestPage = candidate.pageNumber
+      fallbackFraction = fraction
+      fallbackPage = candidate.pageNumber
     }
   }
 
-  return nearestPage
+  return currentPage ?? fallbackPage
 }

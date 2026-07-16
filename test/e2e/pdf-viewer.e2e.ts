@@ -4,9 +4,10 @@ import "@wdio/tauri-service"
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 
-// A content-free PDF of `pageCount` 200x300 pages. Page objects take the odd
-// ids from 3 up, each followed by its (empty) contents stream.
-function minimalPdf(pageCount = 1) {
+// A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
+// otherwise. Page objects take the odd ids from 3 up, each followed by its
+// (empty) contents stream.
+function minimalPdf(pageCount = 1, mediaBox = "0 0 200 300") {
   const kids = Array.from(
     { length: pageCount },
     (_, index) => `${3 + index * 2} 0 R`,
@@ -20,7 +21,7 @@ function minimalPdf(pageCount = 1) {
     const pageId = 3 + index * 2
 
     objects.push(
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] ` +
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [${mediaBox}] ` +
         `/Contents ${pageId + 1} 0 R >>\nendobj\n`,
       `${pageId + 1} 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n`,
     )
@@ -241,5 +242,55 @@ describe("TFolio PDF viewer", () => {
     await browser.refresh()
     await $("input[aria-label='Choose a PDF file']").waitForExist()
     await expect(toggle("Book")).toHaveAttribute("aria-checked", "true")
+  })
+
+  // Landscape thumbnail rows are a fraction of a page's height. Page tracking
+  // must not assume a row is tall enough to reach some fixed depth down the
+  // viewer, or navigation lands on a row and the tracker reports a later one.
+  it("stays on the requested page in a grid of landscape pages", async () => {
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        window.localStorage.removeItem(keys.viewMode)
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
+    await browser.refresh()
+    await selectFile(
+      "landscape.pdf",
+      "application/pdf",
+      minimalPdf(40, "0 0 300 200"),
+    )
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    await $("[role='radio'][aria-label='Thumbnails']").click()
+    await $("button[aria-label='Go to page 1']").waitForDisplayed()
+
+    // The grid fits as many columns as the window allows, so derive a page that
+    // really does start a row rather than hard-coding one.
+    const columns = await browser.execute(() => {
+      const cellTop = (pageNumber: number) =>
+        document
+          .querySelector(`[data-page-number='${pageNumber}']`)!
+          .getBoundingClientRect().top
+      const firstTop = cellTop(1)
+      let count = 0
+
+      for (let pageNumber = 1; pageNumber <= 40; pageNumber += 1) {
+        if (Math.abs(cellTop(pageNumber) - firstTop) < 1) count += 1
+      }
+
+      return count
+    })
+
+    const target = String(1 + columns * 3) // leftmost cell of the fourth row
+    const pageInput = await $("input[aria-label='Page number']")
+
+    await pageInput.setValue(target)
+    await browser.keys("Enter")
+    // Let the tracker settle: it revises the page only after the scroll lands,
+    // so asserting straight away would pass against the pre-scroll value.
+    await browser.pause(1500)
+    await expect(pageInput).toHaveValue(target)
   })
 })
