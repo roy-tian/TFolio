@@ -66,8 +66,10 @@ export type PageCandidate = {
   top: number
 }
 
-// How much of itself a page has to show before it claims the reader from a page
-// above it. Half keeps the topmost page current until it is mostly gone.
+// How much of itself a page has to show to claim the reader from the page above.
+// Half is load-bearing: two stacked pages can never both clear it, so exactly one
+// qualifies and the rule collapses to "whichever shows most" — where Chrome and
+// pdf.js land. Lower it and the tie holds the page above current far too long.
 const MIN_CURRENT_PAGE_VISIBILITY = 0.5
 
 /**
