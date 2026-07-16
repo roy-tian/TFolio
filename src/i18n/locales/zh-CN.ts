@@ -15,6 +15,7 @@ const zhCN = {
     showBookmarks: "显示书签",
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
+    rotate: "顺时针旋转",
   },
   settings: {
     open: "设置",

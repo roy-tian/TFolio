@@ -11,6 +11,7 @@ import {
   Bookmark,
   FileUp,
   LoaderCircle,
+  RotateCw,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -36,6 +37,7 @@ export default function App() {
   const [fileName, setFileName] = useState("")
   const [currentPage, setCurrentPage] = useState(0)
   const [pageInput, setPageInput] = useState("0")
+  const [rotation, setRotation] = useState(0)
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -62,6 +64,7 @@ export default function App() {
     setIsLoading(true)
     setFileName(file.name)
     setCurrentPage(0)
+    setRotation(0)
     setBookmarksOpen(false)
     setPdfDocument(null)
 
@@ -387,7 +390,17 @@ export default function App() {
           </span>
         </div>
 
-        <div className="justify-self-end">
+        <div className="flex items-center gap-1 justify-self-end">
+          <Button
+            aria-label={t("toolbar.rotate")}
+            disabled={!pdfDocument}
+            onClick={() => setRotation((value) => (value + 90) % 360)}
+            size="icon"
+            title={t("toolbar.rotate")}
+            variant="ghost"
+          >
+            <RotateCw />
+          </Button>
           <SettingsDialog />
         </div>
       </header>
@@ -416,6 +429,7 @@ export default function App() {
                   key={`${pdfDocument.id}-${index + 1}`}
                   page={page}
                   pageNumber={index + 1}
+                  rotation={rotation}
                 />
               ))}
             </div>

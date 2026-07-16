@@ -7,6 +7,7 @@ const en = {
     showBookmarks: "Show bookmarks",
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
+    rotate: "Rotate clockwise",
   },
   settings: {
     open: "Settings",
