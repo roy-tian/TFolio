@@ -1,0 +1,107 @@
+// Reusable wdio spec for the `run-app` skill.
+//
+// Launches the app through the embedded WebDriver bridge (the e2e Cargo build),
+// optionally opens a PDF, and saves a screenshot of the WebView.
+//
+// Driven entirely by env vars so it can be pointed at any file without editing:
+//   TFOLIO_PDF   absolute path to a PDF to open (unset/empty => screenshot the
+//                empty drop-zone state instead)
+//   TFOLIO_SHOT  output PNG path (default: artifacts/run/screenshot.png)
+//   TFOLIO_LANG  "zh-CN" (default) or "en" — UI language for the screenshot
+//
+// Run with:
+//   xvfb-run -a bunx wdio run wdio.conf.ts \
+//     --spec .claude/skills/run-app/open-and-screenshot.e2e.ts
+// (with the WebKit software-render env vars from SKILL.md exported).
+
+import { mkdirSync, readFileSync } from "node:fs"
+import path from "node:path"
+
+import { $, browser } from "@wdio/globals"
+import "@wdio/tauri-service"
+
+// Hardcoded so this file is location-independent (no import from ../../src).
+// Keep in sync with src/i18n/config.ts `languageStorageKey`.
+const languageStorageKey = "tfolio.ui.language"
+
+const pdfPath = process.env.TFOLIO_PDF?.trim()
+const shotPath = path.resolve(
+  process.env.TFOLIO_SHOT?.trim() || "artifacts/run/screenshot.png",
+)
+const language = process.env.TFOLIO_LANG?.trim() || "zh-CN"
+
+// The WDIO bridge caps request body size, so stream the base64 in chunks.
+async function selectPdf(name: string, base64: string) {
+  const chunkSize = 256 * 1024
+  await browser.execute(() => {
+    ;(window as unknown as { __pdfChunks: string[] }).__pdfChunks = []
+  })
+  for (let offset = 0; offset < base64.length; offset += chunkSize) {
+    const chunk = base64.slice(offset, offset + chunkSize)
+    await browser.execute((c: string) => {
+      ;(window as unknown as { __pdfChunks: string[] }).__pdfChunks.push(c)
+    }, chunk)
+  }
+  await browser.execute((fileName: string) => {
+    const input = document.querySelector<HTMLInputElement>(
+      "input[type='file']",
+    )
+    if (!input) {
+      throw new Error("PDF file input was not found")
+    }
+    const b64 = (
+      window as unknown as { __pdfChunks: string[] }
+    ).__pdfChunks.join("")
+    const binary = atob(b64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    const file = new File([bytes], fileName, { type: "application/pdf" })
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [file],
+    })
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  }, name)
+}
+
+describe("run-app: launch and screenshot", () => {
+  it("captures the app UI", async () => {
+    await browser.execute(
+      ({ storageKey, lang }) => {
+        window.localStorage.setItem(storageKey, lang)
+      },
+      { storageKey: languageStorageKey, lang: language },
+    )
+    await browser.refresh()
+    await $("input[type='file']").waitForExist({ timeout: 30_000 })
+
+    if (pdfPath) {
+      const base64 = readFileSync(pdfPath).toString("base64")
+      await selectPdf(path.basename(pdfPath), base64)
+
+      const firstPage = await $("[data-page-number='1']")
+      await firstPage.waitForDisplayed({ timeout: 30_000 })
+
+      const canvas = await firstPage.$("canvas")
+      await browser.waitUntil(
+        async () => Number(await canvas.getAttribute("width")) > 200,
+        {
+          timeout: 30_000,
+          timeoutMsg: "PDF first page did not finish rendering through PDFium",
+        },
+      )
+      // Let the rendered page bitmap paint into the viewport before capturing.
+      await browser.pause(3500)
+    } else {
+      // Empty state: give the drop zone a beat to settle.
+      await browser.pause(500)
+    }
+
+    mkdirSync(path.dirname(shotPath), { recursive: true })
+    await browser.saveScreenshot(shotPath)
+    // eslint-disable-next-line no-console
+    console.log(`run-app screenshot saved to ${shotPath}`)
+  })
+})

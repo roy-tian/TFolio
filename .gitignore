@@ -30,3 +30,6 @@ artifacts/
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+
+# Miscellaneous
+.temp
