@@ -6,6 +6,9 @@ export type PdfOutlineItem = {
 
 export type PdfPageInfo = {
   height: number
+  // Clockwise rotation in degrees (0/90/180/270). `width`/`height` are the
+  // displayed dimensions with this rotation already applied.
+  rotation: number
   width: number
 }
 

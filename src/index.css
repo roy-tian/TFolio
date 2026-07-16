@@ -148,10 +148,13 @@ body {
  * query units (cqh), so the layer stays aligned as the page scales with the
  * viewport. The text itself is transparent — only the native selection
  * highlight is visible over the rendered glyphs.
+ *
+ * Size, centering, and rotation are set inline per page (PdfPage.tsx): the layer
+ * is laid out in the page's unrotated dimensions and rotated to match the
+ * rendered bitmap, so a rotated page's glyphs and selection stay aligned.
  */
 .pdf-text-layer {
   position: absolute;
-  inset: 0;
   overflow: hidden;
   container-type: size;
   line-height: 1;

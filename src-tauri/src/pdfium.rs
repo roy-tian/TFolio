@@ -41,13 +41,18 @@ pub struct PdfDocumentInfo {
 
 #[derive(Serialize)]
 struct PdfPageInfo {
+    // `width`/`height` are the displayed dimensions (the page's intrinsic
+    // `/Rotate` already applied), matching the rendered bitmap. `rotation` is
+    // the clockwise rotation in degrees (0/90/180/270) so the frontend can
+    // orient the text layer to match.
     width: f32,
     height: f32,
+    rotation: f32,
 }
 
-/// A run of text on a page together with its bounding box, expressed in PDF
-/// points with a top-left origin so the frontend can overlay a selectable text
-/// layer on top of the rendered page image.
+/// A run of text on a page together with its bounding box, expressed in
+/// *unrotated* page points with a top-left origin. The frontend rotates the
+/// whole text layer by the page's rotation, so spans stay in unrotated space.
 #[derive(Serialize)]
 pub struct PdfTextSpan {
     text: String,
@@ -110,6 +115,7 @@ impl PdfiumEngine {
             .map(|page| PdfPageInfo {
                 width: page.width().value,
                 height: page.height().value,
+                rotation: page_rotation_degrees(&page),
             })
             .collect::<Vec<_>>();
         let num_pages = document.pages().len();
@@ -193,7 +199,16 @@ impl PdfiumEngine {
             .pages()
             .get(page_number - 1)
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
-        let page_height = page.height().value;
+        // Text bounds come back in the page's *unrotated* coordinate space, but
+        // `height()` is the displayed height (rotation applied). For 90°/270°
+        // pages the unrotated height equals the displayed width, so flip the
+        // y-axis against the correct dimension.
+        let rotation = page_rotation_degrees(&page);
+        let unrotated_height = if rotation == 90.0 || rotation == 270.0 {
+            page.width().value
+        } else {
+            page.height().value
+        };
         let text = page.text().map_err(|error| {
             format!("PDFium could not read text on page {page_number}: {error}")
         })?;
@@ -220,7 +235,7 @@ impl PdfiumEngine {
                 text: content,
                 left,
                 // PDFium uses a bottom-left origin; flip to top-left for the DOM.
-                top: page_height - top,
+                top: unrotated_height - top,
                 width,
                 height,
             });
@@ -237,6 +252,14 @@ impl PdfiumEngine {
 
         Ok(())
     }
+}
+
+/// The page's intrinsic clockwise `/Rotate` in degrees (0/90/180/270), or 0 if
+/// PDFium cannot report it.
+fn page_rotation_degrees(page: &PdfPage<'_>) -> f32 {
+    page.rotation()
+        .map(|rotation| rotation.as_degrees())
+        .unwrap_or(0.0)
 }
 
 fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOutlineItem> {
@@ -392,6 +415,99 @@ pub fn close_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result<(), 
 mod tests {
     use super::*;
 
+    // A portrait 200x300 page with `/Rotate 90` and the text "Hi" drawn at an
+    // unrotated baseline of (50, 250).
+    fn rotated_text_pdf() -> Vec<u8> {
+        let content = "BT\n/F1 24 Tf\n50 250 Td\n(Hi) Tj\nET\n";
+        let contents_obj = format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        );
+        let objects = [
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Rotate 90 /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n".to_string(),
+            contents_obj,
+            "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_string(),
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+
+        for object in &objects {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(object.as_bytes());
+        }
+
+        let xref_offset = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n", offsets.len() + 1).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    // PDFium can only be bound once per process, so share a single leaked
+    // instance across the (otherwise independent) test engines.
+    fn test_pdfium() -> &'static Pdfium {
+        static PDFIUM: std::sync::OnceLock<&'static Pdfium> = std::sync::OnceLock::new();
+
+        PDFIUM.get_or_init(|| {
+            let library_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("pdfium")
+                .join(PDFIUM_LIBRARY_NAME);
+            let bindings = Pdfium::bind_to_library(&library_path).unwrap_or_else(|error| {
+                panic!("could not load {}: {error}", library_path.display())
+            });
+
+            Box::leak(Box::new(Pdfium::new(bindings)))
+        })
+    }
+
+    fn test_engine() -> PdfiumEngine {
+        PdfiumEngine {
+            pdfium: test_pdfium(),
+            documents: Mutex::new(HashMap::new()),
+            next_document_id: AtomicU64::new(1),
+        }
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn extracts_text_in_unrotated_space_for_rotated_page() {
+        let engine = test_engine();
+        let document = engine
+            .open(rotated_text_pdf())
+            .expect("PDFium should open the rotated PDF");
+
+        // `/Rotate 90` is surfaced so the frontend can orient the text layer.
+        assert_eq!(document.pages[0].rotation, 90.0);
+
+        let spans = engine
+            .extract_text(document.id, 1)
+            .expect("PDFium should extract text");
+        assert_eq!(spans.len(), 1, "the page has a single text run");
+
+        let span = &spans[0];
+        assert_eq!(span.text, "Hi");
+        // Bounds stay in the unrotated 200x300 page space with a top-left
+        // origin: the run sits near x=52, and the top-flip uses the unrotated
+        // height (300), not the displayed height (200) — which would go negative.
+        assert!((50.0..55.0).contains(&span.left), "left was {}", span.left);
+        assert!((30.0..36.0).contains(&span.top), "top was {}", span.top);
+        assert!(span.width > 0.0 && span.top > 0.0);
+    }
+
     fn minimal_pdf() -> Vec<u8> {
         let objects = [
             "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
@@ -428,19 +544,7 @@ mod tests {
     #[test]
     #[ignore = "requires `bun run pdfium:download`"]
     fn opens_and_renders_pdf_with_pdfium() {
-        let library_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("pdfium")
-            .join(PDFIUM_LIBRARY_NAME);
-        let bindings = Pdfium::bind_to_library(&library_path)
-            .unwrap_or_else(|error| panic!("could not load {}: {error}", library_path.display()));
-        let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
-        let engine = PdfiumEngine {
-            pdfium,
-            documents: Mutex::new(HashMap::new()),
-            next_document_id: AtomicU64::new(1),
-        };
-
+        let engine = test_engine();
         let document = engine
             .open(minimal_pdf())
             .expect("PDFium should open the PDF");

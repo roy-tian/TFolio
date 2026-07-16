@@ -175,6 +175,13 @@ export function PdfPage({
     }
   }, [documentId, isNearViewport, pageNumber])
 
+  // Text spans are in the page's unrotated coordinate space. For 90°/270° pages
+  // the unrotated dimensions are the displayed ones swapped; the layer itself is
+  // rotated (below) to line back up with the rendered bitmap.
+  const isSideways = page.rotation === 90 || page.rotation === 270
+  const layoutWidth = isSideways ? page.height : page.width
+  const layoutHeight = isSideways ? page.width : page.height
+
   // Positions are page-relative and the horizontal scale is resolution
   // independent, so this only needs recomputing when the spans themselves
   // change — not on every resize-driven re-render.
@@ -185,14 +192,14 @@ export function PdfPage({
         const scaleX = naturalWidth > 0 ? span.width / naturalWidth : 1
 
         return {
-          fontSize: `${(span.height / page.height) * 100}cqh`,
-          left: `${(span.left / page.width) * 100}%`,
+          fontSize: `${(span.height / layoutHeight) * 100}cqh`,
+          left: `${(span.left / layoutWidth) * 100}%`,
           text: span.text,
-          top: `${(span.top / page.height) * 100}%`,
+          top: `${(span.top / layoutHeight) * 100}%`,
           transform: scaleX === 1 ? undefined : `scaleX(${scaleX})`,
         }
       }),
-    [page.height, page.width, textSpans],
+    [layoutHeight, layoutWidth, textSpans],
   )
 
   return (
@@ -209,7 +216,16 @@ export function PdfPage({
         width={Math.max(1, Math.round(page.width))}
       />
       {hasRendered && positionedSpans.length > 0 ? (
-        <div className="pdf-text-layer">
+        <div
+          className="pdf-text-layer"
+          style={{
+            height: `${(layoutHeight / page.height) * 100}%`,
+            left: "50%",
+            top: "50%",
+            transform: `translate(-50%, -50%) rotate(${page.rotation}deg)`,
+            width: `${(layoutWidth / page.width) * 100}%`,
+          }}
+        >
           {positionedSpans.map((span, index) => (
             <span
               key={index}
