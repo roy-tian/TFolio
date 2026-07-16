@@ -1,6 +1,6 @@
 mod pdfium;
 
-use pdfium::{close_pdf, open_pdf, render_pdf_page, PdfiumState};
+use pdfium::{close_pdf, extract_pdf_page_text, open_pdf, render_pdf_page, PdfiumState};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,6 +21,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_pdf,
             render_pdf_page,
+            extract_pdf_page_text,
             close_pdf
         ])
         .run(tauri::generate_context!())

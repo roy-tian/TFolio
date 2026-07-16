@@ -141,3 +141,35 @@ body {
     @apply font-sans;
   }
 }
+
+/*
+ * Selectable text layer overlaid on the rendered page image. Each span is
+ * absolutely positioned in page-percentage units and sized with container
+ * query units (cqh), so the layer stays aligned as the page scales with the
+ * viewport. The text itself is transparent — only the native selection
+ * highlight is visible over the rendered glyphs.
+ */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  container-type: size;
+  line-height: 1;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-text-layer span {
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0 0;
+  color: transparent;
+  /* Must match TEXT_LAYER_FONT_FAMILY in PdfPage.tsx: the run width is measured
+     with this family, so the span has to render with it too or scaleX skews. */
+  font-family: sans-serif;
+}
+
+.pdf-text-layer ::selection {
+  background: rgb(56 132 255 / 0.35);
+}

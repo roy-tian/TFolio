@@ -1,9 +1,33 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import type { PdfPageInfo } from "@/lib/pdf"
+import type { PdfPageInfo, PdfTextSpan } from "@/lib/pdf"
+
+// The transparent text layer renders every span with the same font family that
+// measures the run width, so the horizontal scale stays consistent between
+// measurement and layout.
+const TEXT_LAYER_FONT_FAMILY = "sans-serif"
+
+let measureContext: CanvasRenderingContext2D | null = null
+
+// Natural width, in the same units as `fontSize`, that `text` occupies in the
+// text-layer font. Used to derive the horizontal scale that stretches a span to
+// match the width PDFium reported for the run.
+function measureTextWidth(text: string, fontSize: number) {
+  if (!measureContext) {
+    measureContext = document.createElement("canvas").getContext("2d")
+  }
+
+  if (!measureContext) {
+    return 0
+  }
+
+  measureContext.font = `${fontSize}px ${TEXT_LAYER_FONT_FAMILY}`
+
+  return measureContext.measureText(text).width
+}
 
 type PdfPageProps = {
   availableWidth: number
@@ -28,6 +52,7 @@ export function PdfPage({
   const [isNearViewport, setIsNearViewport] = useState(false)
   const [hasRendered, setHasRendered] = useState(false)
   const [renderFailed, setRenderFailed] = useState(false)
+  const [textSpans, setTextSpans] = useState<PdfTextSpan[]>([])
 
   useEffect(() => {
     const wrapper = wrapperRef.current
@@ -122,6 +147,54 @@ export function PdfPage({
     }
   }, [availableWidth, documentId, isNearViewport, pageNumber])
 
+  useEffect(() => {
+    if (!isNearViewport) {
+      return
+    }
+
+    let cancelled = false
+    setTextSpans([])
+
+    void invoke<PdfTextSpan[]>("extract_pdf_page_text", {
+      documentId,
+      pageNumber,
+    })
+      .then((spans) => {
+        if (!cancelled) {
+          setTextSpans(spans)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTextSpans([])
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [documentId, isNearViewport, pageNumber])
+
+  // Positions are page-relative and the horizontal scale is resolution
+  // independent, so this only needs recomputing when the spans themselves
+  // change — not on every resize-driven re-render.
+  const positionedSpans = useMemo(
+    () =>
+      textSpans.map((span) => {
+        const naturalWidth = measureTextWidth(span.text, span.height)
+        const scaleX = naturalWidth > 0 ? span.width / naturalWidth : 1
+
+        return {
+          fontSize: `${(span.height / page.height) * 100}cqh`,
+          left: `${(span.left / page.width) * 100}%`,
+          text: span.text,
+          top: `${(span.top / page.height) * 100}%`,
+          transform: scaleX === 1 ? undefined : `scaleX(${scaleX})`,
+        }
+      }),
+    [page.height, page.width, textSpans],
+  )
+
   return (
     <div
       aria-label={t("viewer.pageLabel", { pageNumber })}
@@ -135,6 +208,23 @@ export function PdfPage({
         ref={canvasRef}
         width={Math.max(1, Math.round(page.width))}
       />
+      {hasRendered && positionedSpans.length > 0 ? (
+        <div className="pdf-text-layer">
+          {positionedSpans.map((span, index) => (
+            <span
+              key={index}
+              style={{
+                fontSize: span.fontSize,
+                left: span.left,
+                top: span.top,
+                transform: span.transform,
+              }}
+            >
+              {span.text}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {!hasRendered && !renderFailed ? (
         <div className="absolute inset-0 grid place-items-center bg-white text-zinc-400">
           <LoaderCircle className="size-5 animate-spin" />

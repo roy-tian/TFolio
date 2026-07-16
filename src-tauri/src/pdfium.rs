@@ -45,6 +45,18 @@ struct PdfPageInfo {
     height: f32,
 }
 
+/// A run of text on a page together with its bounding box, expressed in PDF
+/// points with a top-left origin so the frontend can overlay a selectable text
+/// layer on top of the rendered page image.
+#[derive(Serialize)]
+pub struct PdfTextSpan {
+    text: String,
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PdfOutlineItem {
@@ -162,6 +174,59 @@ impl PdfiumEngine {
             .map_err(|error| format!("could not encode page {page_number}: {error}"))?;
 
         Ok(png.into_inner())
+    }
+
+    fn extract_text(&self, document_id: u64, page_number: i32) -> Result<Vec<PdfTextSpan>, String> {
+        let documents = self
+            .documents
+            .lock()
+            .map_err(|_| "PDFium document store is unavailable".to_string())?;
+        let document = documents
+            .get(&document_id)
+            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+
+        if page_number < 1 || page_number > document.pages().len() {
+            return Err(format!("page {page_number} does not exist"));
+        }
+
+        let page = document
+            .pages()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        let page_height = page.height().value;
+        let text = page.text().map_err(|error| {
+            format!("PDFium could not read text on page {page_number}: {error}")
+        })?;
+        let mut spans = Vec::new();
+
+        for segment in text.segments().iter() {
+            let content = segment.text();
+
+            if content.is_empty() {
+                continue;
+            }
+
+            let bounds = segment.bounds();
+            let left = bounds.left().value;
+            let top = bounds.top().value;
+            let width = bounds.right().value - left;
+            let height = top - bounds.bottom().value;
+
+            if !(width > 0.0 && height > 0.0) {
+                continue;
+            }
+
+            spans.push(PdfTextSpan {
+                text: content,
+                left,
+                // PDFium uses a bottom-left origin; flip to top-left for the DOM.
+                top: page_height - top,
+                width,
+                height,
+            });
+        }
+
+        Ok(spans)
     }
 
     fn close(&self, document_id: u64) -> Result<(), String> {
@@ -306,6 +371,19 @@ pub async fn render_pdf_page(
 }
 
 #[tauri::command]
+pub async fn extract_pdf_page_text(
+    document_id: u64,
+    page_number: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<Vec<PdfTextSpan>, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.extract_text(document_id, page_number))
+        .await
+        .map_err(|error| format!("PDFium text extraction task failed: {error}"))?
+}
+
+#[tauri::command]
 pub fn close_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result<(), String> {
     state.0.close(document_id)
 }
@@ -373,5 +451,11 @@ mod tests {
             .render_page(document.id, 1, 400)
             .expect("PDFium should render the page");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+
+        // The minimal PDF carries no page content, so it has no selectable text.
+        let spans = engine
+            .extract_text(document.id, 1)
+            .expect("PDFium should extract text");
+        assert!(spans.is_empty());
     }
 }

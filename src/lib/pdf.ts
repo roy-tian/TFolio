@@ -9,6 +9,18 @@ export type PdfPageInfo = {
   width: number
 }
 
+/**
+ * A run of text on a page and its bounding box, in PDF points with a top-left
+ * origin. Used to overlay a selectable text layer on the rendered page image.
+ */
+export type PdfTextSpan = {
+  height: number
+  left: number
+  text: string
+  top: number
+  width: number
+}
+
 export type PdfDocumentInfo = {
   id: number
   numPages: number
