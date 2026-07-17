@@ -48,8 +48,7 @@ task runner.
   PDFium first).
 - `bun run build`: type-check (`tsc -b`) and create the frontend production build.
 - `bun run test`: run frontend unit tests with Bun's test runner.
-- `cargo test --manifest-path src-tauri/Cargo.toml --locked`: run Rust unit
-  tests; append `-- --ignored` for tests that need the downloaded PDFium runtime.
+- `cargo test --manifest-path src-tauri/Cargo.toml --locked`: run Rust unit tests.
 - `bun run test:e2e`: build the test binary and run the GUI suite headless
   (requires Xvfb on Linux).
 - `bun run test:all`: run frontend, Rust (incl. ignored), and GUI suites.
@@ -65,12 +64,9 @@ task runner.
 
 ## Coding Style & Naming Conventions
 
-TypeScript uses two-space indentation, double quotes, and no semicolons. Import
-frontend modules via the `@/` alias (e.g. `@/lib/pdf`). Name React components in
-PascalCase (`DocumentToolbar.tsx`), hooks with a `use` prefix, and helpers in
-camelCase. Keep shadcn-style primitives under `src/components/ui/`. For Rust, run
-`cargo fmt`; use snake_case for modules and functions and PascalCase for types.
-Follow the existing trailing-comma style throughout.
+TypeScript uses two-space indentation, double quotes, and no semicolons; no
+formatter enforces this, so match the surrounding code. Import frontend modules
+via the `@/` alias (e.g. `@/lib/pdf`). For Rust, run `cargo fmt`.
 
 Add primitives with `bunx --bun shadcn@latest add <component>` rather than
 hand-writing them, so they match the `radix-nova` style pinned in
@@ -84,12 +80,11 @@ schema, so missing or misspelled keys in other locales fail the build.
 
 ## Testing Guidelines
 
-- Frontend unit tests use Bun's runner. Place them beside their modules as
-  `*.test.ts(x)` (e.g. `src/lib/pdf.test.ts`); run with `bun run test`.
-- Rust unit tests live in the relevant source file under `#[cfg(test)]`. Tests
-  that render real PDFs are marked `#[ignore]` because they need the PDFium
-  runtime — run them with `-- --ignored` after `bun run pdfium:download`, or set
-  `PDFIUM_LIB_PATH` to point at a local library.
+- Place frontend unit tests beside their modules as `*.test.ts(x)` (e.g.
+  `src/lib/pdf.test.ts`).
+- Rust tests that render real PDFs are marked `#[ignore]` because they need the
+  PDFium runtime — run them with `-- --ignored` after `bun run pdfium:download`,
+  or set `PDFIUM_LIB_PATH` to point at a local library.
 - GUI end-to-end tests drive a test-only Tauri binary through WebdriverIO's
   embedded WebDriver provider. The `e2e` Cargo feature, `e2e` capability, global
   Tauri API, and WDIO bridge are enabled only by `tauri.e2e.conf.json`; normal
@@ -97,8 +92,7 @@ schema, so missing or misspelled keys in other locales fail the build.
   write screenshots and logs under `artifacts/e2e/`.
 - Before a pull request, run at minimum `bun run build`, `bun run test`,
   `bun run version:check`, and the locked `cargo check`. Prefer `bun run test:all`
-  for changes touching the backend or GUI. Add focused tests for new behavior and
-  avoid unrelated snapshot churn.
+  for changes touching the backend or GUI.
 
 ## Security & PDF Handling
 
@@ -127,18 +121,8 @@ and `frame-src` disabled — and a separate `devCsp` permits only the WebSocket 
 Security-related changes must pass `bun run build`, `bun run tauri:build`, and a
 manual check for unexpected CSP violations in the WebView developer console.
 
-## Commit & Pull Request Guidelines
+## Versioning & Releases
 
-Use concise, imperative subjects with Conventional Commit prefixes (`feat:`,
-`fix:`, `chore:`, `test:`, as seen in history). Keep each commit scoped to one
-logical change.
-
-Pull requests should explain the motivation, summarize implementation choices,
-list the verification commands run, and link related issues. Include screenshots
-or a short recording for visible UI changes.
-
-`package.json` is the source of truth for the version. Use
-`bun run version:bump <patch|minor|major|x.y.z>` to update all version files
-together, then commit them. Do not push a release tag unless its `vX.Y.Z` value
-exactly matches `package.json`; the release workflow rejects a mismatch before
-creating assets.
+`package.json` is the source of truth for the version. Do not push a release tag
+unless its `vX.Y.Z` value exactly matches it; the release workflow rejects a
+mismatch before creating assets.
