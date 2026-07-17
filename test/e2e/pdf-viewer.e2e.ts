@@ -113,7 +113,7 @@ describe("TFolio PDF viewer", () => {
 
     const firstPage = await $("[data-page-number='1']")
     await firstPage.waitForDisplayed()
-    await expect($("[role='group']")).toHaveAttribute(
+    await expect($("[data-slot='page-status']")).toHaveAttribute(
       "aria-label",
       "Page 1 of 1",
     )

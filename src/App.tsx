@@ -20,6 +20,7 @@ import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { Button } from "@/components/ui/button"
+import { Toggle } from "@/components/ui/toggle"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import {
   isPdfFile,
@@ -285,6 +286,10 @@ export default function App() {
     scrollToPage(pageNumber)
   }
 
+  const bookmarksLabel = bookmarksOpen
+    ? t("toolbar.hideBookmarks")
+    : t("toolbar.showBookmarks")
+
   const errorMessage =
     viewerError === "fileTooLarge"
       ? t("viewer.fileTooLarge")
@@ -303,31 +308,18 @@ export default function App() {
       onDrop={handleDrop}
     >
       <header className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 shadow-xs backdrop-blur">
-        <div className="flex items-center gap-1 justify-self-start">
-          <Button
-            aria-label={
-              bookmarksOpen
-                ? t("toolbar.hideBookmarks")
-                : t("toolbar.showBookmarks")
-            }
-            aria-pressed={bookmarksOpen}
-            className={
-              bookmarksOpen
-                ? "text-foreground"
-                : "text-muted-foreground"
-            }
+        <div className="flex items-center gap-2 justify-self-start">
+          <Toggle
+            aria-label={bookmarksLabel}
+            className="size-8"
             disabled={!pdfDocument}
-            onClick={() => setBookmarksOpen((isOpen) => !isOpen)}
-            size="icon"
-            title={
-              bookmarksOpen
-                ? t("toolbar.hideBookmarks")
-                : t("toolbar.showBookmarks")
-            }
-            variant="ghost"
+            onPressedChange={setBookmarksOpen}
+            pressed={bookmarksOpen}
+            title={bookmarksLabel}
+            variant="outline"
           >
             <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
-          </Button>
+          </Toggle>
           <ViewModeToggle
             disabled={!pdfDocument}
             onChange={changeViewMode}
@@ -341,6 +333,7 @@ export default function App() {
             total: pdfDocument?.numPages ?? 0,
           })}
           className="flex min-w-24 items-center justify-center gap-2 font-mono text-sm tabular-nums"
+          data-slot="page-status"
           role="group"
         >
           <input
@@ -373,14 +366,14 @@ export default function App() {
           </span>
         </div>
 
-        <div className="flex items-center gap-1 justify-self-end">
+        <div className="flex items-center gap-2 justify-self-end">
           <Button
             aria-label={t("toolbar.rotate")}
             disabled={!pdfDocument}
             onClick={() => setRotation((value) => (value + 90) % 360)}
             size="icon"
             title={t("toolbar.rotate")}
-            variant="ghost"
+            variant="outline"
           >
             <RotateCw />
           </Button>

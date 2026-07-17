@@ -170,7 +170,7 @@ export function SettingsDialog() {
           aria-label={t("settings.open")}
           size="icon"
           title={t("settings.open")}
-          variant="ghost"
+          variant="outline"
         >
           <Settings />
         </Button>

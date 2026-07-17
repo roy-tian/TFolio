@@ -1,10 +1,8 @@
 import { BookOpen, LayoutGrid, RectangleVertical, type LucideIcon } from "lucide-react"
-import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui"
 import { useTranslation } from "react-i18next"
 
-import { buttonVariants } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
-import type { ViewMode } from "@/lib/viewMode"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 const options: Array<{
   icon: LucideIcon
@@ -33,39 +31,36 @@ export function ViewModeToggle({
   const { t } = useTranslation()
 
   return (
-    <ToggleGroupPrimitive.Root
+    <ToggleGroup
       aria-label={t("toolbar.viewMode")}
-      className="flex items-center gap-0.5"
+      disabled={disabled}
       onValueChange={(next) => {
         // Radix clears the value when the active item is pressed again, but a
         // view mode always has to stay selected.
-        if (next) {
-          onChange(next as ViewMode)
+        if (isViewMode(next)) {
+          onChange(next)
         }
       }}
+      spacing={0}
       type="single"
       value={value}
+      variant="outline"
     >
       {options.map((option) => {
         const Icon = option.icon
         const label = t(option.labelKey)
 
         return (
-          <ToggleGroupPrimitive.Item
+          <ToggleGroupItem
             aria-label={label}
-            className={cn(
-              buttonVariants({ size: "icon", variant: "ghost" }),
-              "text-muted-foreground data-[state=on]:bg-muted data-[state=on]:text-foreground",
-            )}
-            disabled={disabled}
             key={option.value}
             title={label}
             value={option.value}
           >
             <Icon />
-          </ToggleGroupPrimitive.Item>
+          </ToggleGroupItem>
         )
       })}
-    </ToggleGroupPrimitive.Root>
+    </ToggleGroup>
   )
 }
