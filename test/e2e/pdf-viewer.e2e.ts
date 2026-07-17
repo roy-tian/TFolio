@@ -148,13 +148,13 @@ describe("TFolio PDF viewer", () => {
     // proves the toggle works regardless of the operating system's default scheme
     // (under "follow system" the app may already be dark before the click).
     await $("[role='tab'][aria-controls='settings-panel-appearance']").click()
-    await $("//button[@role='radio' and normalize-space()='Light']").click()
+    await $("//*[@role='radio' and normalize-space()='Light']").click()
     const isDarkAfterLight = await browser.execute(() =>
       document.documentElement.classList.contains("dark"),
     )
     expect(isDarkAfterLight).toBe(false)
 
-    await $("//button[@role='radio' and normalize-space()='Dark']").click()
+    await $("//*[@role='radio' and normalize-space()='Dark']").click()
     const isDarkAfterDark = await browser.execute(() =>
       document.documentElement.classList.contains("dark"),
     )

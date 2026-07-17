@@ -9,7 +9,8 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react"
-import { RadioGroup as RadioGroupPrimitive } from "radix-ui"
+import { Radio } from "@base-ui/react/radio"
+import { RadioGroup } from "@base-ui/react/radio-group"
 import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
@@ -25,6 +26,7 @@ import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -58,6 +60,14 @@ const themeOptions: Array<{
   { value: "light", labelKey: "settings.themeLight", icon: Sun },
   { value: "system", labelKey: "settings.themeSystem", icon: Monitor },
   { value: "dark", labelKey: "settings.themeDark", icon: Moon },
+]
+
+const languageOptions: Array<{
+  value: SupportedLanguage
+  labelKey: "language.simplifiedChinese" | "language.english"
+}> = [
+  { value: "zh-CN", labelKey: "language.simplifiedChinese" },
+  { value: "en", labelKey: "language.english" },
 ]
 
 const mockColors: Record<
@@ -145,6 +155,13 @@ export function SettingsDialog() {
   const activeLanguage: SupportedLanguage =
     resolveSupportedLanguage(i18n.resolvedLanguage) ?? "en"
 
+  // Base UI resolves the trigger's label from `items`; without it the trigger
+  // would fall back to printing the raw value ("zh-CN").
+  const languageItems = languageOptions.map((option) => ({
+    label: t(option.labelKey),
+    value: option.value,
+  }))
+
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
     index: number,
@@ -165,15 +182,17 @@ export function SettingsDialog() {
 
   return (
     <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          aria-label={t("settings.open")}
-          size="icon"
-          title={t("settings.open")}
-          variant="outline"
-        >
-          <Settings />
-        </Button>
+      <DialogTrigger
+        render={
+          <Button
+            aria-label={t("settings.open")}
+            size="icon"
+            title={t("settings.open")}
+            variant="outline"
+          />
+        }
+      >
+        <Settings />
       </DialogTrigger>
 
       <DialogContent
@@ -184,15 +203,17 @@ export function SettingsDialog() {
           {t("settings.description")}
         </DialogDescription>
 
-        <DialogClose asChild>
-          <Button
-            aria-label={t("settings.close")}
-            className="absolute top-2 right-2 z-10"
-            size="icon-sm"
-            variant="ghost"
-          >
-            <X />
-          </Button>
+        <DialogClose
+          render={
+            <Button
+              aria-label={t("settings.close")}
+              className="absolute top-2 right-2 z-10"
+              size="icon-sm"
+              variant="ghost"
+            />
+          }
+        >
+          <X />
         </DialogClose>
 
         <div className="flex h-full w-40 shrink-0 flex-col gap-3 border-r bg-muted/30 p-2.5">
@@ -256,7 +277,7 @@ export function SettingsDialog() {
                     {t("settings.themeHint")}
                   </p>
                 </div>
-                <RadioGroupPrimitive.Root
+                <RadioGroup
                   aria-labelledby="settings-theme-label"
                   className="grid grid-cols-3 gap-3"
                   onValueChange={(value) =>
@@ -268,7 +289,7 @@ export function SettingsDialog() {
                     const Icon = option.icon
 
                     return (
-                      <RadioGroupPrimitive.Item
+                      <Radio.Root
                         className="group/theme flex flex-col gap-2 rounded-lg border bg-card p-2 text-left outline-none transition-all hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 data-checked:border-primary data-checked:ring-2 data-checked:ring-primary/25"
                         key={option.value}
                         value={option.value}
@@ -280,13 +301,13 @@ export function SettingsDialog() {
                             {t(option.labelKey)}
                           </span>
                           <span className="flex size-3.5 items-center justify-center rounded-full border border-input transition-colors group-data-checked/theme:border-primary group-data-checked/theme:bg-primary">
-                            <RadioGroupPrimitive.Indicator className="block size-1.5 rounded-full bg-primary-foreground" />
+                            <Radio.Indicator className="block size-1.5 rounded-full bg-primary-foreground" />
                           </span>
                         </div>
-                      </RadioGroupPrimitive.Item>
+                      </Radio.Root>
                     )
                   })}
-                </RadioGroupPrimitive.Root>
+                </RadioGroup>
               </section>
 
               <section className="space-y-3">
@@ -299,6 +320,7 @@ export function SettingsDialog() {
                   </p>
                 </div>
                 <Select
+                  items={languageItems}
                   onValueChange={(value) =>
                     void changeLanguage(value as SupportedLanguage)
                   }
@@ -308,10 +330,13 @@ export function SettingsDialog() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="zh-CN">
-                      {t("language.simplifiedChinese")}
-                    </SelectItem>
-                    <SelectItem value="en">{t("language.english")}</SelectItem>
+                    <SelectGroup>
+                      {languageItems.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </section>
