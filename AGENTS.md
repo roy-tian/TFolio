@@ -71,11 +71,9 @@ via the `@/` alias (e.g. `@/lib/pdf`). For Rust, run `cargo fmt`.
 
 Add primitives with `bunx --bun shadcn@latest add <component>` rather than
 hand-writing them, so they match the `base-nova` style pinned in
-`components.json`. That style puts the wrappers on Base UI, so consumers use
-`render={<Button />}` rather than Radix's `asChild`. Prefer a registry
-component's built-in variants over bespoke Tailwind: several already cover cases
-that look custom (e.g. `ToggleGroup` with `variant="outline" spacing={0}` is a
-joined segmented control).
+`components.json`. Prefer a registry component's built-in variants over bespoke
+Tailwind: several already cover cases that look custom (e.g. `ToggleGroup` with
+`variant="outline" spacing={0}` is a joined segmented control).
 
 Do not hard-code user-facing text. Use `useTranslation()` and add keys to every
 locale in `src/i18n/locales/`. English (`en`) defines the typed translation-key
