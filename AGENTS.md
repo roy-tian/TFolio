@@ -70,10 +70,12 @@ formatter enforces this, so match the surrounding code. Import frontend modules
 via the `@/` alias (e.g. `@/lib/pdf`). For Rust, run `cargo fmt`.
 
 Add primitives with `bunx --bun shadcn@latest add <component>` rather than
-hand-writing them, so they match the `radix-nova` style pinned in
-`components.json`. Prefer a registry component's built-in variants over bespoke
-Tailwind: several already cover cases that look custom (e.g. `ToggleGroup` with
-`variant="outline" spacing={0}` is a joined segmented control).
+hand-writing them, so they match the `base-nova` style pinned in
+`components.json`. That style puts the wrappers on Base UI, so consumers use
+`render={<Button />}` rather than Radix's `asChild`. Prefer a registry
+component's built-in variants over bespoke Tailwind: several already cover cases
+that look custom (e.g. `ToggleGroup` with `variant="outline" spacing={0}` is a
+joined segmented control).
 
 Do not hard-code user-facing text. Use `useTranslation()` and add keys to every
 locale in `src/i18n/locales/`. English (`en`) defines the typed translation-key
@@ -124,16 +126,16 @@ and `frame-src` disabled — and a separate `devCsp` permits only the WebSocket 
 Security-related changes must pass `bun run build`, `bun run tauri:build`, and a
 manual check for unexpected CSP violations in the WebView developer console.
 
-Known benign CSP violations: opening a Radix dialog or select (the settings
-dialog) emits a few `style-src-elem` "inline" violations. They come from
-`react-remove-scroll` / `react-remove-scroll-bar` (pulled in transitively by
-Radix), which inject a `<style>` element to lock background scroll — blocked by
-the production `style-src 'self'`, and expected. They have no functional impact
-because `body { overflow: hidden }` (`src/index.css`) already locks scroll, so
-the injected rule is redundant. React `style={{…}}` props, Radix positioning, and
-`element.style` writes (e.g. `colorScheme`) are applied via the CSSOM, which CSP
-does not govern, so those are unaffected. Treat only *new* violation sources as
-regressions during the manual console check.
+Known benign CSP violation: opening the settings select emits exactly one
+`style-src-elem` "inline" violation. Base UI hides the popup list's scrollbar
+via `styleDisableScrollbar`, a `<style>` element React hoists into `<head>` —
+blocked by the production `style-src 'self'`, and expected. It is cosmetic: the
+rule would only suppress a scrollbar the two-item language list never grows.
+Base UI's `CSPProvider` can supply a nonce if that ever stops being true. Opening
+the dialog itself is clean. React `style={{…}}` props, popup positioning, and
+`element.style` writes (e.g. `colorScheme`) go through the CSSOM, which CSP does
+not govern. Treat only *new* violation sources as regressions during the manual
+console check.
 
 ## Versioning & Releases
 
