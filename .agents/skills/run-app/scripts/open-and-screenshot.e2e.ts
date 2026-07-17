@@ -8,6 +8,7 @@
 //                empty drop-zone state instead)
 //   TFOLIO_SHOT  output PNG path (default: artifacts/run/screenshot.png)
 //   TFOLIO_LANG  "zh-CN" (default) or "en" — UI language for the screenshot
+//   TFOLIO_VIEW  "single" (default), "book", or "thumbnail" — view mode
 //
 // Run with:
 //   xvfb-run -a bunx wdio run wdio.conf.ts \
@@ -21,14 +22,16 @@ import { $, browser } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 // Hardcoded so this file is location-independent (no import from ../../src).
-// Keep in sync with src/i18n/config.ts `languageStorageKey`.
+// Keep in sync with src/i18n/config.ts and src/lib/viewMode.ts.
 const languageStorageKey = "tfolio.ui.language"
+const viewModeStorageKey = "tfolio.ui.viewMode"
 
 const pdfPath = process.env.TFOLIO_PDF?.trim()
 const shotPath = path.resolve(
   process.env.TFOLIO_SHOT?.trim() || "artifacts/run/screenshot.png",
 )
 const language = process.env.TFOLIO_LANG?.trim() || "zh-CN"
+const viewMode = process.env.TFOLIO_VIEW?.trim() || "single"
 
 // The WDIO bridge caps request body size, so stream the base64 in chunks.
 async function selectPdf(name: string, base64: string) {
@@ -68,11 +71,19 @@ async function selectPdf(name: string, base64: string) {
 
 describe("run-app: launch and screenshot", () => {
   it("captures the app UI", async () => {
+    // Both of these persist across runs (see SKILL.md), so set them explicitly
+    // rather than inheriting whatever the last run happened to leave behind.
     await browser.execute(
-      ({ storageKey, lang }) => {
-        window.localStorage.setItem(storageKey, lang)
+      ({ langKey, lang, viewKey, view }) => {
+        window.localStorage.setItem(langKey, lang)
+        window.localStorage.setItem(viewKey, view)
       },
-      { storageKey: languageStorageKey, lang: language },
+      {
+        lang: language,
+        langKey: languageStorageKey,
+        view: viewMode,
+        viewKey: viewModeStorageKey,
+      },
     )
     await browser.refresh()
     await $("input[type='file']").waitForExist({ timeout: 30_000 })
@@ -84,12 +95,16 @@ describe("run-app: launch and screenshot", () => {
       const firstPage = await $("[data-page-number='1']")
       await firstPage.waitForDisplayed({ timeout: 30_000 })
 
+      // The canvas starts as a 1px placeholder and gets its real width once the
+      // page object loads. Thumbnails size it to THUMBNAIL_WIDTH (160) while
+      // full pages are far wider, so the bar has to clear both — the `pause`
+      // below, not this wait, is what covers the PDFium paint.
       const canvas = await firstPage.$("canvas")
       await browser.waitUntil(
-        async () => Number(await canvas.getAttribute("width")) > 200,
+        async () => Number(await canvas.getAttribute("width")) > 100,
         {
           timeout: 30_000,
-          timeoutMsg: "PDF first page did not finish rendering through PDFium",
+          timeoutMsg: "PDF page 1 never got its dimensions from the document",
         },
       )
       // Let the rendered page bitmap paint into the viewport before capturing.

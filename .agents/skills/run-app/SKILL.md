@@ -26,6 +26,10 @@ saving a screenshot of the WebView:
 
 # UI language (default zh-CN)
 .agents/skills/run-app/scripts/screenshot.sh --lang en --out .temp/en.png
+
+# View mode: single (default), book, or thumbnail
+.agents/skills/run-app/scripts/screenshot.sh \
+  --pdf .temp/2026-109-4010.pdf --view thumbnail --out .temp/thumbs.png
 ```
 
 Then **open the PNG with the Read tool and look at it** — a screenshot you never
@@ -57,6 +61,7 @@ The spec (`scripts/open-and-screenshot.e2e.ts`) is env-driven and reusable:
 | `TFOLIO_PDF` | absolute path to a PDF to open; unset ⇒ empty-state shot | (unset) |
 | `TFOLIO_SHOT` | output PNG path | `artifacts/run/screenshot.png` |
 | `TFOLIO_LANG` | `zh-CN` or `en` | `zh-CN` |
+| `TFOLIO_VIEW` | `single`, `book`, or `thumbnail` | `single` |
 
 To drive more of the UI (bookmarks, page jumps, About/Language menus,
 invalid-file handling), copy the selectors from `test/e2e/pdf-viewer.e2e.ts` into
@@ -101,6 +106,14 @@ Each of these was hit during first bring-up — they're the non-obvious failures
   bridge. Use the e2e build (the wrapper) for anything programmatic.
 - **Stale UI** — the e2e binary embeds the frontend at build time. Re-run
   `bun run test:e2e:build` after editing `src/` or `src-tauri/`.
+- **The app's UI state survives across runs.** Language, theme, and view mode
+  live in `localStorage` (`tfolio.ui.*`), which WebKitGTK backs with a SQLite DB
+  under `~/.local/share/com.roytian.tfolio.e2e/localstorage/`. A run that ends in
+  thumbnail view leaves the *next* run there, so a spec that assumes single view
+  silently shoots the wrong screen — or hangs waiting on a page-sized canvas that
+  a 160px thumbnail will never produce. The spec pins language and view mode
+  before every run for exactly this reason; pin any `tfolio.ui.*` key your own
+  spec depends on. To wipe the slate, delete that directory.
 - **Don't `pkill -f 'target/release/tfolio'`** — the pattern also matches the
   shell running the command and kills it (exit 144). Use the bracket trick,
   `kill $(pgrep -f '[t]arget/release/tfolio')`, or kill the exact PID. Same for
