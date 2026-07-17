@@ -26,9 +26,20 @@ task runner.
   PDFium runtime) and `version.mjs` (version sync/check).
 - `test/e2e/`: WebdriverIO GUI end-to-end specs (`*.e2e.ts`).
 - `.github/workflows/`: GitHub Actions release automation.
+- `.agents/skills/`: the single home for every agent skill, committed so each
+  contributor's agent behaves the same. It holds both this repo's own skills
+  (`run-app`) and ones vendored from upstream registries (`shadcn`, pinned by
+  `skills-lock.json` — manage those with `bunx --bun skills add|update|list`,
+  and do not hand-edit them). The directory is tool-neutral, so Codex, Copilot,
+  Zed, and others read the same skills.
+- `.claude/skills/`: symlinks into `.agents/skills/`, nothing else. Claude Code
+  only discovers skills under `.claude/skills/`, so each skill needs a link here
+  to load; store the skill itself in `.agents/skills/`. Add one with
+  `ln -s ../../.agents/skills/<name> .claude/skills/<name>`.
 - Generated / do not commit: `dist/`, `node_modules/`, `src-tauri/target/`,
-  `src-tauri/gen/`, `artifacts/`, and `src-tauri/resources/pdfium/*` (kept out of
-  git except `.gitkeep`).
+  `src-tauri/gen/`, `artifacts/`, `.temp/` (local scratch; the `run-app` skill
+  writes screenshots here), and `src-tauri/resources/pdfium/*` (kept out of git
+  except `.gitkeep`).
 
 ## Build, Test, and Development Commands
 
@@ -60,6 +71,12 @@ PascalCase (`DocumentToolbar.tsx`), hooks with a `use` prefix, and helpers in
 camelCase. Keep shadcn-style primitives under `src/components/ui/`. For Rust, run
 `cargo fmt`; use snake_case for modules and functions and PascalCase for types.
 Follow the existing trailing-comma style throughout.
+
+Add primitives with `bunx --bun shadcn@latest add <component>` rather than
+hand-writing them, so they match the `radix-nova` style pinned in
+`components.json`. Prefer a registry component's built-in variants over bespoke
+Tailwind: several already cover cases that look custom (e.g. `ToggleGroup` with
+`variant="outline" spacing={0}` is a joined segmented control).
 
 Do not hard-code user-facing text. Use `useTranslation()` and add keys to every
 locale in `src/i18n/locales/`. English (`en`) defines the typed translation-key

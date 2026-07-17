@@ -18,14 +18,14 @@ saving a screenshot of the WebView:
 
 ```bash
 # Screenshot the empty drop-zone state
-.claude/skills/run-app/scripts/screenshot.sh --out .temp/screenshot.png
+.agents/skills/run-app/scripts/screenshot.sh --out .temp/screenshot.png
 
 # Open a PDF and screenshot page 1 (toolbar shows 1 / N)
-.claude/skills/run-app/scripts/screenshot.sh \
+.agents/skills/run-app/scripts/screenshot.sh \
   --pdf .temp/2026-109-4010.pdf --out .temp/screenshot.png
 
 # UI language (default zh-CN)
-.claude/skills/run-app/scripts/screenshot.sh --lang en --out .temp/en.png
+.agents/skills/run-app/scripts/screenshot.sh --lang en --out .temp/en.png
 ```
 
 Then **open the PNG with the Read tool and look at it** — a screenshot you never

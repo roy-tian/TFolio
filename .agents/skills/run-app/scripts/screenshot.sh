@@ -29,7 +29,7 @@ while [ $# -gt 0 ]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# .claude/skills/run-app/scripts -> repo root is four levels up.
+# .agents/skills/run-app/scripts -> repo root is four levels up.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$REPO_ROOT"
 
