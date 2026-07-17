@@ -280,9 +280,7 @@ export function SettingsDialog() {
                 <RadioGroup
                   aria-labelledby="settings-theme-label"
                   className="grid grid-cols-3 gap-3"
-                  onValueChange={(value) =>
-                    setThemePreference(value as ThemePreference)
-                  }
+                  onValueChange={(value) => setThemePreference(value)}
                   value={preference}
                 >
                   {themeOptions.map((option) => {
@@ -321,9 +319,13 @@ export function SettingsDialog() {
                 </div>
                 <Select
                   items={languageItems}
-                  onValueChange={(value) =>
-                    void changeLanguage(value as SupportedLanguage)
-                  }
+                  onValueChange={(value) => {
+                    // Base UI types the value as nullable to allow a placeholder
+                    // item; this list has none, so it only ever reports a language.
+                    if (value !== null) {
+                      void changeLanguage(value)
+                    }
+                  }}
                   value={activeLanguage}
                 >
                   <SelectTrigger className="w-full max-w-60" id="settings-language">
