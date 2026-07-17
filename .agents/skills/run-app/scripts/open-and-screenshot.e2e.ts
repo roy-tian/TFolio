@@ -11,7 +11,7 @@
 //
 // Run with:
 //   xvfb-run -a bunx wdio run wdio.conf.ts \
-//     --spec .claude/skills/run-app/open-and-screenshot.e2e.ts
+//     --spec .agents/skills/run-app/open-and-screenshot.e2e.ts
 // (with the WebKit software-render env vars from SKILL.md exported).
 
 import { mkdirSync, readFileSync } from "node:fs"
