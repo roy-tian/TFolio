@@ -4,11 +4,12 @@
 # env, e2e-binary build check, Xvfb, wdio bridge) so callers run one command.
 #
 # Usage:
-#   scripts/screenshot.sh [--pdf FILE] [--out PNG] [--lang zh-CN|en]
+#   scripts/screenshot.sh [--pdf FILE] [--out PNG] [--lang zh-CN|en] [--view MODE]
 #
 #   --pdf FILE   open this PDF and capture page 1 (default: empty drop-zone state)
 #   --out PNG    output path (default: artifacts/run/screenshot.png)
 #   --lang L     UI language, zh-CN (default) or en
+#   --view MODE  view mode: single (default), book, or thumbnail
 #
 # Requires (one-time): sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev \
 #   librsvg2-dev xvfb ; and bun deps installed. See SKILL.md for the why behind
@@ -18,12 +19,14 @@ set -euo pipefail
 PDF=""
 OUT="artifacts/run/screenshot.png"
 LANG_UI="zh-CN"
+VIEW="single"
 while [ $# -gt 0 ]; do
   case "$1" in
     --pdf)  PDF="$2"; shift 2 ;;
     --out)  OUT="$2"; shift 2 ;;
     --lang) LANG_UI="$2"; shift 2 ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --view) VIEW="$2"; shift 2 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown arg: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -54,8 +57,9 @@ if [ -n "$PDF" ]; then
 fi
 export TFOLIO_SHOT="$OUT"
 export TFOLIO_LANG="$LANG_UI"
+export TFOLIO_VIEW="$VIEW"
 
-echo "run-app: launching (pdf=${PDF:-<none>}, lang=$LANG_UI) → $OUT" >&2
+echo "run-app: launching (pdf=${PDF:-<none>}, lang=$LANG_UI, view=$VIEW) → $OUT" >&2
 xvfb-run -a --server-args="-screen 0 1280x800x24" \
   bunx wdio run wdio.conf.ts \
   --spec "$SCRIPT_DIR/open-and-screenshot.e2e.ts"
