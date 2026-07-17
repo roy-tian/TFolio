@@ -4,6 +4,26 @@ import "@wdio/tauri-service"
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 
+// The zoom listener is bound natively and non-passively, so a wheel has to be
+// dispatched as a real event rather than through WebDriver's scroll action.
+function wheelOverViewer(init: { ctrlKey: boolean; deltaY: number }) {
+  return browser.execute((options: { ctrlKey: boolean; deltaY: number }) => {
+    const viewer = document.querySelector("main")!
+    const rect = viewer.getBoundingClientRect()
+
+    viewer.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        ctrlKey: options.ctrlKey,
+        deltaY: options.deltaY,
+      }),
+    )
+  }, init)
+}
+
 // A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
 // otherwise. Page objects take the odd ids from 3 up, each followed by its
 // (empty) contents stream.
@@ -242,6 +262,114 @@ describe("TFolio PDF viewer", () => {
     await browser.refresh()
     await $("input[aria-label='Choose a PDF file']").waitForExist()
     await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("zooms from the toolbar and from ctrl+wheel", async () => {
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        window.localStorage.setItem(keys.viewMode, "single")
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
+    await browser.refresh()
+    await selectFile("two-pages.pdf", "application/pdf", minimalPdf(2))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    // The button showing the zoom is the one that resets it, so it doubles as
+    // the readout every assertion here reads.
+    const zoom = () => $("button[aria-label='Actual size']")
+    // The room a fit has to fill is measured off the layout itself rather than
+    // recomputed from the padding the code already uses, so that a fit which
+    // silently stopped filling it would fail here.
+    const pageBox = () =>
+      browser.execute(() => {
+        const element = document.querySelector<HTMLElement>(
+          "[data-page-number='1']",
+        )!
+        const page = element.getBoundingClientRect()
+        const column = element.parentElement!
+        const padding = window.getComputedStyle(column)
+        const viewer = document.querySelector("main")!
+
+        return {
+          availableHeight:
+            viewer.clientHeight -
+            parseFloat(padding.paddingTop) -
+            parseFloat(padding.paddingBottom),
+          availableWidth:
+            viewer.clientWidth -
+            parseFloat(padding.paddingLeft) -
+            parseFloat(padding.paddingRight),
+          height: Math.round(page.height),
+          scrollableX: viewer.scrollWidth - viewer.clientWidth,
+          width: Math.round(page.width),
+        }
+      })
+
+    // A document opens sized to be read, never already scrolled sideways.
+    expect((await pageBox()).scrollableX).toBe(0)
+
+    // Actual size is the page's paper size: a point is 1/72 inch against a CSS
+    // pixel's 1/96, so the 200pt media box measures 200 * 96/72 on screen. A
+    // point-for-pixel 200 here would be a quarter short of every other reader.
+    const actualSize = (percent: number) =>
+      Math.round((200 * 96 * percent) / (72 * 100))
+
+    await zoom().click()
+    await expect(zoom()).toHaveText("100%")
+    expect((await pageBox()).width).toBe(actualSize(100))
+
+    await $("button[aria-label='Zoom in']").click()
+    await expect(zoom()).toHaveText("125%")
+    expect((await pageBox()).width).toBe(actualSize(125))
+
+    await $("button[aria-label='Zoom out']").click()
+    await $("button[aria-label='Zoom out']").click()
+    await expect(zoom()).toHaveText("75%")
+    expect((await pageBox()).width).toBe(actualSize(75))
+
+    // Each fit has to actually fit, padding aside — the whole point of the two.
+    await $("button[aria-label='Fit width']").click()
+    const fitted = await pageBox()
+    expect(fitted.width).toBe(Math.round(fitted.availableWidth))
+
+    // The button offers the fit that is not on, and which one *is* on is said by
+    // the group rather than by a pressed state that would contradict that name.
+    await expect($("button[aria-label='Fit height']")).toBeExisting()
+    await expect($("[data-slot='button-group']")).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("fitting width"),
+    )
+
+    await $("button[aria-label='Fit height']").click()
+    const fittedTall = await pageBox()
+    expect(fittedTall.height).toBe(Math.round(fittedTall.availableHeight))
+
+    // Ctrl+wheel zooms; the same wheel without it is an ordinary scroll.
+    await zoom().click()
+    await expect(zoom()).toHaveText("100%")
+    await wheelOverViewer({ ctrlKey: true, deltaY: -300 })
+    await browser.waitUntil(async () => (await zoom().getText()) !== "100%", {
+      timeout: 5_000,
+      timeoutMsg: "ctrl+wheel did not zoom",
+    })
+
+    const zoomed = await zoom().getText()
+    await wheelOverViewer({ ctrlKey: false, deltaY: -300 })
+    await browser.pause(500)
+    await expect(zoom()).toHaveText(zoomed)
+
+    // The thumbnail grid has one width for every page and so no single scale to
+    // report; the controls go away rather than sit there showing a stale figure.
+    await $("button[aria-label='Thumbnails']").click()
+    await $("button[aria-label='Go to page 1']").waitForDisplayed()
+    await expect($("button[aria-label='Zoom in']")).not.toBeExisting()
+    await expect(zoom()).not.toBeExisting()
+
+    // Leaving the grid brings them back, still at the zoom they were left at.
+    await $("button[aria-label='Single page']").click()
+    await expect(zoom()).toHaveText(zoomed)
   })
 
   // Landscape thumbnail rows are a fraction of a page's height. Page tracking

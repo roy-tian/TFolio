@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import {
@@ -12,6 +13,15 @@ import {
   type PdfPageInfo,
   type PdfTextSpan,
 } from "@/lib/pdf"
+import { POINT_TO_PX } from "@/lib/zoom"
+
+// A zoom gesture walks the page width through every value on its way to the one
+// the reader wants, and each distinct one would otherwise cost a full PDFium
+// re-raster of every visible page. Sitting out the burst costs nothing visually:
+// the canvas is stretched to its box by CSS, so it tracks the new size straight
+// away and only resolves to it once the reader pauses. Comfortably longer than
+// a wheel notch, short enough to read as part of the gesture.
+const RENDER_SETTLE_MS = 150
 
 // The transparent text layer renders every span with the same font family that
 // measures the run width, so the horizontal scale stays consistent between
@@ -39,25 +49,41 @@ function measureTextWidth(text: string, fontSize: number) {
 
 type PdfPageProps = {
   documentId: number
-  /** CSS pixels this page may occupy; the layout sizes each column. */
-  maxWidth: number
   page: PdfPageInfo
   pageNumber: number
   rotation: number
+  /** Resolved zoom; 1 lays the page out at one PDF point per CSS pixel. */
+  scale: number
+  /**
+   * CSS pixels to lay the page out at, overriding `scale`. Only for a layout
+   * that has to share one column across pages of different sizes, as a book
+   * spread does; elsewhere every page takes its own size from the zoom.
+   */
+  width?: number
 }
 
 export function PdfPage({
   documentId,
-  maxWidth,
   page,
   pageNumber,
   rotation,
+  scale,
+  width,
 }: PdfPageProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const isNearViewport = useNearViewport(wrapperRef)
   const [textSpans, setTextSpans] = useState<PdfTextSpan[]>([])
+
+  // The user rotation spins the whole page (canvas + text layer) clockwise. It
+  // is applied on top of the bitmap's displayed dimensions, so a 90°/270° user
+  // rotation swaps the on-screen footprint the page occupies in the column.
+  const { height: footprintHeight, width: footprintWidth } =
+    dimensionsForRotation(rotation, page.width, page.height)
+
+  const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
+  const settledWidth = useDebouncedValue(displayWidth, RENDER_SETTLE_MS)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -70,7 +96,9 @@ export function PdfPage({
     pageNumber,
     rotation,
     targetWidth:
-      maxWidth > 0 ? Math.round(Math.max(MIN_PAGE_RENDER_WIDTH, maxWidth)) : 0,
+      settledWidth > 0
+        ? Math.round(Math.max(MIN_PAGE_RENDER_WIDTH, settledWidth))
+        : 0,
   })
 
   useEffect(() => {
@@ -110,12 +138,6 @@ export function PdfPage({
     page.height,
   )
 
-  // The user rotation spins the whole page (canvas + text layer) clockwise. It
-  // is applied on top of the bitmap's displayed dimensions, so a 90°/270° user
-  // rotation swaps the on-screen footprint the page occupies in the column.
-  const { height: footprintHeight, width: footprintWidth } =
-    dimensionsForRotation(rotation, page.width, page.height)
-
   // Positions are page-relative and the horizontal scale is resolution
   // independent, so this only needs recomputing when the spans themselves
   // change — not on every resize-driven re-render.
@@ -139,10 +161,10 @@ export function PdfPage({
   return (
     <div
       aria-label={t("viewer.pageLabel", { pageNumber })}
-      className="relative w-full shrink-0 scroll-mt-5 overflow-hidden bg-white shadow-md ring-1 ring-black/10"
+      className="relative shrink-0 scroll-mt-5 overflow-hidden bg-white shadow-md ring-1 ring-black/10"
       data-page-number={pageNumber}
       ref={wrapperRef}
-      style={{ aspectRatio: footprintWidth / footprintHeight, maxWidth }}
+      style={{ aspectRatio: footprintWidth / footprintHeight, width: displayWidth }}
     >
       <div
         className="absolute"

@@ -19,9 +19,11 @@ import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
+import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
+import { useZoom } from "@/hooks/useZoom"
 import {
   isPdfFile,
   MAX_PDF_BYTES,
@@ -33,6 +35,7 @@ import {
   storeViewMode,
   type ViewMode,
 } from "@/lib/viewMode"
+import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 type ViewerError = "fileTooLarge" | "invalidFile" | "openFailed" | null
 
@@ -52,6 +55,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
   const [viewerWidth, setViewerWidth] = useState(0)
+  const [viewerHeight, setViewerHeight] = useState(0)
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => readStoredViewMode() ?? defaultViewMode,
   )
@@ -60,6 +64,24 @@ export default function App() {
   const requestIdRef = useRef(0)
   const dragDepthRef = useRef(0)
   const pendingScrollPageRef = useRef<number | null>(null)
+
+  // The thumbnail grid gives every cell the same width whatever the page, so it
+  // has no single scale to report and nothing for a zoom to act on. The controls
+  // are absent there rather than disabled: disabled reads as "not just now",
+  // which is what an unopened document means, and it would leave the readout
+  // showing a figure that describes nothing on screen.
+  const zoomApplies = viewMode !== "thumbnail"
+  const zoom = useZoom({
+    contentHeight: Math.max(0, viewerHeight - CONTENT_PADDING_Y),
+    contentWidth: Math.max(0, viewerWidth - CONTENT_PADDING_X),
+    currentPage,
+    disabled: !pdfDocument || !zoomApplies,
+    pages: pdfDocument?.pages ?? [],
+    rotation,
+    viewMode,
+    viewerRef,
+  })
+  const resetZoomToDefault = zoom.resetToDefault
 
   const loadPdf = useCallback(async (file: File) => {
     if (!isPdfFile(file)) {
@@ -78,6 +100,7 @@ export default function App() {
     setFileName(file.name)
     setCurrentPage(0)
     setRotation(0)
+    resetZoomToDefault()
     setBookmarksOpen(false)
     setPdfDocument(null)
 
@@ -115,7 +138,7 @@ export default function App() {
         setIsLoading(false)
       }
     }
-  }, [])
+  }, [resetZoomToDefault])
 
   useEffect(() => {
     return () => {
@@ -141,22 +164,31 @@ export default function App() {
 
     let resizeTimer: ReturnType<typeof setTimeout> | undefined
     let committedWidth = 0
+    let committedHeight = 0
 
-    const commitWidth = (width: number) => {
+    const commitSize = (width: number, height: number) => {
       const roundedWidth = Math.round(width)
+      const roundedHeight = Math.round(height)
 
       if (roundedWidth !== committedWidth) {
         committedWidth = roundedWidth
         setViewerWidth(roundedWidth)
       }
+
+      if (roundedHeight !== committedHeight) {
+        committedHeight = roundedHeight
+        setViewerHeight(roundedHeight)
+      }
     }
 
-    commitWidth(viewer.clientWidth)
+    commitSize(viewer.clientWidth, viewer.clientHeight)
 
     const resizeObserver = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width ?? viewer.clientWidth
+      const rect = entries[0]?.contentRect
+      const width = rect?.width ?? viewer.clientWidth
+      const height = rect?.height ?? viewer.clientHeight
       clearTimeout(resizeTimer)
-      resizeTimer = setTimeout(() => commitWidth(width), 180)
+      resizeTimer = setTimeout(() => commitSize(width, height), 180)
     })
     resizeObserver.observe(viewer)
 
@@ -325,6 +357,19 @@ export default function App() {
             onChange={changeViewMode}
             value={viewMode}
           />
+          {zoomApplies ? (
+            <ZoomControls
+              canZoomIn={zoom.canZoomIn}
+              canZoomOut={zoom.canZoomOut}
+              disabled={!pdfDocument}
+              onReset={zoom.resetZoom}
+              onToggleFit={zoom.toggleFit}
+              onZoomIn={zoom.zoomIn}
+              onZoomOut={zoom.zoomOut}
+              zoomMode={zoom.zoomMode}
+              zoomPercent={zoom.zoomPercent}
+            />
+          ) : null}
         </div>
 
         <div
@@ -400,7 +445,9 @@ export default function App() {
               fileName={fileName}
               onSelectThumbnail={selectThumbnail}
               pages={pdfDocument.pages}
+              referencePageWidth={zoom.referencePageWidth}
               rotation={rotation}
+              scale={zoom.scale}
               viewMode={viewMode}
               viewerWidth={viewerWidth}
             />

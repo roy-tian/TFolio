@@ -1,6 +1,6 @@
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
-import { MAX_PAGE_WIDTH, type PdfPageInfo } from "@/lib/pdf"
+import { type PdfPageInfo } from "@/lib/pdf"
 import {
   computeThumbnailColumns,
   pairPages,
@@ -8,59 +8,63 @@ import {
   THUMBNAIL_WIDTH,
   type ViewMode,
 } from "@/lib/viewMode"
-
-// Horizontal padding of the scrolling column (`px-8` on either side).
-const CONTENT_PADDING = 64
-// Space between the two pages of a spread. Applied inline rather than as a
-// Tailwind class because the column arithmetic below has to agree with it.
-const BOOK_GAP = 20
+import { BOOK_GAP, CONTENT_PADDING_X } from "@/lib/zoom"
 
 type LayoutProps = {
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
   pages: PdfPageInfo[]
+  /** The document's usual page width at 100%, for a layout sharing one column. */
+  referencePageWidth: number
   rotation: number
+  /** Resolved zoom; the fit modes have already been worked out against it. */
+  scale: number
 }
 
-function SingleLayout({ contentWidth, documentId, pages, rotation }: LayoutProps) {
-  const maxWidth = Math.min(MAX_PAGE_WIDTH, contentWidth)
-
+function SingleLayout({ documentId, pages, rotation, scale }: LayoutProps) {
   return pages.map((page, index) => (
     <PdfPage
       documentId={documentId}
       key={`${documentId}-${index + 1}`}
-      maxWidth={maxWidth}
       page={page}
       pageNumber={index + 1}
       rotation={rotation}
+      scale={scale}
     />
   ))
 }
 
-function BookLayout({ contentWidth, documentId, pages, rotation }: LayoutProps) {
-  // Two pages plus the gap share the column, so each gets a little under half.
-  // A trailing odd page keeps the left cell and stays this size rather than
-  // stretching across the spread.
-  const maxWidth = Math.max(
-    0,
-    Math.min(MAX_PAGE_WIDTH, Math.floor((contentWidth - BOOK_GAP) / 2)),
-  )
+function BookLayout({
+  documentId,
+  pages,
+  referencePageWidth,
+  rotation,
+  scale,
+}: LayoutProps) {
+  // Both halves of a spread share one width: two columns of visibly different
+  // widths would read as broken, where a single column simply following each
+  // page's own size does not. A trailing odd page keeps the left cell and stays
+  // this size rather than stretching across the spread.
+  const columnWidth = Math.round(referencePageWidth * scale)
 
   return pairPages(pages.length).map((row) => (
     <div
-      className="grid w-full grid-cols-2 items-start"
+      className="flex items-start"
       key={`${documentId}-spread-${row[0]}`}
-      style={{ gap: BOOK_GAP, maxWidth: maxWidth * 2 + BOOK_GAP }}
+      // Sized for a full spread even when holding a single trailing page, which
+      // keeps that page in the left cell instead of centring it in the column.
+      style={{ gap: BOOK_GAP, width: columnWidth * 2 + BOOK_GAP }}
     >
       {row.map((pageNumber) => (
         <PdfPage
           documentId={documentId}
           key={`${documentId}-${pageNumber}`}
-          maxWidth={maxWidth}
           page={pages[pageNumber - 1]}
           pageNumber={pageNumber}
           rotation={rotation}
+          scale={scale}
+          width={columnWidth}
         />
       ))}
     </div>
@@ -110,7 +114,9 @@ type PdfViewerLayoutProps = {
   fileName: string
   onSelectThumbnail: (pageNumber: number) => void
   pages: PdfPageInfo[]
+  referencePageWidth: number
   rotation: number
+  scale: number
   viewMode: ViewMode
   viewerWidth: number
 }
@@ -126,17 +132,32 @@ export function PdfViewerLayout({
   fileName,
   onSelectThumbnail,
   pages,
+  referencePageWidth,
   rotation,
+  scale,
   viewMode,
   viewerWidth,
 }: PdfViewerLayoutProps) {
-  const contentWidth = Math.max(0, viewerWidth - CONTENT_PADDING)
-  const layoutProps = { contentWidth, documentId, pages, rotation }
+  const contentWidth = Math.max(0, viewerWidth - CONTENT_PADDING_X)
+  const layoutProps = {
+    contentWidth,
+    documentId,
+    pages,
+    referencePageWidth,
+    rotation,
+    scale,
+  }
 
   return (
     <div
       aria-label={fileName}
-      className="flex min-h-full flex-col items-center gap-5 px-8 py-8"
+      // `min-w-fit` is what keeps a zoomed-in page reachable. Without it this
+      // box would only ever be as wide as the viewer, and `items-center` would
+      // centre an overflowing page by splitting the overflow across both sides
+      // — where the left half sits at a negative offset the viewer cannot
+      // scroll back to. Growing the box instead turns that into ordinary
+      // scrollable width. It costs nothing while the pages still fit.
+      className="flex min-h-full min-w-fit flex-col items-center gap-5 px-8 py-8"
     >
       {viewMode === "book" ? (
         <BookLayout {...layoutProps} />
