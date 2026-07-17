@@ -34,16 +34,15 @@ export function ViewModeToggle({
     <ToggleGroup
       aria-label={t("toolbar.viewMode")}
       disabled={disabled}
-      onValueChange={(next) => {
-        // Radix clears the value when the active item is pressed again, but a
-        // view mode always has to stay selected.
+      onValueChange={([next]) => {
+        // Base UI empties the array when the active item is pressed again, but
+        // a view mode always has to stay selected.
         if (isViewMode(next)) {
           onChange(next)
         }
       }}
       spacing={0}
-      type="single"
-      value={value}
+      value={[value]}
       variant="outline"
     >
       {options.map((option) => {

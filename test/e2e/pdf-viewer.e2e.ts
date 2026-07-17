@@ -186,14 +186,14 @@ describe("TFolio PDF viewer", () => {
     await selectFile("nine-pages.pdf", "application/pdf", minimalPdf(9))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    const toggle = (label: string) => $(`[role='radio'][aria-label='${label}']`)
+    const toggle = (label: string) => $(`button[aria-label='${label}']`)
     const pageInput = await $("input[aria-label='Page number']")
 
-    await expect(toggle("Single page")).toHaveAttribute("aria-checked", "true")
+    await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
 
     // Book view pairs from page 1, so pages 1 and 2 share a spread.
     await toggle("Book").click()
-    await expect(toggle("Book")).toHaveAttribute("aria-checked", "true")
+    await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
     await $("[data-page-number='2']").waitForDisplayed()
 
     const spread = await browser.execute(() => {
@@ -234,14 +234,14 @@ describe("TFolio PDF viewer", () => {
 
     // Clicking one drops back into the single view at that page.
     await thirdThumbnail.click()
-    await expect(toggle("Single page")).toHaveAttribute("aria-checked", "true")
+    await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
     await expect(pageInput).toHaveValue("3")
 
     // The chosen mode outlives a reload.
     await toggle("Book").click()
     await browser.refresh()
     await $("input[aria-label='Choose a PDF file']").waitForExist()
-    await expect(toggle("Book")).toHaveAttribute("aria-checked", "true")
+    await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
   })
 
   // Landscape thumbnail rows are a fraction of a page's height. Page tracking
@@ -263,7 +263,7 @@ describe("TFolio PDF viewer", () => {
     )
     await $("[data-page-number='1']").waitForDisplayed()
 
-    await $("[role='radio'][aria-label='Thumbnails']").click()
+    await $("button[aria-label='Thumbnails']").click()
     await $("button[aria-label='Go to page 1']").waitForDisplayed()
 
     // The grid fits as many columns as the window allows, so derive a page that
