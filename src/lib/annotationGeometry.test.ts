@@ -1,0 +1,243 @@
+import { describe, expect, it } from "bun:test"
+
+import {
+  clampFraction,
+  clientPointToFraction,
+  fractionsToPageRect,
+  fractionToPagePoint,
+  totalPageRotation,
+  unrotateFraction,
+  type BoxFraction,
+} from "@/lib/annotationGeometry"
+import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
+
+// A page whose displayed size is 200x300. `rotation` is the intrinsic /Rotate,
+// which the backend has already applied to `width`/`height`.
+function page(rotation: number): PdfPageInfo {
+  return { height: 300, rotation, width: 200 }
+}
+
+const rotations = [0, 90, 180, 270]
+
+describe("unrotateFraction", () => {
+  it("leaves an unrotated box alone", () => {
+    expect(unrotateFraction({ x: 0.25, y: 0.75 }, 0)).toEqual({ x: 0.25, y: 0.75 })
+  })
+
+  // The four quarter turns are the whole domain, so they are pinned corner by
+  // corner rather than trusted to a formula that reads plausibly.
+  it("carries the footprint's corners back to the box's own", () => {
+    const topLeft: BoxFraction = { x: 0, y: 0 }
+
+    expect(unrotateFraction(topLeft, 90)).toEqual({ x: 0, y: 1 })
+    expect(unrotateFraction(topLeft, 180)).toEqual({ x: 1, y: 1 })
+    expect(unrotateFraction(topLeft, 270)).toEqual({ x: 1, y: 0 })
+  })
+
+  it("returns to the identity after four quarter turns", () => {
+    let fraction: BoxFraction = { x: 0.3, y: 0.8 }
+
+    for (let turn = 0; turn < 4; turn += 1) {
+      fraction = unrotateFraction(fraction, 90)
+    }
+
+    expect(fraction.x).toBeCloseTo(0.3)
+    expect(fraction.y).toBeCloseTo(0.8)
+  })
+
+  // Two quarter turns and one half turn are the same map, which is what lets
+  // the page's own rotation and the reader's compose into a single one.
+  it("composes: two quarter turns equal a half turn", () => {
+    const start: BoxFraction = { x: 0.2, y: 0.6 }
+    const twice = unrotateFraction(unrotateFraction(start, 90), 90)
+
+    expect(twice).toEqual(unrotateFraction(start, 180))
+  })
+
+  it("is its own inverse at a half turn", () => {
+    const start: BoxFraction = { x: 0.2, y: 0.6 }
+    const twice = unrotateFraction(unrotateFraction(start, 180), 180)
+
+    expect(twice.x).toBeCloseTo(start.x)
+    expect(twice.y).toBeCloseTo(start.y)
+  })
+})
+
+describe("totalPageRotation", () => {
+  it("adds the reader's rotation to the page's own", () => {
+    expect(totalPageRotation(page(90), 180)).toBe(270)
+  })
+
+  it("wraps past a full turn", () => {
+    expect(totalPageRotation(page(270), 180)).toBe(90)
+    expect(totalPageRotation(page(90), 270)).toBe(0)
+  })
+})
+
+describe("fractionToPagePoint", () => {
+  it("scales a fraction of an upright page to its points", () => {
+    expect(fractionToPagePoint({ x: 0.5, y: 0.5 }, page(0), 0)).toEqual({
+      left: 100,
+      top: 150,
+    })
+  })
+
+  // The centre is the one point every rotation fixes, so it holds whatever the
+  // page and the reader are each doing.
+  it("holds the centre still through every rotation pair", () => {
+    for (const intrinsic of rotations) {
+      for (const rotation of rotations) {
+        const { height, width } = dimensionsForRotation(intrinsic, 200, 300)
+        const centre = fractionToPagePoint(
+          { x: 0.5, y: 0.5 },
+          page(intrinsic),
+          rotation,
+        )
+
+        expect(centre.left).toBeCloseTo(width / 2)
+        expect(centre.top).toBeCloseTo(height / 2)
+      }
+    }
+  })
+
+  // Whatever the rotation, the four corners of the footprint have to land on the
+  // four corners of the page — never off it, and never twice on the same one.
+  it("maps the footprint's corners onto the page's corners, one each", () => {
+    const corners: BoxFraction[] = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+      { x: 0, y: 1 },
+    ]
+
+    for (const intrinsic of rotations) {
+      for (const rotation of rotations) {
+        const { height, width } = dimensionsForRotation(intrinsic, 200, 300)
+        const mapped = corners.map((corner) => {
+          const point = fractionToPagePoint(corner, page(intrinsic), rotation)
+
+          return `${Math.round(point.left)},${Math.round(point.top)}`
+        })
+
+        expect(new Set(mapped).size).toBe(4)
+
+        for (const point of mapped) {
+          expect([`0,0`, `${width},0`, `${width},${height}`, `0,${height}`]).toContain(
+            point,
+          )
+        }
+      }
+    }
+  })
+
+  // Turning a page a quarter clockwise carries its top edge to the right edge,
+  // so the page's own top-left corner is drawn at the footprint's top-right.
+  // Pinned explicitly because the corner-set test above only proves the four
+  // corners are hit once each — it would pass just as happily on a map that
+  // turned the page the wrong way.
+  it("places a quarter turn's corners where the page is actually drawn", () => {
+    expect(fractionToPagePoint({ x: 1, y: 0 }, page(0), 90)).toEqual({
+      left: 0,
+      top: 0,
+    })
+    expect(fractionToPagePoint({ x: 0, y: 0 }, page(0), 90)).toEqual({
+      left: 0,
+      top: 300,
+    })
+  })
+})
+
+describe("fractionsToPageRect", () => {
+  it("squares up a rectangle drawn right and down", () => {
+    expect(
+      fractionsToPageRect({ x: 0.1, y: 0.2 }, { x: 0.6, y: 0.7 }, page(0), 0),
+    ).toEqual({ height: 150, left: 20, top: 60, width: 100 })
+  })
+
+  // A reader drags from whichever corner they like; the rectangle that lands is
+  // the same one either way.
+  it("gives the same rectangle whichever corner the drag started from", () => {
+    const forward = fractionsToPageRect(
+      { x: 0.1, y: 0.2 },
+      { x: 0.6, y: 0.7 },
+      page(0),
+      0,
+    )
+    const backward = fractionsToPageRect(
+      { x: 0.6, y: 0.7 },
+      { x: 0.1, y: 0.2 },
+      page(0),
+      0,
+    )
+
+    expect(backward).toEqual(forward)
+  })
+
+  // The rectangle a drag encloses is the same patch of the page however the
+  // page is turned while drawing it, so its area cannot move with the rotation.
+  it("keeps a drag's area through every rotation pair", () => {
+    for (const intrinsic of rotations) {
+      for (const rotation of rotations) {
+        const rect = fractionsToPageRect(
+          { x: 0.25, y: 0.25 },
+          { x: 0.75, y: 0.75 },
+          page(intrinsic),
+          rotation,
+        )
+        const { height, width } = dimensionsForRotation(intrinsic, 200, 300)
+
+        expect(rect.width * rect.height).toBeCloseTo((width / 2) * (height / 2))
+        expect(rect.left).toBeCloseTo(width / 4)
+        expect(rect.top).toBeCloseTo(height / 4)
+      }
+    }
+  })
+
+  it("never reports a negative side", () => {
+    for (const intrinsic of rotations) {
+      for (const rotation of rotations) {
+        const rect = fractionsToPageRect(
+          { x: 0.8, y: 0.1 },
+          { x: 0.2, y: 0.9 },
+          page(intrinsic),
+          rotation,
+        )
+
+        expect(rect.width).toBeGreaterThan(0)
+        expect(rect.height).toBeGreaterThan(0)
+      }
+    }
+  })
+})
+
+describe("clientPointToFraction", () => {
+  it("measures a client point against the box", () => {
+    const box = { height: 200, left: 50, top: 100, width: 400 }
+
+    expect(clientPointToFraction(box, 250, 200)).toEqual({ x: 0.5, y: 0.5 })
+  })
+
+  it("reports a point outside the box outside 0..1", () => {
+    const box = { height: 200, left: 50, top: 100, width: 400 }
+
+    expect(clientPointToFraction(box, 50 - 40, 100).x).toBeCloseTo(-0.1)
+  })
+
+  // A page still laying out has no size to measure against, and dividing by it
+  // would report NaN rather than simply nothing.
+  it("reports the origin for a box with no size", () => {
+    expect(clientPointToFraction({ height: 0, left: 0, top: 0, width: 0 }, 5, 5)).toEqual(
+      { x: 0, y: 0 },
+    )
+  })
+})
+
+describe("clampFraction", () => {
+  it("holds a fraction inside its box", () => {
+    expect(clampFraction({ x: -0.5, y: 1.5 })).toEqual({ x: 0, y: 1 })
+  })
+
+  it("leaves a fraction already inside alone", () => {
+    expect(clampFraction({ x: 0.25, y: 0.75 })).toEqual({ x: 0.25, y: 0.75 })
+  })
+})

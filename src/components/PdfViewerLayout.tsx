@@ -1,5 +1,6 @@
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
+import type { RenderEpochs } from "@/lib/annotations"
 import { type PdfPageInfo } from "@/lib/pdf"
 import {
   computeThumbnailColumns,
@@ -17,18 +18,27 @@ type LayoutProps = {
   pages: PdfPageInfo[]
   /** The document's usual page width at 100%, for a layout sharing one column. */
   referencePageWidth: number
+  /** How many times each page has been drawn on, keyed by page number. */
+  renderEpochs: RenderEpochs
   rotation: number
   /** Resolved zoom; the fit modes have already been worked out against it. */
   scale: number
 }
 
-function SingleLayout({ documentId, pages, rotation, scale }: LayoutProps) {
+function SingleLayout({
+  documentId,
+  pages,
+  renderEpochs,
+  rotation,
+  scale,
+}: LayoutProps) {
   return pages.map((page, index) => (
     <PdfPage
       documentId={documentId}
       key={`${documentId}-${index + 1}`}
       page={page}
       pageNumber={index + 1}
+      renderEpoch={renderEpochs[index + 1] ?? 0}
       rotation={rotation}
       scale={scale}
     />
@@ -39,6 +49,7 @@ function BookLayout({
   documentId,
   pages,
   referencePageWidth,
+  renderEpochs,
   rotation,
   scale,
 }: LayoutProps) {
@@ -62,6 +73,7 @@ function BookLayout({
           key={`${documentId}-${pageNumber}`}
           page={pages[pageNumber - 1]}
           pageNumber={pageNumber}
+          renderEpoch={renderEpochs[pageNumber] ?? 0}
           rotation={rotation}
           scale={scale}
           width={columnWidth}
@@ -77,6 +89,7 @@ function ThumbnailLayout({
   documentId,
   onSelectThumbnail,
   pages,
+  renderEpochs,
   rotation,
 }: LayoutProps & {
   currentPage: number
@@ -100,6 +113,7 @@ function ThumbnailLayout({
           onSelect={onSelectThumbnail}
           page={page}
           pageNumber={index + 1}
+          renderEpoch={renderEpochs[index + 1] ?? 0}
           rotation={rotation}
           width={THUMBNAIL_WIDTH}
         />
@@ -115,6 +129,7 @@ type PdfViewerLayoutProps = {
   onSelectThumbnail: (pageNumber: number) => void
   pages: PdfPageInfo[]
   referencePageWidth: number
+  renderEpochs: RenderEpochs
   rotation: number
   scale: number
   viewMode: ViewMode
@@ -133,6 +148,7 @@ export function PdfViewerLayout({
   onSelectThumbnail,
   pages,
   referencePageWidth,
+  renderEpochs,
   rotation,
   scale,
   viewMode,
@@ -144,6 +160,7 @@ export function PdfViewerLayout({
     documentId,
     pages,
     referencePageWidth,
+    renderEpochs,
     rotation,
     scale,
   }

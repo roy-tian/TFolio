@@ -51,6 +51,8 @@ type PdfPageProps = {
   documentId: number
   page: PdfPageInfo
   pageNumber: number
+  /** Bumped when the page is drawn on, so the bitmap is fetched again. */
+  renderEpoch: number
   rotation: number
   /** Resolved zoom; 1 lays the page out at one PDF point per CSS pixel. */
   scale: number
@@ -66,6 +68,7 @@ export function PdfPage({
   documentId,
   page,
   pageNumber,
+  renderEpoch,
   rotation,
   scale,
   width,
@@ -94,6 +97,7 @@ export function PdfPage({
     mimeType: "image/png",
     page,
     pageNumber,
+    renderEpoch,
     rotation,
     targetWidth:
       settledWidth > 0

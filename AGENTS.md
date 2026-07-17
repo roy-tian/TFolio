@@ -121,6 +121,25 @@ and `frame-src` disabled — and a separate `devCsp` permits only the WebSocket 
 - Review CSP and Tauri capabilities together; grant filesystem, dialog, shell,
   and protocol permissions with the narrowest practical scopes.
 
+The capability list is **not** what gates this app's own commands. Tauri's ACL
+covers plugin and core commands only; anything in `generate_handler!` is callable
+by the WebView with whatever arguments it likes, which is why none of the PDF
+commands needed a permission entry to work. `capabilities/default.json` holds
+`dialog:allow-save` — narrowed from the `dialog:default` the Tauri CLI adds,
+which would also grant open/message/ask/confirm — and that grant is only what
+lets the frontend *ask for a path*. What is done with that path is `export_pdf`'s
+own business, so an argument a command will act on has to be checked in the
+command, not assumed safe because a dialog produced it. `tauri-plugin-dialog`
+pulls `tauri-plugin-fs` in as a transitive dependency; it is deliberately never
+registered, so no `fs` commands are exposed — do not read its presence in
+`Cargo.lock` as permission to use it.
+
+The backend enforces its own invariants for the same reason. `delete_last_pdf_annotation`
+counts what the session added to each page and refuses to go past it, rather than
+trusting the frontend's undo history: a real PDF's pages carry links, form
+fields, and comments, and an undo that ran off the end of the reader's own marks
+would delete one of those permanently and save it into their file.
+
 Security-related changes must pass `bun run build`, `bun run tauri:build`, and a
 manual check for unexpected CSP violations in the WebView developer console.
 

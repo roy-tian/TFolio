@@ -7,6 +7,7 @@ import {
   useState,
 } from "react"
 import { invoke } from "@tauri-apps/api/core"
+import { save } from "@tauri-apps/plugin-dialog"
 import {
   Bookmark,
   FileUp,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SettingsDialog } from "@/components/SettingsDialog"
@@ -22,8 +24,17 @@ import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
+import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
+import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useZoom } from "@/hooks/useZoom"
+import {
+  defaultHighlightColor,
+  HIGHLIGHT_OPACITY,
+  readStoredHighlightColor,
+  storeHighlightColor,
+} from "@/lib/annotationStyles"
+import type { HexColor } from "@/lib/annotations"
 import {
   isPdfFile,
   MAX_PDF_BYTES,
@@ -37,7 +48,13 @@ import {
 } from "@/lib/viewMode"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
-type ViewerError = "fileTooLarge" | "invalidFile" | "openFailed" | null
+type ViewerError =
+  | "annotateFailed"
+  | "exportFailed"
+  | "fileTooLarge"
+  | "invalidFile"
+  | "openFailed"
+  | null
 
 function closePdf(documentId: number) {
   void invoke("close_pdf", { documentId }).catch(() => undefined)
@@ -58,6 +75,10 @@ export default function App() {
   const [viewerHeight, setViewerHeight] = useState(0)
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => readStoredViewMode() ?? defaultViewMode,
+  )
+  const [activeTool, setActiveTool] = useState<AnnotationTool>(null)
+  const [highlightColor, setHighlightColor] = useState<HexColor>(
+    () => readStoredHighlightColor() ?? defaultHighlightColor,
   )
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(null)
@@ -83,6 +104,54 @@ export default function App() {
   })
   const resetZoomToDefault = zoom.resetToDefault
 
+  // Only the tool: undo, redo, and export act on the document rather than on the
+  // page under the pointer, so they stay.
+  const highlightApplies = viewMode !== "thumbnail"
+  const annotations = useAnnotations({
+    documentId: pdfDocument?.id,
+    onAnnotateError: useCallback(() => setViewerError("annotateFailed"), []),
+    onExportError: useCallback(() => setViewerError("exportFailed"), []),
+    // A toast that outlives what it describes would sit over every mark the
+    // reader went on to make successfully.
+    onSuccess: useCallback(() => setViewerError(null), []),
+  })
+  const resetAnnotations = annotations.reset
+
+  useHighlightTool({
+    active: Boolean(pdfDocument) && highlightApplies && activeTool === "highlight",
+    color: highlightColor,
+    onCommit: annotations.commit,
+    opacity: HIGHLIGHT_OPACITY,
+    pages: pdfDocument?.pages ?? [],
+    rotation,
+    viewerRef,
+  })
+
+  const changeHighlightColor = useCallback((color: HexColor) => {
+    setHighlightColor(color)
+    storeHighlightColor(color)
+  }, [])
+
+  const exportPdf = useCallback(async () => {
+    if (!pdfDocument) {
+      return
+    }
+
+    try {
+      const path = await save({
+        defaultPath: t("annotate.exportDefaultName"),
+        filters: [{ extensions: ["pdf"], name: t("annotate.exportFilter") }],
+      })
+
+      if (path) {
+        await annotations.exportTo(path)
+      }
+    } catch {
+      // Only the picker itself; `exportTo` reports a failed write on its own.
+      setViewerError("exportFailed")
+    }
+  }, [annotations, pdfDocument, t])
+
   const loadPdf = useCallback(async (file: File) => {
     if (!isPdfFile(file)) {
       setViewerError("invalidFile")
@@ -101,6 +170,8 @@ export default function App() {
     setCurrentPage(0)
     setRotation(0)
     resetZoomToDefault()
+    resetAnnotations()
+    setActiveTool(null)
     setBookmarksOpen(false)
     setPdfDocument(null)
 
@@ -138,7 +209,7 @@ export default function App() {
         setIsLoading(false)
       }
     }
-  }, [resetZoomToDefault])
+  }, [resetAnnotations, resetZoomToDefault])
 
   useEffect(() => {
     return () => {
@@ -329,7 +400,11 @@ export default function App() {
         ? t("viewer.invalidFile")
         : viewerError === "openFailed"
           ? t("viewer.openFailed")
-          : null
+          : viewerError === "exportFailed"
+            ? t("annotate.exportFailed")
+            : viewerError === "annotateFailed"
+              ? t("annotate.failed")
+              : null
 
   return (
     <div
@@ -422,6 +497,19 @@ export default function App() {
           >
             <RotateCw />
           </Button>
+          <AnnotationToolbar
+            activeTool={activeTool}
+            canRedo={annotations.canRedo}
+            canUndo={annotations.canUndo}
+            disabled={!pdfDocument}
+            highlightApplies={highlightApplies}
+            highlightColor={highlightColor}
+            onExport={() => void exportPdf()}
+            onHighlightColorChange={changeHighlightColor}
+            onRedo={() => void annotations.redo()}
+            onToolChange={setActiveTool}
+            onUndo={() => void annotations.undo()}
+          />
           <SettingsDialog />
         </div>
       </header>
@@ -446,6 +534,7 @@ export default function App() {
               onSelectThumbnail={selectThumbnail}
               pages={pdfDocument.pages}
               referencePageWidth={zoom.referencePageWidth}
+              renderEpochs={annotations.renderEpochs}
               rotation={rotation}
               scale={zoom.scale}
               viewMode={viewMode}

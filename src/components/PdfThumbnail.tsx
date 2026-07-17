@@ -22,6 +22,8 @@ type PdfThumbnailProps = {
   onSelect: (pageNumber: number) => void
   page: PdfPageInfo
   pageNumber: number
+  /** Bumped when the page is drawn on, so the bitmap is fetched again. */
+  renderEpoch: number
   rotation: number
   /** CSS pixels this thumbnail occupies; the grid sizes every cell alike. */
   width: number
@@ -38,6 +40,7 @@ export function PdfThumbnail({
   onSelect,
   page,
   pageNumber,
+  renderEpoch,
   rotation,
   width,
 }: PdfThumbnailProps) {
@@ -55,6 +58,7 @@ export function PdfThumbnail({
     mimeType: "image/webp",
     page,
     pageNumber,
+    renderEpoch,
     rotation,
     targetWidth: width,
   })

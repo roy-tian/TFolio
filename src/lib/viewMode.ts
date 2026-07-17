@@ -1,3 +1,5 @@
+import { readStored, store } from "@/lib/storage"
+
 export const viewModes = ["single", "book", "thumbnail"] as const
 
 export type ViewMode = (typeof viewModes)[number]
@@ -14,20 +16,11 @@ export function isViewMode(value: unknown): value is ViewMode {
 }
 
 export function readStoredViewMode(): ViewMode | null {
-  try {
-    const stored = window.localStorage.getItem(viewModeStorageKey)
-    return isViewMode(stored) ? stored : null
-  } catch {
-    return null
-  }
+  return readStored(viewModeStorageKey, isViewMode)
 }
 
 export function storeViewMode(mode: ViewMode) {
-  try {
-    window.localStorage.setItem(viewModeStorageKey, mode)
-  } catch {
-    // A restricted WebView can disable storage. The active session still works.
-  }
+  store(viewModeStorageKey, mode)
 }
 
 /**

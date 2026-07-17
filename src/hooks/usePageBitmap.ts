@@ -15,6 +15,12 @@ type PageBitmapOptions = {
   mimeType: string
   page: PdfPageInfo
   pageNumber: number
+  /**
+   * Bumped when the page's content changes: the same page at the same width
+   * renders differently once it has been drawn on, which nothing else about a
+   * render request would reveal.
+   */
+  renderEpoch: number
   rotation: number
   /** CSS pixels the bitmap has to cover. Zero or less defers the render. */
   targetWidth: number
@@ -34,11 +40,13 @@ export function usePageBitmap({
   mimeType,
   page,
   pageNumber,
+  renderEpoch,
   rotation,
   targetWidth,
 }: PageBitmapOptions) {
   const lastRenderRef = useRef<{
     documentId: number
+    renderEpoch: number
     renderWidth: number
   } | null>(null)
   const [hasRendered, setHasRendered] = useState(false)
@@ -69,7 +77,8 @@ export function usePageBitmap({
 
     if (
       lastRender?.documentId === documentId &&
-      lastRender.renderWidth === renderWidth
+      lastRender.renderWidth === renderWidth &&
+      lastRender.renderEpoch === renderEpoch
     ) {
       return
     }
@@ -107,7 +116,7 @@ export function usePageBitmap({
       canvas.height = bitmap.height
       context.drawImage(bitmap, 0, 0)
       bitmap.close()
-      lastRenderRef.current = { documentId, renderWidth }
+      lastRenderRef.current = { documentId, renderEpoch, renderWidth }
       setHasRendered(true)
       setRenderFailed(false)
     }
@@ -131,6 +140,7 @@ export function usePageBitmap({
     page.height,
     page.width,
     pageNumber,
+    renderEpoch,
     rotation,
     targetWidth,
   ])
