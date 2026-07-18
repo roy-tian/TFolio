@@ -1,5 +1,6 @@
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
+import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
 import { type PdfPageInfo } from "@/lib/pdf"
 import {
@@ -15,6 +16,8 @@ type LayoutProps = {
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
+  /** The rectangle being dragged out, on whichever page it started. */
+  draft?: RectDraft
   pages: PdfPageInfo[]
   /** The document's usual page width at 100%, for a layout sharing one column. */
   referencePageWidth: number
@@ -27,6 +30,7 @@ type LayoutProps = {
 
 function SingleLayout({
   documentId,
+  draft,
   pages,
   renderEpochs,
   rotation,
@@ -35,6 +39,7 @@ function SingleLayout({
   return pages.map((page, index) => (
     <PdfPage
       documentId={documentId}
+      draft={draft?.pageNumber === index + 1 ? draft : undefined}
       key={`${documentId}-${index + 1}`}
       page={page}
       pageNumber={index + 1}
@@ -47,6 +52,7 @@ function SingleLayout({
 
 function BookLayout({
   documentId,
+  draft,
   pages,
   referencePageWidth,
   renderEpochs,
@@ -70,6 +76,7 @@ function BookLayout({
       {row.map((pageNumber) => (
         <PdfPage
           documentId={documentId}
+          draft={draft?.pageNumber === pageNumber ? draft : undefined}
           key={`${documentId}-${pageNumber}`}
           page={pages[pageNumber - 1]}
           pageNumber={pageNumber}
@@ -125,6 +132,7 @@ function ThumbnailLayout({
 type PdfViewerLayoutProps = {
   currentPage: number
   documentId: number
+  draft?: RectDraft
   fileName: string
   onSelectThumbnail: (pageNumber: number) => void
   pages: PdfPageInfo[]
@@ -144,6 +152,7 @@ type PdfViewerLayoutProps = {
 export function PdfViewerLayout({
   currentPage,
   documentId,
+  draft,
   fileName,
   onSelectThumbnail,
   pages,
@@ -158,6 +167,7 @@ export function PdfViewerLayout({
   const layoutProps = {
     contentWidth,
     documentId,
+    draft,
     pages,
     referencePageWidth,
     renderEpochs,

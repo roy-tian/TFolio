@@ -27,14 +27,18 @@ import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
+import { useRectTool } from "@/hooks/useRectTool"
 import { useZoom } from "@/hooks/useZoom"
 import {
   defaultHighlightColor,
+  defaultRectStyle,
   HIGHLIGHT_OPACITY,
   readStoredHighlightColor,
+  readStoredRectStyle,
   storeHighlightColor,
+  storeRectStyle,
 } from "@/lib/annotationStyles"
-import type { HexColor } from "@/lib/annotations"
+import type { HexColor, RectStyle } from "@/lib/annotations"
 import {
   isPdfFile,
   MAX_PDF_BYTES,
@@ -46,6 +50,7 @@ import {
   storeViewMode,
   type ViewMode,
 } from "@/lib/viewMode"
+import { cn } from "@/lib/utils"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 type ViewerError =
@@ -80,6 +85,9 @@ export default function App() {
   const [highlightColor, setHighlightColor] = useState<HexColor>(
     () => readStoredHighlightColor() ?? defaultHighlightColor,
   )
+  const [rectStyle, setRectStyle] = useState<RectStyle>(
+    () => readStoredRectStyle() ?? defaultRectStyle,
+  )
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(null)
   const requestIdRef = useRef(0)
@@ -104,9 +112,10 @@ export default function App() {
   })
   const resetZoomToDefault = zoom.resetToDefault
 
-  // Only the tool: undo, redo, and export act on the document rather than on the
-  // page under the pointer, so they stay.
-  const highlightApplies = viewMode !== "thumbnail"
+  // Every drawing tool needs a page under the pointer, and the thumbnail grid
+  // has none. Only the tools: undo, redo, and export act on the document rather
+  // than on a page, so they stay.
+  const drawingApplies = viewMode !== "thumbnail"
   const annotations = useAnnotations({
     documentId: pdfDocument?.id,
     onAnnotateError: useCallback(() => setViewerError("annotateFailed"), []),
@@ -118,7 +127,7 @@ export default function App() {
   const resetAnnotations = annotations.reset
 
   useHighlightTool({
-    active: Boolean(pdfDocument) && highlightApplies && activeTool === "highlight",
+    active: Boolean(pdfDocument) && drawingApplies && activeTool === "highlight",
     color: highlightColor,
     onCommit: annotations.commit,
     opacity: HIGHLIGHT_OPACITY,
@@ -127,9 +136,24 @@ export default function App() {
     viewerRef,
   })
 
+  const drawingRect = drawingApplies && activeTool === "rect"
+  const rectDraft = useRectTool({
+    active: Boolean(pdfDocument) && drawingRect,
+    onCommit: annotations.commit,
+    pages: pdfDocument?.pages ?? [],
+    rotation,
+    style: rectStyle,
+    viewerRef,
+  })
+
   const changeHighlightColor = useCallback((color: HexColor) => {
     setHighlightColor(color)
     storeHighlightColor(color)
+  }, [])
+
+  const changeRectStyle = useCallback((style: RectStyle) => {
+    setRectStyle(style)
+    storeRectStyle(style)
   }, [])
 
   const exportPdf = useCallback(async () => {
@@ -502,13 +526,16 @@ export default function App() {
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
             disabled={!pdfDocument}
-            highlightApplies={highlightApplies}
+            highlightApplies={drawingApplies}
             highlightColor={highlightColor}
             onExport={() => void exportPdf()}
             onHighlightColorChange={changeHighlightColor}
+            onRectStyleChange={changeRectStyle}
             onRedo={() => void annotations.redo()}
             onToolChange={setActiveTool}
             onUndo={() => void annotations.undo()}
+            rectApplies={drawingApplies}
+            rectStyle={rectStyle}
           />
           <SettingsDialog />
         </div>
@@ -523,13 +550,20 @@ export default function App() {
         ) : null}
 
         <main
-          className="relative min-w-0 flex-1 overflow-auto bg-zinc-200/70 dark:bg-zinc-950"
+          className={cn(
+            "relative min-w-0 flex-1 overflow-auto bg-zinc-200/70 dark:bg-zinc-950",
+            // Only while the tool can actually draw: the thumbnail grid hides
+            // the toggle that would turn it back off, so a crosshair left over
+            // it would promise a drag that does nothing.
+            drawingRect && "cursor-crosshair",
+          )}
           ref={viewerRef}
         >
           {pdfDocument ? (
             <PdfViewerLayout
               currentPage={currentPage}
               documentId={pdfDocument.id}
+              draft={rectDraft ?? undefined}
               fileName={fileName}
               onSelectThumbnail={selectThumbnail}
               pages={pdfDocument.pages}

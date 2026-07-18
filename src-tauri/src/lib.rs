@@ -1,8 +1,9 @@
 mod pdfium;
 
 use pdfium::{
-    add_pdf_highlight_annotation, close_pdf, delete_last_pdf_annotation, export_pdf,
-    extract_pdf_page_text, open_pdf, render_pdf_page, render_pdf_page_thumbnail, PdfiumState,
+    add_pdf_highlight_annotation, add_pdf_rect_annotation, close_pdf, delete_last_pdf_annotation,
+    export_pdf, extract_pdf_page_text, open_pdf, render_pdf_page, render_pdf_page_thumbnail,
+    PdfiumState,
 };
 use tauri::Manager;
 
@@ -27,6 +28,7 @@ pub fn run() {
             render_pdf_page_thumbnail,
             extract_pdf_page_text,
             add_pdf_highlight_annotation,
+            add_pdf_rect_annotation,
             delete_last_pdf_annotation,
             export_pdf,
             close_pdf

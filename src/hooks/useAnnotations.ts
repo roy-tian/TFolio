@@ -13,6 +13,7 @@ import {
   undo,
   type AnnotationCommand,
   type AnnotationHistory,
+  type HighlightCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
 
@@ -30,6 +31,24 @@ type UseAnnotationsOptions = {
  * nothing could take back.
  */
 async function applyCommand(documentId: number, command: AnnotationCommand) {
+  switch (command.kind) {
+    case "highlight":
+      await applyHighlight(documentId, command)
+      return
+    case "rect":
+      // One page, one annotation, so there is nothing to wind back: the command
+      // either lands whole or leaves the page untouched.
+      await invoke("add_pdf_rect_annotation", {
+        bounds: command.bounds,
+        documentId,
+        pageNumber: command.pageNumber,
+        style: command.style,
+      })
+      return
+  }
+}
+
+async function applyHighlight(documentId: number, command: HighlightCommand) {
   const written: number[] = []
 
   try {

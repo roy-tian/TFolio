@@ -24,7 +24,31 @@ export type HighlightCommand = {
   targets: HighlightTarget[]
 }
 
-export type AnnotationCommand = HighlightCommand
+/**
+ * A rectangle's appearance. A colour left `null` is that part left off — a
+ * border with no fill, a fill with no border, or both — and `opacity` applies
+ * to whichever are present. `cornerRadius` and `strokeWidth` are page points.
+ */
+export type RectStyle = {
+  cornerRadius: number
+  fillColor: HexColor | null
+  opacity: number
+  strokeColor: HexColor | null
+  strokeWidth: number
+}
+
+/**
+ * A rectangle is drawn on one page in one drag, so unlike a highlight it never
+ * spans pages: one command, one page, one annotation.
+ */
+export type RectCommand = {
+  bounds: PagePointsRect
+  kind: "rect"
+  pageNumber: number
+  style: RectStyle
+}
+
+export type AnnotationCommand = HighlightCommand | RectCommand
 
 /**
  * Redoing re-runs the command and gets a fresh annotation out of PDFium, but it
@@ -52,7 +76,12 @@ export const emptyHistory: AnnotationHistory = {
 
 /** The pages a command writes to, and so the pages an undo has to take back. */
 export function commandPages(command: AnnotationCommand): number[] {
-  return command.targets.map((target) => target.pageNumber)
+  switch (command.kind) {
+    case "highlight":
+      return command.targets.map((target) => target.pageNumber)
+    case "rect":
+      return [command.pageNumber]
+  }
 }
 
 /** The entry the document currently ends at, or 0 when nothing is applied. */

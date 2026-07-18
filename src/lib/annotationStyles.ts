@@ -1,4 +1,4 @@
-import type { HexColor } from "@/lib/annotations"
+import type { HexColor, RectStyle } from "@/lib/annotations"
 import { readStored, store } from "@/lib/storage"
 
 /**
@@ -34,4 +34,107 @@ export function readStoredHighlightColor(): HexColor | null {
 
 export function storeHighlightColor(color: HexColor) {
   store(highlightColorStorageKey, color)
+}
+
+/** Full-strength ink for a border that has to read as a deliberate mark. */
+export const rectStrokeSwatches: readonly HexColor[] = [
+  "#ff3b30",
+  "#0a84ff",
+  "#34c759",
+  "#ffcc00",
+  "#000000",
+]
+
+/** A fill sits under content, so these lean pale enough to keep it readable. */
+export const rectFillSwatches: readonly HexColor[] = [
+  "#ff3b30",
+  "#0a84ff",
+  "#34c759",
+  "#ffcc00",
+  "#ffffff",
+]
+
+/** Slider ends. A radius past a small box's half-side is clamped by the backend. */
+export const RECT_MAX_CORNER_RADIUS = 40
+export const RECT_MIN_STROKE_WIDTH = 1
+export const RECT_MAX_STROKE_WIDTH = 12
+/** A rectangle at no opacity would be invisible, so the floor stays off zero. */
+export const RECT_MIN_OPACITY = 0.1
+
+/**
+ * An outline, not a block: a border reads as "I've marked this" where a fill
+ * reads as "I've covered this", and the first is what a rectangle tool is for.
+ */
+export const defaultRectStyle: RectStyle = {
+  cornerRadius: 0,
+  fillColor: null,
+  opacity: 1,
+  strokeColor: rectStrokeSwatches[0]!,
+  strokeWidth: 2,
+}
+
+export const rectStyleStorageKey = "tfolio.annotate.rectStyle"
+
+/** A colour, or `null` for the part of a rectangle that is left off. */
+function isNullableHexColor(value: unknown): value is HexColor | null {
+  return value === null || isHexColor(value)
+}
+
+/**
+ * Whether `value` is a rectangle style this app could have written. The numeric
+ * ranges are part of that: the sliders never emit a non-finite size or an
+ * opacity below `RECT_MIN_OPACITY`, so a stored one is tampered or from an older
+ * schema, and loading it would draw an invisible mark that still records as an
+ * edit. Rejected here so the caller falls back to the visible default.
+ */
+export function isRectStyle(value: unknown): value is RectStyle {
+  if (typeof value !== "object" || value === null) {
+    return false
+  }
+
+  const style = value as Record<string, unknown>
+
+  return (
+    // The ranges are the sliders' own: a value outside them — a zero border
+    // width, a radius past the maximum — is not one the app wrote, and the
+    // comparisons reject a non-finite number on the way (NaN fails them all).
+    typeof style.cornerRadius === "number" &&
+    style.cornerRadius >= 0 &&
+    style.cornerRadius <= RECT_MAX_CORNER_RADIUS &&
+    typeof style.strokeWidth === "number" &&
+    style.strokeWidth >= RECT_MIN_STROKE_WIDTH &&
+    style.strokeWidth <= RECT_MAX_STROKE_WIDTH &&
+    typeof style.opacity === "number" &&
+    style.opacity >= RECT_MIN_OPACITY &&
+    style.opacity <= 1 &&
+    isNullableHexColor(style.strokeColor) &&
+    isNullableHexColor(style.fillColor) &&
+    // At least one part present, or the rectangle would draw nothing — the same
+    // both-"none" state the options panel already refuses to let a reader reach.
+    (style.strokeColor !== null || style.fillColor !== null)
+  )
+}
+
+export function readStoredRectStyle(): RectStyle | null {
+  const raw = readStored(
+    rectStyleStorageKey,
+    (value): value is string => typeof value === "string",
+  )
+
+  if (raw === null) {
+    return null
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw)
+
+    return isRectStyle(parsed) ? parsed : null
+  } catch {
+    // An older version may have written a shape this one no longer reads.
+    return null
+  }
+}
+
+export function storeRectStyle(style: RectStyle) {
+  store(rectStyleStorageKey, JSON.stringify(style))
 }

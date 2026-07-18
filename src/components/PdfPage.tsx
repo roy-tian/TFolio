@@ -3,9 +3,11 @@ import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
+import type { RectDraft } from "@/hooks/useRectTool"
 import {
   dimensionsForRotation,
   MAX_RENDER_WIDTH,
@@ -49,6 +51,8 @@ function measureTextWidth(text: string, fontSize: number) {
 
 type PdfPageProps = {
   documentId: number
+  /** The rectangle being dragged out on this page, if any. */
+  draft?: RectDraft
   page: PdfPageInfo
   pageNumber: number
   /** Bumped when the page is drawn on, so the bitmap is fetched again. */
@@ -66,6 +70,7 @@ type PdfPageProps = {
 
 export function PdfPage({
   documentId,
+  draft,
   page,
   pageNumber,
   renderEpoch,
@@ -87,6 +92,9 @@ export function PdfPage({
 
   const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
   const settledWidth = useDebouncedValue(displayWidth, RENDER_SETTLE_MS)
+  // The draft's border and corners are given in page points; this turns them
+  // into the on-screen pixels the preview needs, whatever the layout's width.
+  const pxPerPoint = footprintWidth > 0 ? displayWidth / footprintWidth : 0
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -226,6 +234,7 @@ export function PdfPage({
           </span>
         </div>
       ) : null}
+      {draft ? <RectDraftOverlay draft={draft} pxPerPoint={pxPerPoint} /> : null}
     </div>
   )
 }
