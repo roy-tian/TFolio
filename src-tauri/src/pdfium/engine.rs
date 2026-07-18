@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
-    env, fs,
+    fs,
     io::Cursor,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -11,14 +11,20 @@ use std::{
 
 use image::{DynamicImage, ImageFormat};
 use pdfium_render::prelude::*;
-use serde::{Deserialize, Serialize};
-use tauri::{
-    ipc::{InvokeBody, Request, Response},
-    path::BaseDirectory,
-    AppHandle, Manager, State,
+use tauri::AppHandle;
+
+use super::{
+    geometry::{
+        annotation_color, clamp_corner_radius, page_rect_to_pdfium, page_rotation_degrees,
+        quad_points_from_rect, rect_path, union_rect, unrotated_page_height, within_page_range,
+        RectPathSegment, MAX_RECT_CORNER_RADIUS, MAX_RECT_STROKE_WIDTH, MIN_RECT_OPACITY,
+        MIN_RECT_STROKE_WIDTH,
+    },
+    library::bind_pdfium,
+    PagePointsRect, PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfTextSpan, RectStyle,
+    MAX_PDF_BYTES,
 };
 
-const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
 const MIN_RENDER_WIDTH: i32 = 64;
 const MAX_RENDER_WIDTH: i32 = 4096;
 const MAX_RENDER_HEIGHT: i32 = 4096;
@@ -28,80 +34,6 @@ const MAX_THUMBNAIL_WIDTH: i32 = 512;
 // Each quad is a PDFium call made under the lock every render waits on, and no
 // page has this many runs of text.
 const MAX_HIGHLIGHT_QUADS: usize = 8192;
-
-#[cfg(target_os = "windows")]
-const PDFIUM_LIBRARY_NAME: &str = "pdfium.dll";
-#[cfg(target_os = "macos")]
-const PDFIUM_LIBRARY_NAME: &str = "libpdfium.dylib";
-#[cfg(all(unix, not(target_os = "macos")))]
-const PDFIUM_LIBRARY_NAME: &str = "libpdfium.so";
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfDocumentInfo {
-    id: u64,
-    num_pages: i32,
-    pages: Vec<PdfPageInfo>,
-    outline: Vec<PdfOutlineItem>,
-}
-
-#[derive(Serialize)]
-struct PdfPageInfo {
-    // `width`/`height` are the displayed dimensions (the page's intrinsic
-    // `/Rotate` already applied), matching the rendered bitmap. `rotation` is
-    // the clockwise rotation in degrees (0/90/180/270) so the frontend can
-    // orient the text layer to match.
-    width: f32,
-    height: f32,
-    rotation: f32,
-}
-
-/// A run of text on a page together with its bounding box, expressed in
-/// *unrotated* page points with a top-left origin. The frontend rotates the
-/// whole text layer by the page's rotation, so spans stay in unrotated space.
-#[derive(Serialize)]
-pub struct PdfTextSpan {
-    text: String,
-    left: f32,
-    top: f32,
-    width: f32,
-    height: f32,
-}
-
-/// A rectangle in the same space `PdfTextSpan` reports text in: *unrotated* page
-/// points with a top-left origin. Every annotation is placed in these terms, so
-/// a caller never has to know which way PDFium counts its own axes.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PagePointsRect {
-    left: f32,
-    top: f32,
-    width: f32,
-    height: f32,
-}
-
-/// How a rectangle annotation is drawn. A colour left `None` means that part is
-/// absent — no border, or no fill — so a rectangle can be a hollow outline, a
-/// solid block, or both. `opacity` rides the alpha of whichever are present.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RectStyle {
-    stroke_color: Option<String>,
-    fill_color: Option<String>,
-    opacity: f32,
-    /// Corner radius in page points; 0 is a right angle. Clamped to half the
-    /// shorter side so the corners cannot cross and turn the path inside out.
-    corner_radius: f32,
-    stroke_width: f32,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PdfOutlineItem {
-    title: String,
-    page_number: Option<i32>,
-    items: Vec<PdfOutlineItem>,
-}
 
 struct OpenDocument {
     document: PdfDocument<'static>,
@@ -113,7 +45,7 @@ struct OpenDocument {
     added: HashMap<i32, u32>,
 }
 
-struct PdfiumEngine {
+pub(super) struct PdfiumEngine {
     pdfium: &'static Pdfium,
     /// The open documents, and — load-bearing beyond that — the lock that
     /// serializes PDFium itself.
@@ -129,7 +61,7 @@ struct PdfiumEngine {
 }
 
 #[derive(Clone)]
-pub struct PdfiumState(Arc<PdfiumEngine>);
+pub struct PdfiumState(pub(super) Arc<PdfiumEngine>);
 
 impl PdfiumState {
     pub fn new(app: &AppHandle) -> Result<Self, String> {
@@ -145,7 +77,7 @@ impl PdfiumState {
 }
 
 impl PdfiumEngine {
-    fn open(&self, bytes: Vec<u8>) -> Result<PdfDocumentInfo, String> {
+    pub(super) fn open(&self, bytes: Vec<u8>) -> Result<PdfDocumentInfo, String> {
         if bytes.is_empty() {
             return Err("PDF file is empty".into());
         }
@@ -241,7 +173,7 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))
     }
 
-    fn render_page(
+    pub(super) fn render_page(
         &self,
         document_id: u64,
         page_number: i32,
@@ -257,7 +189,7 @@ impl PdfiumEngine {
         Ok(png.into_inner())
     }
 
-    fn render_thumbnail(
+    pub(super) fn render_thumbnail(
         &self,
         document_id: u64,
         page_number: i32,
@@ -275,7 +207,11 @@ impl PdfiumEngine {
         Ok(webp.into_inner())
     }
 
-    fn extract_text(&self, document_id: u64, page_number: i32) -> Result<Vec<PdfTextSpan>, String> {
+    pub(super) fn extract_text(
+        &self,
+        document_id: u64,
+        page_number: i32,
+    ) -> Result<Vec<PdfTextSpan>, String> {
         let documents = self
             .documents
             .lock()
@@ -331,7 +267,7 @@ impl PdfiumEngine {
 
     /// Covers `quads` on `page_number` with one highlight annotation — one mark
     /// as far as the reader is concerned, so taking it back is one step.
-    fn add_highlight(
+    pub(super) fn add_highlight(
         &self,
         document_id: u64,
         page_number: i32,
@@ -448,7 +384,7 @@ impl PdfiumEngine {
     /// they could edit — acceptable while this app only creates and undoes.
     /// Drawing the path ourselves keeps every part of the style — border, fill,
     /// opacity, radius — a real, rendered thing the CSS preview matches.
-    fn add_rect(
+    pub(super) fn add_rect(
         &self,
         document_id: u64,
         page_number: i32,
@@ -647,7 +583,11 @@ impl PdfiumEngine {
     /// Checked here rather than trusted from the caller, which is a browser and
     /// can always be wrong: deleting one of the document's own annotations would
     /// be silent, permanent, and saved into the reader's file.
-    fn delete_last_annotation(&self, document_id: u64, page_number: i32) -> Result<(), String> {
+    pub(super) fn delete_last_annotation(
+        &self,
+        document_id: u64,
+        page_number: i32,
+    ) -> Result<(), String> {
         let mut documents = self
             .documents
             .lock()
@@ -699,7 +639,7 @@ impl PdfiumEngine {
     /// rename: a save interrupted half-written would otherwise leave the reader
     /// with neither the document they had nor the one they asked for. Same
     /// directory keeps the rename on one filesystem, where it is atomic.
-    fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
+    pub(super) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
         let mut documents = self
             .documents
             .lock()
@@ -759,7 +699,7 @@ impl PdfiumEngine {
         written
     }
 
-    fn close(&self, document_id: u64) -> Result<(), String> {
+    pub(super) fn close(&self, document_id: u64) -> Result<(), String> {
         self.documents
             .lock()
             .map_err(|_| "PDFium document store is unavailable".to_string())?
@@ -767,214 +707,6 @@ impl PdfiumEngine {
 
         Ok(())
     }
-}
-
-/// The page's intrinsic clockwise `/Rotate` in degrees (0/90/180/270), or 0 if
-/// PDFium cannot report it.
-fn page_rotation_degrees(page: &PdfPage<'_>) -> f32 {
-    page.rotation()
-        .map(|rotation| rotation.as_degrees())
-        .unwrap_or(0.0)
-}
-
-/// A page's height in its own *unrotated* coordinate space.
-///
-/// `height()` is the displayed height, `/Rotate` already applied, so a 90°/270°
-/// page's unrotated height is its displayed *width*. Every flip between PDFium's
-/// bottom-left origin and the frontend's top-left goes through this, so the two
-/// directions cannot disagree about which edge the y-axis starts at.
-fn unrotated_page_height(page: &PdfPage<'_>) -> f32 {
-    let rotation = page_rotation_degrees(page);
-
-    if rotation == 90.0 || rotation == 270.0 {
-        page.width().value
-    } else {
-        page.height().value
-    }
-}
-
-/// The exact inverse of the flip `extract_text` applies on the way out.
-fn page_rect_to_pdfium(rect: &PagePointsRect, unrotated_height: f32) -> PdfRect {
-    PdfRect::new_from_values(
-        unrotated_height - (rect.top + rect.height),
-        rect.left,
-        unrotated_height - rect.top,
-        rect.left + rect.width,
-    )
-}
-
-/// Opacity rides the alpha channel, which is where PDFium reads an annotation's
-/// transparency from.
-fn annotation_color(hex: &str, opacity: f32) -> Result<PdfColor, String> {
-    let color = PdfColor::from_hex(hex)
-        .map_err(|error| format!("{hex} is not a usable annotation colour: {error}"))?;
-
-    Ok(color.with_alpha((opacity.clamp(0.0, 1.0) * 255.0).round() as u8))
-}
-
-/// The four quad points a text markup annotation is drawn from.
-///
-/// Hand-built rather than `PdfQuadPoints::from_rect`, which winds the corners
-/// anticlockwise from the bottom left. PDF orders them by *position* — top-left,
-/// top-right, bottom-left, bottom-right — and PDFium reads the third pair's x as
-/// the left edge and the second pair's as the right. Fed the anticlockwise
-/// winding it takes both from the right-hand corners, so left equals right and
-/// the highlight is a rectangle of zero width: stored, saved, reported by every
-/// accessor, never drawn.
-fn quad_points_from_rect(rect: &PdfRect) -> PdfQuadPoints {
-    PdfQuadPoints::new(
-        rect.left(),
-        rect.top(),
-        rect.right(),
-        rect.top(),
-        rect.left(),
-        rect.bottom(),
-        rect.right(),
-        rect.bottom(),
-    )
-}
-
-/// The pull of a cubic Bézier's control points that turns four of them into a
-/// near-perfect quarter circle — the standard constant for rounding a corner.
-const CORNER_KAPPA: f32 = 0.552_284_75;
-
-/// One step of a rectangle's outline after the opening `move_to`. Kept as data
-/// rather than issued straight to PDFium so the corner geometry can be checked
-/// without a rendering library.
-#[derive(Debug, PartialEq)]
-enum RectPathSegment {
-    LineTo {
-        x: f32,
-        y: f32,
-    },
-    BezierTo {
-        x: f32,
-        y: f32,
-        c1x: f32,
-        c1y: f32,
-        c2x: f32,
-        c2y: f32,
-    },
-}
-
-/// A rectangle's outline as a start point and the segments that follow it,
-/// closed by the caller. `close_path` draws the final edge back to `start`.
-struct RectPath {
-    start: (f32, f32),
-    segments: Vec<RectPathSegment>,
-}
-
-/// The ceiling on a coordinate a rectangle carries, in page points. The PDF spec
-/// caps a page's MediaBox at 14400pt; this leaves generous room past that, so a
-/// real annotation always fits while an absurd value from the WebView falls
-/// outside and is refused.
-const MAX_PAGE_POINTS: f32 = 100_000.0;
-
-/// The ranges a rectangle's style values may use. These mirror the sliders in
-/// `src/lib/annotationStyles.ts` — together they are the app's one contract for
-/// a rectangle style — so keep the two in step if a slider's range changes.
-const MIN_RECT_OPACITY: f32 = 0.1;
-const MIN_RECT_STROKE_WIDTH: f32 = 1.0;
-const MAX_RECT_STROKE_WIDTH: f32 = 12.0;
-const MAX_RECT_CORNER_RADIUS: f32 = 40.0;
-
-/// Whether `value` is a coordinate a rectangle could really carry.
-fn within_page_range(value: f32) -> bool {
-    value.is_finite() && value.abs() <= MAX_PAGE_POINTS
-}
-
-/// Holds `radius` to what a rectangle this size can take: past half the shorter
-/// side the corner arcs would meet and cross, folding the outline in on itself.
-fn clamp_corner_radius(width: f32, height: f32, radius: f32) -> f32 {
-    radius.max(0.0).min(width.min(height) / 2.0)
-}
-
-/// The outline of `rect` with corners of `radius`, in PDFium's bottom-left
-/// space. A radius at or below zero is four straight edges; above it, each
-/// corner is a quarter-circle Bézier so the shape stays vector — a rounded box
-/// is common enough that rasterising it would be a visible loss on zoom.
-fn rect_path(rect: &PdfRect, radius: f32) -> RectPath {
-    let (l, r) = (rect.left().value, rect.right().value);
-    let (b, t) = (rect.bottom().value, rect.top().value);
-
-    if radius <= 0.0 {
-        return RectPath {
-            start: (l, b),
-            segments: vec![
-                RectPathSegment::LineTo { x: r, y: b },
-                RectPathSegment::LineTo { x: r, y: t },
-                RectPathSegment::LineTo { x: l, y: t },
-            ],
-        };
-    }
-
-    let c = radius * CORNER_KAPPA;
-
-    RectPath {
-        start: (l + radius, b),
-        segments: vec![
-            RectPathSegment::LineTo {
-                x: r - radius,
-                y: b,
-            },
-            RectPathSegment::BezierTo {
-                x: r,
-                y: b + radius,
-                c1x: r - radius + c,
-                c1y: b,
-                c2x: r,
-                c2y: b + radius - c,
-            },
-            RectPathSegment::LineTo {
-                x: r,
-                y: t - radius,
-            },
-            RectPathSegment::BezierTo {
-                x: r - radius,
-                y: t,
-                c1x: r,
-                c1y: t - radius + c,
-                c2x: r - radius + c,
-                c2y: t,
-            },
-            RectPathSegment::LineTo {
-                x: l + radius,
-                y: t,
-            },
-            RectPathSegment::BezierTo {
-                x: l,
-                y: t - radius,
-                c1x: l + radius - c,
-                c1y: t,
-                c2x: l,
-                c2y: t - radius + c,
-            },
-            RectPathSegment::LineTo {
-                x: l,
-                y: b + radius,
-            },
-            RectPathSegment::BezierTo {
-                x: l + radius,
-                y: b,
-                c1x: l,
-                c1y: b + radius - c,
-                c2x: l + radius - c,
-                c2y: b,
-            },
-        ],
-    }
-}
-
-/// The smallest rectangle covering every one of `rects`, or `None` if empty.
-fn union_rect(rects: &[PdfRect]) -> Option<PdfRect> {
-    rects.iter().copied().reduce(|union, rect| {
-        PdfRect::new(
-            union.bottom().min(rect.bottom()),
-            union.left().min(rect.left()),
-            union.top().max(rect.top()),
-            union.right().max(rect.right()),
-        )
-    })
 }
 
 fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOutlineItem> {
@@ -998,217 +730,11 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
     items
 }
 
-fn bind_pdfium(app: &AppHandle) -> Result<Box<dyn PdfiumLibraryBindings>, String> {
-    let candidates = pdfium_library_candidates(app);
-    let mut failures = Vec::new();
-
-    for path in candidates {
-        if !path.is_file() {
-            continue;
-        }
-
-        match Pdfium::bind_to_library(&path) {
-            Ok(bindings) => return Ok(bindings),
-            Err(error) => failures.push(format!("{}: {error}", path.display())),
-        }
-    }
-
-    let details = if failures.is_empty() {
-        String::new()
-    } else {
-        format!(" Attempts: {}", failures.join("; "))
-    };
-
-    Err(format!(
-        "PDFium runtime was not found. Run `bun run pdfium:download` or set PDFIUM_LIB_PATH.{details}"
-    ))
-}
-
-fn pdfium_library_candidates(app: &AppHandle) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-
-    if let Some(path) = env::var_os("PDFIUM_LIB_PATH") {
-        candidates.push(library_path(PathBuf::from(path)));
-    }
-
-    if let Ok(resource_path) = app.path().resolve(
-        Path::new("pdfium").join(PDFIUM_LIBRARY_NAME),
-        BaseDirectory::Resource,
-    ) {
-        candidates.push(resource_path);
-    }
-
-    if let Ok(executable_path) = env::current_exe() {
-        if let Some(executable_directory) = executable_path.parent() {
-            candidates.push(executable_directory.join(PDFIUM_LIBRARY_NAME));
-        }
-    }
-
-    candidates.push(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("pdfium")
-            .join(PDFIUM_LIBRARY_NAME),
-    );
-    candidates.into_iter().fold(Vec::new(), |mut unique, path| {
-        if !unique.contains(&path) {
-            unique.push(path);
-        }
-
-        unique
-    })
-}
-
-fn library_path(path: PathBuf) -> PathBuf {
-    if path.is_dir() {
-        path.join(PDFIUM_LIBRARY_NAME)
-    } else {
-        path
-    }
-}
-
-#[tauri::command]
-pub async fn open_pdf(
-    request: Request<'_>,
-    state: State<'_, PdfiumState>,
-) -> Result<PdfDocumentInfo, String> {
-    let InvokeBody::Raw(bytes) = request.body() else {
-        return Err("open_pdf requires a raw PDF byte payload".into());
-    };
-
-    if bytes.len() > MAX_PDF_BYTES {
-        return Err(format!(
-            "PDF file exceeds the {} MiB limit",
-            MAX_PDF_BYTES / 1024 / 1024
-        ));
-    }
-
-    let bytes = bytes.clone();
-    let engine = Arc::clone(&state.0);
-
-    tauri::async_runtime::spawn_blocking(move || engine.open(bytes))
-        .await
-        .map_err(|error| format!("PDFium open task failed: {error}"))?
-}
-
-#[tauri::command]
-pub async fn render_pdf_page(
-    document_id: u64,
-    page_number: i32,
-    width: i32,
-    state: State<'_, PdfiumState>,
-) -> Result<Response, String> {
-    let engine = Arc::clone(&state.0);
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        engine.render_page(document_id, page_number, width)
-    })
-    .await
-    .map_err(|error| format!("PDFium render task failed: {error}"))??;
-
-    Ok(Response::new(bytes))
-}
-
-#[tauri::command]
-pub async fn render_pdf_page_thumbnail(
-    document_id: u64,
-    page_number: i32,
-    width: i32,
-    state: State<'_, PdfiumState>,
-) -> Result<Response, String> {
-    let engine = Arc::clone(&state.0);
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        engine.render_thumbnail(document_id, page_number, width)
-    })
-    .await
-    .map_err(|error| format!("PDFium thumbnail task failed: {error}"))??;
-
-    Ok(Response::new(bytes))
-}
-
-#[tauri::command]
-pub async fn extract_pdf_page_text(
-    document_id: u64,
-    page_number: i32,
-    state: State<'_, PdfiumState>,
-) -> Result<Vec<PdfTextSpan>, String> {
-    let engine = Arc::clone(&state.0);
-
-    tauri::async_runtime::spawn_blocking(move || engine.extract_text(document_id, page_number))
-        .await
-        .map_err(|error| format!("PDFium text extraction task failed: {error}"))?
-}
-
-#[tauri::command]
-pub async fn add_pdf_highlight_annotation(
-    document_id: u64,
-    page_number: i32,
-    quads: Vec<PagePointsRect>,
-    color: String,
-    opacity: f32,
-    state: State<'_, PdfiumState>,
-) -> Result<(), String> {
-    let engine = Arc::clone(&state.0);
-
-    tauri::async_runtime::spawn_blocking(move || {
-        engine.add_highlight(document_id, page_number, &quads, &color, opacity)
-    })
-    .await
-    .map_err(|error| format!("PDFium highlight task failed: {error}"))?
-}
-
-#[tauri::command]
-pub async fn add_pdf_rect_annotation(
-    document_id: u64,
-    page_number: i32,
-    bounds: PagePointsRect,
-    style: RectStyle,
-    state: State<'_, PdfiumState>,
-) -> Result<(), String> {
-    let engine = Arc::clone(&state.0);
-
-    tauri::async_runtime::spawn_blocking(move || {
-        engine.add_rect(document_id, page_number, &bounds, &style)
-    })
-    .await
-    .map_err(|error| format!("PDFium rectangle task failed: {error}"))?
-}
-
-#[tauri::command]
-pub async fn delete_last_pdf_annotation(
-    document_id: u64,
-    page_number: i32,
-    state: State<'_, PdfiumState>,
-) -> Result<(), String> {
-    let engine = Arc::clone(&state.0);
-
-    tauri::async_runtime::spawn_blocking(move || {
-        engine.delete_last_annotation(document_id, page_number)
-    })
-    .await
-    .map_err(|error| format!("PDFium annotation removal task failed: {error}"))?
-}
-
-#[tauri::command]
-pub async fn export_pdf(
-    document_id: u64,
-    path: String,
-    state: State<'_, PdfiumState>,
-) -> Result<(), String> {
-    let engine = Arc::clone(&state.0);
-
-    tauri::async_runtime::spawn_blocking(move || engine.save_to(document_id, Path::new(&path)))
-        .await
-        .map_err(|error| format!("PDFium save task failed: {error}"))?
-}
-
-#[tauri::command]
-pub fn close_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result<(), String> {
-    state.0.close(document_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::pdfium::library::PDFIUM_LIBRARY_NAME;
 
     /// Serialises `objects` into a PDF. Shared by the fixtures below, which
     /// differ only in the objects they describe.
@@ -1720,19 +1246,6 @@ mod tests {
         assert!(error.contains("does not exist"));
     }
 
-    #[test]
-    fn holds_page_values_to_a_usable_range() {
-        // A real page and annotation sit well inside the range.
-        assert!(within_page_range(0.0));
-        assert!(within_page_range(-14400.0));
-        assert!(within_page_range(14400.0));
-        // Non-finite or absurd is outside it, whichever sign.
-        assert!(!within_page_range(f32::NAN));
-        assert!(!within_page_range(f32::INFINITY));
-        assert!(!within_page_range(f32::MAX));
-        assert!(!within_page_range(1.0e30));
-    }
-
     // A rectangle's flip onto PDFium's axes runs through the same helpers a
     // highlight uses, and a `/Rotate` page is where a wrong one shows. Pinned to
     // hardcoded values, not read back through the flip that placed it.
@@ -2115,113 +1628,6 @@ mod tests {
             )
             .expect_err("a page that does not exist is rejected");
         assert!(error.contains("does not exist"));
-    }
-
-    #[test]
-    fn builds_a_union_covering_every_rect() {
-        let union = union_rect(&[
-            PdfRect::new_from_values(10.0, 20.0, 30.0, 40.0),
-            PdfRect::new_from_values(5.0, 50.0, 25.0, 90.0),
-        ])
-        .expect("two rects have a union");
-
-        assert_eq!(union.bottom().value, 5.0);
-        assert_eq!(union.left().value, 20.0);
-        assert_eq!(union.top().value, 30.0);
-        assert_eq!(union.right().value, 90.0);
-        assert!(union_rect(&[]).is_none());
-    }
-
-    #[test]
-    fn clamps_a_corner_radius_to_half_the_shorter_side() {
-        assert_eq!(clamp_corner_radius(100.0, 60.0, 40.0), 30.0);
-        assert_eq!(clamp_corner_radius(100.0, 60.0, 10.0), 10.0);
-        assert_eq!(clamp_corner_radius(100.0, 60.0, -5.0), 0.0);
-        // A non-finite radius resolves to a real number, never carried into the path.
-        assert_eq!(clamp_corner_radius(100.0, 60.0, f32::NAN), 0.0);
-        assert_eq!(clamp_corner_radius(100.0, 60.0, f32::INFINITY), 30.0);
-    }
-
-    #[test]
-    fn traces_a_right_angle_when_the_radius_is_zero() {
-        let path = rect_path(&PdfRect::new_from_values(0.0, 0.0, 100.0, 80.0), 0.0);
-
-        assert_eq!(path.start, (0.0, 0.0));
-        assert_eq!(
-            path.segments,
-            vec![
-                RectPathSegment::LineTo { x: 80.0, y: 0.0 },
-                RectPathSegment::LineTo { x: 80.0, y: 100.0 },
-                RectPathSegment::LineTo { x: 0.0, y: 100.0 },
-            ]
-        );
-    }
-
-    #[test]
-    fn rounds_each_corner_with_a_bezier() {
-        let path = rect_path(&PdfRect::new_from_values(0.0, 0.0, 100.0, 100.0), 20.0);
-
-        // One straight edge and one curved corner, four times over: the outline
-        // starts a radius in from a corner rather than on it.
-        assert_eq!(path.start, (20.0, 0.0));
-        assert_eq!(path.segments.len(), 8);
-
-        let corners: Vec<_> = path
-            .segments
-            .iter()
-            .filter_map(|segment| match segment {
-                RectPathSegment::BezierTo { x, y, .. } => Some((*x, *y)),
-                RectPathSegment::LineTo { .. } => None,
-            })
-            .collect();
-        // Each arc ends a radius along the next edge, walking anticlockwise.
-        assert_eq!(
-            corners,
-            vec![(100.0, 20.0), (80.0, 100.0), (0.0, 80.0), (20.0, 0.0)]
-        );
-
-        // The first corner's control points pull towards the corner it rounds.
-        let control = match path.segments[1] {
-            RectPathSegment::BezierTo {
-                c1x, c1y, c2x, c2y, ..
-            } => (c1x, c1y, c2x, c2y),
-            _ => panic!("the first corner should be a bezier"),
-        };
-        let c = 20.0 * CORNER_KAPPA;
-        assert!((control.0 - (80.0 + c)).abs() < 1e-3);
-        assert_eq!(control.1, 0.0);
-        assert_eq!(control.2, 100.0);
-        assert!((control.3 - (20.0 - c)).abs() < 1e-3);
-    }
-
-    #[test]
-    fn flips_a_rect_onto_pdfium_s_own_axes() {
-        let rect = page_rect_to_pdfium(&quad(10.0, 20.0, 80.0, 12.0), 300.0);
-
-        assert_eq!(rect.left().value, 10.0);
-        assert_eq!(rect.right().value, 90.0);
-        // 20pt down from the top of a 300pt page is 280pt up from its bottom.
-        assert_eq!(rect.top().value, 280.0);
-        assert_eq!(rect.bottom().value, 268.0);
-    }
-
-    #[test]
-    fn carries_opacity_on_the_colour_s_alpha() {
-        let color = annotation_color("#ffd54a", 0.4).expect("a hex colour is usable");
-
-        assert_eq!(color.red(), 255);
-        assert_eq!(color.green(), 213);
-        assert_eq!(color.blue(), 74);
-        assert_eq!(color.alpha(), 102);
-
-        // Full opacity is a full byte; the range itself is enforced by the callers.
-        assert_eq!(
-            annotation_color("#ffd54a", 1.0)
-                .expect("a hex colour is usable")
-                .alpha(),
-            255
-        );
-        assert!(annotation_color("nope", 0.4).is_err());
     }
 
     /// The runs of dark pixels along a horizontal scanline, as `(start, length)`.
