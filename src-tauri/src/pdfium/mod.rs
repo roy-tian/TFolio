@@ -7,9 +7,10 @@ mod library;
 use serde::{Deserialize, Serialize};
 
 pub use commands::{
-    add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_text_note_annotation, close_pdf,
-    delete_last_pdf_annotation, export_pdf, extract_pdf_page_text, open_pdf, open_pdf_from_path,
-    pick_pdf_path, render_pdf_page, render_pdf_page_thumbnail, save_pdf,
+    add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
+    add_pdf_text_note_annotation, close_pdf, delete_last_pdf_annotation, export_pdf,
+    extract_pdf_page_text, open_pdf, open_pdf_from_path, pick_pdf_path, render_pdf_page,
+    render_pdf_page_thumbnail, save_pdf,
 };
 pub use engine::PdfiumState;
 
@@ -98,6 +99,21 @@ pub struct RectStyle {
     /// shorter side so the corners cannot cross and turn the path inside out.
     corner_radius: f32,
     stroke_width: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RectEffect {
+    kind: RectEffectKind,
+    /// Mosaic block size or blur sigma, in page points.
+    strength: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum RectEffectKind {
+    Mosaic,
+    Blur,
 }
 
 /// A point in the same space `PagePointsRect` uses: *unrotated* page points with

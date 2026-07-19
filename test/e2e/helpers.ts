@@ -51,6 +51,23 @@ export function blankPdf() {
   return minimalPdf(1, "0 0 300 400")
 }
 
+/** A one-page drawing fixture with dense bars through its middle. */
+export function stripedPdf() {
+  let content = "0 0 0 rg\n"
+
+  for (let left = 90; left < 210; left += 4) {
+    content += `${left} 120 2 160 re f\n`
+  }
+
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
+      "/Contents 4 0 R >>\nendobj\n",
+    `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
+  ])
+}
+
 /**
  * A one-page PDF with a line of real text, so there is something to select and
  * something for a highlight to sit over.
@@ -186,6 +203,29 @@ export function pageInk() {
     }
 
     return ink
+  })
+}
+
+/** A position-sensitive digest of page 1's pixels. */
+export function pagePixelFingerprint() {
+  return browser.execute(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      "[data-page-number='1'] canvas",
+    )!
+    const { data } = canvas.getContext("2d")!.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    )
+    let hash = 2166136261
+
+    for (const value of data) {
+      hash ^= value
+      hash = Math.imul(hash, 16777619)
+    }
+
+    return hash >>> 0
   })
 }
 

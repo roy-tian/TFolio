@@ -9,7 +9,10 @@ import { isHexColor } from "@/lib/annotationStyles"
 type ColorSwatchPickerProps = {
   /** Offers a "none" choice for a colour that can be left off, e.g. a fill. */
   allowNone?: boolean
+  disabled?: boolean
   labelledBy: string
+  /** Keeps "none" visible but unavailable when it would remove the last colour. */
+  noneDisabled?: boolean
   onChange: (color: HexColor | null) => void
   swatches: readonly HexColor[]
   value: HexColor | null
@@ -25,7 +28,9 @@ const NONE_VALUE = "none"
  */
 export function ColorSwatchPicker({
   allowNone = false,
+  disabled = false,
   labelledBy,
+  noneDisabled = false,
   onChange,
   swatches,
   value,
@@ -40,6 +45,7 @@ export function ColorSwatchPicker({
       <RadioGroup
         aria-labelledby={labelledBy}
         className="flex items-center gap-1.5"
+        disabled={disabled}
         onValueChange={(next) => {
           if (next === NONE_VALUE) {
             onChange(null)
@@ -54,7 +60,8 @@ export function ColorSwatchPicker({
         {allowNone ? (
           <Radio.Root
             aria-label={t("annotate.noColor")}
-            className="flex size-6 items-center justify-center rounded-md border border-input text-muted-foreground outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex size-6 items-center justify-center rounded-md border border-input text-muted-foreground outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50 data-disabled:pointer-events-none data-disabled:opacity-40"
+            disabled={noneDisabled}
             title={t("annotate.noColor")}
             value={NONE_VALUE}
           >
@@ -79,13 +86,15 @@ export function ColorSwatchPicker({
         ))}
       </RadioGroup>
       <label
-        className="relative flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed border-input transition-colors hover:border-foreground/40 focus-within:ring-3 focus-within:ring-ring/50"
+        className="relative flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed border-input transition-colors hover:border-foreground/40 focus-within:ring-3 focus-within:ring-ring/50 data-disabled:pointer-events-none data-disabled:opacity-50"
         data-checked={isCustom || undefined}
+        data-disabled={disabled || undefined}
         title={t("annotate.customColor")}
       >
         <input
           aria-label={t("annotate.customColor")}
           className="absolute inset-0 size-full cursor-pointer opacity-0"
+          disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
           type="color"
           value={value ?? "#000000"}

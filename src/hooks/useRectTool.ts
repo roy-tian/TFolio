@@ -181,7 +181,15 @@ export function useRectTool({
         return
       }
 
-      onCommit({ bounds, kind: "rect", pageNumber: current.pageNumber, style })
+      const { effect, ...appearance } = style
+
+      onCommit({
+        bounds,
+        effect,
+        kind: "rect",
+        pageNumber: current.pageNumber,
+        style: appearance,
+      })
     }
 
     // The pointer left for good — the OS took over a scroll or a gesture — so

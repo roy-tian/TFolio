@@ -1,5 +1,7 @@
 import type {
   HexColor,
+  RectEffect,
+  RectEffectKind,
   RectStyle,
   TextNoteFontFamily,
   TextNoteStyle,
@@ -63,8 +65,35 @@ export const rectFillSwatches: readonly HexColor[] = [
 export const RECT_MAX_CORNER_RADIUS = 40
 export const RECT_MIN_STROKE_WIDTH = 1
 export const RECT_MAX_STROKE_WIDTH = 12
+export const RECT_MIN_EFFECT_STRENGTH = 2
+export const RECT_MAX_EFFECT_STRENGTH = 24
 /** A rectangle at no opacity would be invisible, so the floor stays off zero. */
 export const RECT_MIN_OPACITY = 0.1
+
+export const rectEffectKinds: readonly RectEffectKind[] = [
+  "none",
+  "mosaic",
+  "blur",
+]
+
+export function isRectEffectKind(value: unknown): value is RectEffectKind {
+  return rectEffectKinds.includes(value as RectEffectKind)
+}
+
+export function isRectEffect(value: unknown): value is RectEffect {
+  if (typeof value !== "object" || value === null) {
+    return false
+  }
+
+  const effect = value as Record<string, unknown>
+
+  return (
+    isRectEffectKind(effect.kind) &&
+    typeof effect.strength === "number" &&
+    effect.strength >= RECT_MIN_EFFECT_STRENGTH &&
+    effect.strength <= RECT_MAX_EFFECT_STRENGTH
+  )
+}
 
 /**
  * An outline, not a block: a border reads as "I've marked this" where a fill
@@ -72,6 +101,7 @@ export const RECT_MIN_OPACITY = 0.1
  */
 export const defaultRectStyle: RectStyle = {
   cornerRadius: 0,
+  effect: { kind: "none", strength: 8 },
   fillColor: null,
   opacity: 1,
   strokeColor: rectStrokeSwatches[0]!,
@@ -106,6 +136,7 @@ export function isRectStyle(value: unknown): value is RectStyle {
     typeof style.cornerRadius === "number" &&
     style.cornerRadius >= 0 &&
     style.cornerRadius <= RECT_MAX_CORNER_RADIUS &&
+    isRectEffect(style.effect) &&
     typeof style.strokeWidth === "number" &&
     style.strokeWidth >= RECT_MIN_STROKE_WIDTH &&
     style.strokeWidth <= RECT_MAX_STROKE_WIDTH &&

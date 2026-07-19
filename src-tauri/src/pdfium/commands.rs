@@ -11,7 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use super::{
     size_limit_error, ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfTextSpan,
-    PdfiumState, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    PdfiumState, RectEffect, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 #[tauri::command]
@@ -115,6 +115,23 @@ pub async fn add_pdf_rect_annotation(
     })
     .await
     .map_err(|error| format!("PDFium rectangle task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn add_pdf_rect_effect_annotation(
+    document_id: u64,
+    page_number: i32,
+    bounds: PagePointsRect,
+    effect: RectEffect,
+    state: State<'_, PdfiumState>,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.add_rect_effect(document_id, page_number, &bounds, &effect)
+    })
+    .await
+    .map_err(|error| format!("PDFium rectangle effect task failed: {error}"))?
 }
 
 #[tauri::command]

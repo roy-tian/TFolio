@@ -8,6 +8,7 @@ describe("isRectStyle", () => {
     expect(
       isRectStyle({
         cornerRadius: 12,
+        effect: { kind: "mosaic", strength: 12 },
         fillColor: "#ffcc00",
         opacity: 0.5,
         strokeColor: null,
@@ -25,6 +26,18 @@ describe("isRectStyle", () => {
     expect(isRectStyle({ ...defaultRectStyle, strokeWidth: 12 })).toBe(true)
     expect(isRectStyle({ ...defaultRectStyle, cornerRadius: 0 })).toBe(true)
     expect(isRectStyle({ ...defaultRectStyle, cornerRadius: 40 })).toBe(true)
+    expect(
+      isRectStyle({
+        ...defaultRectStyle,
+        effect: { kind: "blur", strength: 2 },
+      }),
+    ).toBe(true)
+    expect(
+      isRectStyle({
+        ...defaultRectStyle,
+        effect: { kind: "blur", strength: 24 },
+      }),
+    ).toBe(true)
   })
 
   // A style loaded with these would draw an invisible mark that still records as
@@ -39,6 +52,12 @@ describe("isRectStyle", () => {
     expect(
       isRectStyle({ ...defaultRectStyle, strokeWidth: Number.POSITIVE_INFINITY }),
     ).toBe(false)
+    expect(
+      isRectStyle({
+        ...defaultRectStyle,
+        effect: { kind: "blur", strength: Number.NaN },
+      }),
+    ).toBe(false)
   })
 
   // Just outside each slider's range, so a boundary widened by one still fails
@@ -50,6 +69,27 @@ describe("isRectStyle", () => {
     expect(isRectStyle({ ...defaultRectStyle, cornerRadius: 41 })).toBe(false)
     expect(isRectStyle({ ...defaultRectStyle, opacity: 0.09 })).toBe(false)
     expect(isRectStyle({ ...defaultRectStyle, opacity: 1.05 })).toBe(false)
+    expect(
+      isRectStyle({
+        ...defaultRectStyle,
+        effect: { kind: "mosaic", strength: 1 },
+      }),
+    ).toBe(false)
+    expect(
+      isRectStyle({
+        ...defaultRectStyle,
+        effect: { kind: "mosaic", strength: 25 },
+      }),
+    ).toBe(false)
+  })
+
+  it("rejects an effect mode the app does not offer", () => {
+    expect(
+      isRectStyle({
+        ...defaultRectStyle,
+        effect: { kind: "pixelate", strength: 8 },
+      }),
+    ).toBe(false)
   })
 
   it("rejects a style with neither a border nor a fill", () => {

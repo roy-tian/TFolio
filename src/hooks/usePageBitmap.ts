@@ -51,6 +51,7 @@ export function usePageBitmap({
   } | null>(null)
   const [hasRendered, setHasRendered] = useState(false)
   const [renderFailed, setRenderFailed] = useState(false)
+  const [bitmapRevision, setBitmapRevision] = useState(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -119,6 +120,7 @@ export function usePageBitmap({
       lastRenderRef.current = { documentId, renderEpoch, renderWidth }
       setHasRendered(true)
       setRenderFailed(false)
+      setBitmapRevision((revision) => revision + 1)
     }
 
     void renderPage().catch(() => {
@@ -145,5 +147,5 @@ export function usePageBitmap({
     targetWidth,
   ])
 
-  return { hasRendered, renderFailed }
+  return { bitmapRevision, hasRendered, renderFailed }
 }

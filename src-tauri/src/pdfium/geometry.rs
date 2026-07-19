@@ -110,6 +110,8 @@ pub(super) const MIN_RECT_OPACITY: f32 = 0.1;
 pub(super) const MIN_RECT_STROKE_WIDTH: f32 = 1.0;
 pub(super) const MAX_RECT_STROKE_WIDTH: f32 = 12.0;
 pub(super) const MAX_RECT_CORNER_RADIUS: f32 = 40.0;
+pub(super) const MIN_RECT_EFFECT_STRENGTH: f32 = 2.0;
+pub(super) const MAX_RECT_EFFECT_STRENGTH: f32 = 24.0;
 
 /// The ranges a text note's style values may use, held to the same contract with
 /// `src/lib/annotationStyles.ts` as the rectangle constants above.

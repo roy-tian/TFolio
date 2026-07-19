@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use image::{DynamicImage, ImageFormat};
+use image::{imageops, DynamicImage, ImageFormat};
 use pdfium_render::prelude::*;
 use tauri::AppHandle;
 
@@ -18,14 +18,14 @@ use super::{
     geometry::{
         annotation_color, clamp_corner_radius, page_rect_to_pdfium, page_rotation_degrees,
         quad_points_from_rect, rect_path, union_rect, unrotated_page_height, within_page_range,
-        RectPathSegment, MAX_RECT_CORNER_RADIUS, MAX_RECT_STROKE_WIDTH, MAX_TEXT_NOTE_CHARS,
-        MAX_TEXT_NOTE_FONT_SIZE, MAX_TEXT_NOTE_LINES, MIN_RECT_OPACITY, MIN_RECT_STROKE_WIDTH,
-        MIN_TEXT_NOTE_FONT_SIZE, MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN,
-        TEXT_NOTE_LINE_HEIGHT,
+        RectPathSegment, MAX_RECT_CORNER_RADIUS, MAX_RECT_EFFECT_STRENGTH, MAX_RECT_STROKE_WIDTH,
+        MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE, MAX_TEXT_NOTE_LINES,
+        MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_RECT_STROKE_WIDTH, MIN_TEXT_NOTE_FONT_SIZE,
+        MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
     library::bind_pdfium,
     size_limit_error, ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem,
-    PdfPageInfo, PdfTextSpan, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    PdfPageInfo, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -37,6 +37,55 @@ const MAX_THUMBNAIL_WIDTH: i32 = 512;
 // Each quad is a PDFium call made under the lock every render waits on, and no
 // page has this many runs of text.
 const MAX_HIGHLIGHT_QUADS: usize = 8192;
+// Image effects capture page pixels at a print-like resolution, capped at the
+// same dimensions as an ordinary page render so one drag cannot allocate an
+// unbounded bitmap or inflate the saved file without limit.
+const RECT_EFFECT_DPI: f32 = 150.0;
+const POINTS_PER_INCH: f32 = 72.0;
+
+#[derive(Debug, PartialEq)]
+struct DisplayRect {
+    height: f32,
+    left: f32,
+    top: f32,
+    width: f32,
+}
+
+/// Where an unrotated, top-left page rectangle lands after the PDF's intrinsic
+/// clockwise rotation. The page bitmap is in this displayed space.
+fn rect_in_display_space(
+    rect: &PagePointsRect,
+    unrotated_width: f32,
+    unrotated_height: f32,
+    rotation: f32,
+) -> DisplayRect {
+    match rotation as i32 {
+        90 => DisplayRect {
+            height: rect.width,
+            left: unrotated_height - (rect.top + rect.height),
+            top: rect.left,
+            width: rect.height,
+        },
+        180 => DisplayRect {
+            height: rect.height,
+            left: unrotated_width - (rect.left + rect.width),
+            top: unrotated_height - (rect.top + rect.height),
+            width: rect.width,
+        },
+        270 => DisplayRect {
+            height: rect.width,
+            left: rect.top,
+            top: unrotated_width - (rect.left + rect.width),
+            width: rect.height,
+        },
+        _ => DisplayRect {
+            height: rect.height,
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+        },
+    }
+}
 
 struct OpenDocument {
     document: PdfDocument<'static>,
@@ -46,6 +95,10 @@ struct OpenDocument {
     /// annotations and this is how long that tail is. Past it lie the document's
     /// own — links, form fields, comments — which an undo must never reach.
     added: HashMap<i32, u32>,
+    /// Monotonic content version per page. Rectangle effects release the global
+    /// PDFium lock while processing owned pixels; this detects an annotation that
+    /// changed the source page before the processed image is attached again.
+    revisions: HashMap<i32, u64>,
     /// The file this document was opened from, and so the file a save writes
     /// back over. `None` — opened from bytes — leaves nothing to overwrite,
     /// and a first export adopts its destination as the source.
@@ -204,6 +257,7 @@ impl PdfiumEngine {
             OpenDocument {
                 added: HashMap::new(),
                 document,
+                revisions: HashMap::new(),
                 source_path,
                 removed_any: false,
             },
@@ -453,6 +507,268 @@ impl PdfiumEngine {
         }
 
         *entry.added.entry(page_number).or_insert(0) += 1;
+        *entry.revisions.entry(page_number).or_insert(0) += 1;
+
+        Ok(())
+    }
+
+    /// Replaces the pixels inside `bounds` with a raster treatment carried by
+    /// one Stamp annotation. The page content under the image is untouched and
+    /// remains available to text extraction.
+    pub(super) fn add_rect_effect(
+        &self,
+        document_id: u64,
+        page_number: i32,
+        bounds: &PagePointsRect,
+        effect: &RectEffect,
+    ) -> Result<(), String> {
+        if ![bounds.left, bounds.top, bounds.width, bounds.height]
+            .iter()
+            .all(|value| within_page_range(*value))
+        {
+            return Err("a rectangle effect's coordinates are out of range".into());
+        }
+        if bounds.width <= 0.0 || bounds.height <= 0.0 {
+            return Err("a rectangle effect needs a positive width and height".into());
+        }
+        if !(MIN_RECT_EFFECT_STRENGTH..=MAX_RECT_EFFECT_STRENGTH).contains(&effect.strength) {
+            return Err("a rectangle effect's strength is out of range".into());
+        }
+
+        // Render before creating the annotation, so its image can include every
+        // earlier mark on the page but never recursively capture itself. Only
+        // this capture needs PDFium: once it is an owned DynamicImage, release
+        // the global lock so renders and text extraction can proceed during the
+        // comparatively expensive crop, treatment, rotation, and byte shuffle.
+        let (
+            rendered,
+            rotation,
+            displayed_width,
+            displayed_height,
+            unrotated_width,
+            unrotated_height,
+            captured_revision,
+        ) = {
+            let documents = self
+                .documents
+                .lock()
+                .map_err(|_| "PDFium document store is unavailable".to_string())?;
+            let entry = documents
+                .get(&document_id)
+                .ok_or_else(|| "PDF document is no longer open".to_string())?;
+
+            if page_number < 1 || page_number > entry.document.pages().len() {
+                return Err(format!("page {page_number} does not exist"));
+            }
+
+            let page = entry
+                .document
+                .pages()
+                .get(page_number - 1)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+            let rotation = page_rotation_degrees(&page);
+            let displayed_width = page.width().value;
+            let displayed_height = page.height().value;
+
+            if !displayed_width.is_finite()
+                || !displayed_height.is_finite()
+                || displayed_width <= 0.0
+                || displayed_height <= 0.0
+            {
+                return Err("a rectangle effect needs a page with usable dimensions".into());
+            }
+
+            let (unrotated_width, unrotated_height) = if rotation == 90.0 || rotation == 270.0 {
+                (displayed_height, displayed_width)
+            } else {
+                (displayed_width, displayed_height)
+            };
+
+            if bounds.left < 0.0
+                || bounds.top < 0.0
+                || bounds.left + bounds.width > unrotated_width
+                || bounds.top + bounds.height > unrotated_height
+            {
+                return Err("a rectangle effect must stay inside its page".into());
+            }
+
+            let scale = (RECT_EFFECT_DPI / POINTS_PER_INCH)
+                .min(MAX_RENDER_WIDTH as f32 / displayed_width)
+                .min(MAX_RENDER_HEIGHT as f32 / displayed_height);
+            let render_width = (displayed_width * scale)
+                .round()
+                .clamp(1.0, MAX_RENDER_WIDTH as f32) as i32;
+            let config = PdfRenderConfig::new()
+                .set_target_width(render_width)
+                .set_maximum_width(MAX_RENDER_WIDTH)
+                .set_maximum_height(MAX_RENDER_HEIGHT)
+                .render_annotations(true)
+                .render_form_data(true);
+            let rendered = page
+                .render_with_config(&config)
+                .and_then(|bitmap| bitmap.as_image())
+                .map_err(|error| {
+                    format!("PDFium could not capture page {page_number} for an effect: {error}")
+                })?;
+
+            (
+                rendered,
+                rotation,
+                displayed_width,
+                displayed_height,
+                unrotated_width,
+                unrotated_height,
+                entry.revisions.get(&page_number).copied().unwrap_or(0),
+            )
+        };
+
+        let displayed = rect_in_display_space(bounds, unrotated_width, unrotated_height, rotation);
+        let scale_x = rendered.width() as f32 / displayed_width;
+        let scale_y = rendered.height() as f32 / displayed_height;
+        let left = (displayed.left * scale_x).floor().max(0.0) as u32;
+        let top = (displayed.top * scale_y).floor().max(0.0) as u32;
+        let right = ((displayed.left + displayed.width) * scale_x)
+            .ceil()
+            .min(rendered.width() as f32) as u32;
+        let bottom = ((displayed.top + displayed.height) * scale_y)
+            .ceil()
+            .min(rendered.height() as f32) as u32;
+
+        if right <= left || bottom <= top {
+            return Err("a rectangle effect is too small to capture any pixels".into());
+        }
+
+        let captured = rendered.crop_imm(left, top, right - left, bottom - top);
+        let source_pixels_per_point = (scale_x + scale_y) / 2.0;
+        let processed = match effect.kind {
+            RectEffectKind::Mosaic => {
+                let block = (effect.strength * source_pixels_per_point).round().max(1.0) as u32;
+                let reduced_width = captured.width().div_ceil(block).max(1);
+                let reduced_height = captured.height().div_ceil(block).max(1);
+                let reduced = imageops::resize(
+                    &captured,
+                    reduced_width,
+                    reduced_height,
+                    imageops::FilterType::Nearest,
+                );
+
+                DynamicImage::ImageRgba8(imageops::resize(
+                    &reduced,
+                    captured.width(),
+                    captured.height(),
+                    imageops::FilterType::Nearest,
+                ))
+            }
+            RectEffectKind::Blur => DynamicImage::ImageRgba8(imageops::blur(
+                &captured,
+                effect.strength * source_pixels_per_point,
+            )),
+        };
+
+        // The render includes the page's intrinsic clockwise rotation. Page
+        // objects live before that rotation, so turn the crop back before it is
+        // embedded; PDFium will apply the page rotation once when it draws.
+        let processed = match rotation as i32 {
+            90 => processed.rotate270(),
+            180 => processed.rotate180(),
+            270 => processed.rotate90(),
+            _ => processed,
+        };
+        let pixel_width = i32::try_from(processed.width())
+            .map_err(|_| "a rectangle effect image is too wide".to_string())?;
+        let pixel_height = i32::try_from(processed.height())
+            .map_err(|_| "a rectangle effect image is too tall".to_string())?;
+        let mut bgra = processed.into_rgba8().into_raw();
+
+        // `pdfium-render::set_image()` performs this RGBA -> BGRA copy after it
+        // has created a PDFium bitmap. Shuffle the owned bytes while unlocked,
+        // then hand that buffer to a PdfBitmap during the short commit phase.
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+
+        let placeholder = DynamicImage::new_rgba8(1, 1);
+        let mut documents = self
+            .documents
+            .lock()
+            .map_err(|_| "PDFium document store is unavailable".to_string())?;
+        let entry = documents
+            .get_mut(&document_id)
+            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+
+        if page_number < 1 || page_number > entry.document.pages().len() {
+            return Err(format!("page {page_number} does not exist"));
+        }
+        if entry.revisions.get(&page_number).copied().unwrap_or(0) != captured_revision {
+            return Err("the page changed while its rectangle effect was being prepared".into());
+        }
+
+        let rect = page_rect_to_pdfium(bounds, unrotated_height);
+        let mut image = PdfPageImageObject::new_with_size(
+            &entry.document,
+            &placeholder,
+            PdfPoints::new(bounds.width),
+            PdfPoints::new(bounds.height),
+        )
+        .map_err(|error| format!("PDFium could not create the rectangle effect image: {error}"))?;
+        let bitmap = PdfBitmap::from_bytes(
+            pixel_width,
+            pixel_height,
+            PdfBitmapFormat::BGRA,
+            bgra.as_mut_slice(),
+        )
+        .map_err(|error| {
+            format!("PDFium could not prepare the rectangle effect pixels: {error}")
+        })?;
+        image.set_bitmap(&bitmap).map_err(|error| {
+            format!("PDFium could not apply the rectangle effect pixels: {error}")
+        })?;
+        drop(bitmap);
+        image
+            .translate(rect.left(), rect.bottom())
+            .map_err(|error| {
+                format!("PDFium could not place the rectangle effect image: {error}")
+            })?;
+
+        // Annotation creation attaches immediately. Anything after it can fail,
+        // so the same rollback used by the vector rectangle is required here.
+        let mut page = entry
+            .document
+            .pages_mut()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        let mut annotation = page
+            .annotations_mut()
+            .create_stamp_annotation()
+            .map_err(|error| format!("PDFium could not create a rectangle effect: {error}"))?;
+        let described = (|| {
+            annotation.set_bounds(rect).map_err(|error| {
+                format!("PDFium rejected the rectangle effect's bounds: {error}")
+            })?;
+            annotation
+                .objects_mut()
+                .add_image_object(image)
+                .map_err(|error| {
+                    format!("PDFium rejected the rectangle effect's image: {error}")
+                })?;
+            Ok(())
+        })();
+
+        if let Err(error) = described {
+            let annotations = page.annotations_mut();
+            let count = annotations.len();
+
+            if count > 0 {
+                if let Ok(orphan) = annotations.get(count - 1) {
+                    let _ = annotations.delete_annotation(orphan);
+                }
+            }
+
+            return Err(error);
+        }
+
+        *entry.added.entry(page_number).or_insert(0) += 1;
+        *entry.revisions.entry(page_number).or_insert(0) += 1;
 
         Ok(())
     }
@@ -663,6 +979,7 @@ impl PdfiumEngine {
         }
 
         *entry.added.entry(page_number).or_insert(0) += 1;
+        *entry.revisions.entry(page_number).or_insert(0) += 1;
 
         Ok(())
     }
@@ -950,6 +1267,7 @@ impl PdfiumEngine {
         }
 
         *entry.added.entry(page_number).or_insert(0) += 1;
+        *entry.revisions.entry(page_number).or_insert(0) += 1;
 
         Ok(())
     }
@@ -1006,6 +1324,7 @@ impl PdfiumEngine {
         if let Some(added) = entry.added.get_mut(&page_number) {
             *added -= 1;
         }
+        *entry.revisions.entry(page_number).or_insert(0) += 1;
         entry.removed_any = true;
 
         Ok(())
@@ -1463,6 +1782,10 @@ mod tests {
         }
     }
 
+    fn rect_effect(kind: RectEffectKind, strength: f32) -> RectEffect {
+        RectEffect { kind, strength }
+    }
+
     // Stands in for the links, form fields, and comments a real document
     // arrives with.
     fn link_pdf() -> Vec<u8> {
@@ -1493,6 +1816,87 @@ mod tests {
             "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_string(),
         ];
         build_pdf(&objects)
+    }
+
+    // Dense vertical bars inside (40,70)-(160,170) in top-left page space.
+    // Their short period gives mosaic and blur a high-frequency signal to
+    // reduce, while the untouched white margin catches an effect placed wide.
+    fn striped_pdf_with_rotation(rotation: Option<i32>) -> Vec<u8> {
+        let mut content = "0 0 0 rg\n".to_string();
+
+        for left in (40..160).step_by(4) {
+            content.push_str(&format!("{left} 130 2 100 re f\n"));
+        }
+
+        let contents_obj = format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        );
+        let rotation = rotation
+            .map(|degrees| format!("/Rotate {degrees} "))
+            .unwrap_or_default();
+        let objects = [
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+            format!(
+                "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] {rotation}/Contents 4 0 R >>\nendobj\n"
+            ),
+            contents_obj,
+        ];
+
+        build_pdf(&objects)
+    }
+
+    fn striped_pdf() -> Vec<u8> {
+        striped_pdf_with_rotation(None)
+    }
+
+    fn rotated_striped_pdf() -> Vec<u8> {
+        striped_pdf_with_rotation(Some(90))
+    }
+
+    // Four asymmetric colour fields inside the rectangle-effect target. A test
+    // that only checks the target band cannot distinguish the two quarter-turn
+    // counter-rotations; these fields make the content's orientation observable.
+    fn quadrant_pdf(rotation: i32) -> Vec<u8> {
+        let content = concat!(
+            "1 0 0 rg\n40 180 60 50 re f\n",
+            "0 1 0 rg\n100 180 60 50 re f\n",
+            "0 0 1 rg\n40 130 60 50 re f\n",
+            "1 1 0 rg\n100 130 60 50 re f\n",
+        );
+        let contents_obj = format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        );
+
+        build_pdf(&[
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+            format!(
+                "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Rotate {rotation} /Contents 4 0 R >>\nendobj\n"
+            ),
+            contents_obj,
+        ])
+    }
+
+    fn a4_striped_pdf() -> Vec<u8> {
+        let mut content = "0 0 0 rg\n".to_string();
+
+        for left in (0..595).step_by(4) {
+            content.push_str(&format!("{left} 0 2 842 re f\n"));
+        }
+
+        let contents_obj = format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        );
+        build_pdf(&[
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R >>\nendobj\n".to_string(),
+            contents_obj,
+        ])
     }
 
     /// A page point is two device pixels on the 200x300 fixtures at this width.
@@ -1535,6 +1939,424 @@ mod tests {
         }
 
         (inside, outside)
+    }
+
+    fn rendered_rgb(engine: &PdfiumEngine, document_id: u64) -> image::RgbImage {
+        engine
+            .render_bitmap(document_id, 1, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+            .expect("PDFium should render the page")
+            .into_rgb8()
+    }
+
+    fn color_at_unrotated_point(
+        image: &image::RgbImage,
+        point: (f32, f32),
+        rotation: i32,
+    ) -> [u8; 3] {
+        let (x, top) = point;
+        let (displayed_x, displayed_y, displayed_width, displayed_height) = match rotation {
+            90 => (300.0 - top, x, 300.0, 200.0),
+            180 => (200.0 - x, 300.0 - top, 200.0, 300.0),
+            270 => (top, 200.0 - x, 300.0, 200.0),
+            _ => (x, top, 200.0, 300.0),
+        };
+        let pixel_x = ((displayed_x / displayed_width) * image.width() as f32)
+            .floor()
+            .clamp(0.0, image.width().saturating_sub(1) as f32) as u32;
+        let pixel_y = ((displayed_y / displayed_height) * image.height() as f32)
+            .floor()
+            .clamp(0.0, image.height().saturating_sub(1) as f32) as u32;
+
+        image.get_pixel(pixel_x, pixel_y).0
+    }
+
+    fn color_difference(actual: [u8; 3], expected: [u8; 3]) -> u16 {
+        actual
+            .into_iter()
+            .zip(expected)
+            .map(|(left, right)| left.abs_diff(right) as u16)
+            .sum()
+    }
+
+    fn pixel_difference(
+        before: &image::RgbImage,
+        after: &image::RgbImage,
+        band: (u32, u32, u32, u32),
+    ) -> (u64, u64) {
+        let (left, top, right, bottom) = band;
+        let mut inside = 0;
+        let mut outside = 0;
+
+        for (x, y, pixel) in before.enumerate_pixels() {
+            let next = after.get_pixel(x, y);
+            let difference = pixel
+                .0
+                .into_iter()
+                .zip(next.0)
+                .map(|(a, b)| a.abs_diff(b) as u64)
+                .sum::<u64>();
+
+            if x >= left && x < right && y >= top && y < bottom {
+                inside += difference;
+            } else {
+                outside += difference;
+            }
+        }
+
+        (inside, outside)
+    }
+
+    fn horizontal_edge_energy(image: &image::RgbImage, band: (u32, u32, u32, u32)) -> u64 {
+        let (left, top, right, bottom) = band;
+        let mut energy = 0;
+
+        for y in top..bottom {
+            for x in (left + 1)..right {
+                let previous = image.get_pixel(x - 1, y).0[0];
+                let current = image.get_pixel(x, y).0[0];
+                energy += previous.abs_diff(current) as u64;
+            }
+        }
+
+        energy
+    }
+
+    fn luminance_variance(image: &image::RgbImage, band: (u32, u32, u32, u32)) -> f64 {
+        let (left, top, right, bottom) = band;
+        let mut values = Vec::new();
+
+        for y in top..bottom {
+            for x in left..right {
+                let [red, green, blue] = image.get_pixel(x, y).0;
+                values.push((red as f64 + green as f64 + blue as f64) / 3.0);
+            }
+        }
+
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        values
+            .iter()
+            .map(|value| (value - mean).powi(2))
+            .sum::<f64>()
+            / values.len() as f64
+    }
+
+    #[test]
+    fn maps_unrotated_effect_bounds_into_the_rendered_page() {
+        let bounds = quad(10.0, 20.0, 30.0, 40.0);
+
+        assert_eq!(
+            rect_in_display_space(&bounds, 200.0, 300.0, 0.0),
+            DisplayRect {
+                height: 40.0,
+                left: 10.0,
+                top: 20.0,
+                width: 30.0,
+            }
+        );
+        assert_eq!(
+            rect_in_display_space(&bounds, 200.0, 300.0, 90.0),
+            DisplayRect {
+                height: 30.0,
+                left: 240.0,
+                top: 10.0,
+                width: 40.0,
+            }
+        );
+        assert_eq!(
+            rect_in_display_space(&bounds, 200.0, 300.0, 180.0),
+            DisplayRect {
+                height: 40.0,
+                left: 160.0,
+                top: 240.0,
+                width: 30.0,
+            }
+        );
+        assert_eq!(
+            rect_in_display_space(&bounds, 200.0, 300.0, 270.0),
+            DisplayRect {
+                height: 30.0,
+                left: 20.0,
+                top: 160.0,
+                width: 40.0,
+            }
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn mosaic_changes_the_covered_pixels() {
+        let engine = test_engine();
+        let document = engine
+            .open(striped_pdf())
+            .expect("PDFium should open the striped PDF");
+        let bounds = quad(40.0, 70.0, 120.0, 100.0);
+        let band = (80, 140, 320, 340);
+        let before = rendered_rgb(engine, document.id);
+
+        engine
+            .add_rect_effect(
+                document.id,
+                1,
+                &bounds,
+                &rect_effect(RectEffectKind::Mosaic, 12.0),
+            )
+            .expect("PDFium should add the mosaic");
+
+        let after = rendered_rgb(engine, document.id);
+        let (inside, outside) = pixel_difference(&before, &after, band);
+
+        assert!(
+            inside > 100_000,
+            "the mosaic did not change its band: {inside}"
+        );
+        assert_eq!(outside, 0, "the mosaic changed pixels outside its band");
+
+        engine
+            .delete_last_annotation(document.id, 1)
+            .expect("PDFium should remove the mosaic");
+        assert_eq!(
+            rendered_rgb(engine, document.id),
+            before,
+            "undoing the mosaic should restore every page pixel"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn mosaic_lands_in_unrotated_space_on_a_rotated_page() {
+        let engine = test_engine();
+        let document = engine
+            .open(rotated_striped_pdf())
+            .expect("PDFium should open the rotated striped PDF");
+        let before = rendered_rgb(engine, document.id);
+
+        engine
+            .add_rect_effect(
+                document.id,
+                1,
+                &quad(40.0, 70.0, 120.0, 100.0),
+                &rect_effect(RectEffectKind::Mosaic, 12.0),
+            )
+            .expect("PDFium should add the mosaic in unrotated page space");
+
+        // The unrotated box becomes (130,40)-(230,160) after `/Rotate 90`.
+        // At 400px across the 300pt displayed width, this is the band below.
+        let after = rendered_rgb(engine, document.id);
+        let (inside, outside) = pixel_difference(&before, &after, (170, 50, 310, 217));
+
+        assert!(
+            inside > 100_000,
+            "the rotated mosaic changed no source pixels"
+        );
+        assert_eq!(
+            outside, 0,
+            "the rotated mosaic landed outside its mapped band"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn rectangle_effect_preserves_content_orientation_for_rotated_pages() {
+        let engine = test_engine();
+        let samples = [
+            ((70.0, 95.0), [255, 0, 0]),
+            ((130.0, 95.0), [0, 255, 0]),
+            ((70.0, 145.0), [0, 0, 255]),
+            ((130.0, 145.0), [255, 255, 0]),
+        ];
+
+        for rotation in [90, 180, 270] {
+            let document = engine
+                .open(quadrant_pdf(rotation))
+                .expect("PDFium should open the quadrant PDF");
+            let before = rendered_rgb(engine, document.id);
+
+            engine
+                .add_rect_effect(
+                    document.id,
+                    1,
+                    &quad(40.0, 70.0, 120.0, 100.0),
+                    &rect_effect(RectEffectKind::Mosaic, MIN_RECT_EFFECT_STRENGTH),
+                )
+                .expect("PDFium should add the rotated mosaic");
+
+            let after = rendered_rgb(engine, document.id);
+
+            for (point, expected) in samples {
+                let before_color = color_at_unrotated_point(&before, point, rotation);
+                let after_color = color_at_unrotated_point(&after, point, rotation);
+
+                assert!(
+                    color_difference(before_color, expected) < 10,
+                    "rotation {rotation} fixture colour at {point:?} was {before_color:?}, expected {expected:?}"
+                );
+                assert!(
+                    color_difference(after_color, expected) < 20,
+                    "rotation {rotation} changed {point:?} to {after_color:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn mosaic_makes_the_region_blocky() {
+        let engine = test_engine();
+        let document = engine
+            .open(striped_pdf())
+            .expect("PDFium should open the striped PDF");
+        let bounds = quad(40.0, 70.0, 120.0, 100.0);
+        let inner_band = (90, 150, 310, 330);
+        let before = rendered_rgb(engine, document.id);
+
+        engine
+            .add_rect_effect(
+                document.id,
+                1,
+                &bounds,
+                &rect_effect(RectEffectKind::Mosaic, 12.0),
+            )
+            .expect("PDFium should add the mosaic");
+
+        let after = rendered_rgb(engine, document.id);
+        let before_energy = horizontal_edge_energy(&before, inner_band);
+        let after_energy = horizontal_edge_energy(&after, inner_band);
+
+        assert!(
+            after_energy < before_energy / 3,
+            "mosaic blocks did not reduce local edge frequency: {before_energy} -> {after_energy}"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn blur_reduces_local_variance() {
+        let engine = test_engine();
+        let document = engine
+            .open(striped_pdf())
+            .expect("PDFium should open the striped PDF");
+        let bounds = quad(40.0, 70.0, 120.0, 100.0);
+        let inner_band = (100, 160, 300, 320);
+        let before = rendered_rgb(engine, document.id);
+
+        engine
+            .add_rect_effect(
+                document.id,
+                1,
+                &bounds,
+                &rect_effect(RectEffectKind::Blur, 8.0),
+            )
+            .expect("PDFium should add the blur");
+
+        let after = rendered_rgb(engine, document.id);
+        let before_variance = luminance_variance(&before, inner_band);
+        let after_variance = luminance_variance(&after, inner_band);
+
+        assert!(
+            after_variance < before_variance / 2.0,
+            "blur did not reduce local variance: {before_variance} -> {after_variance}"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn mosaic_does_not_remove_the_underlying_text() {
+        let engine = test_engine();
+        let document = engine
+            .open(text_pdf())
+            .expect("PDFium should open the text PDF");
+        let before = engine
+            .extract_text(document.id, 1)
+            .expect("PDFium should extract the original text");
+        assert!(before.iter().any(|span| span.text.contains("Hello")));
+
+        engine
+            .add_rect_effect(
+                document.id,
+                1,
+                &quad(40.0, 25.0, 100.0, 50.0),
+                &rect_effect(RectEffectKind::Mosaic, 12.0),
+            )
+            .expect("PDFium should add a mosaic over the text");
+
+        let after = engine
+            .extract_text(document.id, 1)
+            .expect("PDFium should still extract text through the visual effect");
+        assert!(
+            after.iter().any(|span| span.text.contains("Hello")),
+            "the underlying text must remain extractable"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn full_page_mosaic_keeps_the_file_size_bounded() {
+        let engine = test_engine();
+        let document = engine
+            .open(a4_striped_pdf())
+            .expect("PDFium should open the A4 striped PDF");
+
+        engine
+            .add_rect_effect(
+                document.id,
+                1,
+                &quad(0.0, 0.0, 595.0, 842.0),
+                &rect_effect(RectEffectKind::Mosaic, MIN_RECT_EFFECT_STRENGTH),
+            )
+            .expect("PDFium should mosaic the full page");
+
+        let directory = scratch_directory("mosaic-size");
+        let destination = directory.join("mosaic.pdf");
+        engine
+            .save_to(document.id, &destination)
+            .expect("PDFium should save the mosaic");
+        let size = fs::metadata(&destination)
+            .expect("the saved mosaic should exist")
+            .len();
+
+        assert!(
+            size < 10_000_000,
+            "an A4 full-page mosaic grew to {size} bytes"
+        );
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn rejects_an_unusable_rectangle_effect() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+
+        for result in [
+            engine.add_rect_effect(
+                document.id,
+                1,
+                &quad(10.0, 10.0, 40.0, 40.0),
+                &rect_effect(RectEffectKind::Blur, 1.0),
+            ),
+            engine.add_rect_effect(
+                document.id,
+                1,
+                &quad(190.0, 10.0, 40.0, 40.0),
+                &rect_effect(RectEffectKind::Mosaic, 8.0),
+            ),
+            engine.add_rect_effect(
+                document.id,
+                1,
+                &quad(10.0, 10.0, 0.0, 40.0),
+                &rect_effect(RectEffectKind::Mosaic, 8.0),
+            ),
+        ] {
+            assert!(result.is_err(), "an unusable effect should be rejected");
+        }
+
+        assert_eq!(
+            with_page(engine, document.id, 1, |page| page.annotations().len()),
+            0,
+            "a refused effect should leave no annotation behind"
+        );
     }
 
     /// The pixel box the page's ink actually occupies, or `None` for a blank

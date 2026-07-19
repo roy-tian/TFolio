@@ -43,12 +43,21 @@ async function applyCommand(documentId: number, command: AnnotationCommand) {
     case "rect":
       // One page, one annotation, so there is nothing to wind back: the command
       // either lands whole or leaves the page untouched.
-      await invoke("add_pdf_rect_annotation", {
-        bounds: command.bounds,
-        documentId,
-        pageNumber: command.pageNumber,
-        style: command.style,
-      })
+      if (command.effect.kind === "none") {
+        await invoke("add_pdf_rect_annotation", {
+          bounds: command.bounds,
+          documentId,
+          pageNumber: command.pageNumber,
+          style: command.style,
+        })
+      } else {
+        await invoke("add_pdf_rect_effect_annotation", {
+          bounds: command.bounds,
+          documentId,
+          effect: command.effect,
+          pageNumber: command.pageNumber,
+        })
+      }
       return
     case "textNote":
       // One page and one annotation, as a rectangle is.

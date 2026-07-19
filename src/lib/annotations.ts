@@ -25,17 +25,31 @@ export type HighlightCommand = {
 }
 
 /**
- * A rectangle's appearance. A colour left `null` is that part left off — a
- * border with no fill, a fill with no border, or both — and `opacity` applies
- * to whichever are present. `cornerRadius` and `strokeWidth` are page points.
+ * The rectangle tool's persisted settings. A colour left `null` is that vector
+ * part left off, and `opacity` applies to whichever are present. The effect is
+ * separate in a command because an image treatment does not draw those vector
+ * parts. Sizes and effect strength are page points.
  */
 export type RectStyle = {
   cornerRadius: number
+  effect: RectEffect
   fillColor: HexColor | null
   opacity: number
   strokeColor: HexColor | null
   strokeWidth: number
 }
+
+export type RectEffectKind = "none" | "mosaic" | "blur"
+
+/** An image treatment applied to the rectangle's source pixels. */
+export type RectEffect = {
+  kind: RectEffectKind
+  /** Mosaic block size or blur sigma, in page points. */
+  strength: number
+}
+
+/** The vector appearance sent only for an ordinary, effect-free rectangle. */
+export type RectAppearance = Omit<RectStyle, "effect">
 
 /**
  * A rectangle is drawn on one page in one drag, so unlike a highlight it never
@@ -43,9 +57,10 @@ export type RectStyle = {
  */
 export type RectCommand = {
   bounds: PagePointsRect
+  effect: RectEffect
   kind: "rect"
   pageNumber: number
-  style: RectStyle
+  style: RectAppearance
 }
 
 /**

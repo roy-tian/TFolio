@@ -96,7 +96,7 @@ export function PdfPage({
   // into the on-screen pixels the preview needs, whatever the layout's width.
   const pxPerPoint = footprintWidth > 0 ? displayWidth / footprintWidth : 0
 
-  const { hasRendered, renderFailed } = usePageBitmap({
+  const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
     command: "render_pdf_page",
     documentId,
@@ -234,7 +234,16 @@ export function PdfPage({
           </span>
         </div>
       ) : null}
-      {draft ? <RectDraftOverlay draft={draft} pxPerPoint={pxPerPoint} /> : null}
+      {draft ? (
+        <RectDraftOverlay
+          draft={draft}
+          pageWidth={page.width}
+          pxPerPoint={pxPerPoint}
+          rotation={rotation}
+          sourceCanvasRef={canvasRef}
+          sourceRevision={bitmapRevision}
+        />
+      ) : null}
     </div>
   )
 }

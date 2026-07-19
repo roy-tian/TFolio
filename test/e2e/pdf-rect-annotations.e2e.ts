@@ -5,11 +5,12 @@ import { languageStorageKey } from "../../src/i18n/config"
 import { rectStyleStorageKey } from "../../src/lib/annotationStyles"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
-  blankPdf,
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
+  pagePixelFingerprint,
   renderedPage,
+  stripedPdf,
 } from "./helpers"
 
 // Drags a rectangle across the middle of page 1 the way a reader would: press on
@@ -63,7 +64,7 @@ describe("TFolio rectangle annotations", () => {
     )
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
-    await openPdfFromDisk("blank.pdf", blankPdf())
+    await openPdfFromDisk("striped.pdf", stripedPdf())
     await renderedPage()
   })
 
@@ -99,6 +100,305 @@ describe("TFolio rectangle annotations", () => {
     await browser.waitUntil(async () => (await pageInk()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the rectangle exactly",
+    })
+  })
+
+  it("previews and applies a mosaic, then undo removes it", async () => {
+    const clean = await pagePixelFingerprint()
+
+    await $("button[aria-label='Rectangle options']").click()
+    const effectStrength = await $("[data-slot='rect-effect-strength']")
+    const effectDisclosure = await $("[data-slot='rect-effect-disclosure']")
+    const effectAbout = await $("button[aria-label='About this effect']")
+    const vectorStyle = await $("[data-slot='rect-vector-style']")
+    const strokeWidth = await $("[data-slot='rect-stroke-width']")
+    const opacity = await $("[data-slot='rect-opacity']")
+    const cornerRadius = await $("[data-slot='rect-corner-radius']")
+    const borderNone = await $(
+      "[data-slot='rect-stroke-colors'] [aria-label='None']",
+    )
+    const fillNone = await $(
+      "[data-slot='rect-fill-colors'] [aria-label='None']",
+    )
+    await expect(effectStrength).not.toExist()
+    await expect(effectDisclosure).not.toExist()
+    await expect(effectAbout).not.toExist()
+    await expect(vectorStyle).toExist()
+    await expect(borderNone).toExist()
+    await expect(fillNone).toExist()
+    expect(await borderNone.getAttribute("data-disabled")).not.toBeNull()
+    await expect(strokeWidth).toExist()
+    await expect(opacity).toExist()
+    await expect(cornerRadius).toExist()
+
+    await $("[data-slot='rect-fill-colors'] [aria-label='#ff3b30']").click()
+    await expect(opacity).toExist()
+    expect(await borderNone.getAttribute("data-disabled")).toBeNull()
+
+    await borderNone.click()
+    await expect(strokeWidth).not.toExist()
+    await expect(opacity).toExist()
+
+    await $("[data-slot='rect-stroke-colors'] [aria-label='#ff3b30']").click()
+    await expect(strokeWidth).toExist()
+    expect(
+      await browser.execute(() =>
+        Array.from(
+          document.querySelector("[data-slot='rect-vector-style']")!.children,
+        ).map((element) => element.getAttribute("data-slot")),
+      ),
+    ).toEqual([
+      "rect-stroke-colors",
+      "rect-fill-colors",
+      "rect-stroke-width",
+      "rect-opacity",
+      "rect-corner-radius",
+    ])
+
+    await fillNone.click()
+    await expect(strokeWidth).toExist()
+    await expect(opacity).toExist()
+
+    await $("button[aria-label='Mosaic']").click()
+    await expect(effectStrength).toExist()
+    await expect(effectAbout).toExist()
+    await expect(effectDisclosure).not.toExist()
+    await effectAbout.click()
+    await expect(effectDisclosure).toHaveText(
+      "Not redaction: the underlying text remains searchable and copyable. Use this visual effect for printing only.",
+    )
+    await effectAbout.click()
+    await expect(effectDisclosure).not.toExist()
+    await expect(vectorStyle).not.toExist()
+
+    await $("button[aria-label='Gaussian blur']").click()
+    await expect(effectStrength).toExist()
+    await expect(vectorStyle).not.toExist()
+
+    await $("button[aria-label='None']").click()
+    await expect(effectStrength).not.toExist()
+    await expect(effectDisclosure).not.toExist()
+    await expect(effectAbout).not.toExist()
+    await expect(vectorStyle).toExist()
+
+    await $("button[aria-label='Mosaic']").click()
+    await expect(effectAbout).toExist()
+    await expect(effectDisclosure).not.toExist()
+
+    await $("button[aria-label='Draw a rectangle']").click()
+    await dragRectOnPage()
+
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) !== clean, {
+      timeout: 15_000,
+      timeoutMsg: "the mosaic never reached the page",
+    })
+
+    await $("button[aria-label='Undo']").click()
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
+      timeout: 15_000,
+      timeoutMsg: "undo did not take the mosaic back off the page",
+    })
+  })
+
+  it("keeps a blur preview opaque through every crop edge", async () => {
+    await $("button[aria-label='Rectangle options']").click()
+    await $("button[aria-label='Gaussian blur']").click()
+    await $("button[aria-label='Draw a rectangle']").click()
+
+    await browser.execute(() => {
+      const page = document.querySelector("[data-page-number='1']")!
+      const canvas = page.querySelector("canvas")!
+      const box = page.getBoundingClientRect()
+      const from = { x: box.left + box.width * 0.25, y: box.top + box.height * 0.25 }
+      const to = { x: box.left + box.width * 0.75, y: box.top + box.height * 0.75 }
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: from.x,
+          clientY: from.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: to.x,
+          clientY: to.y,
+        }),
+      )
+    })
+
+    const preview = await $("[data-slot='rect-effect-preview']")
+    await preview.waitForExist()
+    await browser.waitUntil(
+      () =>
+        browser.execute(() => {
+          const canvas = document.querySelector<HTMLCanvasElement>(
+            "[data-slot='rect-effect-preview']",
+          )!
+          const context = canvas.getContext("2d")
+
+          return Boolean(
+            context &&
+              canvas.width > 1 &&
+              context.getImageData(
+                Math.floor(canvas.width / 2),
+                Math.floor(canvas.height / 2),
+                1,
+                1,
+              ).data[3]! > 0,
+          )
+        }),
+      { timeoutMsg: "the blur preview never painted" },
+    )
+
+    const minimumEdgeAlpha = await browser.execute(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>(
+        "[data-slot='rect-effect-preview']",
+      )!
+      const context = canvas.getContext("2d")!
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
+      let minimum = 255
+
+      const include = (x: number, y: number) => {
+        minimum = Math.min(minimum, data[(y * canvas.width + x) * 4 + 3]!)
+      }
+
+      for (let x = 0; x < canvas.width; x += 1) {
+        include(x, 0)
+        include(x, canvas.height - 1)
+      }
+      for (let y = 0; y < canvas.height; y += 1) {
+        include(0, y)
+        include(canvas.width - 1, y)
+      }
+
+      return minimum
+    })
+
+    expect(minimumEdgeAlpha).toBeGreaterThanOrEqual(250)
+
+    await browser.execute(() => {
+      document.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true }))
+    })
+  })
+
+  it("refreshes a live effect after the source bitmap repaints", async () => {
+    await $("button[aria-label='Rectangle options']").click()
+    await $("button[aria-label='Mosaic']").click()
+    await $("button[aria-label='Draw a rectangle']").click()
+
+    await browser.execute(() => {
+      const page = document.querySelector("[data-page-number='1']")!
+      const source = page.querySelector<HTMLCanvasElement>("canvas")!
+      const box = page.getBoundingClientRect()
+      const from = { x: box.left + box.width * 0.25, y: box.top + box.height * 0.25 }
+      const to = { x: box.left + box.width * 0.75, y: box.top + box.height * 0.75 }
+
+      source.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: from.x,
+          clientY: from.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: to.x,
+          clientY: to.y,
+        }),
+      )
+    })
+
+    const preview = await $("[data-slot='rect-effect-preview']")
+    await preview.waitForExist()
+    await browser.waitUntil(
+      () =>
+        browser.execute(() => {
+          const canvas = document.querySelector<HTMLCanvasElement>(
+            "[data-slot='rect-effect-preview']",
+          )!
+          return canvas.width > 1 && canvas.height > 1
+        }),
+      { timeoutMsg: "the mosaic preview never sized itself" },
+    )
+
+    await browser.execute(() => {
+      const page = document.querySelector("[data-page-number='1']")!
+      const source = page.querySelector<HTMLCanvasElement>("canvas")!
+      const sourceContext = source.getContext("2d")!
+      const box = page.getBoundingClientRect()
+
+      sourceContext.fillStyle = "#ff00ff"
+      sourceContext.fillRect(0, 0, source.width, source.height)
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: box.left + box.width * 0.74,
+          clientY: box.top + box.height * 0.74,
+        }),
+      )
+    })
+
+    const previewCenter = () =>
+      browser.execute(() => {
+        const canvas = document.querySelector<HTMLCanvasElement>(
+          "[data-slot='rect-effect-preview']",
+        )!
+        return Array.from(
+          canvas
+            .getContext("2d")!
+            .getImageData(
+              Math.floor(canvas.width / 2),
+              Math.floor(canvas.height / 2),
+              1,
+              1,
+            ).data,
+        )
+      })
+
+    await browser.waitUntil(
+      async () => {
+        const [red, green, blue] = await previewCenter()
+        return red! > 240 && green! < 15 && blue! > 240
+      },
+      { timeoutMsg: "the preview never sampled the temporary source pixels" },
+    )
+
+    await browser.execute(() => {
+      const page = document.querySelector("[data-page-number='1']")!
+      const box = page.getBoundingClientRect()
+
+      document.querySelector("main")!.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          clientX: box.left + box.width / 2,
+          clientY: box.top + box.height / 2,
+          ctrlKey: true,
+          deltaY: -100,
+        }),
+      )
+    })
+
+    await browser.waitUntil(
+      async () => {
+        const [red, green, blue] = await previewCenter()
+        return red! < 230 || green! > 30 || blue! < 230
+      },
+      {
+        timeout: 30_000,
+        timeoutMsg: "the repainted page never refreshed the live preview",
+      },
+    )
+
+    await browser.execute(() => {
+      document.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true }))
     })
   })
 
