@@ -98,7 +98,12 @@ schema, so missing or misspelled keys in other locales fail the build.
   embedded WebDriver provider. The `e2e` Cargo feature, `e2e` capability, global
   Tauri API, and WDIO bridge are enabled only by `tauri.e2e.conf.json`; normal
   dev and release builds keep their CSP and capabilities unchanged. Failed runs
-  write screenshots and logs under `artifacts/e2e/`.
+  write screenshots and logs under `artifacts/e2e/`. WebDriver cannot drive
+  native file dialogs, and Tauri seals `__TAURI_INTERNALS__.invoke`
+  (non-writable), so specs stand in for the pickers through the app's own seam
+  — `window.__tfolioE2E`, read via `src/lib/e2e.ts` and set by
+  `test/e2e/helpers.ts` — which is live only in the `e2e` Vite mode and dead
+  code in every other build.
 - Before a pull request, run at minimum `bun run build`, `bun run test`,
   `bun run version:check`, and the locked `cargo check`. Prefer `bun run test:all`
   for changes touching the backend or GUI.
@@ -132,15 +137,26 @@ and `frame-src` disabled — and a separate `devCsp` permits only the WebSocket 
 The capability list is **not** what gates this app's own commands. Tauri's ACL
 covers plugin and core commands only; anything in `generate_handler!` is callable
 by the WebView with whatever arguments it likes, which is why none of the PDF
-commands needed a permission entry to work. `capabilities/default.json` holds
-`dialog:allow-save` — narrowed from the `dialog:default` the Tauri CLI adds,
-which would also grant open/message/ask/confirm — and that grant is only what
-lets the frontend *ask for a path*. What is done with that path is `export_pdf`'s
-own business, so an argument a command will act on has to be checked in the
-command, not assumed safe because a dialog produced it. `tauri-plugin-dialog`
-pulls `tauri-plugin-fs` in as a transitive dependency; it is deliberately never
-registered, so no `fs` commands are exposed — do not read its presence in
-`Cargo.lock` as permission to use it.
+commands needed a permission entry to work. `capabilities/default.json` grants
+no dialog permissions at all: both file dialogs live in Rust commands
+(`pick_pdf_path` and `export_pdf`, via `blocking_pick_file`/`blocking_save_file`
+in `spawn_blocking`), so no destination or source path is ever *chosen* by the
+WebView. What the WebView may pass is checked in the command: `export_pdf`
+accepts only a suggested file *name*, reduced to `Path::file_name()` before it
+reaches the dialog; `save_pdf` writes only to the `source_path` recorded at
+open; and `open_pdf_from_path` — which drag-drop needs, since Tauri hands drop
+paths to the frontend — acts only on *approved* paths, ones the OS produced in
+Rust's sight (the window's own drag-drop event handler in `lib.rs`, or the pick
+dialog), because opening a path is what binds it as the file a save will later
+overwrite. The e2e build waives that approval check (its scratch files never
+saw a dialog); nothing else does. Besides `core:default` the capability holds
+only `core:window:allow-destroy`, which the unsaved-changes close guard needs
+to actually close the window once the reader confirms. The principle stands: an
+argument a command will act on has to be checked in the command, not assumed
+safe because a dialog produced it. `tauri-plugin-dialog` pulls `tauri-plugin-fs`
+in as a transitive dependency; it is deliberately never registered, so no `fs`
+commands are exposed — do not read its presence in `Cargo.lock` as permission
+to use it.
 
 The backend enforces its own invariants for the same reason. `delete_last_pdf_annotation`
 counts what the session added to each page and refuses to go past it, rather than

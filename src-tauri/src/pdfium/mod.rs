@@ -8,12 +8,23 @@ use serde::{Deserialize, Serialize};
 
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_text_note_annotation, close_pdf,
-    delete_last_pdf_annotation, export_pdf, extract_pdf_page_text, open_pdf, render_pdf_page,
-    render_pdf_page_thumbnail,
+    delete_last_pdf_annotation, export_pdf, extract_pdf_page_text, open_pdf, open_pdf_from_path,
+    pick_pdf_path, render_pdf_page, render_pdf_page_thumbnail, save_pdf,
 };
 pub use engine::PdfiumState;
 
 const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
+
+/// The one wording for the size refusal, from all three checks: the frontend
+/// tells "too large" apart from every other open failure by the "MiB limit"
+/// substring (see `loadPdfFromPath` in `App.tsx`), so the message must never
+/// vary by call site.
+fn size_limit_error() -> String {
+    format!(
+        "PDF file exceeds the {} MiB limit",
+        MAX_PDF_BYTES / 1024 / 1024
+    )
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +33,21 @@ pub struct PdfDocumentInfo {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
+    /// The file this document was opened from. `None` — opened from bytes —
+    /// disables saving; only exporting can give it a file.
+    path: Option<String>,
+}
+
+/// What an export wrote and where it stands relative to the document's source.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOutcome {
+    path: String,
+    /// Whether the write landed on the document's own source path — true for a
+    /// byte-opened document's first export too, which adopts its destination as
+    /// the source. This, not the operation's name, is what decides whether the
+    /// history counts as saved.
+    saved_to_source: bool,
 }
 
 #[derive(Serialize)]

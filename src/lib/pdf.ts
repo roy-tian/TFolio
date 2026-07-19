@@ -29,9 +29,18 @@ export type PdfDocumentInfo = {
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  /** The file this document was opened from; null when opened from bytes,
+      which leaves nothing to save over. */
+  path: string | null
 }
 
-export const MAX_PDF_BYTES = 512 * 1024 * 1024
+/** What an export wrote, and whether it landed on the document's own file —
+    which, not the operation's name, is what decides the history counts as
+    saved. */
+export type PdfExportOutcome = {
+  path: string
+  savedToSource: boolean
+}
 
 /** Widest a single page may render on screen, in CSS pixels. */
 export const MAX_PAGE_WIDTH = 896
@@ -45,8 +54,16 @@ export const MAX_THUMBNAIL_RENDER_WIDTH = 512
 // still resolves well enough to read once the window widens again.
 export const MIN_PAGE_RENDER_WIDTH = 240
 
-export function isPdfFile(file: Pick<File, "name" | "type">) {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+/** Judged by the name alone: a path has no MIME type to consult, and the
+    backend rejects anything PDFium cannot actually parse. */
+export function isPdfPath(path: string) {
+  return path.toLowerCase().endsWith(".pdf")
+}
+
+/** The name a path ends in, for display. Splits on both separators so a
+    Windows path reads as its file rather than the whole path. */
+export function fileNameFromPath(path: string) {
+  return path.split(/[/\\]/).pop() || path
 }
 
 // Rotating a page by 90° or 270° swaps its width and height; 0°/180° leave them.

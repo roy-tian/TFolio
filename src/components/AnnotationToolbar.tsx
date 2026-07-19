@@ -3,6 +3,7 @@ import {
   Download,
   Highlighter,
   Redo2,
+  Save,
   Square,
   Type,
   Undo2,
@@ -13,6 +14,13 @@ import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { RectStylePopover } from "@/components/RectStylePopover"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Popover,
   PopoverContent,
@@ -30,13 +38,18 @@ type AnnotationToolbarProps = {
   canRedo: boolean
   canUndo: boolean
   disabled: boolean
+  /** Whether the document has a file of its own for the save key to write
+      back to; one opened from bytes does not until an export gives it one. */
+  hasSourceFile: boolean
   /** Whether the layout has text to mark; the grid of thumbnails does not. */
   highlightApplies: boolean
   highlightColor: HexColor
+  isDirty: boolean
   onExport: () => void
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle) => void
   onRedo: () => void
+  onSave: () => void
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
   /** Whether a page is on show to draw on; the thumbnail grid is not. */
@@ -51,12 +64,15 @@ export function AnnotationToolbar({
   canRedo,
   canUndo,
   disabled,
+  hasSourceFile,
   highlightApplies,
   highlightColor,
+  isDirty,
   onExport,
   onHighlightColorChange,
   onRectStyleChange,
   onRedo,
+  onSave,
   onToolChange,
   onUndo,
   rectApplies,
@@ -69,6 +85,7 @@ export function AnnotationToolbar({
   const highlightLabel = t("annotate.highlight")
   const rectLabel = t("annotate.rect")
   const textNoteLabel = t("annotate.textNote")
+  const saveLabel = t("annotate.save")
   const exportLabel = t("annotate.export")
 
   return (
@@ -193,16 +210,44 @@ export function AnnotationToolbar({
         </Toggle>
       ) : null}
 
-      <Button
-        aria-label={exportLabel}
-        disabled={disabled}
-        onClick={onExport}
-        size="icon"
-        title={exportLabel}
-        variant="outline"
-      >
-        <Download />
-      </Button>
+      <ButtonGroup>
+        <Button
+          aria-label={saveLabel}
+          disabled={disabled || !hasSourceFile || !isDirty}
+          onClick={onSave}
+          size="icon"
+          // The tooltip explains a disabled key only where the reason is not
+          // in front of the reader: a document with no file of its own.
+          title={!disabled && !hasSourceFile ? t("annotate.saveNoSource") : saveLabel}
+          variant="outline"
+        >
+          <Save />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                aria-label={t("annotate.saveOptions")}
+                className="px-1"
+                disabled={disabled}
+                size="icon"
+                title={t("annotate.saveOptions")}
+                variant="outline"
+              />
+            }
+          >
+            <ChevronDown />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-40">
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={onExport}>
+                <Download />
+                {exportLabel}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </ButtonGroup>
     </>
   )
 }

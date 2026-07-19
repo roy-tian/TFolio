@@ -1,18 +1,32 @@
 import { describe, expect, test } from "bun:test"
 
-import { dimensionsForRotation, isPdfFile, pickCurrentPage } from "./pdf"
+import {
+  dimensionsForRotation,
+  fileNameFromPath,
+  isPdfPath,
+  pickCurrentPage,
+} from "./pdf"
 
-describe("isPdfFile", () => {
-  test("accepts the PDF MIME type", () => {
-    expect(isPdfFile({ name: "document", type: "application/pdf" })).toBe(true)
+describe("isPdfPath", () => {
+  test("accepts a PDF extension in any case", () => {
+    expect(isPdfPath("/home/roy/document.pdf")).toBe(true)
+    expect(isPdfPath("C:\\Files\\Document.PDF")).toBe(true)
   })
 
-  test("accepts a PDF extension when the OS omits the MIME type", () => {
-    expect(isPdfFile({ name: "document.PDF", type: "" })).toBe(true)
+  test("rejects other extensions", () => {
+    expect(isPdfPath("/home/roy/notes.txt")).toBe(false)
+    expect(isPdfPath("/home/roy/document.pdf.png")).toBe(false)
+  })
+})
+
+describe("fileNameFromPath", () => {
+  test("takes the last segment of either separator", () => {
+    expect(fileNameFromPath("/home/roy/document.pdf")).toBe("document.pdf")
+    expect(fileNameFromPath("C:\\Files\\document.pdf")).toBe("document.pdf")
   })
 
-  test("rejects other file types", () => {
-    expect(isPdfFile({ name: "notes.txt", type: "text/plain" })).toBe(false)
+  test("hands back a bare name unchanged", () => {
+    expect(fileNameFromPath("document.pdf")).toBe("document.pdf")
   })
 })
 

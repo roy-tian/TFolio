@@ -16,11 +16,16 @@ import {
   type HighlightCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
+import type { PdfExportOutcome } from "@/lib/pdf"
 
 type UseAnnotationsOptions = {
   documentId: number | undefined
   onAnnotateError: () => void
   onExportError: () => void
+  /** An export landed; `outcome` says where, and whether that was the
+      document's own file. */
+  onExported: (documentId: number, outcome: PdfExportOutcome) => void
+  onSaveError: () => void
   onSuccess: () => void
 }
 
@@ -102,6 +107,8 @@ export function useAnnotations({
   documentId,
   onAnnotateError,
   onExportError,
+  onExported,
+  onSaveError,
   onSuccess,
 }: UseAnnotationsOptions) {
   const [history, setHistory] = useState<AnnotationHistory>(emptyHistory)
@@ -135,12 +142,17 @@ export function useAnnotations({
    * `plan` reads the history the queue has reached and returns the work to do
    * and the history to leave behind — both decided inside the queue, which is
    * what makes them consistent with each other.
+   *
+   * `work` resolves with whether its step actually happened: an export can end
+   * with the reader cancelling the dialog, or writing somewhere other than the
+   * document's own file, and either way `next` must not be applied — the
+   * history would claim a save that never reached the source.
    */
   const enqueue = useCallback(
     (
       plan: (
         history: AnnotationHistory,
-      ) => { pages: number[]; work: () => Promise<void>; next: AnnotationHistory } | null,
+      ) => { pages: number[]; work: () => Promise<boolean>; next: AnnotationHistory } | null,
       onFailure: () => void,
     ) => {
       if (documentId === undefined) {
@@ -164,14 +176,16 @@ export function useAnnotations({
         }
 
         try {
-          await step.work()
+          const happened = await step.work()
 
           if (generation !== generationRef.current) {
             return
           }
 
-          historyRef.current = step.next
-          setHistory(step.next)
+          if (happened) {
+            historyRef.current = step.next
+            setHistory(step.next)
+          }
           onSuccess()
         } catch {
           if (generation === generationRef.current) {
@@ -201,7 +215,10 @@ export function useAnnotations({
         (current) => ({
           next: commit(current, command),
           pages: commandPages(command),
-          work: () => applyCommand(documentId, command),
+          work: async () => {
+            await applyCommand(documentId, command)
+            return true
+          },
         }),
         onAnnotateError,
       )
@@ -221,7 +238,10 @@ export function useAnnotations({
         ? {
             next: step.history,
             pages: commandPages(step.entry.command),
-            work: () => retractCommand(documentId, step.entry.command),
+            work: async () => {
+              await retractCommand(documentId, step.entry.command)
+              return true
+            },
           }
         : null
     }, onAnnotateError)
@@ -239,7 +259,10 @@ export function useAnnotations({
         ? {
             next: step.history,
             pages: commandPages(step.entry.command),
-            work: () => applyCommand(documentId, step.entry.command),
+            work: async () => {
+              await applyCommand(documentId, step.entry.command)
+              return true
+            },
           }
         : null
     }, onAnnotateError)
@@ -248,9 +271,14 @@ export function useAnnotations({
   /**
    * Queued behind the reader's marks rather than racing them, so the file holds
    * exactly what the history says was saved.
+   *
+   * The backend owns the destination dialog, so this only suggests how it
+   * reads; the history is marked saved only when the write landed on the
+   * document's own file — its source, or the destination a byte-opened
+   * document adopts on its first export.
    */
-  const exportTo = useCallback(
-    async (path: string) => {
+  const exportCopy = useCallback(
+    async (suggestedName: string, filterLabel: string) => {
       if (documentId === undefined) {
         return
       }
@@ -259,13 +287,57 @@ export function useAnnotations({
         (current) => ({
           next: markSaved(current),
           pages: [],
-          work: () => invoke("export_pdf", { documentId, path }),
+          work: async () => {
+            const outcome = await invoke<PdfExportOutcome | null>("export_pdf", {
+              documentId,
+              filterLabel,
+              suggestedName,
+            })
+
+            if (!outcome) {
+              // The reader cancelled the dialog; nothing happened.
+              return false
+            }
+
+            onExported(documentId, outcome)
+            return outcome.savedToSource
+          },
         }),
         onExportError,
       )
     },
-    [documentId, enqueue, onExportError],
+    [documentId, enqueue, onExported, onExportError],
   )
+
+  /** Writes the document back over its own file. A clean history is a no-op —
+      judged inside the queue, against the history it has actually reached. */
+  const save = useCallback(async () => {
+    if (documentId === undefined) {
+      return
+    }
+
+    await enqueue(
+      (current) =>
+        isDirty(current)
+          ? {
+              next: markSaved(current),
+              pages: [],
+              work: async () => {
+                await invoke("save_pdf", { documentId })
+                return true
+              },
+            }
+          : null,
+      onSaveError,
+    )
+  }, [documentId, enqueue, onSaveError])
+
+  /**
+   * The dirty answer as of this instant, off the ref rather than the rendered
+   * state: a guard deciding whether marks may be discarded must not trust a
+   * value that can lag the queue by a render.
+   */
+  const isDirtyNow = useCallback(() => isDirty(historyRef.current), [])
 
   const reset = useCallback(() => {
     generationRef.current += 1
@@ -281,13 +353,26 @@ export function useAnnotations({
       canRedo: canRedo(history) && !isBusy,
       canUndo: canUndo(history) && !isBusy,
       commit: commitCommand,
-      exportTo,
+      exportCopy,
       isDirty: isDirty(history),
+      isDirtyNow,
       redo: redoCommand,
       renderEpochs,
       reset,
+      save,
       undo: undoCommand,
     }),
-    [commitCommand, exportTo, history, isBusy, redoCommand, renderEpochs, reset, undoCommand],
+    [
+      commitCommand,
+      exportCopy,
+      history,
+      isBusy,
+      isDirtyNow,
+      redoCommand,
+      renderEpochs,
+      reset,
+      save,
+      undoCommand,
+    ],
   )
 }

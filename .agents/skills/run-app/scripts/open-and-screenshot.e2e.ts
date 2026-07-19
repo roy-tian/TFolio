@@ -15,7 +15,7 @@
 //     --spec .agents/skills/run-app/open-and-screenshot.e2e.ts
 // (with the WebKit software-render env vars from SKILL.md exported).
 
-import { mkdirSync, readFileSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 import path from "node:path"
 
 import { $, browser } from "@wdio/globals"
@@ -33,40 +33,22 @@ const shotPath = path.resolve(
 const language = process.env.TFOLIO_LANG?.trim() || "zh-CN"
 const viewMode = process.env.TFOLIO_VIEW?.trim() || "single"
 
-// The WDIO bridge caps request body size, so stream the base64 in chunks.
-async function selectPdf(name: string, base64: string) {
-  const chunkSize = 256 * 1024
-  await browser.execute(() => {
-    ;(window as unknown as { __pdfChunks: string[] }).__pdfChunks = []
-  })
-  for (let offset = 0; offset < base64.length; offset += chunkSize) {
-    const chunk = base64.slice(offset, offset + chunkSize)
-    await browser.execute((c: string) => {
-      ;(window as unknown as { __pdfChunks: string[] }).__pdfChunks.push(c)
-    }, chunk)
-  }
-  await browser.execute((fileName: string) => {
-    const input = document.querySelector<HTMLInputElement>(
-      "input[type='file']",
-    )
-    if (!input) {
-      throw new Error("PDF file input was not found")
+// The app opens PDFs by filesystem path through a native dialog WebDriver
+// cannot drive. The PDF is already a file on disk here, so the app's e2e seam
+// (`window.__tfolioE2E`, live in e2e builds only — see src/lib/e2e.ts) only
+// has to answer the picker with its path; `open_pdf_from_path` then really
+// runs. Keep in sync with test/e2e/helpers.ts (`openPathViaDialog`).
+async function selectPdf(filePath: string) {
+  await browser.execute((mockPath: string) => {
+    ;(
+      window as Window & {
+        __tfolioE2E?: { pickPdfPath?: () => Promise<string | null> }
+      }
+    ).__tfolioE2E = {
+      pickPdfPath: () => Promise.resolve(mockPath),
     }
-    const b64 = (
-      window as unknown as { __pdfChunks: string[] }
-    ).__pdfChunks.join("")
-    const binary = atob(b64)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i += 1) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    const file = new File([bytes], fileName, { type: "application/pdf" })
-    Object.defineProperty(input, "files", {
-      configurable: true,
-      value: [file],
-    })
-    input.dispatchEvent(new Event("change", { bubbles: true }))
-  }, name)
+  }, filePath)
+  await $("[data-slot='drop-zone']").click()
 }
 
 describe("run-app: launch and screenshot", () => {
@@ -86,11 +68,10 @@ describe("run-app: launch and screenshot", () => {
       },
     )
     await browser.refresh()
-    await $("input[type='file']").waitForExist({ timeout: 30_000 })
+    await $("[data-slot='drop-zone']").waitForExist({ timeout: 30_000 })
 
     if (pdfPath) {
-      const base64 = readFileSync(pdfPath).toString("base64")
-      await selectPdf(path.basename(pdfPath), base64)
+      await selectPdf(path.resolve(pdfPath))
 
       const firstPage = await $("[data-page-number='1']")
       await firstPage.waitForDisplayed({ timeout: 30_000 })

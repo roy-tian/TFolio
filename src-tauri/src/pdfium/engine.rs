@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::Cursor,
     path::{Path, PathBuf},
@@ -24,8 +24,8 @@ use super::{
         TEXT_NOTE_LINE_HEIGHT,
     },
     library::bind_pdfium,
-    PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfTextSpan,
-    RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    size_limit_error, ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem,
+    PdfPageInfo, PdfTextSpan, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -46,6 +46,17 @@ struct OpenDocument {
     /// annotations and this is how long that tail is. Past it lie the document's
     /// own — links, form fields, comments — which an undo must never reach.
     added: HashMap<i32, u32>,
+    /// The file this document was opened from, and so the file a save writes
+    /// back over. `None` — opened from bytes — leaves nothing to overwrite,
+    /// and a first export adopts its destination as the source.
+    source_path: Option<PathBuf>,
+    /// Whether this session has deleted an annotation. Deleting one takes the
+    /// annotation but not what it referenced — an embedded font subset, its
+    /// appearance's objects — and PDFium writes those out with everything else,
+    /// so the first save after a deletion routes through a reload to collect
+    /// them (measured: five undo/redo rounds of a Chinese note save at 21 KB
+    /// straight, 4 KB collected).
+    removed_any: bool,
 }
 
 pub(super) struct PdfiumEngine {
@@ -68,6 +79,12 @@ pub(super) struct PdfiumEngine {
     /// sessions never touch, so it is not read at startup — and once read it is
     /// kept, because every CJK note subsets it again.
     cjk_font: OnceLock<Vec<u8>>,
+    /// Paths something outside the WebView produced — a drop the window saw, a
+    /// pick a dialog returned. `open_pdf_from_path` acts only on these: a path
+    /// is a string any page code can make up, and opening one binds it as the
+    /// file a save will later overwrite. Grows only by the reader's own
+    /// gestures, so it is never cleared.
+    approved_paths: Mutex<HashSet<PathBuf>>,
 }
 
 #[derive(Clone)]
@@ -86,21 +103,74 @@ impl PdfiumState {
             // it, so a missing font cannot stop the app from opening PDFs.
             cjk_font_path: cjk_font_path(app),
             cjk_font: OnceLock::new(),
+            approved_paths: Mutex::new(HashSet::new()),
         })))
+    }
+
+    /// Records paths the OS itself produced — the window's drag-drop handler
+    /// calls this, from outside the `pdfium` module.
+    pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
+        self.0.approve_paths(paths);
     }
 }
 
 impl PdfiumEngine {
+    pub(super) fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
+        if let Ok(mut approved) = self.approved_paths.lock() {
+            approved.extend(paths.into_iter().cloned());
+        }
+    }
+
+    /// Whether something outside the WebView — a drop, a dialog — produced
+    /// this path. Kept rather than consumed: the reader may cancel the unsaved
+    /// guard and open the same file again.
+    // The e2e build waives the check at its one call site, in `open_pdf_from_path`.
+    #[cfg_attr(feature = "e2e", allow(dead_code))]
+    pub(super) fn is_approved(&self, path: &Path) -> bool {
+        self.approved_paths
+            .lock()
+            .map(|approved| approved.contains(path))
+            .unwrap_or(false)
+    }
+
     pub(super) fn open(&self, bytes: Vec<u8>) -> Result<PdfDocumentInfo, String> {
+        self.open_with_source(bytes, None)
+    }
+
+    /// Opens the file at `path`, remembering it as the place a save writes back
+    /// to.
+    pub(super) fn open_from_path(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
+        // Sized before it is read: `open_with_source` checks the byte count too,
+        // but only after `fs::read` has already pulled an arbitrarily large file
+        // into memory.
+        let metadata = fs::metadata(&path)
+            .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+
+        if !metadata.is_file() {
+            return Err(format!("{} is not a file", path.display()));
+        }
+
+        if metadata.len() > MAX_PDF_BYTES as u64 {
+            return Err(size_limit_error());
+        }
+
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+
+        self.open_with_source(bytes, Some(path))
+    }
+
+    fn open_with_source(
+        &self,
+        bytes: Vec<u8>,
+        source_path: Option<PathBuf>,
+    ) -> Result<PdfDocumentInfo, String> {
         if bytes.is_empty() {
             return Err("PDF file is empty".into());
         }
 
         if bytes.len() > MAX_PDF_BYTES {
-            return Err(format!(
-                "PDF file exceeds the {} MiB limit",
-                MAX_PDF_BYTES / 1024 / 1024
-            ));
+            return Err(size_limit_error());
         }
 
         // Before PDFium is touched, not just around the insert: reading the new
@@ -125,12 +195,17 @@ impl PdfiumEngine {
         let num_pages = document.pages().len();
         let outline = collect_bookmark_siblings(document.bookmarks().root());
         let id = self.next_document_id.fetch_add(1, Ordering::Relaxed);
+        let path = source_path
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned());
 
         documents.insert(
             id,
             OpenDocument {
                 added: HashMap::new(),
                 document,
+                source_path,
+                removed_any: false,
             },
         );
 
@@ -139,6 +214,7 @@ impl PdfiumEngine {
             num_pages,
             pages,
             outline,
+            path,
         })
     }
 
@@ -930,16 +1006,63 @@ impl PdfiumEngine {
         if let Some(added) = entry.added.get_mut(&page_number) {
             *added -= 1;
         }
+        entry.removed_any = true;
 
         Ok(())
     }
 
-    /// Writes the document, annotations and all, to `path`.
-    ///
-    /// Through a temporary file in the destination's own directory, then a
-    /// rename: a save interrupted half-written would otherwise leave the reader
-    /// with neither the document they had nor the one they asked for. Same
-    /// directory keeps the rename on one filesystem, where it is atomic.
+    /// Writes the document back over the file it was opened from.
+    pub(super) fn save(&self, document_id: u64) -> Result<(), String> {
+        let mut documents = self
+            .documents
+            .lock()
+            .map_err(|_| "PDFium document store is unavailable".to_string())?;
+        let entry = documents
+            .get_mut(&document_id)
+            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let path = entry.source_path.clone().ok_or_else(|| {
+            "this document was opened from bytes, so there is no file to save over".to_string()
+        })?;
+
+        self.write_document(entry, &path)
+    }
+
+    /// Writes the document to `path`, and — for a document that had no source —
+    /// adopts `path` as one, making a byte-opened document's export a true
+    /// save-as. Reports whether the write landed on the source path, which is
+    /// what tells the frontend whether the file now matches the history.
+    pub(super) fn export_to(&self, document_id: u64, path: &Path) -> Result<ExportOutcome, String> {
+        let mut documents = self
+            .documents
+            .lock()
+            .map_err(|_| "PDFium document store is unavailable".to_string())?;
+        let entry = documents
+            .get_mut(&document_id)
+            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+
+        self.write_document(entry, path)?;
+
+        // Compared verbatim rather than canonicalized: both paths came out of
+        // the OS's own dialogs, and mistaking a symlinked twin for a stranger
+        // only leaves the history dirty — the safe direction.
+        let saved_to_source = match &entry.source_path {
+            Some(source) => source.as_path() == path,
+            None => {
+                entry.source_path = Some(path.to_path_buf());
+                true
+            }
+        };
+
+        Ok(ExportOutcome {
+            path: path.to_string_lossy().into_owned(),
+            saved_to_source,
+        })
+    }
+
+    /// Writes the document, annotations and all, to `path`. Test-only since the
+    /// dialogs moved into the commands: the app's two exits are `save` and
+    /// `export_to`, and this is the bare write they share.
+    #[cfg(test)]
     pub(super) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
         let mut documents = self
             .documents
@@ -948,6 +1071,55 @@ impl PdfiumEngine {
         let entry = documents
             .get_mut(&document_id)
             .ok_or_else(|| "PDF document is no longer open".to_string())?;
+
+        self.write_document(entry, path)
+    }
+
+    /// Reloads the document off its own saved bytes when this session has
+    /// deleted an annotation, dropping whatever the deleted ones left behind —
+    /// PDFium collects unreferenced objects on a load, and only there.
+    ///
+    /// Costs a whole extra copy of the document in memory while it runs, which
+    /// is why it waits for a deletion instead of riding every save. The `added`
+    /// counts survive the swap: a page's annotation order is its `/Annots`
+    /// order, which a save and reload preserve, so the session's marks are
+    /// still the tail an undo may take back.
+    fn collect_orphans(&self, entry: &mut OpenDocument) -> Result<(), String> {
+        if !entry.removed_any {
+            return Ok(());
+        }
+
+        let bytes = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?;
+
+        entry.document = self
+            .pdfium
+            .load_pdf_from_byte_vec(bytes, None)
+            .map_err(|error| format!("PDFium could not reload the document: {error}"))?;
+        entry.removed_any = false;
+
+        Ok(())
+    }
+
+    /// The one write path under every save and export, so their files come out
+    /// identical — collected of orphans, and landed whole.
+    ///
+    /// Through a temporary file in the destination's own directory, then a
+    /// rename: a save interrupted half-written would otherwise leave the reader
+    /// with neither the document they had nor the one they asked for. Same
+    /// directory keeps the rename on one filesystem, where it is atomic. The
+    /// replacement cannot keep everything about the original — its owner and
+    /// its hard links are beyond an unprivileged process — but its mode is
+    /// carried over, and a symlinked destination is resolved so the save lands
+    /// in the file the link points at rather than replacing the link.
+    fn write_document(&self, entry: &mut OpenDocument, path: &Path) -> Result<(), String> {
+        self.collect_orphans(entry)?;
+
+        // A fresh export has nothing to canonicalize; the given path is it.
+        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let path = path.as_path();
         // A bare name has `""` for a parent, which would put the temporary file
         // in whatever directory the process started from — losing the atomic
         // rename, which needs one filesystem.
@@ -965,9 +1137,11 @@ impl PdfiumEngine {
             .map_err(|error| format!("could not name a temporary file: {error}"))?;
         let temporary = directory.join(format!(
             ".{}.{suffix:016x}.tfolio-save",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("document.pdf"),
+            bounded_file_name(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("document.pdf")
+            ),
         ));
 
         let mut file = fs::OpenOptions::new()
@@ -983,9 +1157,24 @@ impl PdfiumEngine {
         let saved = entry
             .document
             .save_to_writer(&mut file)
-            .map_err(|error| format!("PDFium could not write the document: {error}"));
+            .map_err(|error| format!("PDFium could not write the document: {error}"))
+            // The rename orders the replacement; only a flush makes it real. A
+            // crash between an unsynced rename and the writeback would leave
+            // the name pointing at a hollow file — exactly the loss the
+            // temporary file exists to prevent.
+            .and_then(|()| {
+                file.sync_all()
+                    .map_err(|error| format!("could not flush the document: {error}"))
+            });
 
         drop(file);
+
+        // The temporary was born with default permissions; the file it is about
+        // to become may be tighter (a 0600 document must not come back 0644).
+        // Best effort — a failure here still saves, with default permissions.
+        if let Ok(metadata) = fs::metadata(path) {
+            let _ = fs::set_permissions(&temporary, metadata.permissions());
+        }
 
         let written = saved.and_then(|()| {
             fs::rename(&temporary, path)
@@ -995,6 +1184,10 @@ impl PdfiumEngine {
         if written.is_err() {
             // Hidden, so one left behind is one the reader would never find.
             let _ = fs::remove_file(&temporary);
+        } else if let Ok(handle) = fs::File::open(directory) {
+            // The rename itself lives in the directory; flush that too, best
+            // effort, so the replacement survives a crash.
+            let _ = handle.sync_all();
         }
 
         written
@@ -1008,6 +1201,26 @@ impl PdfiumEngine {
 
         Ok(())
     }
+}
+
+/// At most 200 bytes of `name`, cut on a character boundary: the temporary
+/// file adds a dot, sixteen hex digits, and `.tfolio-save` around it, and the
+/// whole thing has to stay under the 255-byte NAME_MAX of the usual
+/// filesystems.
+fn bounded_file_name(name: &str) -> &str {
+    const BUDGET: usize = 200;
+
+    if name.len() <= BUDGET {
+        return name;
+    }
+
+    let mut end = BUDGET;
+
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &name[..end]
 }
 
 fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOutlineItem> {
@@ -1118,6 +1331,7 @@ mod tests {
             // resolve a bundled resource through.
             cjk_font_path: Some(crate::pdfium::font::bundled_cjk_font_path()),
             cjk_font: OnceLock::new(),
+            approved_paths: Mutex::new(HashSet::new()),
         })
     }
 
@@ -1784,6 +1998,231 @@ mod tests {
         fs::remove_dir_all(&directory).ok();
     }
 
+    /// A directory of its own for a test that touches real files, so parallel
+    /// tests cannot see each other's.
+    fn scratch_directory(label: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "tfolio-{label}-{:016x}",
+            getrandom::u64().expect("the system should have randomness")
+        ));
+
+        fs::create_dir_all(&directory).expect("the temporary directory should be creatable");
+        directory
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn open_by_path_then_save_round_trips() {
+        let engine = test_engine();
+        let directory = scratch_directory("save-path");
+        let path = directory.join("source.pdf");
+        fs::write(&path, text_pdf()).expect("the fixture should be writable");
+
+        let document = engine
+            .open_from_path(path.clone())
+            .expect("PDFium should open the PDF by path");
+        assert_eq!(
+            document.path.as_deref(),
+            path.to_str(),
+            "a document opened by path should report that path"
+        );
+
+        // The quad (45,40)-(155,70) at two pixels per point, as the highlight
+        // placement test draws it.
+        let band = (90, 80, 310, 140);
+        engine
+            .add_highlight(
+                document.id,
+                1,
+                &[quad(45.0, 40.0, 110.0, 30.0)],
+                "#ffd54a",
+                0.4,
+            )
+            .expect("PDFium should create the highlight");
+        engine
+            .save(document.id)
+            .expect("the document should save over its source");
+
+        let left: Vec<_> = fs::read_dir(&directory)
+            .expect("the destination directory should be readable")
+            .map(|entry| entry.expect("the entry should be readable").path())
+            .collect();
+        assert_eq!(
+            left,
+            vec![path.clone()],
+            "a save should leave the document and nothing else"
+        );
+
+        // Ink, not annotation counts: the reopened file has to *draw* the
+        // highlight where it was put, against a clean copy as the baseline.
+        let clean = engine
+            .open(text_pdf())
+            .expect("PDFium should open the clean copy");
+        let (clean_inside, clean_outside) = ink_inside_and_outside(engine, clean.id, 1, band);
+        let reopened = engine
+            .open(fs::read(&path).expect("the saved document should be readable"))
+            .expect("PDFium should reopen the saved document");
+        let (inside, outside) = ink_inside_and_outside(engine, reopened.id, 1, band);
+
+        assert!(
+            inside > clean_inside,
+            "the saved highlight should put ink inside its band"
+        );
+        assert_eq!(
+            outside, clean_outside,
+            "the saved highlight should change nothing outside its band"
+        );
+
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn refuses_to_save_a_document_opened_from_bytes() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+
+        assert!(document.path.is_none(), "bytes carry no path to report");
+
+        let error = engine
+            .save(document.id)
+            .expect_err("a document with no source has nothing to save over");
+        assert!(
+            error.contains("no file to save over"),
+            "the refusal should say why: {error}"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn export_adopts_the_destination_of_a_byte_opened_document() {
+        let engine = test_engine();
+        let directory = scratch_directory("adopt");
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        let path = directory.join("adopted.pdf");
+
+        let outcome = engine
+            .export_to(document.id, &path)
+            .expect("the export should write the document");
+        assert!(
+            outcome.saved_to_source,
+            "a byte-opened document's first export is its save-as"
+        );
+
+        // The adoption has to hold: a plain save now has somewhere to go.
+        engine
+            .save(document.id)
+            .expect("the adopted path should take a save");
+
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn export_beside_the_source_is_not_a_save() {
+        let engine = test_engine();
+        let directory = scratch_directory("beside");
+        let source = directory.join("source.pdf");
+        fs::write(&source, minimal_pdf()).expect("the fixture should be writable");
+
+        let document = engine
+            .open_from_path(source.clone())
+            .expect("PDFium should open the PDF by path");
+
+        let copy = engine
+            .export_to(document.id, &directory.join("copy.pdf"))
+            .expect("the export should write the copy");
+        assert!(
+            !copy.saved_to_source,
+            "a copy elsewhere leaves the source behind the history"
+        );
+
+        // …while exporting *onto* the source is exactly a save, whatever the
+        // button was called.
+        let onto_source = engine
+            .export_to(document.id, &source)
+            .expect("the export should overwrite the source");
+        assert!(onto_source.saved_to_source);
+
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    // Deleting an annotation leaves its resources — for a Chinese note, a whole
+    // font subset — in the document, and a straight save writes them all out:
+    // measured at 21 KB after five undo/redo rounds against 4 KB clean. The
+    // save path reloads to collect them, and this is the byte-count that
+    // proves it still does.
+    #[test]
+    #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+    fn a_save_after_deletions_collects_what_they_left_behind() {
+        let engine = test_engine();
+
+        // The baseline: the same note added once and never deleted.
+        let clean = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        engine
+            .add_text_note(
+                clean.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "你好",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+        let baseline = saved_size(engine, clean.id);
+
+        // Five undo/redo rounds, each stranding a fresh subset in the document.
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        for _ in 0..=5 {
+            engine
+                .add_text_note(
+                    document.id,
+                    1,
+                    &note_origin(20.0, 100.0),
+                    "你好",
+                    &text_note_style(24.0),
+                )
+                .expect("PDFium should add the note");
+            engine
+                .delete_last_annotation(document.id, 1)
+                .expect("the session's own note should be removable");
+        }
+        engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "你好",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+
+        let collected = saved_size(engine, document.id);
+        assert!(
+            collected < baseline + 1_500,
+            "five undo/redo rounds saved at {collected} bytes against a clean \
+             {baseline}; deleted annotations are not being collected"
+        );
+
+        // The reload the collection rides on must not surrender the undo guard:
+        // the session's note is still the tail of the page's annotations…
+        engine
+            .delete_last_annotation(document.id, 1)
+            .expect("the session's note should survive the collecting save");
+        // …and past the session's own marks it still refuses.
+        assert!(
+            engine.delete_last_annotation(document.id, 1).is_err(),
+            "the guard should still refuse the document's own annotations"
+        );
+    }
+
     // A page's `/Rotate` decides which edge the y-axis flips against, so this is
     // where a wrong flip shows up.
     #[test]
@@ -2065,13 +2504,7 @@ mod tests {
     /// The bytes a document takes up once saved, which is how the tests below
     /// tell an embedded font from a subset of one.
     fn saved_size(engine: &PdfiumEngine, document_id: u64) -> u64 {
-        let directory = std::env::temp_dir().join(format!(
-            "tfolio-note-{:016x}",
-            getrandom::u64().expect("the system should have randomness")
-        ));
-
-        fs::create_dir_all(&directory).expect("the temporary directory should be creatable");
-
+        let directory = scratch_directory("note");
         let destination = directory.join("note.pdf");
 
         engine
@@ -2356,13 +2789,7 @@ mod tests {
             .expect("PDFium should add the note");
 
         let drawn = rendered_darkness(engine, document.id, 1);
-        let directory = std::env::temp_dir().join(format!(
-            "tfolio-note-save-{:016x}",
-            getrandom::u64().expect("the system should have randomness")
-        ));
-
-        fs::create_dir_all(&directory).expect("the temporary directory should be creatable");
-
+        let directory = scratch_directory("note-save");
         let destination = directory.join("note.pdf");
 
         engine

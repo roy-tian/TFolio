@@ -1,13 +1,7 @@
-import {
-  type ChangeEvent,
-  type DragEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { save } from "@tauri-apps/plugin-dialog"
+import { getCurrentWebview } from "@tauri-apps/api/webview"
+import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
   Bookmark,
   FileUp,
@@ -18,6 +12,16 @@ import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { SettingsDialog } from "@/components/SettingsDialog"
@@ -44,10 +48,12 @@ import {
   storeTextNoteStyle,
 } from "@/lib/annotationStyles"
 import type { HexColor, RectStyle, TextNoteStyle } from "@/lib/annotations"
+import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
-  isPdfFile,
-  MAX_PDF_BYTES,
+  fileNameFromPath,
+  isPdfPath,
   type PdfDocumentInfo,
+  type PdfExportOutcome,
 } from "@/lib/pdf"
 import {
   defaultViewMode,
@@ -64,7 +70,11 @@ type ViewerError =
   | "fileTooLarge"
   | "invalidFile"
   | "openFailed"
+  | "saveFailed"
   | null
+
+/** What is waiting on the reader's leave to discard unsaved marks. */
+type PendingAction = { kind: "open"; path: string } | { kind: "close" }
 
 function closePdf(documentId: number) {
   void invoke("close_pdf", { documentId }).catch(() => undefined)
@@ -96,10 +106,12 @@ export default function App() {
   const [textNoteStyle, setTextNoteStyle] = useState<TextNoteStyle>(
     () => readStoredTextNoteStyle() ?? defaultTextNoteStyle,
   )
+  // A drop, a picked file, or a window close waiting for the reader to confirm
+  // that it may discard unsaved marks; null when nothing is pending.
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(null)
   const requestIdRef = useRef(0)
-  const dragDepthRef = useRef(0)
   const pendingScrollPageRef = useRef<number | null>(null)
 
   // The thumbnail grid gives every cell the same width whatever the page, so it
@@ -128,6 +140,24 @@ export default function App() {
     documentId: pdfDocument?.id,
     onAnnotateError: useCallback(() => setViewerError("annotateFailed"), []),
     onExportError: useCallback(() => setViewerError("exportFailed"), []),
+    // A byte-opened document adopts its first export's destination as its
+    // source, which is when `path` appears and the save key comes alive.
+    onExported: useCallback((documentId: number, outcome: PdfExportOutcome) => {
+      if (!outcome.savedToSource) {
+        return
+      }
+
+      const current = documentRef.current
+
+      if (!current || current.id !== documentId || current.path === outcome.path) {
+        return
+      }
+
+      const next = { ...current, path: outcome.path }
+      documentRef.current = next
+      setPdfDocument(next)
+    }, []),
+    onSaveError: useCallback(() => setViewerError("saveFailed"), []),
     // A toast that outlives what it describes would sit over every mark the
     // reader went on to make successfully.
     onSuccess: useCallback(() => setViewerError(null), []),
@@ -179,41 +209,29 @@ export default function App() {
     storeTextNoteStyle(style)
   }, [])
 
+  // The destination dialog is the backend's own, so this only says *that* an
+  // export happens; `onExportError` reports a failed write.
   const exportPdf = useCallback(async () => {
     if (!pdfDocument) {
       return
     }
 
-    try {
-      const path = await save({
-        defaultPath: t("annotate.exportDefaultName"),
-        filters: [{ extensions: ["pdf"], name: t("annotate.exportFilter") }],
-      })
-
-      if (path) {
-        await annotations.exportTo(path)
-      }
-    } catch {
-      // Only the picker itself; `exportTo` reports a failed write on its own.
-      setViewerError("exportFailed")
-    }
+    await annotations.exportCopy(
+      t("annotate.exportDefaultName"),
+      t("annotate.exportFilter"),
+    )
   }, [annotations, pdfDocument, t])
 
-  const loadPdf = useCallback(async (file: File) => {
-    if (!isPdfFile(file)) {
+  const loadPdfFromPath = useCallback(async (path: string) => {
+    if (!isPdfPath(path)) {
       setViewerError("invalidFile")
-      return
-    }
-
-    if (file.size > MAX_PDF_BYTES) {
-      setViewerError("fileTooLarge")
       return
     }
 
     const requestId = ++requestIdRef.current
     setViewerError(null)
     setIsLoading(true)
-    setFileName(file.name)
+    setFileName(fileNameFromPath(path))
     setCurrentPage(0)
     setRotation(0)
     resetZoomToDefault()
@@ -230,13 +248,10 @@ export default function App() {
     }
 
     try {
-      const data = new Uint8Array(await file.arrayBuffer())
-
-      if (requestId !== requestIdRef.current) {
-        return
-      }
-
-      const nextDocument = await invoke<PdfDocumentInfo>("open_pdf", data)
+      const openDocument = e2eOverride("openPdfFromPath")
+      const nextDocument = openDocument
+        ? ((await openDocument(path)) as PdfDocumentInfo)
+        : await invoke<PdfDocumentInfo>("open_pdf_from_path", { path })
 
       if (requestId !== requestIdRef.current) {
         closePdf(nextDocument.id)
@@ -246,10 +261,16 @@ export default function App() {
       documentRef.current = nextDocument
       setPdfDocument(nextDocument)
       setCurrentPage(1)
-    } catch {
+    } catch (error) {
       if (requestId === requestIdRef.current) {
         setFileName("")
-        setViewerError("openFailed")
+        // The size ceiling is the backend's now — a path says nothing about
+        // its file until the backend has looked. The substring is a contract:
+        // `size_limit_error` in `pdfium/mod.rs` is the one place the message
+        // is worded, and it stays in step with this match.
+        setViewerError(
+          String(error).includes("MiB limit") ? "fileTooLarge" : "openFailed",
+        )
       }
     } finally {
       if (requestId === requestIdRef.current) {
@@ -257,6 +278,50 @@ export default function App() {
       }
     }
   }, [resetAnnotations, resetZoomToDefault])
+
+  /**
+   * Every way in — the picker and a drop — funnels through here, so unsaved
+   * marks always get their confirmation before the document under them goes.
+   * Dirtiness is asked of the queue's own history, not the rendered state,
+   * which can lag it by a render — exactly when a just-made mark would be
+   * discarded without the question.
+   */
+  const requestOpenPath = useCallback(
+    (path: string) => {
+      if (!isPdfPath(path)) {
+        setViewerError("invalidFile")
+        return
+      }
+
+      if (documentRef.current && annotations.isDirtyNow()) {
+        setPendingAction({ kind: "open", path })
+        return
+      }
+
+      void loadPdfFromPath(path)
+    },
+    [annotations.isDirtyNow, loadPdfFromPath],
+  )
+
+  // The picker dialog is the backend's (`pick_pdf_path`), which also marks the
+  // chosen path as one `open_pdf_from_path` may act on — the WebView cannot
+  // conjure an approved path on its own.
+  const chooseFile = useCallback(async () => {
+    try {
+      const pick = e2eOverride("pickPdfPath")
+      const path = pick
+        ? await pick()
+        : await invoke<string | null>("pick_pdf_path", {
+            filterLabel: t("annotate.exportFilter"),
+          })
+
+      if (typeof path === "string") {
+        requestOpenPath(path)
+      }
+    } catch {
+      setViewerError("openFailed")
+    }
+  }, [requestOpenPath, t])
 
   useEffect(() => {
     return () => {
@@ -322,55 +387,95 @@ export default function App() {
 
   useCurrentPageTracker(viewerRef, pdfDocument?.id, viewMode, setCurrentPage)
 
-  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes("Files")) {
+  // The listener outlives every render, so it reads the latest opener through a
+  // ref rather than resubscribing to the webview each time the history moves.
+  const requestOpenPathRef = useRef(requestOpenPath)
+
+  useEffect(() => {
+    requestOpenPathRef.current = requestOpenPath
+  }, [requestOpenPath])
+
+  // Native drag-and-drop, because `dragDropEnabled` is on: Tauri consumes the
+  // OS drag itself — HTML5 `dataTransfer` never sees these files — and it is
+  // the only side of that trade that hands over real paths, which saving needs.
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "over") {
+          return
+        }
+
+        if (event.payload.type === "enter") {
+          setIsDragging(true)
+          return
+        }
+
+        setIsDragging(false)
+
+        if (event.payload.type === "drop") {
+          const path = event.payload.paths.find(isPdfPath)
+
+          if (!path) {
+            setViewerError("invalidFile")
+            return
+          }
+
+          requestOpenPathRef.current(path)
+        }
+      })
+      .then((stop) => {
+        // The effect may already be gone by the time the subscription resolves.
+        if (cancelled) {
+          stop()
+        } else {
+          unlisten = stop
+        }
+      })
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [])
+
+  // The close guard rides Tauri's close-requested event, not `beforeunload`:
+  // wry never routes a window close through beforeunload, and on a reload
+  // WebKitGTK waits for a confirm the embedder does not implement — wedging
+  // the whole WebView. Registering this listener makes closing the app's job,
+  // so the confirm dialog's close action must call `destroy()` itself. Not in
+  // the e2e build: the harness tears sessions down with unsaved marks, and a
+  // prompt nobody can answer would hang the suite.
+  useEffect(() => {
+    if (isE2eBuild) {
       return
     }
 
-    event.preventDefault()
-    dragDepthRef.current += 1
-    setIsDragging(true)
-  }
+    let cancelled = false
+    let unlisten: (() => void) | undefined
 
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (event.dataTransfer.types.includes("Files")) {
-      event.preventDefault()
-      event.dataTransfer.dropEffect = "copy"
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (documentRef.current && annotations.isDirtyNow()) {
+          event.preventDefault()
+          setPendingAction({ kind: "close" })
+        }
+      })
+      .then((stop) => {
+        if (cancelled) {
+          stop()
+        } else {
+          unlisten = stop
+        }
+      })
+
+    return () => {
+      cancelled = true
+      unlisten?.()
     }
-  }
-
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
-
-    if (dragDepthRef.current === 0) {
-      setIsDragging(false)
-    }
-  }
-
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    dragDepthRef.current = 0
-    setIsDragging(false)
-
-    const droppedFile = Array.from(event.dataTransfer.files).find(isPdfFile)
-
-    if (!droppedFile) {
-      setViewerError("invalidFile")
-      return
-    }
-
-    void loadPdf(droppedFile)
-  }
-
-  const handleFileInput = (event: ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0]
-    event.target.value = ""
-
-    if (selectedFile) {
-      void loadPdf(selectedFile)
-    }
-  }
+  }, [annotations.isDirtyNow])
 
   const scrollToPage = (
     pageNumber: number,
@@ -449,18 +554,14 @@ export default function App() {
           ? t("viewer.openFailed")
           : viewerError === "exportFailed"
             ? t("annotate.exportFailed")
-            : viewerError === "annotateFailed"
-              ? t("annotate.failed")
-              : null
+            : viewerError === "saveFailed"
+              ? t("annotate.saveFailed")
+              : viewerError === "annotateFailed"
+                ? t("annotate.failed")
+                : null
 
   return (
-    <div
-      className="h-svh overflow-hidden bg-background"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
+    <div className="h-svh overflow-hidden bg-background">
       <header className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 shadow-xs backdrop-blur">
         <div className="flex items-center gap-2 justify-self-start">
           <Toggle
@@ -549,12 +650,15 @@ export default function App() {
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
             disabled={!pdfDocument}
+            hasSourceFile={Boolean(pdfDocument?.path)}
             highlightApplies={drawingApplies}
             highlightColor={highlightColor}
+            isDirty={annotations.isDirty}
             onExport={() => void exportPdf()}
             onHighlightColorChange={changeHighlightColor}
             onRectStyleChange={changeRectStyle}
             onRedo={() => void annotations.redo()}
+            onSave={() => void annotations.save()}
             onToolChange={setActiveTool}
             onUndo={() => void annotations.undo()}
             rectApplies={drawingApplies}
@@ -601,32 +705,38 @@ export default function App() {
             />
           ) : (
             <div className="grid min-h-full place-items-center p-8">
-              <label className="group flex w-full max-w-xl cursor-pointer flex-col items-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-14 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-within:ring-3 focus-within:ring-ring/50 dark:border-zinc-700">
-                {isLoading ? (
-                  <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
-                ) : (
-                  <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
-                )}
-                <span className="text-lg font-semibold">
-                  {isLoading ? t("viewer.loading") : t("viewer.dropTitle")}
-                </span>
-                <span className="mt-2 text-sm text-muted-foreground">
-                  {fileName || t("viewer.dropDescription")}
-                </span>
-                <input
-                  accept="application/pdf,.pdf"
+              <div className="flex w-full max-w-xl flex-col items-center">
+                {/* A button to the native picker, where the file input used to
+                    be: the WebView's own picker hands over `File` objects that
+                    never carry a filesystem path, and saving needs the path. */}
+                <button
                   aria-label={t("viewer.chooseFile")}
-                  className="sr-only"
+                  className="group flex w-full cursor-pointer flex-col items-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-14 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+                  data-slot="drop-zone"
                   disabled={isLoading}
-                  onChange={handleFileInput}
-                  type="file"
-                />
+                  onClick={() => void chooseFile()}
+                  type="button"
+                >
+                  {isLoading ? (
+                    <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
+                  ) : (
+                    <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
+                  )}
+                  <span className="text-lg font-semibold">
+                    {isLoading ? t("viewer.loading") : t("viewer.dropTitle")}
+                  </span>
+                  <span className="mt-2 text-sm text-muted-foreground">
+                    {fileName || t("viewer.dropDescription")}
+                  </span>
+                </button>
+                {/* Outside the button: ARIA flattens a button's children to its
+                    name, so an alert inside would announce as nothing. */}
                 {errorMessage ? (
                   <span className="mt-4 text-sm text-destructive" role="alert">
                     {errorMessage}
                   </span>
                 ) : null}
-              </label>
+              </div>
             </div>
           )}
         </main>
@@ -670,6 +780,47 @@ export default function App() {
           {errorMessage}
         </div>
       ) : null}
+
+      <AlertDialog
+        onOpenChange={(dialogOpen) => {
+          if (!dialogOpen) {
+            setPendingAction(null)
+          }
+        }}
+        open={pendingAction !== null}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("viewer.unsavedTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAction?.kind === "close"
+                ? t("viewer.unsavedCloseDescription")
+                : t("viewer.unsavedDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("viewer.unsavedCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const action = pendingAction
+                setPendingAction(null)
+
+                if (action?.kind === "open") {
+                  void loadPdfFromPath(action.path)
+                } else if (action?.kind === "close") {
+                  // `destroy` rather than `close`: close would raise another
+                  // close-requested and land back in this dialog.
+                  void getCurrentWindow().destroy()
+                }
+              }}
+            >
+              {pendingAction?.kind === "close"
+                ? t("viewer.unsavedCloseConfirm")
+                : t("viewer.unsavedConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

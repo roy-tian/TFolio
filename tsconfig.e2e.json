@@ -3,7 +3,7 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.e2e.tsbuildinfo",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["node", "@wdio/globals/types", "@wdio/mocha-framework"],
+    "types": ["node", "@wdio/globals/types", "@wdio/mocha-framework", "vite/client"],
     // The specs reach into `src/` for the keys and helpers they drive the app
     // with, so they pull in app modules — which import each other by the alias.
     "paths": {

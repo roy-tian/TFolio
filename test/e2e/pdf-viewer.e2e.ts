@@ -3,6 +3,7 @@ import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
+import { dropZoneButton, minimalPdf, openPdfFromDisk } from "./helpers"
 
 // The zoom listener is bound natively and non-passively, so a wheel has to be
 // dispatched as a real event rather than through WebDriver's scroll action.
@@ -24,81 +25,6 @@ function wheelOverViewer(init: { ctrlKey: boolean; deltaY: number }) {
   }, init)
 }
 
-// A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
-// otherwise. Page objects take the odd ids from 3 up, each followed by its
-// (empty) contents stream.
-function minimalPdf(pageCount = 1, mediaBox = "0 0 200 300") {
-  const kids = Array.from(
-    { length: pageCount },
-    (_, index) => `${3 + index * 2} 0 R`,
-  ).join(" ")
-  const objects = [
-    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`,
-  ]
-
-  for (let index = 0; index < pageCount; index += 1) {
-    const pageId = 3 + index * 2
-
-    objects.push(
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [${mediaBox}] ` +
-        `/Contents ${pageId + 1} 0 R >>\nendobj\n`,
-      `${pageId + 1} 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n`,
-    )
-  }
-
-  const chunks = ["%PDF-1.4\n"]
-  const offsets: number[] = []
-  let byteLength = Buffer.byteLength(chunks[0], "ascii")
-
-  for (const object of objects) {
-    offsets.push(byteLength)
-    chunks.push(object)
-    byteLength += Buffer.byteLength(object, "ascii")
-  }
-
-  const xrefOffset = byteLength
-  chunks.push(`xref\n0 ${objects.length + 1}\n`)
-  chunks.push("0000000000 65535 f \n")
-
-  for (const offset of offsets) {
-    chunks.push(`${String(offset).padStart(10, "0")} 00000 n \n`)
-  }
-
-  chunks.push(
-    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
-      `startxref\n${xrefOffset}\n%%EOF\n`,
-  )
-
-  return Buffer.from(chunks.join(""), "ascii")
-}
-
-async function selectFile(name: string, type: string, contents: Uint8Array) {
-  await browser.execute(({ bytes, fileName, mimeType }) => {
-    const input = document.querySelector<HTMLInputElement>(
-      "input[type='file']",
-    )
-
-    if (!input) {
-      throw new Error("PDF file input was not found")
-    }
-
-    const file = new File([new Uint8Array(bytes)], fileName, {
-      type: mimeType,
-    })
-
-    Object.defineProperty(input, "files", {
-      configurable: true,
-      value: [file],
-    })
-    input.dispatchEvent(new Event("change", { bubbles: true }))
-  }, {
-    bytes: Array.from(contents),
-    fileName: name,
-    mimeType: type,
-  })
-}
-
 describe("TFolio PDF viewer", () => {
   before(async () => {
     await browser.execute(
@@ -110,26 +36,26 @@ describe("TFolio PDF viewer", () => {
       { language: languageStorageKey, viewMode: viewModeStorageKey },
     )
     await browser.refresh()
-    await $("input[aria-label='Choose a PDF file']").waitForExist()
+    await dropZoneButton().waitForExist()
   })
 
   it("starts with the isolated WDIO bridge available", async () => {
     const location = await browser.tauri.execute(() => window.location.href)
-    const chooseFile = await $("input[aria-label='Choose a PDF file']")
 
-    await expect(chooseFile).toExist()
+    await expect(dropZoneButton()).toExist()
+    await expect(dropZoneButton()).toHaveAttribute(
+      "aria-label",
+      "Choose a PDF file",
+    )
     expect(location).toContain("tauri")
   })
 
   it("rejects invalid input, renders a PDF, and exercises viewer controls", async () => {
-    await selectFile(
-      "not-a-pdf.txt",
-      "text/plain",
-      Buffer.from("not a PDF", "utf8"),
-    )
+    // A real file on disk whose path fails the PDF check at the boundary.
+    await openPdfFromDisk("not-a-pdf.txt", Buffer.from("not a PDF", "utf8"))
     await expect($("[role='alert']")).toHaveText("Please choose a PDF file.")
 
-    await selectFile("one-page.pdf", "application/pdf", minimalPdf())
+    await openPdfFromDisk("one-page.pdf", minimalPdf())
 
     const firstPage = await $("[data-page-number='1']")
     await firstPage.waitForDisplayed()
@@ -203,7 +129,7 @@ describe("TFolio PDF viewer", () => {
       { language: languageStorageKey, viewMode: viewModeStorageKey },
     )
     await browser.refresh()
-    await selectFile("nine-pages.pdf", "application/pdf", minimalPdf(9))
+    await openPdfFromDisk("nine-pages.pdf", minimalPdf(9))
     await $("[data-page-number='1']").waitForDisplayed()
 
     const toggle = (label: string) => $(`button[aria-label='${label}']`)
@@ -260,7 +186,7 @@ describe("TFolio PDF viewer", () => {
     // The chosen mode outlives a reload.
     await toggle("Book").click()
     await browser.refresh()
-    await $("input[aria-label='Choose a PDF file']").waitForExist()
+    await dropZoneButton().waitForExist()
     await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
   })
 
@@ -273,7 +199,7 @@ describe("TFolio PDF viewer", () => {
       { language: languageStorageKey, viewMode: viewModeStorageKey },
     )
     await browser.refresh()
-    await selectFile("two-pages.pdf", "application/pdf", minimalPdf(2))
+    await openPdfFromDisk("two-pages.pdf", minimalPdf(2))
     await $("[data-page-number='1']").waitForDisplayed()
 
     // The button showing the zoom is the one that resets it, so it doubles as
@@ -384,11 +310,7 @@ describe("TFolio PDF viewer", () => {
       { language: languageStorageKey, viewMode: viewModeStorageKey },
     )
     await browser.refresh()
-    await selectFile(
-      "landscape.pdf",
-      "application/pdf",
-      minimalPdf(40, "0 0 300 200"),
-    )
+    await openPdfFromDisk("landscape.pdf", minimalPdf(40, "0 0 300 200"))
     await $("[data-page-number='1']").waitForDisplayed()
 
     await $("button[aria-label='Thumbnails']").click()

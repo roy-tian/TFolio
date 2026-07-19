@@ -4,95 +4,13 @@ import "@wdio/tauri-service"
 import { languageStorageKey } from "../../src/i18n/config"
 import { textNoteStyleStorageKey } from "../../src/lib/annotationStyles"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
-
-// A blank one-page PDF, as the rectangle suite uses: a note is typed onto the
-// page itself, so nothing needs to be underneath it.
-function blankPdf() {
-  const objects = [
-    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
-      "/Contents 4 0 R >>\nendobj\n",
-    "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
-  ]
-  const chunks = ["%PDF-1.4\n"]
-  const offsets: number[] = []
-  let byteLength = Buffer.byteLength(chunks[0], "ascii")
-
-  for (const object of objects) {
-    offsets.push(byteLength)
-    chunks.push(object)
-    byteLength += Buffer.byteLength(object, "ascii")
-  }
-
-  const xrefOffset = byteLength
-  chunks.push(`xref\n0 ${objects.length + 1}\n`, "0000000000 65535 f \n")
-
-  for (const offset of offsets) {
-    chunks.push(`${String(offset).padStart(10, "0")} 00000 n \n`)
-  }
-
-  chunks.push(
-    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
-      `startxref\n${xrefOffset}\n%%EOF\n`,
-  )
-
-  return Buffer.from(chunks.join(""), "ascii")
-}
-
-async function selectFile(name: string, contents: Uint8Array) {
-  await browser.execute(
-    ({ bytes, fileName }) => {
-      const input = document.querySelector<HTMLInputElement>("input[type='file']")
-
-      if (!input) {
-        throw new Error("PDF file input was not found")
-      }
-
-      const file = new File([new Uint8Array(bytes)], fileName, {
-        type: "application/pdf",
-      })
-
-      Object.defineProperty(input, "files", { configurable: true, value: [file] })
-      input.dispatchEvent(new Event("change", { bubbles: true }))
-    },
-    { bytes: Array.from(contents), fileName: name },
-  )
-}
-
-/** The ink page 1 carries, off the canvas — see the rectangle suite for why. */
-function pageInk() {
-  return browser.execute(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>(
-      "[data-page-number='1'] canvas",
-    )!
-    const { data } = canvas.getContext("2d")!.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    )
-    let ink = 0
-
-    for (let index = 0; index < data.length; index += 4) {
-      ink += 765 - data[index]! - data[index + 1]! - data[index + 2]!
-    }
-
-    return ink
-  })
-}
-
-async function renderedPage() {
-  const page = await $("[data-page-number='1']")
-  await page.waitForDisplayed({ timeout: 30_000 })
-
-  const canvas = await page.$("canvas")
-  await browser.waitUntil(
-    async () => Number(await canvas.getAttribute("width")) > 200,
-    { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
-  )
-  await browser.pause(1500)
-}
+import {
+  blankPdf,
+  dropZoneButton,
+  openPdfFromDisk,
+  pageInk,
+  renderedPage,
+} from "./helpers"
 
 /** Places a note by clicking the page, the way a reader opens one. */
 async function clickOnPage(atX = 0.3, atY = 0.3) {
@@ -149,8 +67,8 @@ describe("TFolio text notes", () => {
       },
     )
     await browser.refresh()
-    await $("input[aria-label='Choose a PDF file']").waitForExist({ timeout: 30_000 })
-    await selectFile("blank.pdf", blankPdf())
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("blank.pdf", blankPdf())
     await renderedPage()
   })
 
@@ -387,8 +305,8 @@ describe("TFolio text notes", () => {
       window.localStorage.setItem(key, "zh-CN")
     }, languageStorageKey)
     await browser.refresh()
-    await $("input[aria-label='选择 PDF 文件']").waitForExist({ timeout: 30_000 })
-    await selectFile("blank.pdf", blankPdf())
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("blank.pdf", blankPdf())
     await renderedPage()
 
     const clean = await pageInk()
