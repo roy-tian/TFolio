@@ -16,15 +16,20 @@ task runner.
   - `src/index.css`: global styles and Tailwind layer configuration.
   - `src/App.tsx`, `src/main.tsx`: application entry points.
 - `src-tauri/src/`: Rust backend. `main.rs`/`lib.rs` are the entry points;
-  `pdfium.rs` holds PDF parsing and rendering logic.
+  `pdfium/` holds PDF parsing and rendering — `engine.rs` (documents and
+  annotations), `commands.rs` (the Tauri commands), `geometry.rs` (coordinates
+  and the style ranges), `font.rs` (the bundled CJK face and per-note
+  subsetting), `library.rs` (binding the PDFium runtime).
 - `src-tauri/capabilities/`: Tauri permission definitions (`default.json`).
-- `src-tauri/resources/`: bundled runtime assets, including the downloaded
-  PDFium library under `resources/pdfium/`.
+- `src-tauri/resources/`: bundled runtime assets — the downloaded PDFium
+  library under `resources/pdfium/` and the Noto Sans SC face text notes subset
+  from under `resources/fonts/`.
 - `src-tauri/icons/`: desktop and mobile application icons.
 - `src-tauri/tauri.conf.json`: main app config and CSP; `tauri.e2e.conf.json`
   overlays the test-only build.
 - `scripts/`: maintenance scripts — `download-pdfium.mjs` (fetch the pinned
-  PDFium runtime) and `version.mjs` (version sync/check).
+  PDFium runtime), `download-fonts.mjs` (fetch the pinned Noto Sans SC), and
+  `version.mjs` (version sync/check).
 - `test/e2e/`: WebdriverIO GUI end-to-end specs (`*.e2e.ts`).
 - `.github/workflows/`: GitHub Actions release automation.
 - `.agents/skills/`: the single home for every agent skill, committed so each
@@ -39,8 +44,8 @@ task runner.
   `ln -s ../../.agents/skills/<name> .claude/skills/<name>`.
 - Generated / do not commit: `dist/`, `node_modules/`, `src-tauri/target/`,
   `src-tauri/gen/`, `artifacts/`, `.temp/` (local scratch; the `run-app` skill
-  writes screenshots here), and `src-tauri/resources/pdfium/*` (kept out of git
-  except `.gitkeep`).
+  writes screenshots here), and `src-tauri/resources/pdfium/*` plus
+  `src-tauri/resources/fonts/*` (both kept out of git except `.gitkeep`).
 
 ## Build, Test, and Development Commands
 
@@ -59,6 +64,9 @@ task runner.
 - `bun run tauri:bundle`: create platform installers.
 - `bun run pdfium:download`: fetch the pinned PDFium runtime for this platform
   (runs automatically before `tauri:dev`/`build`/`bundle`).
+- `bun run fonts:download`: fetch the pinned Noto Sans SC used by text notes
+  (runs alongside `pdfium:download`). The `#[ignore]` Rust tests that write a
+  Chinese note need it, and without it they fail rather than skip.
 - `bun run version:check` / `bun run version:bump <patch|minor|major|x.y.z>`:
   verify or update the version across `package.json`, `bun.lock`, `Cargo.toml`,
   and `Cargo.lock`.

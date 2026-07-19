@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next"
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
+import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { ZoomControls } from "@/components/ZoomControls"
@@ -28,17 +29,21 @@ import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
+import { useTextNoteTool } from "@/hooks/useTextNoteTool"
 import { useZoom } from "@/hooks/useZoom"
 import {
   defaultHighlightColor,
   defaultRectStyle,
+  defaultTextNoteStyle,
   HIGHLIGHT_OPACITY,
   readStoredHighlightColor,
   readStoredRectStyle,
+  readStoredTextNoteStyle,
   storeHighlightColor,
   storeRectStyle,
+  storeTextNoteStyle,
 } from "@/lib/annotationStyles"
-import type { HexColor, RectStyle } from "@/lib/annotations"
+import type { HexColor, RectStyle, TextNoteStyle } from "@/lib/annotations"
 import {
   isPdfFile,
   MAX_PDF_BYTES,
@@ -87,6 +92,9 @@ export default function App() {
   )
   const [rectStyle, setRectStyle] = useState<RectStyle>(
     () => readStoredRectStyle() ?? defaultRectStyle,
+  )
+  const [textNoteStyle, setTextNoteStyle] = useState<TextNoteStyle>(
+    () => readStoredTextNoteStyle() ?? defaultTextNoteStyle,
   )
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(null)
@@ -146,6 +154,16 @@ export default function App() {
     viewerRef,
   })
 
+  const drawingTextNote = drawingApplies && activeTool === "textNote"
+  const textNote = useTextNoteTool({
+    active: Boolean(pdfDocument) && drawingTextNote,
+    onCommit: annotations.commit,
+    pages: pdfDocument?.pages ?? [],
+    rotation,
+    style: textNoteStyle,
+    viewerRef,
+  })
+
   const changeHighlightColor = useCallback((color: HexColor) => {
     setHighlightColor(color)
     storeHighlightColor(color)
@@ -154,6 +172,11 @@ export default function App() {
   const changeRectStyle = useCallback((style: RectStyle) => {
     setRectStyle(style)
     storeRectStyle(style)
+  }, [])
+
+  const changeTextNoteStyle = useCallback((style: TextNoteStyle) => {
+    setTextNoteStyle(style)
+    storeTextNoteStyle(style)
   }, [])
 
   const exportPdf = useCallback(async () => {
@@ -536,6 +559,7 @@ export default function App() {
             onUndo={() => void annotations.undo()}
             rectApplies={drawingApplies}
             rectStyle={rectStyle}
+            textNoteApplies={drawingApplies}
           />
           <SettingsDialog />
         </div>
@@ -556,6 +580,7 @@ export default function App() {
             // the toggle that would turn it back off, so a crosshair left over
             // it would promise a drag that does nothing.
             drawingRect && "cursor-crosshair",
+            drawingTextNote && "cursor-text",
           )}
           ref={viewerRef}
         >
@@ -606,6 +631,24 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Outside the viewer's own scroll box, in the screen space it positions
+          itself against — inside, it would scroll away from the page it belongs
+          to and turn with the page it sits on. */}
+      {textNote.draft && pdfDocument?.pages[textNote.draft.pageNumber - 1] ? (
+        <TextNoteEditor
+          draft={textNote.draft}
+          editorRef={textNote.editorRef}
+          onCancel={textNote.cancel}
+          onCommit={textNote.commit}
+          onStyleChange={changeTextNoteStyle}
+          onTextChange={textNote.setText}
+          page={pdfDocument.pages[textNote.draft.pageNumber - 1]!}
+          rotation={rotation}
+          style={textNoteStyle}
+          viewerRef={viewerRef}
+        />
+      ) : null}
 
       {isDragging ? (
         <div className="pointer-events-none fixed inset-3 top-15 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm">

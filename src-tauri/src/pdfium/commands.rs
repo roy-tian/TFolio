@@ -5,7 +5,10 @@ use tauri::{
     State,
 };
 
-use super::{PagePointsRect, PdfDocumentInfo, PdfTextSpan, PdfiumState, RectStyle, MAX_PDF_BYTES};
+use super::{
+    PagePoint, PagePointsRect, PdfDocumentInfo, PdfTextSpan, PdfiumState, RectStyle, TextNoteStyle,
+    MAX_PDF_BYTES,
+};
 
 #[tauri::command]
 pub async fn open_pdf(
@@ -111,6 +114,24 @@ pub async fn add_pdf_rect_annotation(
     })
     .await
     .map_err(|error| format!("PDFium rectangle task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn add_pdf_text_note_annotation(
+    document_id: u64,
+    page_number: i32,
+    origin: PagePoint,
+    text: String,
+    style: TextNoteStyle,
+    state: State<'_, PdfiumState>,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.add_text_note(document_id, page_number, &origin, &text, &style)
+    })
+    .await
+    .map_err(|error| format!("PDFium note task failed: {error}"))?
 }
 
 #[tauri::command]

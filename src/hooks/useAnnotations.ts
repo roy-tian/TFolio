@@ -45,6 +45,16 @@ async function applyCommand(documentId: number, command: AnnotationCommand) {
         style: command.style,
       })
       return
+    case "textNote":
+      // One page and one annotation, as a rectangle is.
+      await invoke("add_pdf_text_note_annotation", {
+        documentId,
+        origin: command.origin,
+        pageNumber: command.pageNumber,
+        style: command.style,
+        text: command.text,
+      })
+      return
   }
 }
 

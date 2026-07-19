@@ -87,6 +87,13 @@ jobs:
       - name: Download PDFium runtime
         run: bun run pdfium:download --target ${{ matrix.pdfium_target }}
 
+      # tauri-action drives the Tauri CLI itself rather than `bun run
+      # tauri:bundle`, so the `pretauri:*` hooks never fire here. Both runtime
+      # assets have to be fetched explicitly or the published bundles ship
+      # without them.
+      - name: Download the bundled CJK font
+        run: bun run fonts:download
+
       - name: Build and publish Tauri bundles
         uses: tauri-apps/tauri-action@v1
         env:

@@ -10,6 +10,10 @@ src-tauri/target/
 src-tauri/resources/pdfium/*
 !src-tauri/resources/pdfium/.gitkeep
 
+# Downloaded CJK font for text notes
+src-tauri/resources/fonts/*
+!src-tauri/resources/fonts/.gitkeep
+
 # Tauri-generated capability schemas
 src-tauri/gen/schemas/
 

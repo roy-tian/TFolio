@@ -31,9 +31,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "copyright": "Copyright © 2026 Roy Tian",
+    "copyright": "Copyright \u00a9 2026 Roy Tian",
     "resources": {
-      "resources/pdfium/": "pdfium/"
+      "resources/pdfium/": "pdfium/",
+      "resources/fonts/": "fonts/"
     }
   }
 }

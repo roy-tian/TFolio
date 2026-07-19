@@ -1,8 +1,7 @@
-import { useId } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
-import { Slider } from "@/components/ui/slider"
+import { SliderRow } from "@/components/SliderRow"
 import type { RectStyle } from "@/lib/annotations"
 import {
   RECT_MAX_CORNER_RADIUS,
@@ -16,52 +15,6 @@ import {
 type RectStylePopoverProps = {
   onChange: (style: RectStyle) => void
   style: RectStyle
-}
-
-function SliderRow({
-  disabled,
-  display,
-  label,
-  max,
-  min,
-  onChange,
-  step,
-  value,
-}: {
-  disabled?: boolean
-  display: string
-  label: string
-  max: number
-  min: number
-  onChange: (value: number) => void
-  step: number
-  value: number
-}) {
-  const labelId = useId()
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium" id={labelId}>
-          {label}
-        </span>
-        <span className="text-xs tabular-nums text-muted-foreground">{display}</span>
-      </div>
-      {/* An array of one: the slider is single-thumb, and a scalar value makes
-          its wrapper fall back to a two-thumb `[min, max]` range. */}
-      <Slider
-        aria-labelledby={labelId}
-        disabled={disabled}
-        max={max}
-        min={min}
-        onValueChange={(next) =>
-          onChange(Array.isArray(next) ? (next[0] ?? min) : (next as number))
-        }
-        step={step}
-        value={[value]}
-      />
-    </div>
-  )
 }
 
 /**

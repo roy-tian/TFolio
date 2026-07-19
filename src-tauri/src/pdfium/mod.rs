@@ -1,13 +1,15 @@
 mod commands;
 mod engine;
+mod font;
 mod geometry;
 mod library;
 
 use serde::{Deserialize, Serialize};
 
 pub use commands::{
-    add_pdf_highlight_annotation, add_pdf_rect_annotation, close_pdf, delete_last_pdf_annotation,
-    export_pdf, extract_pdf_page_text, open_pdf, render_pdf_page, render_pdf_page_thumbnail,
+    add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_text_note_annotation, close_pdf,
+    delete_last_pdf_annotation, export_pdf, extract_pdf_page_text, open_pdf, render_pdf_page,
+    render_pdf_page_thumbnail,
 };
 pub use engine::PdfiumState;
 
@@ -70,6 +72,31 @@ pub struct RectStyle {
     /// shorter side so the corners cannot cross and turn the path inside out.
     corner_radius: f32,
     stroke_width: f32,
+}
+
+/// A point in the same space `PagePointsRect` uses: *unrotated* page points with
+/// a top-left origin. A note is placed by its top-left corner, where the reader
+/// clicked, rather than by the text baseline PDFium draws from.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PagePoint {
+    left: f32,
+    top: f32,
+}
+
+/// How a text note is drawn. `font_family` picks one of the standard 14 and is
+/// ignored for text that needs the bundled CJK font, which is the only face
+/// available once a note leaves Latin-1 — the frontend disables the control to
+/// match rather than letting a reader pick a face they will not get.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextNoteStyle {
+    /// `"sans"`, `"serif"` or `"mono"`.
+    font_family: String,
+    /// Point size, as a PDF measures type.
+    font_size: f32,
+    color: String,
+    opacity: f32,
 }
 
 #[derive(Serialize)]

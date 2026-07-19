@@ -2,10 +2,10 @@ use std::{
     collections::HashMap,
     fs,
     io::Cursor,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
 };
 
@@ -14,15 +14,18 @@ use pdfium_render::prelude::*;
 use tauri::AppHandle;
 
 use super::{
+    font::{cjk_font_path, needs_embedded_font, standard_face, subset_for, StandardFace},
     geometry::{
         annotation_color, clamp_corner_radius, page_rect_to_pdfium, page_rotation_degrees,
         quad_points_from_rect, rect_path, union_rect, unrotated_page_height, within_page_range,
-        RectPathSegment, MAX_RECT_CORNER_RADIUS, MAX_RECT_STROKE_WIDTH, MIN_RECT_OPACITY,
-        MIN_RECT_STROKE_WIDTH,
+        RectPathSegment, MAX_RECT_CORNER_RADIUS, MAX_RECT_STROKE_WIDTH, MAX_TEXT_NOTE_CHARS,
+        MAX_TEXT_NOTE_FONT_SIZE, MAX_TEXT_NOTE_LINES, MIN_RECT_OPACITY, MIN_RECT_STROKE_WIDTH,
+        MIN_TEXT_NOTE_FONT_SIZE, MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN,
+        TEXT_NOTE_LINE_HEIGHT,
     },
     library::bind_pdfium,
-    PagePointsRect, PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfTextSpan, RectStyle,
-    MAX_PDF_BYTES,
+    PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfTextSpan,
+    RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -58,6 +61,13 @@ pub(super) struct PdfiumEngine {
     /// which touches every page before there is anything to insert here.
     documents: Mutex<HashMap<u64, OpenDocument>>,
     next_document_id: AtomicU64,
+    /// Where the bundled CJK font is, resolved at startup because that is the
+    /// only point an `AppHandle` reaches this module.
+    cjk_font_path: Option<PathBuf>,
+    /// The font itself, read on the first note that needs it. ~17 MB that most
+    /// sessions never touch, so it is not read at startup — and once read it is
+    /// kept, because every CJK note subsets it again.
+    cjk_font: OnceLock<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -72,6 +82,10 @@ impl PdfiumState {
             pdfium,
             documents: Mutex::new(HashMap::new()),
             next_document_id: AtomicU64::new(1),
+            // Absent is not fatal here: it only fails the first note that needs
+            // it, so a missing font cannot stop the app from opening PDFs.
+            cjk_font_path: cjk_font_path(app),
+            cjk_font: OnceLock::new(),
         })))
     }
 }
@@ -577,6 +591,293 @@ impl PdfiumEngine {
         Ok(())
     }
 
+    /// The bundled CJK font's bytes, read once and kept.
+    fn cjk_font_bytes(&self) -> Result<&[u8], String> {
+        if let Some(bytes) = self.cjk_font.get() {
+            return Ok(bytes);
+        }
+
+        let path = self.cjk_font_path.as_ref().ok_or_else(|| {
+            "the bundled font is missing; run `bun run fonts:download`".to_string()
+        })?;
+        let bytes = fs::read(path)
+            .map_err(|error| format!("the bundled font could not be read: {error}"))?;
+
+        // Two notes can reach here at once and both read the file; whichever
+        // stores first wins and the other's copy is dropped. Both then see the
+        // same bytes, which is all that matters.
+        let _ = self.cjk_font.set(bytes);
+
+        self.cjk_font
+            .get()
+            .map(Vec::as_slice)
+            .ok_or_else(|| "the bundled font could not be cached".to_string())
+    }
+
+    /// Writes `text` at `origin` as a stamp annotation carrying one text object
+    /// per line.
+    ///
+    /// A stamp rather than the FreeText the format has for exactly this, because
+    /// PDFium generates a FreeText's appearance itself and 0.9.3 exposes neither
+    /// a font size nor a face on one — a note would come out at whatever size
+    /// PDFium chose, in a font that cannot draw Chinese. Drawing the text into a
+    /// stamp puts both under this app's control, at the cost that other readers
+    /// see a stamp rather than an editable note, which is the same trade the
+    /// rectangle tool already makes.
+    ///
+    /// The text does not wrap. A note breaks where the reader pressed return and
+    /// nowhere else: wrapping would mean measuring runs against a width this
+    /// tool does not have, and a note is a margin scribble rather than a column
+    /// of prose.
+    pub(super) fn add_text_note(
+        &self,
+        document_id: u64,
+        page_number: i32,
+        origin: &PagePoint,
+        text: &str,
+        style: &TextNoteStyle,
+    ) -> Result<(), String> {
+        if !within_page_range(origin.left) || !within_page_range(origin.top) {
+            return Err("a note's coordinates are out of range".into());
+        }
+
+        // As with a rectangle's style, a value outside the controls' own ranges
+        // is refused rather than clamped: it is not one the reader could have
+        // chosen, and clamping would draw a note in a size they never picked.
+        if !(MIN_TEXT_NOTE_FONT_SIZE..=MAX_TEXT_NOTE_FONT_SIZE).contains(&style.font_size)
+            || !(MIN_TEXT_NOTE_OPACITY..=1.0).contains(&style.opacity)
+        {
+            return Err("a note's style values are out of range".into());
+        }
+
+        // Resolved here rather than where the font is chosen below, so an
+        // unknown family is refused before a ~17 MB face is read and subset —
+        // and so it is refused for a Chinese note too, which never reaches the
+        // standard fonts and so never used to be checked at all.
+        let face = standard_face(&style.font_family)
+            .ok_or_else(|| "a note's font family is not one this app offers".to_string())?;
+        let color = annotation_color(&style.color, style.opacity)?;
+
+        // Invisible is a failure, not a note: a fully transparent one would be
+        // stored, saved, and recorded as an edit while drawing nothing.
+        if color.alpha() == 0 {
+            return Err("a note needs a visible colour".into());
+        }
+
+        // Blank is not a note either. Checked before the length ceiling so a
+        // whitespace-only note fails as empty rather than as too long.
+        if text.trim().is_empty() {
+            return Err("a note needs some text".into());
+        }
+
+        if text.chars().count() > MAX_TEXT_NOTE_CHARS {
+            return Err("a note is too long".into());
+        }
+
+        // `\r\n` and `\r` both count as one break, so a note pasted from another
+        // platform does not gain a blank line between every line.
+        let lines: Vec<&str> = text
+            .split('\n')
+            .map(|line| line.trim_end_matches('\r'))
+            .collect();
+
+        if lines.len() > MAX_TEXT_NOTE_LINES {
+            return Err("a note has too many lines".into());
+        }
+
+        // Subset before the lock: reading and cutting down a ~17 MB font is the
+        // slow part of this, and it needs no document, so renders should not
+        // queue behind it.
+        let embedded = if needs_embedded_font(text) {
+            Some(subset_for(self.cjk_font_bytes()?, text)?)
+        } else {
+            None
+        };
+
+        let mut documents = self
+            .documents
+            .lock()
+            .map_err(|_| "PDFium document store is unavailable".to_string())?;
+        let entry = documents
+            .get_mut(&document_id)
+            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+
+        if page_number < 1 || page_number > entry.document.pages().len() {
+            return Err(format!("page {page_number} does not exist"));
+        }
+
+        let unrotated_height = {
+            let page = entry
+                .document
+                .pages()
+                .get(page_number - 1)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+
+            unrotated_page_height(&page)
+        };
+
+        // A face the standard 14 cover costs no embedded bytes at all, which is
+        // the common case for a Latin note; anything else carries its subset.
+        let font = match &embedded {
+            // Loaded afresh each time, so a redo of a note that was just undone
+            // embeds its subset again: a font stays in the document once loaded,
+            // and deleting the annotation that used it does not take it back
+            // out. That costs roughly 3.4 KB per undo/redo cycle.
+            //
+            // Not cached, because keeping the token would need it to be `Send`,
+            // and `pdfium-render` 0.9.3 marks every other handle so but not this
+            // one — leaving only an `unsafe impl` to assert a lifetime the crate
+            // never documents. Reloading a saved document drops the orphans
+            // anyway (measured: 21034 bytes down to 4088), so collecting them
+            // belongs to the save path rather than here.
+            Some(bytes) => entry
+                .document
+                .fonts_mut()
+                .load_true_type_from_bytes(bytes, true)
+                .map_err(|error| format!("PDFium rejected the bundled font: {error}"))?,
+            None => {
+                let fonts = entry.document.fonts_mut();
+
+                match face {
+                    StandardFace::Sans => fonts.helvetica(),
+                    StandardFace::Serif => fonts.times_roman(),
+                    StandardFace::Mono => fonts.courier(),
+                }
+            }
+        };
+
+        let ascent = entry
+            .document
+            .fonts()
+            .get(font)
+            .ok_or_else(|| "PDFium lost the note's font".to_string())?
+            .ascent(PdfPoints::new(style.font_size))
+            .map_err(|error| format!("PDFium could not measure the note's font: {error}"))?
+            .value;
+
+        // Laid out before the annotation exists, because the annotation needs its
+        // final `/Rect` up front: PDFium fits a stamp's appearance to whatever
+        // `/Rect` it has, so bounds narrowed afterwards do not crop the text —
+        // they squash it, and the whole note renders shrunk into the new box.
+        //
+        // Free objects until they are added below, so a failure while they are
+        // being laid out has nothing to take off the page.
+        let mut laid_out = Vec::new();
+        let mut text_bounds: Option<PdfRect> = None;
+
+        for (index, line) in lines.iter().enumerate() {
+            // A blank line draws nothing but still advances the next one, which
+            // is how an empty line between paragraphs survives.
+            if line.is_empty() {
+                continue;
+            }
+
+            let mut object = PdfPageTextObject::new(
+                &entry.document,
+                line,
+                font,
+                PdfPoints::new(style.font_size),
+            )
+            .map_err(|error| format!("PDFium rejected a line of the note: {error}"))?;
+
+            object
+                .set_fill_color(color)
+                .map_err(|error| format!("PDFium rejected the note's colour: {error}"))?;
+
+            // A new text object sits with its baseline on the origin, so moving
+            // it is what puts it where the reader clicked.
+            //
+            // PDFium draws a line from its baseline, but a reader clicks where
+            // they want the text to start, which is its top. The gap between the
+            // two is the font's ascent — asked of the font rather than guessed
+            // from the size, since the two differ by face and a wrong guess
+            // lands the note a line away from the click.
+            //
+            // Lines then step by the baseline, not by what each one happens to
+            // draw: spacing measured from the ink would pull a line with no
+            // ascenders up towards the one above it.
+            let baseline =
+                origin.top + ascent + index as f32 * style.font_size * TEXT_NOTE_LINE_HEIGHT;
+
+            object
+                .translate(
+                    PdfPoints::new(origin.left),
+                    PdfPoints::new(unrotated_height - baseline),
+                )
+                .map_err(|error| format!("PDFium could not place the note: {error}"))?;
+
+            let placed = object
+                .bounds()
+                .map_err(|error| format!("PDFium could not measure the note: {error}"))?;
+
+            let line_bounds =
+                PdfRect::new(placed.bottom(), placed.left(), placed.top(), placed.right());
+
+            text_bounds = Some(match text_bounds {
+                None => line_bounds,
+                Some(so_far) => union_rect(&[so_far, line_bounds])
+                    .expect("a union of two rectangles is never empty"),
+            });
+            laid_out.push(object);
+        }
+
+        // Every line was blank, so there is nothing to show — the same
+        // invisible-but-recorded edit the colour check above refuses.
+        let text_bounds = text_bounds.ok_or_else(|| "a note needs some text".to_string())?;
+        // A hair wider than the ink on every side. The appearance is fitted to
+        // this box, and glyphs that ended exactly on its edge would lose their
+        // outermost antialiased pixel to it.
+        let bounds = PdfRect::new_from_values(
+            text_bounds.bottom().value - TEXT_NOTE_BOUNDS_MARGIN,
+            text_bounds.left().value - TEXT_NOTE_BOUNDS_MARGIN,
+            text_bounds.top().value + TEXT_NOTE_BOUNDS_MARGIN,
+            text_bounds.right().value + TEXT_NOTE_BOUNDS_MARGIN,
+        );
+
+        // Attached the moment it is created, so a failure past here has to take
+        // it back off rather than leave a mark nothing can remove.
+        let mut page = entry
+            .document
+            .pages_mut()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        let mut annotation = page
+            .annotations_mut()
+            .create_stamp_annotation()
+            .map_err(|error| format!("PDFium could not create a note: {error}"))?;
+        let described = (|| {
+            annotation
+                .set_bounds(bounds)
+                .map_err(|error| format!("PDFium rejected the note's bounds: {error}"))?;
+
+            for object in laid_out {
+                annotation
+                    .objects_mut()
+                    .add_text_object(object)
+                    .map_err(|error| format!("PDFium rejected a line of the note: {error}"))?;
+            }
+
+            Ok(())
+        })();
+
+        if let Err(error) = described {
+            let annotations = page.annotations_mut();
+            let count = annotations.len();
+
+            if count > 0 {
+                if let Ok(orphan) = annotations.get(count - 1) {
+                    let _ = annotations.delete_annotation(orphan);
+                }
+            }
+
+            return Err(error);
+        }
+
+        *entry.added.entry(page_number).or_insert(0) += 1;
+
+        Ok(())
+    }
+
     /// Removes the annotation most recently added to `page_number`, refusing
     /// anything this session did not put there.
     ///
@@ -813,6 +1114,10 @@ mod tests {
             pdfium: test_pdfium(),
             documents: Mutex::new(HashMap::new()),
             next_document_id: AtomicU64::new(1),
+            // Straight from the source tree: the tests have no `AppHandle` to
+            // resolve a bundled resource through.
+            cjk_font_path: Some(crate::pdfium::font::bundled_cjk_font_path()),
+            cjk_font: OnceLock::new(),
         })
     }
 
@@ -1016,6 +1321,50 @@ mod tests {
         }
 
         (inside, outside)
+    }
+
+    /// The pixel box the page's ink actually occupies, or `None` for a blank
+    /// page.
+    ///
+    /// Where `ink_inside_and_outside` asks "did anything land here", this asks
+    /// "how big is what landed" — which is what tells text drawn at its proper
+    /// size from the same text drawn shrunk, stretched, or squashed into a
+    /// corner of the same box. Every one of those puts all its ink inside the
+    /// band and none outside it.
+    fn ink_bounds(
+        engine: &PdfiumEngine,
+        document_id: u64,
+        page_number: i32,
+    ) -> Option<(u32, u32, u32, u32)> {
+        let image = engine
+            .render_bitmap(
+                document_id,
+                page_number,
+                TEST_RENDER_WIDTH,
+                MAX_RENDER_WIDTH,
+            )
+            .expect("PDFium should render the page")
+            .into_rgb8();
+        let mut box_of: Option<(u32, u32, u32, u32)> = None;
+
+        for (x, y, pixel) in image.enumerate_pixels() {
+            let [red, green, blue] = pixel.0;
+
+            // Anything off pure white counts, so a glyph's antialiased edge is
+            // part of it rather than a threshold's judgement call.
+            if red == 255 && green == 255 && blue == 255 {
+                continue;
+            }
+
+            box_of = Some(match box_of {
+                None => (x, y, x + 1, y + 1),
+                Some((left, top, right, bottom)) => {
+                    (left.min(x), top.min(y), right.max(x + 1), bottom.max(y + 1))
+                }
+            });
+        }
+
+        box_of
     }
 
     fn rendered_darkness(engine: &PdfiumEngine, document_id: u64, page_number: i32) -> u64 {
@@ -1697,6 +2046,463 @@ mod tests {
             runs,
             vec![(100, 24), (276, 24)],
             "a 12pt border should render 24px wide inside the bounds it was dragged"
+        );
+    }
+
+    fn text_note_style(font_size: f32) -> TextNoteStyle {
+        TextNoteStyle {
+            font_family: "sans".into(),
+            font_size,
+            color: "#000000".into(),
+            opacity: 1.0,
+        }
+    }
+
+    fn note_origin(left: f32, top: f32) -> PagePoint {
+        PagePoint { left, top }
+    }
+
+    /// The bytes a document takes up once saved, which is how the tests below
+    /// tell an embedded font from a subset of one.
+    fn saved_size(engine: &PdfiumEngine, document_id: u64) -> u64 {
+        let directory = std::env::temp_dir().join(format!(
+            "tfolio-note-{:016x}",
+            getrandom::u64().expect("the system should have randomness")
+        ));
+
+        fs::create_dir_all(&directory).expect("the temporary directory should be creatable");
+
+        let destination = directory.join("note.pdf");
+
+        engine
+            .save_to(document_id, &destination)
+            .expect("PDFium should save the document");
+
+        let size = fs::metadata(&destination)
+            .expect("the saved document should exist")
+            .len();
+
+        fs::remove_dir_all(&directory).ok();
+        size
+    }
+
+    // Where the reader clicked is the top of the text, but PDFium draws from the
+    // baseline — so a note placed without correcting for that lands a whole line
+    // away from the click. Only the pixels can tell: the annotation's own bounds
+    // would report the wrong place just as confidently as the right one.
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn draws_a_note_where_it_was_asked_for() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+
+        engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "Hello",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+
+        // The note starts at (20,100) and one line of 24pt type is at most 24pt
+        // tall, so at two pixels per point every mark belongs inside this box.
+        // A baseline mistaken for the top would put the text above it.
+        let band = (36, 194, 360, 254);
+        let (inside, outside) = ink_inside_and_outside(engine, document.id, 1, band);
+
+        assert!(
+            inside > 0,
+            "the note should draw inside the box it was given"
+        );
+        assert_eq!(
+            outside, 0,
+            "no part of the note should land outside the line it was placed on"
+        );
+
+        // Where it landed is only half of it — the ink has to be the *size* a
+        // 24pt line is, too. Text scaled into a corner of the right box passes
+        // every check above and is still the wrong picture.
+        let (left, top, right, bottom) =
+            ink_bounds(engine, document.id, 1).expect("the note should draw something");
+
+        // Two pixels to the point on this fixture, so the note's own 20pt left
+        // edge is 40px, give or take the first glyph's side bearing.
+        assert!(
+            (36..=52).contains(&left),
+            "the note started at x={left}px rather than the 40px it was given"
+        );
+        // Its cap height starts a little below the line's top, never above it.
+        assert!(
+            (200..=224).contains(&top),
+            "the note's first line starts at y={top}px rather than just under 200px"
+        );
+
+        let height = bottom - top;
+        let width = right - left;
+
+        // Cap height to baseline for 24pt type is around 36px at this scale.
+        assert!(
+            (24..=60).contains(&height),
+            "one line of 24pt type rendered {height}px tall"
+        );
+        assert!(
+            (60..=200).contains(&width),
+            "five characters of 24pt type rendered {width}px wide"
+        );
+    }
+
+    // The bug this exists for: a subset stripped of its `cmap` renders every
+    // string as the same row of empty boxes. Two different strings drawing the
+    // same ink is exactly that failure, and it passes every count-the-annotations
+    // check there is.
+    #[test]
+    #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+    fn draws_the_glyphs_the_text_asked_for() {
+        let engine = test_engine();
+        let style = text_note_style(24.0);
+        let ink_of = |text: &str| {
+            let document = engine
+                .open(minimal_pdf())
+                .expect("PDFium should open the PDF");
+
+            engine
+                .add_text_note(document.id, 1, &note_origin(20.0, 100.0), text, &style)
+                .expect("PDFium should add the note");
+            rendered_darkness(engine, document.id, 1)
+        };
+
+        let hello = ink_of("你好");
+        let other = ink_of("一二");
+
+        assert!(hello > 0, "a Chinese note should draw something");
+        assert_ne!(
+            hello, other,
+            "different characters should draw differently; identical ink means \
+             the embedded subset lost its character map and every note is boxes"
+        );
+        // The same text twice is the control: ink differs above because the
+        // glyphs differ, not because a render is unrepeatable.
+        assert_eq!(
+            hello,
+            ink_of("你好"),
+            "the same note should draw the same way"
+        );
+    }
+
+    // The placement test above is Latin, and a Chinese note takes a different
+    // route to the page: a subset face rather than a standard one, and so a
+    // different ascent to hang the first line from. An ascent PDFium declined
+    // to report for a subset would land every Chinese note a line off the click
+    // while every Latin one stayed right.
+    #[test]
+    #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+    fn draws_a_chinese_note_where_it_was_asked_for() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+
+        engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "\u{4f60}\u{597d}",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+
+        let (left, top, right, bottom) =
+            ink_bounds(engine, document.id, 1).expect("the note should draw something");
+
+        assert!(
+            (36..=52).contains(&left),
+            "the note started at x={left}px rather than the 40px it was given"
+        );
+        assert!(
+            (200..=224).contains(&top),
+            "the note's line starts at y={top}px rather than just under 200px"
+        );
+
+        let height = bottom - top;
+        let width = right - left;
+
+        // Two full-width characters of 24pt type: about 48px tall and 96 wide.
+        assert!(
+            (24..=70).contains(&height),
+            "one line of 24pt Chinese rendered {height}px tall"
+        );
+        assert!(
+            (60..=200).contains(&width),
+            "two characters of 24pt Chinese rendered {width}px wide"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+    fn refuses_a_font_family_it_does_not_offer_for_chinese_too() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        let style = TextNoteStyle {
+            font_family: "comic".into(),
+            ..text_note_style(24.0)
+        };
+
+        // Chinese carries its own face and never reaches the standard fonts, so
+        // the family it names went unchecked on that path.
+        assert!(engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "\u{4f60}\u{597d}",
+                &style,
+            )
+            .is_err());
+        assert_eq!(
+            with_page(engine, document.id, 1, |page| page.annotations().len()),
+            0,
+            "a refused note should leave no annotation behind"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+    fn embeds_only_the_glyphs_a_chinese_note_uses() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        let before = saved_size(engine, document.id);
+
+        engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "你好",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+
+        let growth = saved_size(engine, document.id) - before;
+
+        // PDFium embeds whatever bytes it is handed, verbatim — the whole 17 MB
+        // face if that is what it gets. A note's worth of glyphs is a few KB, so
+        // this holds the subsetting to something no unsubset font could pass.
+        assert!(
+            growth < 50_000,
+            "a two-character note grew the file by {growth} bytes; the font is \
+             not being subset to the note"
+        );
+    }
+
+    // The other half of the same contract: text the standard 14 can draw embeds
+    // nothing at all, which is the common case and should stay free.
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn embeds_no_font_for_a_latin_note() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        let before = saved_size(engine, document.id);
+
+        engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "Hello",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+
+        let growth = saved_size(engine, document.id) - before;
+
+        // Between the two outcomes, not merely above the smaller: embedding
+        // even the tightest possible subset of the bundled face costs ~3.4 KB
+        // against ~650 bytes for a standard font, and a ceiling above both would
+        // pass whether or not a font went in.
+        assert!(
+            growth < 2_000,
+            "a Latin note grew the file by {growth} bytes, so it embedded a font \
+             it had no need of"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+    fn writes_a_chinese_note_that_survives_a_save() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+
+        engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 100.0),
+                "你好",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+
+        let drawn = rendered_darkness(engine, document.id, 1);
+        let directory = std::env::temp_dir().join(format!(
+            "tfolio-note-save-{:016x}",
+            getrandom::u64().expect("the system should have randomness")
+        ));
+
+        fs::create_dir_all(&directory).expect("the temporary directory should be creatable");
+
+        let destination = directory.join("note.pdf");
+
+        engine
+            .save_to(document.id, &destination)
+            .expect("PDFium should save the document");
+
+        let reopened = engine
+            .open(fs::read(&destination).expect("the saved document should be readable"))
+            .expect("PDFium should reopen the saved document");
+
+        assert_eq!(
+            rendered_darkness(engine, reopened.id, 1),
+            drawn,
+            "a saved note should reopen drawing exactly what it drew before"
+        );
+
+        fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn multiple_lines_stack_down_the_page() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+
+        engine
+            .add_text_note(
+                document.id,
+                1,
+                &note_origin(20.0, 40.0),
+                "One\nTwo",
+                &text_note_style(24.0),
+            )
+            .expect("PDFium should add the note");
+
+        // The first line's own band. The second sits a line below it, so ink
+        // outside proves the lines were not drawn on top of each other.
+        let (first_line, rest) = ink_inside_and_outside(engine, document.id, 1, (0, 0, 400, 140));
+
+        assert!(first_line > 0, "the first line should draw");
+        assert!(rest > 0, "the second line should draw below the first");
+    }
+
+    #[test]
+    #[ignore = "requires `bun run pdfium:download`"]
+    fn rejects_an_unusable_note() {
+        let engine = test_engine();
+        let document = engine
+            .open(minimal_pdf())
+            .expect("PDFium should open the PDF");
+        let origin = note_origin(20.0, 100.0);
+        let style = text_note_style(24.0);
+
+        let cases: Vec<(&str, Result<(), String>)> = vec![
+            (
+                "empty text",
+                engine.add_text_note(document.id, 1, &origin, "", &style),
+            ),
+            (
+                "whitespace only",
+                engine.add_text_note(document.id, 1, &origin, "   \n  ", &style),
+            ),
+            (
+                "a coordinate off the scale",
+                engine.add_text_note(document.id, 1, &note_origin(f32::NAN, 0.0), "Hi", &style),
+            ),
+            (
+                "a font size past the control's range",
+                engine.add_text_note(document.id, 1, &origin, "Hi", &text_note_style(500.0)),
+            ),
+            (
+                "a font size below the control's range",
+                engine.add_text_note(document.id, 1, &origin, "Hi", &text_note_style(1.0)),
+            ),
+            (
+                "an invisible note",
+                engine.add_text_note(
+                    document.id,
+                    1,
+                    &origin,
+                    "Hi",
+                    &TextNoteStyle {
+                        opacity: 0.0,
+                        ..text_note_style(24.0)
+                    },
+                ),
+            ),
+            (
+                "an unreadable colour",
+                engine.add_text_note(
+                    document.id,
+                    1,
+                    &origin,
+                    "Hi",
+                    &TextNoteStyle {
+                        color: "not a colour".into(),
+                        ..text_note_style(24.0)
+                    },
+                ),
+            ),
+            (
+                "a font family this app does not offer",
+                engine.add_text_note(
+                    document.id,
+                    1,
+                    &origin,
+                    "Hi",
+                    &TextNoteStyle {
+                        font_family: "comic".into(),
+                        ..text_note_style(24.0)
+                    },
+                ),
+            ),
+            (
+                "a note longer than the ceiling",
+                engine.add_text_note(document.id, 1, &origin, &"a".repeat(5000), &style),
+            ),
+            (
+                "a page that does not exist",
+                engine.add_text_note(document.id, 2, &origin, "Hi", &style),
+            ),
+        ];
+
+        for (case, result) in cases {
+            assert!(result.is_err(), "{case} should be refused");
+        }
+
+        // Nothing was drawn and nothing was left behind: every refusal above
+        // happened before a mark reached the page, or wound one back if it had.
+        assert_eq!(
+            rendered_darkness(engine, document.id, 1),
+            0,
+            "a refused note should leave the page as it was"
+        );
+        assert_eq!(
+            with_page(engine, document.id, 1, |page| page.annotations().len()),
+            0,
+            "a refused note should leave no annotation behind"
         );
     }
 }

@@ -360,7 +360,12 @@ export function SettingsDialog() {
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 {t("about.description")}
               </p>
+              {/* The bundled face travels under the SIL Open Font License,
+                  which asks that its notice travel with it. */}
               <p className="mt-auto pt-6 text-xs text-muted-foreground">
+                {t("about.fontNotice")}
+              </p>
+              <p className="pt-2 text-xs text-muted-foreground">
                 {t("about.copyright")}
               </p>
             </div>

@@ -4,7 +4,10 @@ import {
   clampFraction,
   clientPointToFraction,
   fractionsToPageRect,
+  fractionToClientPoint,
   fractionToPagePoint,
+  pagePointToFraction,
+  rotateFraction,
   totalPageRotation,
   unrotateFraction,
   type BoxFraction,
@@ -239,5 +242,85 @@ describe("clampFraction", () => {
 
   it("leaves a fraction already inside alone", () => {
     expect(clampFraction({ x: 0.25, y: 0.75 })).toEqual({ x: 0.25, y: 0.75 })
+  })
+})
+
+describe("rotateFraction", () => {
+  // The inverse of `unrotateFraction`, which is the whole of its contract: an
+  // editor placed with one and read back with the other has to land where it
+  // started, at every turn the two can be given.
+  it("undoes unrotateFraction at every quarter turn", () => {
+    const start: BoxFraction = { x: 0.3, y: 0.8 }
+
+    for (const degrees of rotations) {
+      const round = rotateFraction(unrotateFraction(start, degrees), degrees)
+
+      expect(round.x).toBeCloseTo(start.x)
+      expect(round.y).toBeCloseTo(start.y)
+    }
+  })
+
+  // Pinned rather than left to the round trip above, which a pair of maps that
+  // were each other's inverse but both wrong would satisfy just as well.
+  it("carries the box's corner onto the footprint's", () => {
+    const topLeft: BoxFraction = { x: 0, y: 0 }
+
+    expect(rotateFraction(topLeft, 90)).toEqual({ x: 1, y: 0 })
+    expect(rotateFraction(topLeft, 180)).toEqual({ x: 1, y: 1 })
+    expect(rotateFraction(topLeft, 270)).toEqual({ x: 0, y: 1 })
+  })
+})
+
+describe("pagePointToFraction", () => {
+  it("is the inverse of fractionToPagePoint through every rotation pair", () => {
+    const start: BoxFraction = { x: 0.2, y: 0.65 }
+
+    for (const intrinsic of rotations) {
+      for (const rotation of rotations) {
+        const point = fractionToPagePoint(start, page(intrinsic), rotation)
+        const round = pagePointToFraction(point, page(intrinsic), rotation)
+
+        expect(round.x).toBeCloseTo(start.x)
+        expect(round.y).toBeCloseTo(start.y)
+      }
+    }
+  })
+
+  it("puts a point on an upright page where it belongs", () => {
+    expect(pagePointToFraction({ left: 100, top: 150 }, page(0), 0)).toEqual({
+      x: 0.5,
+      y: 0.5,
+    })
+  })
+
+  // The page's top-left is drawn at the footprint's top-right through a quarter
+  // turn — the same corner `fractionToPagePoint` is pinned against, read the
+  // other way, so the two cannot drift apart.
+  it("places a quarter turn's corner where the page is actually drawn", () => {
+    expect(pagePointToFraction({ left: 0, top: 0 }, page(0), 90)).toEqual({
+      x: 1,
+      y: 0,
+    })
+  })
+
+  it("reports the origin for a page with no size", () => {
+    const empty = { height: 0, rotation: 0, width: 0 }
+
+    expect(pagePointToFraction({ left: 5, top: 5 }, empty, 0)).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe("fractionToClientPoint", () => {
+  it("is the inverse of clientPointToFraction", () => {
+    const box = { height: 200, left: 50, top: 100, width: 400 }
+    const round = fractionToClientPoint(box, clientPointToFraction(box, 250, 200))
+
+    expect(round).toEqual({ x: 250, y: 200 })
+  })
+
+  it("measures a fraction back onto the box", () => {
+    const box = { height: 200, left: 50, top: 100, width: 400 }
+
+    expect(fractionToClientPoint(box, { x: 0.5, y: 0.5 })).toEqual({ x: 250, y: 200 })
   })
 })

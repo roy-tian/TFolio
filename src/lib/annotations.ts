@@ -1,4 +1,4 @@
-import type { PagePointsRect } from "@/lib/annotationGeometry"
+import type { PagePoint, PagePointsRect } from "@/lib/annotationGeometry"
 
 /** A colour as `#rrggbb`, the form `<input type="color">` reads and writes. */
 export type HexColor = string
@@ -48,7 +48,35 @@ export type RectCommand = {
   style: RectStyle
 }
 
-export type AnnotationCommand = HighlightCommand | RectCommand
+/**
+ * How a note's text is drawn. `fontFamily` picks one of the PDF's standard
+ * fonts, none of which can draw Chinese — text that needs the bundled face is
+ * drawn in it whatever this says, which is why the control is disabled for it.
+ */
+export type TextNoteStyle = {
+  color: HexColor
+  fontFamily: TextNoteFontFamily
+  /** Point size, as a PDF measures type. */
+  fontSize: number
+  opacity: number
+}
+
+export type TextNoteFontFamily = "sans" | "serif" | "mono"
+
+/**
+ * A note is typed at one point on one page, so like a rectangle it is one
+ * command, one page, one annotation. `origin` is the top-left of the text, which
+ * is where the reader clicked — not the baseline the backend draws from.
+ */
+export type TextNoteCommand = {
+  kind: "textNote"
+  origin: PagePoint
+  pageNumber: number
+  style: TextNoteStyle
+  text: string
+}
+
+export type AnnotationCommand = HighlightCommand | RectCommand | TextNoteCommand
 
 /**
  * Redoing re-runs the command and gets a fresh annotation out of PDFium, but it
@@ -80,6 +108,7 @@ export function commandPages(command: AnnotationCommand): number[] {
     case "highlight":
       return command.targets.map((target) => target.pageNumber)
     case "rect":
+    case "textNote":
       return [command.pageNumber]
   }
 }

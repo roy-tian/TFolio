@@ -4,6 +4,7 @@ import {
   Highlighter,
   Redo2,
   Square,
+  Type,
   Undo2,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -22,7 +23,7 @@ import type { HexColor, RectStyle } from "@/lib/annotations"
 import { highlightSwatches } from "@/lib/annotationStyles"
 
 /** The tool the reader is drawing with, or none. */
-export type AnnotationTool = "highlight" | "rect" | null
+export type AnnotationTool = "highlight" | "rect" | "textNote" | null
 
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
@@ -41,6 +42,8 @@ type AnnotationToolbarProps = {
   /** Whether a page is on show to draw on; the thumbnail grid is not. */
   rectApplies: boolean
   rectStyle: RectStyle
+  /** Whether a page is on show to type on; the thumbnail grid is not. */
+  textNoteApplies: boolean
 }
 
 export function AnnotationToolbar({
@@ -58,12 +61,14 @@ export function AnnotationToolbar({
   onUndo,
   rectApplies,
   rectStyle,
+  textNoteApplies,
 }: AnnotationToolbarProps) {
   const { t } = useTranslation()
   const undoLabel = t("annotate.undo")
   const redoLabel = t("annotate.redo")
   const highlightLabel = t("annotate.highlight")
   const rectLabel = t("annotate.rect")
+  const textNoteLabel = t("annotate.textNote")
   const exportLabel = t("annotate.export")
 
   return (
@@ -173,6 +178,19 @@ export function AnnotationToolbar({
             </PopoverContent>
           </Popover>
         </ButtonGroup>
+      ) : null}
+
+      {textNoteApplies ? (
+        <Toggle
+          aria-label={textNoteLabel}
+          disabled={disabled}
+          onPressedChange={(pressed) => onToolChange(pressed ? "textNote" : null)}
+          pressed={activeTool === "textNote"}
+          title={textNoteLabel}
+          variant="outline"
+        >
+          <Type />
+        </Toggle>
       ) : null}
 
       <Button

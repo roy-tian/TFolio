@@ -111,6 +111,25 @@ pub(super) const MIN_RECT_STROKE_WIDTH: f32 = 1.0;
 pub(super) const MAX_RECT_STROKE_WIDTH: f32 = 12.0;
 pub(super) const MAX_RECT_CORNER_RADIUS: f32 = 40.0;
 
+/// The ranges a text note's style values may use, held to the same contract with
+/// `src/lib/annotationStyles.ts` as the rectangle constants above.
+pub(super) const MIN_TEXT_NOTE_OPACITY: f32 = 0.1;
+pub(super) const MIN_TEXT_NOTE_FONT_SIZE: f32 = 6.0;
+pub(super) const MAX_TEXT_NOTE_FONT_SIZE: f32 = 72.0;
+
+/// A ceiling on a note's length. Every character is a glyph in the subset this
+/// note embeds and every line is a PDFium call made under the lock renders wait
+/// on, so a pasted novel is refused rather than left to stall the app.
+pub(super) const MAX_TEXT_NOTE_CHARS: usize = 4096;
+pub(super) const MAX_TEXT_NOTE_LINES: usize = 256;
+
+/// The baseline-to-baseline step between a note's lines, as a multiple of its
+/// font size — normal prose leading, since a note is prose.
+pub(super) const TEXT_NOTE_LINE_HEIGHT: f32 = 1.2;
+
+/// How far a note's bounds sit outside its ink, in page points.
+pub(super) const TEXT_NOTE_BOUNDS_MARGIN: f32 = 1.0;
+
 /// Whether `value` is a coordinate a rectangle could really carry.
 pub(super) fn within_page_range(value: f32) -> bool {
     value.is_finite() && value.abs() <= MAX_PAGE_POINTS

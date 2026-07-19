@@ -1,4 +1,9 @@
-import type { HexColor, RectStyle } from "@/lib/annotations"
+import type {
+  HexColor,
+  RectStyle,
+  TextNoteFontFamily,
+  TextNoteStyle,
+} from "@/lib/annotations"
 import { readStored, store } from "@/lib/storage"
 
 /**
@@ -137,4 +142,93 @@ export function readStoredRectStyle(): RectStyle | null {
 
 export function storeRectStyle(style: RectStyle) {
   store(rectStyleStorageKey, JSON.stringify(style))
+}
+
+/** Ink a note is read as a note in, rather than mistaken for the page's text. */
+export const textNoteSwatches: readonly HexColor[] = [
+  "#d70015",
+  "#0a84ff",
+  "#1c7c3c",
+  "#b25000",
+  "#000000",
+]
+
+/**
+ * Slider ends, and the same double-edged contract as the rectangle constants
+ * above: these mirror `MIN_/MAX_TEXT_NOTE_*` in `src-tauri/src/pdfium/geometry.rs`
+ * and neither side clamps a value outside them.
+ */
+export const TEXT_NOTE_MIN_FONT_SIZE = 6
+export const TEXT_NOTE_MAX_FONT_SIZE = 72
+export const TEXT_NOTE_MIN_OPACITY = 0.1
+
+export const textNoteFontFamilies: readonly TextNoteFontFamily[] = [
+  "sans",
+  "serif",
+  "mono",
+]
+
+/** Body-text size, so a note reads alongside the page rather than shouting. */
+export const defaultTextNoteStyle: TextNoteStyle = {
+  color: textNoteSwatches[0]!,
+  fontFamily: "sans",
+  fontSize: 12,
+  opacity: 1,
+}
+
+export const textNoteStyleStorageKey = "tfolio.annotate.textNoteStyle"
+
+export function isTextNoteFontFamily(
+  value: unknown,
+): value is TextNoteFontFamily {
+  return textNoteFontFamilies.includes(value as TextNoteFontFamily)
+}
+
+/**
+ * Whether `value` is a note style this app could have written — the same guard
+ * `isRectStyle` applies, for the same reason: a stored style outside the
+ * controls' ranges is tampered or from an older schema, and the backend would
+ * refuse it, so a note typed against it could never be added.
+ */
+export function isTextNoteStyle(value: unknown): value is TextNoteStyle {
+  if (typeof value !== "object" || value === null) {
+    return false
+  }
+
+  const style = value as Record<string, unknown>
+
+  return (
+    typeof style.fontSize === "number" &&
+    style.fontSize >= TEXT_NOTE_MIN_FONT_SIZE &&
+    style.fontSize <= TEXT_NOTE_MAX_FONT_SIZE &&
+    typeof style.opacity === "number" &&
+    style.opacity >= TEXT_NOTE_MIN_OPACITY &&
+    style.opacity <= 1 &&
+    isHexColor(style.color) &&
+    isTextNoteFontFamily(style.fontFamily)
+  )
+}
+
+export function readStoredTextNoteStyle(): TextNoteStyle | null {
+  const raw = readStored(
+    textNoteStyleStorageKey,
+    (value): value is string => typeof value === "string",
+  )
+
+  if (raw === null) {
+    return null
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw)
+
+    return isTextNoteStyle(parsed) ? parsed : null
+  } catch {
+    // An older version may have written a shape this one no longer reads.
+    return null
+  }
+}
+
+export function storeTextNoteStyle(style: TextNoteStyle) {
+  store(textNoteStyleStorageKey, JSON.stringify(style))
 }

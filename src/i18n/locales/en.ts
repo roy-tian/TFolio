@@ -36,6 +36,19 @@ const en = {
     opacity: "Opacity",
     cornerRadius: "Corner radius",
     strokeWidth: "Border width",
+    textNote: "Add a note",
+    textNoteInput: "Note text",
+    textNoteColor: "Text colour",
+    textNoteFont: "Font",
+    textNoteFont_sans: "Sans",
+    textNoteFont_serif: "Serif",
+    textNoteFont_mono: "Mono",
+    textNoteFontFixed: "Chinese and other non-Latin text uses the bundled font.",
+    textNoteSize: "Text size",
+    textNoteSizeValue: "{{size}}pt",
+    textNotePlaceholder: "Type a note…",
+    textNoteConfirm: "Add this note",
+    textNoteCancel: "Discard this note",
     export: "Export a copy…",
     exportFilter: "PDF file",
     exportDefaultName: "annotated.pdf",
@@ -83,6 +96,8 @@ const en = {
   about: {
     title: "TFolio",
     description: "A focused desktop workspace for reading and editing PDF files.",
+    fontNotice:
+      "Chinese text in notes is set in Noto Sans SC, used under the SIL Open Font License 1.1.",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const

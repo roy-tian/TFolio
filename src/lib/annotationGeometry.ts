@@ -58,6 +58,29 @@ export function unrotateFraction(
   }
 }
 
+/**
+ * The inverse of `unrotateFraction`: where a point of the box's own coordinates
+ * lands on its rotated footprint.
+ *
+ * A quarter turn's inverse is the turn that completes the circle, so 90 and 270
+ * swap and the other two are their own inverse.
+ */
+export function rotateFraction(
+  fraction: BoxFraction,
+  degrees: number,
+): BoxFraction {
+  switch (degrees) {
+    case 90:
+      return { x: 1 - fraction.y, y: fraction.x }
+    case 180:
+      return { x: 1 - fraction.x, y: 1 - fraction.y }
+    case 270:
+      return { x: fraction.y, y: 1 - fraction.x }
+    default:
+      return { x: fraction.x, y: fraction.y }
+  }
+}
+
 function unrotatedPageSize(page: PdfPageInfo) {
   return dimensionsForRotation(page.rotation, page.width, page.height)
 }
@@ -98,6 +121,28 @@ export function fractionsToPageRect(
   }
 }
 
+/**
+ * The way back out of page space: where a page point sits on the footprint box.
+ *
+ * The exact inverse of `fractionToPagePoint`, and what lets something drawn in
+ * real screen space — a text editor the reader types into — sit over a point on
+ * the page. The page's own layer would be easier to place it in, but it turns
+ * with the page, and nobody wants to type at 90°.
+ */
+export function pagePointToFraction(
+  point: PagePoint,
+  page: PdfPageInfo,
+  rotation: number,
+): BoxFraction {
+  const { height, width } = unrotatedPageSize(page)
+  const unrotated = {
+    x: width > 0 ? point.left / width : 0,
+    y: height > 0 ? point.top / height : 0,
+  }
+
+  return rotateFraction(unrotated, totalPageRotation(page, rotation))
+}
+
 export function clientPointToFraction(
   box: { height: number; left: number; top: number; width: number },
   clientX: number,
@@ -106,6 +151,17 @@ export function clientPointToFraction(
   return {
     x: box.width > 0 ? (clientX - box.left) / box.width : 0,
     y: box.height > 0 ? (clientY - box.top) / box.height : 0,
+  }
+}
+
+/** The inverse of `clientPointToFraction`, against the same box. */
+export function fractionToClientPoint(
+  box: { height: number; left: number; top: number; width: number },
+  fraction: BoxFraction,
+): { x: number; y: number } {
+  return {
+    x: box.left + fraction.x * box.width,
+    y: box.top + fraction.y * box.height,
   }
 }
 
