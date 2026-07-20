@@ -145,7 +145,13 @@ const en = {
     unsavedCancel: "Keep editing",
     pageLabel: "Page {{pageNumber}}",
     pageError: "Page {{pageNumber}} could not be rendered",
-    thumbnailLabel: "Go to page {{pageNumber}}",
+    thumbnailLabel: "Select page {{pageNumber}}",
+  },
+  pageEdit: {
+    deletePage: "Delete page {{pageNumber}}",
+    deleteSelected: "Delete {{count}} selected pages",
+    insertBefore: "Insert a blank page before page {{pageNumber}}",
+    insertAtEnd: "Insert a blank page at the end",
   },
   bookmarks: {
     title: "Bookmarks",

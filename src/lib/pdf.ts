@@ -42,6 +42,15 @@ export type PdfExportOutcome = {
   savedToSource: boolean
 }
 
+/** Fresh metadata after a page-structure change. Nothing here is patched into
+    place: the page list and outline are replaced wholesale, because the
+    backend's document is the only truth about what the pages now are. */
+export type PdfStructureUpdate = {
+  numPages: number
+  outline: PdfOutlineItem[]
+  pages: PdfPageInfo[]
+}
+
 /** Widest a single page may render on screen, in CSS pixels. */
 export const MAX_PAGE_WIDTH = 896
 

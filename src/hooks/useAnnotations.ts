@@ -10,6 +10,9 @@ import {
   emptyHistory,
   isDirty,
   markSaved,
+  planDeletePages,
+  planInsertBlankPage,
+  planReorderPages,
   planWatermarkChange,
   redo,
   undo,
@@ -19,8 +22,14 @@ import {
   type HighlightCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
-import type { PdfExportOutcome } from "@/lib/pdf"
+import type { PdfExportOutcome, PdfStructureUpdate } from "@/lib/pdf"
 import type { WatermarkConfig } from "@/lib/watermark"
+
+/** Where a structure command's fresh metadata lands, applied or undone. */
+type StructureChangeHandler = (
+  documentId: number,
+  update: PdfStructureUpdate,
+) => void
 
 type UseAnnotationsOptions = {
   documentId: number | undefined
@@ -30,6 +39,9 @@ type UseAnnotationsOptions = {
       document's own file. */
   onExported: (documentId: number, outcome: PdfExportOutcome) => void
   onSaveError: () => void
+  /** A structure command changed the page list; `update` replaces the
+      document's metadata wholesale. */
+  onStructureChange: StructureChangeHandler
   onSuccess: () => void
 }
 
@@ -39,7 +51,11 @@ type UseAnnotationsOptions = {
  * resolves, so a page keeping its share of a failed command would hold a mark
  * nothing could take back.
  */
-async function applyCommand(documentId: number, command: AnnotationCommand) {
+async function applyCommand(
+  documentId: number,
+  command: AnnotationCommand,
+  onStructureChange: StructureChangeHandler,
+) {
   switch (command.kind) {
     case "highlight":
       await applyHighlight(documentId, command)
@@ -83,6 +99,34 @@ async function applyCommand(documentId: number, command: AnnotationCommand) {
         await invoke("remove_pdf_watermark", { documentId })
       }
       return
+    case "reorderPages":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("reorder_pdf_pages", {
+          documentId,
+          order: command.order,
+        }),
+      )
+      return
+    case "deletePages":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("delete_pdf_pages", {
+          documentId,
+          pageNumbers: command.pages,
+          stashId: command.stashId,
+        }),
+      )
+      return
+    case "insertBlankPage":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("insert_pdf_blank_page", {
+          documentId,
+          index: command.index,
+        }),
+      )
+      return
   }
 }
 
@@ -115,22 +159,59 @@ async function applyHighlight(documentId: number, command: HighlightCommand) {
  * Unwound in reverse of `applyCommand`: the backend removes whichever annotation
  * a page was given last, so the two have to agree about what "last" means.
  */
-async function retractCommand(documentId: number, command: AnnotationCommand) {
-  if (command.kind === "watermark") {
-    if (command.previous) {
-      await invoke("apply_pdf_watermark", {
-        config: command.previous,
+async function retractCommand(
+  documentId: number,
+  command: AnnotationCommand,
+  onStructureChange: StructureChangeHandler,
+) {
+  switch (command.kind) {
+    case "watermark":
+      if (command.previous) {
+        await invoke("apply_pdf_watermark", {
+          config: command.previous,
+          documentId,
+        })
+      } else {
+        await invoke("remove_pdf_watermark", { documentId })
+      }
+
+      return
+    case "reorderPages":
+      onStructureChange(
         documentId,
-      })
-    } else {
-      await invoke("remove_pdf_watermark", { documentId })
-    }
-
-    return
-  }
-
-  for (const pageNumber of [...commandPages(command)].reverse()) {
-    await invoke("delete_last_pdf_annotation", { documentId, pageNumber })
+        await invoke<PdfStructureUpdate>("reorder_pdf_pages", {
+          documentId,
+          order: command.inverse,
+        }),
+      )
+      return
+    case "deletePages":
+      // Not a re-creation but a restore: the stash holds the pages themselves.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("restore_pdf_pages", {
+          documentId,
+          stashId: command.stashId,
+        }),
+      )
+      return
+    case "insertBlankPage":
+      // The page is pristine at this point — LIFO undo has already taken back
+      // anything drawn on it — but it is stashed anyway, under this entry's
+      // id, which a redo's insert leaves behind and a later undo replaces.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("delete_pdf_pages", {
+          documentId,
+          pageNumbers: [command.index],
+          stashId: command.stashId,
+        }),
+      )
+      return
+    default:
+      for (const pageNumber of [...commandPages(command)].reverse()) {
+        await invoke("delete_last_pdf_annotation", { documentId, pageNumber })
+      }
   }
 }
 
@@ -145,6 +226,7 @@ export function useAnnotations({
   onExportError,
   onExported,
   onSaveError,
+  onStructureChange,
   onSuccess,
 }: UseAnnotationsOptions) {
   const [history, setHistory] = useState<AnnotationHistory>(emptyHistory)
@@ -270,14 +352,68 @@ export function useAnnotations({
           pages: commandPages(command),
           textPages: commandTextPages(command),
           work: async () => {
-            await applyCommand(documentId, command)
+            await applyCommand(documentId, command, onStructureChange)
             return true
           },
         }),
         onAnnotateError,
       )
     },
-    [documentId, enqueue, onAnnotateError],
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  /**
+   * The one path every structure edit takes: its command is planned against
+   * the history the queue reached — which is what hands the stash its entry
+   * id — and a plan that answers null (an identity order, an empty selection)
+   * never occupies an undo step.
+   */
+  const commitStructure = useCallback(
+    async (
+      plan: (
+        history: AnnotationHistory,
+      ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
+    ) => {
+      if (documentId === undefined) {
+        return
+      }
+
+      await enqueue((current) => {
+        const planned = plan(current)
+
+        if (!planned) {
+          return null
+        }
+
+        return {
+          next: planned.history,
+          pages: commandPages(planned.command),
+          textPages: commandTextPages(planned.command),
+          work: async () => {
+            await applyCommand(documentId, planned.command, onStructureChange)
+            return true
+          },
+        }
+      }, onAnnotateError)
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  const reorderPages = useCallback(
+    (order: number[]) => commitStructure((current) => planReorderPages(current, order)),
+    [commitStructure],
+  )
+
+  const deletePages = useCallback(
+    (pages: number[], pageCount: number) =>
+      commitStructure((current) => planDeletePages(current, pages, pageCount)),
+    [commitStructure],
+  )
+
+  const insertBlankPage = useCallback(
+    (index: number, pageCount: number) =>
+      commitStructure((current) => planInsertBlankPage(current, index, pageCount)),
+    [commitStructure],
   )
 
   /**
@@ -307,7 +443,7 @@ export function useAnnotations({
           pages,
           textPages: pages,
           work: async () => {
-            await applyCommand(documentId, command)
+            await applyCommand(documentId, command, onStructureChange)
             return true
           },
         }
@@ -318,7 +454,7 @@ export function useAnnotations({
 
       return !failed
     },
-    [documentId, enqueue, onAnnotateError],
+    [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
   const undoCommand = useCallback(async () => {
@@ -335,13 +471,13 @@ export function useAnnotations({
             pages: commandPages(step.entry.command),
             textPages: commandTextPages(step.entry.command),
             work: async () => {
-              await retractCommand(documentId, step.entry.command)
+              await retractCommand(documentId, step.entry.command, onStructureChange)
               return true
             },
           }
         : null
     }, onAnnotateError)
-  }, [documentId, enqueue, onAnnotateError])
+  }, [documentId, enqueue, onAnnotateError, onStructureChange])
 
   const redoCommand = useCallback(async () => {
     if (documentId === undefined) {
@@ -357,13 +493,13 @@ export function useAnnotations({
             pages: commandPages(step.entry.command),
             textPages: commandTextPages(step.entry.command),
             work: async () => {
-              await applyCommand(documentId, step.entry.command)
+              await applyCommand(documentId, step.entry.command, onStructureChange)
               return true
             },
           }
         : null
     }, onAnnotateError)
-  }, [documentId, enqueue, onAnnotateError])
+  }, [documentId, enqueue, onAnnotateError, onStructureChange])
 
   /**
    * Queued behind the reader's marks rather than racing them, so the file holds
@@ -453,10 +589,13 @@ export function useAnnotations({
       canRedo: canRedo(history) && !isBusy,
       canUndo: canUndo(history) && !isBusy,
       commit: commitCommand,
+      deletePages,
       exportCopy,
+      insertBlankPage,
       isDirty: isDirty(history),
       isDirtyNow,
       redo: redoCommand,
+      reorderPages,
       renderEpochs,
       reset,
       save,
@@ -467,12 +606,15 @@ export function useAnnotations({
     }),
     [
       commitCommand,
+      deletePages,
       exportCopy,
       history,
+      insertBlankPage,
       isBusy,
       isDirtyNow,
       redoCommand,
       renderEpochs,
+      reorderPages,
       reset,
       save,
       setWatermark,

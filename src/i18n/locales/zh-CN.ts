@@ -149,7 +149,13 @@ const zhCN = {
     unsavedCancel: "继续编辑",
     pageLabel: "第 {{pageNumber}} 页",
     pageError: "第 {{pageNumber}} 页渲染失败",
-    thumbnailLabel: "跳转到第 {{pageNumber}} 页",
+    thumbnailLabel: "选中第 {{pageNumber}} 页",
+  },
+  pageEdit: {
+    deletePage: "删除第 {{pageNumber}} 页",
+    deleteSelected: "删除选中的 {{count}} 页",
+    insertBefore: "在第 {{pageNumber}} 页前插入空白页",
+    insertAtEnd: "在末尾插入空白页",
   },
   bookmarks: {
     title: "书签",

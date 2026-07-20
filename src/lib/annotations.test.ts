@@ -8,8 +8,12 @@ import {
   commit,
   emptyHistory,
   historyHead,
+  inversePermutation,
   isDirty,
   markSaved,
+  planDeletePages,
+  planInsertBlankPage,
+  planReorderPages,
   planWatermarkChange,
   redo,
   undo,
@@ -231,5 +235,86 @@ describe("isDirty", () => {
     const wound = redo(undo(history)!.history)!.history
 
     expect(isDirty(wound)).toBe(false)
+  })
+})
+
+describe("structure commands", () => {
+  it("derives the inverse permutation", () => {
+    expect(inversePermutation([3, 1, 4, 2])).toEqual([2, 4, 1, 3])
+    expect(inversePermutation([1, 2, 3])).toEqual([1, 2, 3])
+  })
+
+  it("undoes any order through its inverse", () => {
+    const order = [5, 3, 1, 2, 4]
+    const inverse = inversePermutation(order)
+
+    // Composed either way round, a permutation and its inverse cancel out.
+    expect(inverse.map((pageNumber) => order[pageNumber - 1])).toEqual([
+      1, 2, 3, 4, 5,
+    ])
+    expect(order.map((pageNumber) => inverse[pageNumber - 1])).toEqual([
+      1, 2, 3, 4, 5,
+    ])
+  })
+
+  it("does not spend an undo step on the identity order", () => {
+    expect(planReorderPages(emptyHistory, [1, 2, 3])).toBeNull()
+
+    const planned = planReorderPages(emptyHistory, [2, 1])
+
+    expect(planned).not.toBeNull()
+    expect(planned!.command).toEqual({
+      inverse: [2, 1],
+      kind: "reorderPages",
+      order: [2, 1],
+    })
+    expect(planned!.history.past).toHaveLength(1)
+  })
+
+  it("hands the delete its own entry id as the stash id", () => {
+    const history = historyOf(highlight(1))
+    const planned = planDeletePages(history, [3, 2], 4)
+
+    expect(planned!.command).toEqual({
+      kind: "deletePages",
+      pageCount: 4,
+      pages: [2, 3],
+      stashId: history.nextId,
+    })
+    expect(planned!.history.past.at(-1)!.id).toBe(planned!.command.stashId)
+  })
+
+  it("refuses a deletion that empties or misses the document", () => {
+    expect(planDeletePages(emptyHistory, [], 4)).toBeNull()
+    expect(planDeletePages(emptyHistory, [1, 2, 3, 4], 4)).toBeNull()
+    // Duplicates collapse before the leave-one-page rule is judged.
+    expect(planDeletePages(emptyHistory, [1, 1], 2)).not.toBeNull()
+  })
+
+  it("plans an insert whose undo shares the entry id", () => {
+    const planned = planInsertBlankPage(emptyHistory, 3, 4)
+
+    expect(planned!.command).toEqual({
+      index: 3,
+      kind: "insertBlankPage",
+      pageCount: 5,
+      stashId: emptyHistory.nextId,
+    })
+    expect(planInsertBlankPage(emptyHistory, 0, 4)).toBeNull()
+    expect(planInsertBlankPage(emptyHistory, 6, 4)).toBeNull()
+  })
+
+  it("invalidates every page, bitmaps and text alike", () => {
+    const reorder = planReorderPages(emptyHistory, [2, 1, 3])!.command
+    const deletion = planDeletePages(emptyHistory, [2], 3)!.command
+    const insertion = planInsertBlankPage(emptyHistory, 1, 3)!.command
+
+    expect(commandPages(reorder)).toEqual([1, 2, 3])
+    expect(commandTextPages(reorder)).toEqual([1, 2, 3])
+    // Delete invalidates the wider, pre-delete shape of the document.
+    expect(commandPages(deletion)).toEqual([1, 2, 3])
+    // Insert invalidates the wider, post-insert shape.
+    expect(commandPages(insertion)).toEqual([1, 2, 3, 4])
+    expect(commandTextPages(insertion)).toEqual([1, 2, 3, 4])
   })
 })

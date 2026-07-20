@@ -1,8 +1,15 @@
+import { useRef } from "react"
+import { FileText, Plus } from "lucide-react"
+import { useTranslation } from "react-i18next"
+
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
+import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
 import { type PdfPageInfo } from "@/lib/pdf"
+import type { SelectionModifiers } from "@/lib/thumbnailSelection"
+import { cn } from "@/lib/utils"
 import {
   computeThumbnailColumns,
   pairPages,
@@ -11,6 +18,17 @@ import {
   type ViewMode,
 } from "@/lib/viewMode"
 import { BOOK_GAP, CONTENT_PADDING_X } from "@/lib/zoom"
+
+/** Everything the thumbnail grid's page editing needs from its owner. */
+export type PageEditProps = {
+  onDeletePage: (pageNumber: number) => void
+  onInsertBlankPage: (index: number) => void
+  /** Double-click: leave the grid for the page itself. */
+  onOpenPage: (pageNumber: number) => void
+  onReorderPages: (order: number[]) => void
+  onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
+  selectedPages: ReadonlySet<number>
+}
 
 type LayoutProps = {
   /** Width left for pages once the column's padding is taken out. */
@@ -96,41 +114,164 @@ function BookLayout({
   ))
 }
 
+/**
+ * The gap beside a thumbnail, as a button: hovering or focusing it shows a
+ * dashed insertion line, clicking inserts a blank page there. During a drag
+ * the same line, solid, marks where the drop would land — and the button goes
+ * inert so the gesture above it keeps the pointer.
+ */
+function InsertZone({
+  active,
+  dragging,
+  index,
+  label,
+  onInsert,
+  trailing,
+}: {
+  /** Whether a drag in progress would drop into this gap. */
+  active: boolean
+  dragging: boolean
+  /** The 1-based position a page inserted here would take. */
+  index: number
+  label: string
+  onInsert: (index: number) => void
+  trailing?: boolean
+}) {
+  return (
+    <button
+      aria-label={label}
+      className={cn(
+        "group/zone absolute top-0 z-10 flex h-full w-5 justify-center outline-none",
+        trailing ? "-right-2.5" : "-left-2.5",
+        dragging && "pointer-events-none",
+      )}
+      onClick={() => onInsert(index)}
+      // A press in the gap is not the start of a page drag.
+      onPointerDown={(event) => event.stopPropagation()}
+      title={label}
+      type="button"
+    >
+      <span
+        className={cn(
+          "pointer-events-none absolute inset-y-0 w-0 border-l-2 border-dashed border-primary opacity-0 transition-opacity",
+          !dragging && "group-hover/zone:opacity-100 group-focus-visible/zone:opacity-100",
+          active && "border-solid opacity-100",
+        )}
+      />
+      <span
+        className={cn(
+          "pointer-events-none absolute -top-2 grid size-5 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
+          !dragging && "group-hover/zone:opacity-100 group-focus-visible/zone:opacity-100",
+          active && "opacity-100",
+        )}
+      >
+        <Plus className="size-3" />
+      </span>
+    </button>
+  )
+}
+
+/** The card riding the pointer during a drag: how many pages are in hand. */
+function DragGhost({ drag }: { drag: PageDragState }) {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full"
+      style={{ left: drag.pointer.x, top: drag.pointer.y - 8 }}
+    >
+      <div className="flex items-center gap-1.5 rounded-md border border-border bg-background/90 px-2.5 py-1.5 shadow-lg">
+        <FileText className="size-4 text-muted-foreground" />
+        <span className="font-mono text-xs font-semibold tabular-nums">
+          {drag.pages.length}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function ThumbnailLayout({
   contentWidth,
   currentPage,
   documentId,
-  onSelectThumbnail,
+  pageEdit,
   pages,
   renderEpochs,
   rotation,
 }: LayoutProps & {
   currentPage: number
-  onSelectThumbnail: (pageNumber: number) => void
+  pageEdit: PageEditProps
 }) {
+  const { t } = useTranslation()
   const columns = computeThumbnailColumns(contentWidth)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const { drag, wasDragClick } = usePageDrag({
+    active: true,
+    columns,
+    gridRef,
+    onReorder: pageEdit.onReorderPages,
+    pageCount: pages.length,
+    selectedPages: pageEdit.selectedPages,
+  })
+
+  const selectPage = (pageNumber: number, modifiers: SelectionModifiers) => {
+    // The click a finished drag releases is the gesture ending, not a choice.
+    if (wasDragClick()) {
+      return
+    }
+
+    pageEdit.onSelectPage(pageNumber, modifiers)
+  }
 
   return (
     <div
       className="grid"
+      ref={gridRef}
       style={{
         gap: THUMBNAIL_GAP,
         gridTemplateColumns: `repeat(${columns}, ${THUMBNAIL_WIDTH}px)`,
       }}
     >
-      {pages.map((page, index) => (
-        <PdfThumbnail
-          documentId={documentId}
-          isCurrent={currentPage === index + 1}
-          key={`${documentId}-${index + 1}`}
-          onSelect={onSelectThumbnail}
-          page={page}
-          pageNumber={index + 1}
-          renderEpoch={renderEpochs[index + 1] ?? 0}
-          rotation={rotation}
-          width={THUMBNAIL_WIDTH}
-        />
-      ))}
+      {pages.map((page, index) => {
+        const pageNumber = index + 1
+
+        return (
+          <div className="relative" key={`${documentId}-${pageNumber}`}>
+            <PdfThumbnail
+              deleteDisabled={pages.length === 1}
+              documentId={documentId}
+              isCurrent={currentPage === pageNumber}
+              isSelected={pageEdit.selectedPages.has(pageNumber)}
+              onDelete={pageEdit.onDeletePage}
+              onOpen={pageEdit.onOpenPage}
+              onSelect={selectPage}
+              page={page}
+              pageNumber={pageNumber}
+              renderEpoch={renderEpochs[pageNumber] ?? 0}
+              rotation={rotation}
+              selectedCount={pageEdit.selectedPages.size}
+              width={THUMBNAIL_WIDTH}
+            />
+            <InsertZone
+              active={drag?.gap === pageNumber - 1}
+              dragging={Boolean(drag)}
+              index={pageNumber}
+              label={t("pageEdit.insertBefore", { pageNumber })}
+              onInsert={pageEdit.onInsertBlankPage}
+            />
+            {pageNumber === pages.length ? (
+              <InsertZone
+                active={drag?.gap === pageNumber}
+                dragging={Boolean(drag)}
+                index={pageNumber + 1}
+                label={t("pageEdit.insertAtEnd")}
+                onInsert={pageEdit.onInsertBlankPage}
+                trailing
+              />
+            ) : null}
+          </div>
+        )
+      })}
+      {drag ? <DragGhost drag={drag} /> : null}
     </div>
   )
 }
@@ -140,7 +281,7 @@ type PdfViewerLayoutProps = {
   documentId: number
   draft?: RectDraft
   fileName: string
-  onSelectThumbnail: (pageNumber: number) => void
+  pageEdit: PageEditProps
   pages: PdfPageInfo[]
   referencePageWidth: number
   renderEpochs: RenderEpochs
@@ -161,7 +302,7 @@ export function PdfViewerLayout({
   documentId,
   draft,
   fileName,
-  onSelectThumbnail,
+  pageEdit,
   pages,
   referencePageWidth,
   renderEpochs,
@@ -201,7 +342,7 @@ export function PdfViewerLayout({
         <ThumbnailLayout
           {...layoutProps}
           currentPage={currentPage}
-          onSelectThumbnail={onSelectThumbnail}
+          pageEdit={pageEdit}
         />
       ) : (
         <SingleLayout {...layoutProps} />

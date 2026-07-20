@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
+import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
 import { useTextNoteTool } from "@/hooks/useTextNoteTool"
@@ -56,7 +57,9 @@ import {
   isPdfPath,
   type PdfDocumentInfo,
   type PdfExportOutcome,
+  type PdfStructureUpdate,
 } from "@/lib/pdf"
+import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import {
   defaultViewMode,
   readStoredViewMode,
@@ -138,6 +141,12 @@ export default function App() {
   // has none. Only the tools: undo, redo, and export act on the document rather
   // than on a page, so they stay.
   const drawingApplies = viewMode !== "thumbnail"
+  // In the thumbnail grid a click is a selection, so the grid doubles as the
+  // page-editing surface; leaving it clears what was chosen.
+  const thumbnailSelection = useThumbnailSelection({
+    active: viewMode === "thumbnail",
+  })
+  const clearThumbnailSelection = thumbnailSelection.clear
   const annotations = useAnnotations({
     documentId: pdfDocument?.id,
     onAnnotateError: useCallback(() => setViewerError("annotateFailed"), []),
@@ -160,6 +169,33 @@ export default function App() {
       setPdfDocument(next)
     }, []),
     onSaveError: useCallback(() => setViewerError("saveFailed"), []),
+    // A structure command moved the page list under everything keyed by page
+    // number, so the metadata is replaced wholesale and every position-derived
+    // state — the current page, the selection — is brought back into range.
+    onStructureChange: useCallback(
+      (documentId: number, update: PdfStructureUpdate) => {
+        const current = documentRef.current
+
+        if (!current || current.id !== documentId) {
+          return
+        }
+
+        const next = {
+          ...current,
+          numPages: update.numPages,
+          outline: update.outline,
+          pages: update.pages,
+        }
+
+        documentRef.current = next
+        setPdfDocument(next)
+        setCurrentPage((page) =>
+          Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
+        )
+        clearThumbnailSelection()
+      },
+      [clearThumbnailSelection],
+    ),
     // A toast that outlives what it describes would sit over every mark the
     // reader went on to make successfully.
     onSuccess: useCallback(() => setViewerError(null), []),
@@ -244,6 +280,7 @@ export default function App() {
     setRotation(0)
     resetZoomToDefault()
     resetAnnotations()
+    clearThumbnailSelection()
     setActiveTool(null)
     setBookmarksOpen(false)
     setPdfDocument(null)
@@ -285,7 +322,7 @@ export default function App() {
         setIsLoading(false)
       }
     }
-  }, [resetAnnotations, resetZoomToDefault])
+  }, [clearThumbnailSelection, resetAnnotations, resetZoomToDefault])
 
   /**
    * Every way in — the picker and a drop — funnels through here, so unsaved
@@ -497,10 +534,45 @@ export default function App() {
     page?.scrollIntoView({ behavior, block: "start" })
   }
 
-  // Picking a thumbnail leaves the grid for the page itself.
-  const selectThumbnail = (pageNumber: number) => {
+  // Double-clicking a thumbnail leaves the grid for the page itself; a single
+  // click is selection now, so navigation moved to the second click.
+  const openThumbnailPage = (pageNumber: number) => {
     pendingScrollPageRef.current = pageNumber
     setViewMode("single")
+  }
+
+  const selectThumbnailPage = (
+    pageNumber: number,
+    modifiers: SelectionModifiers,
+  ) => {
+    thumbnailSelection.select(pageNumber, modifiers)
+  }
+
+  // The x on a selected page takes the whole selection with it; on any other
+  // page it takes that page alone. No confirmation — the delete is one undo
+  // away, which a dialog would only pretend to improve on.
+  const deleteThumbnailPage = (pageNumber: number) => {
+    if (!pdfDocument) {
+      return
+    }
+
+    const pages = thumbnailSelection.selectedPages.has(pageNumber)
+      ? [...thumbnailSelection.selectedPages]
+      : [pageNumber]
+
+    void annotations.deletePages(pages, pdfDocument.numPages)
+  }
+
+  const insertBlankPage = (index: number) => {
+    if (!pdfDocument) {
+      return
+    }
+
+    void annotations.insertBlankPage(index, pdfDocument.numPages)
+  }
+
+  const reorderPages = (order: number[]) => {
+    void annotations.reorderPages(order)
   }
 
   // Each mode stacks its pages to a different total height, and the viewer keeps
@@ -708,7 +780,14 @@ export default function App() {
               documentId={pdfDocument.id}
               draft={rectDraft ?? undefined}
               fileName={fileName}
-              onSelectThumbnail={selectThumbnail}
+              pageEdit={{
+                onDeletePage: deleteThumbnailPage,
+                onInsertBlankPage: insertBlankPage,
+                onOpenPage: openThumbnailPage,
+                onReorderPages: reorderPages,
+                onSelectPage: selectThumbnailPage,
+                selectedPages: thumbnailSelection.selectedPages,
+              }}
               pages={pdfDocument.pages}
               referencePageWidth={zoom.referencePageWidth}
               renderEpochs={annotations.renderEpochs}
