@@ -72,6 +72,23 @@ describe("TFolio document watermark", () => {
 
     // Non-Latin text has one bundled face, so a font choice would be false.
     await expect($("[data-testid='watermark-font']")).toBeDisabled()
+    const bold = $("[data-testid='watermark-bold']")
+    const previewWeight = () =>
+      browser.execute(
+        () =>
+          getComputedStyle(
+            document.querySelector<HTMLElement>(
+              "[data-testid='watermark-preview']",
+            )!,
+          ).fontWeight,
+      )
+
+    await expect(bold).toHaveAttribute("aria-pressed", "false")
+    expect(await previewWeight()).toBe("400")
+    await bold.click()
+    await expect(bold).toHaveAttribute("aria-pressed", "true")
+    expect(await previewWeight()).toBe("800")
+    await browser.saveScreenshot("artifacts/e2e/watermark-bold-dialog.png")
     await $("//button[normalize-space()='Tiled']").click()
 
     // Exercise the angle control as a reader would. Its label and current value

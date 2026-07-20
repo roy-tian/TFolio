@@ -7,6 +7,7 @@ export type WatermarkFontFamily = "sans" | "serif" | "mono"
 export type WatermarkLayout = "single" | "zebra"
 
 export type WatermarkConfig = {
+  bold: boolean
   color: HexColor
   fontFamily: WatermarkFontFamily
   fontSize: number
@@ -44,6 +45,7 @@ export const watermarkFontFamilies: readonly WatermarkFontFamily[] = [
 export const watermarkLayouts: readonly WatermarkLayout[] = ["single", "zebra"]
 
 export const defaultWatermarkPreferences: WatermarkPreferences = {
+  bold: false,
   color: "#64748b",
   fontFamily: "sans",
   fontSize: 36,
@@ -71,6 +73,17 @@ export function isWatermarkFontFamily(
   return watermarkFontFamilies.includes(value as WatermarkFontFamily)
 }
 
+/** The weight the preview and PDF font selected for this text can draw. */
+export function watermarkFontWeightValue(
+  bold: boolean,
+  embedded: boolean,
+) {
+  // The bundled variable face uses the requested 400/800 instances. PDF's
+  // standard Helvetica, Times and Courier faces expose Regular/Bold instead,
+  // whose matching CSS preview weights are 400/700.
+  return bold ? (embedded ? 800 : 700) : 400
+}
+
 export function isWatermarkLayout(value: unknown): value is WatermarkLayout {
   return watermarkLayouts.includes(value as WatermarkLayout)
 }
@@ -94,6 +107,7 @@ export function isWatermarkPreferences(
   const preferences = value as Record<string, unknown>
 
   return (
+    typeof preferences.bold === "boolean" &&
     isHexColor(preferences.color) &&
     isWatermarkFontFamily(preferences.fontFamily) &&
     inRange(
@@ -179,6 +193,7 @@ export function sameWatermarkConfig(
 
   return (
     left.text === right.text &&
+    left.bold === right.bold &&
     left.fontFamily === right.fontFamily &&
     left.fontSize === right.fontSize &&
     left.color === right.color &&
@@ -201,8 +216,17 @@ export function readStoredWatermarkPreferences(): WatermarkPreferences | null {
 
   try {
     const parsed: unknown = JSON.parse(raw)
+    // Styles saved before weight selection existed implicitly used Regular.
+    // Keep the rest of that reader's preferences instead of dropping the
+    // entire record when upgrading.
+    const migrated =
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !("bold" in parsed)
+        ? { ...parsed, bold: false }
+        : parsed
 
-    return isWatermarkPreferences(parsed) ? parsed : null
+    return isWatermarkPreferences(migrated) ? migrated : null
   } catch {
     return null
   }

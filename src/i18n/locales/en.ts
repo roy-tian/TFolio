@@ -80,7 +80,7 @@ const en = {
     font_sans: "Sans",
     font_serif: "Serif",
     font_mono: "Mono",
-    fontFixed: "Chinese and other non-Latin text uses the bundled font.",
+    weightBold: "Bold",
     color: "Colour",
     fontSize: "Text size",
     opacity: "Opacity",

@@ -9,10 +9,14 @@ use allsorts::{
     font::{Font, MatchingPresentation},
     font_data::FontData,
     subset::{subset, CmapTarget, SubsetProfile},
+    tables::Fixed,
+    variations::instance,
 };
 use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 pub(super) const CJK_FONT_NAME: &str = "NotoSansSC.ttf";
+const CJK_BOLD_FONT_WEIGHT: i32 = 800;
+const CJK_REGULAR_FONT_WEIGHT: i32 = 400;
 
 /// One of the standard fonts a note may be set in.
 ///
@@ -84,6 +88,31 @@ pub(super) fn bundled_cjk_font_path() -> PathBuf {
         .join(CJK_FONT_NAME)
 }
 
+/// Resolves the bundled variable face to a static instance PDFium can embed.
+/// The source font's `wght` axis defaults to 100, and PDFium exposes no
+/// variation-axis selection when loading a font from bytes, so every requested
+/// weight has to be resolved before the text's glyph subset is taken.
+fn cjk_font_at_weight(font_bytes: &[u8], weight: i32) -> Result<Vec<u8>, String> {
+    let font_data = ReadScope::new(font_bytes)
+        .read::<FontData<'_>>()
+        .map_err(|error| format!("the bundled font could not be read: {error}"))?;
+    let provider = font_data
+        .table_provider(0)
+        .map_err(|error| format!("the bundled font has no usable tables: {error}"))?;
+
+    instance(&provider, &[Fixed::from(weight)])
+        .map(|(bytes, _)| bytes)
+        .map_err(|error| format!("the bundled font could not select weight {weight}: {error}"))
+}
+
+pub(super) fn regular_cjk_font(font_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    cjk_font_at_weight(font_bytes, CJK_REGULAR_FONT_WEIGHT)
+}
+
+pub(super) fn bold_cjk_font(font_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    cjk_font_at_weight(font_bytes, CJK_BOLD_FONT_WEIGHT)
+}
+
 /// Cuts `font_bytes` down to just the glyphs `text` uses.
 ///
 /// Per note rather than per document: PDFium binds a text object to its font as
@@ -131,6 +160,10 @@ pub(super) fn subset_for(font_bytes: &[u8], text: &str) -> Result<Vec<u8>, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use allsorts::{
+        tables::{os2::Os2, FontTableProvider},
+        tag,
+    };
 
     #[test]
     fn latin_text_needs_no_embedded_font() {
@@ -139,6 +172,47 @@ mod tests {
         // Latin-1's own accents are WinAnsi's too, so a French note stays free.
         assert!(!needs_embedded_font("Voilà, café"));
         assert!(!needs_embedded_font("Grüße"));
+    }
+
+    #[test]
+    #[ignore = "requires `bun run fonts:download`"]
+    fn bundled_cjk_font_resolves_requested_weights() {
+        let source = std::fs::read(bundled_cjk_font_path()).expect("read bundled CJK font");
+
+        for (expected, instance) in [
+            (
+                CJK_REGULAR_FONT_WEIGHT,
+                regular_cjk_font(&source).expect("create Regular font instance"),
+            ),
+            (
+                CJK_BOLD_FONT_WEIGHT,
+                bold_cjk_font(&source).expect("create Bold font instance"),
+            ),
+        ] {
+            let font_data = ReadScope::new(&instance)
+                .read::<FontData<'_>>()
+                .expect("read static font instance");
+            let provider = font_data
+                .table_provider(0)
+                .expect("read static font tables");
+            let os2_data = provider
+                .read_table_data(tag::OS_2)
+                .expect("read static OS/2 table");
+            let os2 = ReadScope::new(&os2_data)
+                .read_dep::<Os2>(os2_data.len())
+                .expect("parse static OS/2 table");
+
+            assert_eq!(os2.us_weight_class, expected as u16);
+            assert!(provider
+                .table_data(tag::FVAR)
+                .expect("inspect static variation table")
+                .is_none());
+
+            let subset = subset_for(&instance, "水印").expect("subset static font instance");
+            ReadScope::new(&subset)
+                .read::<FontData<'_>>()
+                .expect("read static font subset");
+        }
     }
 
     #[test]

@@ -14,7 +14,10 @@ use pdfium_render::prelude::*;
 use tauri::AppHandle;
 
 use super::{
-    font::{cjk_font_path, needs_embedded_font, standard_face, subset_for, StandardFace},
+    font::{
+        bold_cjk_font, cjk_font_path, needs_embedded_font, regular_cjk_font, standard_face,
+        subset_for, StandardFace,
+    },
     geometry::{
         annotation_color, clamp_corner_radius, page_rect_to_pdfium, page_rotation_degrees,
         quad_points_from_rect, rect_path, union_rect, unrotated_page_height, unrotated_page_size,
@@ -201,10 +204,14 @@ pub(super) struct PdfiumEngine {
     /// Where the bundled CJK font is, resolved at startup because that is the
     /// only point an `AppHandle` reaches this module.
     cjk_font_path: Option<PathBuf>,
-    /// The font itself, read on the first note that needs it. ~17 MB that most
-    /// sessions never touch, so it is not read at startup — and once read it is
-    /// kept, because every CJK note subsets it again.
+    /// The font's static Regular (weight 400) instance, created on the first
+    /// note that needs it. Most sessions never touch the ~17 MB variable source,
+    /// so it is not read or resolved at startup — and once resolved it is kept,
+    /// because every CJK note subsets it again.
     cjk_font: OnceLock<Vec<u8>>,
+    /// The same bundled face resolved to weight 800, created only if a bold CJK
+    /// watermark needs it and then reused by later replacements.
+    cjk_bold_font: OnceLock<Vec<u8>>,
     /// Paths something outside the WebView produced — a drop the window saw, a
     /// pick a dialog returned. `open_pdf_from_path` acts only on these: a path
     /// is a string any page code can make up, and opening one binds it as the
@@ -229,6 +236,7 @@ impl PdfiumState {
             // it, so a missing font cannot stop the app from opening PDFs.
             cjk_font_path: cjk_font_path(app),
             cjk_font: OnceLock::new(),
+            cjk_bold_font: OnceLock::new(),
             approved_paths: Mutex::new(HashSet::new()),
         })))
     }
@@ -1058,7 +1066,7 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// The bundled CJK font's bytes, read once and kept.
+    /// The bundled CJK font's static Regular bytes, resolved once and kept.
     fn cjk_font_bytes(&self) -> Result<&[u8], String> {
         if let Some(bytes) = self.cjk_font.get() {
             return Ok(bytes);
@@ -1067,18 +1075,42 @@ impl PdfiumEngine {
         let path = self.cjk_font_path.as_ref().ok_or_else(|| {
             "the bundled font is missing; run `bun run fonts:download`".to_string()
         })?;
-        let bytes = fs::read(path)
+        let source = fs::read(path)
             .map_err(|error| format!("the bundled font could not be read: {error}"))?;
+        let bytes = regular_cjk_font(&source)?;
 
-        // Two notes can reach here at once and both read the file; whichever
+        // Two notes can reach here at once and both resolve the font; whichever
         // stores first wins and the other's copy is dropped. Both then see the
-        // same bytes, which is all that matters.
+        // same Regular instance, which is all that matters.
         let _ = self.cjk_font.set(bytes);
 
         self.cjk_font
             .get()
             .map(Vec::as_slice)
             .ok_or_else(|| "the bundled font could not be cached".to_string())
+    }
+
+    /// The bundled CJK font's static weight-800 bytes, resolved once and kept.
+    fn cjk_bold_font_bytes(&self) -> Result<&[u8], String> {
+        if let Some(bytes) = self.cjk_bold_font.get() {
+            return Ok(bytes);
+        }
+
+        let path = self.cjk_font_path.as_ref().ok_or_else(|| {
+            "the bundled font is missing; run `bun run fonts:download`".to_string()
+        })?;
+        let source = fs::read(path)
+            .map_err(|error| format!("the bundled font could not be read: {error}"))?;
+        let bytes = bold_cjk_font(&source)?;
+
+        // A concurrent replacement may resolve the same instance too; both
+        // byte sequences are equivalent, so whichever stores first wins.
+        let _ = self.cjk_bold_font.set(bytes);
+
+        self.cjk_bold_font
+            .get()
+            .map(Vec::as_slice)
+            .ok_or_else(|| "the bundled bold font could not be cached".to_string())
     }
 
     /// Writes `text` at `origin` as a stamp annotation carrying one text object
@@ -1623,7 +1655,13 @@ impl PdfiumEngine {
         // The whole document reuses this one subset. It is prepared without the
         // PDFium lock because cutting the bundled face is pure CPU work.
         let embedded = if needs_embedded_font(&config.text) {
-            Some(subset_for(self.cjk_font_bytes()?, &config.text)?)
+            let font = if config.bold {
+                self.cjk_bold_font_bytes()?
+            } else {
+                self.cjk_font_bytes()?
+            };
+
+            Some(subset_for(font, &config.text)?)
         } else {
             None
         };
@@ -1662,10 +1700,13 @@ impl PdfiumEngine {
                 None => {
                     let fonts = entry.document.fonts_mut();
 
-                    match face {
-                        StandardFace::Sans => fonts.helvetica(),
-                        StandardFace::Serif => fonts.times_roman(),
-                        StandardFace::Mono => fonts.courier(),
+                    match (face, config.bold) {
+                        (StandardFace::Sans, false) => fonts.helvetica(),
+                        (StandardFace::Sans, true) => fonts.helvetica_bold(),
+                        (StandardFace::Serif, false) => fonts.times_roman(),
+                        (StandardFace::Serif, true) => fonts.times_bold(),
+                        (StandardFace::Mono, false) => fonts.courier(),
+                        (StandardFace::Mono, true) => fonts.courier_bold(),
                     }
                 }
             };

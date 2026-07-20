@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react"
 
 import {
+  watermarkFontWeightValue,
   watermarkUsesEmbeddedFont,
   type WatermarkConfig,
   type WatermarkFontFamily,
@@ -108,6 +109,7 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
     ? "sans-serif"
     : previewFontFamily[config.fontFamily]
   const fontSize = config.fontSize * scale
+  const fontWeight = watermarkFontWeightValue(config.bold, embedded)
   const rotation = `rotate(${config.rotation}deg)`
 
   // The rotated box is what the grid steps by, and a client rect already
@@ -122,7 +124,7 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
     const rect = node.getBoundingClientRect()
 
     setTile({ height: rect.height, width: rect.width })
-  }, [fontFamily, fontSize, rotation, text])
+  }, [fontFamily, fontSize, fontWeight, rotation, text])
 
   const placements = previewPlacements(
     sheet,
@@ -140,20 +142,27 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
         aria-hidden
         className="pointer-events-none absolute top-0 left-0 whitespace-nowrap opacity-0"
         ref={measureRef}
-        style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1, transform: rotation }}
+        style={{
+          fontFamily,
+          fontSize: `${fontSize}px`,
+          fontWeight,
+          lineHeight: 1,
+          transform: rotation,
+        }}
       >
         {text}
       </span>
 
       {placements.map((placement, index) => (
         <span
-          className="pointer-events-none absolute whitespace-nowrap font-medium"
+          className="pointer-events-none absolute whitespace-nowrap"
           data-testid={index === 0 ? "watermark-preview" : undefined}
           key={index}
           style={{
             color: config.color,
             fontFamily,
             fontSize: `${fontSize}px`,
+            fontWeight,
             left: `${placement.x}px`,
             lineHeight: 1,
             opacity: config.opacity,

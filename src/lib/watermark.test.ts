@@ -3,10 +3,13 @@ import { describe, expect, it } from "bun:test"
 import {
   clampWatermarkText,
   defaultWatermarkConfig,
+  defaultWatermarkPreferences,
   isWatermarkPreferences,
   normalizeWatermarkRotation,
+  readStoredWatermarkPreferences,
   sameWatermarkConfig,
   validateWatermarkConfig,
+  watermarkFontWeightValue,
   watermarkPreferences,
   watermarkUsesEmbeddedFont,
   WATERMARK_MAX_CHARS,
@@ -119,18 +122,55 @@ describe("watermark preferences", () => {
     expect("text" in preferences).toBe(false)
     expect(JSON.stringify(preferences)).not.toContain("sensitive")
     expect(isWatermarkPreferences(preferences)).toBe(true)
+    expect(isWatermarkPreferences({ ...preferences, bold: "yes" })).toBe(false)
   })
 
   it("detects configurations without relying on object identity", () => {
     const value = config()
 
     expect(sameWatermarkConfig(value, { ...value })).toBe(true)
+    expect(sameWatermarkConfig(value, { ...value, bold: true })).toBe(false)
     expect(sameWatermarkConfig(value, { ...value, opacity: 0.5 })).toBe(false)
     expect(sameWatermarkConfig(null, null)).toBe(true)
+  })
+
+  it("migrates stored styles from before the bold preference existed", () => {
+    const { bold: _bold, ...legacy } = defaultWatermarkPreferences
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+
+    expect(_bold).toBe(false)
+
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem: () => JSON.stringify(legacy),
+        },
+      },
+    })
+
+    try {
+      expect(readStoredWatermarkPreferences()).toEqual({ ...legacy, bold: false })
+    } finally {
+      if (previousWindow) {
+        Object.defineProperty(globalThis, "window", previousWindow)
+      } else {
+        Reflect.deleteProperty(globalThis, "window")
+      }
+    }
   })
 
   it("uses the bundled face for text outside printable Latin-1", () => {
     expect(watermarkUsesEmbeddedFont("CONFIDENTIAL")).toBe(false)
     expect(watermarkUsesEmbeddedFont("机密")).toBe(true)
+  })
+})
+
+describe("watermark font weight", () => {
+  it("uses 400/800 for the bundled face and Regular/Bold for standard fonts", () => {
+    expect(watermarkFontWeightValue(false, true)).toBe(400)
+    expect(watermarkFontWeightValue(true, true)).toBe(800)
+    expect(watermarkFontWeightValue(false, false)).toBe(400)
+    expect(watermarkFontWeightValue(true, false)).toBe(700)
   })
 })

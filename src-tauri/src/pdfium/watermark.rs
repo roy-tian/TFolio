@@ -15,6 +15,7 @@ pub struct WatermarkConfig {
     pub(super) text: String,
     pub(super) font_family: WatermarkFontFamily,
     pub(super) font_size: f32,
+    pub(super) bold: bool,
     pub(super) color: String,
     pub(super) opacity: f32,
     /// Clockwise degrees relative to the page's normal displayed direction.
@@ -213,6 +214,7 @@ mod tests {
             text: "CONFIDENTIAL".into(),
             font_family: WatermarkFontFamily::Sans,
             font_size: 36.0,
+            bold: false,
             color: "#64748b".into(),
             opacity: 0.25,
             rotation: -30.0,

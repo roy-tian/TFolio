@@ -83,6 +83,7 @@ fn test_engine() -> &'static PdfiumEngine {
         // resolve a bundled resource through.
         cjk_font_path: Some(crate::pdfium::font::bundled_cjk_font_path()),
         cjk_font: OnceLock::new(),
+        cjk_bold_font: OnceLock::new(),
         approved_paths: Mutex::new(HashSet::new()),
     })
 }
@@ -197,6 +198,7 @@ fn watermark_config(text: &str) -> WatermarkConfig {
         text: text.into(),
         font_family: WatermarkFontFamily::Sans,
         font_size: 36.0,
+        bold: false,
         color: "#ef4444".into(),
         opacity: 0.35,
         rotation: -30.0,
@@ -487,6 +489,38 @@ fn watermark_text_is_extractable() {
         .collect::<String>();
 
     assert!(extracted.contains("SEARCHABLE WATERMARK"));
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn latin_bold_watermark_uses_the_standard_bold_face() {
+    let engine = test_engine();
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the watermark fixture");
+    let mut config = watermark_config("BOLD WATERMARK");
+    config.bold = true;
+
+    engine
+        .apply_watermark(document.id, config)
+        .expect("PDFium should apply a bold watermark");
+    let bytes = {
+        let documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+        documents[&document.id]
+            .document
+            .save_to_bytes()
+            .expect("PDFium should save the bold watermark")
+    };
+
+    assert!(
+        bytes
+            .windows(b"Helvetica-Bold".len())
+            .any(|window| window == b"Helvetica-Bold"),
+        "the Latin bold watermark should use PDF's standard bold face"
+    );
 }
 
 #[test]

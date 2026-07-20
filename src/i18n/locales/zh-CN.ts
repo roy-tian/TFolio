@@ -87,7 +87,7 @@ const zhCN = {
     font_sans: "黑体",
     font_serif: "衬线",
     font_mono: "等宽",
-    fontFixed: "中文等非拉丁文字使用内置字体。",
+    weightBold: "加粗",
     color: "颜色",
     fontSize: "字号",
     opacity: "不透明度",

@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/dialog"
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -35,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { WatermarkValidationError } from "@/lib/watermark"
 import {
@@ -182,34 +182,46 @@ export function WatermarkDialog({
               </Field>
 
               <div className="grid gap-5 sm:grid-cols-2">
-                <Field data-disabled={embedded || undefined}>
+                <Field>
                   <FieldLabel>{t("watermark.font")}</FieldLabel>
-                  <Select
-                    disabled={embedded}
-                    items={fontItems}
-                    onValueChange={(value) => {
-                      if (isWatermarkFontFamily(value)) {
-                        onDraftChange({ ...draft, fontFamily: value })
-                      }
-                    }}
-                    value={draft.fontFamily}
-                  >
-                    <SelectTrigger className="w-full" data-testid="watermark-font">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {fontItems.map((item) => (
-                          <SelectItem key={item.value} value={item.value}>
-                            {item.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  {embedded ? (
-                    <FieldDescription>{t("watermark.fontFixed")}</FieldDescription>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <Select
+                      disabled={embedded}
+                      items={fontItems}
+                      onValueChange={(value) => {
+                        if (isWatermarkFontFamily(value)) {
+                          onDraftChange({ ...draft, fontFamily: value })
+                        }
+                      }}
+                      value={draft.fontFamily}
+                    >
+                      <SelectTrigger
+                        className="min-w-0 flex-1"
+                        data-testid="watermark-font"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {fontItems.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <Toggle
+                      aria-label={t("watermark.weightBold")}
+                      data-testid="watermark-bold"
+                      onPressedChange={(bold) => onDraftChange({ ...draft, bold })}
+                      pressed={draft.bold}
+                      title={t("watermark.weightBold")}
+                      variant="outline"
+                    >
+                      <strong aria-hidden>B</strong>
+                    </Toggle>
+                  </div>
                 </Field>
 
                 <Field>
