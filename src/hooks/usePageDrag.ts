@@ -58,6 +58,19 @@ export function usePageDrag({
   // so a click that never had a press — a synthetic one, as the e2e suite
   // dispatches — cannot be swallowed by a long-finished drag.
   const dragEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
+  // The pointer listeners subscribe once per active period and read these
+  // through refs, so an owner re-render mid-gesture — an unstable `onReorder`,
+  // a resolving edit bumping `pending` — cannot resubscribe them and discard
+  // the in-flight `gesture` the closure holds.
+  const onReorderRef = useRef(onReorder)
+  const columnsRef = useRef(columns)
+  const pageCountRef = useRef(pageCount)
+  const selectedPagesRef = useRef(selectedPages)
+
+  onReorderRef.current = onReorder
+  columnsRef.current = columns
+  pageCountRef.current = pageCount
+  selectedPagesRef.current = selectedPages
 
   useEffect(() => {
     if (!active) {
@@ -165,12 +178,13 @@ export function usePageDrag({
         return
       }
 
+      const selectedPages = selectedPagesRef.current
       const pages = selectedPages.has(gesture.pageNumber)
         ? [...selectedPages].sort((left, right) => left - right)
         : [gesture.pageNumber]
 
       setDrag({
-        gap: dropGapForPoint(point, gesture.cells, columns),
+        gap: dropGapForPoint(point, gesture.cells, columnsRef.current),
         pages,
         pointer: { x: event.clientX, y: event.clientY },
       })
@@ -198,12 +212,13 @@ export function usePageDrag({
         return
       }
 
+      const selectedPages = selectedPagesRef.current
       const pages = selectedPages.has(current.pageNumber)
         ? [...selectedPages].sort((left, right) => left - right)
         : [current.pageNumber]
-      const gap = dropGapForPoint(point, current.cells, columns)
+      const gap = dropGapForPoint(point, current.cells, columnsRef.current)
 
-      onReorder(orderAfterMove(pages, gap, pageCount))
+      onReorderRef.current(orderAfterMove(pages, gap, pageCountRef.current))
     }
 
     const handlePointerCancel = (event: PointerEvent) => {
@@ -226,7 +241,7 @@ export function usePageDrag({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, columns, gridRef, onReorder, pageCount, selectedPages])
+  }, [active, gridRef])
 
   const wasDragClick = useCallback(
     () => performance.now() - dragEndedAtRef.current < 300,
