@@ -26,6 +26,8 @@ type LayoutProps = {
   rotation: number
   /** Resolved zoom; the fit modes have already been worked out against it. */
   scale: number
+  /** How many times each page's extracted text has changed. */
+  textEpochs: RenderEpochs
 }
 
 function SingleLayout({
@@ -35,6 +37,7 @@ function SingleLayout({
   renderEpochs,
   rotation,
   scale,
+  textEpochs,
 }: LayoutProps) {
   return pages.map((page, index) => (
     <PdfPage
@@ -46,6 +49,7 @@ function SingleLayout({
       renderEpoch={renderEpochs[index + 1] ?? 0}
       rotation={rotation}
       scale={scale}
+      textEpoch={textEpochs[index + 1] ?? 0}
     />
   ))
 }
@@ -58,6 +62,7 @@ function BookLayout({
   renderEpochs,
   rotation,
   scale,
+  textEpochs,
 }: LayoutProps) {
   // Both halves of a spread share one width: two columns of visibly different
   // widths would read as broken, where a single column simply following each
@@ -83,6 +88,7 @@ function BookLayout({
           renderEpoch={renderEpochs[pageNumber] ?? 0}
           rotation={rotation}
           scale={scale}
+          textEpoch={textEpochs[pageNumber] ?? 0}
           width={columnWidth}
         />
       ))}
@@ -140,6 +146,7 @@ type PdfViewerLayoutProps = {
   renderEpochs: RenderEpochs
   rotation: number
   scale: number
+  textEpochs: RenderEpochs
   viewMode: ViewMode
   viewerWidth: number
 }
@@ -160,6 +167,7 @@ export function PdfViewerLayout({
   renderEpochs,
   rotation,
   scale,
+  textEpochs,
   viewMode,
   viewerWidth,
 }: PdfViewerLayoutProps) {
@@ -173,6 +181,7 @@ export function PdfViewerLayout({
     renderEpochs,
     rotation,
     scale,
+    textEpochs,
   }
 
   return (

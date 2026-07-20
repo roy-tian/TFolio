@@ -2,9 +2,9 @@ mod pdfium;
 
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
-    add_pdf_text_note_annotation, close_pdf, delete_last_pdf_annotation, export_pdf,
-    extract_pdf_page_text, open_pdf, open_pdf_from_path, pick_pdf_path, render_pdf_page,
-    render_pdf_page_thumbnail, save_pdf, PdfiumState,
+    add_pdf_text_note_annotation, apply_pdf_watermark, close_pdf, delete_last_pdf_annotation,
+    export_pdf, extract_pdf_page_text, open_pdf, open_pdf_from_path, pick_pdf_path,
+    remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, save_pdf, PdfiumState,
 };
 use tauri::Manager;
 
@@ -45,7 +45,9 @@ pub fn run() {
             add_pdf_rect_annotation,
             add_pdf_rect_effect_annotation,
             add_pdf_text_note_annotation,
+            apply_pdf_watermark,
             delete_last_pdf_annotation,
+            remove_pdf_watermark,
             save_pdf,
             export_pdf,
             close_pdf

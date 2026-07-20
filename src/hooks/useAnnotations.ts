@@ -5,18 +5,22 @@ import {
   canRedo,
   canUndo,
   commandPages,
+  commandTextPages,
   commit,
   emptyHistory,
   isDirty,
   markSaved,
+  planWatermarkChange,
   redo,
   undo,
+  watermarkConfig as currentWatermarkConfig,
   type AnnotationCommand,
   type AnnotationHistory,
   type HighlightCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PdfExportOutcome } from "@/lib/pdf"
+import type { WatermarkConfig } from "@/lib/watermark"
 
 type UseAnnotationsOptions = {
   documentId: number | undefined
@@ -69,6 +73,16 @@ async function applyCommand(documentId: number, command: AnnotationCommand) {
         text: command.text,
       })
       return
+    case "watermark":
+      if (command.config) {
+        await invoke("apply_pdf_watermark", {
+          config: command.config,
+          documentId,
+        })
+      } else {
+        await invoke("remove_pdf_watermark", { documentId })
+      }
+      return
   }
 }
 
@@ -102,6 +116,19 @@ async function applyHighlight(documentId: number, command: HighlightCommand) {
  * a page was given last, so the two have to agree about what "last" means.
  */
 async function retractCommand(documentId: number, command: AnnotationCommand) {
+  if (command.kind === "watermark") {
+    if (command.previous) {
+      await invoke("apply_pdf_watermark", {
+        config: command.previous,
+        documentId,
+      })
+    } else {
+      await invoke("remove_pdf_watermark", { documentId })
+    }
+
+    return
+  }
+
   for (const pageNumber of [...commandPages(command)].reverse()) {
     await invoke("delete_last_pdf_annotation", { documentId, pageNumber })
   }
@@ -122,6 +149,7 @@ export function useAnnotations({
 }: UseAnnotationsOptions) {
   const [history, setHistory] = useState<AnnotationHistory>(emptyHistory)
   const [renderEpochs, setRenderEpochs] = useState<RenderEpochs>({})
+  const [textEpochs, setTextEpochs] = useState<RenderEpochs>({})
   const [pending, setPending] = useState(0)
   // React state does not move until a re-render, so an operation starting inside
   // another's round trip would plan against a history a step out of date and
@@ -135,7 +163,7 @@ export function useAnnotations({
   // is about to change.
   const queueRef = useRef<Promise<unknown>>(Promise.resolve())
 
-  const applyEpochs = useCallback((pageNumbers: number[]) => {
+  const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
     setRenderEpochs((epochs) => {
       const next = { ...epochs }
 
@@ -145,6 +173,17 @@ export function useAnnotations({
 
       return next
     })
+    if (textPages.length > 0) {
+      setTextEpochs((epochs) => {
+        const next = { ...epochs }
+
+        for (const pageNumber of textPages) {
+          next[pageNumber] = (next[pageNumber] ?? 0) + 1
+        }
+
+        return next
+      })
+    }
   }, [])
 
   /**
@@ -161,7 +200,12 @@ export function useAnnotations({
     (
       plan: (
         history: AnnotationHistory,
-      ) => { pages: number[]; work: () => Promise<boolean>; next: AnnotationHistory } | null,
+      ) => {
+        pages: number[]
+        textPages: number[]
+        work: () => Promise<boolean>
+        next: AnnotationHistory
+      } | null,
       onFailure: () => void,
     ) => {
       if (documentId === undefined) {
@@ -204,7 +248,7 @@ export function useAnnotations({
           // Whether or not the work succeeded: a command that failed partway
           // still changed the pages it reached.
           if (generation === generationRef.current) {
-            applyEpochs(step.pages)
+            applyEpochs(step.pages, step.textPages)
           }
         }
       })
@@ -224,6 +268,7 @@ export function useAnnotations({
         (current) => ({
           next: commit(current, command),
           pages: commandPages(command),
+          textPages: commandTextPages(command),
           work: async () => {
             await applyCommand(documentId, command)
             return true
@@ -231,6 +276,47 @@ export function useAnnotations({
         }),
         onAnnotateError,
       )
+    },
+    [documentId, enqueue, onAnnotateError],
+  )
+
+  /**
+   * Plans against the history the shared queue has actually reached, and
+   * reports whether the change landed — the dialog stays open on a refusal
+   * rather than closing over an error the reader would have to hunt for.
+   */
+  const setWatermark = useCallback(
+    async (config: WatermarkConfig | null, pageCount: number) => {
+      if (documentId === undefined) {
+        return false
+      }
+
+      let failed = false
+
+      await enqueue((current) => {
+        const planned = planWatermarkChange(current, config, pageCount)
+
+        if (!planned) {
+          return null
+        }
+        const { command } = planned
+        const pages = commandPages(command)
+
+        return {
+          next: planned.history,
+          pages,
+          textPages: pages,
+          work: async () => {
+            await applyCommand(documentId, command)
+            return true
+          },
+        }
+      }, () => {
+        failed = true
+        onAnnotateError()
+      })
+
+      return !failed
     },
     [documentId, enqueue, onAnnotateError],
   )
@@ -247,6 +333,7 @@ export function useAnnotations({
         ? {
             next: step.history,
             pages: commandPages(step.entry.command),
+            textPages: commandTextPages(step.entry.command),
             work: async () => {
               await retractCommand(documentId, step.entry.command)
               return true
@@ -268,6 +355,7 @@ export function useAnnotations({
         ? {
             next: step.history,
             pages: commandPages(step.entry.command),
+            textPages: commandTextPages(step.entry.command),
             work: async () => {
               await applyCommand(documentId, step.entry.command)
               return true
@@ -296,6 +384,7 @@ export function useAnnotations({
         (current) => ({
           next: markSaved(current),
           pages: [],
+          textPages: [],
           work: async () => {
             const outcome = await invoke<PdfExportOutcome | null>("export_pdf", {
               documentId,
@@ -331,6 +420,7 @@ export function useAnnotations({
           ? {
               next: markSaved(current),
               pages: [],
+              textPages: [],
               work: async () => {
                 await invoke("save_pdf", { documentId })
                 return true
@@ -353,6 +443,7 @@ export function useAnnotations({
     historyRef.current = emptyHistory
     setHistory(emptyHistory)
     setRenderEpochs({})
+    setTextEpochs({})
   }, [])
 
   const isBusy = pending > 0
@@ -369,7 +460,10 @@ export function useAnnotations({
       renderEpochs,
       reset,
       save,
+      setWatermark,
+      textEpochs,
       undo: undoCommand,
+      watermarkConfig: currentWatermarkConfig(history),
     }),
     [
       commitCommand,
@@ -381,6 +475,8 @@ export function useAnnotations({
       renderEpochs,
       reset,
       save,
+      setWatermark,
+      textEpochs,
       undoCommand,
     ],
   )

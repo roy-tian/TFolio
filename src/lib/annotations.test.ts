@@ -4,16 +4,20 @@ import {
   canRedo,
   canUndo,
   commandPages,
+  commandTextPages,
   commit,
   emptyHistory,
   historyHead,
   isDirty,
   markSaved,
+  planWatermarkChange,
   redo,
   undo,
+  watermarkConfig,
   type AnnotationCommand,
   type AnnotationHistory,
 } from "@/lib/annotations"
+import { defaultWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
 function highlight(...pageNumbers: number[]): AnnotationCommand {
   return {
@@ -32,6 +36,13 @@ function historyOf(...commands: AnnotationCommand[]): AnnotationHistory {
   return commands.reduce(commit, emptyHistory)
 }
 
+function watermark(
+  config: WatermarkConfig | null,
+  previous: WatermarkConfig | null = null,
+): AnnotationCommand {
+  return { config, kind: "watermark", pageCount: 3, previous }
+}
+
 describe("commandPages", () => {
   it("reports the page a single-page command writes to", () => {
     expect(commandPages(highlight(3))).toEqual([3])
@@ -41,6 +52,57 @@ describe("commandPages", () => {
   // carries every page it touched and an undo has to take all of them back.
   it("reports every page a selection ran across", () => {
     expect(commandPages(highlight(3, 4))).toEqual([3, 4])
+  })
+
+  it("reports every page a document watermark changes", () => {
+    expect(commandPages(watermark(defaultWatermarkConfig()))).toEqual([1, 2, 3])
+  })
+
+  it("invalidates extracted text only for page-content watermarks", () => {
+    expect(commandTextPages(highlight(2))).toEqual([])
+    expect(commandTextPages(watermark(defaultWatermarkConfig()))).toEqual([
+      1, 2, 3,
+    ])
+  })
+})
+
+describe("watermarkConfig", () => {
+  const first = { ...defaultWatermarkConfig(), text: "DRAFT" }
+  const second = { ...defaultWatermarkConfig(), text: "FINAL" }
+
+  it("tracks apply, replace, explicit remove, undo, and redo", () => {
+    const applied = historyOf(watermark(first))
+    const replaced = commit(applied, watermark(second, first))
+    const removed = commit(replaced, watermark(null, second))
+
+    expect(watermarkConfig(applied)).toEqual(first)
+    expect(watermarkConfig(replaced)).toEqual(second)
+    expect(watermarkConfig(removed)).toBeNull()
+    expect(watermarkConfig(undo(removed)!.history)).toEqual(second)
+    expect(watermarkConfig(redo(undo(removed)!.history)!.history)).toBeNull()
+  })
+
+  it("keeps an explicit remove authoritative over older configurations", () => {
+    const removed = historyOf(watermark(first), watermark(null, first), highlight(1))
+
+    expect(watermarkConfig(removed)).toBeNull()
+  })
+
+  it("follows the new branch after undo", () => {
+    const replaced = historyOf(watermark(first), watermark(second, first))
+    const branched = commit(undo(replaced)!.history, watermark(null, first))
+
+    expect(watermarkConfig(branched)).toBeNull()
+    expect(canRedo(branched)).toBe(false)
+  })
+
+  it("plans previous from the queue's current history and skips a no-op", () => {
+    const queued = historyOf(watermark(first), highlight(2))
+    const planned = planWatermarkChange(queued, second, 3)!
+
+    expect(planned.command.previous).toEqual(first)
+    expect(watermarkConfig(planned.history)).toEqual(second)
+    expect(planWatermarkChange(planned.history, second, 3)).toBeNull()
   })
 })
 

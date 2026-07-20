@@ -11,7 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use super::{
     size_limit_error, ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfTextSpan,
-    PdfiumState, RectEffect, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    PdfiumState, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
 };
 
 #[tauri::command]
@@ -150,6 +150,31 @@ pub async fn add_pdf_text_note_annotation(
     })
     .await
     .map_err(|error| format!("PDFium note task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn apply_pdf_watermark(
+    document_id: u64,
+    config: WatermarkConfig,
+    state: State<'_, PdfiumState>,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.apply_watermark(document_id, config))
+        .await
+        .map_err(|error| format!("PDFium watermark task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn remove_pdf_watermark(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.remove_watermark(document_id))
+        .await
+        .map_err(|error| format!("PDFium watermark removal task failed: {error}"))?
 }
 
 #[tauri::command]

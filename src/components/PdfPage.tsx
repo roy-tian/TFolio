@@ -57,6 +57,8 @@ type PdfPageProps = {
   pageNumber: number
   /** Bumped when the page is drawn on, so the bitmap is fetched again. */
   renderEpoch: number
+  /** Bumped only when page content text changes. */
+  textEpoch: number
   rotation: number
   /** Resolved zoom; 1 lays the page out at one PDF point per CSS pixel. */
   scale: number
@@ -76,6 +78,7 @@ export function PdfPage({
   renderEpoch,
   rotation,
   scale,
+  textEpoch,
   width,
 }: PdfPageProps) {
   const { t } = useTranslation()
@@ -139,7 +142,7 @@ export function PdfPage({
     return () => {
       cancelled = true
     }
-  }, [documentId, isNearViewport, pageNumber])
+  }, [documentId, isNearViewport, pageNumber, textEpoch])
 
   // Text spans are in the page's unrotated coordinate space. For 90°/270° pages
   // the unrotated dimensions are the displayed ones swapped; the layer itself is

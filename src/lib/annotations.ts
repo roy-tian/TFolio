@@ -1,4 +1,5 @@
 import type { PagePoint, PagePointsRect } from "@/lib/annotationGeometry"
+import { sameWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
 /** A colour as `#rrggbb`, the form `<input type="color">` reads and writes. */
 export type HexColor = string
@@ -91,7 +92,20 @@ export type TextNoteCommand = {
   text: string
 }
 
-export type AnnotationCommand = HighlightCommand | RectCommand | TextNoteCommand
+export type WatermarkCommand = {
+  /** `null` is an explicit request to remove this session's watermark. */
+  config: WatermarkConfig | null
+  kind: "watermark"
+  pageCount: number
+  /** The configuration an undo restores, derived inside the mutation queue. */
+  previous: WatermarkConfig | null
+}
+
+export type AnnotationCommand =
+  | HighlightCommand
+  | RectCommand
+  | TextNoteCommand
+  | WatermarkCommand
 
 /**
  * Redoing re-runs the command and gets a fresh annotation out of PDFium, but it
@@ -125,7 +139,53 @@ export function commandPages(command: AnnotationCommand): number[] {
     case "rect":
     case "textNote":
       return [command.pageNumber]
+    case "watermark":
+      return Array.from({ length: command.pageCount }, (_, index) => index + 1)
   }
+}
+
+/** Pages whose selectable page-content text changed, not merely their pixels. */
+export function commandTextPages(command: AnnotationCommand): number[] {
+  return command.kind === "watermark" ? commandPages(command) : []
+}
+
+/** The active session watermark implied by the applied side of history. */
+export function watermarkConfig(
+  history: AnnotationHistory,
+): WatermarkConfig | null {
+  for (let index = history.past.length - 1; index >= 0; index -= 1) {
+    const command = history.past[index]!.command
+
+    if (command.kind === "watermark") {
+      // An explicit remove is authoritative. Looking farther back would revive
+      // a configuration the document no longer carries.
+      return command.config
+    }
+  }
+
+  return null
+}
+
+/** Plans a document-level change from the history the mutation queue reached. */
+export function planWatermarkChange(
+  history: AnnotationHistory,
+  config: WatermarkConfig | null,
+  pageCount: number,
+) {
+  const previous = watermarkConfig(history)
+
+  if (sameWatermarkConfig(previous, config)) {
+    return null
+  }
+
+  const command: WatermarkCommand = {
+    config,
+    kind: "watermark",
+    pageCount,
+    previous,
+  }
+
+  return { command, history: commit(history, command) }
 }
 
 /** The entry the document currently ends at, or 0 when nothing is applied. */

@@ -12,6 +12,8 @@ bundled PDFium library, so document content is never interpreted by the WebView.
   you are reading.
 - Bookmark sidebar built from the document outline (table of contents) for
   quick navigation.
+- Highlights, rectangle effects, text notes, and document-wide text watermarks,
+  with shared undo, redo, save, and export history.
 - Simplified Chinese and English UI that follows your saved preference, then the
   operating-system language.
 - Adapts to light and dark system themes.
@@ -133,6 +135,11 @@ production Content Security Policy only permits same-origin application resource
 and Tauri IPC. The development-only CSP permits inline styles solely because
 Vite's CSS hot reload injects styles at runtime; production does not allow inline
 styles.
+
+Watermarks are added as page content above the original content, rather than as
+PDF annotations. This makes them harder to remove in ordinary annotation tools,
+but not impossible to remove with a PDF object editor; they are not a security
+or redaction mechanism.
 
 `bun run tauri:dev`, `bun run tauri:build`, and `bun run tauri:bundle`
 automatically download the pinned PDFium runtime for the current platform. To

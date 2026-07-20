@@ -18,8 +18,9 @@ task runner.
 - `src-tauri/src/`: Rust backend. `main.rs`/`lib.rs` are the entry points;
   `pdfium/` holds PDF parsing and rendering — `engine.rs` (documents and
   annotations), `commands.rs` (the Tauri commands), `geometry.rs` (coordinates
-  and the style ranges), `font.rs` (the bundled CJK face and per-note
-  subsetting), `library.rs` (binding the PDFium runtime).
+  and the style ranges), `font.rs` (the bundled CJK face and per-edit
+  subsetting), `watermark.rs` (document-watermark validation and layout),
+  `library.rs` (binding the PDFium runtime).
 - `src-tauri/capabilities/`: Tauri permission definitions (`default.json`).
 - `src-tauri/resources/`: bundled runtime assets — the downloaded PDFium
   library under `resources/pdfium/` and the Noto Sans SC face text notes subset
@@ -163,6 +164,25 @@ counts what the session added to each page and refuses to go past it, rather tha
 trusting the frontend's undo history: a real PDF's pages carry links, form
 fields, and comments, and an undo that ran off the end of the reader's own marks
 would delete one of those permanently and save it into their file.
+
+Document watermarks are top-level page content objects, not annotations. In
+`pdfium-render` 0.9.3, `add_object()` only appends and has no insertion API, so
+watermarks necessarily render above the original page content. Preserve the
+watermark ownership guard: the app may replace or remove only the exact text
+object tail created during the current open session, after preflighting every
+page. Once a saved PDF is closed and reopened, those objects are input content
+and are no longer owned by the app. Page-content watermarks are harder, but not
+impossible, to remove with a professional PDF object editor; never describe
+them as redaction, tamper-proofing, or security protection.
+
+Because that ownership expires at close, a watermarked document may reach only a
+*copy*: both write paths refuse a destination that is the document's own source,
+`save` outright and `export_to` by comparing paths before it writes. The two
+compare differently on purpose. `export_to`'s `saved_to_source` flag stays a
+verbatim path comparison — mistaking a symlinked twin for a stranger only leaves
+the history dirty. The watermark refusal resolves aliases first, because there
+the same mistake overwrites the reader's original with a mark this app can no
+longer lift. Any third write path has to carry the same guard.
 
 Security-related changes must pass `bun run build`, `bun run tauri:build`, and a
 manual check for unexpected CSP violations in the WebView developer console.

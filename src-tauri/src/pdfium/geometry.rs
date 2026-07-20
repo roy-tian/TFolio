@@ -17,12 +17,17 @@ pub(super) fn page_rotation_degrees(page: &PdfPage<'_>) -> f32 {
 /// bottom-left origin and the frontend's top-left goes through this, so the two
 /// directions cannot disagree about which edge the y-axis starts at.
 pub(super) fn unrotated_page_height(page: &PdfPage<'_>) -> f32 {
+    unrotated_page_size(page).1
+}
+
+/// A page's width and height before its intrinsic `/Rotate` is applied.
+pub(super) fn unrotated_page_size(page: &PdfPage<'_>) -> (f32, f32) {
     let rotation = page_rotation_degrees(page);
 
     if rotation == 90.0 || rotation == 270.0 {
-        page.width().value
+        (page.height().value, page.width().value)
     } else {
-        page.height().value
+        (page.width().value, page.height().value)
     }
 }
 

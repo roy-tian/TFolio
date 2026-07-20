@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
+import { WatermarkDialog } from "@/components/WatermarkDialog"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { ZoomControls } from "@/components/ZoomControls"
@@ -34,6 +35,7 @@ import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
 import { useTextNoteTool } from "@/hooks/useTextNoteTool"
+import { useWatermark } from "@/hooks/useWatermark"
 import { useZoom } from "@/hooks/useZoom"
 import {
   defaultHighlightColor,
@@ -163,6 +165,12 @@ export default function App() {
     onSuccess: useCallback(() => setViewerError(null), []),
   })
   const resetAnnotations = annotations.reset
+  const watermark = useWatermark({
+    activeConfig: annotations.watermarkConfig,
+    documentId: pdfDocument?.id,
+    onSet: annotations.setWatermark,
+    pageCount: pdfDocument?.numPages ?? 0,
+  })
 
   useHighlightTool({
     active: Boolean(pdfDocument) && drawingApplies && activeTool === "highlight",
@@ -562,7 +570,11 @@ export default function App() {
 
   return (
     <div className="h-svh overflow-hidden bg-background">
-      <header className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 shadow-xs backdrop-blur">
+      {/* pb-px keeps the content box an even height: without it the bottom
+          border leaves 47px, and centring a 32px control there puts its own
+          border on a half pixel, which the WebView rounds per element — some
+          outlines paint 1px solid, others two half-intensity rows. */}
+      <header className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur">
         <div className="flex items-center gap-2 justify-self-start">
           <Toggle
             aria-label={bookmarksLabel}
@@ -593,6 +605,16 @@ export default function App() {
               zoomPercent={zoom.zoomPercent}
             />
           ) : null}
+          <Button
+            aria-label={t("toolbar.rotate")}
+            disabled={!pdfDocument}
+            onClick={() => setRotation((value) => (value + 90) % 360)}
+            size="icon"
+            title={t("toolbar.rotate")}
+            variant="outline"
+          >
+            <RotateCw />
+          </Button>
         </div>
 
         <div
@@ -635,22 +657,13 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 justify-self-end">
-          <Button
-            aria-label={t("toolbar.rotate")}
-            disabled={!pdfDocument}
-            onClick={() => setRotation((value) => (value + 90) % 360)}
-            size="icon"
-            title={t("toolbar.rotate")}
-            variant="outline"
-          >
-            <RotateCw />
-          </Button>
           <AnnotationToolbar
             activeTool={activeTool}
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
             disabled={!pdfDocument}
             hasSourceFile={Boolean(pdfDocument?.path)}
+            hasWatermark={annotations.watermarkConfig !== null}
             highlightApplies={drawingApplies}
             highlightColor={highlightColor}
             isDirty={annotations.isDirty}
@@ -661,6 +674,7 @@ export default function App() {
             onSave={() => void annotations.save()}
             onToolChange={setActiveTool}
             onUndo={() => void annotations.undo()}
+            onWatermark={watermark.openDialog}
             rectApplies={drawingApplies}
             rectStyle={rectStyle}
             textNoteApplies={drawingApplies}
@@ -700,6 +714,7 @@ export default function App() {
               renderEpochs={annotations.renderEpochs}
               rotation={rotation}
               scale={zoom.scale}
+              textEpochs={annotations.textEpochs}
               viewMode={viewMode}
               viewerWidth={viewerWidth}
             />
@@ -759,6 +774,18 @@ export default function App() {
           viewerRef={viewerRef}
         />
       ) : null}
+
+      <WatermarkDialog
+        draft={watermark.draft}
+        hasWatermark={watermark.hasWatermark}
+        isApplying={watermark.isApplying}
+        onApply={() => void watermark.apply()}
+        onDraftChange={watermark.setDraft}
+        onOpenChange={watermark.onOpenChange}
+        onRemove={() => void watermark.remove()}
+        open={watermark.open}
+        validationError={watermark.validationError}
+      />
 
       {isDragging ? (
         <div className="pointer-events-none fixed inset-3 top-15 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm">
