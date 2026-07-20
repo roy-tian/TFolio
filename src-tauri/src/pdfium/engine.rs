@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, OnceLock,
+        Arc, Mutex, MutexGuard, OnceLock,
     },
 };
 
@@ -73,7 +73,10 @@ struct WatermarkPageState {
 #[derive(Clone, Debug)]
 struct WatermarkState {
     config: WatermarkConfig,
-    per_page: HashMap<i32, WatermarkPageState>,
+    /// Keyed by stable page id, not position, so the record survives the
+    /// structure operations M7 adds. An entry with `added_objects == 0` is a
+    /// page inserted after the watermark was applied: owned, but bare.
+    per_page: HashMap<u64, WatermarkPageState>,
 }
 
 struct PageWatermarkPlan {
@@ -166,16 +169,23 @@ fn place_watermark_object(
 
 struct OpenDocument {
     document: PdfDocument<'static>,
-    /// How many annotations this session has added to each page.
+    /// Position -> stable page id. Assigned `0..n` at open; every inserted page
+    /// takes a fresh id and an id is never reused within a session. Structure
+    /// operations permute or edit this vector, which is what lets every
+    /// id-keyed map below survive them.
+    page_ids: Vec<u64>,
+    /// How many annotations this session has added to each page, keyed by
+    /// stable page id.
     ///
     /// PDFium appends, so the reader's own marks are the tail of a page's
     /// annotations and this is how long that tail is. Past it lie the document's
     /// own — links, form fields, comments — which an undo must never reach.
-    added: HashMap<i32, u32>,
-    /// Monotonic content version per page. Rectangle effects release the global
-    /// PDFium lock while processing owned pixels; this detects an annotation that
-    /// changed the source page before the processed image is attached again.
-    revisions: HashMap<i32, u64>,
+    added: HashMap<u64, u32>,
+    /// Monotonic content version per page, keyed by stable page id. Rectangle
+    /// effects release the global PDFium lock while processing owned pixels;
+    /// this detects an annotation that changed the source page before the
+    /// processed image is attached again.
+    revisions: HashMap<u64, u64>,
     /// The file this document was opened from, and so the file a save writes
     /// back over. `None` — opened from bytes — leaves nothing to overwrite,
     /// and a first export adopts its destination as the source.
@@ -186,6 +196,37 @@ struct OpenDocument {
     needs_compaction: bool,
     /// The one group of top-level page text objects this open session owns.
     watermark: Option<WatermarkState>,
+}
+
+impl OpenDocument {
+    /// Resolves a 1-based page number to the page's stable id — the key every
+    /// per-page map uses, which survives reordering, deletion, and insertion.
+    /// Doubles as the page-number validation every command needs.
+    fn page_id(&self, page_number: i32) -> Result<u64, String> {
+        usize::try_from(page_number - 1)
+            .ok()
+            .and_then(|index| self.page_ids.get(index).copied())
+            .ok_or_else(|| format!("page {page_number} does not exist"))
+    }
+}
+
+/// The entry for `document_id`, with the one wording for a closed document.
+fn open_entry(
+    documents: &HashMap<u64, OpenDocument>,
+    document_id: u64,
+) -> Result<&OpenDocument, String> {
+    documents
+        .get(&document_id)
+        .ok_or_else(|| "PDF document is no longer open".to_string())
+}
+
+fn open_entry_mut(
+    documents: &mut HashMap<u64, OpenDocument>,
+    document_id: u64,
+) -> Result<&mut OpenDocument, String> {
+    documents
+        .get_mut(&document_id)
+        .ok_or_else(|| "PDF document is no longer open".to_string())
 }
 
 pub(super) struct PdfiumEngine {
@@ -267,6 +308,14 @@ impl PdfiumEngine {
             .unwrap_or(false)
     }
 
+    /// Locks the store — and with it PDFium itself — behind the one wording
+    /// for a poisoned lock.
+    fn lock_documents(&self) -> Result<MutexGuard<'_, HashMap<u64, OpenDocument>>, String> {
+        self.documents
+            .lock()
+            .map_err(|_| "PDFium document store is unavailable".to_string())
+    }
+
     pub(super) fn open(&self, bytes: Vec<u8>) -> Result<PdfDocumentInfo, String> {
         self.open_with_source(bytes, None)
     }
@@ -309,10 +358,7 @@ impl PdfiumEngine {
 
         // Before PDFium is touched, not just around the insert: reading the new
         // document's pages and bookmarks is PDFium work like any other.
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
+        let mut documents = self.lock_documents()?;
         let document = self
             .pdfium
             .load_pdf_from_byte_vec(bytes, None)
@@ -339,6 +385,7 @@ impl PdfiumEngine {
                 added: HashMap::new(),
                 document,
                 needs_compaction: false,
+                page_ids: (0..num_pages as u64).collect(),
                 revisions: HashMap::new(),
                 source_path,
                 watermark: None,
@@ -370,20 +417,13 @@ impl PdfiumEngine {
             ));
         }
 
-        let documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let document = &documents
-            .get(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?
-            .document;
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
 
-        if page_number < 1 || page_number > document.pages().len() {
-            return Err(format!("page {page_number} does not exist"));
-        }
+        entry.page_id(page_number)?;
 
-        let page = document
+        let page = entry
+            .document
             .pages()
             .get(page_number - 1)
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
@@ -438,20 +478,13 @@ impl PdfiumEngine {
         document_id: u64,
         page_number: i32,
     ) -> Result<Vec<PdfTextSpan>, String> {
-        let documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let document = &documents
-            .get(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?
-            .document;
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
 
-        if page_number < 1 || page_number > document.pages().len() {
-            return Err(format!("page {page_number} does not exist"));
-        }
+        entry.page_id(page_number)?;
 
-        let page = document
+        let page = entry
+            .document
             .pages()
             .get(page_number - 1)
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
@@ -518,17 +551,9 @@ impl PdfiumEngine {
             return Err("a highlight needs a visible colour".into());
         }
 
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
-
-        if page_number < 1 || page_number > entry.document.pages().len() {
-            return Err(format!("page {page_number} does not exist"));
-        }
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let page_id = entry.page_id(page_number)?;
 
         let mut page = entry
             .document
@@ -588,8 +613,8 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(page_number).or_insert(0) += 1;
-        *entry.revisions.entry(page_number).or_insert(0) += 1;
+        *entry.added.entry(page_id).or_insert(0) += 1;
+        *entry.revisions.entry(page_id).or_insert(0) += 1;
 
         Ok(())
     }
@@ -629,19 +654,12 @@ impl PdfiumEngine {
             displayed_height,
             unrotated_width,
             unrotated_height,
+            captured_page_id,
             captured_revision,
         ) = {
-            let documents = self
-                .documents
-                .lock()
-                .map_err(|_| "PDFium document store is unavailable".to_string())?;
-            let entry = documents
-                .get(&document_id)
-                .ok_or_else(|| "PDF document is no longer open".to_string())?;
-
-            if page_number < 1 || page_number > entry.document.pages().len() {
-                return Err(format!("page {page_number} does not exist"));
-            }
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
+            let page_id = entry.page_id(page_number)?;
 
             let page = entry
                 .document
@@ -700,7 +718,8 @@ impl PdfiumEngine {
                 displayed_height,
                 unrotated_width,
                 unrotated_height,
-                entry.revisions.get(&page_number).copied().unwrap_or(0),
+                page_id,
+                entry.revisions.get(&page_id).copied().unwrap_or(0),
             )
         };
 
@@ -770,18 +789,22 @@ impl PdfiumEngine {
         }
 
         let placeholder = DynamicImage::new_rgba8(1, 1);
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
 
-        if page_number < 1 || page_number > entry.document.pages().len() {
-            return Err(format!("page {page_number} does not exist"));
-        }
-        if entry.revisions.get(&page_number).copied().unwrap_or(0) != captured_revision {
+        // The commit belongs to the page the capture read, wherever that page
+        // sits now — found by id, so a page inserted at the captured number can
+        // never receive another page's pixels. A structure change also bumps
+        // every revision, so a moved page still fails the check below.
+        let page_index = entry
+            .page_ids
+            .iter()
+            .position(|id| *id == captured_page_id)
+            .ok_or_else(|| {
+                "the page changed while its rectangle effect was being prepared".to_string()
+            })?;
+
+        if entry.revisions.get(&captured_page_id).copied().unwrap_or(0) != captured_revision {
             return Err("the page changed while its rectangle effect was being prepared".into());
         }
 
@@ -817,7 +840,7 @@ impl PdfiumEngine {
         let mut page = entry
             .document
             .pages_mut()
-            .get(page_number - 1)
+            .get(page_index as i32)
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
         let mut annotation = page
             .annotations_mut()
@@ -849,8 +872,8 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(page_number).or_insert(0) += 1;
-        *entry.revisions.entry(page_number).or_insert(0) += 1;
+        *entry.added.entry(captured_page_id).or_insert(0) += 1;
+        *entry.revisions.entry(captured_page_id).or_insert(0) += 1;
 
         Ok(())
     }
@@ -929,17 +952,9 @@ impl PdfiumEngine {
             return Err("a rectangle needs a visible border or fill".into());
         }
 
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
-
-        if page_number < 1 || page_number > entry.document.pages().len() {
-            return Err(format!("page {page_number} does not exist"));
-        }
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let page_id = entry.page_id(page_number)?;
 
         // Loaded only to read its unrotated height, then dropped: the path is
         // built against `&entry.document`, which cannot be borrowed while a page
@@ -1060,8 +1075,8 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(page_number).or_insert(0) += 1;
-        *entry.revisions.entry(page_number).or_insert(0) += 1;
+        *entry.added.entry(page_id).or_insert(0) += 1;
+        *entry.revisions.entry(page_id).or_insert(0) += 1;
 
         Ok(())
     }
@@ -1193,17 +1208,9 @@ impl PdfiumEngine {
             None
         };
 
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
-
-        if page_number < 1 || page_number > entry.document.pages().len() {
-            return Err(format!("page {page_number} does not exist"));
-        }
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let page_id = entry.page_id(page_number)?;
 
         let unrotated_height = {
             let page = entry
@@ -1372,8 +1379,8 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(page_number).or_insert(0) += 1;
-        *entry.revisions.entry(page_number).or_insert(0) += 1;
+        *entry.added.entry(page_id).or_insert(0) += 1;
+        *entry.revisions.entry(page_id).or_insert(0) += 1;
 
         Ok(())
     }
@@ -1383,16 +1390,24 @@ impl PdfiumEngine {
     /// page fails, no earlier page may already have lost content.
     fn verify_watermark_tail(
         document: &PdfDocument<'static>,
+        page_ids: &[u64],
         state: &WatermarkState,
     ) -> Result<(), String> {
         let page_count = document.pages().len();
 
-        if state.per_page.len() != page_count as usize {
+        // `page_ids` is the engine's own mirror of the page list; drifted from
+        // the document, every id-keyed record below would name the wrong pages.
+        if page_ids.len() != page_count as usize {
             return Err("the watermark ownership record does not cover every page".into());
         }
 
-        for page_number in 1..=page_count {
-            let page_state = state.per_page.get(&page_number).ok_or_else(|| {
+        if state.per_page.len() != page_ids.len() {
+            return Err("the watermark ownership record does not cover every page".into());
+        }
+
+        for (index, page_id) in page_ids.iter().enumerate() {
+            let page_number = index as i32 + 1;
+            let page_state = state.per_page.get(page_id).ok_or_else(|| {
                 format!("the watermark ownership record is missing page {page_number}")
             })?;
             let expected = page_state
@@ -1408,6 +1423,12 @@ impl PdfiumEngine {
                 return Err(format!(
                     "page {page_number}'s content no longer ends where this session's watermark should"
                 ));
+            }
+
+            // A page inserted after the watermark was applied owns no objects:
+            // its count is pinned above, and there is no tail to identify.
+            if page_state.added_objects == 0 {
+                continue;
             }
 
             let actual = Self::page_watermark_tail_identity(
@@ -1546,7 +1567,7 @@ impl PdfiumEngine {
                 Some(state) => {
                     state
                         .per_page
-                        .get(&page_number)
+                        .get(&entry.page_id(page_number)?)
                         .ok_or_else(|| {
                             format!("the watermark ownership record is missing page {page_number}")
                         })?
@@ -1635,13 +1656,8 @@ impl PdfiumEngine {
         // Avoid a 17 MB read and subset for an exact no-op, while still checking
         // again under the commit lock in case another direct IPC raced this one.
         {
-            let documents = self
-                .documents
-                .lock()
-                .map_err(|_| "PDFium document store is unavailable".to_string())?;
-            let entry = documents
-                .get(&document_id)
-                .ok_or_else(|| "PDF document is no longer open".to_string())?;
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
 
             if entry
                 .watermark
@@ -1666,13 +1682,8 @@ impl PdfiumEngine {
             None
         };
 
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
 
         if entry
             .watermark
@@ -1682,7 +1693,7 @@ impl PdfiumEngine {
             return Ok(());
         }
         if let Some(state) = &entry.watermark {
-            Self::verify_watermark_tail(&entry.document, state)?;
+            Self::verify_watermark_tail(&entry.document, &entry.page_ids, state)?;
         }
 
         let snapshot = entry
@@ -1728,6 +1739,7 @@ impl PdfiumEngine {
             };
 
             for plan in plans {
+                let page_id = entry.page_id(plan.page_number)?;
                 // Construct every free object before touching this page. If font
                 // measurement or placement fails, the page remains unchanged.
                 let mut additions = Vec::with_capacity(plan.placements.len());
@@ -1761,7 +1773,7 @@ impl PdfiumEngine {
                     );
 
                     if let Some(state) = &previous {
-                        let page_state = &state.per_page[&plan.page_number];
+                        let page_state = &state.per_page[&page_id];
                         let objects = page.objects_mut();
 
                         for _ in 0..page_state.added_objects {
@@ -1836,7 +1848,7 @@ impl PdfiumEngine {
                     )?,
                 };
 
-                per_page.insert(plan.page_number, page_state);
+                per_page.insert(page_id, page_state);
             }
 
             if let Some(index) = scratch_index {
@@ -1868,8 +1880,8 @@ impl PdfiumEngine {
 
         entry.needs_compaction |= previous.is_some();
         entry.watermark = Some(state);
-        for page_number in 1..=entry.document.pages().len() {
-            *entry.revisions.entry(page_number).or_insert(0) += 1;
+        for page_id in &entry.page_ids {
+            *entry.revisions.entry(*page_id).or_insert(0) += 1;
         }
 
         Ok(())
@@ -1877,19 +1889,14 @@ impl PdfiumEngine {
 
     /// Removes only the exact top-level text tail this open session owns.
     pub(super) fn remove_watermark(&self, document_id: u64) -> Result<(), String> {
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
         let state = entry
             .watermark
             .clone()
             .ok_or_else(|| "this session has no watermark to remove".to_string())?;
 
-        Self::verify_watermark_tail(&entry.document, &state)?;
+        Self::verify_watermark_tail(&entry.document, &entry.page_ids, &state)?;
         let snapshot = entry
             .document
             .save_to_bytes()
@@ -1906,7 +1913,7 @@ impl PdfiumEngine {
             drop(scratch);
 
             for page_number in 1..=page_count {
-                let page_state = &state.per_page[&page_number];
+                let page_state = &state.per_page[&entry.page_id(page_number)?];
                 let mut retired = Vec::with_capacity(page_state.added_objects);
                 let mut change_error = None;
                 {
@@ -1984,8 +1991,8 @@ impl PdfiumEngine {
 
         entry.watermark = None;
         entry.needs_compaction = true;
-        for page_number in 1..=entry.document.pages().len() {
-            *entry.revisions.entry(page_number).or_insert(0) += 1;
+        for page_id in &entry.page_ids {
+            *entry.revisions.entry(*page_id).or_insert(0) += 1;
         }
 
         Ok(())
@@ -2002,19 +2009,11 @@ impl PdfiumEngine {
         document_id: u64,
         page_number: i32,
     ) -> Result<(), String> {
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let page_id = entry.page_id(page_number)?;
 
-        if page_number < 1 || page_number > entry.document.pages().len() {
-            return Err(format!("page {page_number} does not exist"));
-        }
-
-        if entry.added.get(&page_number).copied().unwrap_or(0) == 0 {
+        if entry.added.get(&page_id).copied().unwrap_or(0) == 0 {
             return Err(format!(
                 "page {page_number} has no annotation of this session's to remove"
             ));
@@ -2040,10 +2039,10 @@ impl PdfiumEngine {
             .delete_annotation(annotation)
             .map_err(|error| format!("PDFium could not remove the annotation: {error}"))?;
 
-        if let Some(added) = entry.added.get_mut(&page_number) {
+        if let Some(added) = entry.added.get_mut(&page_id) {
             *added -= 1;
         }
-        *entry.revisions.entry(page_number).or_insert(0) += 1;
+        *entry.revisions.entry(page_id).or_insert(0) += 1;
         entry.needs_compaction = true;
 
         Ok(())
@@ -2051,13 +2050,8 @@ impl PdfiumEngine {
 
     /// Writes the document back over the file it was opened from.
     pub(super) fn save(&self, document_id: u64) -> Result<(), String> {
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
 
         // Ownership of a watermark ends when the document closes, so writing one
         // over the reader's own file leaves them a mark this app can no longer
@@ -2082,13 +2076,8 @@ impl PdfiumEngine {
     /// save-as. Reports whether the write landed on the source path, which is
     /// what tells the frontend whether the file now matches the history.
     pub(super) fn export_to(&self, document_id: u64, path: &Path) -> Result<ExportOutcome, String> {
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
 
         // The same refusal `save` makes, at the other exit: a reader who picks
         // their own file in the export dialog would otherwise overwrite it with
@@ -2132,13 +2121,8 @@ impl PdfiumEngine {
     /// `export_to`, and this is the bare write they share.
     #[cfg(test)]
     pub(super) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
-        let mut documents = self
-            .documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?;
-        let entry = documents
-            .get_mut(&document_id)
-            .ok_or_else(|| "PDF document is no longer open".to_string())?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
 
         self.write_document(entry, path)
     }
@@ -2169,7 +2153,7 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not reload the document: {error}"))?;
 
         if let Some(state) = &entry.watermark {
-            Self::verify_watermark_tail(&reloaded, state).map_err(|error| {
+            Self::verify_watermark_tail(&reloaded, &entry.page_ids, state).map_err(|error| {
                 format!("PDFium did not preserve the owned watermark during compaction: {error}")
             })?;
         }
@@ -2271,10 +2255,7 @@ impl PdfiumEngine {
     }
 
     pub(super) fn close(&self, document_id: u64) -> Result<(), String> {
-        self.documents
-            .lock()
-            .map_err(|_| "PDFium document store is unavailable".to_string())?
-            .remove(&document_id);
+        self.lock_documents()?.remove(&document_id);
 
         Ok(())
     }

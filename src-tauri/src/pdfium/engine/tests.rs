@@ -782,11 +782,10 @@ fn watermark_change_invalidates_a_captured_rect_effect() {
             .documents
             .lock()
             .expect("the document store should be usable");
-        documents[&document.id]
-            .revisions
-            .get(&1)
-            .copied()
-            .unwrap_or(0)
+        let entry = &documents[&document.id];
+        let page_id = entry.page_ids[0];
+
+        entry.revisions.get(&page_id).copied().unwrap_or(0)
     };
     let captured = revision();
 
@@ -3147,4 +3146,90 @@ fn reorder_keeps_outline_destinations() {
         Some(1),
         "the bookmark should resolve to the page's new position",
     );
+}
+
+// M7's blank-page insertion registers pages the watermark does not cover as
+// zero-object entries. Stand in for the command by inserting a page by hand:
+// the guard must accept the bare page, a replacement must cover it, and a
+// removal must still lift every owned object.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn watermark_guard_accepts_a_zero_object_entry() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the PDF");
+
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply the watermark");
+
+    {
+        let mut documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+        let entry = documents
+            .get_mut(&document.id)
+            .expect("the document should still be open");
+        let page = entry
+            .document
+            .pages_mut()
+            .create_page_at_index(
+                PdfPagePaperSize::Custom(PdfPoints::new(200.0), PdfPoints::new(300.0)),
+                1,
+            )
+            .expect("PDFium should insert the blank page");
+
+        drop(page);
+
+        let page_id = entry.page_ids.iter().max().copied().unwrap_or(0) + 1;
+
+        entry.page_ids.insert(1, page_id);
+        entry
+            .watermark
+            .as_mut()
+            .expect("the watermark state should exist")
+            .per_page
+            .insert(
+                page_id,
+                WatermarkPageState {
+                    base_objects: 0,
+                    added_objects: 0,
+                    text_identity: String::new(),
+                },
+            );
+    }
+
+    let objects_on = |page_number: i32| {
+        with_page(engine, document.id, page_number, |page| {
+            page.objects().len()
+        })
+    };
+
+    assert_eq!(objects_on(1), 1, "the first page carries its mark");
+    assert_eq!(objects_on(2), 0, "the inserted page is bare");
+    assert_eq!(objects_on(3), 1, "the last page carries its mark");
+
+    // A replacement re-plans over the zero-object entry and covers the page.
+    engine
+        .apply_watermark(document.id, watermark_config("FINAL"))
+        .expect("the replacement should accept the bare page");
+
+    assert!(
+        objects_on(2) > 0,
+        "the replacement should cover the inserted page"
+    );
+
+    engine
+        .remove_watermark(document.id)
+        .expect("the removal should lift every owned object");
+
+    for page_number in 1..=3 {
+        assert_eq!(
+            objects_on(page_number),
+            0,
+            "page {page_number} should be clean"
+        );
+    }
 }
