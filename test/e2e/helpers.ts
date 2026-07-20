@@ -51,6 +51,40 @@ export function blankPdf() {
   return minimalPdf(1, "0 0 300 400")
 }
 
+/**
+ * `pageCount` pages, each carrying one black bar at a page-specific position,
+ * so every page renders to a distinct fingerprint — which is what lets a
+ * structure test say *which* page now sits where.
+ */
+export function bandedPdf(pageCount: number) {
+  const kids = Array.from(
+    { length: pageCount },
+    (_, index) => `${3 + index} 0 R`,
+  ).join(" ")
+  const objects = [
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`,
+  ]
+
+  for (let index = 0; index < pageCount; index += 1) {
+    objects.push(
+      `${3 + index} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] ` +
+        `/Contents ${3 + pageCount + index} 0 R >>\nendobj\n`,
+    )
+  }
+
+  for (let index = 0; index < pageCount; index += 1) {
+    const content = `0 0 0 rg\n${20 + (index % 4) * 40} 100 30 120 re f\n`
+
+    objects.push(
+      `${3 + pageCount + index} 0 obj\n<< /Length ${content.length} >>\n` +
+        `stream\n${content}endstream\nendobj\n`,
+    )
+  }
+
+  return buildPdf(objects)
+}
+
 /** A one-page drawing fixture with dense bars through its middle. */
 export function stripedPdf() {
   let content = "0 0 0 rg\n"

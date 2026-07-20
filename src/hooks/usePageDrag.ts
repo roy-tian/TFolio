@@ -52,10 +52,12 @@ export function usePageDrag({
   wasDragClick: () => boolean
 } {
   const [drag, setDrag] = useState<PageDragState | null>(null)
-  // Whether the last pointer sequence was a drag, read by the click handlers:
-  // the click a drag's release fires must not change the selection. Cleared on
-  // the next press, which happens before that press's own click can fire.
-  const dragJustEndedRef = useRef(false)
+  // When the last drag ended, read by the click handlers: the click a drag's
+  // release fires arrives within milliseconds and must not change the
+  // selection. Judged by recency rather than a cleared-on-pointerdown flag,
+  // so a click that never had a press — a synthetic one, as the e2e suite
+  // dispatches — cannot be swallowed by a long-finished drag.
+  const dragEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
 
   useEffect(() => {
     if (!active) {
@@ -86,7 +88,7 @@ export function usePageDrag({
 
     const handlePointerDown = (event: PointerEvent) => {
       gesture = null
-      dragJustEndedRef.current = false
+      dragEndedAtRef.current = Number.NEGATIVE_INFINITY
       setDrag(null)
 
       if (event.button !== 0 || !event.isPrimary) {
@@ -188,7 +190,7 @@ export function usePageDrag({
         return
       }
 
-      dragJustEndedRef.current = true
+      dragEndedAtRef.current = performance.now()
 
       const point = gridPoint(event)
 
@@ -226,7 +228,10 @@ export function usePageDrag({
     }
   }, [active, columns, gridRef, onReorder, pageCount, selectedPages])
 
-  const wasDragClick = useCallback(() => dragJustEndedRef.current, [])
+  const wasDragClick = useCallback(
+    () => performance.now() - dragEndedAtRef.current < 300,
+    [],
+  )
 
   return { drag, wasDragClick }
 }

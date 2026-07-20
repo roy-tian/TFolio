@@ -184,7 +184,7 @@ describe("TFolio document watermark", () => {
     await renderedPage()
 
     await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Go to page 1']").waitForDisplayed()
+    await $("button[aria-label='Select page 1']").waitForDisplayed()
     const cleanThumbnail = await pagePixelFingerprint()
     const original = readFileSync(sourcePath)
 

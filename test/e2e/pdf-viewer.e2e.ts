@@ -172,14 +172,19 @@ describe("TFolio PDF viewer", () => {
     await browser.pause(1500)
     await expect(pageInput).toHaveValue("5")
 
-    // Thumbnails are navigation targets: an image, and no selectable text layer.
+    // Thumbnails are an image and no selectable text layer; since M7 a click
+    // selects, and it is the double-click that navigates.
     await toggle("Thumbnails").click()
-    const thirdThumbnail = await $("button[aria-label='Go to page 3']")
+    const thirdThumbnail = await $("button[aria-label='Select page 3']")
     await thirdThumbnail.waitForDisplayed()
     await expect($$(".pdf-text-layer")).toBeElementsArrayOfSize(0)
 
-    // Clicking one drops back into the single view at that page.
-    await thirdThumbnail.click()
+    // Double-clicking one drops back into the single view at that page.
+    await browser.execute(() => {
+      document
+        .querySelector("button[aria-label='Select page 3']")!
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+    })
     await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
     await expect(pageInput).toHaveValue("3")
 
@@ -289,7 +294,7 @@ describe("TFolio PDF viewer", () => {
     // The thumbnail grid has one width for every page and so no single scale to
     // report; the controls go away rather than sit there showing a stale figure.
     await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Go to page 1']").waitForDisplayed()
+    await $("button[aria-label='Select page 1']").waitForDisplayed()
     await expect($("button[aria-label='Zoom in']")).not.toBeExisting()
     await expect(zoom()).not.toBeExisting()
 
@@ -314,7 +319,7 @@ describe("TFolio PDF viewer", () => {
     await $("[data-page-number='1']").waitForDisplayed()
 
     await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Go to page 1']").waitForDisplayed()
+    await $("button[aria-label='Select page 1']").waitForDisplayed()
 
     // The grid fits as many columns as the window allows, so derive a page that
     // really does start a row rather than hard-coding one.

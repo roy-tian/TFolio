@@ -101,7 +101,10 @@ export function PdfThumbnail({
           // The current page keeps its marker, faded: in the editing grid the
           // selection is the louder voice.
           isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
-          isSelected && "ring-2 ring-primary hover:ring-primary",
+          // Offset from the page, so the ring reads against the page's own
+          // white even when the theme paints the ring light.
+          isSelected &&
+            "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary dark:ring-offset-zinc-950",
         )}
         data-page-number={pageNumber}
         onClick={(event) =>
