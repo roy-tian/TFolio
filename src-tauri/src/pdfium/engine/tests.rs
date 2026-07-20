@@ -2920,3 +2920,231 @@ fn rejects_an_unusable_note() {
         "a refused note should leave no annotation behind"
     );
 }
+
+// Four pages, each with one black bar at a page-specific horizontal position,
+// so every page renders to a distinct pixel fingerprint.
+fn four_page_banded_pdf() -> Vec<u8> {
+    let mut objects = vec![
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R] /Count 4 >>\nendobj\n"
+            .to_string(),
+    ];
+
+    for page in 0..4 {
+        objects.push(format!(
+            "{} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents {} 0 R >>\nendobj\n",
+            3 + page,
+            7 + page,
+        ));
+    }
+
+    for page in 0..4 {
+        let content = format!("0 0 0 rg\n{} 100 30 120 re f\n", 20 + page * 40);
+
+        objects.push(format!(
+            "{} 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            7 + page,
+            content.len(),
+        ));
+    }
+
+    build_pdf(&objects)
+}
+
+// Three pages where only the first carries an annotation — the document's own
+// link. The test adds a session highlight beside it.
+fn three_page_link_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Annots [7 0 R] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+        "7 0 obj\n<< /Type /Annot /Subtype /Link /Rect [10 250 90 270] /Border [0 0 0] >>\nendobj\n".to_string(),
+    ])
+}
+
+// Three pages and a single bookmark aimed at the third via its page object
+// reference — the destination form a page move must keep resolving.
+fn outlined_three_page_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 7 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+        "7 0 obj\n<< /Type /Outlines /First 8 0 R /Last 8 0 R /Count 1 >>\nendobj\n".to_string(),
+        "8 0 obj\n<< /Title (Chapter) /Parent 7 0 R /Dest [5 0 R /XYZ null null null] >>\nendobj\n".to_string(),
+    ])
+}
+
+/// Applies `move_pages` to an open document directly, standing in for the M7
+/// reorder command while proving the forked wrapper behaves.
+fn move_document_pages(engine: &PdfiumEngine, document_id: u64, page_indices: &[i32], dest: i32) {
+    let mut documents = engine
+        .documents
+        .lock()
+        .expect("the document store should be usable");
+    let entry = documents
+        .get_mut(&document_id)
+        .expect("the document should still be open");
+
+    entry
+        .document
+        .pages_mut()
+        .move_pages(page_indices, dest)
+        .expect("PDFium should move the pages");
+}
+
+fn page_fingerprints(engine: &PdfiumEngine, document_id: u64, page_count: i32) -> Vec<Vec<u8>> {
+    (1..=page_count)
+        .map(|page_number| {
+            engine
+                .render_bitmap(
+                    document_id,
+                    page_number,
+                    TEST_RENDER_WIDTH,
+                    MAX_RENDER_WIDTH,
+                )
+                .expect("PDFium should render the page")
+                .into_rgb8()
+                .into_raw()
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn reorders_pages_and_their_content() {
+    let engine = test_engine();
+    let document = engine
+        .open(four_page_banded_pdf())
+        .expect("PDFium should open the banded PDF");
+    let before = page_fingerprints(engine, document.id, 4);
+
+    for (index, fingerprint) in before.iter().enumerate() {
+        for other in &before[index + 1..] {
+            assert_ne!(fingerprint, other, "the fixture pages should be distinct");
+        }
+    }
+
+    // A full permutation: position i shows what was page order[i] + 1.
+    let order = [2, 0, 3, 1];
+
+    move_document_pages(engine, document.id, &order, 0);
+
+    let after = page_fingerprints(engine, document.id, 4);
+
+    for (position, old_index) in order.iter().enumerate() {
+        assert_eq!(
+            after[position],
+            before[*old_index as usize],
+            "position {} should hold the old page {}",
+            position + 1,
+            old_index + 1,
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn reorder_keeps_annotations_with_their_page() {
+    let engine = test_engine();
+    let document = engine
+        .open(three_page_link_pdf())
+        .expect("PDFium should open the link PDF");
+
+    engine
+        .add_highlight(
+            document.id,
+            1,
+            &[quad(20.0, 60.0, 100.0, 12.0)],
+            "#ffd54a",
+            0.4,
+        )
+        .expect("PDFium should create the highlight");
+
+    // Send the annotated first page to the back: [B, C, A].
+    move_document_pages(engine, document.id, &[1, 2, 0], 0);
+
+    for page_number in [1, 2] {
+        assert_eq!(
+            with_page(engine, document.id, page_number, |page| page
+                .annotations()
+                .len()),
+            0,
+            "page {page_number} never had annotations",
+        );
+    }
+
+    let (count, first_top, last_top) = with_page(engine, document.id, 3, |page| {
+        let annotations = page.annotations();
+
+        (
+            annotations.len(),
+            annotations
+                .get(0)
+                .expect("the link should survive")
+                .bounds()
+                .expect("the link should have bounds")
+                .top()
+                .value,
+            annotations
+                .get(1)
+                .expect("the highlight should survive")
+                .bounds()
+                .expect("the highlight should have bounds")
+                .top()
+                .value,
+        )
+    });
+
+    assert_eq!(count, 2, "both annotations should ride with their page");
+    // `/Annots` order survives the move: the document's link is still first and
+    // the session's highlight still the tail, which the `added` guard counts on.
+    assert!(
+        (262.0..=278.0).contains(&first_top),
+        "the link sat at top {first_top}",
+    );
+    assert!(
+        (232.0..=248.0).contains(&last_top),
+        "the highlight sat at top {last_top}",
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn reorder_keeps_outline_destinations() {
+    let engine = test_engine();
+    let document = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the outlined PDF");
+
+    assert_eq!(document.outline.len(), 1);
+    assert_eq!(
+        document.outline[0].page_number,
+        Some(3),
+        "the bookmark starts on the last page",
+    );
+
+    // Bring the bookmarked page to the front: [C, A, B].
+    move_document_pages(engine, document.id, &[2, 0, 1], 0);
+
+    let outline = {
+        let documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+
+        collect_bookmark_siblings(documents[&document.id].document.bookmarks().root())
+    };
+
+    assert_eq!(outline.len(), 1, "the bookmark itself should survive");
+    assert_eq!(
+        outline[0].page_number,
+        Some(1),
+        "the bookmark should resolve to the page's new position",
+    );
+}
