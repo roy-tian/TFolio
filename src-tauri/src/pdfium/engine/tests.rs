@@ -2979,22 +2979,40 @@ fn outlined_three_page_pdf() -> Vec<u8> {
     ])
 }
 
-/// Applies `move_pages` to an open document directly, standing in for the M7
-/// reorder command while proving the forked wrapper behaves.
-fn move_document_pages(engine: &PdfiumEngine, document_id: u64, page_indices: &[i32], dest: i32) {
-    let mut documents = engine
-        .documents
-        .lock()
-        .expect("the document store should be usable");
-    let entry = documents
-        .get_mut(&document_id)
-        .expect("the document should still be open");
+// Two pages where only the second carries heavy content, so deleting it leaves
+// a measurable hole for compaction to reclaim.
+fn heavy_second_page_pdf() -> Vec<u8> {
+    let mut content = "0 0 0 rg\n".to_string();
 
-    entry
-        .document
-        .pages_mut()
-        .move_pages(page_indices, dest)
-        .expect("PDFium should move the pages");
+    for left in (0..595).step_by(2) {
+        content.push_str(&format!("{left} 0 1 842 re f\n"));
+    }
+
+    let contents_obj = format!(
+        "6 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+        content.len()
+    );
+
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+        contents_obj,
+    ])
+}
+
+// A 200x300 page and a 400x500 page, so an inserted blank's size names the
+// neighbour it was measured from.
+fn two_size_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 500] /Contents 5 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+    ])
 }
 
 fn page_fingerprints(engine: &PdfiumEngine, document_id: u64, page_count: i32) -> Vec<Vec<u8>> {
@@ -3015,6 +3033,48 @@ fn page_fingerprints(engine: &PdfiumEngine, document_id: u64, page_count: i32) -
 }
 
 #[test]
+fn page_order_validation_refuses_everything_but_a_permutation() {
+    // Identity is the no-op, reported as None.
+    assert_eq!(validate_page_order(&[1, 2, 3], 3), Ok(None));
+    // A genuine permutation comes back as zero-based move indices.
+    assert_eq!(validate_page_order(&[3, 1, 2], 3), Ok(Some(vec![2, 0, 1])));
+
+    for (case, order) in [
+        ("too short", &[1, 2][..]),
+        ("too long", &[1, 2, 3, 4][..]),
+        ("a repeat", &[1, 2, 2][..]),
+        ("out of range", &[1, 2, 4][..]),
+        ("below range", &[0, 1, 2][..]),
+        ("an overflowing number", &[i32::MIN, 1, 2][..]),
+    ] {
+        assert!(
+            validate_page_order(order, 3).is_err(),
+            "{case} should be refused",
+        );
+    }
+}
+
+#[test]
+fn deletion_validation_keeps_a_page_and_refuses_junk() {
+    // Selections come back as ascending zero-based indices however given.
+    assert_eq!(validate_pages_to_delete(&[3, 1], 4), Ok(vec![0, 2]));
+
+    for (case, pages) in [
+        ("an empty selection", &[][..]),
+        ("a repeat", &[2, 2][..]),
+        ("out of range", &[5][..]),
+        ("below range", &[0][..]),
+        ("every page", &[1, 2, 3, 4][..]),
+        ("an overflowing number", &[i32::MIN][..]),
+    ] {
+        assert!(
+            validate_pages_to_delete(pages, 4).is_err(),
+            "{case} should be refused",
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn reorders_pages_and_their_content() {
     let engine = test_engine();
@@ -3029,22 +3089,57 @@ fn reorders_pages_and_their_content() {
         }
     }
 
-    // A full permutation: position i shows what was page order[i] + 1.
-    let order = [2, 0, 3, 1];
+    // A full permutation: position i holds what was page order[i].
+    let order = [3, 1, 4, 2];
+    let update = engine
+        .reorder_pages(document.id, &order)
+        .expect("PDFium should reorder the pages");
 
-    move_document_pages(engine, document.id, &order, 0);
+    assert_eq!(update.num_pages, 4, "a reorder keeps every page");
 
     let after = page_fingerprints(engine, document.id, 4);
 
-    for (position, old_index) in order.iter().enumerate() {
+    for (position, old_number) in order.iter().enumerate() {
         assert_eq!(
             after[position],
-            before[*old_index as usize],
-            "position {} should hold the old page {}",
+            before[(old_number - 1) as usize],
+            "position {} should hold the old page {old_number}",
             position + 1,
-            old_index + 1,
         );
     }
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn reorder_is_a_no_op_for_the_identity_order() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the PDF");
+    let revision = || {
+        let documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+        let entry = &documents[&document.id];
+
+        entry
+            .revisions
+            .get(&entry.page_ids[0])
+            .copied()
+            .unwrap_or(0)
+    };
+    let captured = revision();
+    let update = engine
+        .reorder_pages(document.id, &[1, 2])
+        .expect("the identity order is accepted");
+
+    assert_eq!(update.num_pages, 2);
+    assert_eq!(
+        revision(),
+        captured,
+        "an order that moves nothing should invalidate nothing",
+    );
 }
 
 #[test]
@@ -3066,7 +3161,9 @@ fn reorder_keeps_annotations_with_their_page() {
         .expect("PDFium should create the highlight");
 
     // Send the annotated first page to the back: [B, C, A].
-    move_document_pages(engine, document.id, &[1, 2, 0], 0);
+    engine
+        .reorder_pages(document.id, &[2, 3, 1])
+        .expect("PDFium should reorder the pages");
 
     for page_number in [1, 2] {
         assert_eq!(
@@ -3111,6 +3208,18 @@ fn reorder_keeps_annotations_with_their_page() {
         (232.0..=248.0).contains(&last_top),
         "the highlight sat at top {last_top}",
     );
+
+    // The ownership count moved with the page: the session's highlight comes
+    // off its new position, and the document's link stays beyond reach.
+    engine
+        .delete_last_annotation(document.id, 3)
+        .expect("the session's highlight should come off the moved page");
+
+    let error = engine
+        .delete_last_annotation(document.id, 3)
+        .expect_err("the document's own link must stay beyond reach");
+
+    assert!(error.contains("no annotation of this session's"));
 }
 
 #[test]
@@ -3129,32 +3238,258 @@ fn reorder_keeps_outline_destinations() {
     );
 
     // Bring the bookmarked page to the front: [C, A, B].
-    move_document_pages(engine, document.id, &[2, 0, 1], 0);
+    let update = engine
+        .reorder_pages(document.id, &[3, 1, 2])
+        .expect("PDFium should reorder the pages");
 
-    let outline = {
-        let documents = engine
-            .documents
-            .lock()
-            .expect("the document store should be usable");
-
-        collect_bookmark_siblings(documents[&document.id].document.bookmarks().root())
-    };
-
-    assert_eq!(outline.len(), 1, "the bookmark itself should survive");
     assert_eq!(
-        outline[0].page_number,
+        update.outline.len(),
+        1,
+        "the bookmark itself should survive"
+    );
+    assert_eq!(
+        update.outline[0].page_number,
         Some(1),
         "the bookmark should resolve to the page's new position",
     );
 }
 
-// M7's blank-page insertion registers pages the watermark does not cover as
-// zero-object entries. Stand in for the command by inserting a page by hand:
-// the guard must accept the bare page, a replacement must cover it, and a
-// removal must still lift every owned object.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn watermark_guard_accepts_a_zero_object_entry() {
+fn delete_then_restore_is_lossless() {
+    let engine = test_engine();
+    let document = engine
+        .open(four_page_banded_pdf())
+        .expect("PDFium should open the banded PDF");
+
+    engine
+        .add_highlight(
+            document.id,
+            2,
+            &[quad(20.0, 60.0, 100.0, 12.0)],
+            "#ffd54a",
+            0.4,
+        )
+        .expect("PDFium should create the highlight");
+
+    let before = page_fingerprints(engine, document.id, 4);
+
+    // Two non-adjacent pages, one carrying the session's highlight.
+    let update = engine
+        .delete_pages(document.id, &[2, 4], 7)
+        .expect("PDFium should delete the pages");
+
+    assert_eq!(update.num_pages, 2);
+
+    let between = page_fingerprints(engine, document.id, 2);
+
+    assert_eq!(between[0], before[0], "page 1 should keep its place");
+    assert_eq!(between[1], before[2], "old page 3 should close the gap");
+
+    let update = engine
+        .restore_pages(document.id, 7)
+        .expect("PDFium should restore the pages");
+
+    assert_eq!(update.num_pages, 4);
+    assert_eq!(
+        page_fingerprints(engine, document.id, 4),
+        before,
+        "a delete and restore should be lossless, highlight and all",
+    );
+
+    // The session's ownership count came back with the page.
+    engine
+        .delete_last_annotation(document.id, 2)
+        .expect("the restored highlight should still be the session's to remove");
+
+    let error = engine
+        .restore_pages(document.id, 7)
+        .expect_err("a stash is consumed by its restore");
+
+    assert!(error.contains("no stashed pages"));
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn restore_preserves_the_watermark_guard() {
+    let engine = test_engine();
+    let document = engine
+        .open(four_page_banded_pdf())
+        .expect("PDFium should open the banded PDF");
+
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply the watermark");
+    engine
+        .delete_pages(document.id, &[1, 3], 11)
+        .expect("PDFium should delete the marked pages");
+    engine
+        .restore_pages(document.id, 11)
+        .expect("the restored pages should still pass the tail preflight");
+
+    engine
+        .remove_watermark(document.id)
+        .expect("the round-tripped tail should still be removable");
+
+    for page_number in 1..=4 {
+        assert_eq!(
+            with_page(engine, document.id, page_number, |page| page
+                .objects()
+                .len()),
+            1,
+            "page {page_number} should hold only its own band again",
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn refuses_to_delete_every_page() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the PDF");
+
+    let error = engine
+        .delete_pages(document.id, &[1, 2], 1)
+        .expect_err("a document must keep at least one page");
+
+    assert!(error.contains("at least one page"));
+
+    engine
+        .delete_pages(document.id, &[2], 1)
+        .expect("PDFium should delete the second page");
+
+    let error = engine
+        .delete_pages(document.id, &[1], 2)
+        .expect_err("the last page must survive");
+
+    assert!(error.contains("at least one page"));
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn same_stash_id_supports_the_insert_undo_cycle() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the PDF");
+
+    // Insert, undo, redo, undo again: the second undo reuses the stash id the
+    // redo never consumed, and must replace the leftover stash, not refuse.
+    engine
+        .insert_blank_page(document.id, 2)
+        .expect("PDFium should insert the blank page");
+    engine
+        .delete_pages(document.id, &[2], 42)
+        .expect("the undo should stash the blank page");
+    engine
+        .insert_blank_page(document.id, 2)
+        .expect("the redo should insert a fresh blank page");
+    engine
+        .delete_pages(document.id, &[2], 42)
+        .expect("the second undo should replace the leftover stash");
+
+    let update = engine
+        .restore_pages(document.id, 42)
+        .expect("the replaced stash should still restore");
+
+    assert_eq!(update.num_pages, 3);
+
+    let error = engine
+        .restore_pages(document.id, 9999)
+        .expect_err("an unknown stash id has nothing to restore");
+
+    assert!(error.contains("no stashed pages"));
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn inserted_blank_page_matches_its_neighbor() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_size_pdf())
+        .expect("PDFium should open the two-size PDF");
+
+    // Before the first page: sized from the page that will follow it.
+    let update = engine
+        .insert_blank_page(document.id, 1)
+        .expect("PDFium should insert at the front");
+
+    assert_eq!(update.num_pages, 3);
+    assert_eq!(
+        (update.pages[0].width, update.pages[0].height),
+        (200.0, 300.0),
+        "a front insert should take the following page's size",
+    );
+
+    // Past the last page: sized from the page that will precede it.
+    let update = engine
+        .insert_blank_page(document.id, 4)
+        .expect("PDFium should insert at the end");
+
+    assert_eq!(update.num_pages, 4);
+    assert_eq!(
+        (update.pages[3].width, update.pages[3].height),
+        (400.0, 500.0),
+        "an end insert should take the preceding page's size",
+    );
+
+    // The blank pages render blank.
+    let fingerprints = page_fingerprints(engine, document.id, 4);
+
+    assert!(
+        fingerprints[0].iter().all(|byte| *byte == 0xff),
+        "the inserted page should render pure white",
+    );
+
+    for (case, index) in [("front", 0), ("end", 6)] {
+        let error = engine
+            .insert_blank_page(document.id, index)
+            .expect_err("an out-of-range position must be refused");
+
+        assert!(
+            error.contains("cannot go to position"),
+            "the {case} refusal talked about something else: {error}",
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn inserted_blank_page_ignores_the_neighbors_rotation() {
+    let engine = test_engine();
+    let document = engine
+        .open(rotated_blank_pdf(90))
+        .expect("PDFium should open the rotated PDF");
+
+    // The neighbour displays 300x200 through its /Rotate 90; the blank page
+    // takes its unrotated 200x300 and no rotation of its own.
+    let update = engine
+        .insert_blank_page(document.id, 1)
+        .expect("PDFium should insert the blank page");
+
+    assert_eq!(
+        (
+            update.pages[0].width,
+            update.pages[0].height,
+            update.pages[0].rotation,
+        ),
+        (200.0, 300.0, 0.0),
+    );
+    assert_eq!(
+        (update.pages[1].width, update.pages[1].height),
+        (300.0, 200.0),
+        "the neighbour still displays through its own rotation",
+    );
+}
+
+// M7's blank-page insertion registers pages the watermark does not cover as
+// zero-object entries: the guard must accept the bare page, a replacement must
+// cover it, and a removal must still lift every owned object.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn insert_extends_watermark_state_with_an_empty_entry() {
     let engine = test_engine();
     let document = engine
         .open(two_page_pdf())
@@ -3163,43 +3498,9 @@ fn watermark_guard_accepts_a_zero_object_entry() {
     engine
         .apply_watermark(document.id, watermark_config("DRAFT"))
         .expect("PDFium should apply the watermark");
-
-    {
-        let mut documents = engine
-            .documents
-            .lock()
-            .expect("the document store should be usable");
-        let entry = documents
-            .get_mut(&document.id)
-            .expect("the document should still be open");
-        let page = entry
-            .document
-            .pages_mut()
-            .create_page_at_index(
-                PdfPagePaperSize::Custom(PdfPoints::new(200.0), PdfPoints::new(300.0)),
-                1,
-            )
-            .expect("PDFium should insert the blank page");
-
-        drop(page);
-
-        let page_id = entry.page_ids.iter().max().copied().unwrap_or(0) + 1;
-
-        entry.page_ids.insert(1, page_id);
-        entry
-            .watermark
-            .as_mut()
-            .expect("the watermark state should exist")
-            .per_page
-            .insert(
-                page_id,
-                WatermarkPageState {
-                    base_objects: 0,
-                    added_objects: 0,
-                    text_identity: String::new(),
-                },
-            );
-    }
+    engine
+        .insert_blank_page(document.id, 2)
+        .expect("PDFium should insert into the marked document");
 
     let objects_on = |page_number: i32| {
         with_page(engine, document.id, page_number, |page| {
@@ -3232,4 +3533,124 @@ fn watermark_guard_accepts_a_zero_object_entry() {
             "page {page_number} should be clean"
         );
     }
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn structure_change_invalidates_a_captured_rect_effect() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the PDF");
+    let revisions = || {
+        let documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+        let entry = &documents[&document.id];
+
+        entry
+            .page_ids
+            .iter()
+            .map(|page_id| entry.revisions.get(page_id).copied().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+
+    // Each structure operation must bump every page: an M5 effect captured
+    // before it processes unlocked, and its commit has to be refused.
+    let captured = revisions();
+
+    engine
+        .reorder_pages(document.id, &[2, 1])
+        .expect("PDFium should reorder the pages");
+
+    let after_reorder = revisions();
+
+    assert!(
+        captured.iter().zip(&after_reorder).all(|(a, b)| a != b),
+        "a reorder should invalidate every page",
+    );
+
+    engine
+        .insert_blank_page(document.id, 1)
+        .expect("PDFium should insert the blank page");
+
+    let after_insert = revisions();
+
+    assert!(
+        after_reorder
+            .iter()
+            .zip(&after_insert[1..])
+            .all(|(a, b)| a != b),
+        "an insert should invalidate every existing page",
+    );
+
+    engine
+        .delete_pages(document.id, &[1], 3)
+        .expect("PDFium should delete the blank page");
+
+    let after_delete = revisions();
+
+    assert!(
+        after_insert[1..]
+            .iter()
+            .zip(&after_delete)
+            .all(|(a, b)| a != b),
+        "a delete should invalidate every remaining page",
+    );
+
+    engine
+        .restore_pages(document.id, 3)
+        .expect("PDFium should restore the blank page");
+
+    let after_restore = revisions();
+
+    assert!(
+        after_delete
+            .iter()
+            .zip(&after_restore[1..])
+            .all(|(a, b)| a != b),
+        "a restore should invalidate every page",
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn deleting_pages_marks_compaction() {
+    let engine = test_engine();
+    let directory = scratch_directory("page-delete-compaction");
+    let full = directory.join("full.pdf");
+    let trimmed = directory.join("trimmed.pdf");
+    let document = engine
+        .open(heavy_second_page_pdf())
+        .expect("PDFium should open the heavy PDF");
+
+    engine
+        .save_to(document.id, &full)
+        .expect("the untouched document should save");
+    engine
+        .delete_pages(document.id, &[2], 1)
+        .expect("PDFium should delete the heavy page");
+    engine
+        .save_to(document.id, &trimmed)
+        .expect("the trimmed document should save");
+
+    let full_size = fs::metadata(&full)
+        .expect("the full save should exist")
+        .len();
+    let trimmed_size = fs::metadata(&trimmed)
+        .expect("the trimmed save should exist")
+        .len();
+
+    assert!(
+        trimmed_size + 500 < full_size,
+        "compaction should reclaim the deleted page's content ({full_size} -> {trimmed_size})",
+    );
+
+    let reopened = engine
+        .open(fs::read(&trimmed).expect("the trimmed save should read back"))
+        .expect("the trimmed save should reopen");
+
+    assert_eq!(reopened.num_pages, 1, "the deletion should persist");
+    fs::remove_dir_all(directory).ok();
 }

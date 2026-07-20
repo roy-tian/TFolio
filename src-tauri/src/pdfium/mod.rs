@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_watermark, close_pdf, delete_last_pdf_annotation,
-    export_pdf, extract_pdf_page_text, open_pdf, open_pdf_from_path, pick_pdf_path,
-    remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, save_pdf,
+    delete_pdf_pages, export_pdf, extract_pdf_page_text, insert_pdf_blank_page, open_pdf,
+    open_pdf_from_path, pick_pdf_path, remove_pdf_watermark, render_pdf_page,
+    render_pdf_page_thumbnail, reorder_pdf_pages, restore_pdf_pages, save_pdf,
 };
 pub use engine::PdfiumState;
 pub use watermark::WatermarkConfig;
@@ -41,6 +42,16 @@ pub struct PdfDocumentInfo {
     path: Option<String>,
 }
 
+/// Fresh metadata after a page-structure change. The frontend holds no mirror
+/// of the page list to patch, so it replaces its copy wholesale.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfStructureUpdate {
+    num_pages: i32,
+    pages: Vec<PdfPageInfo>,
+    outline: Vec<PdfOutlineItem>,
+}
+
 /// What an export wrote and where it stands relative to the document's source.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +64,7 @@ pub struct ExportOutcome {
     saved_to_source: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct PdfPageInfo {
     // `width`/`height` are the displayed dimensions (the page's intrinsic
     // `/Rotate` already applied), matching the rendered bitmap. `rotation` is
@@ -143,7 +154,7 @@ pub struct TextNoteStyle {
     opacity: f32,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PdfOutlineItem {
     title: String,

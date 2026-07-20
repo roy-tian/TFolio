@@ -10,8 +10,9 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 use super::{
-    size_limit_error, ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfTextSpan,
-    PdfiumState, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
+    size_limit_error, ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo,
+    PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle, TextNoteStyle,
+    WatermarkConfig, MAX_PDF_BYTES,
 };
 
 #[tauri::command]
@@ -190,6 +191,61 @@ pub async fn delete_last_pdf_annotation(
     })
     .await
     .map_err(|error| format!("PDFium annotation removal task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn reorder_pdf_pages(
+    document_id: u64,
+    order: Vec<i32>,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.reorder_pages(document_id, &order))
+        .await
+        .map_err(|error| format!("PDFium reorder task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn delete_pdf_pages(
+    document_id: u64,
+    page_numbers: Vec<i32>,
+    stash_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.delete_pages(document_id, &page_numbers, stash_id)
+    })
+    .await
+    .map_err(|error| format!("PDFium page deletion task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn restore_pdf_pages(
+    document_id: u64,
+    stash_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.restore_pages(document_id, stash_id))
+        .await
+        .map_err(|error| format!("PDFium page restore task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn insert_pdf_blank_page(
+    document_id: u64,
+    index: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.insert_blank_page(document_id, index))
+        .await
+        .map_err(|error| format!("PDFium page insertion task failed: {error}"))?
 }
 
 /// Shows the native open dialog and hands back the chosen path — recorded as

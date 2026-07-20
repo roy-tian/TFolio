@@ -32,7 +32,8 @@ use super::{
         add_document_object_count, watermark_placements, WatermarkConfig, WatermarkPlacement,
     },
     ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem, PdfPageInfo,
-    PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
+    MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -68,6 +69,26 @@ struct WatermarkPageState {
     /// fonts can map a Unicode character to a compatibility equivalent, so the
     /// source config is not always the identity PDFium later reads back.
     text_identity: String,
+}
+
+/// A deleted page's copy and the session state that travelled with it, held so
+/// an undo can put both back exactly. Self-contained: the copies live in their
+/// own document, released with the stash.
+struct PageStash {
+    document: PdfDocument<'static>,
+    /// One record per deleted page, ascending by original position — the order
+    /// their copies sit in `document`, and the order a restore reinserts them.
+    pages: Vec<StashedPage>,
+}
+
+struct StashedPage {
+    /// The page's 1-based position at the moment it was deleted. LIFO undo
+    /// guarantees the document is back in that shape when a restore runs.
+    position: i32,
+    page_id: u64,
+    added: u32,
+    revision: u64,
+    watermark: Option<WatermarkPageState>,
 }
 
 #[derive(Clone, Debug)]
@@ -174,6 +195,12 @@ struct OpenDocument {
     /// operations permute or edit this vector, which is what lets every
     /// id-keyed map below survive them.
     page_ids: Vec<u64>,
+    next_page_id: u64,
+    /// Deleted pages awaiting a possible undo, keyed by the history entry that
+    /// deleted them. A delete under an occupied key replaces the stash: the key
+    /// identifies one history entry, so a redo of that delete re-stashes the
+    /// same logical pages — and an insert undone more than once reuses its key.
+    stashes: HashMap<u64, PageStash>,
     /// How many annotations this session has added to each page, keyed by
     /// stable page id.
     ///
@@ -203,11 +230,88 @@ impl OpenDocument {
     /// per-page map uses, which survives reordering, deletion, and insertion.
     /// Doubles as the page-number validation every command needs.
     fn page_id(&self, page_number: i32) -> Result<u64, String> {
-        usize::try_from(page_number - 1)
-            .ok()
-            .and_then(|index| self.page_ids.get(index).copied())
+        page_index(page_number, self.page_ids.len())
+            .map(|index| self.page_ids[index])
             .ok_or_else(|| format!("page {page_number} does not exist"))
     }
+}
+
+/// A 1-based page number as a zero-based index, if it lands inside the
+/// document. Checked arithmetic throughout: the number is the WebView's, and
+/// `i32::MIN - 1` must refuse rather than overflow.
+fn page_index(page_number: i32, page_count: usize) -> Option<usize> {
+    page_number
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+        .filter(|index| *index < page_count)
+}
+
+/// Checks `order` names every page exactly once, handing back the zero-based
+/// indices PDFium moves. `None` is the identity order — a no-op.
+fn validate_page_order(order: &[i32], page_count: usize) -> Result<Option<Vec<i32>>, String> {
+    if order.len() != page_count {
+        return Err("the page order must name every page exactly once".into());
+    }
+
+    let mut seen = vec![false; page_count];
+
+    for &page_number in order {
+        let Some(index) = page_index(page_number, page_count) else {
+            return Err(format!("page {page_number} does not exist"));
+        };
+
+        if seen[index] {
+            return Err(format!(
+                "page {page_number} appears twice in the page order"
+            ));
+        }
+
+        seen[index] = true;
+    }
+
+    if order
+        .iter()
+        .enumerate()
+        .all(|(index, page_number)| *page_number == index as i32 + 1)
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(
+        order.iter().map(|page_number| page_number - 1).collect(),
+    ))
+}
+
+/// Checks the pages named for deletion exist, are distinct, and leave at least
+/// one page behind; hands back their zero-based indices in ascending order.
+fn validate_pages_to_delete(page_numbers: &[i32], page_count: usize) -> Result<Vec<usize>, String> {
+    if page_numbers.is_empty() {
+        return Err("a deletion needs at least one page".into());
+    }
+
+    let mut seen = vec![false; page_count];
+
+    for &page_number in page_numbers {
+        let Some(index) = page_index(page_number, page_count) else {
+            return Err(format!("page {page_number} does not exist"));
+        };
+
+        if seen[index] {
+            return Err(format!("page {page_number} appears twice in the deletion"));
+        }
+
+        seen[index] = true;
+    }
+
+    if page_numbers.len() >= page_count {
+        return Err("a document must keep at least one page".into());
+    }
+
+    Ok(seen
+        .iter()
+        .enumerate()
+        .filter_map(|(index, selected)| selected.then_some(index))
+        .collect())
 }
 
 /// The entry for `document_id`, with the one wording for a closed document.
@@ -363,17 +467,11 @@ impl PdfiumEngine {
             .pdfium
             .load_pdf_from_byte_vec(bytes, None)
             .map_err(|error| format!("PDFium could not open the document: {error}"))?;
-        let pages = document
-            .pages()
-            .iter()
-            .map(|page| PdfPageInfo {
-                width: page.width().value,
-                height: page.height().value,
-                rotation: page_rotation_degrees(&page),
-            })
-            .collect::<Vec<_>>();
-        let num_pages = document.pages().len();
-        let outline = collect_bookmark_siblings(document.bookmarks().root());
+        let PdfStructureUpdate {
+            num_pages,
+            pages,
+            outline,
+        } = document_layout(&document);
         let id = self.next_document_id.fetch_add(1, Ordering::Relaxed);
         let path = source_path
             .as_deref()
@@ -385,9 +483,11 @@ impl PdfiumEngine {
                 added: HashMap::new(),
                 document,
                 needs_compaction: false,
+                next_page_id: num_pages as u64,
                 page_ids: (0..num_pages as u64).collect(),
                 revisions: HashMap::new(),
                 source_path,
+                stashes: HashMap::new(),
                 watermark: None,
             },
         );
@@ -2048,6 +2148,314 @@ impl PdfiumEngine {
         Ok(())
     }
 
+    /// Rearranges the pages into `order` — the current 1-based page numbers in
+    /// their new sequence. The identity order changes nothing and bumps nothing.
+    pub(super) fn reorder_pages(
+        &self,
+        document_id: u64,
+        order: &[i32],
+    ) -> Result<PdfStructureUpdate, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let Some(indices) = validate_page_order(order, entry.page_ids.len())? else {
+            return Ok(document_layout(&entry.document));
+        };
+
+        // A failed FPDF_MovePages may leave the document in an indeterminate
+        // state, so even a pure move takes the M6 snapshot precaution.
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        if let Err(error) = entry.document.pages_mut().move_pages(&indices, 0) {
+            return Err(self.restore_document_snapshot(
+                entry,
+                snapshot,
+                format!("PDFium could not reorder the pages: {error}"),
+            ));
+        }
+
+        entry.page_ids = indices
+            .iter()
+            .map(|index| entry.page_ids[*index as usize])
+            .collect();
+
+        // Every page's content now sits at a new position, so an effect
+        // captured before the move must fail its revision check after it.
+        for page_id in &entry.page_ids {
+            *entry.revisions.entry(*page_id).or_insert(0) += 1;
+        }
+
+        Ok(document_layout(&entry.document))
+    }
+
+    /// Deletes the given pages, first copying them — and the session state
+    /// riding with them — into a stash under `stash_id` for a later restore.
+    /// An occupied `stash_id` is replaced: the key names one history entry,
+    /// and a redo of that entry's delete stashes the same logical pages again.
+    pub(super) fn delete_pages(
+        &self,
+        document_id: u64,
+        page_numbers: &[i32],
+        stash_id: u64,
+    ) -> Result<PdfStructureUpdate, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let indices = validate_pages_to_delete(page_numbers, entry.page_ids.len())?;
+
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        let stashed = (|| -> Result<PdfDocument<'static>, String> {
+            let mut stash_document = self
+                .pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not prepare the page stash: {error}"))?;
+            let range = indices
+                .iter()
+                .map(|index| (index + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+
+            stash_document
+                .pages_mut()
+                .copy_pages_from_document(&entry.document, &range, 0)
+                .map_err(|error| format!("PDFium could not copy the pages aside: {error}"))?;
+
+            // Descending, so each deletion leaves the shallower indices true.
+            for index in indices.iter().rev() {
+                entry
+                    .document
+                    .pages_mut()
+                    .get(*index as i32)
+                    .map_err(|error| format!("PDFium could not load page {}: {error}", index + 1))?
+                    .delete()
+                    .map_err(|error| {
+                        format!("PDFium could not delete page {}: {error}", index + 1)
+                    })?;
+            }
+
+            Ok(stash_document)
+        })();
+        let stash_document = match stashed {
+            Ok(document) => document,
+            Err(error) => return Err(self.restore_document_snapshot(entry, snapshot, error)),
+        };
+
+        // PDFium is done; move each page's session state into the stash.
+        let mut pages = Vec::with_capacity(indices.len());
+
+        for index in indices.iter().rev() {
+            let page_id = entry.page_ids.remove(*index);
+
+            pages.push(StashedPage {
+                position: *index as i32 + 1,
+                page_id,
+                added: entry.added.remove(&page_id).unwrap_or(0),
+                revision: entry.revisions.remove(&page_id).unwrap_or(0),
+                watermark: entry
+                    .watermark
+                    .as_mut()
+                    .and_then(|state| state.per_page.remove(&page_id)),
+            });
+        }
+        // Ascending — the order their copies sit in the stash document.
+        pages.reverse();
+
+        entry.stashes.insert(
+            stash_id,
+            PageStash {
+                document: stash_document,
+                pages,
+            },
+        );
+        entry.needs_compaction = true;
+        for page_id in &entry.page_ids {
+            *entry.revisions.entry(*page_id).or_insert(0) += 1;
+        }
+
+        Ok(document_layout(&entry.document))
+    }
+
+    /// Puts a stash's pages back where they were deleted from, consuming it.
+    pub(super) fn restore_pages(
+        &self,
+        document_id: u64,
+        stash_id: u64,
+    ) -> Result<PdfStructureUpdate, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let Some(stash) = entry.stashes.remove(&stash_id) else {
+            return Err("there are no stashed pages under this undo entry".into());
+        };
+
+        // LIFO undo has the document back in its post-delete shape, but the
+        // caller is a browser: prove every recorded position fits before
+        // touching PDFium. Ascending insertion counts the pages already back.
+        let fits = stash.pages.iter().enumerate().all(|(offset, stashed)| {
+            stashed.position >= 1 && stashed.position as usize <= entry.page_ids.len() + offset + 1
+        });
+
+        if !fits {
+            entry.stashes.insert(stash_id, stash);
+            return Err("the stashed pages do not fit this document".into());
+        }
+
+        let snapshot = match entry.document.save_to_bytes() {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                entry.stashes.insert(stash_id, stash);
+                return Err(format!("PDFium could not snapshot the document: {error}"));
+            }
+        };
+        let restored = (|| -> Result<(), String> {
+            for (offset, stashed) in stash.pages.iter().enumerate() {
+                entry
+                    .document
+                    .pages_mut()
+                    .copy_page_from_document(&stash.document, offset as i32, stashed.position - 1)
+                    .map_err(|error| {
+                        format!(
+                            "PDFium could not restore page {}: {error}",
+                            stashed.position
+                        )
+                    })?;
+            }
+
+            Ok(())
+        })();
+
+        if let Err(error) = restored {
+            let cause = self.restore_document_snapshot(entry, snapshot, error);
+
+            entry.stashes.insert(stash_id, stash);
+            return Err(cause);
+        }
+
+        let mut next_page_ids = entry.page_ids.clone();
+
+        for stashed in &stash.pages {
+            next_page_ids.insert(stashed.position as usize - 1, stashed.page_id);
+        }
+
+        // The copies came back through FPDF_ImportPages; prove the owned
+        // watermark tail survived the round trip before accepting the document,
+        // as M6's compaction does after its own save-and-reload.
+        if let Some(state) = &entry.watermark {
+            let mut prospective = state.clone();
+
+            for stashed in &stash.pages {
+                if let Some(page_state) = &stashed.watermark {
+                    prospective
+                        .per_page
+                        .insert(stashed.page_id, page_state.clone());
+                }
+            }
+
+            if let Err(error) =
+                Self::verify_watermark_tail(&entry.document, &next_page_ids, &prospective)
+            {
+                let cause = self.restore_document_snapshot(
+                    entry,
+                    snapshot,
+                    format!("the restored pages no longer carry this session's watermark: {error}"),
+                );
+
+                entry.stashes.insert(stash_id, stash);
+                return Err(cause);
+            }
+
+            entry.watermark = Some(prospective);
+        }
+
+        entry.page_ids = next_page_ids;
+        for stashed in &stash.pages {
+            if stashed.added > 0 {
+                entry.added.insert(stashed.page_id, stashed.added);
+            }
+
+            entry.revisions.insert(stashed.page_id, stashed.revision);
+        }
+
+        // The delete already set this, and the import may leave orphans of its
+        // own; keep the next write on the compacting path either way.
+        entry.needs_compaction = true;
+        for page_id in &entry.page_ids {
+            *entry.revisions.entry(*page_id).or_insert(0) += 1;
+        }
+
+        Ok(document_layout(&entry.document))
+    }
+
+    /// Inserts a blank page at 1-based `index`, sized from the unrotated
+    /// dimensions of the page that will follow it — or precede it, at the end.
+    pub(super) fn insert_blank_page(
+        &self,
+        document_id: u64,
+        index: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let page_count = entry.page_ids.len();
+        // One past the end is a position too, so the check is page_index's
+        // with the count stretched by one.
+        let Some(slot) = page_index(index, page_count + 1) else {
+            return Err(format!("a page cannot go to position {index}"));
+        };
+
+        // The size is read off the neighbour under the lock, never taken from
+        // the WebView.
+        let neighbor_index = slot.min(page_count.saturating_sub(1));
+        let (width, height) = {
+            let page = entry
+                .document
+                .pages()
+                .get(neighbor_index as i32)
+                .map_err(|error| {
+                    format!("PDFium could not load page {}: {error}", neighbor_index + 1)
+                })?;
+
+            unrotated_page_size(&page)
+        };
+        let page = entry
+            .document
+            .pages_mut()
+            .create_page_at_index(
+                PdfPagePaperSize::Custom(PdfPoints::new(width), PdfPoints::new(height)),
+                slot as i32,
+            )
+            .map_err(|error| format!("PDFium could not create the blank page: {error}"))?;
+
+        drop(page);
+
+        let page_id = entry.next_page_id;
+
+        entry.next_page_id += 1;
+        entry.page_ids.insert(slot, page_id);
+
+        if let Some(state) = entry.watermark.as_mut() {
+            // Owned but bare: the session's watermark does not cover a page
+            // inserted after it was applied, and only a re-apply will.
+            state.per_page.insert(
+                page_id,
+                WatermarkPageState {
+                    base_objects: 0,
+                    added_objects: 0,
+                    text_identity: String::new(),
+                },
+            );
+        }
+
+        for page_id in &entry.page_ids {
+            *entry.revisions.entry(*page_id).or_insert(0) += 1;
+        }
+
+        Ok(document_layout(&entry.document))
+    }
+
     /// Writes the document back over the file it was opened from.
     pub(super) fn save(&self, document_id: u64) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
@@ -2304,6 +2712,25 @@ fn same_file(left: &Path, right: &Path) -> bool {
     }
 
     resolved(left) == resolved(right)
+}
+
+/// The page list and outline as they stand: what an open reports, and what
+/// every structure command returns fresh — the frontend holds no mirror of
+/// the page list to patch, only this to replace.
+fn document_layout(document: &PdfDocument<'static>) -> PdfStructureUpdate {
+    PdfStructureUpdate {
+        num_pages: document.pages().len(),
+        pages: document
+            .pages()
+            .iter()
+            .map(|page| PdfPageInfo {
+                width: page.width().value,
+                height: page.height().value,
+                rotation: page_rotation_degrees(&page),
+            })
+            .collect(),
+        outline: collect_bookmark_siblings(document.bookmarks().root()),
+    }
 }
 
 fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOutlineItem> {
