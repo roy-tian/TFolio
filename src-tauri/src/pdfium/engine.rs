@@ -234,6 +234,15 @@ impl OpenDocument {
             .map(|index| self.page_ids[index])
             .ok_or_else(|| format!("page {page_number} does not exist"))
     }
+
+    /// Bumps every page's revision so an M5 effect captured before a structure
+    /// change fails its revision check after it: every structure command
+    /// permutes or resizes the page list, so no capture survives one.
+    fn invalidate_all_page_revisions(&mut self) {
+        for &page_id in &self.page_ids {
+            *self.revisions.entry(page_id).or_insert(0) += 1;
+        }
+    }
 }
 
 /// A 1-based page number as a zero-based index, if it lands inside the
@@ -2183,9 +2192,7 @@ impl PdfiumEngine {
 
         // Every page's content now sits at a new position, so an effect
         // captured before the move must fail its revision check after it.
-        for page_id in &entry.page_ids {
-            *entry.revisions.entry(*page_id).or_insert(0) += 1;
-        }
+        entry.invalidate_all_page_revisions();
 
         Ok(document_layout(&entry.document))
     }
@@ -2273,9 +2280,7 @@ impl PdfiumEngine {
             },
         );
         entry.needs_compaction = true;
-        for page_id in &entry.page_ids {
-            *entry.revisions.entry(*page_id).or_insert(0) += 1;
-        }
+        entry.invalidate_all_page_revisions();
 
         Ok(document_layout(&entry.document))
     }
@@ -2383,9 +2388,7 @@ impl PdfiumEngine {
         // The delete already set this, and the import may leave orphans of its
         // own; keep the next write on the compacting path either way.
         entry.needs_compaction = true;
-        for page_id in &entry.page_ids {
-            *entry.revisions.entry(*page_id).or_insert(0) += 1;
-        }
+        entry.invalidate_all_page_revisions();
 
         Ok(document_layout(&entry.document))
     }
@@ -2449,9 +2452,7 @@ impl PdfiumEngine {
             );
         }
 
-        for page_id in &entry.page_ids {
-            *entry.revisions.entry(*page_id).or_insert(0) += 1;
-        }
+        entry.invalidate_all_page_revisions();
 
         Ok(document_layout(&entry.document))
     }
@@ -2718,10 +2719,11 @@ fn same_file(left: &Path, right: &Path) -> bool {
 /// every structure command returns fresh — the frontend holds no mirror of
 /// the page list to patch, only this to replace.
 fn document_layout(document: &PdfDocument<'static>) -> PdfStructureUpdate {
+    let pages = document.pages();
+
     PdfStructureUpdate {
-        num_pages: document.pages().len(),
-        pages: document
-            .pages()
+        num_pages: pages.len(),
+        pages: pages
             .iter()
             .map(|page| PdfPageInfo {
                 width: page.width().value,
