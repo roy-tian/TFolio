@@ -3654,3 +3654,347 @@ fn deleting_pages_marks_compaction() {
     assert_eq!(reopened.num_pages, 1, "the deletion should persist");
     fs::remove_dir_all(directory).ok();
 }
+
+// One 200x300 page per band offset, each carrying a single black bar at that
+// x — so every page in a merge renders to a distinct fingerprint, which is
+// what lets a merge test say which document's page now sits where.
+fn banded_pdf(offsets: &[i32]) -> Vec<u8> {
+    let count = offsets.len();
+    let kids = (0..count)
+        .map(|index| format!("{} 0 R", 3 + index))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut objects = vec![
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        format!("2 0 obj\n<< /Type /Pages /Kids [{kids}] /Count {count} >>\nendobj\n"),
+    ];
+
+    for index in 0..count {
+        objects.push(format!(
+            "{} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents {} 0 R >>\nendobj\n",
+            3 + index,
+            3 + count + index,
+        ));
+    }
+
+    for (index, offset) in offsets.iter().enumerate() {
+        let content = format!("0 0 0 rg\n{offset} 100 30 120 re f\n");
+
+        objects.push(format!(
+            "{} 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            3 + count + index,
+            content.len(),
+        ));
+    }
+
+    build_pdf(&objects)
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merges_a_document_at_the_end() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-at-end");
+    let source_path = directory.join("addendum.pdf");
+    let source_bytes = banded_pdf(&[110, 150, 190]);
+    fs::write(&source_path, &source_bytes).expect("the source should write to disk");
+
+    let document = engine
+        .open(banded_pdf(&[20, 60]))
+        .expect("PDFium should open the base document");
+    let before = page_fingerprints(engine, document.id, 2);
+    // The source rendered on its own, so the comparison is independent of the
+    // merge under test rather than fed back from it.
+    let source = engine
+        .open(source_bytes)
+        .expect("PDFium should open the source on its own");
+    let source_prints = page_fingerprints(engine, source.id, 3);
+
+    let outcome = engine
+        .merge_from_path(document.id, source_path)
+        .expect("PDFium should merge the document");
+
+    assert_eq!(
+        outcome.inserted_at, 3,
+        "the source lands after the base's pages"
+    );
+    assert_eq!(outcome.page_count, 3);
+    assert_eq!(outcome.update.num_pages, 5);
+
+    let merged = page_fingerprints(engine, document.id, 5);
+
+    assert_eq!(
+        &merged[..2],
+        &before[..],
+        "the base's pages keep their place"
+    );
+    assert_eq!(
+        &merged[2..],
+        &source_prints[..],
+        "the source's pages land at positions 3-5, in order",
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_preserves_both_documents_annotations() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-annotations");
+    let source_path = directory.join("linked.pdf");
+    // The source's own page carries a link — input content, not this session's.
+    fs::write(&source_path, link_pdf()).expect("the source should write to disk");
+
+    let document = engine
+        .open(three_page_link_pdf())
+        .expect("PDFium should open the base document");
+    // A session highlight beside the base's own first-page link.
+    engine
+        .add_highlight(
+            document.id,
+            1,
+            &[quad(20.0, 60.0, 100.0, 12.0)],
+            "#ffd54a",
+            0.4,
+        )
+        .expect("PDFium should create the highlight");
+
+    engine
+        .merge_from_path(document.id, source_path)
+        .expect("PDFium should merge the document");
+
+    // Both documents' annotations rode across: the base's link and highlight on
+    // page 1, and the source's link on the new page 4.
+    assert_eq!(
+        with_page(engine, document.id, 1, |page| page.annotations().len()),
+        2,
+        "the base's link and the session highlight both survive",
+    );
+    assert_eq!(
+        with_page(engine, document.id, 4, |page| page.annotations().len()),
+        1,
+        "the merged page keeps its own link",
+    );
+
+    // The `added` guard only counts this session's marks: the highlight comes
+    // off page 1, then the base's own link is beyond reach.
+    engine
+        .delete_last_annotation(document.id, 1)
+        .expect("the session highlight is the session's to remove");
+    let error = engine
+        .delete_last_annotation(document.id, 1)
+        .expect_err("the base's own link must stay beyond reach");
+    assert!(error.contains("no annotation of this session's"));
+
+    // The merged page's link is input content too — nothing the session added.
+    let error = engine
+        .delete_last_annotation(document.id, 4)
+        .expect_err("the merged page's link must stay beyond reach");
+    assert!(error.contains("no annotation of this session's"));
+
+    fs::remove_dir_all(directory).ok();
+}
+
+// A merged page carries its source's own content, so its owned-but-bare
+// watermark entry must pin that content as the base — the whole-document
+// preflight then still passes, and a re-apply covers the new page.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_extends_watermark_state() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-watermark");
+    let source_path = directory.join("added.pdf");
+    // One page with a single content object of its own (a band).
+    fs::write(&source_path, banded_pdf(&[100])).expect("the source should write to disk");
+
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the base document");
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply the watermark");
+    engine
+        .merge_from_path(document.id, source_path)
+        .expect("PDFium should merge into the watermarked document");
+
+    let objects_on = |page_number: i32| {
+        with_page(engine, document.id, page_number, |page| {
+            page.objects().len()
+        })
+    };
+
+    assert_eq!(objects_on(1), 1, "the first page carries its mark");
+    assert_eq!(objects_on(2), 1, "the second page carries its mark");
+    assert_eq!(
+        objects_on(3),
+        1,
+        "the merged page keeps its own band, unmarked",
+    );
+
+    // Removal succeeding is the proof the bare entry's base was set to the
+    // merged page's content count, not zero — a zero base would fail the
+    // preflight for a page holding one object.
+    engine
+        .remove_watermark(document.id)
+        .expect("the removal should still pass with the bare merged page");
+    assert_eq!(objects_on(1), 0, "the first page is clean");
+    assert_eq!(objects_on(2), 0, "the second page is clean");
+    assert_eq!(objects_on(3), 1, "the merged page keeps its own band");
+
+    // A fresh watermark now covers the merged page as well.
+    engine
+        .apply_watermark(document.id, watermark_config("FINAL"))
+        .expect("a fresh watermark should cover every page");
+    assert_eq!(objects_on(3), 2, "the merged page gains a mark of its own");
+
+    fs::remove_dir_all(directory).ok();
+}
+
+// The frontend undoes a merge by deleting the appended range and redoes it from
+// the stash; both must round-trip the merged pages exactly.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_undo_redo_is_lossless() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-undo-redo");
+    let source_path = directory.join("addendum.pdf");
+    fs::write(&source_path, banded_pdf(&[110, 150, 190])).expect("the source should write to disk");
+
+    let document = engine
+        .open(banded_pdf(&[20, 60]))
+        .expect("PDFium should open the base document");
+    engine
+        .merge_from_path(document.id, source_path)
+        .expect("PDFium should merge the document");
+    let merged = page_fingerprints(engine, document.id, 5);
+
+    // Undo: delete the appended range under the history entry's stash id.
+    let update = engine
+        .delete_pages(document.id, &[3, 4, 5], 9)
+        .expect("the undo should delete the merged range");
+    assert_eq!(update.num_pages, 2);
+
+    // Redo: restore from the stash — not a re-read of the file, which may have
+    // changed on disk.
+    let update = engine
+        .restore_pages(document.id, 9)
+        .expect("the redo should restore the merged range from the stash");
+    assert_eq!(update.num_pages, 5);
+    assert_eq!(
+        page_fingerprints(engine, document.id, 5),
+        merged,
+        "the merged pages should come back byte-for-byte",
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+// A merged document carries the watermark's export-only restriction: saving or
+// exporting onto its source would write another file's pages over the first
+// file. The guard tracks what is present, so undoing the merge lifts it and
+// redoing it puts it back.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_merged_document_will_not_overwrite_its_source() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-source-guard");
+    let source = directory.join("source.pdf");
+    fs::write(&source, banded_pdf(&[30, 70])).expect("the fixture should be writable");
+    let original = fs::read(&source).expect("the fixture should be readable");
+    let addendum = directory.join("addendum.pdf");
+    fs::write(&addendum, banded_pdf(&[110, 150, 190])).expect("the source should write to disk");
+
+    let document = engine
+        .open_from_path(source.clone())
+        .expect("PDFium should open the base by path");
+    engine
+        .merge_from_path(document.id, addendum)
+        .expect("PDFium should merge the addendum");
+
+    // A plain save over the source is refused…
+    let error = engine
+        .save(document.id)
+        .expect_err("a merged document must not save over its source");
+    assert!(error.contains("exported as a copy"), "why: {error}");
+
+    // …and so is an export that lands on the source — the dialog is no way round.
+    let error = engine
+        .export_to(document.id, &source)
+        .expect_err("a merged export must not land on the source");
+    assert!(error.contains("exported as a copy"), "why: {error}");
+    assert_eq!(
+        fs::read(&source).expect("the source should still be readable"),
+        original,
+        "the refusal has to come before the write, not after it",
+    );
+
+    // A copy elsewhere is the merged document's one destination.
+    engine
+        .export_to(document.id, &directory.join("copy.pdf"))
+        .expect("the export should write the merged copy");
+
+    // Undoing the merge (deleting its pages) lifts the restriction…
+    engine
+        .delete_pages(document.id, &[3, 4, 5], 1)
+        .expect("the undo should delete the merged range");
+    engine
+        .save(document.id)
+        .expect("the un-merged document may save over its source again");
+
+    // …and redoing it (restoring the pages) puts the guard back.
+    engine
+        .restore_pages(document.id, 1)
+        .expect("the redo should restore the merged range");
+    engine
+        .save(document.id)
+        .expect_err("the restored merge forbids saving over the source again");
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_invalidates_a_captured_rect_effect() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-invalidate");
+    let source_path = directory.join("addendum.pdf");
+    fs::write(&source_path, banded_pdf(&[110])).expect("the source should write to disk");
+
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the base document");
+    let revisions = || {
+        let documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+        let entry = &documents[&document.id];
+
+        entry
+            .page_ids
+            .iter()
+            .map(|page_id| entry.revisions.get(page_id).copied().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+
+    let captured = revisions();
+
+    engine
+        .merge_from_path(document.id, source_path)
+        .expect("PDFium should merge the document");
+
+    let after = revisions();
+
+    // Every page that existed before the merge has a new revision, so an M5
+    // effect captured before it and processed unlocked is refused on commit.
+    assert!(
+        captured
+            .iter()
+            .zip(&after)
+            .all(|(before, now)| before != now),
+        "a merge should invalidate every existing page",
+    );
+
+    fs::remove_dir_all(directory).ok();
+}

@@ -10,7 +10,7 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 use super::{
-    size_limit_error, ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo,
+    size_limit_error, ExportOutcome, MergeOutcome, PagePoint, PagePointsRect, PdfDocumentInfo,
     PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle, TextNoteStyle,
     WatermarkConfig, MAX_PDF_BYTES,
 };
@@ -307,6 +307,37 @@ pub async fn open_pdf_from_path(
     })
     .await
     .map_err(|error| format!("PDFium open task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn merge_pdf_from_path(
+    document_id: u64,
+    path: String,
+    state: State<'_, PdfiumState>,
+) -> Result<MergeOutcome, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(path);
+
+        // The same approval a fresh open needs, and for the same reason: a
+        // merge reads a file the WebView named, so only paths the OS produced
+        // in this process's sight (a drop the window saw, a pick the dialog
+        // returned) are acted on. The e2e harness merges scratch files no
+        // dialog blessed, so its build waives the check — as `open_pdf_from_path`
+        // does at its one call site.
+        #[cfg(not(feature = "e2e"))]
+        if !engine.is_approved(&path) {
+            return Err(format!(
+                "{} did not come from a file dialog or a drop",
+                path.display()
+            ));
+        }
+
+        engine.merge_from_path(document_id, path)
+    })
+    .await
+    .map_err(|error| format!("PDFium merge task failed: {error}"))?
 }
 
 #[tauri::command]

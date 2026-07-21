@@ -31,9 +31,9 @@ use super::{
     watermark::{
         add_document_object_count, watermark_placements, WatermarkConfig, WatermarkPlacement,
     },
-    ExportOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem, PdfPageInfo,
-    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
-    MAX_PDF_BYTES,
+    ExportOutcome, MergeOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem,
+    PdfPageInfo, PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle,
+    TextNoteStyle, MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -89,6 +89,9 @@ struct StashedPage {
     added: u32,
     revision: u64,
     watermark: Option<WatermarkPageState>,
+    /// Whether the page came from a merge, so a restore puts it back into the
+    /// merged-content set that forbids overwriting the first file.
+    merged: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -213,6 +216,13 @@ struct OpenDocument {
     /// this detects an annotation that changed the source page before the
     /// processed image is attached again.
     revisions: HashMap<u64, u64>,
+    /// Page ids that came from a merge and are still in the document. While any
+    /// remain, this document holds another file's pages, so — like a watermark —
+    /// it may only be exported as a copy, never written back over the first
+    /// file. Emptied when a merge is undone (its pages deleted) and refilled
+    /// when it is redone (its pages restored), so the guard tracks what is
+    /// actually present, not merely what once happened.
+    merged_page_ids: HashSet<u64>,
     /// The file this document was opened from, and so the file a save writes
     /// back over. `None` — opened from bytes — leaves nothing to overwrite,
     /// and a first export adopts its destination as the source.
@@ -412,7 +422,8 @@ impl PdfiumEngine {
     /// Whether something outside the WebView — a drop, a dialog — produced
     /// this path. Kept rather than consumed: the reader may cancel the unsaved
     /// guard and open the same file again.
-    // The e2e build waives the check at its one call site, in `open_pdf_from_path`.
+    // The e2e build waives the check at both its call sites — `open_pdf_from_path`
+    // and `merge_pdf_from_path` — so the whole method is dead there.
     #[cfg_attr(feature = "e2e", allow(dead_code))]
     pub(super) fn is_approved(&self, path: &Path) -> bool {
         self.approved_paths
@@ -491,6 +502,7 @@ impl PdfiumEngine {
             OpenDocument {
                 added: HashMap::new(),
                 document,
+                merged_page_ids: HashSet::new(),
                 needs_compaction: false,
                 next_page_id: num_pages as u64,
                 page_ids: (0..num_pages as u64).collect(),
@@ -2267,6 +2279,8 @@ impl PdfiumEngine {
                     .watermark
                     .as_mut()
                     .and_then(|state| state.per_page.remove(&page_id)),
+                // A deleted merged page leaves the document; the guard follows.
+                merged: entry.merged_page_ids.remove(&page_id),
             });
         }
         // Ascending — the order their copies sit in the stash document.
@@ -2382,6 +2396,10 @@ impl PdfiumEngine {
                 entry.added.insert(stashed.page_id, stashed.added);
             }
 
+            if stashed.merged {
+                entry.merged_page_ids.insert(stashed.page_id);
+            }
+
             entry.revisions.insert(stashed.page_id, stashed.revision);
         }
 
@@ -2457,6 +2475,146 @@ impl PdfiumEngine {
         Ok(document_layout(&entry.document))
     }
 
+    /// Appends every page of the PDF at `path` to the end of the open document,
+    /// as one merge. The source is opened under the same limits as a fresh open
+    /// and never enters the document store; a "file" in the merged document is
+    /// only the frontend's accounting of a page range, not a second document.
+    pub(super) fn merge_from_path(
+        &self,
+        document_id: u64,
+        path: PathBuf,
+    ) -> Result<MergeOutcome, String> {
+        // Sized before it is read, like `open_from_path`: a merge honours the
+        // same MiB ceiling as an open, and reading the metadata first keeps an
+        // oversized file from being pulled wholesale into memory.
+        let metadata = fs::metadata(&path)
+            .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+
+        if !metadata.is_file() {
+            return Err(format!("{} is not a file", path.display()));
+        }
+
+        if metadata.len() > MAX_PDF_BYTES as u64 {
+            return Err(size_limit_error());
+        }
+
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+
+        if bytes.is_empty() {
+            return Err("PDF file is empty".into());
+        }
+
+        if bytes.len() > MAX_PDF_BYTES {
+            return Err(size_limit_error());
+        }
+
+        let mut documents = self.lock_documents()?;
+        // The source is opened inside the lock — loading a PDF is PDFium work —
+        // and dropped when this scope ends, never inserted into the store. Its
+        // error wording matches `open`'s, so an encrypted file is refused the
+        // same way whichever door it comes through.
+        let source = self
+            .pdfium
+            .load_pdf_from_byte_vec(bytes, None)
+            .map_err(|error| format!("PDFium could not open the document: {error}"))?;
+        let added_count = source.pages().len();
+
+        if added_count < 1 {
+            return Err("the merged PDF has no pages".into());
+        }
+
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let inserted_at = entry.page_ids.len() as i32 + 1;
+
+        // Append imports the pages, which may fail partway; snapshot first so a
+        // failure rolls the document back whole, as every multi-page structure
+        // change does.
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        if let Err(error) = entry.document.pages_mut().append(&source) {
+            return Err(self.restore_document_snapshot(
+                entry,
+                snapshot,
+                format!("PDFium could not merge the document: {error}"),
+            ));
+        }
+
+        // A merged page carries its source's own content objects. When this
+        // session holds a watermark, each new page takes an owned-but-bare
+        // record whose base is that content and whose added count is zero — the
+        // watermark does not cover a page it never marked. Measured before the
+        // recording loop, which needs a mutable borrow of the same entry.
+        //
+        // A read failure here rolls the append back like `append` itself does:
+        // the pages are already on the document, so a bare `?` would leave them
+        // there while `page_ids` never learned of them — a desync every later
+        // command trusts against.
+        let new_base_objects = match &entry.watermark {
+            Some(_) => {
+                let measured = (0..added_count)
+                    .map(|offset| {
+                        let index = inserted_at - 1 + offset;
+                        entry
+                            .document
+                            .pages()
+                            .get(index)
+                            .map(|page| page.objects().len())
+                            .map_err(|error| {
+                                format!(
+                                    "PDFium could not inspect merged page {}: {error}",
+                                    index + 1
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+
+                match measured {
+                    Ok(values) => values,
+                    Err(error) => {
+                        return Err(self.restore_document_snapshot(entry, snapshot, error));
+                    }
+                }
+            }
+            None => Vec::new(),
+        };
+
+        for offset in 0..added_count {
+            let page_id = entry.next_page_id;
+
+            entry.next_page_id += 1;
+            entry.page_ids.push(page_id);
+            // This page is another file's content: while it stays, the document
+            // may only be exported as a copy, not saved over the first file.
+            entry.merged_page_ids.insert(page_id);
+
+            if let Some(state) = entry.watermark.as_mut() {
+                state.per_page.insert(
+                    page_id,
+                    WatermarkPageState {
+                        base_objects: new_base_objects[offset as usize],
+                        added_objects: 0,
+                        text_identity: String::new(),
+                    },
+                );
+            }
+        }
+
+        // Nothing was removed, so no compaction is owed; but every page's
+        // content now sits in a longer document, and an M5 effect captured
+        // before the merge must fail its revision check after it.
+        entry.invalidate_all_page_revisions();
+
+        Ok(MergeOutcome {
+            inserted_at,
+            page_count: added_count,
+            update: document_layout(&entry.document),
+        })
+    }
+
     /// Writes the document back over the file it was opened from.
     pub(super) fn save(&self, document_id: u64) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
@@ -2469,6 +2627,17 @@ impl PdfiumEngine {
         if entry.watermark.is_some() {
             return Err(
                 "a watermarked document may only be exported as a copy, not saved over its own file"
+                    .into(),
+            );
+        }
+
+        // Merged-in pages carry the same restriction as a watermark, for the
+        // same reason the plan modelled on it: a save here would write another
+        // file's pages over the first file. Enforced in the command, not trusted
+        // to the disabled key, since the WebView can call this directly.
+        if !entry.merged_page_ids.is_empty() {
+            return Err(
+                "a document that merged other files may only be exported as a copy, not saved over its own file"
                     .into(),
             );
         }
@@ -2490,18 +2659,20 @@ impl PdfiumEngine {
 
         // The same refusal `save` makes, at the other exit: a reader who picks
         // their own file in the export dialog would otherwise overwrite it with
-        // a mark this app can no longer lift. Unlike the `saved_to_source`
-        // comparison below, this one resolves aliases before it answers — the
-        // two run in opposite directions. Missing a symlinked twin there only
-        // leaves the history dirty; missing one here destroys the original.
-        if entry.watermark.is_some()
+        // content this app cannot lift — a watermark, or another file's merged-in
+        // pages, both export-only for the same reason. Unlike the
+        // `saved_to_source` comparison below, this one resolves aliases before it
+        // answers — the two run in opposite directions. Missing a symlinked twin
+        // there only leaves the history dirty; missing one here destroys the
+        // original.
+        if (entry.watermark.is_some() || !entry.merged_page_ids.is_empty())
             && entry
                 .source_path
                 .as_deref()
                 .is_some_and(|source| same_file(source, path))
         {
             return Err(
-                "a watermarked document may only be exported as a copy, not written back over its own file"
+                "this document may only be exported as a copy, not written back over its own file"
                     .into(),
             );
         }
