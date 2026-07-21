@@ -131,8 +131,37 @@ export type InsertBlankPageCommand = {
   index: number
   /** Pages in the document after the insertion. */
   pageCount: number
+  /** Whether this is a smart-parity pad — a blank page inserted before a file
+      whose first page would otherwise land on an even position. Accounting
+      only; the backend inserts an ordinary blank page either way. */
+  pad?: boolean
   /** The history entry's own id; the undo's delete stashes under it, and a
       redo's delete replaces that stash rather than colliding with it. */
+  stashId: number
+}
+
+/**
+ * Appends another PDF's pages to the end of the document, as one merge. The
+ * backend holds a single merged document; a "file" is only the frontend's
+ * accounting of a page range, derived from these commands (see `fileRanges`).
+ *
+ * `insertedAt` and `pageCount` are 0 until the first apply reads the file: the
+ * frontend cannot know how many pages the file has, nor exactly where they
+ * land, until the backend has opened it. A redo does not re-read the file — it
+ * restores the pages the undo stashed — so by then both are known.
+ */
+export type MergeFileCommand = {
+  kind: "mergeFile"
+  /** The approved path the merge reads, as an undone/redone merge would. */
+  path: string
+  /** The file's display name, for its card. */
+  name: string
+  /** 1-based position the file's first page took; 0 until the first apply. */
+  insertedAt: number
+  /** Pages the file brought; 0 until the first apply learns it. */
+  pageCount: number
+  /** The history entry's own id: the undo deletes the appended range under it,
+      and the redo restores exactly that stash. */
   stashId: number
 }
 
@@ -144,6 +173,7 @@ export type AnnotationCommand =
   | ReorderPagesCommand
   | DeletePagesCommand
   | InsertBlankPageCommand
+  | MergeFileCommand
 
 /**
  * Redoing re-runs the command and gets a fresh annotation out of PDFium, but it
@@ -190,6 +220,34 @@ export function commandPages(command: AnnotationCommand): number[] {
       // The larger of the before and after counts, so both the apply and the
       // undo invalidate every page number either shape of the document has.
       return everyPage(command.pageCount)
+    case "mergeFile":
+      // A merge only appends: no page number that already existed changes its
+      // pixels or its text, and the new pages get fresh components that fetch
+      // on mount. Its undo (a tail delete) and redo (a restore) touch only
+      // those same tail pages, so there is nothing to invalidate either way.
+      return []
+  }
+}
+
+/**
+ * Whether applying, undoing, or redoing this command shifts the document's
+ * pages — the four structure commands do; an annotation or watermark leaves
+ * every page where it was. Read where a page-numbered draft (a text note being
+ * typed) must be settled before a page moves out from under it, but left alone
+ * when the edit cannot touch it.
+ */
+export function movesPages(command: AnnotationCommand): boolean {
+  switch (command.kind) {
+    case "reorderPages":
+    case "deletePages":
+    case "insertBlankPage":
+    case "mergeFile":
+      return true
+    case "highlight":
+    case "rect":
+    case "textNote":
+    case "watermark":
+      return false
   }
 }
 
@@ -205,6 +263,15 @@ export function commandTextPages(command: AnnotationCommand): number[] {
     default:
       return []
   }
+}
+
+/** The pages a merge's undo deletes, and its redo restores: the appended file's
+    range, valid at the LIFO moment the merge sits at the top of history. */
+export function mergeFilePages(command: MergeFileCommand): number[] {
+  return Array.from(
+    { length: command.pageCount },
+    (_, offset) => command.insertedAt + offset,
+  )
 }
 
 /** The permutation that undoes `order`; both are 1-based page sequences. */
@@ -265,6 +332,7 @@ export function planInsertBlankPage(
   history: AnnotationHistory,
   index: number,
   pageCount: number,
+  pad = false,
 ) {
   if (index < 1 || index > pageCount + 1) {
     return null
@@ -274,10 +342,53 @@ export function planInsertBlankPage(
     index,
     kind: "insertBlankPage",
     pageCount: pageCount + 1,
+    // Omit the flag entirely when false, so an ordinary insert's command stays
+    // exactly what it was before parity padding existed.
+    ...(pad ? { pad: true } : {}),
     stashId: history.nextId,
   }
 
   return { command, history: commit(history, command) }
+}
+
+/** Plans a merge. `insertedAt`/`pageCount` stay 0 here: the file has not been
+    read yet, so both are filled in once the first apply learns them (see
+    `fillMergeOutcome`). A merge always happens, so this never returns null. */
+export function planMergeFile(
+  history: AnnotationHistory,
+  path: string,
+  name: string,
+) {
+  const command: MergeFileCommand = {
+    insertedAt: 0,
+    kind: "mergeFile",
+    name,
+    pageCount: 0,
+    path,
+    stashId: history.nextId,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+/** Rewrites the merge the first apply just committed with the position and page
+    count the backend reported — the two facts a merge learns only after reading
+    the file. Later replays (`fileRanges`, an undo's delete) then read them as if
+    they had been known all along. */
+export function fillMergeOutcome(
+  history: AnnotationHistory,
+  entryId: number,
+  insertedAt: number,
+  pageCount: number,
+): AnnotationHistory {
+  return {
+    ...history,
+    past: history.past.map((entry) =>
+      entry.id === entryId && entry.command.kind === "mergeFile"
+        ? { ...entry, command: { ...entry.command, insertedAt, pageCount } }
+        : entry,
+    ),
+  }
 }
 
 /** The active session watermark implied by the applied side of history. */

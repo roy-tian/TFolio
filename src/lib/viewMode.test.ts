@@ -13,6 +13,7 @@ describe("isViewMode", () => {
     expect(isViewMode("single")).toBe(true)
     expect(isViewMode("book")).toBe(true)
     expect(isViewMode("thumbnail")).toBe(true)
+    expect(isViewMode("files")).toBe(true)
   })
 
   test("rejects anything else", () => {

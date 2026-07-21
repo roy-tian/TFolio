@@ -51,6 +51,15 @@ export type PdfStructureUpdate = {
   pages: PdfPageInfo[]
 }
 
+/** What a merge appended. `pageCount` is the one thing the frontend cannot
+    derive from history until the backend has read the file, so the merge
+    command carries it back from here. */
+export type PdfMergeOutcome = {
+  insertedAt: number
+  pageCount: number
+  update: PdfStructureUpdate
+}
+
 /** Widest a single page may render on screen, in CSS pixels. */
 export const MAX_PAGE_WIDTH = 896
 

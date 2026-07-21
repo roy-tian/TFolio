@@ -8,10 +8,13 @@ import {
   commandTextPages,
   commit,
   emptyHistory,
+  fillMergeOutcome,
   isDirty,
   markSaved,
+  mergeFilePages,
   planDeletePages,
   planInsertBlankPage,
+  planMergeFile,
   planReorderPages,
   planWatermarkChange,
   redo,
@@ -22,7 +25,11 @@ import {
   type HighlightCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
-import type { PdfExportOutcome, PdfStructureUpdate } from "@/lib/pdf"
+import type {
+  PdfExportOutcome,
+  PdfMergeOutcome,
+  PdfStructureUpdate,
+} from "@/lib/pdf"
 import type { WatermarkConfig } from "@/lib/watermark"
 
 /** Where a structure command's fresh metadata lands, applied or undone. */
@@ -127,6 +134,18 @@ async function applyCommand(
         }),
       )
       return
+    case "mergeFile":
+      // Only ever a redo here — the first apply reads the file through
+      // `mergeFile` below. A redo restores the pages the undo stashed rather
+      // than re-reading the file, which may have changed on disk since.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("restore_pdf_pages", {
+          documentId,
+          stashId: command.stashId,
+        }),
+      )
+      return
   }
 }
 
@@ -208,6 +227,18 @@ async function retractCommand(
         }),
       )
       return
+    case "mergeFile":
+      // Undo a merge by deleting the range it appended, stashed under this
+      // entry's id so a redo can restore exactly those bytes.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("delete_pdf_pages", {
+          documentId,
+          pageNumbers: mergeFilePages(command),
+          stashId: command.stashId,
+        }),
+      )
+      return
     default:
       for (const pageNumber of [...commandPages(command)].reverse()) {
         await invoke("delete_last_pdf_annotation", { documentId, pageNumber })
@@ -233,6 +264,18 @@ export function useAnnotations({
   const [renderEpochs, setRenderEpochs] = useState<RenderEpochs>({})
   const [textEpochs, setTextEpochs] = useState<RenderEpochs>({})
   const [pending, setPending] = useState(0)
+  // How many structure edits are in flight — reorder, delete, insert, merge,
+  // and undo/redo. A screen-read gesture (a grid edit, a file-card edit) must
+  // not start while one runs, since it would plan against ranges the edit is
+  // about to change; `isStructureBusyNow` gates on this.
+  const structurePendingRef = useRef(0)
+  // The subset of those that move pages that already exist — reorder, delete,
+  // insert, undo/redo — but *not* a merge, which only appends and so leaves
+  // every existing page where it was. A drawing or note the reader finishes
+  // mid-edit is dropped only while one of these runs (its page is about to
+  // move); during a merge it is let through, to land on its unmoved page once
+  // the append is done, rather than silently lost.
+  const pageShiftPendingRef = useRef(0)
   // React state does not move until a re-render, so an operation starting inside
   // another's round trip would plan against a history a step out of date and
   // overwrite its entry.
@@ -287,6 +330,11 @@ export function useAnnotations({
         textPages: number[]
         work: () => Promise<boolean>
         next: AnnotationHistory
+        /** For a command whose own fields are known only once its work runs — a
+            merge learns the file's page count only after the backend reads it:
+            rebuilds the history to commit from what work resolved. `next` is
+            the placeholder used until then, and when this is absent. */
+        reconcile?: () => AnnotationHistory
       } | null,
       onFailure: () => void,
     ) => {
@@ -318,8 +366,9 @@ export function useAnnotations({
           }
 
           if (happened) {
-            historyRef.current = step.next
-            setHistory(step.next)
+            const committed = step.reconcile ? step.reconcile() : step.next
+            historyRef.current = committed
+            setHistory(committed)
           }
           onSuccess()
         } catch {
@@ -335,7 +384,9 @@ export function useAnnotations({
         }
       })
 
-      return queueRef.current.finally(() => setPending((count) => count - 1))
+      return queueRef.current.finally(() => {
+        setPending((count) => count - 1)
+      })
     },
     [applyEpochs, documentId, onSuccess],
   )
@@ -343,6 +394,16 @@ export function useAnnotations({
   const commitCommand = useCallback(
     async (command: AnnotationCommand) => {
       if (documentId === undefined) {
+        return
+      }
+
+      // A drawing or note carries the page it was made on; a page-moving edit
+      // in flight is about to move that page, so the mark would land on the
+      // wrong one. Dropped rather than misplaced — a rare gesture, one the
+      // reader can simply repeat. A merge is excluded (it appends, moving
+      // nothing), so a note finished while a dropped file is still merging is
+      // kept, to land on its unmoved page, not lost.
+      if (pageShiftPendingRef.current > 0) {
         return
       }
 
@@ -366,35 +427,55 @@ export function useAnnotations({
    * The one path every structure edit takes: its command is planned against
    * the history the queue reached — which is what hands the stash its entry
    * id — and a plan that answers null (an identity order, an empty selection)
-   * never occupies an undo step.
+   * never occupies an undo step. Because the plan runs inside the queue, each
+   * step is decided from the history every prior edit, its own or another's,
+   * has already reached.
+   *
+   * Resolves with whether the edit actually *landed* — false for a plan that
+   * had nothing to do *and* for one whose work failed. A caller stepping toward
+   * a target (the smart-parity reconcile) stops on either, so a backend failure
+   * is one attempt, not a replan of the same failing op until a loop bound.
    */
   const commitStructure = useCallback(
     async (
       plan: (
         history: AnnotationHistory,
       ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
-    ) => {
+    ): Promise<boolean> => {
       if (documentId === undefined) {
-        return
+        return false
       }
 
-      await enqueue((current) => {
-        const planned = plan(current)
+      let landed = false
 
-        if (!planned) {
-          return null
-        }
+      structurePendingRef.current += 1
+      pageShiftPendingRef.current += 1
 
-        return {
-          next: planned.history,
-          pages: commandPages(planned.command),
-          textPages: commandTextPages(planned.command),
-          work: async () => {
-            await applyCommand(documentId, planned.command, onStructureChange)
-            return true
-          },
-        }
-      }, onAnnotateError)
+      try {
+        await enqueue((current) => {
+          const step = plan(current)
+
+          if (!step) {
+            return null
+          }
+
+          return {
+            next: step.history,
+            pages: commandPages(step.command),
+            textPages: commandTextPages(step.command),
+            work: async () => {
+              await applyCommand(documentId, step.command, onStructureChange)
+              landed = true
+              return true
+            },
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+        pageShiftPendingRef.current -= 1
+      }
+
+      return landed
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
@@ -411,9 +492,61 @@ export function useAnnotations({
   )
 
   const insertBlankPage = useCallback(
-    (index: number, pageCount: number) =>
-      commitStructure((current) => planInsertBlankPage(current, index, pageCount)),
+    (index: number, pageCount: number, pad = false) =>
+      commitStructure((current) => planInsertBlankPage(current, index, pageCount, pad)),
     [commitStructure],
+  )
+
+  /**
+   * Appends another PDF's pages to the document. Unlike every other structure
+   * edit this cannot go through `commitStructure`: the file's page count is
+   * unknown until the backend reads it, so the first apply reads the file here
+   * and `reconcile` writes what it learned back into the freshly committed
+   * command. A redo — the command already carries its counts by then — restores
+   * the stashed pages through `applyCommand` like any other.
+   */
+  const mergeFile = useCallback(
+    async (path: string, name: string) => {
+      if (documentId === undefined) {
+        return
+      }
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planMergeFile(current, path, name)
+          const entryId = planned.history.past.at(-1)!.id
+          let outcome: PdfMergeOutcome | null = null
+
+          return {
+            next: planned.history,
+            pages: [],
+            textPages: [],
+            work: async () => {
+              outcome = await invoke<PdfMergeOutcome>("merge_pdf_from_path", {
+                documentId,
+                path,
+              })
+              onStructureChange(documentId, outcome.update)
+              return true
+            },
+            reconcile: () =>
+              outcome
+                ? fillMergeOutcome(
+                    planned.history,
+                    entryId,
+                    outcome.insertedAt,
+                    outcome.pageCount,
+                  )
+                : planned.history,
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+      }
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
   /**
@@ -457,26 +590,38 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
+  // Undo and redo count as page-shifting: the entry they take back may be a
+  // structure edit, and a page-numbered command queued behind it would go
+  // stale. Blocked conservatively rather than by peeking at the command, which
+  // a pending edit could still change before the queue reaches this step.
   const undoCommand = useCallback(async () => {
     if (documentId === undefined) {
       return
     }
 
-    await enqueue((current) => {
-      const step = undo(current)
+    structurePendingRef.current += 1
+    pageShiftPendingRef.current += 1
 
-      return step
-        ? {
-            next: step.history,
-            pages: commandPages(step.entry.command),
-            textPages: commandTextPages(step.entry.command),
-            work: async () => {
-              await retractCommand(documentId, step.entry.command, onStructureChange)
-              return true
-            },
-          }
-        : null
-    }, onAnnotateError)
+    try {
+      await enqueue((current) => {
+        const step = undo(current)
+
+        return step
+          ? {
+              next: step.history,
+              pages: commandPages(step.entry.command),
+              textPages: commandTextPages(step.entry.command),
+              work: async () => {
+                await retractCommand(documentId, step.entry.command, onStructureChange)
+                return true
+              },
+            }
+          : null
+      }, onAnnotateError)
+    } finally {
+      structurePendingRef.current -= 1
+      pageShiftPendingRef.current -= 1
+    }
   }, [documentId, enqueue, onAnnotateError, onStructureChange])
 
   const redoCommand = useCallback(async () => {
@@ -484,21 +629,29 @@ export function useAnnotations({
       return
     }
 
-    await enqueue((current) => {
-      const step = redo(current)
+    structurePendingRef.current += 1
+    pageShiftPendingRef.current += 1
 
-      return step
-        ? {
-            next: step.history,
-            pages: commandPages(step.entry.command),
-            textPages: commandTextPages(step.entry.command),
-            work: async () => {
-              await applyCommand(documentId, step.entry.command, onStructureChange)
-              return true
-            },
-          }
-        : null
-    }, onAnnotateError)
+    try {
+      await enqueue((current) => {
+        const step = redo(current)
+
+        return step
+          ? {
+              next: step.history,
+              pages: commandPages(step.entry.command),
+              textPages: commandTextPages(step.entry.command),
+              work: async () => {
+                await applyCommand(documentId, step.entry.command, onStructureChange)
+                return true
+              },
+            }
+          : null
+      }, onAnnotateError)
+    } finally {
+      structurePendingRef.current -= 1
+      pageShiftPendingRef.current -= 1
+    }
   }, [documentId, enqueue, onAnnotateError, onStructureChange])
 
   /**
@@ -574,6 +727,21 @@ export function useAnnotations({
    */
   const isDirtyNow = useCallback(() => isDirty(historyRef.current), [])
 
+  /** Whether any structure edit — including a merge — is in flight this instant.
+      The guard a screen-read gesture (a grid or file-card edit) checks so it
+      never plans against ranges an edit is about to change. Drawings and notes
+      use the narrower page-shift guard instead, since a merge cannot misplace
+      them. */
+  const isStructureBusyNow = useCallback(() => structurePendingRef.current > 0, [])
+
+  /**
+   * The applied history as of this instant, off the ref rather than the
+   * rendered state. Awaited file operations resolve after the ref moves but
+   * before the re-render, so a follow-up that needs the fresh ranges — the
+   * smart-parity reconcile — has to read it here, not from `history`.
+   */
+  const historyNow = useCallback(() => historyRef.current, [])
+
   const reset = useCallback(() => {
     generationRef.current += 1
     historyRef.current = emptyHistory
@@ -589,11 +757,22 @@ export function useAnnotations({
       canRedo: canRedo(history) && !isBusy,
       canUndo: canUndo(history) && !isBusy,
       commit: commitCommand,
+      // The generic structure-edit path, exposed so the smart-parity reconcile
+      // can re-derive each pad step inside the queue rather than from a snapshot
+      // an interleaved edit could invalidate.
+      commitStructure,
       deletePages,
       exportCopy,
+      // The applied command history itself, so the owner can derive the file
+      // ranges (which need the initial file's name and page count, known only
+      // to it) the way it derives the watermark config here.
+      history,
+      historyNow,
       insertBlankPage,
       isDirty: isDirty(history),
       isDirtyNow,
+      isStructureBusyNow,
+      mergeFile,
       redo: redoCommand,
       reorderPages,
       renderEpochs,
@@ -606,12 +785,16 @@ export function useAnnotations({
     }),
     [
       commitCommand,
+      commitStructure,
       deletePages,
       exportCopy,
       history,
+      historyNow,
       insertBlankPage,
       isBusy,
       isDirtyNow,
+      isStructureBusyNow,
+      mergeFile,
       redoCommand,
       renderEpochs,
       reorderPages,

@@ -7,12 +7,16 @@ import {
   commandTextPages,
   commit,
   emptyHistory,
+  fillMergeOutcome,
   historyHead,
   inversePermutation,
   isDirty,
   markSaved,
+  mergeFilePages,
+  movesPages,
   planDeletePages,
   planInsertBlankPage,
+  planMergeFile,
   planReorderPages,
   planWatermarkChange,
   redo,
@@ -238,6 +242,32 @@ describe("isDirty", () => {
   })
 })
 
+describe("movesPages", () => {
+  it("is true only for the four structure commands", () => {
+    const reorder: AnnotationCommand = { inverse: [2, 1], kind: "reorderPages", order: [2, 1] }
+    const del: AnnotationCommand = { kind: "deletePages", pageCount: 3, pages: [2], stashId: 1 }
+    const insert: AnnotationCommand = { index: 2, kind: "insertBlankPage", pageCount: 3, stashId: 1 }
+    const merge: AnnotationCommand = {
+      insertedAt: 0,
+      kind: "mergeFile",
+      name: "b.pdf",
+      pageCount: 0,
+      path: "/b.pdf",
+      stashId: 1,
+    }
+
+    for (const command of [reorder, del, insert, merge]) {
+      expect(movesPages(command)).toBe(true)
+    }
+
+    // An annotation or watermark leaves every page where it was, so undoing one
+    // must not discard a note the reader is still typing.
+    for (const command of [highlight(1), watermark(null)]) {
+      expect(movesPages(command)).toBe(false)
+    }
+  })
+})
+
 describe("structure commands", () => {
   it("derives the inverse permutation", () => {
     expect(inversePermutation([3, 1, 4, 2])).toEqual([2, 4, 1, 3])
@@ -316,5 +346,58 @@ describe("structure commands", () => {
     // Insert invalidates the wider, post-insert shape.
     expect(commandPages(insertion)).toEqual([1, 2, 3, 4])
     expect(commandTextPages(insertion)).toEqual([1, 2, 3, 4])
+  })
+
+  it("marks a pad insert and leaves a plain one unflagged", () => {
+    expect(planInsertBlankPage(emptyHistory, 2, 3, true)!.command).toEqual({
+      index: 2,
+      kind: "insertBlankPage",
+      pad: true,
+      pageCount: 4,
+      stashId: emptyHistory.nextId,
+    })
+    // A plain insert carries no pad key at all, so it is byte-identical to what
+    // the page-editing grid produced before parity padding existed.
+    expect(
+      "pad" in planInsertBlankPage(emptyHistory, 2, 3)!.command,
+    ).toBe(false)
+  })
+})
+
+describe("merge commands", () => {
+  it("plans a merge with its counts unknown until the file is read", () => {
+    const history = historyOf(highlight(1))
+    const planned = planMergeFile(history, "/b.pdf", "b.pdf")
+
+    expect(planned.command).toEqual({
+      insertedAt: 0,
+      kind: "mergeFile",
+      name: "b.pdf",
+      pageCount: 0,
+      path: "/b.pdf",
+      stashId: history.nextId,
+    })
+    // The stash rides the entry id, so the undo's delete and its redo's restore
+    // pair up exactly, as every structure command's do.
+    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
+  })
+
+  it("a merge never invalidates an existing page's pixels or text", () => {
+    const command = planMergeFile(emptyHistory, "/b.pdf", "b.pdf").command
+
+    expect(commandPages(command)).toEqual([])
+    expect(commandTextPages(command)).toEqual([])
+  })
+
+  it("fills the position and page count the first apply learned", () => {
+    const planned = planMergeFile(historyOf(highlight(1)), "/b.pdf", "b.pdf")
+    const id = planned.history.past.at(-1)!.id
+    const filled = fillMergeOutcome(planned.history, id, 3, 4)
+    const command = filled.past.at(-1)!.command
+
+    expect(command).toMatchObject({ insertedAt: 3, pageCount: 4 })
+    // The delete an undo runs, and the restore a redo runs, cover the appended
+    // range — pages 3 through 6.
+    expect(mergeFilePages(command as never)).toEqual([3, 4, 5, 6])
   })
 })
