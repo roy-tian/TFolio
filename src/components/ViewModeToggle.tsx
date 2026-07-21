@@ -1,4 +1,10 @@
-import { BookOpen, LayoutGrid, RectangleVertical, type LucideIcon } from "lucide-react"
+import {
+  BookOpen,
+  LayoutGrid,
+  Layers,
+  RectangleVertical,
+  type LucideIcon,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -10,11 +16,13 @@ const options: Array<{
     | "toolbar.viewModeSingle"
     | "toolbar.viewModeBook"
     | "toolbar.viewModeThumbnail"
+    | "toolbar.viewModeFiles"
   value: ViewMode
 }> = [
   { icon: RectangleVertical, labelKey: "toolbar.viewModeSingle", value: "single" },
   { icon: BookOpen, labelKey: "toolbar.viewModeBook", value: "book" },
   { icon: LayoutGrid, labelKey: "toolbar.viewModeThumbnail", value: "thumbnail" },
+  { icon: Layers, labelKey: "toolbar.viewModeFiles", value: "files" },
 ]
 
 type ViewModeToggleProps = {

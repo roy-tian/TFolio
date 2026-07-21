@@ -1,17 +1,26 @@
 import { useRef } from "react"
-import { FileText, Plus } from "lucide-react"
+import { FilePlus, FileText, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { FileCard } from "@/components/FileCard"
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
+import { useFileCardDrag } from "@/hooks/useFileCardDrag"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
+import {
+  fileCardOrderToPageOrder,
+  type FileRange,
+} from "@/lib/fileRanges"
 import { type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import {
+  computeFileCardColumns,
   computeThumbnailColumns,
+  FILE_CARD_GAP,
+  FILE_CARD_WIDTH,
   pairPages,
   THUMBNAIL_GAP,
   THUMBNAIL_WIDTH,
@@ -28,6 +37,16 @@ export type PageEditProps = {
   onReorderPages: (order: number[]) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   selectedPages: ReadonlySet<number>
+}
+
+/** Everything the multi-file view needs from its owner. */
+export type FilesEditProps = {
+  /** The files as page ranges, derived from history by the owner. */
+  ranges: FileRange[]
+  onAddFile: () => void
+  onDeleteFile: (range: FileRange) => void
+  /** A full-document page permutation, the same seam page editing reorders by. */
+  onReorderPages: (order: number[]) => void
 }
 
 type LayoutProps = {
@@ -283,11 +302,128 @@ function ThumbnailLayout({
   )
 }
 
+/** The card riding the pointer during a file-card drag. */
+function FileDragGhost({
+  name,
+  pointer,
+}: {
+  name: string
+  pointer: { x: number; y: number }
+}) {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full"
+      style={{ left: pointer.x, top: pointer.y - 8 }}
+    >
+      <div className="flex items-center gap-1.5 rounded-md border border-border bg-background/90 px-2.5 py-1.5 shadow-lg">
+        <FileText className="size-4 text-muted-foreground" />
+        <span className="max-w-40 truncate text-xs font-medium">{name}</span>
+      </div>
+    </div>
+  )
+}
+
+function FilesLayout({
+  contentWidth,
+  documentId,
+  filesEdit,
+  pages,
+  renderEpochs,
+  rotation,
+}: LayoutProps & { filesEdit: FilesEditProps }) {
+  const { t } = useTranslation()
+  const { ranges } = filesEdit
+  const columns = computeFileCardColumns(contentWidth)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const { drag } = useFileCardDrag({
+    active: true,
+    cardCount: ranges.length,
+    columns,
+    gridRef,
+    onReorder: (cardOrder) =>
+      filesEdit.onReorderPages(
+        fileCardOrderToPageOrder(ranges, cardOrder, pages.length),
+      ),
+  })
+  const draggedName =
+    drag && ranges[drag.cardPosition - 1]
+      ? ranges[drag.cardPosition - 1]!.name
+      : ""
+
+  return (
+    <div
+      className="grid"
+      ref={gridRef}
+      style={{
+        gap: FILE_CARD_GAP,
+        gridTemplateColumns: `repeat(${columns}, ${FILE_CARD_WIDTH}px)`,
+      }}
+    >
+      {ranges.map((range, index) => {
+        // The face is the file's first real page, not its first slot: a pad
+        // moved to the run's front must not become the card's thumbnail.
+        const page = pages[range.firstReal - 1]
+
+        // A structure change updates the page list and the history in two steps;
+        // for the render between them, a range may point past the pages it has.
+        if (!page) {
+          return null
+        }
+
+        return (
+          <div
+            className={cn(
+              "transition-opacity",
+              drag?.cardPosition === index + 1 && "opacity-40",
+            )}
+            // A page-level move can split one file into two runs of the same id;
+            // the start disambiguates them so the two cards never share a key.
+            key={`${documentId}-${range.id}-${range.start}`}
+          >
+            <FileCard
+              deleteDisabled={ranges.length === 1}
+              documentId={documentId}
+              onDelete={filesEdit.onDeleteFile}
+              page={page}
+              position={index + 1}
+              range={range}
+              renderEpoch={renderEpochs[range.firstReal] ?? 0}
+              rotation={rotation}
+              width={FILE_CARD_WIDTH}
+            />
+          </div>
+        )
+      })}
+      {/* A keyboard- and no-drag-reachable way to merge a file, and the seam the
+          e2e suite drives (WebDriver cannot drop files). */}
+      <button
+        className="flex flex-col items-center justify-center gap-2 self-start rounded-md border border-dashed border-zinc-400 px-3 text-center text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        data-slot="add-file"
+        onClick={filesEdit.onAddFile}
+        style={{ aspectRatio: FILE_CARD_WIDTH / (FILE_CARD_WIDTH * 1.3) }}
+        title={t("files.addFile")}
+        type="button"
+      >
+        <FilePlus className="size-6" />
+        <span className="flex flex-col items-center gap-1">
+          <span className="text-sm font-medium">{t("files.addFile")}</span>
+          <span className="text-xs font-normal text-balance text-muted-foreground/75">
+            {t("files.addFileHint")}
+          </span>
+        </span>
+      </button>
+      {drag ? <FileDragGhost name={draggedName} pointer={drag.pointer} /> : null}
+    </div>
+  )
+}
+
 type PdfViewerLayoutProps = {
   currentPage: number
   documentId: number
   draft?: RectDraft
   fileName: string
+  filesEdit: FilesEditProps
   pageEdit: PageEditProps
   pages: PdfPageInfo[]
   referencePageWidth: number
@@ -309,6 +445,7 @@ export function PdfViewerLayout({
   documentId,
   draft,
   fileName,
+  filesEdit,
   pageEdit,
   pages,
   referencePageWidth,
@@ -351,6 +488,8 @@ export function PdfViewerLayout({
           currentPage={currentPage}
           pageEdit={pageEdit}
         />
+      ) : viewMode === "files" ? (
+        <FilesLayout {...layoutProps} filesEdit={filesEdit} />
       ) : (
         <SingleLayout {...layoutProps} />
       )}

@@ -43,6 +43,9 @@ type AnnotationToolbarProps = {
   canRedo: boolean
   canUndo: boolean
   disabled: boolean
+  /** Whether the document merged in other files; like a watermark, that may
+      only be exported as a copy, never saved back over the first file. */
+  hasMergedFiles: boolean
   /** Whether the document has a file of its own for the save key to write
       back to; one opened from bytes does not until an export gives it one. */
   hasSourceFile: boolean
@@ -73,6 +76,7 @@ export function AnnotationToolbar({
   canRedo,
   canUndo,
   disabled,
+  hasMergedFiles,
   hasSourceFile,
   hasWatermark,
   highlightApplies,
@@ -99,13 +103,16 @@ export function AnnotationToolbar({
   const watermarkLabel = t("watermark.open")
   const saveLabel = t("annotate.save")
   const exportLabel = t("annotate.export")
-  // Only where the reason is not already in front of the reader: a watermark
-  // they can see, or a document with no file of its own.
+  // Only where the reason is not already in front of the reader: a watermark or
+  // merged files they can see, or a document with no file of its own. A
+  // watermark is named first — it is the stricter, less recoverable of the two.
   const saveTitle = hasWatermark
     ? t("annotate.saveWatermarked")
-    : hasSourceFile
-      ? saveLabel
-      : t("annotate.saveNoSource")
+    : hasMergedFiles
+      ? t("annotate.saveMerged")
+      : hasSourceFile
+        ? saveLabel
+        : t("annotate.saveNoSource")
 
   return (
     <>
@@ -258,7 +265,9 @@ export function AnnotationToolbar({
         <Button
           aria-label={saveLabel}
           className="border-r-transparent peer/save"
-          disabled={disabled || !hasSourceFile || !isDirty || hasWatermark}
+          disabled={
+            disabled || !hasSourceFile || !isDirty || hasWatermark || hasMergedFiles
+          }
           onClick={onSave}
           size="icon"
           title={disabled ? saveLabel : saveTitle}

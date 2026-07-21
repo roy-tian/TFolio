@@ -9,6 +9,7 @@ const en = {
     viewModeSingle: "Single page",
     viewModeBook: "Book",
     viewModeThumbnail: "Thumbnails",
+    viewModeFiles: "Files",
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
     rotate: "Rotate clockwise",
@@ -63,6 +64,8 @@ const en = {
     saveNoSource: "No file to save over — exporting will save a copy",
     saveWatermarked:
       "A watermarked document can only be exported as a copy — its watermark cannot be lifted once the file is closed",
+    saveMerged:
+      "A document that merged other files can only be exported as a copy, never saved back over the first file",
     saveFailed: "This PDF could not be saved.",
     export: "Export a copy…",
     exportFilter: "PDF file",
@@ -131,7 +134,8 @@ const en = {
     chooseFile: "Choose a PDF file",
     loading: "Opening PDF…",
     dropNow: "Drop to open this PDF",
-    replaceHint: "The current document will be replaced",
+    dropNowMerge: "Drop to add these PDFs",
+    appendHint: "The PDFs will be added to this document",
     fileTooLarge: "PDF files must be no larger than 512 MiB.",
     invalidFile: "Please choose a PDF file.",
     openFailed: "This PDF could not be opened.",
@@ -152,6 +156,16 @@ const en = {
     deleteSelected: "Delete {{count}} selected pages",
     insertBefore: "Insert a blank page before page {{pageNumber}}",
     insertAtEnd: "Insert a blank page at the end",
+  },
+  files: {
+    cardLabel: "File {{name}}",
+    pageCount_one: "{{count}} page",
+    pageCount_other: "{{count}} pages",
+    pageCountPadded_one: "{{count}} page (+{{pad}} blank)",
+    pageCountPadded_other: "{{count}} pages (+{{pad}} blank)",
+    deleteFile: "Remove {{name}}",
+    addFile: "Add a PDF",
+    addFileHint: "Click to choose, or drop a PDF anywhere",
   },
   bookmarks: {
     title: "Bookmarks",

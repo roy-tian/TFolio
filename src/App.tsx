@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
@@ -50,8 +50,20 @@ import {
   storeRectStyle,
   storeTextNoteStyle,
 } from "@/lib/annotationStyles"
-import type { HexColor, RectStyle, TextNoteStyle } from "@/lib/annotations"
+import {
+  movesPages,
+  type HexColor,
+  type RectStyle,
+  type TextNoteStyle,
+} from "@/lib/annotations"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
+import {
+  fileBlockPages,
+  fileRanges,
+  hasMergedPages,
+  type FileRange,
+  type InitialFile,
+} from "@/lib/fileRanges"
 import {
   fileNameFromPath,
   isPdfPath,
@@ -89,6 +101,10 @@ export default function App() {
   const { t } = useTranslation()
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo | null>(null)
   const [fileName, setFileName] = useState("")
+  // The document as it was opened, before any merges — the initial file range's
+  // name and page count, which the command history alone cannot recover. Fixed
+  // for the session; a new open replaces it.
+  const [initialFile, setInitialFile] = useState<InitialFile | null>(null)
   const [currentPage, setCurrentPage] = useState(0)
   const [pageInput, setPageInput] = useState("0")
   const [rotation, setRotation] = useState(0)
@@ -116,15 +132,24 @@ export default function App() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(null)
+  // Read by the parity reconcile, which runs after an awaited file operation —
+  // past the point the rendered `initialFile` can be trusted in a closure.
+  const initialFileRef = useRef<InitialFile | null>(null)
+  // Files dropped alongside the first, waiting for that first to open before
+  // they can be merged (the merge needs the new document's id, which reaches
+  // the hook only on the next render). Tagged with the id they belong to.
+  const pendingMergeRef = useRef<{ documentId: number; paths: string[] } | null>(
+    null,
+  )
   const requestIdRef = useRef(0)
   const pendingScrollPageRef = useRef<number | null>(null)
 
-  // The thumbnail grid gives every cell the same width whatever the page, so it
-  // has no single scale to report and nothing for a zoom to act on. The controls
-  // are absent there rather than disabled: disabled reads as "not just now",
-  // which is what an unopened document means, and it would leave the readout
-  // showing a figure that describes nothing on screen.
-  const zoomApplies = viewMode !== "thumbnail"
+  // The thumbnail grid and the files view give every cell the same width
+  // whatever the page, so neither has a single scale to report or anything for a
+  // zoom to act on. The controls are absent there rather than disabled: disabled
+  // reads as "not just now", which is what an unopened document means, and it
+  // would leave the readout showing a figure that describes nothing on screen.
+  const zoomApplies = viewMode === "single" || viewMode === "book"
   const zoom = useZoom({
     contentHeight: Math.max(0, viewerHeight - CONTENT_PADDING_Y),
     contentWidth: Math.max(0, viewerWidth - CONTENT_PADDING_X),
@@ -137,10 +162,10 @@ export default function App() {
   })
   const resetZoomToDefault = zoom.resetToDefault
 
-  // Every drawing tool needs a page under the pointer, and the thumbnail grid
-  // has none. Only the tools: undo, redo, and export act on the document rather
-  // than on a page, so they stay.
-  const drawingApplies = viewMode !== "thumbnail"
+  // Every drawing tool needs a page under the pointer, which neither the
+  // thumbnail grid nor the files view shows. Only undo, redo, watermark, and
+  // export act on the document rather than a page, so they stay.
+  const drawingApplies = viewMode === "single" || viewMode === "book"
   // In the thumbnail grid a click is a selection, so the grid doubles as the
   // page-editing surface; leaving it clears what was chosen.
   const thumbnailSelection = useThumbnailSelection({
@@ -266,7 +291,7 @@ export default function App() {
     )
   }, [annotations, pdfDocument, t])
 
-  const loadPdfFromPath = useCallback(async (path: string) => {
+  const loadPdfFromPath = useCallback(async (path: string, mergeTail: string[] = []) => {
     if (!isPdfPath(path)) {
       setViewerError("invalidFile")
       return
@@ -284,6 +309,8 @@ export default function App() {
     setActiveTool(null)
     setBookmarksOpen(false)
     setPdfDocument(null)
+    setInitialFile(null)
+    initialFileRef.current = null
 
     const previousDocument = documentRef.current
     documentRef.current = null
@@ -305,7 +332,20 @@ export default function App() {
 
       documentRef.current = nextDocument
       setPdfDocument(nextDocument)
+      // The file every later merge is measured against. Recorded here, at the
+      // one moment it is the whole document, and never touched by a structure
+      // edit again.
+      const opened = { name: fileNameFromPath(path), pageCount: nextDocument.numPages }
+      initialFileRef.current = opened
+      setInitialFile(opened)
       setCurrentPage(1)
+      // Files dropped alongside the first are merged once this document reaches
+      // the hook (its id only arrives on the next render). Keyed to *this*
+      // document's id so a superseded open — or a later, unrelated one — never
+      // pulls these paths into the wrong document.
+      if (mergeTail.length > 0) {
+        pendingMergeRef.current = { documentId: nextDocument.id, paths: mergeTail }
+      }
     } catch (error) {
       if (requestId === requestIdRef.current) {
         setFileName("")
@@ -430,15 +470,18 @@ export default function App() {
     storeViewMode(viewMode)
   }, [viewMode])
 
+  // A structure edit reachable while a note is open must settle the draft
+  // *before* it runs — a note is anchored by page number, which an edit can move
+  // out from under it, and a note the reader finishes mid-edit would be dropped
+  // by the in-flight-edit guard after the editor had already cleared its text.
+  // A merge only appends, so the draft is committed onto its own unmoved page
+  // (see mergePaths); undo and redo can move any page and can't take a note as
+  // their target, so the uncommitted draft is discarded before the step (see the
+  // toolbar). Both callbacks are stable.
+  const cancelTextNote = textNote.cancel
+  const commitTextNote = textNote.commit
+
   useCurrentPageTracker(viewerRef, pdfDocument?.id, viewMode, setCurrentPage)
-
-  // The listener outlives every render, so it reads the latest opener through a
-  // ref rather than resubscribing to the webview each time the history moves.
-  const requestOpenPathRef = useRef(requestOpenPath)
-
-  useEffect(() => {
-    requestOpenPathRef.current = requestOpenPath
-  }, [requestOpenPath])
 
   // Native drag-and-drop, because `dragDropEnabled` is on: Tauri consumes the
   // OS drag itself — HTML5 `dataTransfer` never sees these files — and it is
@@ -461,14 +504,9 @@ export default function App() {
         setIsDragging(false)
 
         if (event.payload.type === "drop") {
-          const path = event.payload.paths.find(isPdfPath)
-
-          if (!path) {
-            setViewerError("invalidFile")
-            return
-          }
-
-          requestOpenPathRef.current(path)
+          // Every dropped PDF, not just the first: with a document open they are
+          // all merged in; with none, the first opens and the rest merge after.
+          handleDroppedPathsRef.current(event.payload.paths)
         }
       })
       .then((stop) => {
@@ -548,11 +586,20 @@ export default function App() {
     thumbnailSelection.select(pageNumber, modifiers)
   }
 
+  // Every page-editing gesture carries page numbers read off the screen, so it
+  // must not be queued behind a *page-shifting* edit — above all the multi-step
+  // smart-parity reconcile — or it would land on the wrong page. The gesture is
+  // dropped while such an edit is in flight; the pages the reader sees then
+  // always match the numbers their next gesture names. An annotation in flight,
+  // which shifts nothing, does not block editing. Checked off the ref so a
+  // gesture in the same tick as the edit that started the churn is caught.
+  const editingBusy = () => annotations.isStructureBusyNow()
+
   // The x on a selected page takes the whole selection with it; on any other
   // page it takes that page alone. No confirmation — the delete is one undo
   // away, which a dialog would only pretend to improve on.
   const deleteThumbnailPage = (pageNumber: number) => {
-    if (!pdfDocument) {
+    if (!pdfDocument || editingBusy()) {
       return
     }
 
@@ -564,7 +611,7 @@ export default function App() {
   }
 
   const insertBlankPage = (index: number) => {
-    if (!pdfDocument) {
+    if (!pdfDocument || editingBusy()) {
       return
     }
 
@@ -572,8 +619,159 @@ export default function App() {
   }
 
   const reorderPages = (order: number[]) => {
+    if (editingBusy()) {
+      return
+    }
+
     void annotations.reorderPages(order)
   }
+
+  // The files are a positional accounting of the merged document's page ranges,
+  // derived from the same command history the watermark config is (see
+  // fileRanges). No document means no ranges.
+  const ranges = useMemo(
+    () => (initialFile ? fileRanges(annotations.history, initialFile) : []),
+    [annotations.history, initialFile],
+  )
+  // Save is forbidden while another file's pages are actually present — matching
+  // the backend guard, which tracks the merged page ids, not the mere history of
+  // a merge, and not a file card. A card can outlive its merged pages (a blank
+  // inserted inside the file keeps the card but is this app's own page), so this
+  // asks the backend's own question — does a merged page remain — rather than
+  // "does a non-zero-id range exist", which would keep save disabled after the
+  // last merged page is deleted while the backend already allows it.
+  const hasMergedContent = useMemo(
+    () => (initialFile ? hasMergedPages(annotations.history, initialFile) : false),
+    [annotations.history, initialFile],
+  )
+  // Appends each PDF in turn — the queue keeps them in order — then, if the
+  // smart pads were in place before, brings them back to target once so a newly
+  // merged file gets its own pad without spending a reconcile per file.
+  const mergePaths = useCallback(
+    async (paths: string[]) => {
+      // Finish any open note first, while the pages it is anchored to still sit
+      // where the reader put them: the appends below (and the parity reconcile
+      // after) leave those pages in place, so the committed note lands exactly
+      // there, and is never left open to be dropped by the in-flight guard the
+      // merges raise. A no-op when no note or an empty one is open.
+      commitTextNote()
+
+      for (const path of paths) {
+        await annotations.mergeFile(path, fileNameFromPath(path))
+      }
+    },
+    [annotations, commitTextNote],
+  )
+
+  const mergeFilePath = useCallback(
+    (path: string) => {
+      if (!isPdfPath(path)) {
+        setViewerError("invalidFile")
+        return
+      }
+
+      void mergePaths([path])
+    },
+    [mergePaths],
+  )
+
+  // The add-file button's picker, the same backend dialog `chooseFile` uses —
+  // which also records the path as one a merge may act on.
+  const chooseFileToMerge = useCallback(async () => {
+    try {
+      const pick = e2eOverride("pickPdfPath")
+      const path = pick
+        ? await pick()
+        : await invoke<string | null>("pick_pdf_path", {
+            filterLabel: t("annotate.exportFilter"),
+          })
+
+      if (typeof path === "string") {
+        mergeFilePath(path)
+      }
+    } catch {
+      setViewerError("annotateFailed")
+    }
+  }, [mergeFilePath, t])
+
+  // Removing a whole file deletes its block — up to the next file's start, the
+  // same span a card drag moves (`fileBlockPages`) — so its real pages, its
+  // pads, and any pad stranded between it and the next file all go together,
+  // none orphaned. The card disables this for the last remaining file.
+  const deleteFile = useCallback(
+    async (range: FileRange) => {
+      if (!documentRef.current || annotations.isStructureBusyNow()) {
+        return
+      }
+
+      const index = ranges.findIndex(
+        (other) => other.id === range.id && other.start === range.start,
+      )
+
+      if (index < 0) {
+        return
+      }
+
+      const total = documentRef.current.numPages
+
+      await annotations.deletePages(fileBlockPages(ranges, index, total), total)
+    },
+    [annotations, ranges],
+  )
+
+  // A card drag reorders whole files; the pads travel with them, then reconcile
+  // if enabled, since a new file order can change which files start even.
+  const reorderFiles = useCallback(
+    async (order: number[]) => {
+      if (annotations.isStructureBusyNow()) {
+        return
+      }
+
+      await annotations.reorderPages(order)
+    },
+    [annotations],
+  )
+
+  // A no-document drop opens the first PDF, then merges the rest — passed to the
+  // open itself, which records them against the document it produced so the
+  // effect below merges them into that document and no other.
+  const handleDroppedPaths = useCallback(
+    (paths: string[]) => {
+      const pdfPaths = paths.filter(isPdfPath)
+
+      if (pdfPaths.length === 0) {
+        setViewerError("invalidFile")
+        return
+      }
+
+      if (documentRef.current) {
+        // A document is open: every dropped PDF is appended, undoably — never a
+        // replace, and so never the unsaved-changes guard.
+        void mergePaths(pdfPaths)
+        return
+      }
+
+      void loadPdfFromPath(pdfPaths[0]!, pdfPaths.slice(1))
+    },
+    [loadPdfFromPath, mergePaths],
+  )
+
+  useEffect(() => {
+    const pending = pendingMergeRef.current
+
+    if (pdfDocument && pending && pending.documentId === pdfDocument.id) {
+      pendingMergeRef.current = null
+      void mergePaths(pending.paths)
+    }
+  }, [pdfDocument, mergePaths])
+
+  // The drop listener outlives every render, so it reads the latest handler
+  // through a ref rather than resubscribing to the webview each time.
+  const handleDroppedPathsRef = useRef(handleDroppedPaths)
+
+  useEffect(() => {
+    handleDroppedPathsRef.current = handleDroppedPaths
+  }, [handleDroppedPaths])
 
   // Each mode stacks its pages to a different total height, and the viewer keeps
   // its scroll offset across the switch, so the old offset would land somewhere
@@ -734,6 +932,7 @@ export default function App() {
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
             disabled={!pdfDocument}
+            hasMergedFiles={hasMergedContent}
             hasSourceFile={Boolean(pdfDocument?.path)}
             hasWatermark={annotations.watermarkConfig !== null}
             highlightApplies={drawingApplies}
@@ -742,10 +941,27 @@ export default function App() {
             onExport={() => void exportPdf()}
             onHighlightColorChange={changeHighlightColor}
             onRectStyleChange={changeRectStyle}
-            onRedo={() => void annotations.redo()}
+            onRedo={() => {
+              // Only a page-moving step would strand the note on a page that has
+              // shifted or gone, and undo/redo cannot take the uncommitted note
+              // as their target; so the draft is discarded before such a step,
+              // but an annotation step (a highlight, say) leaves it to finish.
+              // The target is the head of the queue's live history.
+              const target = annotations.historyNow().future.at(-1)?.command
+              if (target && movesPages(target)) {
+                cancelTextNote()
+              }
+              void annotations.redo()
+            }}
             onSave={() => void annotations.save()}
             onToolChange={setActiveTool}
-            onUndo={() => void annotations.undo()}
+            onUndo={() => {
+              const target = annotations.historyNow().past.at(-1)?.command
+              if (target && movesPages(target)) {
+                cancelTextNote()
+              }
+              void annotations.undo()
+            }}
             onWatermark={watermark.openDialog}
             rectApplies={drawingApplies}
             rectStyle={rectStyle}
@@ -780,6 +996,12 @@ export default function App() {
               documentId={pdfDocument.id}
               draft={rectDraft ?? undefined}
               fileName={fileName}
+              filesEdit={{
+                onAddFile: () => void chooseFileToMerge(),
+                onDeleteFile: (range) => void deleteFile(range),
+                onReorderPages: (order) => void reorderFiles(order),
+                ranges,
+              }}
               pageEdit={{
                 onDeletePage: deleteThumbnailPage,
                 onInsertBlankPage: insertBlankPage,
@@ -870,10 +1092,14 @@ export default function App() {
         <div className="pointer-events-none fixed inset-3 top-15 z-40 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm">
           <div className="flex flex-col items-center text-center">
             <FileUp className="mb-4 size-12" />
-            <p className="text-lg font-semibold">{t("viewer.dropNow")}</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("viewer.replaceHint")}
+            <p className="text-lg font-semibold">
+              {pdfDocument ? t("viewer.dropNowMerge") : t("viewer.dropNow")}
             </p>
+            {pdfDocument ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t("viewer.appendHint")}
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}
