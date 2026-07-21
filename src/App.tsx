@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
+  BookCopy,
   Bookmark,
   FileUp,
   LoaderCircle,
@@ -52,15 +53,22 @@ import {
 } from "@/lib/annotationStyles"
 import {
   movesPages,
+  planDeletePages,
+  planInsertBlankPage,
+  type AnnotationCommand,
+  type AnnotationHistory,
   type HexColor,
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
+  documentPageCount,
   fileBlockPages,
   fileRanges,
   hasMergedPages,
+  nextParityOp,
+  padPagePositions,
   type FileRange,
   type InitialFile,
 } from "@/lib/fileRanges"
@@ -105,6 +113,12 @@ export default function App() {
   // name and page count, which the command history alone cannot recover. Fixed
   // for the session; a new open replaces it.
   const [initialFile, setInitialFile] = useState<InitialFile | null>(null)
+  // Whether the reader has turned smart parity padding on. Kept as intent rather
+  // than derived from the pads present, because a document that happens to need
+  // no pad right now is indistinguishable from one with the feature off — yet a
+  // later merge must still know to reconcile. Session state, reset on open, so
+  // it never drifts across documents.
+  const [parityEnabled, setParityEnabled] = useState(false)
   const [currentPage, setCurrentPage] = useState(0)
   const [pageInput, setPageInput] = useState("0")
   const [rotation, setRotation] = useState(0)
@@ -135,6 +149,8 @@ export default function App() {
   // Read by the parity reconcile, which runs after an awaited file operation —
   // past the point the rendered `initialFile` can be trusted in a closure.
   const initialFileRef = useRef<InitialFile | null>(null)
+  // The parity intent, read by the same post-await reconcile.
+  const parityEnabledRef = useRef(false)
   // Files dropped alongside the first, waiting for that first to open before
   // they can be merged (the merge needs the new document's id, which reaches
   // the hook only on the next render). Tagged with the id they belong to.
@@ -311,6 +327,8 @@ export default function App() {
     setPdfDocument(null)
     setInitialFile(null)
     initialFileRef.current = null
+    setParityEnabled(false)
+    parityEnabledRef.current = false
 
     const previousDocument = documentRef.current
     documentRef.current = null
@@ -595,6 +613,18 @@ export default function App() {
   // gesture in the same tick as the edit that started the churn is caught.
   const editingBusy = () => annotations.isStructureBusyNow()
 
+  // After a page-level edit, bring the smart pads back to target if the feature
+  // is on — a delete, insert, or reorder can push a file onto an even page just
+  // as a file-level edit can, and the toggle staying on means the reader still
+  // wants odd starts. Re-derived from the resulting layout, so a pad the edit
+  // made surplus is removed and one it made necessary is added; a no-op when the
+  // toggle is off or the layout already meets the target.
+  const reconcileParityAfterEdit = () => {
+    if (parityEnabledRef.current) {
+      void applyParityTarget()
+    }
+  }
+
   // The x on a selected page takes the whole selection with it; on any other
   // page it takes that page alone. No confirmation — the delete is one undo
   // away, which a dialog would only pretend to improve on.
@@ -607,7 +637,7 @@ export default function App() {
       ? [...thumbnailSelection.selectedPages]
       : [pageNumber]
 
-    void annotations.deletePages(pages, pdfDocument.numPages)
+    void annotations.deletePages(pages, pdfDocument.numPages).then(reconcileParityAfterEdit)
   }
 
   const insertBlankPage = (index: number) => {
@@ -615,7 +645,7 @@ export default function App() {
       return
     }
 
-    void annotations.insertBlankPage(index, pdfDocument.numPages)
+    void annotations.insertBlankPage(index, pdfDocument.numPages).then(reconcileParityAfterEdit)
   }
 
   const reorderPages = (order: number[]) => {
@@ -623,7 +653,7 @@ export default function App() {
       return
     }
 
-    void annotations.reorderPages(order)
+    void annotations.reorderPages(order).then(reconcileParityAfterEdit)
   }
 
   // The files are a positional accounting of the merged document's page ranges,
@@ -644,6 +674,88 @@ export default function App() {
     () => (initialFile ? hasMergedPages(annotations.history, initialFile) : false),
     [annotations.history, initialFile],
   )
+  // A parity run — the toggle, or the reconcile a file operation triggers —
+  // brings the whole document to its pad target through several queued edits.
+  // Two runs overlapping would oscillate (one adding a pad the other removes),
+  // so they are serialized: each waits for the previous to finish. A repeat run
+  // whose target is already met is then simply a no-op.
+  const parityChainRef = useRef<Promise<void>>(Promise.resolve())
+  const runParity = useCallback((run: () => Promise<void>) => {
+    const next = parityChainRef.current.then(run, run)
+    parityChainRef.current = next.then(
+      () => undefined,
+      () => undefined,
+    )
+    return next
+  }, [])
+
+  // Steps the document one pad at a time toward what `choose` asks for, each op
+  // re-derived *inside* the queue against the history it reached — so an
+  // ordinary edit the reader slips in between steps is fully counted, never
+  // shifting a position the loop had already fixed (the trap a precomputed
+  // batch falls into). Highest position first, so an earlier op never moves a
+  // later one's page. The bound guards against a pathological non-convergence.
+  const runParitySteps = useCallback(
+    (
+      choose: (
+        history: AnnotationHistory,
+        total: number,
+        initial: InitialFile,
+      ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
+    ) =>
+      runParity(async () => {
+        for (let guard = 0; guard < 512; guard += 1) {
+          const applied = await annotations.commitStructure((history) => {
+            const initial = initialFileRef.current
+
+            if (!initial) {
+              return null
+            }
+
+            return choose(history, documentPageCount(history, initial), initial)
+          })
+
+          if (!applied) {
+            return
+          }
+        }
+      }),
+    [annotations, runParity],
+  )
+
+  // Brings the smart pads to their target: one blank before every file that
+  // would otherwise open on an even page, and away with any blank that serves
+  // none. Each step is derived from the slots, so a stranded pad is counted.
+  const applyParityTarget = useCallback(
+    () =>
+      runParitySteps((history, total, initial) => {
+        const op = nextParityOp(history, initial)
+
+        if (!op) {
+          return null
+        }
+
+        return op.kind === "insert"
+          ? planInsertBlankPage(history, op.at, total, true)
+          : planDeletePages(history, [op.at], total)
+      }),
+    [runParitySteps],
+  )
+
+  // Removes every pad, found from the slots so a pad stranded from its file — a
+  // pad-only run that shows no card — is cleared too, not left behind.
+  const removeAllPads = useCallback(
+    () =>
+      runParitySteps((history, total, initial) => {
+        const positions = padPagePositions(history, initial)
+
+        return positions.length > 0
+          ? planDeletePages(history, [Math.max(...positions)], total)
+          : null
+      }),
+    [runParitySteps],
+  )
+
   // Appends each PDF in turn — the queue keeps them in order — then, if the
   // smart pads were in place before, brings them back to target once so a newly
   // merged file gets its own pad without spending a reconcile per file.
@@ -659,8 +771,12 @@ export default function App() {
       for (const path of paths) {
         await annotations.mergeFile(path, fileNameFromPath(path))
       }
+
+      if (parityEnabledRef.current) {
+        await applyParityTarget()
+      }
     },
-    [annotations, commitTextNote],
+    [annotations, applyParityTarget, commitTextNote],
   )
 
   const mergeFilePath = useCallback(
@@ -715,8 +831,12 @@ export default function App() {
       const total = documentRef.current.numPages
 
       await annotations.deletePages(fileBlockPages(ranges, index, total), total)
+
+      if (parityEnabledRef.current) {
+        await applyParityTarget()
+      }
     },
-    [annotations, ranges],
+    [annotations, applyParityTarget, ranges],
   )
 
   // A card drag reorders whole files; the pads travel with them, then reconcile
@@ -728,9 +848,34 @@ export default function App() {
       }
 
       await annotations.reorderPages(order)
+
+      if (parityEnabledRef.current) {
+        await applyParityTarget()
+      }
     },
-    [annotations],
+    [annotations, applyParityTarget],
   )
+
+  // The toggle carries the reader's intent, whether or not the current layout
+  // happens to need a pad: enabling reconciles to the target (perhaps a no-op
+  // right now), disabling clears every pad. The toggle sits in the main toolbar,
+  // so it is reachable from the page view with a note open; settle the draft
+  // first (like mergePaths), since enabling can insert a pad and disabling
+  // remove one ahead of the note's page. Committed rather than dropped: the note
+  // lands on its page and then travels with it through the pad shift, instead of
+  // being left bound to a number the shift invalidates or refused by the
+  // in-flight-edit guard the reconcile raises.
+  const toggleParity = (next: boolean) => {
+    commitTextNote()
+    parityEnabledRef.current = next
+    setParityEnabled(next)
+
+    if (next) {
+      void applyParityTarget()
+    } else {
+      void removeAllPads()
+    }
+  }
 
   // A no-document drop opens the first PDF, then merges the rest — passed to the
   // open itself, which records them against the document it produced so the
@@ -862,6 +1007,19 @@ export default function App() {
             onChange={changeViewMode}
             value={viewMode}
           />
+          {/* Only worth showing once there is more than one file to align. */}
+          {ranges.length >= 2 ? (
+            <Toggle
+              aria-label={t("files.smartPadding")}
+              className="size-8"
+              onPressedChange={toggleParity}
+              pressed={parityEnabled}
+              title={t("files.smartPaddingHint")}
+              variant="outline"
+            >
+              <BookCopy />
+            </Toggle>
+          ) : null}
           {zoomApplies ? (
             <ZoomControls
               canZoomIn={zoom.canZoomIn}

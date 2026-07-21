@@ -171,6 +171,9 @@ const zhCN = {
     deleteFile: "移除 {{name}}",
     addFile: "添加 PDF",
     addFileHint: "点击选择,或将 PDF 拖到窗口任意处",
+    smartPadding: "文件从奇数页开始",
+    smartPaddingHint:
+      "在首页会落在偶数页的文件前插入一张空白页，使每个文件在双面打印时都从右侧页开始",
   },
   bookmarks: {
     title: "书签",

@@ -166,6 +166,9 @@ const en = {
     deleteFile: "Remove {{name}}",
     addFile: "Add a PDF",
     addFileHint: "Click to choose, or drop a PDF anywhere",
+    smartPadding: "Odd-page file starts",
+    smartPaddingHint:
+      "Add a blank page before any file that would start on an even page, so each file begins on a right-hand page when printed double-sided",
   },
   bookmarks: {
     title: "Bookmarks",
