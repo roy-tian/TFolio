@@ -165,6 +165,38 @@ describe("TFolio text notes", () => {
     expect(await pageInk()).toBe(clean)
   })
 
+  // Undo takes back the last committed edit, which a reader may trigger while
+  // partway through the next note. An undo that only removes an annotation moves
+  // no page, so it must leave the open draft to be finished, not discard it.
+  it("keeps an open note draft when an undo takes back an earlier note", async () => {
+    const editor = () => $("textarea[aria-label='Note text']")
+
+    await $("button[aria-label='Add a note']").click()
+
+    // First note: placed, typed, committed — the edit the undo will take back.
+    await clickOnPage(0.3, 0.3)
+    await editor().waitForDisplayed({ timeout: 15_000 })
+    await editor().setValue("first")
+    await $("button[aria-label='Add this note']").click()
+    // Landed in history before the second note opens, so the undo below has a
+    // deterministic target rather than racing the first note's commit.
+    await $("button[aria-label='Undo']").waitForEnabled({ timeout: 15_000 })
+
+    // Second note: placed and typed, left open.
+    await clickOnPage(0.3, 0.6)
+    await editor().waitForDisplayed({ timeout: 15_000 })
+    await editor().setValue("second")
+
+    // A real press, so the note tool's own listener runs (it leaves an off-page
+    // press alone); then undo takes back the first note.
+    await pressControl("button[aria-label='Undo']")
+
+    // The draft is still open on the second note…
+    await expect(editor()).toBeDisplayed()
+    // …and the undone edit was the first note: nothing is left to undo.
+    await expect($("button[aria-label='Undo']")).toBeDisabled()
+  })
+
   // Placing a note while one is open swaps the draft inside a single render
   // rather than remounting the editor, so a caret that only arrived on mount
   // would leave every note after the first needing a click before it could be
