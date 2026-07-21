@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils"
 const THUMBNAIL_ROOT_MARGIN = "400px 0px"
 
 type PdfThumbnailProps = {
-  /** Whether the one remaining page rule forbids deleting this one. */
+  /** Whether the keep-one-page rule forbids this delete — the sole page, or a
+      selection this page belongs to that spans the whole document. */
   deleteDisabled: boolean
   documentId: number
   isCurrent: boolean

@@ -237,7 +237,14 @@ function ThumbnailLayout({
         return (
           <div className="relative" key={`${documentId}-${pageNumber}`}>
             <PdfThumbnail
-              deleteDisabled={pages.length === 1}
+              deleteDisabled={
+                pages.length === 1 ||
+                // Deleting a selected page takes the whole selection; when that
+                // is every page the backend refuses it, so the button that
+                // would silently do nothing is disabled instead.
+                (pageEdit.selectedPages.has(pageNumber) &&
+                  pageEdit.selectedPages.size === pages.length)
+              }
               documentId={documentId}
               isCurrent={currentPage === pageNumber}
               isSelected={pageEdit.selectedPages.has(pageNumber)}
