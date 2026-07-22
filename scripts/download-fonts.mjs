@@ -9,7 +9,6 @@ import {
   writeFileSync,
 } from "node:fs"
 import { createHash } from "node:crypto"
-import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -96,10 +95,15 @@ async function download(url, destination) {
   await pipeline(Readable.fromWeb(response.body), createWriteStream(destination))
 }
 
-const temporaryDirectory = mkdtempSync(join(tmpdir(), "tfolio-fonts-"))
+// Keep staging beside the final files: Windows runners put the OS temp folder
+// on C: and the checked-out repository on D:, where renameSync() cannot move a
+// file across volumes. A sibling directory preserves the atomic final rename.
+mkdirSync(outputDirectory, { recursive: true })
+const temporaryDirectory = mkdtempSync(
+  join(outputDirectory, ".tfolio-fonts-"),
+)
 
 try {
-  mkdirSync(outputDirectory, { recursive: true })
 
   for (const font of fonts) {
     const stagedDownload = join(temporaryDirectory, `${font.name}.download`)

@@ -178,7 +178,11 @@ pub(super) fn watermark_placements(
     let mut center_y = -text_height;
 
     while center_y <= page_height + text_height {
-        let offset = if row % 2 == 0 { 0.0 } else { step_x / 2.0 };
+        let offset = if row.is_multiple_of(2) {
+            0.0
+        } else {
+            step_x / 2.0
+        };
         let mut center_x = -text_width + offset;
 
         while center_x <= page_width + text_width {
