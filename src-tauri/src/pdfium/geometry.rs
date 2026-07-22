@@ -74,7 +74,7 @@ pub(super) fn quad_points_from_rect(rect: &PdfRect) -> PdfQuadPoints {
 
 /// The pull of a cubic Bézier's control points that turns four of them into a
 /// near-perfect quarter circle — the standard constant for rounding a corner.
-const CORNER_KAPPA: f32 = 0.552_284_75;
+const CORNER_KAPPA: f32 = 0.552_284_8;
 
 /// One step of a rectangle's outline after the opening `move_to`. Kept as data
 /// rather than issued straight to PDFium so the corner geometry can be checked
