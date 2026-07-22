@@ -27,6 +27,7 @@
     "pretauri:build": "bun run pdfium:download && bun run fonts:download",
     "pretauri:bundle": "bun run pdfium:download && bun run fonts:download",
     "preview": "vite preview",
+    "preflight": "bun scripts/preflight.mjs",
     "prepare": "husky",
     "version:bump": "bun scripts/version.mjs",
     "version:check": "bun scripts/version.mjs --check",
