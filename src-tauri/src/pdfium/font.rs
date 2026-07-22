@@ -15,6 +15,10 @@ use allsorts::{
 use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 pub(super) const CJK_FONT_NAME: &str = "NotoSansSC.ttf";
+/// The page-number serif face. Already instanced to Regular and cut to the
+/// digit/dash glyphs by `download-fonts.mjs`, so — unlike the sans face — it is
+/// embedded whole rather than subset again at runtime.
+pub(super) const SERIF_CJK_FONT_NAME: &str = "NotoSerifSC.ttf";
 const CJK_BOLD_FONT_WEIGHT: i32 = 800;
 const CJK_REGULAR_FONT_WEIGHT: i32 = 400;
 
@@ -53,39 +57,52 @@ pub(super) fn needs_embedded_font(text: &str) -> bool {
         .any(|character| !matches!(character, ' '..='~' | '\u{a0}'..='\u{ff}' | '\n' | '\r'))
 }
 
-/// Where the bundled CJK font is, searched the way `bind_pdfium` searches for
-/// the PDFium library so a dev build, a test and a bundle all find it.
+/// Where the bundled sans CJK font is.
 pub(super) fn cjk_font_path(app: &AppHandle) -> Option<PathBuf> {
+    font_path(app, CJK_FONT_NAME)
+}
+
+/// Where the bundled serif CJK font — the page-number face — is.
+pub(super) fn serif_cjk_font_path(app: &AppHandle) -> Option<PathBuf> {
+    font_path(app, SERIF_CJK_FONT_NAME)
+}
+
+/// Where a bundled font `name` is, searched the way `bind_pdfium` searches for
+/// the PDFium library so a dev build, a test and a bundle all find it. A
+/// `TFOLIO_FONT_PATH` directory overrides the search for every font; a file
+/// there overrides only the one whose name it carries, so pointing it at one
+/// face does not hide the others.
+fn font_path(app: &AppHandle, name: &str) -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
     if let Some(path) = env::var_os("TFOLIO_FONT_PATH") {
         let path = PathBuf::from(path);
 
-        candidates.push(if path.is_dir() {
-            path.join(CJK_FONT_NAME)
-        } else {
-            path
-        });
+        if path.is_dir() {
+            candidates.push(path.join(name));
+        } else if path.file_name().is_some_and(|file| file == name) {
+            candidates.push(path);
+        }
     }
 
-    if let Ok(resource_path) = app.path().resolve(
-        Path::new("fonts").join(CJK_FONT_NAME),
-        BaseDirectory::Resource,
-    ) {
+    if let Ok(resource_path) = app
+        .path()
+        .resolve(Path::new("fonts").join(name), BaseDirectory::Resource)
+    {
         candidates.push(resource_path);
     }
 
-    candidates.push(bundled_cjk_font_path());
+    candidates.push(bundled_font_path(name));
     candidates.into_iter().find(|path| path.is_file())
 }
 
-/// The font in the source tree, which is where a dev build and the tests read it
-/// from — `bun run fonts:download` puts it there.
-pub(super) fn bundled_cjk_font_path() -> PathBuf {
+/// A bundled font in the source tree, which is where a dev build and the tests
+/// read it from — `bun run fonts:download` puts it there.
+pub(super) fn bundled_font_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("resources")
         .join("fonts")
-        .join(CJK_FONT_NAME)
+        .join(name)
 }
 
 /// Resolves the bundled variable face to a static instance PDFium can embed.
@@ -177,7 +194,8 @@ mod tests {
     #[test]
     #[ignore = "requires `bun run fonts:download`"]
     fn bundled_cjk_font_resolves_requested_weights() {
-        let source = std::fs::read(bundled_cjk_font_path()).expect("read bundled CJK font");
+        let source =
+            std::fs::read(bundled_font_path(CJK_FONT_NAME)).expect("read bundled CJK font");
 
         for (expected, instance) in [
             (

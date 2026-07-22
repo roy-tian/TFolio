@@ -15,8 +15,8 @@ use tauri::AppHandle;
 
 use super::{
     font::{
-        bold_cjk_font, cjk_font_path, needs_embedded_font, regular_cjk_font, standard_face,
-        subset_for, StandardFace,
+        bold_cjk_font, cjk_font_path, needs_embedded_font, regular_cjk_font, serif_cjk_font_path,
+        standard_face, subset_for, StandardFace,
     },
     geometry::{
         annotation_color, clamp_corner_radius, page_rect_to_pdfium, page_rotation_degrees,
@@ -27,6 +27,10 @@ use super::{
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
     library::bind_pdfium,
+    page_numbers::{
+        average_luminance, ink_color, page_number_center, page_number_display_box, DisplayBox,
+        PageNumberPlacement, PageNumbersConfig, FONT_SIZE as PAGE_NUMBER_FONT_SIZE,
+    },
     size_limit_error,
     watermark::{
         add_document_object_count, watermark_placements, WatermarkConfig, WatermarkPlacement,
@@ -50,6 +54,13 @@ const MAX_HIGHLIGHT_QUADS: usize = 8192;
 // unbounded bitmap or inflate the saved file without limit.
 const RECT_EFFECT_DPI: f32 = 150.0;
 const POINTS_PER_INCH: f32 = 72.0;
+// Smart colour only needs an average luminance under one small label, so it
+// samples at a fraction of a print-resolution capture — a few pixels across the
+// label is enough to pick black or white.
+const PAGE_NUMBER_SAMPLE_DPI: f32 = 24.0;
+// A little slack around the label's box, in display points, so the sample reads
+// the drop the number sits on rather than a hairline of it.
+const PAGE_NUMBER_SAMPLE_PADDING: f32 = 4.0;
 
 #[derive(Debug, PartialEq)]
 struct DisplayRect {
@@ -59,16 +70,40 @@ struct DisplayRect {
     width: f32,
 }
 
+/// One page-content layer's run of objects at the tail of a page, in tail
+/// order.
+///
+/// `identities` holds one string per object, read back from PDFium after the
+/// object was attached rather than the source text: an embedded font may map a
+/// character to a compatibility equivalent, so the bytes written are not always
+/// what PDFium reads, and only the read-back survives to be compared on a later
+/// guard.
 #[derive(Clone, Debug)]
-struct WatermarkPageState {
-    /// How many top-level page objects existed before this session's watermark.
+struct OwnedSegment {
+    object_count: usize,
+    identities: Vec<String>,
+}
+
+/// Everything this session appended to one page, past the content it found
+/// there. A page's objects are `[ base | segment 0 | segment 1 | … ]`, the
+/// segments in a fixed layer order (a watermark beneath, page numbers above),
+/// so a change to one layer leaves the other exactly where the reader saw it.
+#[derive(Clone, Debug)]
+struct OwnedTailState {
+    /// Top-level page objects that existed before any owned layer covered this
+    /// page.
     base_objects: usize,
-    /// How many text objects this session appended after `base_objects`.
-    added_objects: usize,
-    /// Text exactly as PDFium reports it after attaching the object. Embedded
-    /// fonts can map a Unicode character to a compatibility equivalent, so the
-    /// source config is not always the identity PDFium later reads back.
-    text_identity: String,
+    segments: Vec<OwnedSegment>,
+}
+
+impl OwnedTailState {
+    /// The length of the owned tail — what a rebuild pops and a guard measures.
+    fn owned_objects(&self) -> usize {
+        self.segments
+            .iter()
+            .map(|segment| segment.object_count)
+            .sum()
+    }
 }
 
 /// A deleted page's copy and the session state that travelled with it, held so
@@ -88,26 +123,75 @@ struct StashedPage {
     page_id: u64,
     added: u32,
     revision: u64,
-    watermark: Option<WatermarkPageState>,
+    owned: Option<OwnedTailState>,
     /// Whether the page came from a merge, so a restore puts it back into the
     /// merged-content set that forbids overwriting the first file.
     merged: bool,
 }
 
+/// The page-content layers this open session owns. A layer's config is `Some`
+/// while it is active; the value as a whole is dropped to `None` once none is.
+/// Keyed by stable page id so the record survives the structure operations
+/// M7/M8 add; a page whose tail has empty `segments` was inserted or merged
+/// after a layer was applied — owned, but bare, until a re-apply covers it.
 #[derive(Clone, Debug)]
-struct WatermarkState {
-    config: WatermarkConfig,
-    /// Keyed by stable page id, not position, so the record survives the
-    /// structure operations M7 adds. An entry with `added_objects == 0` is a
-    /// page inserted after the watermark was applied: owned, but bare.
-    per_page: HashMap<u64, WatermarkPageState>,
+struct OwnedContentState {
+    watermark: Option<WatermarkConfig>,
+    page_numbers: Option<PageNumbersConfig>,
+    per_page: HashMap<u64, OwnedTailState>,
 }
 
-struct PageWatermarkPlan {
-    base_objects: usize,
+impl OwnedContentState {
+    /// Whether any layer is still active. When false the session owns nothing,
+    /// the state is dropped, and a save is no longer refused.
+    fn has_active_layer(&self) -> bool {
+        self.watermark.is_some() || self.page_numbers.is_some()
+    }
+}
+
+/// One active layer's planned objects for one page. Computed for every page
+/// before any is touched, so a measurement, object-limit, or sampling failure
+/// leaves the document untouched.
+struct WatermarkLayerPlan {
     object_rotation: f32,
-    page_number: i32,
     placements: Vec<WatermarkPlacement>,
+}
+
+/// A single page-number object, planned: its text, the angle that cancels the
+/// page's `/Rotate`, and where its measured bounds go. The ink is chosen later,
+/// in the rebuild — for smart colour, `sample_box` says where to read the drop,
+/// which is sampled only *after* any previous tail is popped, so a replacement
+/// reads the real backdrop and not the label it is about to overwrite.
+struct PageNumberLayerPlan {
+    text: String,
+    object_rotation: f32,
+    center: PageNumberPlacement,
+    sample_box: Option<DisplayBox>,
+}
+
+struct PageOwnedPlan {
+    base_objects: usize,
+    page_number: i32,
+    watermark: Option<WatermarkLayerPlan>,
+    page_number_label: Option<PageNumberLayerPlan>,
+}
+
+/// The watermark layer's inputs to a rebuild, prepared before the document lock
+/// is taken: the config, its resolved colour, and — when the text leaves
+/// Latin-1 — the bundled face subset to embed. Its font token is loaded inside
+/// the rebuild, once, and reused for every page.
+struct WatermarkResources {
+    config: WatermarkConfig,
+    color: PdfColor,
+    embedded: Option<Vec<u8>>,
+}
+
+/// The page-number layer's inputs to a rebuild: the config and the bundled
+/// serif face bytes, already instanced and subset by the font pipeline, so they
+/// are embedded whole. The font token is loaded inside the rebuild, once.
+struct PageNumbersResources {
+    config: PageNumbersConfig,
+    serif: Vec<u8>,
 }
 
 /// Where an unrotated, top-left page rectangle lands after the PDF's intrinsic
@@ -171,22 +255,49 @@ fn rotated_watermark_object<'a>(
     Ok(object)
 }
 
-fn place_watermark_object(
+/// Builds the page-number label as a text object in the serif face, coloured
+/// and turned to cancel the page's `/Rotate` — the same shape as
+/// `rotated_watermark_object`, for the other owned layer.
+fn rotated_page_number_object<'a>(
+    document: &PdfDocument<'a>,
+    font: PdfFontToken,
+    text: &str,
+    color: PdfColor,
+    object_rotation: f32,
+) -> Result<PdfPageTextObject<'a>, String> {
+    let mut object =
+        PdfPageTextObject::new(document, text, font, PdfPoints::new(PAGE_NUMBER_FONT_SIZE))
+            .map_err(|error| format!("PDFium rejected the page-number text: {error}"))?;
+
+    object
+        .set_fill_color(color)
+        .map_err(|error| format!("PDFium rejected the page-number colour: {error}"))?;
+    object
+        .rotate_clockwise_degrees(object_rotation)
+        .map_err(|error| format!("PDFium could not rotate the page number: {error}"))?;
+
+    Ok(object)
+}
+
+/// Translates a measured text object so its bounds' centre lands on a target
+/// centre in unrotated page space. Shared by both owned layers.
+fn place_text_object(
     mut object: PdfPageTextObject<'static>,
-    placement: WatermarkPlacement,
+    target_x: f32,
+    target_y: f32,
 ) -> Result<PdfPageTextObject<'static>, String> {
     let bounds = object
         .bounds()
-        .map_err(|error| format!("PDFium could not measure the watermark: {error}"))?;
+        .map_err(|error| format!("PDFium could not measure an owned object: {error}"))?;
     let center_x = (bounds.left().value + bounds.right().value) / 2.0;
     let center_y = (bounds.bottom().value + bounds.top().value) / 2.0;
 
     object
         .translate(
-            PdfPoints::new(placement.center_x - center_x),
-            PdfPoints::new(placement.center_y - center_y),
+            PdfPoints::new(target_x - center_x),
+            PdfPoints::new(target_y - center_y),
         )
-        .map_err(|error| format!("PDFium could not place the watermark: {error}"))?;
+        .map_err(|error| format!("PDFium could not place an owned object: {error}"))?;
 
     Ok(object)
 }
@@ -231,8 +342,10 @@ struct OpenDocument {
     /// leaves referenced fonts, appearances, and content streams behind until a
     /// save-and-reload collects them, so the next write takes that route.
     needs_compaction: bool,
-    /// The one group of top-level page text objects this open session owns.
-    watermark: Option<WatermarkState>,
+    /// The page-content layers (watermark, page numbers) this open session
+    /// owns, and where each page's owned tail sits. `None` once the session
+    /// owns nothing.
+    owned_content: Option<OwnedContentState>,
 }
 
 impl OpenDocument {
@@ -376,6 +489,13 @@ pub(super) struct PdfiumEngine {
     /// The same bundled face resolved to weight 800, created only if a bold CJK
     /// watermark needs it and then reused by later replacements.
     cjk_bold_font: OnceLock<Vec<u8>>,
+    /// Where the bundled serif face — the page-number face — is, resolved at
+    /// startup for the same reason `cjk_font_path` is.
+    serif_cjk_font_path: Option<PathBuf>,
+    /// The serif face bytes, read on the first page-number apply that needs
+    /// them and kept. Already instanced and subset by `download-fonts.mjs`, so
+    /// unlike the sans face this is embedded whole, not cut again.
+    serif_cjk_font: OnceLock<Vec<u8>>,
     /// Paths something outside the WebView produced — a drop the window saw, a
     /// pick a dialog returned. `open_pdf_from_path` acts only on these: a path
     /// is a string any page code can make up, and opening one binds it as the
@@ -401,6 +521,8 @@ impl PdfiumState {
             cjk_font_path: cjk_font_path(app),
             cjk_font: OnceLock::new(),
             cjk_bold_font: OnceLock::new(),
+            serif_cjk_font_path: serif_cjk_font_path(app),
+            serif_cjk_font: OnceLock::new(),
             approved_paths: Mutex::new(HashSet::new()),
         })))
     }
@@ -505,11 +627,11 @@ impl PdfiumEngine {
                 merged_page_ids: HashSet::new(),
                 needs_compaction: false,
                 next_page_id: num_pages as u64,
+                owned_content: None,
                 page_ids: (0..num_pages as u64).collect(),
                 revisions: HashMap::new(),
                 source_path,
                 stashes: HashMap::new(),
-                watermark: None,
             },
         );
 
@@ -1249,6 +1371,30 @@ impl PdfiumEngine {
             .ok_or_else(|| "the bundled bold font could not be cached".to_string())
     }
 
+    /// The bundled serif face bytes, read once and kept. The font pipeline has
+    /// already instanced it to Regular and cut it to the digit and dash glyphs,
+    /// so — unlike the sans face — nothing is instanced or subset here.
+    fn serif_cjk_font_bytes(&self) -> Result<&[u8], String> {
+        if let Some(bytes) = self.serif_cjk_font.get() {
+            return Ok(bytes);
+        }
+
+        let path = self.serif_cjk_font_path.as_ref().ok_or_else(|| {
+            "the bundled serif font is missing; run `bun run fonts:download`".to_string()
+        })?;
+        let source = fs::read(path)
+            .map_err(|error| format!("the bundled serif font could not be read: {error}"))?;
+
+        // Two applies can reach here at once; whichever stores first wins and
+        // the other copy is dropped, both then seeing the same bytes.
+        let _ = self.serif_cjk_font.set(source);
+
+        self.serif_cjk_font
+            .get()
+            .map(Vec::as_slice)
+            .ok_or_else(|| "the bundled serif font could not be cached".to_string())
+    }
+
     /// Writes `text` at `origin` as a stamp annotation carrying one text object
     /// per line.
     ///
@@ -1506,137 +1652,160 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// Verifies that every page still ends with exactly the text objects this
-    /// session recorded. This is deliberately whole-document preflight: once a
-    /// page fails, no earlier page may already have lost content.
-    fn verify_watermark_tail(
+    /// Verifies that every page still ends with exactly the objects this
+    /// session recorded, across every owned layer. Whole-document preflight:
+    /// once a page fails, no earlier page may already have lost content.
+    fn verify_owned_tail(
         document: &PdfDocument<'static>,
         page_ids: &[u64],
-        state: &WatermarkState,
+        state: &OwnedContentState,
     ) -> Result<(), String> {
         let page_count = document.pages().len();
 
         // `page_ids` is the engine's own mirror of the page list; drifted from
         // the document, every id-keyed record below would name the wrong pages.
         if page_ids.len() != page_count as usize {
-            return Err("the watermark ownership record does not cover every page".into());
+            return Err("the owned-content record does not cover every page".into());
         }
 
         if state.per_page.len() != page_ids.len() {
-            return Err("the watermark ownership record does not cover every page".into());
+            return Err("the owned-content record does not cover every page".into());
         }
 
         for (index, page_id) in page_ids.iter().enumerate() {
             let page_number = index as i32 + 1;
-            let page_state = state.per_page.get(page_id).ok_or_else(|| {
-                format!("the watermark ownership record is missing page {page_number}")
-            })?;
-            let expected = page_state
+            let tail = state
+                .per_page
+                .get(page_id)
+                .ok_or_else(|| format!("the owned-content record is missing page {page_number}"))?;
+            let expected = tail
                 .base_objects
-                .checked_add(page_state.added_objects)
-                .ok_or_else(|| "the watermark object count overflowed".to_string())?;
-            let page = document.pages().get(page_number - 1).map_err(|error| {
-                format!("PDFium could not load watermark page {page_number}: {error}")
-            })?;
+                .checked_add(tail.owned_objects())
+                .ok_or_else(|| "the owned object count overflowed".to_string())?;
+            let page = document
+                .pages()
+                .get(page_number - 1)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
             let objects = page.objects();
 
             if objects.len() != expected {
                 return Err(format!(
-                    "page {page_number}'s content no longer ends where this session's watermark should"
+                    "page {page_number}'s content no longer ends where this session's marks should"
                 ));
             }
 
-            // A page inserted after the watermark was applied owns no objects:
+            // A page inserted or merged after a layer was applied owns nothing:
             // its count is pinned above, and there is no tail to identify.
-            if page_state.added_objects == 0 {
+            if tail.segments.is_empty() {
                 continue;
             }
 
-            let actual = Self::page_watermark_tail_identity(
-                &page,
-                page_number,
-                page_state.base_objects,
-                page_state.added_objects,
-            )?;
+            let text_page = page
+                .text()
+                .map_err(|error| format!("PDFium could not inspect page {page_number}: {error}"))?;
+            let mut next = tail.base_objects;
 
-            if actual != page_state.text_identity {
-                return Err(format!(
-                    "page {page_number}'s owned watermark tail contains different text"
-                ));
+            for segment in &tail.segments {
+                for offset in 0..segment.object_count {
+                    let object = objects.get(next + offset).map_err(|error| {
+                        format!(
+                            "PDFium could not inspect owned object {}: {error}",
+                            next + offset
+                        )
+                    })?;
+                    let text_object = object.as_text_object().ok_or_else(|| {
+                        format!("page {page_number}'s owned tail contains a non-text object")
+                    })?;
+                    // PDFium's extraction appends a separator to a run another
+                    // run follows on the same line, so tiles sharing a baseline
+                    // come back as "TEXT " except the last, "TEXT"; the identity
+                    // stored at apply was trimmed the same way, so the edges
+                    // carry nothing worth comparing.
+                    let actual = text_page.for_object(text_object).trim().to_owned();
+
+                    if actual != segment.identities[offset] {
+                        return Err(format!(
+                            "page {page_number}'s owned tail contains different text"
+                        ));
+                    }
+                }
+
+                next += segment.object_count;
             }
         }
 
         Ok(())
     }
 
-    fn watermark_tail_identity(
+    /// Reads back the identities of a tail this rebuild just wrote, one string
+    /// per object, so a later guard can compare against what PDFium actually
+    /// holds — not the source text an embedded font may have remapped.
+    fn read_owned_tail(
         document: &PdfDocument<'static>,
         page_number: i32,
         base_objects: usize,
-        added_objects: usize,
-    ) -> Result<String, String> {
-        let page = document.pages().get(page_number - 1).map_err(|error| {
-            format!("PDFium could not load watermark page {page_number}: {error}")
-        })?;
-
-        Self::page_watermark_tail_identity(&page, page_number, base_objects, added_objects)
-    }
-
-    fn page_watermark_tail_identity(
-        page: &PdfPage<'_>,
-        page_number: i32,
-        base_objects: usize,
-        added_objects: usize,
-    ) -> Result<String, String> {
+        segment_counts: &[usize],
+    ) -> Result<OwnedTailState, String> {
+        let page = document
+            .pages()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
         let objects = page.objects();
-        let text_page = page.text().map_err(|error| {
-            format!("PDFium could not inspect watermark page {page_number}: {error}")
-        })?;
-        let mut identity = None;
+        let text_page = page
+            .text()
+            .map_err(|error| format!("PDFium could not inspect page {page_number}: {error}"))?;
+        let mut segments = Vec::with_capacity(segment_counts.len());
+        let mut next = base_objects;
 
-        for index in base_objects..base_objects + added_objects {
-            let object = objects.get(index).map_err(|error| {
-                format!("PDFium could not inspect watermark object {index}: {error}")
-            })?;
-            let text_object = object.as_text_object().ok_or_else(|| {
-                format!("page {page_number}'s owned watermark tail contains a non-text object")
-            })?;
-            // PDFium's extraction appends a separator to a run that another run
-            // follows on the same line, so tiles sharing a baseline — every
-            // horizontal row of a tiled grid — come back as "TEXT " except the
-            // last, which comes back as "TEXT". A validated config's text is
-            // already trimmed, so the edges carry nothing worth comparing.
-            let actual = text_page.for_object(text_object).trim().to_owned();
+        for &count in segment_counts {
+            let mut identities = Vec::with_capacity(count);
 
-            match &identity {
-                None => identity = Some(actual),
-                Some(expected) if *expected == actual => {}
-                Some(_) => {
-                    return Err(format!(
-                        "page {page_number}'s owned watermark tail contains different text"
-                    ));
-                }
+            for offset in 0..count {
+                let object = objects.get(next + offset).map_err(|error| {
+                    format!(
+                        "PDFium could not inspect owned object {}: {error}",
+                        next + offset
+                    )
+                })?;
+                let text_object = object.as_text_object().ok_or_else(|| {
+                    format!("page {page_number}'s owned tail contains a non-text object")
+                })?;
+
+                identities.push(text_page.for_object(text_object).trim().to_owned());
             }
+
+            segments.push(OwnedSegment {
+                object_count: count,
+                identities,
+            });
+            next += count;
         }
 
-        identity.ok_or_else(|| format!("page {page_number}'s watermark tail is empty"))
+        Ok(OwnedTailState {
+            base_objects,
+            segments,
+        })
     }
 
-    fn plan_watermark(
+    /// Plans every page's rebuild before any is touched, so a measurement or
+    /// object-limit failure leaves the document untouched. `base_objects` is
+    /// read from the prior owned record when one exists — a replacement rebuilds
+    /// the same base — or the page's current object count on a first apply.
+    fn plan_owned_content(
         entry: &OpenDocument,
-        config: &WatermarkConfig,
-        font: PdfFontToken,
-        color: PdfColor,
-    ) -> Result<Vec<PageWatermarkPlan>, String> {
+        watermark: Option<(&WatermarkConfig, PdfFontToken, PdfColor)>,
+        page_numbers: Option<(&PageNumbersConfig, PdfFontToken)>,
+    ) -> Result<Vec<PageOwnedPlan>, String> {
         let page_count = entry.document.pages().len();
 
         // Without this an empty document takes an empty ownership record, which
         // every later guard passes vacuously — leaving a session that believes
-        // it holds a watermark, and so refuses to save, over nothing at all.
+        // it holds marks, and so refuses to save, over nothing at all.
         if page_count < 1 {
-            return Err("a document with no pages cannot carry a watermark".into());
+            return Err("a document with no pages cannot carry page marks".into());
         }
 
+        let previous = entry.owned_content.as_ref();
         let mut plans = Vec::with_capacity(page_count as usize);
         let mut measured_bounds: Vec<(u32, (f32, f32))> = Vec::new();
         let mut document_objects = 0usize;
@@ -1646,66 +1815,205 @@ impl PdfiumEngine {
                 .document
                 .pages()
                 .get(page_number - 1)
-                .map_err(|error| {
-                    format!("PDFium could not load watermark page {page_number}: {error}")
-                })?;
-            let page_rotation = page_rotation_degrees(&page);
-            let object_rotation = config.rotation - page_rotation;
-            let (page_width, page_height) = unrotated_page_size(&page);
-            // One text at one angle always measures the same, and `/Rotate` has
-            // only four values — so a document of any length needs at most four
-            // of these, not one built and thrown away per page.
-            let key = object_rotation.to_bits();
-            let (text_width, text_height) =
-                match measured_bounds.iter().find(|(cached, _)| *cached == key) {
-                    Some((_, size)) => *size,
-                    None => {
-                        let measured = rotated_watermark_object(
-                            &entry.document,
-                            font,
-                            config,
-                            color,
-                            object_rotation,
-                        )?;
-                        let bounds = measured.bounds().map_err(|error| {
-                            format!("PDFium could not measure the watermark: {error}")
-                        })?;
-                        let size = (
-                            bounds.right().value - bounds.left().value,
-                            bounds.top().value - bounds.bottom().value,
-                        );
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
 
-                        measured_bounds.push((key, size));
-                        size
-                    }
-                };
-            let placements =
-                watermark_placements(page_width, page_height, text_width, text_height, config)?;
-
-            document_objects = add_document_object_count(document_objects, placements.len())?;
-
-            let base_objects = match &entry.watermark {
+            let base_objects = match previous {
                 Some(state) => {
                     state
                         .per_page
                         .get(&entry.page_id(page_number)?)
                         .ok_or_else(|| {
-                            format!("the watermark ownership record is missing page {page_number}")
+                            format!("the owned-content record is missing page {page_number}")
                         })?
                         .base_objects
                 }
                 None => page.objects().len(),
             };
 
-            plans.push(PageWatermarkPlan {
+            let watermark_plan = match watermark {
+                Some((config, font, color)) => {
+                    let page_rotation = page_rotation_degrees(&page);
+                    let object_rotation = config.rotation - page_rotation;
+                    let (page_width, page_height) = unrotated_page_size(&page);
+                    // One text at one angle always measures the same, and
+                    // `/Rotate` has only four values — so a document of any
+                    // length needs at most four of these.
+                    let key = object_rotation.to_bits();
+                    let (text_width, text_height) =
+                        match measured_bounds.iter().find(|(cached, _)| *cached == key) {
+                            Some((_, size)) => *size,
+                            None => {
+                                let measured = rotated_watermark_object(
+                                    &entry.document,
+                                    font,
+                                    config,
+                                    color,
+                                    object_rotation,
+                                )?;
+                                let bounds = measured.bounds().map_err(|error| {
+                                    format!("PDFium could not measure the watermark: {error}")
+                                })?;
+                                let size = (
+                                    bounds.right().value - bounds.left().value,
+                                    bounds.top().value - bounds.bottom().value,
+                                );
+
+                                measured_bounds.push((key, size));
+                                size
+                            }
+                        };
+                    let placements = watermark_placements(
+                        page_width,
+                        page_height,
+                        text_width,
+                        text_height,
+                        config,
+                    )?;
+
+                    document_objects =
+                        add_document_object_count(document_objects, placements.len())?;
+
+                    Some(WatermarkLayerPlan {
+                        object_rotation,
+                        placements,
+                    })
+                }
+                None => None,
+            };
+
+            let page_number_label = match page_numbers {
+                Some((config, font)) if config.covers(page_number) => {
+                    let page_rotation = page_rotation_degrees(&page);
+                    // Page numbers are always upright as the reader sees them,
+                    // so the object is turned by exactly the negative of the
+                    // page's own `/Rotate`, which a render then puts back.
+                    let object_rotation = -page_rotation;
+                    let (unrotated_width, unrotated_height) = unrotated_page_size(&page);
+                    let text = config.label(page_number);
+                    let anchor = config.anchor(page_number);
+
+                    // Measure the label exactly as it will be built, so the
+                    // placement and the smart-colour drop both use real bounds
+                    // (M3/M6 lesson: measure before positioning).
+                    let measured = rotated_page_number_object(
+                        &entry.document,
+                        font,
+                        &text,
+                        PdfColor::BLACK,
+                        object_rotation,
+                    )?;
+                    let bounds = measured.bounds().map_err(|error| {
+                        format!("PDFium could not measure a page number: {error}")
+                    })?;
+                    let bounds_width = bounds.right().value - bounds.left().value;
+                    let bounds_height = bounds.top().value - bounds.bottom().value;
+                    drop(measured);
+
+                    let center = page_number_center(
+                        unrotated_width,
+                        unrotated_height,
+                        page_rotation,
+                        bounds_width,
+                        bounds_height,
+                        anchor,
+                    );
+
+                    // The drop is sampled in the rebuild, not here: a replacement
+                    // must read the page after its old label is gone, which has
+                    // not happened yet at plan time.
+                    let sample_box = config.smart_color().then(|| {
+                        page_number_display_box(
+                            unrotated_width,
+                            unrotated_height,
+                            page_rotation,
+                            bounds_width,
+                            bounds_height,
+                            anchor,
+                        )
+                    });
+
+                    Some(PageNumberLayerPlan {
+                        text,
+                        object_rotation,
+                        center,
+                        sample_box,
+                    })
+                }
+                _ => None,
+            };
+
+            plans.push(PageOwnedPlan {
                 base_objects,
-                object_rotation,
                 page_number,
-                placements,
+                watermark: watermark_plan,
+                page_number_label,
             });
         }
 
         Ok(plans)
+    }
+
+    /// Averages the relative luminance of the drop a page number will cover, at
+    /// a low sampling resolution, and returns the ink that stays legible on it —
+    /// white on a dark drop, black otherwise. A page with no usable dimensions,
+    /// or a region that falls outside the render, defaults to black.
+    fn sample_ink_color(page: &PdfPage<'_>, region: DisplayBox) -> Result<PdfColor, String> {
+        let display_width = page.width().value;
+        let display_height = page.height().value;
+
+        if !display_width.is_finite()
+            || !display_height.is_finite()
+            || display_width <= 0.0
+            || display_height <= 0.0
+        {
+            return Ok(PdfColor::BLACK);
+        }
+
+        // Far cheaper than M5's print-resolution capture: the decision is a
+        // single average, so a handful of pixels across the label suffices.
+        let scale = (PAGE_NUMBER_SAMPLE_DPI / POINTS_PER_INCH)
+            .min(MAX_RENDER_WIDTH as f32 / display_width)
+            .min(MAX_RENDER_HEIGHT as f32 / display_height);
+        let render_width = (display_width * scale)
+            .round()
+            .clamp(1.0, MAX_RENDER_WIDTH as f32) as i32;
+        let config = PdfRenderConfig::new()
+            .set_target_width(render_width)
+            .set_maximum_width(MAX_RENDER_WIDTH)
+            .set_maximum_height(MAX_RENDER_HEIGHT)
+            .render_annotations(true)
+            .render_form_data(true);
+        let rendered = page
+            .render_with_config(&config)
+            .and_then(|bitmap| bitmap.as_image())
+            .map_err(|error| format!("PDFium could not sample a page for smart colour: {error}"))?;
+
+        let scale_x = rendered.width() as f32 / display_width;
+        let scale_y = rendered.height() as f32 / display_height;
+        let left = ((region.left - PAGE_NUMBER_SAMPLE_PADDING) * scale_x)
+            .floor()
+            .max(0.0) as u32;
+        let top = ((region.top - PAGE_NUMBER_SAMPLE_PADDING) * scale_y)
+            .floor()
+            .max(0.0) as u32;
+        let right = ((region.left + region.width + PAGE_NUMBER_SAMPLE_PADDING) * scale_x)
+            .ceil()
+            .min(rendered.width() as f32) as u32;
+        let bottom = ((region.top + region.height + PAGE_NUMBER_SAMPLE_PADDING) * scale_y)
+            .ceil()
+            .min(rendered.height() as f32) as u32;
+
+        if right <= left || bottom <= top {
+            return Ok(PdfColor::BLACK);
+        }
+
+        let crop = rendered
+            .crop_imm(left, top, right - left, bottom - top)
+            .into_rgba8()
+            .into_raw();
+
+        PdfColor::from_hex(ink_color(average_luminance(&crop)))
+            .map_err(|error| format!("PDFium rejected the page-number colour: {error}"))
     }
 
     fn restore_document_snapshot(
@@ -1735,7 +2043,7 @@ impl PdfiumEngine {
     /// would rewrite every object retired so far once per page, which is why the
     /// strategy stays `Manual`: it is also what keeps `PdfPage`'s own drop from
     /// regenerating the page behind us.
-    fn retire_watermark_objects(
+    fn retire_owned_objects(
         document: &mut PdfDocument<'static>,
         scratch_index: i32,
         objects: Vec<PdfPageObject<'static>>,
@@ -1747,162 +2055,173 @@ impl PdfiumEngine {
         let mut scratch = document
             .pages_mut()
             .get(scratch_index)
-            .map_err(|error| format!("PDFium could not load watermark scratch page: {error}"))?;
+            .map_err(|error| format!("PDFium could not load the scratch page: {error}"))?;
         scratch.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
 
         for object in objects {
-            scratch.objects_mut().add_object(object).map_err(|error| {
-                format!("PDFium could not retire an old watermark object: {error}")
-            })?;
+            scratch
+                .objects_mut()
+                .add_object(object)
+                .map_err(|error| format!("PDFium could not retire an old owned object: {error}"))?;
         }
 
         Ok(())
     }
 
-    /// Applies a new document-wide watermark, replacing the one this open
-    /// session owns. A saved byte snapshot makes every multi-page failure an
-    /// exact rollback, including failures after an earlier page regenerated.
-    pub(super) fn apply_watermark(
+    /// Rebuilds every page's owned-content tail to match the given active layer
+    /// configs, replacing whatever this session previously owned.
+    ///
+    /// The whole tail is popped and re-appended in the fixed layer order on
+    /// every page, so a change to one layer can never leave it stacked wrong
+    /// against another — `add_object` only appends, and this is the one path
+    /// that keeps the order canonical. A saved byte snapshot makes every
+    /// multi-page failure an exact rollback, including one after an earlier page
+    /// already regenerated.
+    fn rebuild_owned_content(
         &self,
-        document_id: u64,
-        config: WatermarkConfig,
+        entry: &mut OpenDocument,
+        watermark: Option<WatermarkResources>,
+        page_numbers: Option<PageNumbersResources>,
     ) -> Result<(), String> {
-        let config = config.validated()?;
-        let face = standard_face(config.font_family.as_str())
-            .expect("WatermarkFontFamily only has standard-face variants");
-        let color = PdfColor::from_hex(&config.color)
-            .map_err(|error| format!("the watermark colour is unusable: {error}"))?
-            .with_alpha((config.opacity * 255.0).round() as u8);
-
-        // Avoid a 17 MB read and subset for an exact no-op, while still checking
-        // again under the commit lock in case another direct IPC raced this one.
-        {
-            let documents = self.lock_documents()?;
-            let entry = open_entry(&documents, document_id)?;
-
-            if entry
-                .watermark
-                .as_ref()
-                .is_some_and(|state| state.config == config)
-            {
-                return Ok(());
-            }
-        }
-
-        // The whole document reuses this one subset. It is prepared without the
-        // PDFium lock because cutting the bundled face is pure CPU work.
-        let embedded = if needs_embedded_font(&config.text) {
-            let font = if config.bold {
-                self.cjk_bold_font_bytes()?
-            } else {
-                self.cjk_font_bytes()?
-            };
-
-            Some(subset_for(font, &config.text)?)
-        } else {
-            None
-        };
-
-        let mut documents = self.lock_documents()?;
-        let entry = open_entry_mut(&mut documents, document_id)?;
-
-        if entry
-            .watermark
-            .as_ref()
-            .is_some_and(|state| state.config == config)
-        {
-            return Ok(());
-        }
-        if let Some(state) = &entry.watermark {
-            Self::verify_watermark_tail(&entry.document, &entry.page_ids, state)?;
-        }
-
+        let previous = entry.owned_content.clone();
         let snapshot = entry
             .document
             .save_to_bytes()
             .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
-        let previous = entry.watermark.clone();
-        let applied = (|| -> Result<WatermarkState, String> {
-            let font = match &embedded {
-                Some(bytes) => entry
-                    .document
-                    .fonts_mut()
-                    .load_true_type_from_bytes(bytes, true)
-                    .map_err(|error| format!("PDFium rejected the bundled font: {error}"))?,
-                None => {
-                    let fonts = entry.document.fonts_mut();
 
-                    match (face, config.bold) {
-                        (StandardFace::Sans, false) => fonts.helvetica(),
-                        (StandardFace::Sans, true) => fonts.helvetica_bold(),
-                        (StandardFace::Serif, false) => fonts.times_roman(),
-                        (StandardFace::Serif, true) => fonts.times_bold(),
-                        (StandardFace::Mono, false) => fonts.courier(),
-                        (StandardFace::Mono, true) => fonts.courier_bold(),
+        let rebuilt = (|| -> Result<OwnedContentState, String> {
+            // Load each active layer's font once, into the document, and thread
+            // the token through the per-page loop — a replacement reloads even an
+            // unchanged layer's font, since its objects are rebuilt too.
+            let watermark_font = match &watermark {
+                Some(resources) => Some(match &resources.embedded {
+                    Some(bytes) => entry
+                        .document
+                        .fonts_mut()
+                        .load_true_type_from_bytes(bytes, true)
+                        .map_err(|error| format!("PDFium rejected the bundled font: {error}"))?,
+                    None => {
+                        let config = &resources.config;
+                        let face = standard_face(config.font_family.as_str())
+                            .expect("WatermarkFontFamily only has standard-face variants");
+                        let fonts = entry.document.fonts_mut();
+
+                        match (face, config.bold) {
+                            (StandardFace::Sans, false) => fonts.helvetica(),
+                            (StandardFace::Sans, true) => fonts.helvetica_bold(),
+                            (StandardFace::Serif, false) => fonts.times_roman(),
+                            (StandardFace::Serif, true) => fonts.times_bold(),
+                            (StandardFace::Mono, false) => fonts.courier(),
+                            (StandardFace::Mono, true) => fonts.courier_bold(),
+                        }
                     }
-                }
+                }),
+                None => None,
             };
-            let plans = Self::plan_watermark(entry, &config, font, color)?;
-            let mut per_page = HashMap::with_capacity(plans.len());
+            let page_number_font = match &page_numbers {
+                Some(resources) => Some(
+                    entry
+                        .document
+                        .fonts_mut()
+                        .load_true_type_from_bytes(&resources.serif, true)
+                        .map_err(|error| {
+                            format!("PDFium rejected the bundled serif font: {error}")
+                        })?,
+                ),
+                None => None,
+            };
+
+            let plans = Self::plan_owned_content(
+                entry,
+                watermark
+                    .as_ref()
+                    .map(|resources| (&resources.config, watermark_font.unwrap(), resources.color)),
+                page_numbers
+                    .as_ref()
+                    .map(|resources| (&resources.config, page_number_font.unwrap())),
+            )?;
+
+            // A scratch page receives every retired object; created only when
+            // there is a prior tail to pop, and deleted before the transaction
+            // ends so PDFium collects the retired handles.
             let scratch_index = if previous.is_some() {
                 let index = entry.document.pages().len();
                 let scratch = entry
                     .document
                     .pages_mut()
                     .create_page_at_end(PdfPagePaperSize::a4())
-                    .map_err(|error| {
-                        format!("PDFium could not create a watermark scratch page: {error}")
-                    })?;
+                    .map_err(|error| format!("PDFium could not create a scratch page: {error}"))?;
                 drop(scratch);
                 Some(index)
             } else {
                 None
             };
 
+            let mut per_page = HashMap::with_capacity(plans.len());
+
             for plan in plans {
                 let page_id = entry.page_id(plan.page_number)?;
-                // Construct every free object before touching this page. If font
-                // measurement or placement fails, the page remains unchanged.
-                let mut additions = Vec::with_capacity(plan.placements.len());
-                for placement in &plan.placements {
-                    let object = rotated_watermark_object(
-                        &entry.document,
-                        font,
-                        &config,
-                        color,
-                        plan.object_rotation,
-                    )?;
-                    additions.push(place_watermark_object(object, *placement)?);
+
+                // Build the watermark objects up front — a font or placement
+                // failure then leaves the page untouched. The page-number object
+                // is built later, once the drop it sits on can be sampled.
+                let mut watermark_objects: Vec<PdfPageTextObject<'static>> = Vec::new();
+                if let Some(layer) = &plan.watermark {
+                    let resources = watermark
+                        .as_ref()
+                        .expect("a watermark plan implies watermark resources");
+                    let font = watermark_font.expect("a watermark plan implies a loaded font");
+                    watermark_objects.reserve(layer.placements.len());
+
+                    for placement in &layer.placements {
+                        let object = rotated_watermark_object(
+                            &entry.document,
+                            font,
+                            &resources.config,
+                            resources.color,
+                            layer.object_rotation,
+                        )?;
+                        watermark_objects.push(place_text_object(
+                            object,
+                            placement.center_x,
+                            placement.center_y,
+                        )?);
+                    }
                 }
+
+                let previous_tail = previous
+                    .as_ref()
+                    .and_then(|state| state.per_page.get(&page_id))
+                    .map(OwnedTailState::owned_objects)
+                    .unwrap_or(0);
 
                 let mut retired = Vec::new();
                 let mut change_error = None;
                 let mut changed = false;
+
+                // First pass: pop the previous owned tail and lay down the
+                // watermark beneath. A smart-colour page regenerates here, so the
+                // sample below reads the real backdrop — the new watermark now
+                // under the number — and never the old label the pop just lifted.
                 {
                     let mut page = entry
                         .document
                         .pages_mut()
                         .get(plan.page_number - 1)
                         .map_err(|error| {
-                            format!(
-                                "PDFium could not load watermark page {}: {error}",
-                                plan.page_number
-                            )
+                            format!("PDFium could not load page {}: {error}", plan.page_number)
                         })?;
                     page.set_content_regeneration_strategy(
                         PdfPageContentRegenerationStrategy::Manual,
                     );
 
-                    if let Some(state) = &previous {
-                        let page_state = &state.per_page[&page_id];
+                    {
                         let objects = page.objects_mut();
 
-                        for _ in 0..page_state.added_objects {
+                        for _ in 0..previous_tail {
                             let Some(last) = objects.len().checked_sub(1) else {
-                                change_error = Some(
-                                    "the owned watermark tail disappeared during replacement"
-                                        .to_string(),
-                                );
+                                change_error =
+                                    Some("the owned tail disappeared during a rebuild".to_string());
                                 break;
                             };
 
@@ -1913,7 +2232,7 @@ impl PdfiumEngine {
                                 }
                                 Err(error) => {
                                     change_error = Some(format!(
-                                        "PDFium could not remove the old watermark: {error}"
+                                        "PDFium could not remove the old owned content: {error}"
                                     ));
                                     break;
                                 }
@@ -1922,7 +2241,7 @@ impl PdfiumEngine {
                     }
 
                     if change_error.is_none() {
-                        for object in additions {
+                        for object in watermark_objects {
                             match page.objects_mut().add_text_object(object) {
                                 Ok(_) => changed = true,
                                 Err(error) => {
@@ -1935,11 +2254,93 @@ impl PdfiumEngine {
                         }
                     }
 
+                    // Regenerate before the handle closes whenever this pass
+                    // changed the page — PDFium drops objects that were inserted
+                    // but never flushed once the page is reopened for the second
+                    // pass. A first-apply page-numbers-only page pops nothing and
+                    // lays no watermark, so `changed` stays false and its flush
+                    // falls to the second pass; every other case flushes here so
+                    // the smart-colour sample below reads a persisted backdrop.
                     if changed && change_error.is_none() {
                         if let Err(error) = page.regenerate_content() {
-                            change_error = Some(format!(
-                                "PDFium could not regenerate the watermarked page: {error}"
-                            ));
+                            change_error =
+                                Some(format!("PDFium could not regenerate the page: {error}"));
+                        }
+                    }
+                    page.set_content_regeneration_strategy(
+                        PdfPageContentRegenerationStrategy::AutomaticOnEveryChange,
+                    );
+                }
+
+                // Choose the page number's ink from the drop it now sits on —
+                // sampled after the pop, so a replacement never reads its own old
+                // label — then build the object.
+                let page_number_object = if change_error.is_none() {
+                    match &plan.page_number_label {
+                        Some(layer) => {
+                            let color = match layer.sample_box {
+                                Some(region) => {
+                                    let page =
+                                        entry.document.pages().get(plan.page_number - 1).map_err(
+                                            |error| {
+                                                format!(
+                                                    "PDFium could not load page {}: {error}",
+                                                    plan.page_number
+                                                )
+                                            },
+                                        )?;
+
+                                    Self::sample_ink_color(&page, region)?
+                                }
+                                None => PdfColor::BLACK,
+                            };
+                            let font =
+                                page_number_font.expect("a page-number plan implies a loaded font");
+                            let object = rotated_page_number_object(
+                                &entry.document,
+                                font,
+                                &layer.text,
+                                color,
+                                layer.object_rotation,
+                            )?;
+
+                            Some(place_text_object(
+                                object,
+                                layer.center.center_x,
+                                layer.center.center_y,
+                            )?)
+                        }
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+
+                // Second pass: lay the page number over the flushed watermark. The
+                // first pass already persisted the pop and the watermark, so a
+                // page with no number needs no second pass at all.
+                if let Some(object) = page_number_object {
+                    let mut page = entry
+                        .document
+                        .pages_mut()
+                        .get(plan.page_number - 1)
+                        .map_err(|error| {
+                            format!("PDFium could not load page {}: {error}", plan.page_number)
+                        })?;
+                    page.set_content_regeneration_strategy(
+                        PdfPageContentRegenerationStrategy::Manual,
+                    );
+
+                    match page.objects_mut().add_text_object(object) {
+                        Ok(_) => {
+                            if let Err(error) = page.regenerate_content() {
+                                change_error =
+                                    Some(format!("PDFium could not regenerate the page: {error}"));
+                            }
+                        }
+                        Err(error) => {
+                            change_error =
+                                Some(format!("PDFium could not append the page number: {error}"));
                         }
                     }
                     page.set_content_regeneration_strategy(
@@ -1949,7 +2350,7 @@ impl PdfiumEngine {
 
                 if let Some(index) = scratch_index {
                     if let Err(error) =
-                        Self::retire_watermark_objects(&mut entry.document, index, retired)
+                        Self::retire_owned_objects(&mut entry.document, index, retired)
                     {
                         change_error.get_or_insert(error);
                     }
@@ -1958,18 +2359,24 @@ impl PdfiumEngine {
                     return Err(error);
                 }
 
-                let page_state = WatermarkPageState {
-                    base_objects: plan.base_objects,
-                    added_objects: plan.placements.len(),
-                    text_identity: Self::watermark_tail_identity(
-                        &entry.document,
-                        plan.page_number,
-                        plan.base_objects,
-                        plan.placements.len(),
-                    )?,
-                };
+                // The tail's segments, in the order they were appended: watermark
+                // beneath, page number above.
+                let mut segment_counts = Vec::new();
+                if let Some(layer) = &plan.watermark {
+                    segment_counts.push(layer.placements.len());
+                }
+                if plan.page_number_label.is_some() {
+                    segment_counts.push(1);
+                }
 
-                per_page.insert(page_id, page_state);
+                let tail = Self::read_owned_tail(
+                    &entry.document,
+                    plan.page_number,
+                    plan.base_objects,
+                    &segment_counts,
+                )?;
+
+                per_page.insert(page_id, tail);
             }
 
             if let Some(index) = scratch_index {
@@ -1977,146 +2384,241 @@ impl PdfiumEngine {
                     .document
                     .pages_mut()
                     .get(index)
-                    .map_err(|error| {
-                        format!("PDFium could not load watermark scratch page: {error}")
-                    })?
+                    .map_err(|error| format!("PDFium could not load the scratch page: {error}"))?
                     .delete()
                     .map_err(|error| {
-                        format!("PDFium could not delete watermark scratch page: {error}")
+                        format!("PDFium could not delete the scratch page: {error}")
                     })?;
             }
 
-            Ok(WatermarkState {
-                config: config.clone(),
+            Ok(OwnedContentState {
+                watermark: watermark.as_ref().map(|resources| resources.config.clone()),
+                page_numbers: page_numbers
+                    .as_ref()
+                    .map(|resources| resources.config.clone()),
                 per_page,
             })
         })();
 
-        let state = match applied {
+        let state = match rebuilt {
             Ok(state) => state,
             Err(error) => {
                 return Err(self.restore_document_snapshot(entry, snapshot, error));
             }
         };
 
+        // A rebuild that had something to pop leaves orphaned fonts and content
+        // behind for the next save to collect; a first apply removes nothing.
         entry.needs_compaction |= previous.is_some();
-        entry.watermark = Some(state);
-        for page_id in &entry.page_ids {
-            *entry.revisions.entry(*page_id).or_insert(0) += 1;
-        }
+        entry.owned_content = if state.has_active_layer() {
+            Some(state)
+        } else {
+            None
+        };
+        entry.invalidate_all_page_revisions();
 
         Ok(())
     }
 
-    /// Removes only the exact top-level text tail this open session owns.
+    /// The watermark layer's rebuild inputs from a stored config: its resolved
+    /// colour and, for embedded text, the bundled face subset. The subset is the
+    /// expensive part, so a *new* watermark's resources are prepared outside the
+    /// lock; an existing layer's — rebuilt to survive a change to the other —
+    /// are prepared under it, from a config that cannot change while it is held.
+    fn watermark_resources(&self, config: &WatermarkConfig) -> Result<WatermarkResources, String> {
+        let color = PdfColor::from_hex(&config.color)
+            .map_err(|error| format!("the watermark colour is unusable: {error}"))?
+            .with_alpha((config.opacity * 255.0).round() as u8);
+        let embedded = if needs_embedded_font(&config.text) {
+            let font = if config.bold {
+                self.cjk_bold_font_bytes()?
+            } else {
+                self.cjk_font_bytes()?
+            };
+
+            Some(subset_for(font, &config.text)?)
+        } else {
+            None
+        };
+
+        Ok(WatermarkResources {
+            config: config.clone(),
+            color,
+            embedded,
+        })
+    }
+
+    /// The page-number layer's rebuild inputs from a stored config: the bundled
+    /// serif bytes, which are kilobytes and cached, so this is cheap enough to
+    /// run under the lock.
+    fn page_numbers_resources(
+        &self,
+        config: &PageNumbersConfig,
+    ) -> Result<PageNumbersResources, String> {
+        Ok(PageNumbersResources {
+            config: config.clone(),
+            serif: self.serif_cjk_font_bytes()?.to_vec(),
+        })
+    }
+
+    /// The page-number layer's resources rebuilt from the document's current
+    /// config, or `None` if it carries no page numbers — what a watermark change
+    /// passes so the other layer survives it unchanged.
+    fn existing_page_numbers(
+        &self,
+        entry: &OpenDocument,
+    ) -> Result<Option<PageNumbersResources>, String> {
+        match entry
+            .owned_content
+            .as_ref()
+            .and_then(|state| state.page_numbers.clone())
+        {
+            Some(config) => Ok(Some(self.page_numbers_resources(&config)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// The watermark layer's resources rebuilt from the document's current
+    /// config, or `None` — what a page-number change passes so the watermark
+    /// survives it unchanged.
+    fn existing_watermark(
+        &self,
+        entry: &OpenDocument,
+    ) -> Result<Option<WatermarkResources>, String> {
+        match entry
+            .owned_content
+            .as_ref()
+            .and_then(|state| state.watermark.clone())
+        {
+            Some(config) => Ok(Some(self.watermark_resources(&config)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Applies a new document-wide watermark, replacing the one this open
+    /// session owns and rebuilding every owned layer's tail in canonical order.
+    pub(super) fn apply_watermark(
+        &self,
+        document_id: u64,
+        config: WatermarkConfig,
+    ) -> Result<(), String> {
+        let config = config.validated()?;
+
+        // Avoid a 17 MB read and subset for an exact no-op, while still checking
+        // again under the commit lock in case another direct IPC raced this one.
+        {
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
+
+            if entry
+                .owned_content
+                .as_ref()
+                .is_some_and(|state| state.watermark.as_ref() == Some(&config))
+            {
+                return Ok(());
+            }
+        }
+
+        // Prepared without the PDFium lock because cutting the bundled face is
+        // pure CPU work; the whole document reuses this one subset.
+        let watermark = self.watermark_resources(&config)?;
+
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if entry
+            .owned_content
+            .as_ref()
+            .is_some_and(|state| state.watermark.as_ref() == Some(&config))
+        {
+            return Ok(());
+        }
+        if let Some(state) = &entry.owned_content {
+            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
+        }
+
+        let page_numbers = self.existing_page_numbers(entry)?;
+
+        self.rebuild_owned_content(entry, Some(watermark), page_numbers)
+    }
+
+    /// Removes only the watermark this open session owns, rebuilding any other
+    /// owned layer's tail so it survives the change unaltered.
     pub(super) fn remove_watermark(&self, document_id: u64) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
-        let state = entry
-            .watermark
-            .clone()
-            .ok_or_else(|| "this session has no watermark to remove".to_string())?;
 
-        Self::verify_watermark_tail(&entry.document, &entry.page_ids, &state)?;
-        let snapshot = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
-        let removed = (|| -> Result<(), String> {
-            let page_count = entry.document.pages().len();
-            let scratch = entry
-                .document
-                .pages_mut()
-                .create_page_at_end(PdfPagePaperSize::a4())
-                .map_err(|error| {
-                    format!("PDFium could not create a watermark scratch page: {error}")
-                })?;
-            drop(scratch);
-
-            for page_number in 1..=page_count {
-                let page_state = &state.per_page[&entry.page_id(page_number)?];
-                let mut retired = Vec::with_capacity(page_state.added_objects);
-                let mut change_error = None;
-                {
-                    let mut page =
-                        entry
-                            .document
-                            .pages_mut()
-                            .get(page_number - 1)
-                            .map_err(|error| {
-                                format!(
-                                    "PDFium could not load watermark page {page_number}: {error}"
-                                )
-                            })?;
-                    page.set_content_regeneration_strategy(
-                        PdfPageContentRegenerationStrategy::Manual,
-                    );
-                    let objects = page.objects_mut();
-
-                    for _ in 0..page_state.added_objects {
-                        let Some(last) = objects.len().checked_sub(1) else {
-                            change_error = Some(
-                                "the owned watermark tail disappeared during removal".to_string(),
-                            );
-                            break;
-                        };
-
-                        match objects.remove_object_at_index(last) {
-                            Ok(object) => retired.push(object),
-                            Err(error) => {
-                                change_error =
-                                    Some(format!("PDFium could not remove the watermark: {error}"));
-                                break;
-                            }
-                        }
-                    }
-
-                    if !retired.is_empty() && change_error.is_none() {
-                        if let Err(error) = page.regenerate_content() {
-                            change_error = Some(format!(
-                                "PDFium could not regenerate the unwatermarked page: {error}"
-                            ));
-                        }
-                    }
-                    page.set_content_regeneration_strategy(
-                        PdfPageContentRegenerationStrategy::AutomaticOnEveryChange,
-                    );
-                }
-
-                if let Err(error) =
-                    Self::retire_watermark_objects(&mut entry.document, page_count, retired)
-                {
-                    change_error.get_or_insert(error);
-                }
-                if let Some(error) = change_error {
-                    return Err(error);
-                }
-            }
-
-            entry
-                .document
-                .pages_mut()
-                .get(page_count)
-                .map_err(|error| format!("PDFium could not load watermark scratch page: {error}"))?
-                .delete()
-                .map_err(|error| {
-                    format!("PDFium could not delete watermark scratch page: {error}")
-                })?;
-
-            Ok(())
-        })();
-
-        if let Err(error) = removed {
-            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        if !entry
+            .owned_content
+            .as_ref()
+            .is_some_and(|state| state.watermark.is_some())
+        {
+            return Err("this session has no watermark to remove".into());
+        }
+        if let Some(state) = &entry.owned_content {
+            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
         }
 
-        entry.watermark = None;
-        entry.needs_compaction = true;
-        for page_id in &entry.page_ids {
-            *entry.revisions.entry(*page_id).or_insert(0) += 1;
+        let page_numbers = self.existing_page_numbers(entry)?;
+
+        self.rebuild_owned_content(entry, None, page_numbers)
+    }
+
+    /// Applies page numbers, replacing the ones this open session owns and
+    /// rebuilding every owned layer's tail in canonical order — the page numbers
+    /// on top. The range is validated against the document's current length.
+    pub(super) fn apply_page_numbers(
+        &self,
+        document_id: u64,
+        config: PageNumbersConfig,
+    ) -> Result<(), String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let config = config.validated(entry.page_ids.len() as i32)?;
+
+        // Checked before any work, so an unchanged config never rebuilds an
+        // existing watermark's font. A single lock leaves no window for a
+        // concurrent IPC to slip between the check and the rebuild.
+        if entry
+            .owned_content
+            .as_ref()
+            .is_some_and(|state| state.page_numbers.as_ref() == Some(&config))
+        {
+            return Ok(());
+        }
+        if let Some(state) = &entry.owned_content {
+            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
         }
 
-        Ok(())
+        // The other layer is rebuilt from its current config; its subset is
+        // taken under the lock, which the plan accepts as the cost of stacking a
+        // second layer on a watermarked document.
+        let watermark = self.existing_watermark(entry)?;
+        let page_numbers = self.page_numbers_resources(&config)?;
+
+        self.rebuild_owned_content(entry, watermark, Some(page_numbers))
+    }
+
+    /// Removes only the page numbers this open session owns, rebuilding any
+    /// watermark so it survives the change unaltered.
+    pub(super) fn remove_page_numbers(&self, document_id: u64) -> Result<(), String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if !entry
+            .owned_content
+            .as_ref()
+            .is_some_and(|state| state.page_numbers.is_some())
+        {
+            return Err("this session has no page numbers to remove".into());
+        }
+        if let Some(state) = &entry.owned_content {
+            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
+        }
+
+        let watermark = self.existing_watermark(entry)?;
+
+        self.rebuild_owned_content(entry, watermark, None)
     }
 
     /// Removes the annotation most recently added to `page_number`, refusing
@@ -2275,8 +2777,8 @@ impl PdfiumEngine {
                 page_id,
                 added: entry.added.remove(&page_id).unwrap_or(0),
                 revision: entry.revisions.remove(&page_id).unwrap_or(0),
-                watermark: entry
-                    .watermark
+                owned: entry
+                    .owned_content
                     .as_mut()
                     .and_then(|state| state.per_page.remove(&page_id)),
                 // A deleted merged page leaves the document; the guard follows.
@@ -2360,34 +2862,32 @@ impl PdfiumEngine {
             next_page_ids.insert(stashed.position as usize - 1, stashed.page_id);
         }
 
-        // The copies came back through FPDF_ImportPages; prove the owned
-        // watermark tail survived the round trip before accepting the document,
+        // The copies came back through FPDF_ImportPages; prove every owned
+        // layer's tail survived the round trip before accepting the document,
         // as M6's compaction does after its own save-and-reload.
-        if let Some(state) = &entry.watermark {
+        if let Some(state) = &entry.owned_content {
             let mut prospective = state.clone();
 
             for stashed in &stash.pages {
-                if let Some(page_state) = &stashed.watermark {
-                    prospective
-                        .per_page
-                        .insert(stashed.page_id, page_state.clone());
+                if let Some(tail) = &stashed.owned {
+                    prospective.per_page.insert(stashed.page_id, tail.clone());
                 }
             }
 
             if let Err(error) =
-                Self::verify_watermark_tail(&entry.document, &next_page_ids, &prospective)
+                Self::verify_owned_tail(&entry.document, &next_page_ids, &prospective)
             {
                 let cause = self.restore_document_snapshot(
                     entry,
                     snapshot,
-                    format!("the restored pages no longer carry this session's watermark: {error}"),
+                    format!("the restored pages no longer carry this session's marks: {error}"),
                 );
 
                 entry.stashes.insert(stash_id, stash);
                 return Err(cause);
             }
 
-            entry.watermark = Some(prospective);
+            entry.owned_content = Some(prospective);
         }
 
         entry.page_ids = next_page_ids;
@@ -2457,15 +2957,15 @@ impl PdfiumEngine {
         entry.next_page_id += 1;
         entry.page_ids.insert(slot, page_id);
 
-        if let Some(state) = entry.watermark.as_mut() {
-            // Owned but bare: the session's watermark does not cover a page
-            // inserted after it was applied, and only a re-apply will.
+        if let Some(state) = entry.owned_content.as_mut() {
+            // Owned but bare: no active layer covers a blank page inserted after
+            // it was applied, and only a re-apply will. A blank page has no
+            // content of its own, so its base is zero.
             state.per_page.insert(
                 page_id,
-                WatermarkPageState {
+                OwnedTailState {
                     base_objects: 0,
-                    added_objects: 0,
-                    text_identity: String::new(),
+                    segments: Vec::new(),
                 },
             );
         }
@@ -2544,16 +3044,16 @@ impl PdfiumEngine {
         }
 
         // A merged page carries its source's own content objects. When this
-        // session holds a watermark, each new page takes an owned-but-bare
-        // record whose base is that content and whose added count is zero — the
-        // watermark does not cover a page it never marked. Measured before the
-        // recording loop, which needs a mutable borrow of the same entry.
+        // session owns any layer, each new page takes an owned-but-bare record
+        // whose base is that content and whose tail is empty — no active layer
+        // covers a page it never marked. Measured before the recording loop,
+        // which needs a mutable borrow of the same entry.
         //
         // A read failure here rolls the append back like `append` itself does:
         // the pages are already on the document, so a bare `?` would leave them
         // there while `page_ids` never learned of them — a desync every later
         // command trusts against.
-        let new_base_objects = match &entry.watermark {
+        let new_base_objects = match &entry.owned_content {
             Some(_) => {
                 let measured = (0..added_count)
                     .map(|offset| {
@@ -2591,13 +3091,14 @@ impl PdfiumEngine {
             // may only be exported as a copy, not saved over the first file.
             entry.merged_page_ids.insert(page_id);
 
-            if let Some(state) = entry.watermark.as_mut() {
+            if let Some(state) = entry.owned_content.as_mut() {
+                // Owned but bare: its base is the source file's own content, and
+                // no active layer covers a page it never marked.
                 state.per_page.insert(
                     page_id,
-                    WatermarkPageState {
+                    OwnedTailState {
                         base_objects: new_base_objects[offset as usize],
-                        added_objects: 0,
-                        text_identity: String::new(),
+                        segments: Vec::new(),
                     },
                 );
             }
@@ -2620,13 +3121,18 @@ impl PdfiumEngine {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
-        // Ownership of a watermark ends when the document closes, so writing one
-        // over the reader's own file leaves them a mark this app can no longer
-        // lift. A copy is the only destination it may reach. Checked here rather
-        // than trusted to the disabled key: the WebView can call the command.
-        if entry.watermark.is_some() {
+        // Ownership of a page-content layer ends when the document closes, so
+        // writing one over the reader's own file leaves them a mark this app can
+        // no longer lift. A copy is the only destination it may reach. Checked
+        // here rather than trusted to the disabled key: the WebView can call the
+        // command.
+        if entry
+            .owned_content
+            .as_ref()
+            .is_some_and(OwnedContentState::has_active_layer)
+        {
             return Err(
-                "a watermarked document may only be exported as a copy, not saved over its own file"
+                "a document with a watermark or page numbers may only be exported as a copy, not saved over its own file"
                     .into(),
             );
         }
@@ -2665,7 +3171,11 @@ impl PdfiumEngine {
         // answers — the two run in opposite directions. Missing a symlinked twin
         // there only leaves the history dirty; missing one here destroys the
         // original.
-        if (entry.watermark.is_some() || !entry.merged_page_ids.is_empty())
+        if (entry
+            .owned_content
+            .as_ref()
+            .is_some_and(OwnedContentState::has_active_layer)
+            || !entry.merged_page_ids.is_empty())
             && entry
                 .source_path
                 .as_deref()
@@ -2713,10 +3223,10 @@ impl PdfiumEngine {
     /// and only there.
     ///
     /// Costs a whole extra copy of the document in memory while it runs, which
-    /// is why it waits for a deletion instead of riding every save. Both owned
-    /// tails are checked before the replacement is accepted: annotation order
-    /// is preserved by PDFium, and the watermark's top-level text objects must
-    /// still have the same exact count, order, type, and text.
+    /// is why it waits for a deletion instead of riding every save. The owned
+    /// content is checked before the replacement is accepted: annotation order
+    /// is preserved by PDFium, and every owned layer's top-level text objects
+    /// must still have the same exact count, order, type, and text.
     fn collect_orphans(&self, entry: &mut OpenDocument) -> Result<(), String> {
         if !entry.needs_compaction {
             return Ok(());
@@ -2732,9 +3242,9 @@ impl PdfiumEngine {
             .load_pdf_from_byte_vec(bytes, None)
             .map_err(|error| format!("PDFium could not reload the document: {error}"))?;
 
-        if let Some(state) = &entry.watermark {
-            Self::verify_watermark_tail(&reloaded, &entry.page_ids, state).map_err(|error| {
-                format!("PDFium did not preserve the owned watermark during compaction: {error}")
+        if let Some(state) = &entry.owned_content {
+            Self::verify_owned_tail(&reloaded, &entry.page_ids, state).map_err(|error| {
+                format!("PDFium did not preserve the owned content during compaction: {error}")
             })?;
         }
 

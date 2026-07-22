@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::pdfium::library::PDFIUM_LIBRARY_NAME;
+use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 use crate::pdfium::watermark::{WatermarkFontFamily, WatermarkLayout};
 
 /// Serialises `objects` into a PDF. Shared by the fixtures below, which
@@ -81,9 +82,15 @@ fn test_engine() -> &'static PdfiumEngine {
         next_document_id: AtomicU64::new(1),
         // Straight from the source tree: the tests have no `AppHandle` to
         // resolve a bundled resource through.
-        cjk_font_path: Some(crate::pdfium::font::bundled_cjk_font_path()),
+        cjk_font_path: Some(crate::pdfium::font::bundled_font_path(
+            crate::pdfium::font::CJK_FONT_NAME,
+        )),
         cjk_font: OnceLock::new(),
         cjk_bold_font: OnceLock::new(),
+        serif_cjk_font_path: Some(crate::pdfium::font::bundled_font_path(
+            crate::pdfium::font::SERIF_CJK_FONT_NAME,
+        )),
+        serif_cjk_font: OnceLock::new(),
         approved_paths: Mutex::new(HashSet::new()),
     })
 }
@@ -3997,4 +4004,508 @@ fn merge_invalidates_a_captured_rect_effect() {
     );
 
     fs::remove_dir_all(directory).ok();
+}
+
+// --- M9 page numbers ---
+
+fn page_numbers_config() -> PageNumbersConfig {
+    PageNumbersConfig {
+        mode: PageNumbersMode::Single,
+        position: PageNumbersPosition::BottomCenter,
+        range: None,
+        start: None,
+        // Off by default in the fixtures, so a test asserts a colour only when
+        // it means to; `smart_color_flips_on_the_backdrop` turns it on.
+        smart_color: false,
+    }
+}
+
+// A 600x800 page is wide enough that the 2.54 cm side margins pull the
+// right- and left-anchored numbers to clearly separate halves — a 200 pt page
+// would leave both near the middle.
+fn wide_two_page_pdf() -> Vec<u8> {
+    let objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 5 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+        "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+    ];
+
+    build_pdf(&objects)
+}
+
+// A 600x800 page painted dark across the bottom, where a page number lands,
+// and white above it.
+fn dark_bottom_pdf() -> Vec<u8> {
+    let content = "0.05 g\n0 0 600 130 re f\n";
+    let contents = format!(
+        "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+        content.len()
+    );
+    let objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R >>\nendobj\n".to_string(),
+        contents,
+    ];
+
+    build_pdf(&objects)
+}
+
+/// The extractable text of one page, its spans concatenated.
+fn extracted_text(engine: &PdfiumEngine, document_id: u64, page_number: i32) -> String {
+    engine
+        .extract_text(document_id, page_number)
+        .expect("PDFium should extract page content")
+        .into_iter()
+        .map(|span| span.text)
+        .collect::<String>()
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn numbers_every_page_and_extracts_the_label() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number every page");
+
+    for (page_number, digit) in [(1, "1"), (2, "2")] {
+        // The label lands in a band along the bottom-centre of the page.
+        let (inside, _) =
+            ink_inside_and_outside(engine, document.id, page_number, (150, 460, 250, 520));
+        assert!(inside > 0, "page {page_number} should render a page number");
+
+        let text = extracted_text(engine, document.id, page_number);
+        assert!(
+            text.contains('—') && text.contains(digit),
+            "page {page_number} should extract as a serif label, got {text:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn numbers_only_the_selected_range() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+    let mut config = page_numbers_config();
+    config.range = Some((2, 2));
+
+    engine
+        .apply_page_numbers(document.id, config)
+        .expect("PDFium should number only the range");
+
+    let band = (150, 460, 250, 520);
+    let (first, _) = ink_inside_and_outside(engine, document.id, 1, band);
+    let (second, _) = ink_inside_and_outside(engine, document.id, 2, band);
+
+    assert_eq!(first, 0, "page one is outside the range and must stay bare");
+    assert!(second > 0, "page two is in the range and must be numbered");
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn custom_start_renumbers_the_range() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+    let mut config = page_numbers_config();
+    config.range = Some((1, 2));
+    config.start = Some(10);
+
+    engine
+        .apply_page_numbers(document.id, config)
+        .expect("PDFium should renumber from the custom start");
+
+    assert!(
+        extracted_text(engine, document.id, 1).contains("10"),
+        "the range's first page prints the start"
+    );
+    assert!(
+        extracted_text(engine, document.id, 2).contains("11"),
+        "the next page counts up from it"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn duplex_mirrors_odd_and_even_pages() {
+    let engine = test_engine();
+    let document = engine
+        .open(wide_two_page_pdf())
+        .expect("PDFium should open the wide fixture");
+    let mut config = page_numbers_config();
+    config.mode = PageNumbersMode::Duplex;
+
+    engine
+        .apply_page_numbers(document.id, config)
+        .expect("PDFium should number both sides");
+
+    // The 600 pt page renders 400 px wide; its halves are cleanly apart.
+    let left_band = (10, 470, 110, 515);
+    let right_band = (300, 470, 390, 515);
+    let (odd_left, _) = ink_inside_and_outside(engine, document.id, 1, left_band);
+    let (odd_right, _) = ink_inside_and_outside(engine, document.id, 1, right_band);
+    let (even_left, _) = ink_inside_and_outside(engine, document.id, 2, left_band);
+    let (even_right, _) = ink_inside_and_outside(engine, document.id, 2, right_band);
+
+    assert!(
+        odd_right > 0 && odd_left == 0,
+        "an odd page binds bottom-right"
+    );
+    assert!(
+        even_left > 0 && even_right == 0,
+        "an even page binds bottom-left"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn smart_colour_flips_on_the_backdrop() {
+    let engine = test_engine();
+    let mut config = page_numbers_config();
+    config.smart_color = true;
+
+    // A dark drop takes white ink, so the label's band holds bright pixels the
+    // dark background could not have.
+    let dark = engine
+        .open(dark_bottom_pdf())
+        .expect("PDFium should open the dark fixture");
+    engine
+        .apply_page_numbers(dark.id, config.clone())
+        .expect("PDFium should number the dark page");
+    let image = engine
+        .render_bitmap(dark.id, 1, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+        .expect("PDFium should render the dark page")
+        .into_rgb8();
+    // The fill is near-black (~13), so any pixel well above it in the band is
+    // white ink — thin strokes anti-alias below full white at this resolution.
+    let bright = (150..250)
+        .flat_map(|x| (470..515).map(move |y| (x, y)))
+        .filter(|&(x, y)| image.get_pixel(x, y).0.iter().all(|channel| *channel > 90))
+        .count();
+    assert!(bright > 0, "a dark drop should take white ink");
+
+    // A light drop takes black ink: the band holds dark pixels a white page
+    // could not have.
+    let light = engine
+        .open(wide_two_page_pdf())
+        .expect("PDFium should open the light fixture");
+    engine
+        .apply_page_numbers(light.id, config)
+        .expect("PDFium should number the light page");
+    let image = engine
+        .render_bitmap(light.id, 1, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+        .expect("PDFium should render the light page")
+        .into_rgb8();
+    // The page is otherwise white, so any pixel well below it in the band is
+    // black ink — thin strokes anti-alias above full black at this resolution.
+    let dark_pixels = (150..250)
+        .flat_map(|x| (470..515).map(move |y| (x, y)))
+        .filter(|&(x, y)| image.get_pixel(x, y).0.iter().all(|channel| *channel < 160))
+        .count();
+    assert!(dark_pixels > 0, "a light drop should take black ink");
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn places_numbers_in_display_space_on_rotated_pages() {
+    let engine = test_engine();
+
+    for rotation in [0, 90, 180, 270] {
+        let document = engine
+            .open(rotated_blank_pdf(rotation))
+            .expect("PDFium should open the rotated fixture");
+
+        engine
+            .apply_page_numbers(document.id, page_numbers_config())
+            .expect("PDFium should number the rotated page");
+
+        let image = engine
+            .render_bitmap(document.id, 1, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+            .expect("PDFium should render the rotated page")
+            .into_rgb8();
+        let (width, height) = (image.width() as f32, image.height() as f32);
+        let mut inside = 0u64;
+        let mut outside = 0u64;
+
+        // Whichever way the page is turned, the number sits at the bottom
+        // centre of what the reader sees — the rendered image.
+        for (x, y, pixel) in image.enumerate_pixels() {
+            let ink = pixel
+                .0
+                .iter()
+                .map(|channel| (255 - *channel) as u64)
+                .sum::<u64>();
+            let centred = (x as f32) > width * 0.3 && (x as f32) < width * 0.7;
+            let low = (y as f32) > height * 0.6 && (y as f32) < height * 0.95;
+
+            if centred && low {
+                inside += ink;
+            } else {
+                outside += ink;
+            }
+        }
+
+        assert!(
+            inside > 0,
+            "rotation {rotation} should place a number at the display bottom centre"
+        );
+        assert_eq!(
+            outside, 0,
+            "rotation {rotation} should leave the rest of the page bare"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn replacing_page_numbers_does_not_stack() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number the pages");
+    let mut moved = page_numbers_config();
+    moved.position = PageNumbersPosition::BottomRight;
+    engine
+        .apply_page_numbers(document.id, moved)
+        .expect("PDFium should move the numbers");
+
+    for page_number in 1..=2 {
+        assert_eq!(
+            with_page(engine, document.id, page_number, |page| page
+                .objects()
+                .len()),
+            1,
+            "page {page_number} should carry exactly one page-number object"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn removing_page_numbers_restores_the_page() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+    let before = engine
+        .render_page(document.id, 1, 400)
+        .expect("PDFium should render the plain page");
+
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number the page");
+    engine
+        .remove_page_numbers(document.id)
+        .expect("PDFium should lift its own page numbers");
+
+    assert_eq!(
+        engine
+            .render_page(document.id, 1, 400)
+            .expect("PDFium should render the restored page"),
+        before,
+        "removing the page numbers should restore the original page"
+    );
+    for page_number in 1..=2 {
+        assert_eq!(
+            with_page(engine, document.id, page_number, |page| page
+                .objects()
+                .len()),
+            0,
+            "page {page_number} should be clean again"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn coexists_with_a_watermark() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply the watermark");
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number over the watermark");
+
+    // Both layers are on the page, page numbers on top.
+    let text = extracted_text(engine, document.id, 1);
+    assert!(
+        text.contains("DRAFT") && text.contains('—'),
+        "both layers should be present, got {text:?}"
+    );
+
+    // Removing one leaves the other exactly in place.
+    engine
+        .remove_page_numbers(document.id)
+        .expect("removing page numbers should keep the watermark");
+    let text = extracted_text(engine, document.id, 1);
+    assert!(
+        text.contains("DRAFT") && !text.contains('—'),
+        "the watermark should survive, the numbers should not: {text:?}"
+    );
+
+    engine
+        .remove_watermark(document.id)
+        .expect("removing the watermark should now clear the page");
+    assert!(
+        !extracted_text(engine, document.id, 1).contains("DRAFT"),
+        "the watermark should be gone too"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn refuses_a_foreign_page_number_tail() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number the pages");
+    let first_page_objects = with_page(engine, document.id, 1, |page| page.objects().len());
+
+    // Another editor appends content after this session's tail on page two.
+    {
+        let mut documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+        let entry = documents
+            .get_mut(&document.id)
+            .expect("the fixture should still be open");
+        let mut page = entry
+            .document
+            .pages_mut()
+            .get(1)
+            .expect("the fixture should have a second page");
+        page.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
+        page.objects_mut()
+            .create_path_object_rect(
+                PdfRect::new_from_values(10.0, 10.0, 20.0, 20.0),
+                None,
+                None,
+                Some(PdfColor::BLACK),
+            )
+            .expect("PDFium should append foreign page content");
+        page.regenerate_content()
+            .expect("PDFium should regenerate the corrupted fixture");
+        page.set_content_regeneration_strategy(
+            PdfPageContentRegenerationStrategy::AutomaticOnEveryChange,
+        );
+    }
+
+    let error = engine
+        .remove_page_numbers(document.id)
+        .expect_err("foreign page content must invalidate the ownership guard");
+
+    assert!(error.contains("no longer ends"));
+    assert_eq!(
+        with_page(engine, document.id, 1, |page| page.objects().len()),
+        first_page_objects,
+        "whole-document preflight must fail before page one is changed"
+    );
+}
+
+// A 600x800 page painted a light grey just above the luminance split across the
+// bottom, where a page number lands, and white above. The grey is close enough
+// to the 0.5 threshold that a number resampled over its own previous ink would
+// tip under and wrongly flip to white.
+fn grey_band_pdf() -> Vec<u8> {
+    let content = "0.53 g\n0 0 600 130 re f\n";
+    let contents = format!(
+        "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+        content.len()
+    );
+    let objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R >>\nendobj\n".to_string(),
+        contents,
+    ];
+
+    build_pdf(&objects)
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn smart_colour_resamples_the_backdrop_not_its_own_label() {
+    let engine = test_engine();
+    let document = engine
+        .open(grey_band_pdf())
+        .expect("PDFium should open the grey-band fixture");
+    let mut config = page_numbers_config();
+    config.smart_color = true;
+
+    // On the light-grey drop the number takes black ink.
+    let band = |image: &image::RgbImage| {
+        let mut dark = 0u32;
+        let mut bright = 0u32;
+
+        for x in 150..250 {
+            for y in 470..515 {
+                let pixel = image.get_pixel(x, y).0;
+                if pixel.iter().all(|channel| *channel < 90) {
+                    dark += 1;
+                }
+                if pixel.iter().all(|channel| *channel > 200) {
+                    bright += 1;
+                }
+            }
+        }
+
+        (dark, bright)
+    };
+
+    engine
+        .apply_page_numbers(document.id, config)
+        .expect("PDFium should number the grey page");
+    let (dark, bright) = band(
+        &engine
+            .render_bitmap(document.id, 1, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+            .expect("PDFium should render the numbered page")
+            .into_rgb8(),
+    );
+    assert!(dark > 0, "a light-grey drop should take black ink");
+    assert_eq!(bright, 0, "and not white");
+
+    // A watermark rebuilds the page-number layer, resampling the drop. The
+    // previous label is popped before the sample, so the number must read the
+    // grey drop it truly sits on — not the black label it is replacing, which
+    // would tip the average under the split and flip it to white.
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should watermark the numbered page");
+    let (dark, bright) = band(
+        &engine
+            .render_bitmap(document.id, 1, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+            .expect("PDFium should render the resampled page")
+            .into_rgb8(),
+    );
+    assert!(
+        dark > 0,
+        "the number must stay black after a resampling rebuild"
+    );
+    assert_eq!(bright, 0, "and never flip to white on its own ink");
 }
