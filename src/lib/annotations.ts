@@ -1,4 +1,8 @@
 import type { PagePoint, PagePointsRect } from "@/lib/annotationGeometry"
+import {
+  samePageNumbersConfig,
+  type PageNumbersConfig,
+} from "@/lib/pageNumbers"
 import { sameWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
 /** A colour as `#rrggbb`, the form `<input type="color">` reads and writes. */
@@ -101,6 +105,15 @@ export type WatermarkCommand = {
   previous: WatermarkConfig | null
 }
 
+export type PageNumbersCommand = {
+  /** `null` is an explicit request to remove this session's page numbers. */
+  config: PageNumbersConfig | null
+  kind: "pageNumbers"
+  pageCount: number
+  /** The configuration an undo restores, derived inside the mutation queue. */
+  previous: PageNumbersConfig | null
+}
+
 /**
  * Rearranges the whole document: `order` holds the current 1-based page
  * numbers in their new sequence. Both permutations are recorded because the
@@ -170,6 +183,7 @@ export type AnnotationCommand =
   | RectCommand
   | TextNoteCommand
   | WatermarkCommand
+  | PageNumbersCommand
   | ReorderPagesCommand
   | DeletePagesCommand
   | InsertBlankPageCommand
@@ -212,6 +226,7 @@ export function commandPages(command: AnnotationCommand): number[] {
     case "textNote":
       return [command.pageNumber]
     case "watermark":
+    case "pageNumbers":
       return everyPage(command.pageCount)
     case "reorderPages":
       return everyPage(command.order.length)
@@ -247,6 +262,7 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "rect":
     case "textNote":
     case "watermark":
+    case "pageNumbers":
       return false
   }
 }
@@ -255,6 +271,8 @@ export function movesPages(command: AnnotationCommand): boolean {
 export function commandTextPages(command: AnnotationCommand): number[] {
   switch (command.kind) {
     case "watermark":
+    // Page numbers write page-content text, the same as a watermark.
+    case "pageNumbers":
     // Structure changes move every page's extractable text somewhere else.
     case "reorderPages":
     case "deletePages":
@@ -423,6 +441,44 @@ export function planWatermarkChange(
   const command: WatermarkCommand = {
     config,
     kind: "watermark",
+    pageCount,
+    previous,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+/** The active session page numbers implied by the applied side of history. */
+export function pageNumbersConfig(
+  history: AnnotationHistory,
+): PageNumbersConfig | null {
+  for (let index = history.past.length - 1; index >= 0; index -= 1) {
+    const command = history.past[index]!.command
+
+    if (command.kind === "pageNumbers") {
+      // An explicit remove is authoritative, exactly as for a watermark.
+      return command.config
+    }
+  }
+
+  return null
+}
+
+/** Plans a page-number change from the history the mutation queue reached. */
+export function planPageNumbersChange(
+  history: AnnotationHistory,
+  config: PageNumbersConfig | null,
+  pageCount: number,
+) {
+  const previous = pageNumbersConfig(history)
+
+  if (samePageNumbersConfig(previous, config)) {
+    return null
+  }
+
+  const command: PageNumbersCommand = {
+    config,
+    kind: "pageNumbers",
     pageCount,
     previous,
   }

@@ -12,9 +12,11 @@ import {
   isDirty,
   markSaved,
   mergeFilePages,
+  pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
   planInsertBlankPage,
   planMergeFile,
+  planPageNumbersChange,
   planReorderPages,
   planWatermarkChange,
   redo,
@@ -25,6 +27,7 @@ import {
   type HighlightCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
+import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
   PdfExportOutcome,
   PdfMergeOutcome,
@@ -104,6 +107,16 @@ async function applyCommand(
         })
       } else {
         await invoke("remove_pdf_watermark", { documentId })
+      }
+      return
+    case "pageNumbers":
+      if (command.config) {
+        await invoke("apply_pdf_page_numbers", {
+          config: command.config,
+          documentId,
+        })
+      } else {
+        await invoke("remove_pdf_page_numbers", { documentId })
       }
       return
     case "reorderPages":
@@ -192,6 +205,17 @@ async function retractCommand(
         })
       } else {
         await invoke("remove_pdf_watermark", { documentId })
+      }
+
+      return
+    case "pageNumbers":
+      if (command.previous) {
+        await invoke("apply_pdf_page_numbers", {
+          config: command.previous,
+          documentId,
+        })
+      } else {
+        await invoke("remove_pdf_page_numbers", { documentId })
       }
 
       return
@@ -590,6 +614,44 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
+  /** The page-number counterpart of `setWatermark`, planned against the history
+      the shared queue has reached; reports whether the change landed. */
+  const setPageNumbers = useCallback(
+    async (config: PageNumbersConfig | null, pageCount: number) => {
+      if (documentId === undefined) {
+        return false
+      }
+
+      let failed = false
+
+      await enqueue((current) => {
+        const planned = planPageNumbersChange(current, config, pageCount)
+
+        if (!planned) {
+          return null
+        }
+        const { command } = planned
+        const pages = commandPages(command)
+
+        return {
+          next: planned.history,
+          pages,
+          textPages: pages,
+          work: async () => {
+            await applyCommand(documentId, command, onStructureChange)
+            return true
+          },
+        }
+      }, () => {
+        failed = true
+        onAnnotateError()
+      })
+
+      return !failed
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
   // Undo and redo count as page-shifting: the entry they take back may be a
   // structure edit, and a page-numbered command queued behind it would go
   // stale. Blocked conservatively rather than by peeking at the command, which
@@ -773,11 +835,13 @@ export function useAnnotations({
       isDirtyNow,
       isStructureBusyNow,
       mergeFile,
+      pageNumbersConfig: currentPageNumbersConfig(history),
       redo: redoCommand,
       reorderPages,
       renderEpochs,
       reset,
       save,
+      setPageNumbers,
       setWatermark,
       textEpochs,
       undo: undoCommand,
@@ -800,6 +864,7 @@ export function useAnnotations({
       reorderPages,
       reset,
       save,
+      setPageNumbers,
       setWatermark,
       textEpochs,
       undoCommand,

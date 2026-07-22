@@ -62,8 +62,8 @@ const en = {
     save: "Save",
     saveOptions: "Save options",
     saveNoSource: "No file to save over — exporting will save a copy",
-    saveWatermarked:
-      "A watermarked document can only be exported as a copy — its watermark cannot be lifted once the file is closed",
+    saveOwnedContent:
+      "A document with a watermark or page numbers added this session can only be exported as a copy — they cannot be lifted once the file is closed",
     saveMerged:
       "A document that merged other files can only be exported as a copy, never saved back over the first file",
     saveFailed: "This PDF could not be saved.",
@@ -108,6 +108,34 @@ const en = {
     errorMultiline: "Use a single line of text.",
     errorTooLong: "Watermark text may contain at most 256 characters.",
     errorStyle: "Choose values within the supported ranges.",
+  },
+  pageNumbers: {
+    open: "Page numbers",
+    title: "Page numbers",
+    description: "Add “— n —” page numbers along the bottom of this PDF.",
+    mode: "Printing",
+    modeSingle: "Single-sided",
+    modeDuplex: "Double-sided",
+    position: "Position",
+    positionBottomCenter: "Bottom centre",
+    positionBottomRight: "Bottom right",
+    duplexHint:
+      "Odd pages bottom-right, even pages bottom-left — mirrored for double-sided binding.",
+    rangeAll: "Number every page",
+    rangeFrom: "From",
+    rangeTo: "To",
+    start: "Start at",
+    startPlaceholder: "Page position",
+    startHint: "Leave blank to print each page’s own position.",
+    smartColor: "Smart colour",
+    smartColorHint:
+      "Numbers are black, turning white where they land on a dark area.",
+    apply: "Apply",
+    replace: "Replace",
+    remove: "Remove page numbers",
+    cancel: "Cancel",
+    errorRange: "Enter a page range within 1–{{max}}.",
+    errorStart: "Enter a whole number to start from.",
   },
   settings: {
     open: "Settings",
@@ -179,7 +207,7 @@ const en = {
     title: "TFolio",
     description: "A focused desktop workspace for reading and editing PDF files.",
     fontNotice:
-      "Chinese text in notes and watermarks is set in Noto Sans SC, used under the SIL Open Font License 1.1.",
+      "Chinese text in notes and watermarks is set in Noto Sans SC, and page numbers in Noto Serif SC, both used under the SIL Open Font License 1.1.",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const

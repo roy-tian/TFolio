@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   Download,
+  Hash,
   Highlighter,
   Redo2,
   Save,
@@ -49,6 +50,9 @@ type AnnotationToolbarProps = {
   /** Whether the document has a file of its own for the save key to write
       back to; one opened from bytes does not until an export gives it one. */
   hasSourceFile: boolean
+  /** Whether this session added page numbers still on the document; like a
+      watermark, they leave the document export-only. */
+  hasPageNumbers: boolean
   /** Whether a watermark this session added is still on the document; one may
       only be exported as a copy, never written back over the reader's file. */
   hasWatermark: boolean
@@ -59,6 +63,7 @@ type AnnotationToolbarProps = {
   onExport: () => void
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle) => void
+  onPageNumbers: () => void
   onRedo: () => void
   onSave: () => void
   onToolChange: (tool: AnnotationTool) => void
@@ -77,6 +82,7 @@ export function AnnotationToolbar({
   canUndo,
   disabled,
   hasMergedFiles,
+  hasPageNumbers,
   hasSourceFile,
   hasWatermark,
   highlightApplies,
@@ -84,6 +90,7 @@ export function AnnotationToolbar({
   isDirty,
   onExport,
   onHighlightColorChange,
+  onPageNumbers,
   onRectStyleChange,
   onRedo,
   onSave,
@@ -101,18 +108,21 @@ export function AnnotationToolbar({
   const rectLabel = t("annotate.rect")
   const textNoteLabel = t("annotate.textNote")
   const watermarkLabel = t("watermark.open")
+  const pageNumbersLabel = t("pageNumbers.open")
   const saveLabel = t("annotate.save")
   const exportLabel = t("annotate.export")
-  // Only where the reason is not already in front of the reader: a watermark or
-  // merged files they can see, or a document with no file of its own. A
-  // watermark is named first — it is the stricter, less recoverable of the two.
-  const saveTitle = hasWatermark
-    ? t("annotate.saveWatermarked")
-    : hasMergedFiles
-      ? t("annotate.saveMerged")
-      : hasSourceFile
-        ? saveLabel
-        : t("annotate.saveNoSource")
+  // Only where the reason is not already in front of the reader: session page
+  // content (a watermark or page numbers) or merged files they can see, or a
+  // document with no file of its own. Owned page content is named first — it is
+  // the stricter, less recoverable reason.
+  const saveTitle =
+    hasWatermark || hasPageNumbers
+      ? t("annotate.saveOwnedContent")
+      : hasMergedFiles
+        ? t("annotate.saveMerged")
+        : hasSourceFile
+          ? saveLabel
+          : t("annotate.saveNoSource")
 
   return (
     <>
@@ -259,6 +269,18 @@ export function AnnotationToolbar({
         >
           <Stamp />
         </Button>
+
+        <Button
+          aria-label={pageNumbersLabel}
+          className="border-input"
+          disabled={disabled}
+          onClick={onPageNumbers}
+          size="icon"
+          title={pageNumbersLabel}
+          variant="ghost"
+        >
+          <Hash />
+        </Button>
       </ButtonGroup>
 
       <ButtonGroup>
@@ -266,7 +288,12 @@ export function AnnotationToolbar({
           aria-label={saveLabel}
           className="border-r-transparent peer/save"
           disabled={
-            disabled || !hasSourceFile || !isDirty || hasWatermark || hasMergedFiles
+            disabled ||
+            !hasSourceFile ||
+            !isDirty ||
+            hasWatermark ||
+            hasPageNumbers ||
+            hasMergedFiles
           }
           onClick={onSave}
           size="icon"

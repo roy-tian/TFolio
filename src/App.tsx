@@ -23,6 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
@@ -36,6 +37,7 @@ import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
+import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useTextNoteTool } from "@/hooks/useTextNoteTool"
 import { useWatermark } from "@/hooks/useWatermark"
 import { useZoom } from "@/hooks/useZoom"
@@ -246,6 +248,12 @@ export default function App() {
     activeConfig: annotations.watermarkConfig,
     documentId: pdfDocument?.id,
     onSet: annotations.setWatermark,
+    pageCount: pdfDocument?.numPages ?? 0,
+  })
+  const pageNumbers = usePageNumbers({
+    activeConfig: annotations.pageNumbersConfig,
+    documentId: pdfDocument?.id,
+    onSet: annotations.setPageNumbers,
     pageCount: pdfDocument?.numPages ?? 0,
   })
 
@@ -1091,6 +1099,7 @@ export default function App() {
             canUndo={annotations.canUndo}
             disabled={!pdfDocument}
             hasMergedFiles={hasMergedContent}
+            hasPageNumbers={annotations.pageNumbersConfig !== null}
             hasSourceFile={Boolean(pdfDocument?.path)}
             hasWatermark={annotations.watermarkConfig !== null}
             highlightApplies={drawingApplies}
@@ -1098,6 +1107,7 @@ export default function App() {
             isDirty={annotations.isDirty}
             onExport={() => void exportPdf()}
             onHighlightColorChange={changeHighlightColor}
+            onPageNumbers={pageNumbers.openDialog}
             onRectStyleChange={changeRectStyle}
             onRedo={() => {
               // Only a page-moving step would strand the note on a page that has
@@ -1244,6 +1254,19 @@ export default function App() {
         onRemove={() => void watermark.remove()}
         open={watermark.open}
         validationError={watermark.validationError}
+      />
+
+      <PageNumbersDialog
+        draft={pageNumbers.draft}
+        hasPageNumbers={pageNumbers.hasPageNumbers}
+        isApplying={pageNumbers.isApplying}
+        onApply={() => void pageNumbers.apply()}
+        onDraftChange={pageNumbers.setDraft}
+        onOpenChange={pageNumbers.onOpenChange}
+        onRemove={() => void pageNumbers.remove()}
+        open={pageNumbers.open}
+        pageCount={pdfDocument?.numPages ?? 0}
+        validationError={pageNumbers.validationError}
       />
 
       {isDragging ? (

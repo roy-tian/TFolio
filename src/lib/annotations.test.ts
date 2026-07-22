@@ -14,9 +14,11 @@ import {
   markSaved,
   mergeFilePages,
   movesPages,
+  pageNumbersConfig,
   planDeletePages,
   planInsertBlankPage,
   planMergeFile,
+  planPageNumbersChange,
   planReorderPages,
   planWatermarkChange,
   redo,
@@ -25,6 +27,7 @@ import {
   type AnnotationCommand,
   type AnnotationHistory,
 } from "@/lib/annotations"
+import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { defaultWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
 function highlight(...pageNumbers: number[]): AnnotationCommand {
@@ -51,6 +54,26 @@ function watermark(
   return { config, kind: "watermark", pageCount: 3, previous }
 }
 
+function pageNumbersConfigValue(
+  overrides: Partial<PageNumbersConfig> = {},
+): PageNumbersConfig {
+  return {
+    mode: "single",
+    position: "bottomCenter",
+    range: null,
+    smartColor: true,
+    start: null,
+    ...overrides,
+  }
+}
+
+function pageNumbers(
+  config: PageNumbersConfig | null,
+  previous: PageNumbersConfig | null = null,
+): AnnotationCommand {
+  return { config, kind: "pageNumbers", pageCount: 3, previous }
+}
+
 describe("commandPages", () => {
   it("reports the page a single-page command writes to", () => {
     expect(commandPages(highlight(3))).toEqual([3])
@@ -66,8 +89,17 @@ describe("commandPages", () => {
     expect(commandPages(watermark(defaultWatermarkConfig()))).toEqual([1, 2, 3])
   })
 
+  it("reports every page a page-number change covers", () => {
+    expect(commandPages(pageNumbers(pageNumbersConfigValue()))).toEqual([
+      1, 2, 3,
+    ])
+  })
+
   it("invalidates extracted text only for page-content watermarks", () => {
     expect(commandTextPages(highlight(2))).toEqual([])
+    expect(commandTextPages(pageNumbers(pageNumbersConfigValue()))).toEqual([
+      1, 2, 3,
+    ])
     expect(commandTextPages(watermark(defaultWatermarkConfig()))).toEqual([
       1, 2, 3,
     ])
@@ -111,6 +143,40 @@ describe("watermarkConfig", () => {
     expect(planned.command.previous).toEqual(first)
     expect(watermarkConfig(planned.history)).toEqual(second)
     expect(planWatermarkChange(planned.history, second, 3)).toBeNull()
+  })
+})
+
+describe("pageNumbersConfig", () => {
+  const first = pageNumbersConfigValue({ position: "bottomRight" })
+  const second = pageNumbersConfigValue({ mode: "duplex", range: [2, 3] })
+
+  it("tracks apply, replace, explicit remove, undo, and redo", () => {
+    const applied = historyOf(pageNumbers(first))
+    const replaced = commit(applied, pageNumbers(second, first))
+    const removed = commit(replaced, pageNumbers(null, second))
+
+    expect(pageNumbersConfig(applied)).toEqual(first)
+    expect(pageNumbersConfig(replaced)).toEqual(second)
+    expect(pageNumbersConfig(removed)).toBeNull()
+    expect(pageNumbersConfig(undo(removed)!.history)).toEqual(second)
+    expect(pageNumbersConfig(redo(undo(removed)!.history)!.history)).toBeNull()
+  })
+
+  it("plans previous from the queue's history and skips a no-op", () => {
+    const queued = historyOf(pageNumbers(first), highlight(2))
+    const planned = planPageNumbersChange(queued, second, 3)!
+
+    expect(planned.command.previous).toEqual(first)
+    expect(pageNumbersConfig(planned.history)).toEqual(second)
+    expect(planPageNumbersChange(planned.history, second, 3)).toBeNull()
+  })
+
+  it("is independent of the watermark layer in one history", () => {
+    const wm = { ...defaultWatermarkConfig(), text: "DRAFT" }
+    const history = historyOf(watermark(wm), pageNumbers(first))
+
+    expect(watermarkConfig(history)).toEqual(wm)
+    expect(pageNumbersConfig(history)).toEqual(first)
   })
 })
 
@@ -260,9 +326,13 @@ describe("movesPages", () => {
       expect(movesPages(command)).toBe(true)
     }
 
-    // An annotation or watermark leaves every page where it was, so undoing one
-    // must not discard a note the reader is still typing.
-    for (const command of [highlight(1), watermark(null)]) {
+    // An annotation, watermark, or page number leaves every page where it was,
+    // so undoing one must not discard a note the reader is still typing.
+    for (const command of [
+      highlight(1),
+      watermark(null),
+      pageNumbers(pageNumbersConfigValue()),
+    ]) {
       expect(movesPages(command)).toBe(false)
     }
   })
