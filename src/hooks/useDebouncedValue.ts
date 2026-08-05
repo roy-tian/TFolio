@@ -3,10 +3,10 @@ import { useEffect, useState } from "react"
 /**
  * `value`, held back until it has gone `delayMs` without changing.
  *
- * The first value is passed straight through, and so is any change that lands
- * after things have settled: the delay is only ever paid by a burst. That is
- * what lets a caller drive layout from the live value and rendering from this
- * one — the two agree except while the value is actually moving.
+ * This hook belongs at the viewer boundary, not inside every page. Layout can
+ * follow the committed zoom immediately while the handful of near-viewport
+ * surfaces keep stretching their existing canvases until one final render size
+ * settles for the whole document.
  */
 export function useDebouncedValue<T>(value: T, delayMs: number) {
   const [settled, setSettled] = useState(value)

@@ -102,20 +102,38 @@ export function stripedPdf() {
   ])
 }
 
-/**
- * A one-page PDF with a line of real text, so there is something to select and
- * something for a highlight to sit over.
- */
-export function textPdf() {
-  const content = "BT\n/F1 24 Tf\n40 200 Td\n(Highlight me please) Tj\nET\n"
+/** Pages with one line of real text each, for selection and highlight tests. */
+export function textPdf(pageCount = 1) {
+  const fontId = 3 + pageCount * 2
+  const pages = Array.from({ length: pageCount }, (_, index) => {
+    const pageId = 3 + index
+    const contentId = 3 + pageCount + index
+
+    return (
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] ` +
+      `/Resources << /Font << /F1 ${fontId} 0 R >> >> ` +
+      `/Contents ${contentId} 0 R >>\nendobj\n`
+    )
+  })
+  const contents = Array.from({ length: pageCount }, (_, index) => {
+    const contentId = 3 + pageCount + index
+    const content =
+      `BT\n/F1 24 Tf\n40 200 Td\n(Highlight me please ${index + 1}) Tj\nET\n`
+
+    return (
+      `${contentId} 0 obj\n<< /Length ${content.length} >>\n` +
+      `stream\n${content}endstream\nendobj\n`
+    )
+  })
 
   return buildPdf([
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
-      "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
-    `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
-    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    `2 0 obj\n<< /Type /Pages /Kids [${pages
+      .map((_, index) => `${3 + index} 0 R`)
+      .join(" ")}] /Count ${pageCount} >>\nendobj\n`,
+    ...pages,
+    ...contents,
+    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
   ])
 }
 
@@ -219,10 +237,10 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
  * accept and store a mark it then declines to draw. Only the canvas can say
  * whether the reader can actually see it.
  */
-export function pageInk() {
-  return browser.execute(() => {
+export function pageInk(pageNumber = 1) {
+  return browser.execute((targetPage: number) => {
     const canvas = document.querySelector<HTMLCanvasElement>(
-      "[data-page-number='1'] canvas",
+      `[data-page-number='${targetPage}'] canvas`,
     )!
     const { data } = canvas.getContext("2d")!.getImageData(
       0,
@@ -237,7 +255,7 @@ export function pageInk() {
     }
 
     return ink
-  })
+  }, pageNumber)
 }
 
 /** A position-sensitive digest of page 1's pixels. */

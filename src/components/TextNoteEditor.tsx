@@ -12,6 +12,7 @@ import {
   fractionToClientPoint,
   pagePointToFraction,
 } from "@/lib/annotationGeometry"
+import { ZOOM_PREVIEW_EVENT } from "@/lib/zoom"
 import type { TextNoteFontFamily, TextNoteStyle } from "@/lib/annotations"
 import {
   isTextNoteFontFamily,
@@ -163,6 +164,10 @@ export function TextNoteEditor({
     // Capture, because the page scrolls inside the viewer rather than the
     // window: without it a scroll on an inner element would not be heard.
     viewer.addEventListener("scroll", measure, { capture: true, passive: true })
+    // Ctrl+wheel previews move the page on the compositor before its layout box
+    // is committed. Follow that one lightweight event so the screen-space editor
+    // stays pinned to its point throughout the gesture, not only after it ends.
+    viewer.addEventListener(ZOOM_PREVIEW_EVENT, measure)
     window.addEventListener("resize", measure)
 
     // Scrolling moves the page; zooming resizes it, and does so by writing the
@@ -182,6 +187,7 @@ export function TextNoteEditor({
     return () => {
       observer.disconnect()
       viewer.removeEventListener("scroll", measure, { capture: true })
+      viewer.removeEventListener(ZOOM_PREVIEW_EVENT, measure)
       window.removeEventListener("resize", measure)
     }
   }, [draft.pageNumber, measure, viewerRef])

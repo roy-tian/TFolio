@@ -50,6 +50,9 @@ export const CONTENT_PADDING_Y = 64
 // Tailwind class because the column arithmetic has to agree with it.
 export const BOOK_GAP = 20
 
+/** Screen-space overlays listen for compositor-only page motion during a zoom. */
+export const ZOOM_PREVIEW_EVENT = "tfolio:zoom-preview"
+
 export function clampZoom(scale: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
 }

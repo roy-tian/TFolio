@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react"
+import { useEffect, useState, type RefObject } from "react"
 
 import {
   clampFraction,
@@ -16,6 +16,8 @@ type UseHighlightToolOptions = {
   opacity: number
   pages: PdfPageInfo[]
   rotation: number
+  /** Whether native text selection is available, even without the highlighter. */
+  selectable: boolean
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -99,10 +101,14 @@ export function useHighlightTool({
   opacity,
   pages,
   rotation,
+  selectable,
   viewerRef,
 }: UseHighlightToolOptions) {
+  const [selectionDragging, setSelectionDragging] = useState(false)
+
   useEffect(() => {
-    if (!active) {
+    if (!selectable) {
+      setSelectionDragging(false)
       return
     }
 
@@ -116,15 +122,22 @@ export function useHighlightTool({
 
       startedOnText =
         target instanceof Element && target.closest(".pdf-text-layer") !== null
+      setSelectionDragging(startedOnText)
     }
 
     // Bound on the document: a drag that runs off the page still ends there.
     const handlePointerUp = () => {
       if (!startedOnText) {
+        setSelectionDragging(false)
         return
       }
 
       startedOnText = false
+      setSelectionDragging(false)
+
+      if (!active) {
+        return
+      }
 
       const viewer = viewerRef.current
       const selection = window.getSelection()
@@ -164,12 +177,21 @@ export function useHighlightTool({
       selection.removeAllRanges()
     }
 
+    const handlePointerCancel = () => {
+      startedOnText = false
+      setSelectionDragging(false)
+    }
+
     document.addEventListener("pointerdown", handlePointerDown)
+    document.addEventListener("pointercancel", handlePointerCancel)
     document.addEventListener("pointerup", handlePointerUp)
 
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown)
+      document.removeEventListener("pointercancel", handlePointerCancel)
       document.removeEventListener("pointerup", handlePointerUp)
     }
-  }, [active, color, onCommit, opacity, pages, rotation, viewerRef])
+  }, [active, color, onCommit, opacity, pages, rotation, selectable, viewerRef])
+
+  return selectionDragging
 }

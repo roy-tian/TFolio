@@ -257,13 +257,17 @@ export default function App() {
     pageCount: pdfDocument?.numPages ?? 0,
   })
 
-  useHighlightTool({
+  const textSelectionDragging = useHighlightTool({
     active: Boolean(pdfDocument) && drawingApplies && activeTool === "highlight",
     color: highlightColor,
     onCommit: annotations.commit,
     opacity: HIGHLIGHT_OPACITY,
     pages: pdfDocument?.pages ?? [],
     rotation,
+    selectable:
+      Boolean(pdfDocument) &&
+      drawingApplies &&
+      (activeTool === null || activeTool === "highlight"),
     viewerRef,
   })
 
@@ -507,7 +511,13 @@ export default function App() {
   const cancelTextNote = textNote.cancel
   const commitTextNote = textNote.commit
 
-  useCurrentPageTracker(viewerRef, pdfDocument?.id, viewMode, setCurrentPage)
+  useCurrentPageTracker(
+    viewerRef,
+    pdfDocument?.id,
+    viewMode,
+    setCurrentPage,
+    zoom.zoomPreviewing,
+  )
 
   // Native drag-and-drop, because `dragDropEnabled` is on: Tauri consumes the
   // OS drag itself — HTML5 `dataTransfer` never sees these files — and it is
@@ -1170,6 +1180,7 @@ export default function App() {
                 onReorderPages: (order) => void reorderFiles(order),
                 ranges,
               }}
+              key={pdfDocument.id}
               pageEdit={{
                 onDeletePage: deleteThumbnailPage,
                 onInsertBlankPage: insertBlankPage,
@@ -1184,8 +1195,10 @@ export default function App() {
               rotation={rotation}
               scale={zoom.scale}
               textEpochs={annotations.textEpochs}
+              textSelectionDragging={textSelectionDragging}
               viewMode={viewMode}
               viewerWidth={viewerWidth}
+              zoomPreviewing={zoom.zoomPreviewing}
             />
           ) : (
             <div className="grid min-h-full place-items-center p-8">

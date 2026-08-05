@@ -25,6 +25,7 @@ import {
   resolveZoomScale,
   stepZoomPercent,
   zoomToPercent,
+  ZOOM_PREVIEW_EVENT,
   type ZoomState,
 } from "@/lib/zoom"
 
@@ -41,6 +42,22 @@ type ZoomAnchor = {
   fractionY: number
   pageNumber: number
 }
+
+type ZoomPreview = {
+  baseScale: number
+  clientX: number
+  clientY: number
+  layoutLeft: number
+  layoutTop: number
+  scale: number
+  scrollLeft: number
+  scrollTop: number
+}
+
+// One viewer-level timer replaces the former timer in every mounted page. The
+// gesture stays on the compositor until it has been quiet for this long, then a
+// single React layout and PDFium render are committed.
+const WHEEL_PREVIEW_SETTLE_MS = 150
 
 type UseZoomOptions = {
   /** Height available to pages, once the column's padding is out. */
@@ -66,12 +83,18 @@ export function useZoom({
   viewerRef,
 }: UseZoomOptions) {
   const [zoom, setZoom] = useState<ZoomState>(defaultZoomState)
+  const [zoomPreviewing, setZoomPreviewing] = useState(false)
   // Bumped by every zoom the reader asks for, and what the anchor below is paid
   // back against. Watching the scale instead would strand an anchor whenever a
   // zoom resolved to the scale already showing — pressing `+` at the maximum,
   // say — leaving it to be paid back against some later, unrelated zoom.
   const [zoomRequest, setZoomRequest] = useState(0)
   const anchorRef = useRef<ZoomAnchor | null>(null)
+  const previewRef = useRef<ZoomPreview | null>(null)
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+  const previewDeadlineRef = useRef(0)
 
   const { referenceHeight, referenceWidth, widestWidth } = useMemo(
     () => referenceDimensions(pages, rotation),
@@ -120,6 +143,30 @@ export function useZoom({
     scaleRef.current = scale
     currentPageRef.current = currentPage
   }, [currentPage, scale])
+
+  const clearPreviewTransform = useCallback(() => {
+    const layout = viewerRef.current?.querySelector<HTMLElement>(
+      "[data-pdf-viewer-layout]",
+    )
+
+    if (!layout) {
+      return
+    }
+
+    layout.style.removeProperty("transform")
+    layout.style.removeProperty("transform-origin")
+    layout.style.removeProperty("will-change")
+  }, [viewerRef])
+
+  const cancelPreview = useCallback(() => {
+    clearTimeout(previewTimerRef.current)
+    previewTimerRef.current = undefined
+    previewDeadlineRef.current = 0
+    previewRef.current = null
+    anchorRef.current = null
+    clearPreviewTransform()
+    setZoomPreviewing(false)
+  }, [clearPreviewTransform])
 
   const captureAnchor = useCallback(
     (clientX: number, clientY: number) => {
@@ -181,11 +228,67 @@ export function useZoom({
     [],
   )
 
-  // Pages only ever resize on a zoom, never unmount, so the anchor can be paid
-  // back synchronously against the real post-zoom rect and never be seen.
+  const commitPreview = useCallback(() => {
+    const preview = previewRef.current
+
+    if (!preview) {
+      return
+    }
+
+    const anchor = anchorRef.current
+    const viewer = viewerRef.current
+
+    if (anchor && viewer) {
+      // Scrolling moves every transformed point by the opposite viewport delta.
+      // Carry that exact movement into the final anchor before replacing the
+      // compositor picture with real layout, independent of scroll-event timing.
+      anchor.clientX -= viewer.scrollLeft - preview.scrollLeft
+      anchor.clientY -= viewer.scrollTop - preview.scrollTop
+    }
+
+    clearTimeout(previewTimerRef.current)
+    previewTimerRef.current = undefined
+    previewDeadlineRef.current = 0
+    previewRef.current = null
+    requestZoom({ customScale: preview.scale, mode: "custom" })
+    setZoomPreviewing(false)
+  }, [requestZoom, viewerRef])
+
+  const schedulePreviewCommit = useCallback(() => {
+    previewDeadlineRef.current = performance.now() + WHEEL_PREVIEW_SETTLE_MS
+
+    // Keep one active timer for the viewer. If more wheel frames arrive, only
+    // move its deadline; when it wakes it either commits or sleeps for the small
+    // remainder. A long gesture no longer creates and cancels a timer per frame.
+    if (previewTimerRef.current !== undefined) {
+      return
+    }
+
+    const settle = () => {
+      const remaining = previewDeadlineRef.current - performance.now()
+
+      if (remaining > 0) {
+        previewTimerRef.current = setTimeout(settle, remaining)
+        return
+      }
+
+      previewTimerRef.current = undefined
+      commitPreview()
+    }
+
+    previewTimerRef.current = setTimeout(settle, WHEEL_PREVIEW_SETTLE_MS)
+  }, [commitPreview])
+
+  // Page shells only resize on a zoom, so the anchor can be paid back
+  // synchronously against the real post-zoom rect and never be seen.
   useLayoutEffect(() => {
     const anchor = anchorRef.current
     const viewer = viewerRef.current
+
+    // The preview still represents the old layout. Remove it in the same layout
+    // effect that reconciles the newly committed page boxes, before either state
+    // can be painted, so the reader never sees an unscaled or double-scaled frame.
+    clearPreviewTransform()
 
     if (!anchor || !viewer) {
       return
@@ -204,22 +307,25 @@ export function useZoom({
     const rect = page.getBoundingClientRect()
     viewer.scrollLeft += rect.left + anchor.fractionX * rect.width - anchor.clientX
     viewer.scrollTop += rect.top + anchor.fractionY * rect.height - anchor.clientY
-  }, [viewerRef, zoomRequest])
+  }, [clearPreviewTransform, viewerRef, zoomRequest])
 
   const zoomTo = useCallback(
     (nextScale: number) => {
+      cancelPreview()
       captureCentreAnchor()
       requestZoom({ customScale: nextScale, mode: "custom" })
     },
-    [captureCentreAnchor, requestZoom],
+    [cancelPreview, captureCentreAnchor, requestZoom],
   )
 
   const zoomIn = useCallback(() => {
-    zoomTo(stepZoomPercent(zoomToPercent(scaleRef.current), 1) / 100)
+    const liveScale = previewRef.current?.scale ?? scaleRef.current
+    zoomTo(stepZoomPercent(zoomToPercent(liveScale), 1) / 100)
   }, [zoomTo])
 
   const zoomOut = useCallback(() => {
-    zoomTo(stepZoomPercent(zoomToPercent(scaleRef.current), -1) / 100)
+    const liveScale = previewRef.current?.scale ?? scaleRef.current
+    zoomTo(stepZoomPercent(zoomToPercent(liveScale), -1) / 100)
   }, [zoomTo])
 
   const resetZoom = useCallback(() => {
@@ -227,6 +333,7 @@ export function useZoom({
   }, [zoomTo])
 
   const toggleFit = useCallback(() => {
+    cancelPreview()
     captureCentreAnchor()
     // The custom scale rides along untouched, so leaving a fit later resumes the
     // zoom the reader last picked.
@@ -234,13 +341,13 @@ export function useZoom({
       customScale: current.customScale,
       mode: nextFitMode(current.mode),
     }))
-  }, [captureCentreAnchor, requestZoom])
+  }, [cancelPreview, captureCentreAnchor, requestZoom])
 
   /** For a newly opened document, which has no reading position to keep. */
   const resetToDefault = useCallback(() => {
-    anchorRef.current = null
+    cancelPreview()
     setZoom(defaultZoomState)
-  }, [])
+  }, [cancelPreview])
 
   useEffect(() => {
     const viewer = viewerRef.current
@@ -279,21 +386,68 @@ export function useZoom({
         frame = 0
         const delta = pendingDelta
         pendingDelta = 0
-        captureAnchor(pointerX, pointerY)
-        requestZoom({
-          customScale: applyWheelZoom(scaleRef.current, delta),
-          mode: "custom",
-        })
+        const viewerLayout = viewer.querySelector<HTMLElement>(
+          "[data-pdf-viewer-layout]",
+        )
+
+        if (!viewerLayout) {
+          return
+        }
+
+        let preview = previewRef.current
+
+        if (!preview) {
+          // Capture both anchors once. Every following wheel frame is a single
+          // compositor transform; the page geometry is not read again until the
+          // final scale is committed.
+          captureAnchor(pointerX, pointerY)
+          const layoutRect = viewerLayout.getBoundingClientRect()
+          preview = {
+            baseScale: scaleRef.current,
+            clientX: pointerX,
+            clientY: pointerY,
+            layoutLeft: layoutRect.left,
+            layoutTop: layoutRect.top,
+            scale: scaleRef.current,
+            scrollLeft: viewer.scrollLeft,
+            scrollTop: viewer.scrollTop,
+          }
+          previewRef.current = preview
+          viewerLayout.style.transformOrigin = "0 0"
+          viewerLayout.style.willChange = "transform"
+          setZoomPreviewing(true)
+        }
+
+        preview.scale = applyWheelZoom(preview.scale, delta)
+        const ratio = preview.scale / preview.baseScale
+        const anchorX = preview.clientX - preview.layoutLeft
+        const anchorY = preview.clientY - preview.layoutTop
+        const translateX = anchorX * (1 - ratio)
+        const translateY = anchorY * (1 - ratio)
+        viewerLayout.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${ratio})`
+        viewer.dispatchEvent(new Event(ZOOM_PREVIEW_EVENT))
+
+        schedulePreviewCommit()
       })
     }
 
     viewer.addEventListener("wheel", handleWheel, { passive: false })
+    viewer.addEventListener("scroll", commitPreview, { passive: true })
 
     return () => {
       viewer.removeEventListener("wheel", handleWheel)
+      viewer.removeEventListener("scroll", commitPreview)
       cancelAnimationFrame(frame)
+      cancelPreview()
     }
-  }, [captureAnchor, disabled, requestZoom, viewerRef])
+  }, [
+    cancelPreview,
+    captureAnchor,
+    commitPreview,
+    disabled,
+    schedulePreviewCommit,
+    viewerRef,
+  ])
 
   return {
     canZoomIn: percent < MAX_ZOOM * 100,
@@ -307,5 +461,6 @@ export function useZoom({
     zoomMode: zoom.mode,
     zoomOut,
     zoomPercent: percent,
+    zoomPreviewing,
   }
 }

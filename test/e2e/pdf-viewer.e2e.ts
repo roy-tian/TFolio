@@ -280,11 +280,139 @@ describe("TFolio PDF viewer", () => {
     // Ctrl+wheel zooms; the same wheel without it is an ordinary scroll.
     await zoom().click()
     await expect(zoom()).toHaveText("100%")
-    await wheelOverViewer({ ctrlKey: true, deltaY: -300 })
+    const widthBeforePreview = (await pageBox()).width
+    const preview = (await browser.executeAsync((done) => {
+      const viewer = document.querySelector("main")!
+      const rect = viewer.getBoundingClientRect()
+      let remaining = 8
+
+      const tick = () => {
+        viewer.dispatchEvent(
+          new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+            ctrlKey: true,
+            deltaY: -12,
+          }),
+        )
+        remaining -= 1
+
+        if (remaining > 0) {
+          requestAnimationFrame(tick)
+          return
+        }
+
+        // The app consumes the last wheel in its own next animation frame.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const layout = document.querySelector<HTMLElement>(
+              "[data-pdf-viewer-layout]",
+            )!
+            done({
+              layoutTransform: layout.style.transform,
+              pageWidth: document.querySelector<HTMLElement>(
+                "[data-page-number='1']",
+              )!.offsetWidth,
+              zoomText: document.querySelector<HTMLButtonElement>(
+                "button[aria-label='Actual size']",
+              )!.textContent,
+            })
+          }),
+        )
+      }
+
+      requestAnimationFrame(tick)
+    })) as { layoutTransform: string; pageWidth: number; zoomText: string }
+
+    // The burst is one compositor transform. React page boxes and the toolbar
+    // stay at the committed scale until the viewer-level settle timer fires.
+    expect(preview.layoutTransform).toContain("scale(")
+    expect(preview.pageWidth).toBe(widthBeforePreview)
+    expect(preview.zoomText).toBe("100%")
+
     await browser.waitUntil(async () => (await zoom().getText()) !== "100%", {
       timeout: 5_000,
       timeoutMsg: "ctrl+wheel did not zoom",
     })
+
+    const committedPreview = await browser.execute(() => ({
+      layoutTransform: document.querySelector<HTMLElement>(
+        "[data-pdf-viewer-layout]",
+      )!.style.transform,
+      pageWidth: document.querySelector<HTMLElement>(
+        "[data-page-number='1']",
+      )!.offsetWidth,
+    }))
+    expect(committedPreview.layoutTransform).toBe("")
+    expect(committedPreview.pageWidth).toBeGreaterThan(widthBeforePreview)
+
+    const scrolledPreview = (await browser.executeAsync((done) => {
+      const viewer = document.querySelector("main")!
+      const viewerRect = viewer.getBoundingClientRect()
+
+      viewer.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          clientX: viewerRect.left + viewerRect.width / 2,
+          clientY: viewerRect.top + viewerRect.height / 2,
+          ctrlKey: true,
+          deltaY: -60,
+        }),
+      )
+
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const layout = document.querySelector<HTMLElement>(
+            "[data-pdf-viewer-layout]",
+          )!
+          const page = document.querySelector<HTMLElement>(
+            "[data-page-number='1']",
+          )!
+          const topBeforeScroll = page.getBoundingClientRect().top
+          viewer.scrollTop = Math.min(
+            viewer.scrollTop + 80,
+            viewer.scrollHeight - viewer.clientHeight,
+          )
+
+          done({
+            layoutTransform: layout.style.transform,
+            pageTopAfterScroll: page.getBoundingClientRect().top,
+            scrollMovement: topBeforeScroll - page.getBoundingClientRect().top,
+          })
+        }),
+      )
+    })) as {
+      layoutTransform: string
+      pageTopAfterScroll: number
+      scrollMovement: number
+    }
+    expect(scrolledPreview.layoutTransform).toContain("scale(")
+    expect(scrolledPreview.scrollMovement).toBeGreaterThan(40)
+
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () =>
+            document.querySelector<HTMLElement>("[data-pdf-viewer-layout]")!
+              .style.transform === "",
+        ),
+      { timeout: 5_000, timeoutMsg: "scroll did not settle the zoom preview" },
+    )
+    const pageTopAfterCommit = await browser.execute(
+      () =>
+        document
+          .querySelector<HTMLElement>("[data-page-number='1']")!
+          .getBoundingClientRect().top,
+    )
+    // The compositor also scales the fixed page gap/padding while the committed
+    // layout deliberately does not. Allow that sub-5px reconciliation, but not
+    // the ~80px snap-back this regression produced before scroll rebasing.
+    expect(
+      Math.abs(pageTopAfterCommit - scrolledPreview.pageTopAfterScroll),
+    ).toBeLessThan(5)
 
     const zoomed = await zoom().getText()
     await wheelOverViewer({ ctrlKey: false, deltaY: -300 })
@@ -301,6 +429,48 @@ describe("TFolio PDF viewer", () => {
     // Leaving the grid brings them back, still at the zoom they were left at.
     await $("button[aria-label='Single page']").click()
     await expect(zoom()).toHaveText(zoomed)
+  })
+
+  it("keeps only near-viewport full-page surfaces mounted", async () => {
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        window.localStorage.setItem(keys.viewMode, "single")
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
+    await browser.refresh()
+    await openPdfFromDisk("forty-pages.pdf", minimalPdf(40))
+    await $("[data-page-number='1'] canvas").waitForExist()
+
+    const initialSurfaces = await browser.execute(() => ({
+      canvases: document.querySelectorAll("[data-page-number] canvas").length,
+      pages: document.querySelectorAll("[data-page-number]").length,
+    }))
+    expect(initialSurfaces.pages).toBe(40)
+    expect(initialSurfaces.canvases).toBeLessThan(initialSurfaces.pages)
+
+    const pageInput = await $("input[aria-label='Page number']")
+    await pageInput.setValue("40")
+    await browser.keys("Enter")
+    await $("[data-page-number='40'] canvas").waitForExist({ timeout: 10_000 })
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () => !document.querySelector("[data-page-number='1'] canvas"),
+        ),
+      {
+        timeout: 10_000,
+        timeoutMsg: "the offscreen first-page surface was not evicted",
+      },
+    )
+
+    const finalSurfaces = await browser.execute(() => ({
+      canvases: document.querySelectorAll("[data-page-number] canvas").length,
+      pages: document.querySelectorAll("[data-page-number]").length,
+    }))
+    expect(finalSurfaces.pages).toBe(40)
+    expect(finalSurfaces.canvases).toBeLessThan(finalSurfaces.pages)
   })
 
   // Landscape thumbnail rows are a fraction of a page's height. Page tracking

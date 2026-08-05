@@ -6,6 +6,7 @@ import { FileCard } from "@/components/FileCard"
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
 import { useFileCardDrag } from "@/hooks/useFileCardDrag"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
@@ -27,6 +28,11 @@ import {
   type ViewMode,
 } from "@/lib/viewMode"
 import { BOOK_GAP, CONTENT_PADDING_X } from "@/lib/zoom"
+
+// The wheel preview has already collapsed a gesture into one layout commit.
+// Holding its bitmap resolution a little longer also coalesces rapid toolbar
+// clicks and resize-driven fits without putting a timer in every page.
+const RENDER_SETTLE_MS = 150
 
 /** Everything the thumbnail grid's page editing needs from its owner. */
 export type PageEditProps = {
@@ -60,11 +66,16 @@ type LayoutProps = {
   referencePageWidth: number
   /** How many times each page has been drawn on, keyed by page number. */
   renderEpochs: RenderEpochs
+  renderScale: number
   rotation: number
   /** Resolved zoom; the fit modes have already been worked out against it. */
   scale: number
   /** How many times each page's extracted text has changed. */
   textEpochs: RenderEpochs
+  /** Freeze the current heavy-page window during compositor-only zoom. */
+  virtualizationPaused: boolean
+  /** Preserve pages already crossed by an active text-selection drag. */
+  virtualizationRetainExited: boolean
 }
 
 function SingleLayout({
@@ -72,9 +83,12 @@ function SingleLayout({
   draft,
   pages,
   renderEpochs,
+  renderScale,
   rotation,
   scale,
   textEpochs,
+  virtualizationPaused,
+  virtualizationRetainExited,
 }: LayoutProps) {
   return pages.map((page, index) => (
     <PdfPage
@@ -84,9 +98,12 @@ function SingleLayout({
       page={page}
       pageNumber={index + 1}
       renderEpoch={renderEpochs[index + 1] ?? 0}
+      renderScale={renderScale}
       rotation={rotation}
       scale={scale}
       textEpoch={textEpochs[index + 1] ?? 0}
+      virtualizationPaused={virtualizationPaused}
+      virtualizationRetainExited={virtualizationRetainExited}
     />
   ))
 }
@@ -97,15 +114,19 @@ function BookLayout({
   pages,
   referencePageWidth,
   renderEpochs,
+  renderScale,
   rotation,
   scale,
   textEpochs,
+  virtualizationPaused,
+  virtualizationRetainExited,
 }: LayoutProps) {
   // Both halves of a spread share one width: two columns of visibly different
   // widths would read as broken, where a single column simply following each
   // page's own size does not. A trailing odd page keeps the left cell and stays
   // this size rather than stretching across the spread.
   const columnWidth = Math.round(referencePageWidth * scale)
+  const renderColumnWidth = Math.round(referencePageWidth * renderScale)
 
   return pairPages(pages.length).map((row) => (
     <div
@@ -123,9 +144,13 @@ function BookLayout({
           page={pages[pageNumber - 1]}
           pageNumber={pageNumber}
           renderEpoch={renderEpochs[pageNumber] ?? 0}
+          renderScale={renderScale}
+          renderWidth={renderColumnWidth}
           rotation={rotation}
           scale={scale}
           textEpoch={textEpochs[pageNumber] ?? 0}
+          virtualizationPaused={virtualizationPaused}
+          virtualizationRetainExited={virtualizationRetainExited}
           width={columnWidth}
         />
       ))}
@@ -433,6 +458,8 @@ type PdfViewerLayoutProps = {
   textEpochs: RenderEpochs
   viewMode: ViewMode
   viewerWidth: number
+  textSelectionDragging: boolean
+  zoomPreviewing: boolean
 }
 
 /**
@@ -455,8 +482,11 @@ export function PdfViewerLayout({
   textEpochs,
   viewMode,
   viewerWidth,
+  textSelectionDragging,
+  zoomPreviewing,
 }: PdfViewerLayoutProps) {
   const contentWidth = Math.max(0, viewerWidth - CONTENT_PADDING_X)
+  const renderScale = useDebouncedValue(scale, RENDER_SETTLE_MS)
   const layoutProps = {
     contentWidth,
     documentId,
@@ -464,14 +494,18 @@ export function PdfViewerLayout({
     pages,
     referencePageWidth,
     renderEpochs,
+    renderScale,
     rotation,
     scale,
     textEpochs,
+    virtualizationPaused: zoomPreviewing,
+    virtualizationRetainExited: textSelectionDragging,
   }
 
   return (
     <div
       aria-label={fileName}
+      data-pdf-viewer-layout
       // `min-w-fit` is what keeps a zoomed-in page reachable. Without it this
       // box would only ever be as wide as the viewer, and `items-center` would
       // centre an overflowing page by splitting the overflow across both sides

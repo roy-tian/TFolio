@@ -127,4 +127,78 @@ describe("TFolio annotations", () => {
     await expect($("button[aria-label='Undo']")).toBeDisabled()
     expect(await pageInk()).toBe(clean)
   })
+
+  it("keeps both ends of a cross-page selection mounted until highlight commit", async () => {
+    await browser.refresh()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("cross-page-text.pdf", textPdf(6))
+    await renderedPage()
+    await $("[data-page-number='1'] .pdf-text-layer span").waitForExist({
+      timeout: 15_000,
+    })
+    const cleanFirst = await pageInk(1)
+
+    await $("button[aria-label='Highlight text']").click()
+    await browser.execute(() => {
+      const span = document.querySelector<HTMLElement>(
+        "[data-page-number='1'] .pdf-text-layer span",
+      )!
+      const text = span.firstChild!
+      const range = document.createRange()
+
+      span.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
+      range.setStart(text, 0)
+      range.collapse(true)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+    })
+    // Let the selection-drag retention reach every page shell before the
+    // programmatic scroll stands in for native selection auto-scroll.
+    await browser.pause(100)
+
+    await browser.execute(() => {
+      document
+        .querySelector("[data-page-number='6']")!
+        .scrollIntoView({ block: "center" })
+    })
+    await $("[data-page-number='6'] .pdf-text-layer span").waitForExist({
+      timeout: 15_000,
+    })
+    await expect(
+      $("[data-page-number='1'] .pdf-text-layer span"),
+    ).toBeExisting()
+    const cleanLast = await pageInk(6)
+
+    await browser.execute(() => {
+      const first = document.querySelector<HTMLElement>(
+        "[data-page-number='1'] .pdf-text-layer span",
+      )!.firstChild!
+      const last = document.querySelector<HTMLElement>(
+        "[data-page-number='6'] .pdf-text-layer span",
+      )!.firstChild!
+      const range = document.createRange()
+      range.setStart(first, 0)
+      range.setEnd(last, last.textContent!.length)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
+    })
+
+    await browser.waitUntil(async () => (await pageInk(6)) > cleanLast, {
+      timeout: 15_000,
+      timeoutMsg: "the last selected page was not highlighted",
+    })
+    await browser.execute(() => {
+      document
+        .querySelector("[data-page-number='1']")!
+        .scrollIntoView({ block: "center" })
+    })
+    await $("[data-page-number='1'] canvas").waitForExist({ timeout: 15_000 })
+    await browser.waitUntil(async () => (await pageInk(1)) > cleanFirst, {
+      timeout: 15_000,
+      timeoutMsg: "the evicted selection start was not highlighted",
+    })
+  })
 })

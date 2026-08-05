@@ -4,7 +4,6 @@ import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
-import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import type { RectDraft } from "@/hooks/useRectTool"
@@ -16,14 +15,6 @@ import {
   type PdfTextSpan,
 } from "@/lib/pdf"
 import { POINT_TO_PX } from "@/lib/zoom"
-
-// A zoom gesture walks the page width through every value on its way to the one
-// the reader wants, and each distinct one would otherwise cost a full PDFium
-// re-raster of every visible page. Sitting out the burst costs nothing visually:
-// the canvas is stretched to its box by CSS, so it tracks the new size straight
-// away and only resolves to it once the reader pauses. Comfortably longer than
-// a wheel notch, short enough to read as part of the gesture.
-const RENDER_SETTLE_MS = 150
 
 // The transparent text layer renders every span with the same font family that
 // measures the run width, so the horizontal scale stays consistent between
@@ -57,53 +48,70 @@ type PdfPageProps = {
   pageNumber: number
   /** Bumped when the page is drawn on, so the bitmap is fetched again. */
   renderEpoch: number
+  /** Viewer-level settled zoom used only to choose the bitmap resolution. */
+  renderScale: number
   /** Bumped only when page content text changes. */
   textEpoch: number
   rotation: number
   /** Resolved zoom; 1 lays the page out at one PDF point per CSS pixel. */
   scale: number
+  /** Keep the current heavy-page window fixed during a compositor zoom preview. */
+  virtualizationPaused: boolean
+  /** Do not evict mounted surfaces while a text-selection drag crosses pages. */
+  virtualizationRetainExited: boolean
   /**
    * CSS pixels to lay the page out at, overriding `scale`. Only for a layout
    * that has to share one column across pages of different sizes, as a book
    * spread does; elsewhere every page takes its own size from the zoom.
    */
   width?: number
+  /** Settled render width for a shared-column layout such as book mode. */
+  renderWidth?: number
 }
 
-export function PdfPage({
+type PdfPageSurfaceProps = {
+  documentId: number
+  draft?: RectDraft
+  footprintHeight: number
+  footprintWidth: number
+  page: PdfPageInfo
+  pageNumber: number
+  pxPerPoint: number
+  renderEpoch: number
+  renderWidth: number
+  rotation: number
+  textEpoch: number
+}
+
+/**
+ * The expensive half of a page. It exists only around the viewport, so leaving
+ * a page releases its canvas backing store, extracted text, and annotation
+ * preview instead of letting a long reading session retain all of them.
+ */
+function PdfPageSurface({
   documentId,
   draft,
+  footprintHeight,
+  footprintWidth,
   page,
   pageNumber,
+  pxPerPoint,
   renderEpoch,
+  renderWidth,
   rotation,
-  scale,
   textEpoch,
-  width,
-}: PdfPageProps) {
+}: PdfPageSurfaceProps) {
   const { t } = useTranslation()
-  const wrapperRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const isNearViewport = useNearViewport(wrapperRef)
   const [textSpans, setTextSpans] = useState<PdfTextSpan[]>([])
-
-  // The user rotation spins the whole page (canvas + text layer) clockwise. It
-  // is applied on top of the bitmap's displayed dimensions, so a 90°/270° user
-  // rotation swaps the on-screen footprint the page occupies in the column.
-  const { height: footprintHeight, width: footprintWidth } =
-    dimensionsForRotation(rotation, page.width, page.height)
-
-  const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
-  const settledWidth = useDebouncedValue(displayWidth, RENDER_SETTLE_MS)
-  // The draft's border and corners are given in page points; this turns them
-  // into the on-screen pixels the preview needs, whatever the layout's width.
-  const pxPerPoint = footprintWidth > 0 ? displayWidth / footprintWidth : 0
 
   const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
     command: "render_pdf_page",
     documentId,
-    isNearViewport,
+    // The whole surface is virtualised; if it is mounted, it is near enough to
+    // render. This keeps the bitmap hook free of a second observer/state gate.
+    isNearViewport: true,
     maxRenderWidth: MAX_RENDER_WIDTH,
     mimeType: "image/png",
     page,
@@ -111,17 +119,16 @@ export function PdfPage({
     renderEpoch,
     rotation,
     targetWidth:
-      settledWidth > 0
-        ? Math.round(Math.max(MIN_PAGE_RENDER_WIDTH, settledWidth))
+      renderWidth > 0
+        ? Math.round(Math.max(MIN_PAGE_RENDER_WIDTH, renderWidth))
         : 0,
   })
 
   useEffect(() => {
-    if (!isNearViewport) {
-      return
-    }
-
     let cancelled = false
+    // A text epoch means the page's selectable content is no longer the content
+    // these spans describe. Do not leave stale runs clickable while PDFium
+    // extracts the replacement — especially after pages of different sizes move.
     setTextSpans([])
 
     void invoke<PdfTextSpan[]>("extract_pdf_page_text", {
@@ -142,7 +149,7 @@ export function PdfPage({
     return () => {
       cancelled = true
     }
-  }, [documentId, isNearViewport, pageNumber, textEpoch])
+  }, [documentId, pageNumber, textEpoch])
 
   // Text spans are in the page's unrotated coordinate space. For 90°/270° pages
   // the unrotated dimensions are the displayed ones swapped; the layer itself is
@@ -174,13 +181,7 @@ export function PdfPage({
   )
 
   return (
-    <div
-      aria-label={t("viewer.pageLabel", { pageNumber })}
-      className="relative shrink-0 scroll-mt-5 overflow-hidden bg-white shadow-md ring-1 ring-black/10"
-      data-page-number={pageNumber}
-      ref={wrapperRef}
-      style={{ aspectRatio: footprintWidth / footprintHeight, width: displayWidth }}
-    >
+    <>
       <div
         className="absolute"
         style={{
@@ -245,6 +246,72 @@ export function PdfPage({
           rotation={rotation}
           sourceCanvasRef={canvasRef}
           sourceRevision={bitmapRevision}
+        />
+      ) : null}
+    </>
+  )
+}
+
+export function PdfPage({
+  documentId,
+  draft,
+  page,
+  pageNumber,
+  renderEpoch,
+  renderScale,
+  renderWidth,
+  rotation,
+  scale,
+  textEpoch,
+  virtualizationPaused,
+  virtualizationRetainExited,
+  width,
+}: PdfPageProps) {
+  const { t } = useTranslation()
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const isNearViewport = useNearViewport(
+    wrapperRef,
+    "800px 0px",
+    {
+      paused: virtualizationPaused,
+      retainExited: virtualizationRetainExited,
+      retainSelection: true,
+    },
+  )
+
+  // The user rotation spins the whole page (canvas + text layer) clockwise. It
+  // is applied on top of the bitmap's displayed dimensions, so a 90°/270° user
+  // rotation swaps the on-screen footprint the page occupies in the column.
+  const { height: footprintHeight, width: footprintWidth } =
+    dimensionsForRotation(rotation, page.width, page.height)
+  const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
+  const targetRenderWidth =
+    renderWidth ?? footprintWidth * POINT_TO_PX * renderScale
+  // The draft's border and corners are given in page points; this turns them
+  // into the on-screen pixels the preview needs, whatever the layout's width.
+  const pxPerPoint = footprintWidth > 0 ? displayWidth / footprintWidth : 0
+
+  return (
+    <div
+      aria-label={t("viewer.pageLabel", { pageNumber })}
+      className="relative shrink-0 scroll-mt-5 overflow-hidden bg-white shadow-md ring-1 ring-black/10"
+      data-page-number={pageNumber}
+      ref={wrapperRef}
+      style={{ aspectRatio: footprintWidth / footprintHeight, width: displayWidth }}
+    >
+      {isNearViewport ? (
+        <PdfPageSurface
+          documentId={documentId}
+          draft={draft}
+          footprintHeight={footprintHeight}
+          footprintWidth={footprintWidth}
+          page={page}
+          pageNumber={pageNumber}
+          pxPerPoint={pxPerPoint}
+          renderEpoch={renderEpoch}
+          renderWidth={targetRenderWidth}
+          rotation={rotation}
+          textEpoch={textEpoch}
         />
       ) : null}
     </div>
