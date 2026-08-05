@@ -72,6 +72,36 @@ describe("TFolio PDF viewer", () => {
         timeoutMsg: "PDF page did not finish rendering through PDFium",
       },
     )
+    // The viewer debounces the render scale for 150ms after the first fit, so an
+    // early bitmap renders at the boot-time MIN_ZOOM of 0.25 before the settled
+    // fit redraws it. That transient bitmap is far smaller than its CSS box, so
+    // its backing-pixel ratio would fall well outside the bounds below; wait for
+    // the ratio to settle into that band before asserting it.
+    let backingPixelsPerCssPixel = 0
+    await browser.waitUntil(
+      async () => {
+        backingPixelsPerCssPixel = (await browser.execute(() => {
+          const canvas = document.querySelector<HTMLCanvasElement>(
+            "[data-page-number='1'] canvas",
+          )!
+          const cssWidth = canvas.getBoundingClientRect().width
+          return cssWidth > 0 ? canvas.width / cssWidth : 0
+        })) as number
+        return (
+          backingPixelsPerCssPixel >= 1.24 &&
+          backingPixelsPerCssPixel <= 2.01
+        )
+      },
+      {
+        timeout: 15_000,
+        timeoutMsg:
+          "PDF page backing-pixel ratio did not settle into [1.24, 2.01]",
+      },
+    )
+    // Low-DPI desktops need modest supersampling for PDFium's grayscale glyph
+    // edges; HiDPI displays may naturally reach the shared 2x ceiling instead.
+    expect(backingPixelsPerCssPixel).toBeGreaterThanOrEqual(1.24)
+    expect(backingPixelsPerCssPixel).toBeLessThanOrEqual(2.01)
 
     const pageInput = await $("input[aria-label='Page number']")
     await pageInput.setValue("99")

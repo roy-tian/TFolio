@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
-import type { PdfPageInfo } from "@/lib/pdf"
+import { resolveOutputScale, type PdfPageInfo } from "@/lib/pdf"
 
 type PageBitmapOptions = {
   canvasRef: RefObject<HTMLCanvasElement | null>
@@ -13,6 +13,8 @@ type PageBitmapOptions = {
   maxRenderWidth: number
   /** MIME type of the bytes `command` returns. */
   mimeType: string
+  /** Minimum backing pixels per CSS pixel; useful for low-DPI reading surfaces. */
+  minOutputScale?: number
   page: PdfPageInfo
   pageNumber: number
   /**
@@ -38,6 +40,7 @@ export function usePageBitmap({
   isNearViewport,
   maxRenderWidth,
   mimeType,
+  minOutputScale = 1,
   page,
   pageNumber,
   renderEpoch,
@@ -61,7 +64,10 @@ export function usePageBitmap({
     }
 
     let cancelled = false
-    const outputScale = Math.min(window.devicePixelRatio || 1, 2)
+    const outputScale = resolveOutputScale(
+      window.devicePixelRatio,
+      minOutputScale,
+    )
     // A 90°/270° rotation makes the page's width span more CSS pixels for a
     // landscape page (its long side becomes the height the column caps), and
     // rotation itself does not re-render. Render at that wider target so a
@@ -71,6 +77,11 @@ export function usePageBitmap({
       rotation === 90 || rotation === 270
         ? Math.max(1, page.width / page.height)
         : 1
+    // The output-scale floor is a render *intent*, not a guarantee: once heavy
+    // zoom pushes `targetWidth * outputScale * rotationScale` past
+    // `maxRenderWidth`, the render is clamped and the effective backing ratio
+    // drops back below the floor — at the extreme the text is a touch softer
+    // than the floor promises.
     const renderWidth = Math.round(
       Math.min(maxRenderWidth, targetWidth * outputScale * rotationScale),
     )
@@ -139,6 +150,7 @@ export function usePageBitmap({
     isNearViewport,
     maxRenderWidth,
     mimeType,
+    minOutputScale,
     page.height,
     page.width,
     pageNumber,

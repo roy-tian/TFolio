@@ -273,7 +273,24 @@ export function useZoom({
       }
 
       previewTimerRef.current = undefined
-      commitPreview()
+      // Settle runs as a setTimeout, yet a delayed wheel frame and this timer
+      // can wake in the same frame batch once the main thread was busy. Deferring
+      // the commit two frames lets a wheel-RAF queued in that batch run first and
+      // re-arm the timer (schedulePreviewCommit installs a fresh one once it is
+      // undefined); the guard on the second frame then bails instead of splitting
+      // one physical gesture across two layout commits.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (
+            previewTimerRef.current !== undefined ||
+            !previewRef.current
+          ) {
+            return
+          }
+
+          commitPreview()
+        }),
+      )
     }
 
     previewTimerRef.current = setTimeout(settle, WHEEL_PREVIEW_SETTLE_MS)

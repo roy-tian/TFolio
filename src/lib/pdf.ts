@@ -95,6 +95,26 @@ export function dimensionsForRotation(
     : { height, width }
 }
 
+/**
+ * Minimum backing pixels per CSS pixel for a settled page bitmap. PDFium's
+ * ordinary grayscale anti-aliasing reads as visibly soft when a display gives
+ * the page just one backing pixel per CSS pixel, so the viewer raises the
+ * render-resolution floor from 1x to this modest 1.25x instead of paying for a
+ * heavier 2x supersample. Only surfaces whose `devicePixelRatio` is below 1.25
+ * are affected; a higher-DPI display already reaches the shared 2x ceiling.
+ */
+export const MIN_PAGE_OUTPUT_SCALE = 1.25
+
+/**
+ * Backing pixels to render per CSS pixel, floored at `minOutputScale` (so a
+ * low-DPI surface still supersamples) and capped at 2 (the renderer's upper
+ * bound). A zero or absent `dpr` falls back to 1, since a zero ratio never
+ * means "no pixels".
+ */
+export function resolveOutputScale(dpr: number, minOutputScale = 1) {
+  return Math.min(Math.max(dpr || 1, minOutputScale), 2)
+}
+
 export type PageCandidate = {
   bottom: number
   pageNumber: number

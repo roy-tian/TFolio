@@ -10,6 +10,7 @@ import type { RectDraft } from "@/hooks/useRectTool"
 import {
   dimensionsForRotation,
   MAX_RENDER_WIDTH,
+  MIN_PAGE_OUTPUT_SCALE,
   MIN_PAGE_RENDER_WIDTH,
   type PdfPageInfo,
   type PdfTextSpan,
@@ -114,6 +115,7 @@ function PdfPageSurface({
     isNearViewport: true,
     maxRenderWidth: MAX_RENDER_WIDTH,
     mimeType: "image/png",
+    minOutputScale: MIN_PAGE_OUTPUT_SCALE,
     page,
     pageNumber,
     renderEpoch,
