@@ -33,12 +33,6 @@ task runner.
   `version.mjs` (version sync/check).
 - `test/e2e/`: WebdriverIO GUI end-to-end specs (`*.e2e.ts`).
 - `.github/workflows/`: GitHub Actions release automation.
-- `.agents/skills/`: the single home for every agent skill, committed so each
-  contributor's agent behaves the same. It holds both this repo's own skills
-  (`run-app`) and ones vendored from upstream registries (`shadcn`, pinned by
-  `skills-lock.json` — manage those with `bunx --bun skills add|update|list`,
-  and do not hand-edit them). The directory is tool-neutral, so Codex, Copilot,
-  Zed, and others read the same skills.
 - `.claude/skills/`: symlinks into `.agents/skills/`, nothing else. Claude Code
   only discovers skills under `.claude/skills/`, so each skill needs a link here
   to load; store the skill itself in `.agents/skills/`. Add one with
