@@ -460,7 +460,6 @@ export default function App() {
       return
     }
 
-    let resizeTimer: ReturnType<typeof setTimeout> | undefined
     let committedWidth = 0
     let committedHeight = 0
 
@@ -481,17 +480,18 @@ export default function App() {
 
     commitSize(viewer.clientWidth, viewer.clientHeight)
 
+    // Commit every observed size straight away. Layout — the grid's column
+    // count, a fit mode's page scale — tracks the window in real time, while
+    // the heavy PDFium renders stay throttled by the viewer's settled
+    // `renderScale` debounce. ResizeObserver already batches to one callback
+    // per frame, so a timer here would only add the lag of waiting for it.
     const resizeObserver = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect
-      const width = rect?.width ?? viewer.clientWidth
-      const height = rect?.height ?? viewer.clientHeight
-      clearTimeout(resizeTimer)
-      resizeTimer = setTimeout(() => commitSize(width, height), 180)
+      commitSize(rect?.width ?? viewer.clientWidth, rect?.height ?? viewer.clientHeight)
     })
     resizeObserver.observe(viewer)
 
     return () => {
-      clearTimeout(resizeTimer)
       resizeObserver.disconnect()
     }
   }, [])
