@@ -210,8 +210,7 @@ const zhCN = {
   about: {
     title: "TFolio",
     description: "专注于阅读和编辑 PDF 文件的桌面工作空间。",
-    fontNotice:
-      "注释和水印中的中文使用 Noto Sans SC 字体，页码使用 Noto Serif SC 字体，均依据 SIL Open Font License 1.1 授权。",
+    version: "版本 {{version}}",
     copyright: "版权所有 © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema<typeof en>

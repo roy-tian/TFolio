@@ -206,8 +206,7 @@ const en = {
   about: {
     title: "TFolio",
     description: "A focused desktop workspace for reading and editing PDF files.",
-    fontNotice:
-      "Chinese text in notes and watermarks is set in Noto Sans SC, and page numbers in Noto Serif SC, both used under the SIL Open Font License 1.1.",
+    version: "Version {{version}}",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const
