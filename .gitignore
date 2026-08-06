@@ -37,3 +37,8 @@ Thumbs.db
 
 # Miscellaneous
 .temp
+
+# Agent and test tooling scratch (runtime artifacts, not source)
+.pi-subagents/
+.playwright/
+scratchpad/
