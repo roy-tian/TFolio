@@ -3848,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "tfolio"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "allsorts",
  "getrandom 0.3.4",
