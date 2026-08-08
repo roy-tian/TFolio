@@ -8,6 +8,20 @@ const en = {
     restore: "Restore",
     close: "Close",
   },
+  tabs: {
+    openFile: "Open PDF in a new tab",
+    list: "Open PDF documents",
+    close: "Close {{name}}",
+    closeCurrent: "Close current document, {{name}}",
+    unsaved: "Unsaved changes",
+    dropNow: "Drop to open PDF files",
+    dropHint: "PDF files open in separate tabs",
+    unsavedTabDescription:
+      "This document has changes that are not saved. Closing its tab will discard them.",
+    unsavedWindowDescription:
+      "One or more open documents have changes that are not saved. Closing the window will discard them.",
+    discardAndCloseTab: "Discard and close tab",
+  },
   toolbar: {
     hideBookmarks: "Hide bookmarks",
     showBookmarks: "Show bookmarks",
@@ -199,7 +213,7 @@ const en = {
     pageCountPadded_other: "{{count}} pages (+{{pad}} blank)",
     deleteFile: "Remove {{name}}",
     addFile: "Add a PDF",
-    addFileHint: "Click to choose, or drop a PDF anywhere",
+    addFileHint: "Click to choose a PDF to merge into this document",
     smartPadding: "Odd-page file starts",
     smartPaddingHint:
       "Add a blank page before any file that would start on an even page, so each file begins on a right-hand page when printed double-sided",

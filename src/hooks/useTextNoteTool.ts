@@ -18,6 +18,8 @@ import {
 type UseTextNoteToolOptions = {
   active: boolean
   onCommit: (command: TextNoteCommand) => void
+  /** Temporarily detach document listeners without settling the draft or tool. */
+  suspended?: boolean
   pages: PdfPageInfo[]
   rotation: number
   style: TextNoteStyle
@@ -46,6 +48,7 @@ export function useTextNoteTool({
   active,
   onCommit,
   pages,
+  suspended = false,
   rotation,
   style,
   viewerRef,
@@ -98,6 +101,10 @@ export function useTextNoteTool({
   }, [])
 
   useEffect(() => {
+    if (suspended) {
+      return
+    }
+
     if (!active) {
       // Putting the tool away keeps what was typed rather than dropping it, the
       // same as clicking away from the editor does.
@@ -203,7 +210,7 @@ export function useTextNoteTool({
       document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("keydown", handleKeyDown)
     }
-  }, [active, cancel, commit, pages, rotation, viewerRef])
+  }, [active, cancel, commit, pages, rotation, suspended, viewerRef])
 
   return { cancel, commit, draft, editorRef, setText }
 }

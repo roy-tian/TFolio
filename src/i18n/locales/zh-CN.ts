@@ -16,6 +16,19 @@ const zhCN = {
     restore: "还原",
     close: "关闭",
   },
+  tabs: {
+    openFile: "在新标签页中打开 PDF",
+    list: "已打开的 PDF 文档",
+    close: "关闭 {{name}}",
+    closeCurrent: "关闭当前文档 {{name}}",
+    unsaved: "有未保存的修改",
+    dropNow: "松开以打开 PDF 文件",
+    dropHint: "PDF 文件将在独立标签页中打开",
+    unsavedTabDescription: "此文档尚有未保存的修改，关闭标签页将丢弃这些修改。",
+    unsavedWindowDescription:
+      "一个或多个已打开文档尚有未保存的修改，关闭窗口将丢弃这些修改。",
+    discardAndCloseTab: "丢弃并关闭标签页",
+  },
   toolbar: {
     hideBookmarks: "隐藏书签",
     showBookmarks: "显示书签",
@@ -203,7 +216,7 @@ const zhCN = {
     pageCountPadded_other: "{{count}} 页（+{{pad}} 空白）",
     deleteFile: "移除 {{name}}",
     addFile: "添加 PDF",
-    addFileHint: "点击选择,或将 PDF 拖到窗口任意处",
+    addFileHint: "点击选择要合并到当前文档的 PDF",
     smartPadding: "文件从奇数页开始",
     smartPaddingHint:
       "在首页会落在偶数页的文件前插入一张空白页，使每个文件在双面打印时都从右侧页开始",

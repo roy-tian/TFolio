@@ -202,6 +202,23 @@ export async function openPathViaDialog(filePath: string) {
   await dropZoneButton().click()
 }
 
+/** Opens an additional path through the titlebar's new-tab picker control. */
+export async function openPathViaToolbar(filePath: string) {
+  const openButton = $(
+    "[data-active='true'] [data-slot='session-open-file']",
+  )
+  await openButton.waitForExist()
+  await browser.execute((mockPath: string) => {
+    const seam = window as Window & { __tfolioE2E?: E2eOverrides }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      pickPdfPath: () => Promise.resolve(mockPath),
+    }
+  }, filePath)
+  await openButton.click()
+}
+
 /**
  * Opens `contents` as a document with no path at all, pointing the seam's
  * `openPdfFromPath` at the byte-payload `open_pdf` command — the documented

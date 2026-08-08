@@ -288,6 +288,9 @@ export function useAnnotations({
   const [renderEpochs, setRenderEpochs] = useState<RenderEpochs>({})
   const [textEpochs, setTextEpochs] = useState<RenderEpochs>({})
   const [pending, setPending] = useState(0)
+  // The synchronous counterpart to `pending`: guards cannot wait for React to
+  // render before deciding whether a tab may be discarded.
+  const pendingRef = useRef(0)
   // How many structure edits are in flight — reorder, delete, insert, merge,
   // and undo/redo. A screen-read gesture (a grid edit, a file-card edit) must
   // not start while one runs, since it would plan against ranges the edit is
@@ -368,6 +371,7 @@ export function useAnnotations({
 
       const generation = generationRef.current
 
+      pendingRef.current += 1
       setPending((count) => count + 1)
 
       queueRef.current = queueRef.current.then(async () => {
@@ -409,6 +413,7 @@ export function useAnnotations({
       })
 
       return queueRef.current.finally(() => {
+        pendingRef.current -= 1
         setPending((count) => count - 1)
       })
     },
@@ -794,6 +799,7 @@ export function useAnnotations({
       never plans against ranges an edit is about to change. Drawings and notes
       use the narrower page-shift guard instead, since a merge cannot misplace
       them. */
+  const hasPendingWorkNow = useCallback(() => pendingRef.current > 0, [])
   const isStructureBusyNow = useCallback(() => structurePendingRef.current > 0, [])
 
   /**
@@ -825,6 +831,7 @@ export function useAnnotations({
       commitStructure,
       deletePages,
       exportCopy,
+      hasPendingWorkNow,
       // The applied command history itself, so the owner can derive the file
       // ranges (which need the initial file's name and page count, known only
       // to it) the way it derives the watermark config here.
@@ -852,6 +859,7 @@ export function useAnnotations({
       commitStructure,
       deletePages,
       exportCopy,
+      hasPendingWorkNow,
       history,
       historyNow,
       insertBlankPage,
