@@ -10,6 +10,12 @@ const zhCN = {
   app: {
     documentTitle: "TFolio",
   },
+  window: {
+    minimize: "最小化",
+    maximize: "最大化",
+    restore: "还原",
+    close: "关闭",
+  },
   toolbar: {
     hideBookmarks: "隐藏书签",
     showBookmarks: "显示书签",

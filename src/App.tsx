@@ -29,6 +29,7 @@ import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
+import { WindowControls } from "@/components/WindowControls"
 import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
@@ -81,6 +82,7 @@ import {
   type PdfExportOutcome,
   type PdfStructureUpdate,
 } from "@/lib/pdf"
+import { isMacOS } from "@/lib/platform"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import {
   defaultViewMode,
@@ -109,6 +111,7 @@ function closePdf(documentId: number) {
 
 export default function App() {
   const { t } = useTranslation()
+  const macOS = isMacOS()
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo | null>(null)
   const [fileName, setFileName] = useState("")
   // The document as it was opened, before any merges — the initial file range's
@@ -1013,8 +1016,16 @@ export default function App() {
           border leaves 47px, and centring a 32px control there puts its own
           border on a half pixel, which the WebView rounds per element — some
           outlines paint 1px solid, others two half-intensity rows. */}
-      <header className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur">
-        <div className="flex items-center gap-2 justify-self-start">
+      <header
+        className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
+        data-tauri-drag-region="deep"
+      >
+        <div
+          className={cn(
+            "flex items-center gap-2 justify-self-start",
+            macOS && "pl-[72px]",
+          )}
+        >
           <Toggle
             aria-label={bookmarksLabel}
             className="size-8"
@@ -1152,6 +1163,7 @@ export default function App() {
             textNoteApplies={drawingApplies}
           />
           <SettingsDialog />
+          {macOS ? null : <WindowControls />}
         </div>
       </header>
 

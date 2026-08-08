@@ -16,11 +16,12 @@
         "title": "TFolio",
         "width": 1100,
         "height": 760,
-        "minWidth": 800,
+        "minWidth": 1100,
         "minHeight": 560,
         "center": true,
         "resizable": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "decorations": false
       }
     ],
     "security": {

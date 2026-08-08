@@ -2,6 +2,12 @@ const en = {
   app: {
     documentTitle: "TFolio",
   },
+  window: {
+    minimize: "Minimize",
+    maximize: "Maximize",
+    restore: "Restore",
+    close: "Close",
+  },
   toolbar: {
     hideBookmarks: "Hide bookmarks",
     showBookmarks: "Show bookmarks",
