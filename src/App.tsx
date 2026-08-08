@@ -168,6 +168,7 @@ export default function App() {
   // reads as "not just now", which is what an unopened document means, and it
   // would leave the readout showing a figure that describes nothing on screen.
   const zoomApplies = viewMode === "single" || viewMode === "book"
+  const bookmarksApply = viewMode === "thumbnail" || viewMode === "files"
   const zoom = useZoom({
     contentHeight: Math.max(0, viewerHeight - CONTENT_PADDING_Y),
     contentWidth: Math.max(0, viewerWidth - CONTENT_PADDING_X),
@@ -612,6 +613,7 @@ export default function App() {
   // click is selection now, so navigation moved to the second click.
   const openThumbnailPage = (pageNumber: number) => {
     pendingScrollPageRef.current = pageNumber
+    setBookmarksOpen(false)
     setViewMode("single")
   }
 
@@ -944,6 +946,10 @@ export default function App() {
       pendingScrollPageRef.current = currentPage
     }
 
+    if (mode === "single" || mode === "book") {
+      setBookmarksOpen(false)
+    }
+
     setViewMode(mode)
   }
 
@@ -1012,7 +1018,7 @@ export default function App() {
           <Toggle
             aria-label={bookmarksLabel}
             className="size-8"
-            disabled={!pdfDocument}
+            disabled={!pdfDocument || !bookmarksApply}
             onPressedChange={setBookmarksOpen}
             pressed={bookmarksOpen}
             title={bookmarksLabel}

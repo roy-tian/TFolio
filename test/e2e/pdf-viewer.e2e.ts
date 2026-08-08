@@ -108,10 +108,17 @@ describe("TFolio PDF viewer", () => {
     await browser.keys("Enter")
     await expect(pageInput).toHaveValue("1")
 
-    await $("button[aria-label='Show bookmarks']").click()
+    const bookmarksToggle = $("button[aria-label='Show bookmarks']")
+    await expect(bookmarksToggle).toBeDisabled()
+    await $("button[aria-label='Thumbnails']").click()
+    await expect(bookmarksToggle).toBeEnabled()
+    await bookmarksToggle.click()
     await expect($("nav[aria-label='Bookmarks']")).toHaveText(
       "This document has no bookmarks.",
     )
+    await $("button[aria-label='Single page']").click()
+    await expect(bookmarksToggle).toBeDisabled()
+    await expect($("nav[aria-label='Bookmarks']")).not.toBeExisting()
 
     await $("button[aria-label='Settings']").click()
     await expect($("[role='dialog']")).toBeDisplayed()
@@ -166,10 +173,12 @@ describe("TFolio PDF viewer", () => {
     const pageInput = await $("input[aria-label='Page number']")
 
     await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
+    await expect(toggle("Show bookmarks")).toBeDisabled()
 
     // Book view pairs from page 1, so pages 1 and 2 share a spread.
     await toggle("Book").click()
     await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
+    await expect(toggle("Show bookmarks")).toBeDisabled()
     await $("[data-page-number='2']").waitForDisplayed()
 
     const spread = await browser.execute(() => {
@@ -205,6 +214,9 @@ describe("TFolio PDF viewer", () => {
     // Thumbnails are an image and no selectable text layer; since M7 a click
     // selects, and it is the double-click that navigates.
     await toggle("Thumbnails").click()
+    await expect(toggle("Show bookmarks")).toBeEnabled()
+    await toggle("Show bookmarks").click()
+    await expect($("nav[aria-label='Bookmarks']")).toBeDisplayed()
     const thirdThumbnail = await $("button[aria-label='Select page 3']")
     await thirdThumbnail.waitForDisplayed()
     await expect($$(".pdf-text-layer")).toBeElementsArrayOfSize(0)
@@ -216,6 +228,8 @@ describe("TFolio PDF viewer", () => {
         .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
     })
     await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
+    await expect(toggle("Show bookmarks")).toBeDisabled()
+    await expect($("nav[aria-label='Bookmarks']")).not.toBeExisting()
     await expect(pageInput).toHaveValue("3")
 
     // The chosen mode outlives a reload.
