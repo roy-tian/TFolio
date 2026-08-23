@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
-import { Bookmark, FileUp } from "lucide-react"
+import { FileUp } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
@@ -12,7 +12,6 @@ import {
 } from "@/components/DocumentSession"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
-import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
 import {
   AlertDialog,
@@ -24,7 +23,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Toggle } from "@/components/ui/toggle"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
@@ -41,8 +39,6 @@ import {
 } from "@/lib/pdf"
 import { isMacOS } from "@/lib/platform"
 import { readRecentFiles, type RecentFile } from "@/lib/recentFiles"
-import { cn } from "@/lib/utils"
-import { defaultViewMode, readStoredViewMode } from "@/lib/viewMode"
 
 type OpenTab = {
   dirty: boolean
@@ -96,9 +92,6 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false)
   const [workspaceError, setWorkspaceError] = useState<WorkspaceError>(null)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
-  const [emptyViewMode] = useState(
-    () => readStoredViewMode() ?? defaultViewMode,
-  )
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -524,32 +517,13 @@ export default function App() {
   return (
     <div className="h-svh overflow-hidden bg-background">
       {homeActive ? (
+        // The document tools — bookmarks, view mode — have no document to act
+        // on here, so the home header carries only what still works.
         <header
-          className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
+          className="fixed inset-x-0 top-0 z-50 flex h-12 items-center justify-end border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
           data-tauri-drag-region="deep"
         >
-          <div
-            className={cn(
-              "flex items-center gap-1 justify-self-start",
-              macOS && "pl-[72px]",
-            )}
-          >
-            <Toggle
-              aria-label={t("toolbar.showBookmarks")}
-              className="size-8"
-              disabled
-              title={t("toolbar.showBookmarks")}
-              variant="outline"
-            >
-              <Bookmark />
-            </Toggle>
-            <ViewModeToggle
-              disabled
-              onChange={() => undefined}
-              value={emptyViewMode}
-            />
-          </div>
-          <div className="flex items-center gap-2 justify-self-end">
+          <div className="flex items-center gap-2">
             <AppMenu {...menuActions} />
             {macOS ? null : <WindowControls />}
           </div>
