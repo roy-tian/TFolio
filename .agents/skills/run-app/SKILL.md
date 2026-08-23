@@ -118,6 +118,15 @@ Each of these was hit during first bring-up — they're the non-obvious failures
   shell running the command and kills it (exit 144). Use the bracket trick,
   `kill $(pgrep -f '[t]arget/release/tfolio')`, or kill the exact PID. Same for
   `[X]vfb`.
+- **`Failed to create a session … UND_ERR_SOCKET` on `127.0.0.1:4445`** → an
+  `HTTP_PROXY`/`HTTPS_PROXY` in the environment. wdio's HTTP client honours it
+  even for loopback, so the session request goes to the proxy, which drops it.
+  Export `NO_PROXY=127.0.0.1,localhost` (and `no_proxy`); the wrapper does.
+- **~31 s of nothing between launch and the window** (and a session that times
+  out before it) → no session D-Bus, so GTK waits out an `xdg-desktop-portal`
+  lookup. Run the whole command under `dbus-run-session --`, which brings boot
+  back to about a second; the wrapper does. Same for `bun run test:e2e`:
+  `xvfb-run -a dbus-run-session -- bun run test:e2e:run`, with `NO_PROXY` set.
 - **PDFium not found** → set `PDFIUM_LIB_PATH`, or run `bun run pdfium:download`.
   Debug build looks in `src-tauri/target/debug/pdfium/`, release in
   `src-tauri/resources/pdfium/`.
