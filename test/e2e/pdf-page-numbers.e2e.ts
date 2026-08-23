@@ -8,7 +8,9 @@ import { pageNumbersPreferencesStorageKey } from "../../src/lib/pageNumbers"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 import { watermarkPreferencesStorageKey } from "../../src/lib/watermark"
 import {
+  appMenuItem,
   blankPdf,
+  closeAppMenu,
   dropZoneButton,
   minimalPdf,
   openPdfFromDisk,
@@ -195,10 +197,11 @@ describe("TFolio page numbers", () => {
     await browser.saveScreenshot("artifacts/e2e/page-numbers-both.png")
 
     // Owned page content leaves the document export-only, and the reason is on
-    // the disabled save button.
-    const save = $("button[aria-label='Save']")
-    await expect(save).toBeDisabled()
+    // the menu's disabled save item.
+    const save = await appMenuItem("save")
+    expect(await save.getAttribute("data-disabled")).not.toBe(null)
     expect(await save.getAttribute("title")).toContain("exported as a copy")
+    await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 
     // Removing the page numbers leaves the watermark exactly in place.

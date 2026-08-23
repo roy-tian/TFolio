@@ -12,12 +12,12 @@ import { BookCopy, Bookmark, RotateCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
+import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
-import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
 import { ZoomControls } from "@/components/ZoomControls"
@@ -102,7 +102,12 @@ type DocumentSessionProps = {
   active: boolean
   document: PdfDocumentInfo
   fileName: string
+  /** The workspace half of the header's menu, which every tab shares. */
+  menu: AppMenuActions
   onDirtyChange: (documentId: number, dirty: boolean) => void
+  /** An export that gave a document its first file: the tab now stands for
+      that file, not for the bytes it opened from. */
+  onSourceChange: (documentId: number, path: string) => void
 }
 
 function closePdf(documentId: number) {
@@ -111,7 +116,14 @@ function closePdf(documentId: number) {
 
 export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSessionProps>(
 function DocumentSession(
-  { active, document: openedDocument, fileName, onDirtyChange },
+  {
+    active,
+    document: openedDocument,
+    fileName,
+    menu,
+    onDirtyChange,
+    onSourceChange,
+  },
   ref,
 ) {
   const { t } = useTranslation()
@@ -193,21 +205,25 @@ function DocumentSession(
     onExportError: useCallback(() => setViewerError("exportFailed"), []),
     // A byte-opened document adopts its first export's destination as its
     // source, which is when `path` appears and the save key comes alive.
-    onExported: useCallback((documentId: number, outcome: PdfExportOutcome) => {
-      if (!outcome.savedToSource) {
-        return
-      }
+    onExported: useCallback(
+      (documentId: number, outcome: PdfExportOutcome) => {
+        if (!outcome.savedToSource) {
+          return
+        }
 
-      const current = documentRef.current
+        const current = documentRef.current
 
-      if (!current || current.id !== documentId || current.path === outcome.path) {
-        return
-      }
+        if (!current || current.id !== documentId || current.path === outcome.path) {
+          return
+        }
 
-      const next = { ...current, path: outcome.path }
-      documentRef.current = next
-      setPdfDocument(next)
-    }, []),
+        const next = { ...current, path: outcome.path }
+        documentRef.current = next
+        setPdfDocument(next)
+        onSourceChange(documentId, outcome.path)
+      },
+      [onSourceChange],
+    ),
     onSaveError: useCallback(() => setViewerError("saveFailed"), []),
     // A structure command moved the page list under everything keyed by page
     // number, so the metadata is replaced wholesale and every position-derived
@@ -512,6 +528,23 @@ function DocumentSession(
     () => (initialFile ? hasMergedPages(annotations.history, initialFile) : false),
     [annotations.history, initialFile],
   )
+  // Page content this session owns (a watermark, page numbers) and merged
+  // pages each leave the document export-only, for the reasons the menu's hint
+  // gives; a document opened from bytes has no file to write back to at all.
+  const hasOwnedContent =
+    annotations.watermarkConfig !== null || annotations.pageNumbersConfig !== null
+  const hasSourceFile = Boolean(pdfDocument?.path)
+  const canSave =
+    hasSourceFile && annotations.isDirty && !hasOwnedContent && !hasMergedContent
+  // Only where the reason is not already in front of the reader. Owned page
+  // content is named first — it is the stricter, less recoverable reason.
+  const saveHint = hasOwnedContent
+    ? t("annotate.saveOwnedContent")
+    : hasMergedContent
+      ? t("annotate.saveMerged")
+      : hasSourceFile
+        ? undefined
+        : t("annotate.saveNoSource")
   // A parity run — the toggle, or the reconcile a file operation triggers —
   // brings the whole document to its pad target through several queued edits.
   // Two runs overlapping would oscillate (one adding a pad the other removes),
@@ -908,14 +941,8 @@ function DocumentSession(
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
             disabled={!pdfDocument}
-            hasMergedFiles={hasMergedContent}
-            hasPageNumbers={annotations.pageNumbersConfig !== null}
-            hasSourceFile={Boolean(pdfDocument?.path)}
-            hasWatermark={annotations.watermarkConfig !== null}
             highlightApplies={drawingApplies}
             highlightColor={highlightColor}
-            isDirty={annotations.isDirty}
-            onExport={() => void exportPdf()}
             onHighlightColorChange={changeHighlightColor}
             onPageNumbers={pageNumbers.openDialog}
             onRectStyleChange={changeRectStyle}
@@ -931,7 +958,6 @@ function DocumentSession(
               }
               void annotations.redo()
             }}
-            onSave={() => void annotations.save()}
             onToolChange={setActiveTool}
             onUndo={() => {
               const target = annotations.historyNow().past.at(-1)?.command
@@ -945,7 +971,15 @@ function DocumentSession(
             rectStyle={rectStyle}
             textNoteApplies={drawingApplies}
           />
-          {active ? <SettingsDialog /> : null}
+          {active ? (
+            <AppMenu
+              {...menu}
+              canSave={canSave}
+              onSave={() => void annotations.save()}
+              onSaveAs={() => void exportPdf()}
+              saveHint={saveHint}
+            />
+          ) : null}
           {active && !macOS ? <WindowControls /> : null}
         </div>
       </header>

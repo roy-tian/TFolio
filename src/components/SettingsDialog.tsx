@@ -1,10 +1,9 @@
-import { useRef, useState, type KeyboardEvent } from "react"
+import { useRef, type KeyboardEvent } from "react"
 import {
   Info,
   Monitor,
   Moon,
   Palette,
-  Settings,
   Sun,
   X,
   type LucideIcon,
@@ -20,7 +19,6 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import {
@@ -41,7 +39,8 @@ import {
   type ThemePreference,
 } from "@/lib/theme"
 
-type SettingsSection = "appearance" | "about"
+/** Which pane the dialog opens on; the menu names one when it opens it. */
+export type SettingsSection = "appearance" | "about"
 
 const sections: Array<{
   value: SettingsSection
@@ -146,9 +145,20 @@ function ThemeMock({ preference }: { preference: ThemePreference }) {
   )
 }
 
-export function SettingsDialog() {
+type SettingsDialogProps = {
+  onOpenChange: (open: boolean) => void
+  onSectionChange: (section: SettingsSection) => void
+  open: boolean
+  section: SettingsSection
+}
+
+export function SettingsDialog({
+  onOpenChange,
+  onSectionChange,
+  open,
+  section,
+}: SettingsDialogProps) {
   const { i18n, t } = useTranslation()
-  const [section, setSection] = useState<SettingsSection>("appearance")
   const preference = useThemePreference()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
 
@@ -176,25 +186,12 @@ export function SettingsDialog() {
     event.preventDefault()
     const nextIndex =
       (index + (forward ? 1 : -1) + sections.length) % sections.length
-    setSection(sections[nextIndex].value)
+    onSectionChange(sections[nextIndex].value)
     tabRefs.current[nextIndex]?.focus()
   }
 
   return (
-    <Dialog>
-      <DialogTrigger
-        render={
-          <Button
-            aria-label={t("settings.open")}
-            size="icon"
-            title={t("settings.open")}
-            variant="outline"
-          />
-        }
-      >
-        <Settings />
-      </DialogTrigger>
-
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         className="flex h-[27rem] w-[44rem] gap-0 overflow-hidden p-0 sm:max-w-[44rem]"
         showCloseButton={false}
@@ -242,7 +239,7 @@ export function SettingsDialog() {
                   )}
                   id={`settings-tab-${item.value}`}
                   key={item.value}
-                  onClick={() => setSection(item.value)}
+                  onClick={() => onSectionChange(item.value)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                   ref={(node) => {
                     tabRefs.current[index] = node

@@ -1,10 +1,8 @@
 import {
   ChevronDown,
-  Download,
   Hash,
   Highlighter,
   Redo2,
-  Save,
   Square,
   Stamp,
   Type,
@@ -16,13 +14,6 @@ import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { RectStylePopover } from "@/components/RectStylePopover"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Popover,
   PopoverContent,
@@ -44,28 +35,13 @@ type AnnotationToolbarProps = {
   canRedo: boolean
   canUndo: boolean
   disabled: boolean
-  /** Whether the document merged in other files; like a watermark, that may
-      only be exported as a copy, never saved back over the first file. */
-  hasMergedFiles: boolean
-  /** Whether the document has a file of its own for the save key to write
-      back to; one opened from bytes does not until an export gives it one. */
-  hasSourceFile: boolean
-  /** Whether this session added page numbers still on the document; like a
-      watermark, they leave the document export-only. */
-  hasPageNumbers: boolean
-  /** Whether a watermark this session added is still on the document; one may
-      only be exported as a copy, never written back over the reader's file. */
-  hasWatermark: boolean
   /** Whether the layout has text to mark; the grid of thumbnails does not. */
   highlightApplies: boolean
   highlightColor: HexColor
-  isDirty: boolean
-  onExport: () => void
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle) => void
   onPageNumbers: () => void
   onRedo: () => void
-  onSave: () => void
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
   onWatermark: () => void
@@ -81,19 +57,12 @@ export function AnnotationToolbar({
   canRedo,
   canUndo,
   disabled,
-  hasMergedFiles,
-  hasPageNumbers,
-  hasSourceFile,
-  hasWatermark,
   highlightApplies,
   highlightColor,
-  isDirty,
-  onExport,
   onHighlightColorChange,
   onPageNumbers,
   onRectStyleChange,
   onRedo,
-  onSave,
   onToolChange,
   onUndo,
   onWatermark,
@@ -109,20 +78,6 @@ export function AnnotationToolbar({
   const textNoteLabel = t("annotate.textNote")
   const watermarkLabel = t("watermark.open")
   const pageNumbersLabel = t("pageNumbers.open")
-  const saveLabel = t("annotate.save")
-  const exportLabel = t("annotate.export")
-  // Only where the reason is not already in front of the reader: session page
-  // content (a watermark or page numbers) or merged files they can see, or a
-  // document with no file of its own. Owned page content is named first — it is
-  // the stricter, less recoverable reason.
-  const saveTitle =
-    hasWatermark || hasPageNumbers
-      ? t("annotate.saveOwnedContent")
-      : hasMergedFiles
-        ? t("annotate.saveMerged")
-        : hasSourceFile
-          ? saveLabel
-          : t("annotate.saveNoSource")
 
   return (
     <>
@@ -281,54 +236,6 @@ export function AnnotationToolbar({
         >
           <Hash />
         </Button>
-      </ButtonGroup>
-
-      <ButtonGroup>
-        <Button
-          aria-label={saveLabel}
-          className="border-r-transparent peer/save"
-          disabled={
-            disabled ||
-            !hasSourceFile ||
-            !isDirty ||
-            hasWatermark ||
-            hasPageNumbers ||
-            hasMergedFiles
-          }
-          onClick={onSave}
-          size="icon"
-          title={disabled ? saveLabel : saveTitle}
-          variant="outline"
-        >
-          <Save />
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label={t("annotate.saveOptions")}
-                className={cn(
-                  splitMenuButtonClassName,
-                  "peer-hover/save:before:opacity-100",
-                )}
-                disabled={disabled}
-                size="icon"
-                title={t("annotate.saveOptions")}
-                variant="outline"
-              />
-            }
-          >
-            <ChevronDown />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto min-w-40">
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={onExport}>
-                <Download />
-                {exportLabel}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </ButtonGroup>
     </>
   )

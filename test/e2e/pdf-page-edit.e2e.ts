@@ -3,7 +3,13 @@ import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { bandedPdf, openPdfFromDisk, openPathViaDialog } from "./helpers"
+import {
+  appMenuItemEnabled,
+  bandedPdf,
+  clickAppMenuItem,
+  openPdfFromDisk,
+  openPathViaDialog,
+} from "./helpers"
 
 function thumbCount() {
   return browser.execute(
@@ -360,11 +366,10 @@ describe("TFolio page editing", () => {
     await dragThumbToGap(3, 1)
     await waitForThumb(1, fourth!)
 
-    await $("button[aria-label='Save']").click()
-    await browser.waitUntil(
-      async () => (await $("button[aria-label='Save']").isEnabled()) === false,
-      { timeoutMsg: "the save never completed" },
-    )
+    await clickAppMenuItem("save")
+    await browser.waitUntil(async () => !(await appMenuItemEnabled("save")), {
+      timeoutMsg: "the save never completed",
+    })
 
     // The saved file, reopened, still reads [4, 2, 3].
     await browser.refresh()

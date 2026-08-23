@@ -21,7 +21,22 @@ const en = {
       "This document has changes that are not saved. Closing its tab will discard them.",
     unsavedWindowDescription:
       "One or more open documents have changes that are not saved. Closing the window will discard them.",
+    unsavedAllDescription:
+      "One or more open documents have changes that are not saved. Closing them all will discard those changes.",
     discardAndCloseTab: "Discard and close tab",
+    discardAndCloseAll: "Discard and close all",
+  },
+  menu: {
+    title: "Menu",
+    new: "New…",
+    newFailed: "A new PDF could not be created.",
+    untitled: "Untitled.pdf",
+    openFile: "Open…",
+    openRecent: "Open recent",
+    recentEmpty: "No recent files",
+    saveAs: "Save as…",
+    closeAll: "Close all files",
+    exit: "Exit",
   },
   home: {
     welcome: "Welcome to TFolio",
@@ -86,14 +101,12 @@ const en = {
     textNoteConfirm: "Add this note",
     textNoteCancel: "Discard this note",
     save: "Save",
-    saveOptions: "Save options",
     saveNoSource: "No file to save over — exporting will save a copy",
     saveOwnedContent:
       "A document with a watermark or page numbers added this session can only be exported as a copy — they cannot be lifted once the file is closed",
     saveMerged:
       "A document that merged other files can only be exported as a copy, never saved back over the first file",
     saveFailed: "This PDF could not be saved.",
-    export: "Export a copy…",
     exportFilter: "PDF file",
     exportDefaultName: "annotated.pdf",
     exportFailed: "This PDF could not be exported.",

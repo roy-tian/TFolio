@@ -28,7 +28,22 @@ const zhCN = {
     unsavedTabDescription: "此文档尚有未保存的修改，关闭标签页将丢弃这些修改。",
     unsavedWindowDescription:
       "一个或多个已打开文档尚有未保存的修改，关闭窗口将丢弃这些修改。",
+    unsavedAllDescription:
+      "一个或多个已打开文档尚有未保存的修改，全部关闭将丢弃这些修改。",
     discardAndCloseTab: "丢弃并关闭标签页",
+    discardAndCloseAll: "丢弃并全部关闭",
+  },
+  menu: {
+    title: "菜单",
+    new: "新建…",
+    newFailed: "无法新建 PDF。",
+    untitled: "未命名.pdf",
+    openFile: "打开…",
+    openRecent: "打开最近文件",
+    recentEmpty: "暂无最近打开的文件",
+    saveAs: "另存为…",
+    closeAll: "关闭所有文件",
+    exit: "退出",
   },
   home: {
     welcome: "欢迎使用 TFolio",
@@ -93,13 +108,11 @@ const zhCN = {
     textNoteConfirm: "添加此注释",
     textNoteCancel: "放弃此注释",
     save: "保存",
-    saveOptions: "保存选项",
     saveNoSource: "没有可覆盖的源文件——导出将另存为副本",
     saveOwnedContent:
       "本次会话添加了水印或页码的文档只能导出副本——文件一旦关闭，它们便无法再由本应用移除",
     saveMerged: "合并了其他文件的文档只能导出副本，不能保存回第一个文件",
     saveFailed: "无法保存此 PDF。",
-    export: "导出副本…",
     exportFilter: "PDF 文件",
     exportDefaultName: "已批注.pdf",
     exportFailed: "无法导出此 PDF。",

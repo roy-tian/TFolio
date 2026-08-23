@@ -6,6 +6,10 @@ import "@wdio/tauri-service"
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
+  appMenuItem,
+  appMenuItemEnabled,
+  clickAppMenuItem,
+  closeAppMenu,
   dropZoneButton,
   openPdfFromBytes,
   openPathViaDialog,
@@ -62,9 +66,8 @@ describe("TFolio save", () => {
     const original = readFileSync(filePath)
     await renderedPage()
 
-    // Nothing to save yet, so the key waits.
-    const saveButton = () => $("button[aria-label='Save']")
-    await expect(saveButton()).toBeDisabled()
+    // Nothing to save yet, so the menu's save item waits.
+    expect(await appMenuItemEnabled("save")).toBe(false)
 
     const clean = await pageInk()
     await highlightTheText()
@@ -74,8 +77,8 @@ describe("TFolio save", () => {
     })
 
     // A mark on the page is a change on disk waiting to happen.
-    await expect(saveButton()).toBeEnabled()
-    await saveButton().click()
+    expect(await appMenuItemEnabled("save")).toBe(true)
+    await clickAppMenuItem("save")
 
     // The proof is the file: its bytes must actually change under the save.
     await browser.waitUntil(
@@ -87,9 +90,9 @@ describe("TFolio save", () => {
     expect(saved.subarray(0, 5).toString("ascii")).toBe("%PDF-")
     expect(saved.length).toBeGreaterThan(original.length)
 
-    // …and the history is clean again, so the key goes back to waiting.
+    // …and the history is clean again, so the item goes back to waiting.
     await browser.waitUntil(
-      async () => !(await saveButton().isEnabled()),
+      async () => !(await appMenuItemEnabled("save")),
       { timeout: 15_000, timeoutMsg: "the save never marked the history clean" },
     )
 
@@ -103,12 +106,11 @@ describe("TFolio save", () => {
     expect(await pageInk()).toBeGreaterThan(clean)
   })
 
-  it("disables save for a document opened from bytes, and leaves export available", async () => {
+  it("disables save for a document opened from bytes, and leaves save as available", async () => {
     await openPdfFromBytes("bytes.pdf", textPdf())
     await renderedPage()
 
-    const saveButton = () => $("button[aria-label='Save']")
-    await expect(saveButton()).toBeDisabled()
+    expect(await appMenuItemEnabled("save")).toBe(false)
 
     // Even with a change to save, there is no file of its own to save over.
     const clean = await pageInk()
@@ -117,13 +119,13 @@ describe("TFolio save", () => {
       timeout: 15_000,
       timeoutMsg: "the highlight never reached the page",
     })
-    await expect(saveButton()).toBeDisabled()
+    expect(await appMenuItemEnabled("save")).toBe(false)
 
-    // Export stays on offer — for this document it is the save-as.
-    await $("button[aria-label='Save options']").click()
-    const exportItem = await $("[role='menuitem']")
-    await exportItem.waitForDisplayed({ timeout: 15_000 })
-    await expect(exportItem).toHaveText("Export a copy…")
-    await browser.keys("Escape")
+    // Saving a copy stays on offer — for this document it is the only way to
+    // a file at all.
+    const saveAs = await appMenuItem("save-as")
+    await expect(saveAs).toHaveText("Save as…")
+    expect(await saveAs.getAttribute("data-disabled")).toBe(null)
+    await closeAppMenu(saveAs)
   })
 })

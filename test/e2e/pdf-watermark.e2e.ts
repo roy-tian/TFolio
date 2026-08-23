@@ -7,7 +7,9 @@ import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 import { watermarkPreferencesStorageKey } from "../../src/lib/watermark"
 import {
+  appMenuItem,
   blankPdf,
+  closeAppMenu,
   dropZoneButton,
   openPdfFromDisk,
   pagePixelFingerprint,
@@ -198,11 +200,12 @@ describe("TFolio document watermark", () => {
 
     // A watermark this app can no longer lift once the file closes never gets
     // written back over the file it came from; only an exported copy carries it.
-    // The title says which rule is holding the key, since a clean document and
-    // a document with no file of its own disable it too.
-    const save = $("button[aria-label='Save']")
-    await expect(save).toBeDisabled()
+    // The title says which rule is holding the item down, since a clean document
+    // and a document with no file of its own disable it too.
+    const save = await appMenuItem("save")
+    expect(await save.getAttribute("data-disabled")).not.toBe(null)
     expect(await save.getAttribute("title")).toContain("exported as a copy")
+    await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 
     mkdirSync("artifacts/e2e", { recursive: true })

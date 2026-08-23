@@ -8,7 +8,7 @@ import "@wdio/tauri-service"
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 import type { E2eOverrides } from "../../src/lib/e2e"
-import { openPdfFromDisk } from "./helpers"
+import { appMenuItemEnabled, openPdfFromDisk } from "./helpers"
 
 /**
  * One 200x300 page per band offset, each carrying a black bar at that x — so
@@ -399,7 +399,7 @@ describe("TFolio multi-file merge", () => {
     })
 
     // A merged document can only be exported as a copy, never saved over source.
-    await expect($("button[aria-label='Save']")).toBeDisabled()
-    await expect($("button[aria-label='Save options']")).toBeEnabled()
+    expect(await appMenuItemEnabled("save")).toBe(false)
+    expect(await appMenuItemEnabled("save-as")).toBe(true)
   })
 })

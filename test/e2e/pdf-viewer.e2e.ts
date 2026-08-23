@@ -3,7 +3,12 @@ import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { dropZoneButton, minimalPdf, openPdfFromDisk } from "./helpers"
+import {
+  clickAppMenuItem,
+  dropZoneButton,
+  minimalPdf,
+  openPdfFromDisk,
+} from "./helpers"
 
 // The zoom listener is bound natively and non-passively, so a wheel has to be
 // dispatched as a real event rather than through WebDriver's scroll action.
@@ -120,7 +125,7 @@ describe("TFolio PDF viewer", () => {
     await expect(bookmarksToggle).toBeDisabled()
     await expect($("nav[aria-label='Bookmarks']")).not.toBeExisting()
 
-    await $("button[aria-label='Settings']").click()
+    await clickAppMenuItem("settings")
     await expect($("[role='dialog']")).toBeDisplayed()
 
     // The About section preserves the existing application information.

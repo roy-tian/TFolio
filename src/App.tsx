@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Bookmark, FileUp } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import {
   DocumentSession,
   type DocumentSessionHandle,
 } from "@/components/DocumentSession"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
-import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
 import {
@@ -52,8 +52,16 @@ type OpenTab = {
   path: string
 }
 
-type WorkspaceError = "fileTooLarge" | "invalidFile" | "openFailed" | null
-type PendingClose = { kind: "tab"; documentId: number } | { kind: "window" }
+type WorkspaceError =
+  | "createFailed"
+  | "fileTooLarge"
+  | "invalidFile"
+  | "openFailed"
+  | null
+type PendingClose =
+  | { kind: "all" }
+  | { kind: "tab"; documentId: number }
+  | { kind: "window" }
 
 function hasUsableFocus() {
   const focused = document.activeElement
@@ -130,6 +138,34 @@ export default function App() {
     focusWorkspaceTarget(tabId)
   }, [])
 
+  // Every way a document reaches the workspace runs through here: they queue
+  // behind one another rather than racing over which tab ends up active, and
+  // they share the one busy state the strip and the home panel read.
+  const runOpenBatch = useCallback(
+    (run: () => Promise<void>) => {
+      openBatchesRef.current += 1
+      setIsOpening(true)
+
+      const queued = openChainRef.current.then(run, run)
+      openChainRef.current = queued.then(
+        () => undefined,
+        () => undefined,
+      )
+
+      return queued.finally(() => {
+        openBatchesRef.current -= 1
+
+        if (mountedRef.current && openBatchesRef.current === 0) {
+          setIsOpening(false)
+          // The backend records what it opened, so the home tab's list is
+          // read back rather than guessed at from here.
+          refreshRecentFiles()
+        }
+      })
+    },
+    [refreshRecentFiles],
+  )
+
   const openPaths = useCallback(
     (paths: string[], activate: "first" | "last" = "last") => {
       const pdfPaths = paths.filter(isPdfPath)
@@ -139,10 +175,7 @@ export default function App() {
         return Promise.resolve()
       }
 
-      openBatchesRef.current += 1
-      setIsOpening(true)
-
-      const run = async () => {
+      return runOpenBatch(async () => {
         const openedIds: number[] = []
         let firstError: WorkspaceError = null
 
@@ -209,26 +242,42 @@ export default function App() {
         } else if (firstError) {
           setWorkspaceError(firstError)
         }
-      }
-
-      const queued = openChainRef.current.then(run, run)
-      openChainRef.current = queued.then(
-        () => undefined,
-        () => undefined,
-      )
-
-      return queued.finally(() => {
-        openBatchesRef.current -= 1
-
-        if (mountedRef.current && openBatchesRef.current === 0) {
-          setIsOpening(false)
-          // The backend records what it opened, so the home tab's list is
-          // read back rather than guessed at from here.
-          refreshRecentFiles()
-        }
       })
     },
-    [activateTab, refreshRecentFiles, replaceTabs],
+    [activateTab, replaceTabs, runOpenBatch],
+  )
+
+  // A new document is the app's own rather than a file's: with no path it
+  // matches no open tab and has nothing to be saved back over, so it lives on
+  // in the workspace until an export gives it a file.
+  const createDocument = useCallback(
+    () =>
+      runOpenBatch(async () => {
+        try {
+          const document = await invoke<PdfDocumentInfo>("create_pdf")
+
+          if (!mountedRef.current) {
+            void invoke("close_pdf", { documentId: document.id }).catch(
+              () => undefined,
+            )
+            return
+          }
+
+          const tab: OpenTab = {
+            dirty: false,
+            document,
+            id: document.id,
+            name: t("menu.untitled"),
+            path: "",
+          }
+          replaceTabs((current) => [...current, tab])
+          activateTab(tab.id)
+          setWorkspaceError(null)
+        } catch {
+          setWorkspaceError("createFailed")
+        }
+      }),
+    [activateTab, replaceTabs, runOpenBatch, t],
   )
 
   const chooseFile = useCallback(async () => {
@@ -295,6 +344,48 @@ export default function App() {
     [removeTabNow],
   )
 
+  const removeAllTabsNow = useCallback(() => {
+    replaceTabs(() => [])
+    activeIdRef.current = HOME_TAB_ID
+    setActiveId(HOME_TAB_ID)
+    focusWorkspaceTarget(HOME_TAB_ID, true)
+  }, [replaceTabs])
+
+  // One question for the lot, rather than a dialog per dirty document: the
+  // reader asked to close everything, and answering the same prompt five times
+  // is not five decisions.
+  const requestCloseAll = useCallback(() => {
+    if (tabsRef.current.length === 0) {
+      return
+    }
+
+    const anyUnsaved = tabsRef.current.some((tab) =>
+      sessionRefs.current.get(tab.id)?.hasUnsavedWorkNow(),
+    )
+
+    if (anyUnsaved) {
+      setPendingClose({ kind: "all" })
+    } else {
+      removeAllTabsNow()
+    }
+  }, [removeAllTabsNow])
+
+  // An export that adopted its destination has given a document its first file.
+  // The tab follows it: the name the reader now knows it by, and the path the
+  // duplicate-open check reads.
+  const updateSource = useCallback(
+    (documentId: number, path: string) => {
+      replaceTabs((current) =>
+        current.map((tab) =>
+          tab.id === documentId
+            ? { ...tab, name: fileNameFromPath(path), path }
+            : tab,
+        ),
+      )
+    },
+    [replaceTabs],
+  )
+
   const updateDirty = useCallback(
     (documentId: number, dirty: boolean) => {
       replaceTabs((current) => {
@@ -310,6 +401,27 @@ export default function App() {
       })
     },
     [replaceTabs],
+  )
+
+  const menuActions: AppMenuActions = useMemo(
+    () => ({
+      canCloseAll: tabs.length > 0,
+      onCloseAll: requestCloseAll,
+      onNew: () => void createDocument(),
+      onOpen: () => void chooseFile(),
+      onOpenRecent: (path) => void openPaths([path]),
+      onRefreshRecent: refreshRecentFiles,
+      recentFiles,
+    }),
+    [
+      chooseFile,
+      createDocument,
+      openPaths,
+      recentFiles,
+      refreshRecentFiles,
+      requestCloseAll,
+      tabs.length,
+    ],
   )
 
   useEffect(() => {
@@ -399,13 +511,15 @@ export default function App() {
   }, [homeActive, refreshRecentFiles])
 
   const errorMessage =
-    workspaceError === "fileTooLarge"
-      ? t("viewer.fileTooLarge")
-      : workspaceError === "invalidFile"
-        ? t("viewer.invalidFile")
-        : workspaceError === "openFailed"
-          ? t("viewer.openFailed")
-          : null
+    workspaceError === "createFailed"
+      ? t("menu.newFailed")
+      : workspaceError === "fileTooLarge"
+        ? t("viewer.fileTooLarge")
+        : workspaceError === "invalidFile"
+          ? t("viewer.invalidFile")
+          : workspaceError === "openFailed"
+            ? t("viewer.openFailed")
+            : null
 
   return (
     <div className="h-svh overflow-hidden bg-background">
@@ -436,7 +550,7 @@ export default function App() {
             />
           </div>
           <div className="flex items-center gap-2 justify-self-end">
-            <SettingsDialog />
+            <AppMenu {...menuActions} />
             {macOS ? null : <WindowControls />}
           </div>
         </header>
@@ -459,7 +573,9 @@ export default function App() {
           document={tab.document}
           fileName={tab.name}
           key={tab.id}
+          menu={menuActions}
           onDirtyChange={updateDirty}
+          onSourceChange={updateSource}
           ref={(handle) => {
             if (handle) {
               sessionRefs.current.set(tab.id, handle)
@@ -514,7 +630,9 @@ export default function App() {
             <AlertDialogDescription>
               {pendingClose?.kind === "tab"
                 ? t("tabs.unsavedTabDescription")
-                : t("tabs.unsavedWindowDescription")}
+                : pendingClose?.kind === "all"
+                  ? t("tabs.unsavedAllDescription")
+                  : t("tabs.unsavedWindowDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -526,6 +644,8 @@ export default function App() {
 
                 if (action?.kind === "tab") {
                   removeTabNow(action.documentId)
+                } else if (action?.kind === "all") {
+                  removeAllTabsNow()
                 } else if (action?.kind === "window") {
                   void getCurrentWindow().destroy()
                 }
@@ -533,7 +653,9 @@ export default function App() {
             >
               {pendingClose?.kind === "tab"
                 ? t("tabs.discardAndCloseTab")
-                : t("viewer.unsavedCloseConfirm")}
+                : pendingClose?.kind === "all"
+                  ? t("tabs.discardAndCloseAll")
+                  : t("viewer.unsavedCloseConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

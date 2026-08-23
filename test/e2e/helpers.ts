@@ -177,6 +177,50 @@ export function openFileButton() {
 }
 
 /**
+ * Opens the header's menu — where the file commands live, the toolbar having
+ * no save key of its own — and hands back the item for `action`. The caller
+ * either clicks it or reads it and presses Escape; `data-action` rather than
+ * the label, which changes with the language.
+ */
+export async function appMenuItem(action: string) {
+  await $("[data-slot='app-menu']").click()
+
+  const item = $(`[data-action='${action}']`)
+  await item.waitForDisplayed({ timeout: 15_000 })
+
+  return item
+}
+
+export async function clickAppMenuItem(action: string) {
+  await (await appMenuItem(action)).click()
+}
+
+/**
+ * Dismisses the menu and waits for its popup to actually leave the screen —
+ * the next click would otherwise land on the closing popup, not the control
+ * behind it. `item` is any element inside the menu, from `appMenuItem`.
+ */
+export async function closeAppMenu(
+  item: Awaited<ReturnType<typeof appMenuItem>>,
+) {
+  await browser.keys("Escape")
+  await item.waitForDisplayed({ reverse: true, timeout: 15_000 })
+}
+
+/**
+ * Whether the menu currently offers `action`, leaving the menu closed again.
+ * Base UI marks a disabled item with `data-disabled`, not the `disabled`
+ * property WebdriverIO's `isEnabled` reads off a form control.
+ */
+export async function appMenuItemEnabled(action: string) {
+  const item = await appMenuItem(action)
+  const disabled = await item.getAttribute("data-disabled")
+  await closeAppMenu(item)
+
+  return disabled === null
+}
+
+/**
  * Writes `contents` to a scratch file and opens it through the app's real
  * choose-a-file flow — only the native dialog is stubbed, resolving with the
  * file's path — then returns that path, which is where a save will land.
