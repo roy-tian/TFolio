@@ -39,6 +39,15 @@ pub async fn open_pdf(
 }
 
 #[tauri::command]
+pub async fn create_pdf(state: State<'_, PdfiumState>) -> Result<PdfDocumentInfo, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.create_blank())
+        .await
+        .map_err(|error| format!("PDFium create task failed: {error}"))?
+}
+
+#[tauri::command]
 pub async fn render_pdf_page(
     document_id: u64,
     page_number: i32,

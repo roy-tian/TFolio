@@ -562,6 +562,34 @@ impl PdfiumEngine {
             .map_err(|_| "PDFium document store is unavailable".to_string())
     }
 
+    /// A new one-page A4 document, built in memory. It has no file of its own,
+    /// so — exactly like one opened from bytes — a save has nowhere to write
+    /// until an export adopts a destination as its source.
+    pub(super) fn create_blank(&self) -> Result<PdfDocumentInfo, String> {
+        let bytes = {
+            // Building a document is PDFium work like any other, so it is done
+            // under the store's lock — given back before `open_with_source`
+            // takes it again.
+            let _documents = self.lock_documents()?;
+            let mut document = self
+                .pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+            let page = document
+                .pages_mut()
+                .create_page_at_end(PdfPagePaperSize::a4())
+                .map_err(|error| format!("PDFium could not create the first page: {error}"))?;
+
+            drop(page);
+
+            document
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not build the new document: {error}"))?
+        };
+
+        self.open_with_source(bytes, None)
+    }
+
     pub(super) fn open(&self, bytes: Vec<u8>) -> Result<PdfDocumentInfo, String> {
         self.open_with_source(bytes, None)
     }

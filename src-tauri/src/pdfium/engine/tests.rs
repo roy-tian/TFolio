@@ -4509,3 +4509,29 @@ fn smart_colour_resamples_the_backdrop_not_its_own_label() {
     );
     assert_eq!(bright, 0, "and never flip to white on its own ink");
 }
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn creates_a_blank_a4_document_with_no_file_of_its_own() {
+    let engine = test_engine();
+    let document = engine
+        .create_blank()
+        .expect("PDFium should create a blank document");
+
+    assert_eq!(document.num_pages, 1);
+
+    let page = &document.pages[0];
+    assert!(
+        (page.width - 595.0).abs() < 1.0 && (page.height - 842.0).abs() < 1.0,
+        "the page should be A4, and was {}x{}",
+        page.width,
+        page.height
+    );
+    // Nothing to overwrite: the document never came from a file, so the save
+    // key stays down until an export gives it one.
+    assert!(document.path.is_none());
+
+    engine
+        .close(document.id)
+        .expect("the new document should close");
+}
