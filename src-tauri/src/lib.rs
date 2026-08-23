@@ -1,4 +1,5 @@
 mod pdfium;
+mod recent;
 
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
@@ -8,6 +9,7 @@ use pdfium::{
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
     reorder_pdf_pages, restore_pdf_pages, save_pdf, PdfiumState,
 };
+use recent::{recent_pdfs, RecentFiles};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,7 +24,15 @@ pub fn run() {
     builder
         .setup(|app| {
             let pdfium = PdfiumState::new(app.handle()).map_err(std::io::Error::other)?;
+            // An earlier run's recent list is the one thing outside this
+            // process that may name a path the reader gets to reopen, and it
+            // holds only paths a dialog or a drop produced while this app
+            // watched — so approving it is approving the reader's own past
+            // gestures, not the WebView's word.
+            let recent = RecentFiles::load(app.handle());
+            pdfium.approve_paths(recent.stored().iter());
             app.manage(pdfium);
+            app.manage(recent);
             Ok(())
         })
         // Recorded on the Rust side of the boundary, because this is the only
@@ -40,6 +50,7 @@ pub fn run() {
             open_pdf,
             open_pdf_from_path,
             pick_pdf_path,
+            recent_pdfs,
             render_pdf_page,
             render_pdf_page_thumbnail,
             extract_pdf_page_text,

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   activeTabAfterClose,
+  HOME_TAB_ID,
   selectOpenedTabId,
   tabIdForKey,
   tabIdForPath,
@@ -25,18 +26,23 @@ describe("document tabs", () => {
   })
 
   test("closing the active tab selects its next neighbour, then its previous", () => {
-    expect(activeTabAfterClose([1, 2, 3], 2, 2)).toBe(3)
-    expect(activeTabAfterClose([1, 2, 3], 3, 3)).toBe(2)
-    expect(activeTabAfterClose([1], 1, 1)).toBeNull()
-    expect(activeTabAfterClose([1, 2], 1, 2)).toBe(1)
+    const ids = [HOME_TAB_ID, 1, 2, 3]
+
+    expect(activeTabAfterClose(ids, 2, 2)).toBe(3)
+    expect(activeTabAfterClose(ids, 3, 3)).toBe(2)
+    expect(activeTabAfterClose(ids, 1, 2)).toBe(1)
   })
 
-  test("keyboard navigation wraps and supports the ends", () => {
-    const ids = [4, 7, 9]
+  test("closing the last document falls back to home", () => {
+    expect(activeTabAfterClose([HOME_TAB_ID, 1], 1, 1)).toBe(HOME_TAB_ID)
+  })
 
-    expect(tabIdForKey(ids, 4, "ArrowLeft")).toBe(9)
-    expect(tabIdForKey(ids, 9, "ArrowRight")).toBe(4)
-    expect(tabIdForKey(ids, 7, "Home")).toBe(4)
+  test("keyboard navigation wraps through home and supports the ends", () => {
+    const ids = [HOME_TAB_ID, 4, 7, 9]
+
+    expect(tabIdForKey(ids, HOME_TAB_ID, "ArrowLeft")).toBe(9)
+    expect(tabIdForKey(ids, 9, "ArrowRight")).toBe(HOME_TAB_ID)
+    expect(tabIdForKey(ids, 7, "Home")).toBe(HOME_TAB_ID)
     expect(tabIdForKey(ids, 7, "End")).toBe(9)
     expect(tabIdForKey(ids, 7, "Enter")).toBeNull()
   })

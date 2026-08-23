@@ -7,12 +7,13 @@ import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
-import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   dropZoneButton,
   minimalPdf,
+  openFileButton,
+  openPathViaDialog,
   openPdfFromDisk,
-  openPathViaToolbar,
+  pointPickerAt,
 } from "./helpers"
 
 function writePdf(name: string, pages: number) {
@@ -20,6 +21,11 @@ function writePdf(name: string, pages: number) {
   const filePath = path.join(directory, name)
   writeFileSync(filePath, minimalPdf(pages))
   return filePath
+}
+
+/** Every tab in the strip, the home tab included — it leads the list. */
+function tabButtons() {
+  return $$("button[role='tab']")
 }
 
 async function resetWorkspace() {
@@ -32,27 +38,31 @@ async function resetWorkspace() {
     { languageKey: languageStorageKey, viewKey: viewModeStorageKey },
   )
   await browser.refresh()
-  await dropZoneButton().waitForExist({ timeout: 30_000 })
+  await openFileButton().waitForExist({ timeout: 30_000 })
 }
 
 describe("independent document tabs", () => {
   beforeEach(resetWorkspace)
 
-  it("closes the only clean document back to the empty workspace", async () => {
+  it("closes the only clean document back to the home tab", async () => {
     await openPdfFromDisk("only.pdf", minimalPdf())
-    const closeCurrent = $("[data-slot='close-current-document']")
+    const close = $("button[aria-label='Close only.pdf']")
 
-    await closeCurrent.waitForDisplayed()
-    await closeCurrent.click()
+    await close.waitForDisplayed()
+    await close.click()
     await dropZoneButton().waitForDisplayed()
-    await expect($("[role='tablist']")).not.toBeExisting()
-    await expect($("[data-slot='titlebar-open-file']")).toBeFocused()
+    await expect(tabButtons()).toBeElementsArrayOfSize(1)
+    await expect($("#workspace-tab-home")).toBeFocused()
+    await expect($("#workspace-tab-home")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
   })
 
-  it("shows the strip at two documents and preserves per-tab view and undo state", async () => {
+  it("keeps the strip through an empty workspace and preserves per-tab state", async () => {
     const firstPath = await openPdfFromDisk("first.pdf", minimalPdf(3))
     await $("[data-page-number='1']").waitForDisplayed()
-    await expect($("[role='tablist']")).not.toBeExisting()
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
 
     const pageInput = $("[data-active='true'] input[aria-label='Page number']")
     await pageInput.setValue("2")
@@ -60,12 +70,12 @@ describe("independent document tabs", () => {
     await expect(pageInput).toHaveValue("2")
 
     const secondPath = writePdf("second.pdf", 1)
-    await openPathViaToolbar(secondPath)
+    await openPathViaDialog(secondPath)
     await $("button[role='tab'][title='second.pdf']").waitForExist()
-    await expect($$("button[role='tab']")).toBeElementsArrayOfSize(2)
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
     await expect($("button[role='tab'][title='second.pdf']")).toHaveAttribute(
       "aria-controls",
-      expect.stringMatching(/^document-panel-/),
+      expect.stringMatching(/^workspace-panel-/),
     )
     await expect($("button[aria-label='Close first.pdf']")).toHaveAttribute(
       "tabindex",
@@ -82,22 +92,20 @@ describe("independent document tabs", () => {
 
     // An exact duplicate activates its existing tab instead of opening a third.
     await $("button[role='tab'][title='second.pdf']").click()
-    await openPathViaToolbar(firstPath)
-    await expect($$("button[role='tab']")).toBeElementsArrayOfSize(2)
+    await openPathViaDialog(firstPath)
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
     await expect($("button[role='tab'][title='first.pdf']")).toHaveAttribute(
       "aria-selected",
       "true",
     )
 
     await $("button[aria-label='Close second.pdf']").click()
-    await expect($("[role='tablist']")).not.toBeExisting()
-    await expect(
-      $("[data-active='true'] [data-slot='session-open-file']"),
-    ).toBeFocused()
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
+    await expect($("button[role='tab'][title='first.pdf']")).toBeFocused()
 
     // Reopen a clean neighbour, dirty the first document, and verify both
     // branches of the tab-close guard.
-    await openPathViaToolbar(secondPath)
+    await openPathViaDialog(secondPath)
     await $("button[role='tab'][title='first.pdf']").click()
     await $("button[aria-label='Thumbnails']").click()
     await $("button[aria-label='Delete page 1']").waitForExist()
@@ -121,11 +129,37 @@ describe("independent document tabs", () => {
     await $("button[aria-label='Close first.pdf']").click()
     await expect($("[role='alertdialog']")).toBeDisplayed()
     await $("button=Keep editing").click()
-    await expect($$("button[role='tab']")).toBeElementsArrayOfSize(2)
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
 
     await $("button[aria-label='Close first.pdf']").click()
     await $("button=Discard and close tab").click()
-    await expect($("[role='tablist']")).not.toBeExisting()
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
+  })
+
+  it("reopens a closed document from the home tab's recent list", async () => {
+    const filePath = await openPdfFromDisk("recent.pdf", minimalPdf(2))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    await $("button[aria-label='Close recent.pdf']").click()
+    await dropZoneButton().waitForDisplayed()
+
+    const entry = $("[data-slot='recent-file'][title='" + filePath + "']")
+    await entry.waitForDisplayed()
+    await expect(entry).toHaveText(/recent\.pdf/)
+
+    await entry.click()
+    await $("button[role='tab'][title='recent.pdf']").waitForExist()
+    await expect($("[data-page-number='1']")).toBeDisplayed()
+
+    // A file already open is not opened twice: its recent entry just goes back
+    // to the tab it is in.
+    await $("#workspace-tab-home").click()
+    await entry.click()
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
+    await expect($("button[role='tab'][title='recent.pdf']")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
   })
 
   it("keeps the Files-view add action as a merge into the current tab", async () => {
@@ -134,20 +168,14 @@ describe("independent document tabs", () => {
     await $("[data-slot='add-file']").waitForDisplayed()
 
     const addedPath = writePdf("merged.pdf", 2)
-    await browser.execute((mockPath: string) => {
-      const seam = window as Window & { __tfolioE2E?: E2eOverrides }
-      seam.__tfolioE2E = {
-        ...seam.__tfolioE2E,
-        pickPdfPath: () => Promise.resolve(mockPath),
-      }
-    }, addedPath)
+    await pointPickerAt(addedPath)
     await $("[data-slot='add-file']").click()
 
     await browser.waitUntil(
       async () => (await $$('[data-file-index]').length) === 2,
       { timeoutMsg: "the added PDF did not become a second file card" },
     )
-    await expect($("[role='tablist']")).not.toBeExisting()
-    await expect($("[data-slot='close-current-document']")).toBeDisplayed()
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
+    await expect($("button[aria-label='Close base.pdf']")).toBeDisplayed()
   })
 })

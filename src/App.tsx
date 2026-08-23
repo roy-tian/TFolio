@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
-import { Bookmark, FilePlus, FileUp, LoaderCircle } from "lucide-react"
+import { Bookmark, FileUp } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -10,6 +10,7 @@ import {
   type DocumentSessionHandle,
 } from "@/components/DocumentSession"
 import { DocumentTabs } from "@/components/DocumentTabs"
+import { HomePanel } from "@/components/HomePanel"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
@@ -23,13 +24,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
+  HOME_TAB_ID,
   selectOpenedTabId,
+  tabElementId,
   tabIdForPath,
+  type TabId,
 } from "@/lib/documentTabs"
 import {
   fileNameFromPath,
@@ -37,6 +40,7 @@ import {
   type PdfDocumentInfo,
 } from "@/lib/pdf"
 import { isMacOS } from "@/lib/platform"
+import { readRecentFiles, type RecentFile } from "@/lib/recentFiles"
 import { cn } from "@/lib/utils"
 import { defaultViewMode, readStoredViewMode } from "@/lib/viewMode"
 
@@ -62,28 +66,15 @@ function hasUsableFocus() {
   )
 }
 
-function focusWorkspaceTarget(
-  activeId: number | null,
-  tabCount: number,
-  force = false,
-) {
+/** Puts focus on the tab that now leads the workspace — the one control that
+    is always on screen, whichever panel is showing behind it. */
+function focusWorkspaceTarget(activeId: TabId, force = false) {
   requestAnimationFrame(() => {
     if (!force && hasUsableFocus()) {
       return
     }
 
-    const target =
-      tabCount >= 2 && activeId !== null
-        ? document.getElementById(`document-tab-${activeId}`)
-        : tabCount === 1
-          ? document.querySelector<HTMLElement>(
-              "[data-active='true'] [data-slot='session-open-file']",
-            )
-          : document.querySelector<HTMLElement>(
-              "[data-slot='titlebar-open-file'], [data-slot='drop-zone']",
-            )
-
-    target?.focus()
+    document.getElementById(tabElementId(activeId))?.focus()
   })
 }
 
@@ -91,7 +82,8 @@ export default function App() {
   const { t } = useTranslation()
   const macOS = isMacOS()
   const [tabs, setTabs] = useState<OpenTab[]>([])
-  const [activeId, setActiveId] = useState<number | null>(null)
+  const [activeId, setActiveId] = useState<TabId>(HOME_TAB_ID)
+  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [workspaceError, setWorkspaceError] = useState<WorkspaceError>(null)
@@ -105,7 +97,7 @@ export default function App() {
   const openBatchesRef = useRef(0)
   const choosingFileRef = useRef(false)
   const mountedRef = useRef(true)
-  const activeIdRef = useRef<number | null>(null)
+  const activeIdRef = useRef<TabId>(HOME_TAB_ID)
 
   const replaceTabs = useCallback(
     (update: (current: OpenTab[]) => OpenTab[]) => {
@@ -117,14 +109,25 @@ export default function App() {
     [],
   )
 
-  const activateTab = useCallback((documentId: number) => {
-    if (!tabsRef.current.some((tab) => tab.id === documentId)) {
+  const refreshRecentFiles = useCallback(() => {
+    void readRecentFiles().then((files) => {
+      if (mountedRef.current) {
+        setRecentFiles(files)
+      }
+    })
+  }, [])
+
+  const activateTab = useCallback((tabId: TabId) => {
+    if (
+      tabId !== HOME_TAB_ID &&
+      !tabsRef.current.some((tab) => tab.id === tabId)
+    ) {
       return
     }
 
-    activeIdRef.current = documentId
-    setActiveId(documentId)
-    focusWorkspaceTarget(documentId, tabsRef.current.length)
+    activeIdRef.current = tabId
+    setActiveId(tabId)
+    focusWorkspaceTarget(tabId)
   }, [])
 
   const openPaths = useCallback(
@@ -219,10 +222,13 @@ export default function App() {
 
         if (mountedRef.current && openBatchesRef.current === 0) {
           setIsOpening(false)
+          // The backend records what it opened, so the home tab's list is
+          // read back rather than guessed at from here.
+          refreshRecentFiles()
         }
       })
     },
-    [activateTab, replaceTabs],
+    [activateTab, refreshRecentFiles, replaceTabs],
   )
 
   const chooseFile = useCallback(async () => {
@@ -255,23 +261,25 @@ export default function App() {
       const current = tabsRef.current
       const currentActiveId = activeIdRef.current
       const candidateId = activeTabAfterClose(
-        current.map((tab) => tab.id),
+        [HOME_TAB_ID, ...current.map((tab) => tab.id)],
         currentActiveId,
         documentId,
       )
       const next = replaceTabs((existing) =>
         existing.filter((tab) => tab.id !== documentId),
       )
-      const nextActiveId = next.some((tab) => tab.id === candidateId)
-        ? candidateId
-        : next[0]?.id ?? null
+      const nextActiveId =
+        candidateId === HOME_TAB_ID ||
+        next.some((tab) => tab.id === candidateId)
+          ? candidateId
+          : HOME_TAB_ID
 
       if (nextActiveId !== currentActiveId) {
         activeIdRef.current = nextActiveId
         setActiveId(nextActiveId)
       }
 
-      focusWorkspaceTarget(nextActiveId, next.length, true)
+      focusWorkspaceTarget(nextActiveId, true)
     },
     [replaceTabs],
   )
@@ -380,7 +388,16 @@ export default function App() {
     }
   }, [])
 
-  const tabsVisible = tabs.length >= 2
+  const homeActive = activeId === HOME_TAB_ID
+
+  // Read again on every visit, not just at startup: a file the list points at
+  // may have been moved or deleted since, and the backend leaves those out.
+  useEffect(() => {
+    if (homeActive) {
+      refreshRecentFiles()
+    }
+  }, [homeActive, refreshRecentFiles])
+
   const errorMessage =
     workspaceError === "fileTooLarge"
       ? t("viewer.fileTooLarge")
@@ -392,81 +409,49 @@ export default function App() {
 
   return (
     <div className="h-svh overflow-hidden bg-background">
-      {tabs.length === 0 ? (
-        <>
-          <header
-            className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
-            data-tauri-drag-region="deep"
+      {homeActive ? (
+        <header
+          className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
+          data-tauri-drag-region="deep"
+        >
+          <div
+            className={cn(
+              "flex items-center gap-1 justify-self-start",
+              macOS && "pl-[72px]",
+            )}
           >
-            <div
-              className={cn(
-                "flex items-center justify-self-start",
-                macOS && "pl-[72px]",
-              )}
+            <Toggle
+              aria-label={t("toolbar.showBookmarks")}
+              className="size-8"
+              disabled
+              title={t("toolbar.showBookmarks")}
+              variant="outline"
             >
-              <Button
-                aria-label={t("tabs.openFile")}
-                data-slot="titlebar-open-file"
-                disabled={isOpening}
-                onClick={() => void chooseFile()}
-                size="icon"
-                title={t("tabs.openFile")}
-                variant="outline"
-              >
-                {isOpening ? <LoaderCircle className="animate-spin" /> : <FilePlus />}
-              </Button>
-              <Toggle
-                aria-label={t("toolbar.showBookmarks")}
-                className="ml-1 size-8"
-                disabled
-                title={t("toolbar.showBookmarks")}
-                variant="outline"
-              >
-                <Bookmark />
-              </Toggle>
-              <ViewModeToggle
-                disabled
-                onChange={() => undefined}
-                value={emptyViewMode}
-              />
-            </div>
-            <div className="flex items-center gap-2 justify-self-end">
-              <SettingsDialog />
-              {macOS ? null : <WindowControls />}
-            </div>
-          </header>
-
-          <main className="grid h-full place-items-center bg-zinc-200/70 p-8 pt-20 dark:bg-zinc-950">
-            <div className="flex w-full max-w-xl flex-col items-center">
-              <button
-                aria-label={t("viewer.chooseFile")}
-                className="group flex w-full cursor-pointer flex-col items-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-14 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
-                data-slot="drop-zone"
-                disabled={isOpening}
-                onClick={() => void chooseFile()}
-                type="button"
-              >
-                {isOpening ? (
-                  <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
-                ) : (
-                  <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
-                )}
-                <span className="text-lg font-semibold">
-                  {isOpening ? t("viewer.loading") : t("viewer.dropTitle")}
-                </span>
-                <span className="mt-2 text-sm text-muted-foreground">
-                  {t("viewer.dropDescription")}
-                </span>
-              </button>
-              {errorMessage ? (
-                <span className="mt-4 text-sm text-destructive" role="alert">
-                  {errorMessage}
-                </span>
-              ) : null}
-            </div>
-          </main>
-        </>
+              <Bookmark />
+            </Toggle>
+            <ViewModeToggle
+              disabled
+              onChange={() => undefined}
+              value={emptyViewMode}
+            />
+          </div>
+          <div className="flex items-center gap-2 justify-self-end">
+            <SettingsDialog />
+            {macOS ? null : <WindowControls />}
+          </div>
+        </header>
       ) : null}
+
+      <HomePanel
+        active={homeActive}
+        // Only the showing panel carries the message: two live `role="alert"`
+        // nodes for one error is one too many for a screen reader to reach.
+        errorMessage={homeActive ? errorMessage : null}
+        onOpenFile={() => void chooseFile()}
+        onOpenRecent={(path) => void openPaths([path])}
+        opening={isOpening}
+        recentFiles={recentFiles}
+      />
 
       {tabs.map((tab) => (
         <DocumentSession
@@ -474,10 +459,7 @@ export default function App() {
           document={tab.document}
           fileName={tab.name}
           key={tab.id}
-          opening={isOpening}
-          onCloseDocument={() => requestCloseTab(tab.id)}
           onDirtyChange={updateDirty}
-          onOpenFile={() => void chooseFile()}
           ref={(handle) => {
             if (handle) {
               sessionRefs.current.set(tab.id, handle)
@@ -485,26 +467,20 @@ export default function App() {
               sessionRefs.current.delete(tab.id)
             }
           }}
-          tabsVisible={tabsVisible}
         />
       ))}
 
-      {tabsVisible && activeId !== null ? (
-        <DocumentTabs
-          activeId={activeId}
-          onActivate={activateTab}
-          onClose={requestCloseTab}
-          tabs={tabs}
-        />
-      ) : null}
+      <DocumentTabs
+        activeId={activeId}
+        onActivate={activateTab}
+        onClose={requestCloseTab}
+        onOpenFile={() => void chooseFile()}
+        opening={isOpening}
+        tabs={tabs}
+      />
 
       {isDragging ? (
-        <div
-          className={cn(
-            "pointer-events-none fixed inset-3 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm",
-            tabsVisible ? "top-24" : "top-15",
-          )}
-        >
+        <div className="pointer-events-none fixed inset-3 top-24 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm">
           <div className="flex flex-col items-center text-center">
             <FileUp className="mb-4 size-12" />
             <p className="text-lg font-semibold">{t("tabs.dropNow")}</p>
@@ -515,12 +491,9 @@ export default function App() {
         </div>
       ) : null}
 
-      {tabs.length > 0 && errorMessage ? (
+      {!homeActive && errorMessage ? (
         <div
-          className={cn(
-            "fixed right-4 z-60 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg",
-            tabsVisible ? "top-25" : "top-16",
-          )}
+          className="fixed top-25 right-4 z-60 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
           role="alert"
         >
           {errorMessage}

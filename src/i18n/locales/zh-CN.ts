@@ -17,10 +17,11 @@ const zhCN = {
     close: "关闭",
   },
   tabs: {
+    home: "主页",
     openFile: "在新标签页中打开 PDF",
-    list: "已打开的 PDF 文档",
+    list: "工作区标签页",
+    listAll: "全部已打开的文档",
     close: "关闭 {{name}}",
-    closeCurrent: "关闭当前文档 {{name}}",
     unsaved: "有未保存的修改",
     dropNow: "松开以打开 PDF 文件",
     dropHint: "PDF 文件将在独立标签页中打开",
@@ -28,6 +29,11 @@ const zhCN = {
     unsavedWindowDescription:
       "一个或多个已打开文档尚有未保存的修改，关闭窗口将丢弃这些修改。",
     discardAndCloseTab: "丢弃并关闭标签页",
+  },
+  home: {
+    welcome: "欢迎使用 TFolio",
+    recent: "最近打开",
+    recentEmpty: "打开过的 PDF 会显示在这里。",
   },
   toolbar: {
     hideBookmarks: "隐藏书签",

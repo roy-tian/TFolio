@@ -8,14 +8,7 @@ import {
   useState,
 } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import {
-  BookCopy,
-  Bookmark,
-  FilePlus,
-  LoaderCircle,
-  RotateCw,
-  X,
-} from "lucide-react"
+import { BookCopy, Bookmark, RotateCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
@@ -61,6 +54,7 @@ import {
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
+import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { e2eOverride } from "@/lib/e2e"
 import {
   documentPageCount,
@@ -108,11 +102,7 @@ type DocumentSessionProps = {
   active: boolean
   document: PdfDocumentInfo
   fileName: string
-  opening: boolean
-  onCloseDocument: () => void
   onDirtyChange: (documentId: number, dirty: boolean) => void
-  onOpenFile: () => void
-  tabsVisible: boolean
 }
 
 function closePdf(documentId: number) {
@@ -121,16 +111,7 @@ function closePdf(documentId: number) {
 
 export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSessionProps>(
 function DocumentSession(
-  {
-    active,
-    document: openedDocument,
-    fileName,
-    opening,
-    onCloseDocument,
-    onDirtyChange,
-    onOpenFile,
-    tabsVisible,
-  },
+  { active, document: openedDocument, fileName, onDirtyChange },
   ref,
 ) {
   const { t } = useTranslation()
@@ -806,13 +787,13 @@ function DocumentSession(
   return (
     <div
       aria-hidden={!active}
-      aria-labelledby={tabsVisible ? `document-tab-${openedDocument.id}` : undefined}
+      aria-labelledby={tabElementId(openedDocument.id)}
       className="h-svh overflow-hidden bg-background"
       data-active={active}
       data-document-session={openedDocument.id}
       hidden={!active}
-      id={`document-panel-${openedDocument.id}`}
-      role={tabsVisible ? "tabpanel" : undefined}
+      id={panelElementId(openedDocument.id)}
+      role="tabpanel"
     >
       {/* pb-px keeps the content box an even height: without it the bottom
           border leaves 47px, and centring a 32px control there puts its own
@@ -828,29 +809,6 @@ function DocumentSession(
             macOS && "pl-[72px]",
           )}
         >
-          <Button
-            aria-label={t("tabs.openFile")}
-            data-slot="session-open-file"
-            disabled={opening}
-            onClick={onOpenFile}
-            size="icon"
-            title={t("tabs.openFile")}
-            variant="outline"
-          >
-            {opening ? <LoaderCircle className="animate-spin" /> : <FilePlus />}
-          </Button>
-          {!tabsVisible ? (
-            <Button
-              aria-label={t("tabs.closeCurrent", { name: fileName })}
-              data-slot="close-current-document"
-              onClick={onCloseDocument}
-              size="icon"
-              title={t("tabs.closeCurrent", { name: fileName })}
-              variant="outline"
-            >
-              <X />
-            </Button>
-          ) : null}
           <Toggle
             aria-label={bookmarksLabel}
             className="size-8"
@@ -992,7 +950,7 @@ function DocumentSession(
         </div>
       </header>
 
-      <div className={cn("flex h-full", tabsVisible ? "pt-21" : "pt-12")}>
+      <div className="flex h-full pt-21">
         {pdfDocument && bookmarksOpen ? (
           <BookmarkSidebar
             items={pdfDocument.outline}
@@ -1090,10 +1048,7 @@ function DocumentSession(
 
       {errorMessage ? (
         <div
-          className={cn(
-            "fixed right-4 z-40 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg",
-            tabsVisible ? "top-25" : "top-16",
-          )}
+          className="fixed top-25 right-4 z-40 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
           role="alert"
         >
           {errorMessage}

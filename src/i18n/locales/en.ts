@@ -9,10 +9,11 @@ const en = {
     close: "Close",
   },
   tabs: {
+    home: "Home",
     openFile: "Open PDF in a new tab",
-    list: "Open PDF documents",
+    list: "Workspace tabs",
+    listAll: "All open documents",
     close: "Close {{name}}",
-    closeCurrent: "Close current document, {{name}}",
     unsaved: "Unsaved changes",
     dropNow: "Drop to open PDF files",
     dropHint: "PDF files open in separate tabs",
@@ -21,6 +22,11 @@ const en = {
     unsavedWindowDescription:
       "One or more open documents have changes that are not saved. Closing the window will discard them.",
     discardAndCloseTab: "Discard and close tab",
+  },
+  home: {
+    welcome: "Welcome to TFolio",
+    recent: "Recent files",
+    recentEmpty: "The PDFs you open will be listed here.",
   },
   toolbar: {
     hideBookmarks: "Hide bookmarks",

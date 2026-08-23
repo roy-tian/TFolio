@@ -20,7 +20,8 @@ task runner.
   annotations), `commands.rs` (the Tauri commands), `geometry.rs` (coordinates
   and the style ranges), `font.rs` (the bundled CJK face and per-edit
   subsetting), `watermark.rs` (document-watermark validation and layout),
-  `library.rs` (binding the PDFium runtime).
+  `library.rs` (binding the PDFium runtime); `recent.rs` holds the persisted
+  recently-opened list the home tab reads.
 - `src-tauri/capabilities/`: Tauri permission definitions (`default.json`).
 - `src-tauri/resources/`: bundled runtime assets — the downloaded PDFium
   library under `resources/pdfium/` and the Noto Sans SC face text notes subset
@@ -144,14 +145,17 @@ paths to the frontend — acts only on *approved* paths, ones the OS produced in
 Rust's sight (the window's own drag-drop event handler in `lib.rs`, or the pick
 dialog), because opening a path is what binds it as the file a save will later
 overwrite. The e2e build waives that approval check (its scratch files never
-saw a dialog); nothing else does. Besides `core:default` the capability holds
-only `core:window:allow-destroy`, which the unsaved-changes close guard needs
-to actually close the window once the reader confirms. The principle stands: an
-argument a command will act on has to be checked in the command, not assumed
-safe because a dialog produced it. `tauri-plugin-dialog` pulls `tauri-plugin-fs`
-in as a transitive dependency; it is deliberately never registered, so no `fs`
-commands are exposed — do not read its presence in `Cargo.lock` as permission
-to use it.
+saw a dialog); nothing else does. The home tab's recent list is the one way an
+approved path outlives its run: `recent.rs` records one only after an approved
+open succeeded and `run()` re-approves them at startup; recording a path the
+frontend passed in would launder it into approval. Besides `core:default` the
+capability holds only `core:window:allow-destroy`, which the unsaved-changes
+close guard needs to actually close the window once the reader confirms. The
+principle stands: an argument a command will act on has to be checked in the
+command, not assumed safe because a dialog produced it. `tauri-plugin-dialog`
+pulls `tauri-plugin-fs` in as a transitive dependency; it is deliberately never
+registered, so no `fs` commands are exposed — do not read its presence in
+`Cargo.lock` as permission to use it.
 
 The backend enforces its own invariants for the same reason. `delete_last_pdf_annotation`
 counts what the session added to each page and refuses to go past it, rather than

@@ -9,6 +9,8 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
+use crate::recent::RecentFiles;
+
 use super::{
     size_limit_error, ExportOutcome, MergeOutcome, PageNumbersConfig, PagePoint, PagePointsRect,
     PdfDocumentInfo, PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle,
@@ -309,8 +311,10 @@ pub async fn pick_pdf_path(
 pub async fn open_pdf_from_path(
     path: String,
     state: State<'_, PdfiumState>,
+    recent: State<'_, RecentFiles>,
 ) -> Result<PdfDocumentInfo, String> {
     let engine = Arc::clone(&state.0);
+    let recent = recent.inner().clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(path);
@@ -318,8 +322,10 @@ pub async fn open_pdf_from_path(
         // A path is a string any page code can make up, and opening one binds
         // it as the file `save_pdf` will overwrite — so only paths the OS
         // produced in this process's sight (a drop the window handler saw, a
-        // pick `pick_pdf_path` returned) are acted on. The e2e harness opens
-        // scratch files no dialog ever blessed, so its build waives the check.
+        // pick `pick_pdf_path` returned, or one an earlier run recorded as
+        // recent, which is the same set made durable) are acted on. The e2e
+        // harness opens scratch files no dialog ever blessed, so its build
+        // waives the check.
         #[cfg(not(feature = "e2e"))]
         if !engine.is_approved(&path) {
             return Err(format!(
@@ -328,7 +334,12 @@ pub async fn open_pdf_from_path(
             ));
         }
 
-        engine.open_from_path(path)
+        let document = engine.open_from_path(path.clone())?;
+        // Recorded only once the file actually opened, so the list the next
+        // run approves holds nothing this one could not open itself.
+        recent.record(&path);
+
+        Ok(document)
     })
     .await
     .map_err(|error| format!("PDFium open task failed: {error}"))?

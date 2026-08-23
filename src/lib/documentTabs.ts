@@ -1,3 +1,19 @@
+/** The strip's fixed first tab. It is not a document, so it needs an id no
+    backend document id can be. */
+export const HOME_TAB_ID = "home" as const
+
+export type TabId = number | typeof HOME_TAB_ID
+
+/** The strip and the panel it reveals name each other by id, so both sides
+    build those ids here rather than repeating the format. */
+export function tabElementId(tabId: TabId) {
+  return `workspace-tab-${tabId}`
+}
+
+export function panelElementId(tabId: TabId) {
+  return `workspace-panel-${tabId}`
+}
+
 export type DocumentTabIdentity = {
   id: number
   path: string
@@ -24,28 +40,26 @@ export function selectOpenedTabId(
 }
 
 export function activeTabAfterClose(
-  tabIds: readonly number[],
-  activeId: number | null,
+  tabIds: readonly TabId[],
+  activeId: TabId,
   closingId: number,
-): number | null {
+): TabId {
   const closingIndex = tabIds.indexOf(closingId)
 
-  if (closingIndex < 0) {
+  if (closingIndex < 0 || activeId !== closingId) {
     return activeId
   }
 
-  if (activeId !== closingId) {
-    return activeId
-  }
-
-  return tabIds[closingIndex + 1] ?? tabIds[closingIndex - 1] ?? null
+  // Home leads the strip, so a closed document always has a neighbour to fall
+  // back to and the workspace never lands on nothing.
+  return tabIds[closingIndex + 1] ?? tabIds[closingIndex - 1] ?? HOME_TAB_ID
 }
 
 export function tabIdForKey(
-  tabIds: readonly number[],
-  activeId: number,
+  tabIds: readonly TabId[],
+  activeId: TabId,
   key: string,
-): number | null {
+): TabId | null {
   const activeIndex = tabIds.indexOf(activeId)
 
   if (activeIndex < 0 || tabIds.length === 0) {

@@ -163,11 +163,17 @@ function buildPdf(objects: string[]) {
   return Buffer.from(chunks.join(""), "ascii")
 }
 
-/** The drop zone's button to the native picker, present while no document is.
-    By slot rather than label (which changes with the language) or structure
-    (`main` fills with a button per thumbnail once a document opens). */
+/** The home tab's drop zone, its own route to the native picker. It is in the
+    page whichever tab is showing, so it doubles as the signal that the app has
+    booted; it is only clickable while the home tab is the one on screen.
+    By slot rather than label, which changes with the language. */
 export function dropZoneButton() {
   return $("[data-slot='drop-zone']")
+}
+
+/** The tab strip's open-a-file button, which every tab shares. */
+export function openFileButton() {
+  return $("[data-slot='tab-open-file']")
 }
 
 /**
@@ -187,27 +193,21 @@ export async function openPdfFromDisk(
   return filePath
 }
 
-/** Points the app's picker seam at `filePath` and clicks the drop zone. */
+/**
+ * Points the app's picker seam at `filePath` and opens it from the tab strip,
+ * which is on screen whatever is already open — so one helper serves the first
+ * document and every later one alike.
+ */
 export async function openPathViaDialog(filePath: string) {
-  // A refresh can resolve before the new page has booted; the drop zone
-  // appearing is what proves the seam lands on the page that will read it.
-  await dropZoneButton().waitForExist({ timeout: 30_000 })
-  await browser.execute((mockPath: string) => {
-    const seam = window as Window & { __tfolioE2E?: E2eOverrides }
-
-    seam.__tfolioE2E = {
-      pickPdfPath: () => Promise.resolve(mockPath),
-    }
-  }, filePath)
-  await dropZoneButton().click()
+  // A refresh can resolve before the new page has booted; the strip's open
+  // button appearing is what proves the seam lands on the page that reads it.
+  await openFileButton().waitForExist({ timeout: 30_000 })
+  await pointPickerAt(filePath)
+  await openFileButton().click()
 }
 
-/** Opens an additional path through the titlebar's new-tab picker control. */
-export async function openPathViaToolbar(filePath: string) {
-  const openButton = $(
-    "[data-active='true'] [data-slot='session-open-file']",
-  )
-  await openButton.waitForExist()
+/** Writes the picker stand-in without disturbing any other override. */
+export async function pointPickerAt(filePath: string) {
   await browser.execute((mockPath: string) => {
     const seam = window as Window & { __tfolioE2E?: E2eOverrides }
 
@@ -216,7 +216,6 @@ export async function openPathViaToolbar(filePath: string) {
       pickPdfPath: () => Promise.resolve(mockPath),
     }
   }, filePath)
-  await openButton.click()
 }
 
 /**
@@ -227,7 +226,7 @@ export async function openPathViaToolbar(filePath: string) {
  * writing it is sealed.
  */
 export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
-  await dropZoneButton().waitForExist({ timeout: 30_000 })
+  await openFileButton().waitForExist({ timeout: 30_000 })
   await browser.execute(
     ({ bytes, mockPath }: { bytes: number[]; mockPath: string }) => {
       const seam = window as unknown as Window & {
@@ -245,7 +244,7 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
     },
     { bytes: Array.from(contents), mockPath: `/e2e/${fileName}` },
   )
-  await dropZoneButton().click()
+  await openFileButton().click()
 }
 
 /**
