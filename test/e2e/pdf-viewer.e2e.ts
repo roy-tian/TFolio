@@ -10,11 +10,18 @@ import {
   openPdfFromDisk,
 } from "./helpers"
 
+// Every workspace panel carries a `<main>`, the home tab's included, and all but
+// the showing one are `hidden` — which measures 0x0. A viewer read for its
+// geometry, or dispatched an event, has to be the active document's; the
+// selector is repeated inline because these run in the app's own context.
+//
 // The zoom listener is bound natively and non-passively, so a wheel has to be
 // dispatched as a real event rather than through WebDriver's scroll action.
 function wheelOverViewer(init: { ctrlKey: boolean; deltaY: number }) {
   return browser.execute((options: { ctrlKey: boolean; deltaY: number }) => {
-    const viewer = document.querySelector("main")!
+    const viewer = document.querySelector<HTMLElement>(
+      "[data-document-session][data-active='true'] main",
+    )!
     const rect = viewer.getBoundingClientRect()
 
     viewer.dispatchEvent(
@@ -236,11 +243,33 @@ describe("TFolio PDF viewer", () => {
     await expect(toggle("Show bookmarks")).toBeDisabled()
     await expect($("nav[aria-label='Bookmarks']")).not.toBeExisting()
     await expect(pageInput).toHaveValue("3")
+  })
 
-    // The chosen mode outlives a reload.
+  // A case of its own rather than a coda to the one above: a reload plus a second
+  // document is most of a test's time budget on its own.
+  it("keeps the chosen view mode across a reload", async () => {
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        window.localStorage.removeItem(keys.viewMode)
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
+    await browser.refresh()
+    await openPdfFromDisk("mode-kept.pdf", minimalPdf(3))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const toggle = (label: string) => $(`button[aria-label='${label}']`)
+
     await toggle("Book").click()
+    await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
+
+    // The home tab carries no view controls — it has no document to act on — so
+    // it takes the next document opened to say whether the mode was kept.
     await browser.refresh()
     await dropZoneButton().waitForExist()
+    await openPdfFromDisk("reopened.pdf", minimalPdf(3))
+    await $("[data-page-number='1']").waitForDisplayed()
     await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
   })
 
@@ -270,7 +299,9 @@ describe("TFolio PDF viewer", () => {
         const page = element.getBoundingClientRect()
         const column = element.parentElement!
         const padding = window.getComputedStyle(column)
-        const viewer = document.querySelector("main")!
+        const viewer = document.querySelector<HTMLElement>(
+          "[data-document-session][data-active='true'] main",
+        )!
 
         return {
           availableHeight:
@@ -331,7 +362,9 @@ describe("TFolio PDF viewer", () => {
     await expect(zoom()).toHaveText("100%")
     const widthBeforePreview = (await pageBox()).width
     const preview = (await browser.executeAsync((done) => {
-      const viewer = document.querySelector("main")!
+      const viewer = document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] main",
+      )!
       const rect = viewer.getBoundingClientRect()
       let remaining = 8
 
@@ -398,7 +431,9 @@ describe("TFolio PDF viewer", () => {
     expect(committedPreview.pageWidth).toBeGreaterThan(widthBeforePreview)
 
     const scrolledPreview = (await browser.executeAsync((done) => {
-      const viewer = document.querySelector("main")!
+      const viewer = document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] main",
+      )!
       const viewerRect = viewer.getBoundingClientRect()
 
       viewer.dispatchEvent(

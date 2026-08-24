@@ -47,6 +47,35 @@ async function dragRectOnPage() {
   })
 }
 
+/**
+ * How many pixels page 1 carries in the default border colour. What `pageInk`
+ * cannot say on this suite's striped fixture: a red border laid along the
+ * stripes covers about as much black as its own red adds, so the page's total
+ * ink barely moves whether the rectangle was drawn or not.
+ */
+function strokePixels() {
+  return browser.execute(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      "[data-page-number='1'] canvas",
+    )!
+    const { data } = canvas.getContext("2d")!.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    )
+    let pixels = 0
+
+    for (let index = 0; index < data.length; index += 4) {
+      if (data[index]! > 180 && data[index + 1]! < 120 && data[index + 2]! < 120) {
+        pixels += 1
+      }
+    }
+
+    return pixels
+  })
+}
+
 describe("TFolio rectangle annotations", () => {
   beforeEach(async () => {
     await browser.execute(
@@ -69,7 +98,8 @@ describe("TFolio rectangle annotations", () => {
   })
 
   it("draws a rectangle, and undo and redo restore it exactly", async () => {
-    const clean = await pageInk()
+    const clean = await pagePixelFingerprint()
+    const cleanStroke = await strokePixels()
 
     await $("button[aria-label='Draw a rectangle']").click()
     await expect($("button[aria-label='Draw a rectangle']")).toHaveAttribute(
@@ -81,23 +111,26 @@ describe("TFolio rectangle annotations", () => {
 
     // The page is re-rastered by PDFium, so the mark arrives a beat after the
     // drag ends.
-    await browser.waitUntil(async () => (await pageInk()) > clean, {
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) !== clean, {
       timeout: 15_000,
       timeoutMsg: "the rectangle never reached the page",
     })
+    // Drawn, not merely stored: PDFium will accept and keep a mark it then
+    // declines to paint, so the border has to be there in its own colour.
+    expect(await strokePixels()).toBeGreaterThan(cleanStroke + 1000)
 
-    const drawn = await pageInk()
+    const drawn = await pagePixelFingerprint()
 
     await $("button[aria-label='Undo']").click()
-    await browser.waitUntil(async () => (await pageInk()) === clean, {
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 15_000,
       timeoutMsg: "undo did not take the rectangle back off the page",
     })
 
-    // Exact, not merely "more ink than clean": a redo that applied the command
+    // Exact, not merely "different from clean": a redo that applied the command
     // twice would stack two rectangles and still clear that lower bar.
     await $("button[aria-label='Redo']").click()
-    await browser.waitUntil(async () => (await pageInk()) === drawn, {
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the rectangle exactly",
     })
@@ -374,7 +407,14 @@ describe("TFolio rectangle annotations", () => {
       const page = document.querySelector("[data-page-number='1']")!
       const box = page.getBoundingClientRect()
 
-      document.querySelector("main")!.dispatchEvent(
+      // Every workspace panel carries a `<main>`, the home tab's included, and
+      // all but the showing one are `hidden`. The wheel has to reach this
+      // document's viewer, which is the active panel's.
+      const viewer = document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] main",
+      )!
+
+      viewer.dispatchEvent(
         new WheelEvent("wheel", {
           bubbles: true,
           cancelable: true,
