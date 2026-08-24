@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown, House, LoaderCircle, Plus, X } from "lucide-react"
+import { ChevronDown, FolderOpen, House, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -199,7 +199,7 @@ export function DocumentTabs({
         title={t("tabs.openFile")}
         variant="ghost"
       >
-        {opening ? <LoaderCircle className="animate-spin" /> : <Plus />}
+        {opening ? <LoaderCircle className="animate-spin" /> : <FolderOpen />}
       </Button>
 
       {scrolls ? (
