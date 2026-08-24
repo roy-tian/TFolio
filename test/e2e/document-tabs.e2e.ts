@@ -28,6 +28,35 @@ function tabButtons() {
   return $$("button[role='tab']")
 }
 
+/** Where the active document is scrolled to, which is where its reader is. */
+function activeScrollTop() {
+  return browser.execute(() => {
+    const viewer = document.querySelector<HTMLElement>(
+      "[data-document-session][data-active='true'] main",
+    )
+
+    return viewer ? Math.round(viewer.scrollTop) : -1
+  })
+}
+
+/** That offset once a smooth scroll to a page has come to rest. */
+async function settledScrollTop() {
+  let previous = -1
+
+  await browser.waitUntil(
+    async () => {
+      const current = await activeScrollTop()
+      const settled = current > 0 && current === previous
+      previous = current
+
+      return settled
+    },
+    { interval: 200, timeoutMsg: "the viewer never settled at an offset" },
+  )
+
+  return previous
+}
+
 async function resetWorkspace() {
   await browser.refresh()
   await browser.execute(
@@ -68,6 +97,9 @@ describe("independent document tabs", () => {
     await pageInput.setValue("2")
     await browser.keys("Enter")
     await expect(pageInput).toHaveValue("2")
+    // The offset as well as the page: a hidden tab measures 0x0, and laying its
+    // pages out against that once left it clamped to the top of the document.
+    const readingOffset = await settledScrollTop()
 
     const secondPath = writePdf("second.pdf", 1)
     await openPathViaDialog(secondPath)
@@ -89,6 +121,10 @@ describe("independent document tabs", () => {
     await expect(
       $("[data-active='true'] input[aria-label='Page number']"),
     ).toHaveValue("2")
+    await browser.waitUntil(
+      async () => (await activeScrollTop()) === readingOffset,
+      { timeoutMsg: "the tab came back to a different reading position" },
+    )
 
     // An exact duplicate activates its existing tab instead of opening a third.
     await $("button[role='tab'][title='second.pdf']").click()

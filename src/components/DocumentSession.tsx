@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -170,6 +171,8 @@ function DocumentSession(
   // The parity intent, read by the same post-await reconcile.
   const parityEnabledRef = useRef(false)
   const pendingScrollPageRef = useRef<number | null>(null)
+  // The last geometry the viewer really had, which a hidden tab keeps.
+  const committedSizeRef = useRef({ height: 0, width: 0 })
   const mountedRef = useRef(false)
 
   // The thumbnail grid and the files view give every cell the same width
@@ -372,20 +375,29 @@ function DocumentSession(
       return
     }
 
-    let committedWidth = 0
-    let committedHeight = 0
-
+    // An inactive tab is `hidden`, so it has no layout box and the observer
+    // reports 0x0. Committing that would lay every page out at the minimum
+    // scale, and the collapsed scroll height is what the viewer's offset is
+    // clamped against — the reader's place in the document, lost before the tab
+    // is even shown again. Hold the last real geometry instead; the observer
+    // reports the true size again the moment the panel comes back.
     const commitSize = (width: number, height: number) => {
       const roundedWidth = Math.round(width)
       const roundedHeight = Math.round(height)
 
-      if (roundedWidth !== committedWidth) {
-        committedWidth = roundedWidth
+      if (roundedWidth <= 0 || roundedHeight <= 0) {
+        return
+      }
+
+      const committed = committedSizeRef.current
+
+      if (roundedWidth !== committed.width) {
+        committed.width = roundedWidth
         setViewerWidth(roundedWidth)
       }
 
-      if (roundedHeight !== committedHeight) {
-        committedHeight = roundedHeight
+      if (roundedHeight !== committed.height) {
+        committed.height = roundedHeight
         setViewerHeight(roundedHeight)
       }
     }
@@ -397,9 +409,10 @@ function DocumentSession(
     // the heavy PDFium renders stay throttled by the viewer's settled
     // `renderScale` debounce. ResizeObserver already batches to one callback
     // per frame, so a timer here would only add the lag of waiting for it.
-    const resizeObserver = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect
-      commitSize(rect?.width ?? viewer.clientWidth, rect?.height ?? viewer.clientHeight)
+    // Measured off the element rather than the entry's `contentRect`, so every
+    // committed figure comes from the same box the activation check below reads.
+    const resizeObserver = new ResizeObserver(() => {
+      commitSize(viewer.clientWidth, viewer.clientHeight)
     })
     resizeObserver.observe(viewer)
 
@@ -407,6 +420,34 @@ function DocumentSession(
       resizeObserver.disconnect()
     }
   }, [])
+
+  // The geometry a hidden tab holds can be out of date, since the window may
+  // have been resized while another tab had the screen: the new size reaches
+  // this one only as it comes back, and the offset it kept would then point into
+  // a document laid out at a different scale. Seek to the page being read
+  // instead, once the size it was measured against has been committed.
+  //
+  // It has to be a layout effect: the observer delivers the panel's new size
+  // before a passive effect would run, and its commit writes the very ref this
+  // compares against — leaving nothing to notice, and the reader stranded.
+  useLayoutEffect(() => {
+    const viewer = viewerRef.current
+
+    if (!active || !viewer) {
+      return
+    }
+
+    const committed = committedSizeRef.current
+
+    if (
+      viewer.clientWidth === committed.width &&
+      viewer.clientHeight === committed.height
+    ) {
+      return
+    }
+
+    pendingScrollPageRef.current = currentPage
+  }, [active, currentPage])
 
   useEffect(() => {
     storeViewMode(viewMode)
@@ -764,18 +805,33 @@ function DocumentSession(
   }
 
   // The target only exists once the new layout has mounted, so the scroll waits
-  // for the commit rather than running alongside the mode change.
+  // for the commit rather than running alongside the mode change — or, for a
+  // tab returning to a window that was resized without it, the new geometry.
   useEffect(() => {
     const pendingPage = pendingScrollPageRef.current
+    const viewer = viewerRef.current
 
-    if (pendingPage === null) {
+    if (pendingPage === null || !viewer) {
       return
     }
 
-    pendingScrollPageRef.current = null
     // The jump reads as a view swap rather than a scroll, so it lands instantly.
     scrollToPage(pendingPage, "auto")
-  }, [viewMode])
+
+    const committed = committedSizeRef.current
+
+    // Leaving the thumbnail grid closes the bookmark sidebar in the same commit,
+    // which widens the viewer — and the zoom that sizes every page only follows
+    // once that width has been committed, growing the pages under a scroll
+    // offset already taken. Keep the page until the layout the seek measured is
+    // the settled one, so the last seek is the one that stands.
+    if (
+      viewer.clientWidth === committed.width &&
+      viewer.clientHeight === committed.height
+    ) {
+      pendingScrollPageRef.current = null
+    }
+  }, [viewerHeight, viewerWidth, viewMode])
 
   const submitPageNumber = () => {
     if (!pdfDocument) {
