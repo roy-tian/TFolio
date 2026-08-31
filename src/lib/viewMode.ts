@@ -58,12 +58,21 @@ export function pairPages(numPages: number): number[][] {
   const rows: number[][] = []
 
   for (let pageNumber = 1; pageNumber <= numPages; pageNumber += 2) {
-    rows.push(
-      pageNumber === numPages ? [pageNumber] : [pageNumber, pageNumber + 1],
-    )
+    rows.push(spreadPages(pageNumber, numPages))
   }
 
   return rows
+}
+
+/**
+ * The pages laid out beside `pageNumber`, itself included — the row `pairPages`
+ * puts it in, which is what the reader of a spread actually has in front of
+ * them. A trailing odd page stands alone.
+ */
+export function spreadPages(pageNumber: number, numPages: number): number[] {
+  const first = pageNumber % 2 === 1 ? pageNumber : pageNumber - 1
+
+  return first === numPages ? [first] : [first, first + 1]
 }
 
 /**

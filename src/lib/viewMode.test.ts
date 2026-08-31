@@ -4,6 +4,7 @@ import {
   computeThumbnailColumns,
   isViewMode,
   pairPages,
+  spreadPages,
   THUMBNAIL_GAP,
   THUMBNAIL_WIDTH,
 } from "./viewMode"
@@ -42,6 +43,17 @@ describe("pairPages", () => {
 
   test("handles a single-page document", () => {
     expect(pairPages(1)).toEqual([[1]])
+  })
+})
+
+describe("spreadPages", () => {
+  test("returns the row a page sits in, from either half", () => {
+    expect(spreadPages(3, 6)).toEqual([3, 4])
+    expect(spreadPages(4, 6)).toEqual([3, 4])
+  })
+
+  test("leaves a trailing odd page alone", () => {
+    expect(spreadPages(5, 5)).toEqual([5])
   })
 })
 

@@ -51,6 +51,36 @@ describe("TFolio PDF viewer", () => {
     await dropZoneButton().waitForExist()
   })
 
+  // The room a fit has to fill is measured off the layout itself rather than
+  // recomputed from the padding the code already uses, so that a fit which
+  // silently stopped filling it would fail here.
+  const pageBox = (pageNumber = 1) =>
+    browser.execute((number: number) => {
+      const element = document.querySelector<HTMLElement>(
+        `[data-page-number='${number}']`,
+      )!
+      const page = element.getBoundingClientRect()
+      const column = element.parentElement!
+      const padding = window.getComputedStyle(column)
+      const viewer = document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] main",
+      )!
+
+      return {
+        availableHeight:
+          viewer.clientHeight -
+          parseFloat(padding.paddingTop) -
+          parseFloat(padding.paddingBottom),
+        availableWidth:
+          viewer.clientWidth -
+          parseFloat(padding.paddingLeft) -
+          parseFloat(padding.paddingRight),
+        height: Math.round(page.height),
+        scrollableX: viewer.scrollWidth - viewer.clientWidth,
+        width: Math.round(page.width),
+      }
+    }, pageNumber)
+
   it("starts with the isolated WDIO bridge available", async () => {
     const location = await browser.tauri.execute(() => window.location.href)
 
@@ -308,35 +338,6 @@ describe("TFolio PDF viewer", () => {
         await $("button[aria-label='Zoom in']").click()
       }
     }
-    // The room a fit has to fill is measured off the layout itself rather than
-    // recomputed from the padding the code already uses, so that a fit which
-    // silently stopped filling it would fail here.
-    const pageBox = () =>
-      browser.execute(() => {
-        const element = document.querySelector<HTMLElement>(
-          "[data-page-number='1']",
-        )!
-        const page = element.getBoundingClientRect()
-        const column = element.parentElement!
-        const padding = window.getComputedStyle(column)
-        const viewer = document.querySelector<HTMLElement>(
-          "[data-document-session][data-active='true'] main",
-        )!
-
-        return {
-          availableHeight:
-            viewer.clientHeight -
-            parseFloat(padding.paddingTop) -
-            parseFloat(padding.paddingBottom),
-          availableWidth:
-            viewer.clientWidth -
-            parseFloat(padding.paddingLeft) -
-            parseFloat(padding.paddingRight),
-          height: Math.round(page.height),
-          scrollableX: viewer.scrollWidth - viewer.clientWidth,
-          width: Math.round(page.width),
-        }
-      })
 
     // A document opens sized to be read, never already scrolled sideways.
     expect((await pageBox()).scrollableX).toBe(0)
@@ -410,21 +411,26 @@ describe("TFolio PDF viewer", () => {
     await expect(indicator()).toHaveAttribute("data-visible", "false")
 
     // Each fit has to actually fit, padding aside — the whole point of the two.
-    await $("button[aria-label='Fit width']").click()
-    const fitted = await pageBox()
-    expect(fitted.width).toBe(Math.round(fitted.availableWidth))
+    // A fit page takes the tighter dimension, which for this portrait page in a
+    // landscape window is the height, and leaves the other one inside the column.
+    await $("button[aria-label='Fit page']").click()
+    const fittedPage = await pageBox()
+    expect(fittedPage.height).toBe(Math.round(fittedPage.availableHeight))
+    expect(fittedPage.width).toBeLessThanOrEqual(
+      Math.round(fittedPage.availableWidth),
+    )
 
     // The button offers the fit that is not on, and which one *is* on is said by
     // the group rather than by a pressed state that would contradict that name.
-    await expect($("button[aria-label='Fit height']")).toBeExisting()
+    await expect($("button[aria-label='Fit width']")).toBeExisting()
     await expect(zoomGroup()).toHaveAttribute(
       "aria-label",
-      expect.stringContaining("fitting width"),
+      expect.stringContaining("fitting the page"),
     )
 
-    await $("button[aria-label='Fit height']").click()
-    const fittedTall = await pageBox()
-    expect(fittedTall.height).toBe(Math.round(fittedTall.availableHeight))
+    await $("button[aria-label='Fit width']").click()
+    const fittedWide = await pageBox()
+    expect(fittedWide.width).toBe(Math.round(fittedWide.availableWidth))
 
     // Ctrl+wheel zooms; the same wheel without it is an ordinary scroll.
     await zoomToActualSize()
@@ -612,6 +618,50 @@ describe("TFolio PDF viewer", () => {
     await expect(zoomGroup()).toHaveAttribute("aria-label", zoomed)
   })
 
+  // A fit is of *the page*, and in a document of two page sizes that means the
+  // one the reader is on. Standing on the odd landscape page and asking for a
+  // fit must measure that page, not the portrait size the document is mostly
+  // made of — which is still what the opening zoom and the spread column go on.
+  it("fits the page the reader is on, not the document's usual page", async () => {
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        window.localStorage.setItem(keys.viewMode, "single")
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
+    await browser.refresh()
+    await openPdfFromDisk(
+      "mixed.pdf",
+      minimalPdf(6, (index) => (index === 3 ? "0 0 400 200" : "0 0 200 300")),
+    )
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    // Page 1 is portrait in a window wider than it is tall, so its fit is the
+    // one the height gives.
+    await $("button[aria-label='Fit page']").click()
+    const portrait = await pageBox(1)
+    expect(portrait.height).toBe(Math.round(portrait.availableHeight))
+
+    // Page 4 is the landscape one, and wide enough that its fit is the width's.
+    // Measured against the document's usual page it would come out at more than
+    // twice the column and hang out of it.
+    const pageInput = await $("input[aria-label='Page number']")
+    await pageInput.setValue("4")
+    await browser.keys("Enter")
+    // The tracker revises the page only once the scroll lands, and the fit is
+    // measured from whatever it reports when the button is pressed.
+    await browser.pause(1500)
+    await expect(pageInput).toHaveValue("4")
+
+    await $("button[aria-label='Fit width']").click()
+    const landscape = await pageBox(4)
+    expect(landscape.width).toBe(Math.round(landscape.availableWidth))
+    expect(landscape.height).toBeLessThanOrEqual(
+      Math.round(landscape.availableHeight),
+    )
+  })
+
   // A viewport dragged sideways re-fits every page, and the scroll offset the
   // browser keeps is a count of pixels — so without an anchor the document
   // slides vertically under a change the reader asked for horizontally.
@@ -633,7 +683,9 @@ describe("TFolio PDF viewer", () => {
     await $("[data-page-number='1']").waitForDisplayed()
 
     // Fit width ties the page scale to the viewer's width, so it is where the
-    // drift is worst — and it is a mode readers sit in.
+    // drift is worst — and it is a mode readers sit in. The button cycles, and
+    // it offers fit-page first, so reaching fit width takes both rungs.
+    await $("button[aria-label='Fit page']").click()
     await $("button[aria-label='Fit width']").click()
 
     // Where the top edge of the viewer — everything above it read, everything

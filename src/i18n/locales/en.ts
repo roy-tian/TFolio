@@ -58,9 +58,9 @@ const en = {
     zoomIn: "Zoom in",
     zoomLevel: "Zoom {{percent}}%",
     zoomLevelFitWidth: "Zoom {{percent}}%, fitting width",
-    zoomLevelFitHeight: "Zoom {{percent}}%, fitting height",
+    zoomLevelFitPage: "Zoom {{percent}}%, fitting the page",
     zoomFitWidth: "Fit width",
-    zoomFitHeight: "Fit height",
+    zoomFitPage: "Fit page",
   },
   annotate: {
     undo: "Undo",

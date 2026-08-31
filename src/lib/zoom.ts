@@ -2,18 +2,31 @@ import { dimensionsForRotation, MAX_PAGE_WIDTH, type PdfPageInfo } from "@/lib/p
 
 // `auto` is the sizing a document opens with and is not one of the modes the fit
 // button cycles through: the reader never picks it, they only ever leave it.
-export type ZoomMode = "auto" | "custom" | "fit-height" | "fit-width"
+export type ZoomMode = "auto" | "custom" | "fit-page" | "fit-width"
 
 export type ZoomState = {
   // Only read in "custom" mode, but kept across a stint in a fit mode so that
   // returning to an explicit zoom resumes where the reader left it.
   customScale: number
+  // The page a fit measures itself against: the one the reader was on when they
+  // asked for it. Only read in a fit mode.
+  //
+  // It stays on that page rather than following the reader, and deliberately so.
+  // A zoom is one number for the whole document, so re-fitting on the way past a
+  // page of another size would resize every page under a reader who was only
+  // scrolling — and since which page counts as current depends on how tall the
+  // pages are, the two sizes could flip back and forth at the boundary. Chrome's
+  // viewer and pdf.js refuse that same re-fit. They do re-measure on a resize,
+  // against whatever page is in view by then; here the resize keeps the page it
+  // was given, which is one fewer way for a window being dragged to move the
+  // reading position — the pages are already being re-laid-out under an anchor.
+  fitPage: number
   mode: ZoomMode
 }
 
 export type FitScales = {
   auto: number
-  fitHeight: number
+  fitPage: number
   fitWidth: number
 }
 
@@ -40,7 +53,11 @@ export const zoomSteps = [
   25, 50, 75, 100, 125, 150, 200, 300, 400, 600, 800,
 ] as const
 
-export const defaultZoomState: ZoomState = { customScale: 1, mode: "auto" }
+export const defaultZoomState: ZoomState = {
+  customScale: 1,
+  fitPage: 1,
+  mode: "auto",
+}
 
 /** Padding of the scrolling column: `px-8` on either side, `py-8` on both ends. */
 export const CONTENT_PADDING_X = 64
@@ -63,19 +80,20 @@ export function zoomToPercent(scale: number) {
 
 /**
  * The page size the document is mostly made of, in CSS pixels at 100% and with
- * the user's rotation applied. Every scale is worked out against it.
+ * the user's rotation applied. What a document opens sized against, and the
+ * width a spread hands both of its halves.
  *
- * A fit has to resolve to one scale for the whole document, because a zoom is
- * one number and pages of different sizes have to keep their sizes relative to
- * each other. So a fit needs one page to measure, and the one the document is
- * mostly made of is the one the reader is almost always looking at.
+ * Both of those need one size for the whole document — the opening zoom is a
+ * single number, and two columns of visibly different widths read as broken —
+ * and the size the document is mostly made of is the one the reader is almost
+ * always looking at. A fit is the exception: it measures the page the reader
+ * asked from, through `fitDimensions` below.
  *
  * Measuring the *widest* page instead is the tempting choice, since nothing
  * could then overflow. But one landscape page among thirty-five portrait ones
- * is enough to hold every portrait page at 71% of the width it asked for —
- * including under fit-width, which would then visibly not fit the width. A rare
- * page overflowing into a horizontal scroll is the better failure: it is what
- * the reader asked for, and it is confined to the odd page out.
+ * is enough to open every portrait page at 71% of the width it asked for. A
+ * rare page overflowing into a horizontal scroll is the better failure: it is
+ * confined to the odd page out.
  *
  * For the ordinary document, where every page is the same size, there is no odd
  * page out and this is exactly that size.
@@ -169,23 +187,94 @@ export function autoScale(
   return clampZoom(Math.min(readable, withoutOverflow))
 }
 
-export function fitWidthScale(availableWidth: number, referenceWidth: number) {
-  if (referenceWidth <= 0) {
-    return 1
+/**
+ * The box a fit measures itself against: what the reader has in front of them,
+ * at 100%, rotated, and the size this view will really lay it out at.
+ *
+ * In single view that is the one page they asked from, at its own size. A spread
+ * is both of its halves: they take the reference page's column whatever they
+ * measure, so only their aspects are their own, and the fit has to clear the
+ * taller of the two or half of what the reader is looking at hangs below the
+ * viewport. Numbers that have gone out of range — pages can be deleted or
+ * reordered while a fit is on — fall back to the reference page.
+ */
+export function fitDimensions(
+  pages: PdfPageInfo[],
+  pageNumbers: number[],
+  rotation: number,
+  reference: { referenceHeight: number; referenceWidth: number },
+  sharedColumn: boolean,
+) {
+  const fallback = {
+    height: reference.referenceHeight,
+    width: reference.referenceWidth,
   }
 
-  return clampZoom(availableWidth / referenceWidth)
+  if (!sharedColumn) {
+    const page = pages[pageNumbers[0] - 1]
+
+    return page
+      ? dimensionsForRotation(
+          rotation,
+          page.width * POINT_TO_PX,
+          page.height * POINT_TO_PX,
+        )
+      : fallback
+  }
+
+  let height = 0
+
+  for (const pageNumber of pageNumbers) {
+    const page = pages[pageNumber - 1]
+
+    if (!page) {
+      continue
+    }
+
+    const footprint = dimensionsForRotation(
+      rotation,
+      page.width * POINT_TO_PX,
+      page.height * POINT_TO_PX,
+    )
+
+    if (footprint.width > 0) {
+      height = Math.max(
+        height,
+        (reference.referenceWidth * footprint.height) / footprint.width,
+      )
+    }
+  }
+
+  return height > 0 ? { height, width: reference.referenceWidth } : fallback
 }
 
-export function fitHeightScale(
-  availableHeight: number,
-  referenceHeight: number,
-) {
-  if (referenceHeight <= 0) {
+export function fitWidthScale(availableWidth: number, pageWidth: number) {
+  if (pageWidth <= 0) {
     return 1
   }
 
-  return clampZoom(availableHeight / referenceHeight)
+  return clampZoom(availableWidth / pageWidth)
+}
+
+/**
+ * The scale that puts a whole page on screen. Both dimensions have to hold, so
+ * the tighter of the two is the one that decides it: fitting the height alone
+ * would still let a page hang out of the column sideways, which is the one
+ * thing the reader who asked to see the whole page did not want.
+ */
+export function fitPageScale(
+  availableWidth: number,
+  availableHeight: number,
+  pageWidth: number,
+  pageHeight: number,
+) {
+  if (pageWidth <= 0 || pageHeight <= 0) {
+    return 1
+  }
+
+  return clampZoom(
+    Math.min(availableWidth / pageWidth, availableHeight / pageHeight),
+  )
 }
 
 export function resolveZoomScale(zoom: ZoomState, fits: FitScales) {
@@ -194,8 +283,8 @@ export function resolveZoomScale(zoom: ZoomState, fits: FitScales) {
       ? fits.auto
       : zoom.mode === "fit-width"
         ? fits.fitWidth
-        : zoom.mode === "fit-height"
-          ? fits.fitHeight
+        : zoom.mode === "fit-page"
+          ? fits.fitPage
           : zoom.customScale
 
   return clampZoom(scale)
@@ -253,11 +342,15 @@ export function applyWheelZoom(scale: number, delta: number) {
   return clampZoom(scale * Math.exp(-delta * WHEEL_SENSITIVITY))
 }
 
-/** The fit the button would engage next; anything but fit-width goes to it. */
-export function nextFitMode(mode: ZoomMode): "fit-height" | "fit-width" {
-  return mode === "fit-width" ? "fit-height" : "fit-width"
+/**
+ * The fit the button would engage next. Anything but fit-page offers fit-page,
+ * so a press from an arbitrary zoom is the one that puts the whole page back in
+ * view — the order a browser's own viewer cycles in.
+ */
+export function nextFitMode(mode: ZoomMode): "fit-page" | "fit-width" {
+  return mode === "fit-page" ? "fit-width" : "fit-page"
 }
 
 export function isFitActive(mode: ZoomMode) {
-  return mode === "fit-height" || mode === "fit-width"
+  return mode === "fit-page" || mode === "fit-width"
 }

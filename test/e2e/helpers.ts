@@ -17,10 +17,14 @@ import type { E2eOverrides } from "../../src/lib/e2e"
 
 /**
  * A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
- * otherwise. Page objects take the odd ids from 3 up, each followed by its
- * (empty) contents stream.
+ * otherwise — pass a function of the 0-based page index for a document whose
+ * pages are not all one size. Page objects take the odd ids from 3 up, each
+ * followed by its (empty) contents stream.
  */
-export function minimalPdf(pageCount = 1, mediaBox = "0 0 200 300") {
+export function minimalPdf(
+  pageCount = 1,
+  mediaBox: string | ((index: number) => string) = "0 0 200 300",
+) {
   const kids = Array.from(
     { length: pageCount },
     (_, index) => `${3 + index * 2} 0 R`,
@@ -32,9 +36,10 @@ export function minimalPdf(pageCount = 1, mediaBox = "0 0 200 300") {
 
   for (let index = 0; index < pageCount; index += 1) {
     const pageId = 3 + index * 2
+    const box = typeof mediaBox === "function" ? mediaBox(index) : mediaBox
 
     objects.push(
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [${mediaBox}] ` +
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [${box}] ` +
         `/Contents ${pageId + 1} 0 R >>\nendobj\n`,
       `${pageId + 1} 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n`,
     )

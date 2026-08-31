@@ -1,4 +1,4 @@
-import { Minus, MoveHorizontal, MoveVertical, Plus } from "lucide-react"
+import { Maximize, Minus, MoveHorizontal, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
@@ -33,22 +33,22 @@ export function ZoomControls({
   // pressed state carries.
   const fitActive = isFitActive(zoomMode)
   const nextFit = nextFitMode(zoomMode)
-  const FitIcon = nextFit === "fit-width" ? MoveHorizontal : MoveVertical
+  const FitIcon = nextFit === "fit-width" ? MoveHorizontal : Maximize
   const fitLabel =
-    nextFit === "fit-width" ? t("toolbar.zoomFitWidth") : t("toolbar.zoomFitHeight")
+    nextFit === "fit-width" ? t("toolbar.zoomFitWidth") : t("toolbar.zoomFitPage")
 
   const zoomOutLabel = t("toolbar.zoomOut")
   const zoomInLabel = t("toolbar.zoomIn")
 
   // Which fit is on belongs here rather than on the fit button, whose name is
   // the fit it would switch *to*. Naming it that and marking it pressed would
-  // have a screen reader announce "fit height, pressed" while fit-width is what
+  // have a screen reader announce "fit page, pressed" while fit-width is what
   // is actually on.
   const groupLabel =
     zoomMode === "fit-width"
       ? t("toolbar.zoomLevelFitWidth", { percent: zoomPercent })
-      : zoomMode === "fit-height"
-        ? t("toolbar.zoomLevelFitHeight", { percent: zoomPercent })
+      : zoomMode === "fit-page"
+        ? t("toolbar.zoomLevelFitPage", { percent: zoomPercent })
         : t("toolbar.zoomLevel", { percent: zoomPercent })
 
   return (

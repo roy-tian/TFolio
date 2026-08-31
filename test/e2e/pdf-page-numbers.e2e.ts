@@ -190,11 +190,9 @@ describe("TFolio page numbers", () => {
     )
 
     // Capture both layers with the whole page in view — the number sits at the
-    // bottom, out of frame at the zoom a document opens at. The fit button
-    // cycles, so reaching fit-height from the opening `auto` takes both rungs.
+    // bottom, out of frame at the zoom a document opens at.
     mkdirSync("artifacts/e2e", { recursive: true })
-    await $("button[aria-label='Fit width']").click()
-    await $("button[aria-label='Fit height']").click()
+    await $("button[aria-label='Fit page']").click()
     await browser.pause(1500)
     await browser.saveScreenshot("artifacts/e2e/page-numbers-both.png")
 

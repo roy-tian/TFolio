@@ -9,7 +9,7 @@ import {
 } from "react"
 
 import type { PdfPageInfo } from "@/lib/pdf"
-import type { ViewMode } from "@/lib/viewMode"
+import { spreadPages, type ViewMode } from "@/lib/viewMode"
 import {
   anchorCorrection,
   anchorOnPage,
@@ -20,7 +20,8 @@ import {
   autoScale,
   bookColumnWidth,
   defaultZoomState,
-  fitHeightScale,
+  fitDimensions,
+  fitPageScale,
   fitWidthScale,
   MAX_ZOOM,
   MIN_ZOOM,
@@ -107,19 +108,35 @@ export function useZoom({
   // sake of a page that was never going to spill.
   const widestLaidOut = viewMode === "book" ? referenceWidth : widestWidth
 
+  // What a fit measures: the page the reader asked from, laid out the way this
+  // view really lays it out. Only `auto`, which precedes any reading position,
+  // goes on the document's usual page.
+  const fitBox = useMemo(
+    () =>
+      fitDimensions(
+        pages,
+        viewMode === "book"
+          ? spreadPages(zoom.fitPage, pages.length)
+          : [zoom.fitPage],
+        rotation,
+        { referenceHeight, referenceWidth },
+        viewMode === "book",
+      ),
+    [pages, referenceHeight, referenceWidth, rotation, viewMode, zoom.fitPage],
+  )
+
   const fits = useMemo(
     () => ({
       auto: autoScale(availableWidth, referenceWidth, widestLaidOut),
-      fitHeight: fitHeightScale(contentHeight, referenceHeight),
-      fitWidth: fitWidthScale(availableWidth, referenceWidth),
+      fitPage: fitPageScale(
+        availableWidth,
+        contentHeight,
+        fitBox.width,
+        fitBox.height,
+      ),
+      fitWidth: fitWidthScale(availableWidth, fitBox.width),
     }),
-    [
-      availableWidth,
-      contentHeight,
-      referenceHeight,
-      referenceWidth,
-      widestLaidOut,
-    ],
+    [availableWidth, contentHeight, fitBox, referenceWidth, widestLaidOut],
   )
 
   const scale = resolveZoomScale(zoom, fits)
@@ -210,9 +227,14 @@ export function useZoom({
     captureAnchor(rect.left + rect.width / 2, rect.top + rect.height / 2)
   }, [captureAnchor, viewerRef])
 
-  /** Every zoom the reader asks for goes through here, so none skips its anchor. */
+  /**
+   * Every zoom the reader asks for goes through here, so none skips its anchor.
+   * It takes an update of the current state rather than a whole one, so that a
+   * caller changing the mode cannot silently drop the rest of it — the custom
+   * scale and the page a fit measures both have to survive the modes between.
+   */
   const requestZoom = useCallback(
-    (next: ZoomState | ((current: ZoomState) => ZoomState)) => {
+    (next: (current: ZoomState) => ZoomState) => {
       setZoom(next)
       setZoomRequest((request) => request + 1)
     },
@@ -244,7 +266,11 @@ export function useZoom({
     // Also what flashes the level a pinch or ctrl+wheel landed on. It costs no
     // extra render: the gesture itself never leaves the compositor, and this is
     // the one commit it makes when it settles.
-    requestZoom({ customScale: preview.scale, mode: "custom" })
+    requestZoom((current) => ({
+      ...current,
+      customScale: preview.scale,
+      mode: "custom",
+    }))
     setZoomPreviewing(false)
   }, [requestZoom, viewerRef])
 
@@ -324,7 +350,11 @@ export function useZoom({
     (nextScale: number) => {
       cancelPreview()
       captureCentreAnchor()
-      requestZoom({ customScale: nextScale, mode: "custom" })
+      requestZoom((current) => ({
+        ...current,
+        customScale: nextScale,
+        mode: "custom",
+      }))
     },
     [cancelPreview, captureCentreAnchor, requestZoom],
   )
@@ -343,9 +373,11 @@ export function useZoom({
     cancelPreview()
     captureCentreAnchor()
     // The custom scale rides along untouched, so leaving a fit later resumes the
-    // zoom the reader last picked.
+    // zoom the reader last picked. The page is taken fresh: "fit the page" means
+    // the page in front of the reader, whatever the rest of the document is.
     requestZoom((current) => ({
-      customScale: current.customScale,
+      ...current,
+      fitPage: currentPageRef.current,
       mode: nextFitMode(current.mode),
     }))
   }, [cancelPreview, captureCentreAnchor, requestZoom])

@@ -65,9 +65,9 @@ const zhCN = {
     zoomIn: "放大",
     zoomLevel: "缩放 {{percent}}%",
     zoomLevelFitWidth: "缩放 {{percent}}%，适合宽度",
-    zoomLevelFitHeight: "缩放 {{percent}}%，适合高度",
+    zoomLevelFitPage: "缩放 {{percent}}%，适合页面",
     zoomFitWidth: "适合宽度",
-    zoomFitHeight: "适合高度",
+    zoomFitPage: "适合页面",
   },
   annotate: {
     undo: "撤销",
