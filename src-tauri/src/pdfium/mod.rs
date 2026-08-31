@@ -114,19 +114,14 @@ pub struct PagePointsRect {
     height: f32,
 }
 
-/// How a rectangle annotation is drawn. A colour left `None` means that part is
-/// absent — no border, or no fill — so a rectangle can be a hollow outline, a
-/// solid block, or both. `opacity` rides the alpha of whichever are present.
+/// How a rectangle annotation is drawn: a block of `color` with `opacity` on
+/// its alpha. There is no border and no corner radius — a rectangle covers what
+/// is under it, and the reader picks how much of it still shows through.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RectStyle {
-    stroke_color: Option<String>,
-    fill_color: Option<String>,
+    color: String,
     opacity: f32,
-    /// Corner radius in page points; 0 is a right angle. Clamped to half the
-    /// shorter side so the corners cannot cross and turn the path inside out.
-    corner_radius: f32,
-    stroke_width: f32,
 }
 
 #[derive(Deserialize)]

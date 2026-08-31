@@ -47,35 +47,6 @@ async function dragRectOnPage() {
   })
 }
 
-/**
- * How many pixels page 1 carries in the default border colour. What `pageInk`
- * cannot say on this suite's striped fixture: a red border laid along the
- * stripes covers about as much black as its own red adds, so the page's total
- * ink barely moves whether the rectangle was drawn or not.
- */
-function strokePixels() {
-  return browser.execute(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>(
-      "[data-page-number='1'] canvas",
-    )!
-    const { data } = canvas.getContext("2d")!.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    )
-    let pixels = 0
-
-    for (let index = 0; index < data.length; index += 4) {
-      if (data[index]! > 180 && data[index + 1]! < 120 && data[index + 2]! < 120) {
-        pixels += 1
-      }
-    }
-
-    return pixels
-  })
-}
-
 describe("TFolio rectangle annotations", () => {
   beforeEach(async () => {
     await browser.execute(
@@ -99,7 +70,7 @@ describe("TFolio rectangle annotations", () => {
 
   it("draws a rectangle, and undo and redo restore it exactly", async () => {
     const clean = await pagePixelFingerprint()
-    const cleanStroke = await strokePixels()
+    const cleanInk = await pageInk()
 
     await $("button[aria-label='Draw a rectangle']").click()
     await expect($("button[aria-label='Draw a rectangle']")).toHaveAttribute(
@@ -116,8 +87,9 @@ describe("TFolio rectangle annotations", () => {
       timeoutMsg: "the rectangle never reached the page",
     })
     // Drawn, not merely stored: PDFium will accept and keep a mark it then
-    // declines to paint, so the border has to be there in its own colour.
-    expect(await strokePixels()).toBeGreaterThan(cleanStroke + 1000)
+    // declines to paint. The drag covers the fixture's stripes exactly, so the
+    // default half-opaque white block has to wash away much of the page's ink.
+    expect(await pageInk()).toBeLessThan(cleanInk * 0.75)
 
     const drawn = await pagePixelFingerprint()
 
@@ -136,88 +108,48 @@ describe("TFolio rectangle annotations", () => {
     })
   })
 
-  it("previews and applies a mosaic, then undo removes it", async () => {
+  it("gives each effect its own settings, and applies a mosaic", async () => {
     const clean = await pagePixelFingerprint()
 
     await $("button[aria-label='Rectangle options']").click()
-    const effectStrength = await $("[data-slot='rect-effect-strength']")
-    const effectDisclosure = await $("[data-slot='rect-effect-disclosure']")
-    const effectAbout = await $("button[aria-label='About this effect']")
-    const vectorStyle = await $("[data-slot='rect-vector-style']")
-    const strokeWidth = await $("[data-slot='rect-stroke-width']")
-    const opacity = await $("[data-slot='rect-opacity']")
-    const cornerRadius = await $("[data-slot='rect-corner-radius']")
-    const borderNone = await $(
-      "[data-slot='rect-stroke-colors'] [aria-label='None']",
-    )
-    const fillNone = await $(
-      "[data-slot='rect-fill-colors'] [aria-label='None']",
-    )
-    await expect(effectStrength).not.toExist()
-    await expect(effectDisclosure).not.toExist()
-    await expect(effectAbout).not.toExist()
-    await expect(vectorStyle).toExist()
-    await expect(borderNone).toExist()
-    await expect(fillNone).toExist()
-    expect(await borderNone.getAttribute("data-disabled")).not.toBeNull()
-    await expect(strokeWidth).toExist()
-    await expect(opacity).toExist()
-    await expect(cornerRadius).toExist()
+    const amount = await $("[data-slot='rect-amount']")
+    const white = await $("[data-slot='rect-colors'] [aria-label='#ffffff']")
+    const custom = await $("[data-slot='rect-colors'] input[type='color']")
+    const disclosure = await $("[data-slot='rect-effect-disclosure']")
+    const about = await $("button[aria-label='About this effect']")
 
-    await $("[data-slot='rect-fill-colors'] [aria-label='#ff3b30']").click()
-    await expect(opacity).toExist()
-    expect(await borderNone.getAttribute("data-disabled")).toBeNull()
+    // Translucent: the colour is the mark, so the picker is live and the one
+    // slider is its opacity.
+    await expect(amount).toHaveText(/Opacity/)
+    expect(await white.getAttribute("data-disabled")).toBeNull()
+    await expect(custom).toBeEnabled()
+    await expect(about).not.toExist()
 
-    await borderNone.click()
-    await expect(strokeWidth).not.toExist()
-    await expect(opacity).toExist()
-
-    await $("[data-slot='rect-stroke-colors'] [aria-label='#ff3b30']").click()
-    await expect(strokeWidth).toExist()
-    expect(
-      await browser.execute(() =>
-        Array.from(
-          document.querySelector("[data-slot='rect-vector-style']")!.children,
-        ).map((element) => element.getAttribute("data-slot")),
-      ),
-    ).toEqual([
-      "rect-stroke-colors",
-      "rect-fill-colors",
-      "rect-stroke-width",
-      "rect-opacity",
-      "rect-corner-radius",
-    ])
-
-    await fillNone.click()
-    await expect(strokeWidth).toExist()
-    await expect(opacity).toExist()
-
+    // A mosaic is built from the pixels under the box, so the colour has
+    // nothing to tint: it stays on the panel but goes inert.
     await $("button[aria-label='Mosaic']").click()
-    await expect(effectStrength).toExist()
-    await expect(effectAbout).toExist()
-    await expect(effectDisclosure).not.toExist()
-    await effectAbout.click()
-    await expect(effectDisclosure).toHaveText(
+    await expect(amount).toHaveText(/Mosaic size/)
+    expect(await white.getAttribute("data-disabled")).not.toBeNull()
+    await expect(custom).toBeDisabled()
+
+    await expect(disclosure).not.toExist()
+    await about.click()
+    await expect(disclosure).toHaveText(
       "Not redaction: the underlying text remains searchable and copyable. Use this visual effect for printing only.",
     )
-    await effectAbout.click()
-    await expect(effectDisclosure).not.toExist()
-    await expect(vectorStyle).not.toExist()
+    await about.click()
+    await expect(disclosure).not.toExist()
 
     await $("button[aria-label='Gaussian blur']").click()
-    await expect(effectStrength).toExist()
-    await expect(vectorStyle).not.toExist()
+    await expect(amount).toHaveText(/Blur strength/)
+    expect(await white.getAttribute("data-disabled")).not.toBeNull()
 
-    await $("button[aria-label='None']").click()
-    await expect(effectStrength).not.toExist()
-    await expect(effectDisclosure).not.toExist()
-    await expect(effectAbout).not.toExist()
-    await expect(vectorStyle).toExist()
+    await $("button[aria-label='Translucent']").click()
+    await expect(amount).toHaveText(/Opacity/)
+    expect(await white.getAttribute("data-disabled")).toBeNull()
+    await expect(about).not.toExist()
 
     await $("button[aria-label='Mosaic']").click()
-    await expect(effectAbout).toExist()
-    await expect(effectDisclosure).not.toExist()
-
     await $("button[aria-label='Draw a rectangle']").click()
     await dragRectOnPage()
 

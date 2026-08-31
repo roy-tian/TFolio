@@ -1,6 +1,5 @@
 import type {
   HexColor,
-  RectEffect,
   RectEffectKind,
   RectStyle,
   TextNoteFontFamily,
@@ -43,77 +42,44 @@ export function storeHighlightColor(color: HexColor) {
   store(highlightColorStorageKey, color)
 }
 
-/** Full-strength ink for a border that has to read as a deliberate mark. */
-export const rectStrokeSwatches: readonly HexColor[] = [
-  "#ff3b30",
-  "#0a84ff",
-  "#34c759",
-  "#ffcc00",
-  "#000000",
-]
-
-/** A fill sits under content, so these lean pale enough to keep it readable. */
-export const rectFillSwatches: readonly HexColor[] = [
-  "#ff3b30",
-  "#0a84ff",
-  "#34c759",
-  "#ffcc00",
+/**
+ * A block covers what is under it, so white — the page's own ground — leads,
+ * and the rest are strong enough to read as a deliberate cover rather than a
+ * stain.
+ */
+export const rectSwatches: readonly HexColor[] = [
   "#ffffff",
+  "#000000",
+  "#ff3b30",
+  "#0a84ff",
+  "#ffcc00",
 ]
 
-/** Slider ends. A radius past a small box's half-side is clamped by the backend. */
-export const RECT_MAX_CORNER_RADIUS = 40
-export const RECT_MIN_STROKE_WIDTH = 1
-export const RECT_MAX_STROKE_WIDTH = 12
+/** Slider ends, shared by the blur's sigma and the mosaic's block size. */
 export const RECT_MIN_EFFECT_STRENGTH = 2
 export const RECT_MAX_EFFECT_STRENGTH = 24
 /** A rectangle at no opacity would be invisible, so the floor stays off zero. */
 export const RECT_MIN_OPACITY = 0.1
 
 export const rectEffectKinds: readonly RectEffectKind[] = [
-  "none",
-  "mosaic",
+  "translucent",
   "blur",
+  "mosaic",
 ]
 
 export function isRectEffectKind(value: unknown): value is RectEffectKind {
   return rectEffectKinds.includes(value as RectEffectKind)
 }
 
-export function isRectEffect(value: unknown): value is RectEffect {
-  if (typeof value !== "object" || value === null) {
-    return false
-  }
-
-  const effect = value as Record<string, unknown>
-
-  return (
-    isRectEffectKind(effect.kind) &&
-    typeof effect.strength === "number" &&
-    effect.strength >= RECT_MIN_EFFECT_STRENGTH &&
-    effect.strength <= RECT_MAX_EFFECT_STRENGTH
-  )
-}
-
-/**
- * An outline, not a block: a border reads as "I've marked this" where a fill
- * reads as "I've covered this", and the first is what a rectangle tool is for.
- */
+/** A wash rather than a cover: enough to hide a face, not the whole page. */
 export const defaultRectStyle: RectStyle = {
-  cornerRadius: 0,
-  effect: { kind: "none", strength: 8 },
-  fillColor: null,
-  opacity: 1,
-  strokeColor: rectStrokeSwatches[0]!,
-  strokeWidth: 2,
+  color: rectSwatches[0]!,
+  effect: "translucent",
+  opacity: 0.5,
+  strength: 8,
 }
 
 export const rectStyleStorageKey = "tfolio.annotate.rectStyle"
-
-/** A colour, or `null` for the part of a rectangle that is left off. */
-function isNullableHexColor(value: unknown): value is HexColor | null {
-  return value === null || isHexColor(value)
-}
 
 /**
  * Whether `value` is a rectangle style this app could have written. The numeric
@@ -121,6 +87,10 @@ function isNullableHexColor(value: unknown): value is HexColor | null {
  * opacity below `RECT_MIN_OPACITY`, so a stored one is tampered or from an older
  * schema, and loading it would draw an invisible mark that still records as an
  * edit. Rejected here so the caller falls back to the visible default.
+ *
+ * Both numbers are checked whichever effect is stored: the one the effect does
+ * not use is still kept, and still becomes the mark as soon as the reader
+ * switches to it.
  */
 export function isRectStyle(value: unknown): value is RectStyle {
   if (typeof value !== "object" || value === null) {
@@ -130,24 +100,15 @@ export function isRectStyle(value: unknown): value is RectStyle {
   const style = value as Record<string, unknown>
 
   return (
-    // The ranges are the sliders' own: a value outside them — a zero border
-    // width, a radius past the maximum — is not one the app wrote, and the
-    // comparisons reject a non-finite number on the way (NaN fails them all).
-    typeof style.cornerRadius === "number" &&
-    style.cornerRadius >= 0 &&
-    style.cornerRadius <= RECT_MAX_CORNER_RADIUS &&
-    isRectEffect(style.effect) &&
-    typeof style.strokeWidth === "number" &&
-    style.strokeWidth >= RECT_MIN_STROKE_WIDTH &&
-    style.strokeWidth <= RECT_MAX_STROKE_WIDTH &&
+    isHexColor(style.color) &&
+    isRectEffectKind(style.effect) &&
+    // The comparisons reject a non-finite number on the way (NaN fails them all).
     typeof style.opacity === "number" &&
     style.opacity >= RECT_MIN_OPACITY &&
     style.opacity <= 1 &&
-    isNullableHexColor(style.strokeColor) &&
-    isNullableHexColor(style.fillColor) &&
-    // At least one part present, or the rectangle would draw nothing — the same
-    // both-"none" state the options panel already refuses to let a reader reach.
-    (style.strokeColor !== null || style.fillColor !== null)
+    typeof style.strength === "number" &&
+    style.strength >= RECT_MIN_EFFECT_STRENGTH &&
+    style.strength <= RECT_MAX_EFFECT_STRENGTH
   )
 }
 

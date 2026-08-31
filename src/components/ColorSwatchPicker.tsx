@@ -1,25 +1,18 @@
 import { Radio } from "@base-ui/react/radio"
 import { RadioGroup } from "@base-ui/react/radio-group"
-import { Ban, Check } from "lucide-react"
+import { Check } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import type { HexColor } from "@/lib/annotations"
 import { isHexColor } from "@/lib/annotationStyles"
 
 type ColorSwatchPickerProps = {
-  /** Offers a "none" choice for a colour that can be left off, e.g. a fill. */
-  allowNone?: boolean
   disabled?: boolean
   labelledBy: string
-  /** Keeps "none" visible but unavailable when it would remove the last colour. */
-  noneDisabled?: boolean
-  onChange: (color: HexColor | null) => void
+  onChange: (color: HexColor) => void
   swatches: readonly HexColor[]
-  value: HexColor | null
+  value: HexColor
 }
-
-// Base UI's RadioGroup keys on strings, so `null` needs a stand-in value.
-const NONE_VALUE = "none"
 
 /**
  * Swatches for the common cases, and `<input type="color">` for the rest rather
@@ -27,18 +20,15 @@ const NONE_VALUE = "none"
  * screen reader.
  */
 export function ColorSwatchPicker({
-  allowNone = false,
   disabled = false,
   labelledBy,
-  noneDisabled = false,
   onChange,
   swatches,
   value,
 }: ColorSwatchPickerProps) {
   const { t } = useTranslation()
-  const isNone = value === null
   // A mixed colour has no swatch to check, so the custom well shows as chosen.
-  const isCustom = value !== null && !swatches.includes(value)
+  const isCustom = !swatches.includes(value)
 
   return (
     <div className="flex items-center gap-1.5">
@@ -47,31 +37,18 @@ export function ColorSwatchPicker({
         className="flex items-center gap-1.5"
         disabled={disabled}
         onValueChange={(next) => {
-          if (next === NONE_VALUE) {
-            onChange(null)
-          } else if (isHexColor(next)) {
-            // Base UI hands back the `null` a mixed colour puts in; coercing it
-            // would store the string "null" as the reader's colour.
+          // Base UI hands back the `null` a mixed colour puts in; coercing it
+          // would store the string "null" as the reader's colour.
+          if (isHexColor(next)) {
             onChange(next)
           }
         }}
-        value={isNone ? NONE_VALUE : isCustom ? null : value}
+        value={isCustom ? null : value}
       >
-        {allowNone ? (
-          <Radio.Root
-            aria-label={t("annotate.noColor")}
-            className="flex size-6 items-center justify-center rounded-md border border-input text-muted-foreground outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50 data-disabled:pointer-events-none data-disabled:opacity-40"
-            disabled={noneDisabled}
-            title={t("annotate.noColor")}
-            value={NONE_VALUE}
-          >
-            <Ban className="size-4" />
-          </Radio.Root>
-        ) : null}
         {swatches.map((swatch) => (
           <Radio.Root
             aria-label={swatch}
-            className="flex size-6 items-center justify-center rounded-md border border-black/10 outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50 dark:border-white/15"
+            className="flex size-6 items-center justify-center rounded-md border border-black/10 outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50 data-disabled:pointer-events-none data-disabled:opacity-50 dark:border-white/15"
             key={swatch}
             style={{ backgroundColor: swatch }}
             title={swatch}
@@ -97,7 +74,7 @@ export function ColorSwatchPicker({
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
           type="color"
-          value={value ?? "#000000"}
+          value={value}
         />
         <span
           aria-hidden

@@ -234,11 +234,7 @@ export function TextNoteEditor({
           </p>
           <ColorSwatchPicker
             labelledBy="text-note-color-label"
-            onChange={(color) => {
-              if (color) {
-                onStyleChange({ ...style, color })
-              }
-            }}
+            onChange={(color) => onStyleChange({ ...style, color })}
             swatches={textNoteSwatches}
             value={style.color}
           />

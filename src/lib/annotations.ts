@@ -30,31 +30,32 @@ export type HighlightCommand = {
 }
 
 /**
- * The rectangle tool's persisted settings. A colour left `null` is that vector
- * part left off, and `opacity` applies to whichever are present. The effect is
- * separate in a command because an image treatment does not draw those vector
- * parts. Sizes and effect strength are page points.
+ * The rectangle tool's persisted settings. One drag draws one block, and the
+ * effect decides what fills it: a translucent wash of `color` at `opacity`, or
+ * the page's own pixels blurred or squared off at `strength` page points. The
+ * settings the showing effect does not use are kept rather than dropped, so
+ * switching back returns the reader to what they had.
  */
 export type RectStyle = {
-  cornerRadius: number
-  effect: RectEffect
-  fillColor: HexColor | null
+  color: HexColor
+  effect: RectEffectKind
+  /** 0..1, kept apart from the colour so the picker can stay a plain hex. */
   opacity: number
-  strokeColor: HexColor | null
-  strokeWidth: number
-}
-
-export type RectEffectKind = "none" | "mosaic" | "blur"
-
-/** An image treatment applied to the rectangle's source pixels. */
-export type RectEffect = {
-  kind: RectEffectKind
-  /** Mosaic block size or blur sigma, in page points. */
+  /** Blur sigma or mosaic block size, in page points. */
   strength: number
 }
 
-/** The vector appearance sent only for an ordinary, effect-free rectangle. */
-export type RectAppearance = Omit<RectStyle, "effect">
+export type RectEffectKind = "translucent" | "blur" | "mosaic"
+
+/**
+ * The effects that rebuild the rectangle from the pixels under it. They read
+ * the page rather than paint over it, which is why the colour has nothing to
+ * say about them, and why they take a different path into the backend.
+ */
+export type RectPixelEffect = {
+  kind: Exclude<RectEffectKind, "translucent">
+  strength: number
+}
 
 /**
  * A rectangle is drawn on one page in one drag, so unlike a highlight it never
@@ -62,10 +63,9 @@ export type RectAppearance = Omit<RectStyle, "effect">
  */
 export type RectCommand = {
   bounds: PagePointsRect
-  effect: RectEffect
   kind: "rect"
   pageNumber: number
-  style: RectAppearance
+  style: RectStyle
 }
 
 /**

@@ -111,11 +111,7 @@ export function AnnotationToolbar({
                 </p>
                 <ColorSwatchPicker
                   labelledBy="highlight-color-label"
-                  onChange={(color) => {
-                    if (color) {
-                      onHighlightColorChange(color)
-                    }
-                  }}
+                  onChange={onHighlightColorChange}
                   swatches={highlightSwatches}
                   value={highlightColor}
                 />

@@ -19,11 +19,10 @@ use super::{
         standard_face, subset_for, StandardFace,
     },
     geometry::{
-        annotation_color, clamp_corner_radius, page_rect_to_pdfium, page_rotation_degrees,
-        quad_points_from_rect, rect_path, union_rect, unrotated_page_height, unrotated_page_size,
-        within_page_range, RectPathSegment, MAX_RECT_CORNER_RADIUS, MAX_RECT_EFFECT_STRENGTH,
-        MAX_RECT_STROKE_WIDTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE, MAX_TEXT_NOTE_LINES,
-        MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_RECT_STROKE_WIDTH, MIN_TEXT_NOTE_FONT_SIZE,
+        annotation_color, page_rect_to_pdfium, page_rotation_degrees, quad_points_from_rect,
+        union_rect, unrotated_page_height, unrotated_page_size, within_page_range,
+        MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
+        MAX_TEXT_NOTE_LINES, MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_TEXT_NOTE_FONT_SIZE,
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
     library::bind_pdfium,
@@ -1152,20 +1151,14 @@ impl PdfiumEngine {
     /// Draws a rectangle on `page_number` — one mark, so one step to take back.
     ///
     /// Carried by a Stamp annotation holding a hand-built path object, not a
-    /// Square — including for a right-angled one, where the plan had wanted a
-    /// Square. Both halves of a Square's shape come from `/Border`
-    /// `[h_radius v_radius width]`, and PDFium honours only the width: rendering
-    /// a Square with `[25 25 2]` puts down pixel-for-pixel the same corner as
-    /// `[0 0 2]`, so a rounded Square would be accepted, stored, saved, and
-    /// drawn with square corners. Nor is the width reachable: `pdfium-render`
-    /// binds `FPDFAnnot_SetBorder` but keeps the annotation handle it needs
-    /// `pub(crate)`, and a Square cannot own the page object whose ownership
-    /// would hand one back, so the stroke-width slider would go nowhere.
+    /// Square, so it is the same kind of mark the blur and the mosaic leave and
+    /// one deletion path takes any of them back off.
     ///
     /// The cost is that other tools see a stamp rather than a native rectangle
     /// they could edit — acceptable while this app only creates and undoes.
-    /// Drawing the path ourselves keeps every part of the style — border, fill,
-    /// opacity, radius — a real, rendered thing the CSS preview matches.
+    /// Drawing the path ourselves keeps the colour and the opacity a real,
+    /// rendered thing the CSS preview matches, rather than an `/IC` and a `/CA`
+    /// a reader's viewer may or may not honour.
     pub(super) fn add_rect(
         &self,
         document_id: u64,
@@ -1184,15 +1177,15 @@ impl PdfiumEngine {
             return Err("a rectangle's coordinates are out of range".into());
         }
 
-        // The style's sizes have the sliders' ranges (see annotationStyles.ts) as
-        // their contract, enforced on both sides of the boundary: a value the
-        // reader could never have chosen — a wider stroke, a larger radius, an
-        // opacity past full — is refused rather than quietly clamped into a
-        // different mark than they drew. `contains` also rejects a non-finite.
-        if !(MIN_RECT_OPACITY..=1.0).contains(&style.opacity)
-            || !(MIN_RECT_STROKE_WIDTH..=MAX_RECT_STROKE_WIDTH).contains(&style.stroke_width)
-            || !(0.0..=MAX_RECT_CORNER_RADIUS).contains(&style.corner_radius)
-        {
+        // The opacity slider's range (see annotationStyles.ts) is the contract,
+        // enforced on both sides of the boundary: a value the reader could never
+        // have chosen is refused rather than quietly clamped into a different
+        // mark than they drew. The floor is also what keeps a rectangle a
+        // visible one — a fully transparent block would be accepted, stored,
+        // saved, invisible, yet still recorded as an edit, which is the failure
+        // this project measures pixels to catch. `contains` rejects a non-finite
+        // opacity on the way.
+        if !(MIN_RECT_OPACITY..=1.0).contains(&style.opacity) {
             return Err("a rectangle's style values are out of range".into());
         }
 
@@ -1200,29 +1193,7 @@ impl PdfiumEngine {
             return Err("a rectangle needs a positive width and height".into());
         }
 
-        // Drawn at the width the reader chose and the preview showed, not
-        // shrunk to the shape: the range check above already held it to the
-        // sliders' bounds, so there is nothing left to clamp, and clamping here
-        // would silently redraw a thin rectangle's border narrower than drawn.
-        let stroke = match &style.stroke_color {
-            Some(hex) => Some((annotation_color(hex, style.opacity)?, style.stroke_width)),
-            None => None,
-        };
-        let fill = match &style.fill_color {
-            Some(hex) => Some(annotation_color(hex, style.opacity)?),
-            None => None,
-        };
-
-        // Visible means a pixel that actually lands: a colour that is present
-        // *and* not fully transparent. No colour, or zero opacity, draws nothing
-        // — accepted, stored, saved, invisible, yet still recorded as an edit,
-        // which is the failure this project measures pixels to catch.
-        let draws_border = stroke.as_ref().is_some_and(|(color, _)| color.alpha() > 0);
-        let draws_fill = fill.as_ref().is_some_and(|color| color.alpha() > 0);
-        if !draws_border && !draws_fill {
-            return Err("a rectangle needs a visible border or fill".into());
-        }
-
+        let fill = annotation_color(&style.color, style.opacity)?;
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
         let page_id = entry.page_id(page_number)?;
@@ -1239,75 +1210,31 @@ impl PdfiumEngine {
             unrotated_page_height(&page)
         };
         let rect = page_rect_to_pdfium(bounds, unrotated_height);
-        // A stroke is centred on the path it follows, and PDFium clips a stamp's
-        // appearance to the annotation's `/Rect` — so a path traced along the
-        // bounds loses the outer half of its border, rendering a 12pt one 6pt
-        // wide. Tracing it half a stroke inside puts the whole width within the
-        // bounds, which is also where the preview draws it: CSS `border-box`
-        // puts a border inside the element's box, not straddling its edge.
-        //
-        // A rectangle narrower than its own border insets to nothing; the stroke
-        // centred on that still covers the bounds, which is the right picture.
-        let inset = match &stroke {
-            Some((_, width)) => (width / 2.0).min(bounds.width.min(bounds.height) / 2.0),
-            None => 0.0,
-        };
-        let path_rect = PdfRect::new_from_values(
-            rect.bottom().value + inset,
-            rect.left().value + inset,
-            rect.top().value - inset,
-            rect.right().value - inset,
-        );
-        // `corner_radius` is the outer corner, as the preview's `border-radius`
-        // is, so the path's own radius is that less the distance it moved in.
-        let radius = clamp_corner_radius(
-            bounds.width - inset * 2.0,
-            bounds.height - inset * 2.0,
-            style.corner_radius - inset,
-        );
-        let plan = rect_path(&path_rect, radius);
-
-        let (stroke_color, stroke_width) = match &stroke {
-            Some((color, width)) => (Some(*color), Some(PdfPoints::new(*width))),
-            None => (None, None),
-        };
 
         // A free object until it is added below, so a failure while it is being
-        // drawn has nothing to take off the page.
+        // drawn has nothing to take off the page. Traced along the bounds
+        // themselves: with no stroke to centre on the path, every pixel the fill
+        // puts down is inside the box the reader dragged, which is where the
+        // preview draws it.
         let mut path = PdfPagePathObject::new(
             &entry.document,
-            PdfPoints::new(plan.start.0),
-            PdfPoints::new(plan.start.1),
-            stroke_color,
-            stroke_width,
-            fill,
+            rect.left(),
+            rect.bottom(),
+            None,
+            None,
+            Some(fill),
         )
         .map_err(|error| format!("PDFium could not start the rectangle: {error}"))?;
 
-        for segment in &plan.segments {
-            match *segment {
-                RectPathSegment::LineTo { x, y } => path
-                    .line_to(PdfPoints::new(x), PdfPoints::new(y))
-                    .map_err(|error| format!("PDFium rejected a rectangle edge: {error}"))?,
-                RectPathSegment::BezierTo {
-                    x,
-                    y,
-                    c1x,
-                    c1y,
-                    c2x,
-                    c2y,
-                } => path
-                    .bezier_to(
-                        PdfPoints::new(x),
-                        PdfPoints::new(y),
-                        PdfPoints::new(c1x),
-                        PdfPoints::new(c1y),
-                        PdfPoints::new(c2x),
-                        PdfPoints::new(c2y),
-                    )
-                    .map_err(|error| format!("PDFium rejected a rectangle corner: {error}"))?,
-            }
+        for (x, y) in [
+            (rect.right(), rect.bottom()),
+            (rect.right(), rect.top()),
+            (rect.left(), rect.top()),
+        ] {
+            path.line_to(x, y)
+                .map_err(|error| format!("PDFium rejected a rectangle edge: {error}"))?;
         }
+
         path.close_path()
             .map_err(|error| format!("PDFium could not close the rectangle: {error}"))?;
 

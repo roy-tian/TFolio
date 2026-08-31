@@ -7,12 +7,10 @@ describe("isRectStyle", () => {
     expect(isRectStyle(defaultRectStyle)).toBe(true)
     expect(
       isRectStyle({
-        cornerRadius: 12,
-        effect: { kind: "mosaic", strength: 12 },
-        fillColor: "#ffcc00",
+        color: "#ffcc00",
+        effect: "mosaic",
         opacity: 0.5,
-        strokeColor: null,
-        strokeWidth: 3,
+        strength: 12,
       }),
     ).toBe(true)
   })
@@ -22,22 +20,20 @@ describe("isRectStyle", () => {
   it("accepts the ends of every slider's range", () => {
     expect(isRectStyle({ ...defaultRectStyle, opacity: 0.1 })).toBe(true)
     expect(isRectStyle({ ...defaultRectStyle, opacity: 1 })).toBe(true)
-    expect(isRectStyle({ ...defaultRectStyle, strokeWidth: 1 })).toBe(true)
-    expect(isRectStyle({ ...defaultRectStyle, strokeWidth: 12 })).toBe(true)
-    expect(isRectStyle({ ...defaultRectStyle, cornerRadius: 0 })).toBe(true)
-    expect(isRectStyle({ ...defaultRectStyle, cornerRadius: 40 })).toBe(true)
+    expect(isRectStyle({ ...defaultRectStyle, strength: 2 })).toBe(true)
+    expect(isRectStyle({ ...defaultRectStyle, strength: 24 })).toBe(true)
+  })
+
+  // Both numbers are kept whichever effect is showing, so both are checked
+  // whichever effect is stored — the one the effect does not use is one switch
+  // away from being the mark.
+  it("checks the settings the stored effect does not use", () => {
+    expect(isRectStyle({ ...defaultRectStyle, effect: "blur", opacity: 0 })).toBe(
+      false,
+    )
     expect(
-      isRectStyle({
-        ...defaultRectStyle,
-        effect: { kind: "blur", strength: 2 },
-      }),
-    ).toBe(true)
-    expect(
-      isRectStyle({
-        ...defaultRectStyle,
-        effect: { kind: "blur", strength: 24 },
-      }),
-    ).toBe(true)
+      isRectStyle({ ...defaultRectStyle, effect: "translucent", strength: 99 }),
+    ).toBe(false)
   })
 
   // A style loaded with these would draw an invisible mark that still records as
@@ -48,59 +44,30 @@ describe("isRectStyle", () => {
   })
 
   it("rejects non-finite sizes", () => {
-    expect(isRectStyle({ ...defaultRectStyle, cornerRadius: Number.NaN })).toBe(false)
+    expect(isRectStyle({ ...defaultRectStyle, opacity: Number.NaN })).toBe(false)
     expect(
-      isRectStyle({ ...defaultRectStyle, strokeWidth: Number.POSITIVE_INFINITY }),
-    ).toBe(false)
-    expect(
-      isRectStyle({
-        ...defaultRectStyle,
-        effect: { kind: "blur", strength: Number.NaN },
-      }),
+      isRectStyle({ ...defaultRectStyle, strength: Number.POSITIVE_INFINITY }),
     ).toBe(false)
   })
 
   // Just outside each slider's range, so a boundary widened by one still fails
   // here rather than slipping through a far-off value like 99 or 999.
   it("rejects values just past the sliders' ranges", () => {
-    expect(isRectStyle({ ...defaultRectStyle, strokeWidth: 0.9 })).toBe(false)
-    expect(isRectStyle({ ...defaultRectStyle, strokeWidth: 13 })).toBe(false)
-    expect(isRectStyle({ ...defaultRectStyle, cornerRadius: -0.5 })).toBe(false)
-    expect(isRectStyle({ ...defaultRectStyle, cornerRadius: 41 })).toBe(false)
     expect(isRectStyle({ ...defaultRectStyle, opacity: 0.09 })).toBe(false)
     expect(isRectStyle({ ...defaultRectStyle, opacity: 1.05 })).toBe(false)
-    expect(
-      isRectStyle({
-        ...defaultRectStyle,
-        effect: { kind: "mosaic", strength: 1 },
-      }),
-    ).toBe(false)
-    expect(
-      isRectStyle({
-        ...defaultRectStyle,
-        effect: { kind: "mosaic", strength: 25 },
-      }),
-    ).toBe(false)
+    expect(isRectStyle({ ...defaultRectStyle, strength: 1 })).toBe(false)
+    expect(isRectStyle({ ...defaultRectStyle, strength: 25 })).toBe(false)
   })
 
-  it("rejects an effect mode the app does not offer", () => {
-    expect(
-      isRectStyle({
-        ...defaultRectStyle,
-        effect: { kind: "pixelate", strength: 8 },
-      }),
-    ).toBe(false)
-  })
-
-  it("rejects a style with neither a border nor a fill", () => {
-    expect(
-      isRectStyle({ ...defaultRectStyle, fillColor: null, strokeColor: null }),
-    ).toBe(false)
+  it("rejects an effect the app does not offer", () => {
+    expect(isRectStyle({ ...defaultRectStyle, effect: "pixelate" })).toBe(false)
+    expect(isRectStyle({ ...defaultRectStyle, effect: "none" })).toBe(false)
   })
 
   it("rejects a shape that is not a style at all", () => {
     expect(isRectStyle(null)).toBe(false)
     expect(isRectStyle({ opacity: 1 })).toBe(false)
-    expect(isRectStyle({ ...defaultRectStyle, strokeColor: "red" })).toBe(false)
+    expect(isRectStyle({ ...defaultRectStyle, color: "red" })).toBe(false)
+    expect(isRectStyle({ ...defaultRectStyle, color: null })).toBe(false)
   })
 })

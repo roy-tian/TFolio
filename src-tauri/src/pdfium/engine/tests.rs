@@ -869,19 +869,10 @@ fn quad(left: f32, top: f32, width: f32, height: f32) -> PagePointsRect {
     }
 }
 
-fn rect_style(
-    stroke: Option<&str>,
-    fill: Option<&str>,
-    opacity: f32,
-    corner_radius: f32,
-    stroke_width: f32,
-) -> RectStyle {
+fn rect_style(color: &str, opacity: f32) -> RectStyle {
     RectStyle {
-        stroke_color: stroke.map(str::to_string),
-        fill_color: fill.map(str::to_string),
+        color: color.to_string(),
         opacity,
-        corner_radius,
-        stroke_width,
     }
 }
 
@@ -1552,8 +1543,7 @@ fn draws_a_highlight_where_it_was_asked_for() {
 }
 
 // A rectangle, like a highlight, has to land where it was asked for and
-// nowhere else. Filled with no border so all its ink is inside its bounds,
-// which is what lets the band outside it stay exactly as it was.
+// nowhere else — which is what lets the band outside it stay exactly as it was.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn draws_a_square_where_it_was_asked_for() {
@@ -1570,7 +1560,7 @@ fn draws_a_square_where_it_was_asked_for() {
             document.id,
             1,
             &quad(50.0, 60.0, 100.0, 90.0),
-            &rect_style(None, Some("#ff3b30"), 1.0, 0.0, 2.0),
+            &rect_style("#ff3b30", 1.0),
         )
         .expect("PDFium should create the rectangle");
 
@@ -1595,46 +1585,39 @@ fn draws_a_square_where_it_was_asked_for() {
     );
 }
 
-// Counting the path's segments proves nothing about what renders — only the
-// pixels can say the corner was actually carved. A rounded corner leaves the
-// square of page at its very corner emptier than a right angle would.
+// Opacity is what the block is for: a wash has to let the page through where
+// a solid one hides it. Only the pixels can say so — PDFium will accept an
+// alpha it then declines to honour.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn draws_a_rounded_rect() {
+fn draws_a_translucent_rectangle_lighter_than_a_solid_one() {
     let engine = test_engine();
-    // The top-left 25pt corner of a box at (50,50)-(150,150): px (100,100)-(150,150).
-    let corner = (100, 100, 150, 150);
     let bounds = quad(50.0, 50.0, 100.0, 100.0);
 
-    let square = engine
+    let solid = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
     engine
-        .add_rect(
-            square.id,
-            1,
-            &bounds,
-            &rect_style(None, Some("#ff3b30"), 1.0, 0.0, 2.0),
-        )
-        .expect("PDFium should create the square-cornered rectangle");
-    let (square_corner, _) = ink_inside_and_outside(engine, square.id, 1, corner);
+        .add_rect(solid.id, 1, &bounds, &rect_style("#000000", 1.0))
+        .expect("PDFium should create the solid rectangle");
 
-    let rounded = engine
+    let washed = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
     engine
-        .add_rect(
-            rounded.id,
-            1,
-            &bounds,
-            &rect_style(None, Some("#ff3b30"), 1.0, 25.0, 2.0),
-        )
-        .expect("PDFium should create the rounded rectangle");
-    let (rounded_corner, _) = ink_inside_and_outside(engine, rounded.id, 1, corner);
+        .add_rect(washed.id, 1, &bounds, &rect_style("#000000", 0.1))
+        .expect("PDFium should create the translucent rectangle");
+
+    let solid_darkness = rendered_darkness(engine, solid.id, 1);
+    let washed_darkness = rendered_darkness(engine, washed.id, 1);
 
     assert!(
-        rounded_corner < square_corner,
-        "the corner was not rounded: rounded {rounded_corner} vs square {square_corner}"
+        washed_darkness > 0,
+        "the translucent rectangle drew nothing"
+    );
+    assert!(
+        washed_darkness < solid_darkness / 2,
+        "the opacity never reached the fill: {washed_darkness} vs {solid_darkness}"
     );
 }
 
@@ -1651,7 +1634,7 @@ fn rejects_an_unusable_rectangle() {
             document.id,
             1,
             &quad(10.0, 10.0, 0.0, 40.0),
-            &rect_style(Some("#ff3b30"), None, 1.0, 0.0, 2.0),
+            &rect_style("#ff3b30", 1.0),
         )
         .expect_err("a rectangle with no area is not a rectangle");
     assert!(error.contains("positive width and height"));
@@ -1661,7 +1644,7 @@ fn rejects_an_unusable_rectangle() {
             document.id,
             1,
             &quad(f32::NAN, 10.0, 40.0, 40.0),
-            &rect_style(Some("#ff3b30"), None, 1.0, 0.0, 2.0),
+            &rect_style("#ff3b30", 1.0),
         )
         .expect_err("a non-finite coordinate is rejected before it reaches PDFium");
     assert!(error.contains("coordinates are out of range"));
@@ -1672,21 +1655,20 @@ fn rejects_an_unusable_rectangle() {
             document.id,
             1,
             &quad(3.0e38, 0.0, 3.0e38, 40.0),
-            &rect_style(Some("#ff3b30"), None, 1.0, 0.0, 2.0),
+            &rect_style("#ff3b30", 1.0),
         )
         .expect_err("bounds beyond the page range are rejected");
     assert!(error.contains("coordinates are out of range"));
 
-    // Style values outside the sliders' ranges are refused, not clamped: a
-    // stroke thinner than 1pt or past 12, a radius past 40, an opacity below the
-    // floor or past full — none of them a value the reader could have chosen.
+    // An opacity outside the slider's range is refused, not clamped: below the
+    // floor it would draw a mark too faint to see that still records as an
+    // edit, and past full it is not a value the reader could have chosen.
     for style in [
-        rect_style(Some("#ff3b30"), None, 1.0, 0.0, 0.0),
-        rect_style(Some("#ff3b30"), None, 1.0, 0.0, 13.0),
-        rect_style(Some("#ff3b30"), None, 1.0, 41.0, 2.0),
-        rect_style(Some("#ff3b30"), Some("#ffcc00"), 0.0, 0.0, 2.0),
-        rect_style(Some("#ff3b30"), None, 2.0, 0.0, 2.0),
-        rect_style(Some("#ff3b30"), None, f32::MAX, 0.0, 2.0),
+        rect_style("#ff3b30", 0.0),
+        rect_style("#ff3b30", 0.09),
+        rect_style("#ff3b30", 2.0),
+        rect_style("#ff3b30", f32::MAX),
+        rect_style("#ff3b30", f32::NAN),
     ] {
         let error = engine
             .add_rect(document.id, 1, &quad(10.0, 10.0, 40.0, 40.0), &style)
@@ -1697,23 +1679,12 @@ fn rejects_an_unusable_rectangle() {
         );
     }
 
-    // Both a border and a fill left off: in range, but nothing to draw.
     let error = engine
         .add_rect(
             document.id,
             1,
             &quad(10.0, 10.0, 40.0, 40.0),
-            &rect_style(None, None, 1.0, 0.0, 2.0),
-        )
-        .expect_err("a rectangle with neither a border nor a fill draws nothing");
-    assert!(error.contains("visible border or fill"));
-
-    let error = engine
-        .add_rect(
-            document.id,
-            1,
-            &quad(10.0, 10.0, 40.0, 40.0),
-            &rect_style(Some("not-a-colour"), None, 1.0, 0.0, 2.0),
+            &rect_style("not-a-colour", 1.0),
         )
         .expect_err("a colour PDFium cannot read is rejected");
     assert!(error.contains("not a usable annotation colour"));
@@ -1723,7 +1694,7 @@ fn rejects_an_unusable_rectangle() {
             document.id,
             9,
             &quad(10.0, 10.0, 40.0, 40.0),
-            &rect_style(Some("#ff3b30"), None, 1.0, 0.0, 2.0),
+            &rect_style("#ff3b30", 1.0),
         )
         .expect_err("a page that does not exist is rejected");
     assert!(error.contains("does not exist"));
@@ -1745,7 +1716,7 @@ fn places_a_rectangle_in_unrotated_space_for_a_rotated_page() {
             document.id,
             1,
             &quad(40.0, 30.0, 60.0, 50.0),
-            &rect_style(Some("#ff3b30"), None, 1.0, 0.0, 2.0),
+            &rect_style("#ff3b30", 1.0),
         )
         .expect("PDFium should create the rectangle");
 
@@ -1837,15 +1808,14 @@ fn writes_a_rectangle_that_survives_a_save() {
     let document = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
-    // A fill-only box at (50,60)-(150,150): px band (100,120)-(300,300). No
-    // border, so every drawn pixel is inside the bounds.
+    // The box (50,60)-(150,150): px band (100,120)-(300,300).
     let band = (100, 120, 300, 300);
     engine
         .add_rect(
             document.id,
             1,
             &quad(50.0, 60.0, 100.0, 90.0),
-            &rect_style(None, Some("#ff3b30"), 1.0, 0.0, 2.0),
+            &rect_style("#ff3b30", 1.0),
         )
         .expect("PDFium should create the rectangle");
 
@@ -2445,40 +2415,36 @@ fn dark_runs_on_scanline(
     runs
 }
 
-// A border has to be drawn at the width the reader chose, and inside the box
-// they dragged — where the preview's `box-sizing: border-box` draws it.
-//
-// A stroke is centred on its path and PDFium clips a stamp to the annotation's
-// `/Rect`, so a path traced along the bounds renders at *half* width: measuring
-// the run of pixels across the border is what tells the two apart. Counting
+// A block has to cover the box the reader dragged, edge to edge and no
+// further. Measuring the run of dark pixels across a scanline is what tells a
+// full fill from one inset, clipped, or spilling past its bounds — counting
 // annotations, or total ink, would not.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn draws_a_border_at_its_full_width_inside_the_bounds() {
+fn fills_the_whole_box_it_was_dragged() {
     let engine = test_engine();
     let document = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
 
-    // A 12pt black border on the box (50,50)-(150,150), no fill. At two pixels
-    // per point that is px 100-300, with each border 24px wide and lying
-    // *inside* that span: 100-124 on the left, 276-300 on the right.
+    // A black block on the box (50,50)-(150,150). At two pixels per point that
+    // is px 100 through 300, filled solid the whole way across.
     engine
         .add_rect(
             document.id,
             1,
             &quad(50.0, 50.0, 100.0, 100.0),
-            &rect_style(Some("#000000"), None, 1.0, 0.0, 12.0),
+            &rect_style("#000000", 1.0),
         )
         .expect("PDFium should create the rectangle");
 
-    // Halfway down the box, so the scanline crosses the two vertical edges.
+    // Halfway down the box, so the scanline crosses its whole width.
     let runs = dark_runs_on_scanline(engine, document.id, 1, 200);
 
     assert_eq!(
         runs,
-        vec![(100, 24), (276, 24)],
-        "a 12pt border should render 24px wide inside the bounds it was dragged"
+        vec![(100, 200)],
+        "a block should fill the bounds it was dragged"
     );
 }
 

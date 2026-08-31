@@ -181,14 +181,11 @@ export function useRectTool({
         return
       }
 
-      const { effect, ...appearance } = style
-
       onCommit({
         bounds,
-        effect,
         kind: "rect",
         pageNumber: current.pageNumber,
-        style: appearance,
+        style,
       })
     }
 

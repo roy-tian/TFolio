@@ -230,11 +230,7 @@ export function WatermarkDialog({
                   </FieldLabel>
                   <ColorSwatchPicker
                     labelledBy="watermark-color-label"
-                    onChange={(color) => {
-                      if (color) {
-                        onDraftChange({ ...draft, color })
-                      }
-                    }}
+                    onChange={(color) => onDraftChange({ ...draft, color })}
                     swatches={watermarkSwatches}
                     value={draft.color}
                   />

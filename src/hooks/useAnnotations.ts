@@ -72,19 +72,27 @@ async function applyCommand(
       return
     case "rect":
       // One page, one annotation, so there is nothing to wind back: the command
-      // either lands whole or leaves the page untouched.
-      if (command.effect.kind === "none") {
+      // either lands whole or leaves the page untouched. A translucent block is
+      // a drawn shape while a blur or a mosaic is built from the page's own
+      // pixels, so each takes the backend path that suits it.
+      if (command.style.effect === "translucent") {
         await invoke("add_pdf_rect_annotation", {
           bounds: command.bounds,
           documentId,
           pageNumber: command.pageNumber,
-          style: command.style,
+          style: {
+            color: command.style.color,
+            opacity: command.style.opacity,
+          },
         })
       } else {
         await invoke("add_pdf_rect_effect_annotation", {
           bounds: command.bounds,
           documentId,
-          effect: command.effect,
+          effect: {
+            kind: command.style.effect,
+            strength: command.style.strength,
+          },
           pageNumber: command.pageNumber,
         })
       }

@@ -77,7 +77,6 @@ type PdfPageSurfaceProps = {
   footprintWidth: number
   page: PdfPageInfo
   pageNumber: number
-  pxPerPoint: number
   renderEpoch: number
   renderWidth: number
   rotation: number
@@ -96,7 +95,6 @@ function PdfPageSurface({
   footprintWidth,
   page,
   pageNumber,
-  pxPerPoint,
   renderEpoch,
   renderWidth,
   rotation,
@@ -244,7 +242,6 @@ function PdfPageSurface({
         <RectDraftOverlay
           draft={draft}
           pageWidth={page.width}
-          pxPerPoint={pxPerPoint}
           rotation={rotation}
           sourceCanvasRef={canvasRef}
           sourceRevision={bitmapRevision}
@@ -289,9 +286,6 @@ export function PdfPage({
   const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
   const targetRenderWidth =
     renderWidth ?? footprintWidth * POINT_TO_PX * renderScale
-  // The draft's border and corners are given in page points; this turns them
-  // into the on-screen pixels the preview needs, whatever the layout's width.
-  const pxPerPoint = footprintWidth > 0 ? displayWidth / footprintWidth : 0
 
   return (
     <div
@@ -309,7 +303,6 @@ export function PdfPage({
           footprintWidth={footprintWidth}
           page={page}
           pageNumber={pageNumber}
-          pxPerPoint={pxPerPoint}
           renderEpoch={renderEpoch}
           renderWidth={targetRenderWidth}
           rotation={rotation}

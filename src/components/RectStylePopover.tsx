@@ -13,21 +13,25 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { RectStyle } from "@/lib/annotations"
 import {
   isRectEffectKind,
-  RECT_MAX_CORNER_RADIUS,
   RECT_MAX_EFFECT_STRENGTH,
-  RECT_MAX_STROKE_WIDTH,
   RECT_MIN_EFFECT_STRENGTH,
   RECT_MIN_OPACITY,
-  RECT_MIN_STROKE_WIDTH,
   rectEffectKinds,
-  rectFillSwatches,
-  rectStrokeSwatches,
+  rectSwatches,
 } from "@/lib/annotationStyles"
+import { cn } from "@/lib/utils"
 
 const effectLabelKey = {
-  none: "annotate.effectNone",
-  mosaic: "annotate.effectMosaic",
+  translucent: "annotate.effectTranslucent",
   blur: "annotate.effectBlur",
+  mosaic: "annotate.effectMosaic",
+} as const
+
+/** The one slider each effect wants, in its own terms. */
+const amountLabelKey = {
+  translucent: "annotate.opacity",
+  blur: "annotate.blurStrength",
+  mosaic: "annotate.mosaicSize",
 } as const
 
 type RectStylePopoverProps = {
@@ -35,13 +39,13 @@ type RectStylePopoverProps = {
   style: RectStyle
 }
 
-/**
- * The rectangle tool's options panel: an optional image treatment, followed by
- * the vector appearance used when no treatment is selected.
- */
+/** The rectangle tool's options panel: an effect, a colour, and one amount. */
 export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
   const { t } = useTranslation()
-  const effectActive = style.effect.kind !== "none"
+  // A blur and a mosaic are built from the pixels under the box, so the colour
+  // has nothing to tint — the picker stays visible but goes inert rather than
+  // disappearing and shuffling the panel under the reader's pointer.
+  const usesColor = style.effect === "translucent"
 
   return (
     <div className="flex w-64 flex-col gap-3">
@@ -50,7 +54,7 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
           <p className="text-xs font-medium" id="rect-effect-label">
             {t("annotate.effect")}
           </p>
-          {effectActive ? (
+          {usesColor ? null : (
             <Popover>
               <PopoverTrigger
                 render={
@@ -73,20 +77,20 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
                 </p>
               </PopoverContent>
             </Popover>
-          ) : null}
+          )}
         </div>
         <ToggleGroup
           aria-labelledby="rect-effect-label"
           className="w-full"
           onValueChange={([next]) => {
             // Base UI permits an empty group when its active item is pressed,
-            // but every rectangle always has exactly one effect mode.
+            // but every rectangle always has exactly one effect.
             if (isRectEffectKind(next)) {
-              onChange({ ...style, effect: { ...style.effect, kind: next } })
+              onChange({ ...style, effect: next })
             }
           }}
           spacing={0}
-          value={[style.effect.kind]}
+          value={[style.effect]}
           variant="outline"
         >
           {rectEffectKinds.map((kind) => (
@@ -102,96 +106,47 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
         </ToggleGroup>
       </div>
 
-      {effectActive ? (
-        <div data-slot="rect-effect-strength">
+      <div className="flex flex-col gap-1.5" data-slot="rect-colors">
+        <p
+          className={cn("text-xs font-medium", !usesColor && "opacity-50")}
+          id="rect-color-label"
+        >
+          {t("annotate.rectColor")}
+        </p>
+        <ColorSwatchPicker
+          disabled={!usesColor}
+          labelledBy="rect-color-label"
+          onChange={(color) => onChange({ ...style, color })}
+          swatches={rectSwatches}
+          value={style.color}
+        />
+      </div>
+
+      <div data-slot="rect-amount">
+        {usesColor ? (
+          <SliderRow
+            display={`${Math.round(style.opacity * 100)}%`}
+            label={t(amountLabelKey.translucent)}
+            max={100}
+            min={RECT_MIN_OPACITY * 100}
+            onChange={(value) => onChange({ ...style, opacity: value / 100 })}
+            step={5}
+            value={Math.round(style.opacity * 100)}
+          />
+        ) : (
           <SliderRow
             display={t("annotate.effectStrengthValue", {
-              strength: style.effect.strength,
+              strength: style.strength,
             })}
-            label={t("annotate.effectStrength")}
+            label={t(amountLabelKey[style.effect])}
             max={RECT_MAX_EFFECT_STRENGTH}
             min={RECT_MIN_EFFECT_STRENGTH}
-            onChange={(strength) =>
-              onChange({ ...style, effect: { ...style.effect, strength } })
-            }
+            onChange={(strength) => onChange({ ...style, strength })}
             step={1}
-            value={style.effect.strength}
+            value={style.strength}
           />
-        </div>
-      ) : null}
-
-      {!effectActive ? (
-        <div className="flex flex-col gap-3" data-slot="rect-vector-style">
-          <div className="flex flex-col gap-1.5" data-slot="rect-stroke-colors">
-            <p className="text-xs font-medium" id="rect-stroke-label">
-              {t("annotate.strokeColor")}
-            </p>
-            {/* Only offer "none" for the border while the fill is holding the
-                shape up: a rectangle with neither would draw nothing, and the
-                backend rejects it. The last visible part cannot be removed. */}
-            <ColorSwatchPicker
-              allowNone
-              labelledBy="rect-stroke-label"
-              noneDisabled={style.fillColor === null}
-              onChange={(color) => onChange({ ...style, strokeColor: color })}
-              swatches={rectStrokeSwatches}
-              value={style.strokeColor}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5" data-slot="rect-fill-colors">
-            <p className="text-xs font-medium" id="rect-fill-label">
-              {t("annotate.fillColor")}
-            </p>
-            <ColorSwatchPicker
-              allowNone
-              labelledBy="rect-fill-label"
-              noneDisabled={style.strokeColor === null}
-              onChange={(color) => onChange({ ...style, fillColor: color })}
-              swatches={rectFillSwatches}
-              value={style.fillColor}
-            />
-          </div>
-
-          {style.strokeColor !== null ? (
-            <div data-slot="rect-stroke-width">
-              <SliderRow
-                display={`${style.strokeWidth}`}
-                label={t("annotate.strokeWidth")}
-                max={RECT_MAX_STROKE_WIDTH}
-                min={RECT_MIN_STROKE_WIDTH}
-                onChange={(value) => onChange({ ...style, strokeWidth: value })}
-                step={1}
-                value={style.strokeWidth}
-              />
-            </div>
-          ) : null}
-
-          <div data-slot="rect-opacity">
-            <SliderRow
-              display={`${Math.round(style.opacity * 100)}%`}
-              label={t("annotate.opacity")}
-              max={100}
-              min={RECT_MIN_OPACITY * 100}
-              onChange={(value) => onChange({ ...style, opacity: value / 100 })}
-              step={5}
-              value={Math.round(style.opacity * 100)}
-            />
-          </div>
-
-          <div data-slot="rect-corner-radius">
-            <SliderRow
-              display={`${style.cornerRadius}`}
-              label={t("annotate.cornerRadius")}
-              max={RECT_MAX_CORNER_RADIUS}
-              min={0}
-              onChange={(value) => onChange({ ...style, cornerRadius: value })}
-              step={1}
-              value={style.cornerRadius}
-            />
-          </div>
-        </div>
-      ) : null}
+        )}
+      </div>
     </div>
   )
 }
