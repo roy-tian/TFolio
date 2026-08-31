@@ -515,6 +515,107 @@ describe("TFolio PDF viewer", () => {
     await expect(zoom()).toHaveText(zoomed)
   })
 
+  // A viewport dragged sideways re-fits every page, and the scroll offset the
+  // browser keeps is a count of pixels — so without an anchor the document
+  // slides vertically under a change the reader asked for horizontally.
+  //
+  // The OS window cannot be resized from here: the embedded WebDriver bridge
+  // has no window-rect command (a `setWindowRect` is accepted and does
+  // nothing). Narrowing the app's own root box instead reaches the viewer as
+  // exactly the ResizeObserver callback a window resize delivers.
+  it("holds the reading position when the viewport changes width", async () => {
+    await browser.execute(
+      (keys) => {
+        window.localStorage.setItem(keys.language, "en")
+        window.localStorage.setItem(keys.viewMode, "single")
+      },
+      { language: languageStorageKey, viewMode: viewModeStorageKey },
+    )
+    await browser.refresh()
+    await openPdfFromDisk("resized.pdf", minimalPdf(12))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    // Fit width ties the page scale to the viewer's width, so it is where the
+    // drift is worst — and it is a mode readers sit in.
+    await $("button[aria-label='Fit width']").click()
+
+    // Where the top edge of the viewer — everything above it read, everything
+    // below still to come — falls in the document, measured in pages so that it
+    // means the same thing at any scale.
+    const readingLine = () =>
+      browser.execute(() => {
+        const viewer = document.querySelector<HTMLElement>(
+          "[data-document-session][data-active='true'] main",
+        )!
+        const top = viewer.getBoundingClientRect().top
+
+        for (const element of viewer.querySelectorAll<HTMLElement>(
+          "[data-page-number]",
+        )) {
+          const rect = element.getBoundingClientRect()
+
+          if (rect.bottom > top + 1) {
+            return {
+              at:
+                Number(element.dataset.pageNumber) +
+                (top - rect.top) / rect.height,
+              pageWidth: Math.round(rect.width),
+            }
+          }
+        }
+
+        return { at: 0, pageWidth: 0 }
+      })
+
+    const setAppWidth = (width: number | null) =>
+      browser.execute((value: number | null) => {
+        document.body.style.width = value === null ? "" : `${value}px`
+      }, width)
+
+    await browser.execute(() => {
+      const viewer = document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] main",
+      )!
+      viewer.scrollTop = Math.round(viewer.scrollHeight * 0.35)
+    })
+    // The anchor is taken on the page the tracker reports, which follows a
+    // scroll a frame later.
+    await browser.pause(500)
+
+    const before = await readingLine()
+    expect(before.at).toBeGreaterThan(1)
+
+    await setAppWidth(900)
+    await browser.waitUntil(
+      async () => (await readingLine()).pageWidth < before.pageWidth,
+      {
+        timeout: 5_000,
+        timeoutMsg: "a narrower viewport never re-fitted the pages",
+      },
+    )
+    await browser.pause(300)
+
+    const narrowed = await readingLine()
+    // A fifth of the width gone: the pages really were laid out again, so the
+    // position below is a position across two different layouts.
+    expect(narrowed.pageWidth).toBeLessThan(before.pageWidth)
+    // A fiftieth of a page — before the anchor this drifted by a third of one.
+    expect(Math.abs(narrowed.at - before.at)).toBeLessThan(0.02)
+
+    await setAppWidth(null)
+    await browser.waitUntil(
+      async () => (await readingLine()).pageWidth === before.pageWidth,
+      {
+        timeout: 5_000,
+        timeoutMsg: "the restored viewport never re-fitted the pages",
+      },
+    )
+    await browser.pause(300)
+
+    const restored = await readingLine()
+    expect(Math.abs(restored.at - before.at)).toBeLessThan(0.02)
+  })
+
   it("keeps only near-viewport full-page surfaces mounted", async () => {
     await browser.execute(
       (keys) => {

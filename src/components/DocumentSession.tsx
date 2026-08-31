@@ -84,6 +84,11 @@ import {
 } from "@/lib/viewMode"
 import { isNoteWorthKeeping } from "@/lib/textNoteDraft"
 import { cn } from "@/lib/utils"
+import {
+  anchorCorrection,
+  anchorOnPage,
+  type ViewportAnchor,
+} from "@/lib/viewportAnchor"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 type ViewerError =
@@ -171,6 +176,12 @@ function DocumentSession(
   // The parity intent, read by the same post-await reconcile.
   const parityEnabledRef = useRef(false)
   const pendingScrollPageRef = useRef<number | null>(null)
+  // Where the reader was when the viewport last changed size, taken before the
+  // layout that change resolves to, and paid back once it has been made.
+  const resizeAnchorRef = useRef<ViewportAnchor | null>(null)
+  // The tracked page, for the resize observer below: it is bound once, so it
+  // cannot read a value that re-renders.
+  const currentPageRef = useRef(currentPage)
   // The last geometry the viewer really had, which a hidden tab keeps.
   const committedSizeRef = useRef({ height: 0, width: 0 })
   const mountedRef = useRef(false)
@@ -365,6 +376,7 @@ function DocumentSession(
   }, [])
 
   useEffect(() => {
+    currentPageRef.current = currentPage
     setPageInput(String(currentPage))
   }, [currentPage])
 
@@ -373,6 +385,41 @@ function DocumentSession(
 
     if (!viewer) {
       return
+    }
+
+    // The reader's place, as a point on the page they are on, taken while the
+    // document is still laid out for the size the viewer has just left. Every
+    // mode that fits pages to the column takes its scale from that width, so a
+    // window dragged sideways re-lays the whole document out under a scroll
+    // offset the browser keeps in pixels — and the reader, who asked for a
+    // change of width, watches the page slide vertically away from them.
+    //
+    // The reading line is the viewer's top edge: everything above it has been
+    // read, and holding it still is what "the document did not move" means. The
+    // point is taken at the middle of the width, which is where the column
+    // centres what it lays out.
+    const captureResizeAnchor = () => {
+      const page = viewer.querySelector<HTMLElement>(
+        `[data-page-number="${currentPageRef.current}"]`,
+      )
+      const rect = viewer.getBoundingClientRect()
+      const pageRect = page?.getBoundingClientRect()
+
+      // Only a page on screen can hold the reader's place. The tracked page is
+      // named the moment a seek starts, so a smooth `scrollToPage` still on its
+      // way names a page pages off; anchoring to that would scale the gaps and
+      // padding between here and there, which no re-fit scales, and would land
+      // the correction — cancelling the seek's animation as it writes — nowhere
+      // the reader ever was.
+      resizeAnchorRef.current =
+        pageRect && pageRect.bottom > rect.top && pageRect.top < rect.bottom
+          ? anchorOnPage(
+              currentPageRef.current,
+              pageRect,
+              rect.left + rect.width / 2,
+              rect.top,
+            )
+          : null
     }
 
     // An inactive tab is `hidden`, so it has no layout box and the observer
@@ -390,6 +437,21 @@ function DocumentSession(
       }
 
       const committed = committedSizeRef.current
+
+      if (
+        roundedWidth === committed.width &&
+        roundedHeight === committed.height
+      ) {
+        return
+      }
+
+      // Not on the first size, which has no reading position behind it, and not
+      // when a seek is already pending — a tab coming back to a window resized
+      // without it holds a position from a layout that no longer exists, and
+      // has its own way of finding the page again.
+      if (committed.width > 0 && pendingScrollPageRef.current === null) {
+        captureResizeAnchor()
+      }
 
       if (roundedWidth !== committed.width) {
         committed.width = roundedWidth
@@ -420,6 +482,36 @@ function DocumentSession(
       resizeObserver.disconnect()
     }
   }, [])
+
+  // Pay the anchor back against the pages as they have just been laid out. A
+  // layout effect, so the correction lands in the same frame as the new sizes
+  // and the reader sees the column change width, not the document jump.
+  useLayoutEffect(() => {
+    const anchor = resizeAnchorRef.current
+    const viewer = viewerRef.current
+
+    // A seek queued after the anchor was taken owns the offset instead: it names
+    // a page to find in the layout that has just been made, while the anchor
+    // describes one that was never committed.
+    if (!anchor || !viewer || pendingScrollPageRef.current !== null) {
+      resizeAnchorRef.current = null
+      return
+    }
+
+    resizeAnchorRef.current = null
+
+    const page = viewer.querySelector<HTMLElement>(
+      `[data-page-number="${anchor.pageNumber}"]`,
+    )
+
+    if (!page) {
+      return
+    }
+
+    const correction = anchorCorrection(anchor, page.getBoundingClientRect())
+    viewer.scrollLeft += correction.left
+    viewer.scrollTop += correction.top
+  }, [viewerHeight, viewerWidth])
 
   // The geometry a hidden tab holds can be out of date, since the window may
   // have been resized while another tab had the screen: the new size reaches
