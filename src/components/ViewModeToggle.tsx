@@ -26,12 +26,15 @@ const options: Array<{
 ]
 
 type ViewModeToggleProps = {
+  /** Whether the document has a spread to show; a single page has none. */
+  bookApplies: boolean
   disabled: boolean
   onChange: (mode: ViewMode) => void
   value: ViewMode
 }
 
 export function ViewModeToggle({
+  bookApplies,
   disabled,
   onChange,
   value,
@@ -60,6 +63,7 @@ export function ViewModeToggle({
         return (
           <ToggleGroupItem
             aria-label={label}
+            disabled={option.value === "book" && !bookApplies}
             key={option.value}
             title={label}
             value={option.value}

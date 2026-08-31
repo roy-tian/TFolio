@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next"
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
+import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
@@ -79,6 +80,8 @@ import { isMacOS } from "@/lib/platform"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import {
   defaultViewMode,
+  effectiveViewMode,
+  hasBookSpread,
   readStoredViewMode,
   storeViewMode,
   type ViewMode,
@@ -156,7 +159,7 @@ function DocumentSession(
   const [viewerError, setViewerError] = useState<ViewerError>(null)
   const [viewerWidth, setViewerWidth] = useState(0)
   const [viewerHeight, setViewerHeight] = useState(0)
-  const [viewMode, setViewMode] = useState<ViewMode>(
+  const [preferredViewMode, setPreferredViewMode] = useState<ViewMode>(
     () => readStoredViewMode() ?? defaultViewMode,
   )
   const [activeTool, setActiveTool] = useState<AnnotationTool>(null)
@@ -187,6 +190,14 @@ function DocumentSession(
   const committedSizeRef = useRef({ height: 0, width: 0 })
   const mountedRef = useRef(false)
 
+  const bookApplies = hasBookSpread(pdfDocument.numPages)
+  const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
+  // The mode the last commit actually laid out, so a switch can be told from a
+  // re-render. Seeded with the mode the first render shows, which is why it sits
+  // here rather than with the refs above — and it tracks the laid-out mode, not
+  // the reader's stored choice, since it is the layout that strands an offset.
+  const laidOutViewModeRef = useRef(viewMode)
+
   // The thumbnail grid and the files view give every cell the same width
   // whatever the page, so neither has a single scale to report or anything for a
   // zoom to act on. The controls are absent there rather than disabled: disabled
@@ -205,8 +216,8 @@ function DocumentSession(
     viewerRef,
   })
   // Every drawing tool needs a page under the pointer, which neither the
-  // thumbnail grid nor the files view shows. Only undo, redo, watermark, and
-  // export act on the document rather than a page, so they stay.
+  // thumbnail grid nor the files view shows. Only the watermark and the page
+  // numbers act on the document rather than a page, so they stay.
   const drawingApplies = viewMode === "single" || viewMode === "book"
   // In the thumbnail grid a click is a selection, so the grid doubles as the
   // page-editing surface; leaving it clears what was chosen.
@@ -543,8 +554,8 @@ function DocumentSession(
   }, [active, currentPage])
 
   useEffect(() => {
-    storeViewMode(viewMode)
-  }, [viewMode])
+    storeViewMode(preferredViewMode)
+  }, [preferredViewMode])
 
   // A structure edit reachable while a note is open must settle the draft
   // *before* it runs — a note is anchored by page number, which an edit can move
@@ -582,7 +593,7 @@ function DocumentSession(
   const openThumbnailPage = (pageNumber: number) => {
     pendingScrollPageRef.current = pageNumber
     setBookmarksOpen(false)
-    setViewMode("single")
+    setPreferredViewMode("single")
   }
 
   const selectThumbnailPage = (
@@ -884,7 +895,9 @@ function DocumentSession(
 
   // Each mode stacks its pages to a different total height, and the viewer keeps
   // its scroll offset across the switch, so the old offset would land somewhere
-  // unrelated. Remember the page being read and seek back to it instead.
+  // unrelated. Remember the page being read and seek back to it instead. Queued
+  // here rather than from the commit below so that the layout effects of the
+  // very next render already see the seek pending, and yield the offset to it.
   const changeViewMode = (mode: ViewMode) => {
     if (mode !== viewMode) {
       pendingScrollPageRef.current = currentPage
@@ -894,8 +907,24 @@ function DocumentSession(
       setBookmarksOpen(false)
     }
 
-    setViewMode(mode)
+    setPreferredViewMode(mode)
   }
+
+  // The same seek for the switch nobody pressed: a merge past a one-page
+  // document's first spread brings book view back on its own. A seek already
+  // queued — the press above, or a thumbnail opened at its own page — is the
+  // more specific target and stands.
+  useEffect(() => {
+    if (laidOutViewModeRef.current === viewMode) {
+      return
+    }
+
+    laidOutViewModeRef.current = viewMode
+
+    if (pendingScrollPageRef.current === null) {
+      pendingScrollPageRef.current = currentPage
+    }
+  }, [currentPage, viewMode])
 
   // The target only exists once the new layout has mounted, so the scroll waits
   // for the commit rather than running alongside the mode change — or, for a
@@ -1002,7 +1031,32 @@ function DocumentSession(
           >
             <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
           </Toggle>
+          <HistoryControls
+            canRedo={annotations.canRedo}
+            canUndo={annotations.canUndo}
+            disabled={!pdfDocument}
+            onRedo={() => {
+              // Only a page-moving step would strand the note on a page that has
+              // shifted or gone, and undo/redo cannot take the uncommitted note
+              // as their target; so the draft is discarded before such a step,
+              // but an annotation step (a highlight, say) leaves it to finish.
+              // The target is the head of the queue's live history.
+              const target = annotations.historyNow().future.at(-1)?.command
+              if (target && movesPages(target)) {
+                cancelTextNote()
+              }
+              void annotations.redo()
+            }}
+            onUndo={() => {
+              const target = annotations.historyNow().past.at(-1)?.command
+              if (target && movesPages(target)) {
+                cancelTextNote()
+              }
+              void annotations.undo()
+            }}
+          />
           <ViewModeToggle
+            bookApplies={bookApplies}
             disabled={!pdfDocument}
             onChange={changeViewMode}
             value={viewMode}
@@ -1086,34 +1140,13 @@ function DocumentSession(
         <div className="flex items-center gap-1 justify-self-end">
           <AnnotationToolbar
             activeTool={activeTool}
-            canRedo={annotations.canRedo}
-            canUndo={annotations.canUndo}
             disabled={!pdfDocument}
             highlightApplies={drawingApplies}
             highlightColor={highlightColor}
             onHighlightColorChange={changeHighlightColor}
             onPageNumbers={pageNumbers.openDialog}
             onRectStyleChange={changeRectStyle}
-            onRedo={() => {
-              // Only a page-moving step would strand the note on a page that has
-              // shifted or gone, and undo/redo cannot take the uncommitted note
-              // as their target; so the draft is discarded before such a step,
-              // but an annotation step (a highlight, say) leaves it to finish.
-              // The target is the head of the queue's live history.
-              const target = annotations.historyNow().future.at(-1)?.command
-              if (target && movesPages(target)) {
-                cancelTextNote()
-              }
-              void annotations.redo()
-            }}
             onToolChange={setActiveTool}
-            onUndo={() => {
-              const target = annotations.historyNow().past.at(-1)?.command
-              if (target && movesPages(target)) {
-                cancelTextNote()
-              }
-              void annotations.undo()
-            }}
             onWatermark={watermark.openDialog}
             rectApplies={drawingApplies}
             rectStyle={rectStyle}

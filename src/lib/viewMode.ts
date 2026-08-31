@@ -41,6 +41,24 @@ export function isViewMode(value: unknown): value is ViewMode {
   return viewModes.includes(value as ViewMode)
 }
 
+/** Whether the document has a spread to show; a single page has none. */
+export function hasBookSpread(numPages: number): boolean {
+  return numPages > 1
+}
+
+/**
+ * The mode the viewer really lays out, which can outvote the reader's choice: a
+ * one-page document has no spread, and book view would leave that page in the
+ * left half of a double-width column (see `pairPages`). The choice itself is
+ * left standing, so merging or inserting a page brings book view back.
+ */
+export function effectiveViewMode(
+  preferred: ViewMode,
+  numPages: number,
+): ViewMode {
+  return preferred === "book" && !hasBookSpread(numPages) ? "single" : preferred
+}
+
 export function readStoredViewMode(): ViewMode | null {
   return readStored(viewModeStorageKey, isViewMode)
 }

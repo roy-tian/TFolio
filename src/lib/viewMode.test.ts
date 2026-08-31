@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   computeThumbnailColumns,
+  effectiveViewMode,
   isViewMode,
   pairPages,
   spreadPages,
@@ -74,5 +75,22 @@ describe("computeThumbnailColumns", () => {
   test("uses every column an even fit allows", () => {
     expect(computeThumbnailColumns(columnStride * 4 - THUMBNAIL_GAP)).toBe(4)
     expect(computeThumbnailColumns(columnStride * 6 - THUMBNAIL_GAP)).toBe(6)
+  })
+})
+
+describe("effectiveViewMode", () => {
+  test("falls back to single when there is no spread to show", () => {
+    expect(effectiveViewMode("book", 1)).toBe("single")
+    expect(effectiveViewMode("book", 0)).toBe("single")
+  })
+
+  test("keeps book once a second page gives it a spread", () => {
+    expect(effectiveViewMode("book", 2)).toBe("book")
+  })
+
+  test("leaves every other mode to stand on its own", () => {
+    expect(effectiveViewMode("single", 1)).toBe("single")
+    expect(effectiveViewMode("thumbnail", 1)).toBe("thumbnail")
+    expect(effectiveViewMode("files", 1)).toBe("files")
   })
 })
