@@ -19,7 +19,6 @@ import {
   rectEffectKinds,
   rectSwatches,
 } from "@/lib/annotationStyles"
-import { cn } from "@/lib/utils"
 
 const effectLabelKey = {
   translucent: "annotate.effectTranslucent",
@@ -39,12 +38,15 @@ type RectStylePopoverProps = {
   style: RectStyle
 }
 
-/** The rectangle tool's options panel: an effect, a colour, and one amount. */
+/**
+ * The rectangle tool's options panel: an effect, the colour it uses if it uses
+ * one, and the single amount it takes.
+ */
 export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
   const { t } = useTranslation()
   // A blur and a mosaic are built from the pixels under the box, so the colour
-  // has nothing to tint — the picker stays visible but goes inert rather than
-  // disappearing and shuffling the panel under the reader's pointer.
+  // has nothing to tint and the panel drops it: the effect decides what the
+  // rectangle is made of, and the panel only offers what that effect can use.
   const usesColor = style.effect === "translucent"
 
   return (
@@ -106,21 +108,20 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
         </ToggleGroup>
       </div>
 
-      <div className="flex flex-col gap-1.5" data-slot="rect-colors">
-        <p
-          className={cn("text-xs font-medium", !usesColor && "opacity-50")}
-          id="rect-color-label"
-        >
-          {t("annotate.rectColor")}
-        </p>
-        <ColorSwatchPicker
-          disabled={!usesColor}
-          labelledBy="rect-color-label"
-          onChange={(color) => onChange({ ...style, color })}
-          swatches={rectSwatches}
-          value={style.color}
-        />
-      </div>
+      {usesColor ? (
+        <div className="flex flex-col gap-1.5" data-slot="rect-colors">
+          <p className="text-xs font-medium" id="rect-color-label">
+            {t("annotate.rectColor")}
+          </p>
+          <ColorSwatchPicker
+            allowCustom={false}
+            labelledBy="rect-color-label"
+            onChange={(color) => onChange({ ...style, color })}
+            swatches={rectSwatches}
+            value={style.color}
+          />
+        </div>
+      ) : null}
 
       <div data-slot="rect-amount">
         {usesColor ? (

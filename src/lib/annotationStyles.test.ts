@@ -7,7 +7,7 @@ describe("isRectStyle", () => {
     expect(isRectStyle(defaultRectStyle)).toBe(true)
     expect(
       isRectStyle({
-        color: "#ffcc00",
+        color: "#000000",
         effect: "mosaic",
         opacity: 0.5,
         strength: 12,
@@ -69,5 +69,8 @@ describe("isRectStyle", () => {
     expect(isRectStyle({ opacity: 1 })).toBe(false)
     expect(isRectStyle({ ...defaultRectStyle, color: "red" })).toBe(false)
     expect(isRectStyle({ ...defaultRectStyle, color: null })).toBe(false)
+    // A well-formed colour the swatches no longer offer: an older schema's, and
+    // one the panel could show no swatch checked for.
+    expect(isRectStyle({ ...defaultRectStyle, color: "#ff3b30" })).toBe(false)
   })
 })

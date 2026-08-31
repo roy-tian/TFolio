@@ -113,24 +113,24 @@ describe("TFolio rectangle annotations", () => {
 
     await $("button[aria-label='Rectangle options']").click()
     const amount = await $("[data-slot='rect-amount']")
+    const colors = await $("[data-slot='rect-colors']")
     const white = await $("[data-slot='rect-colors'] [aria-label='#ffffff']")
-    const custom = await $("[data-slot='rect-colors'] input[type='color']")
     const disclosure = await $("[data-slot='rect-effect-disclosure']")
     const about = await $("button[aria-label='About this effect']")
 
-    // Translucent: the colour is the mark, so the picker is live and the one
-    // slider is its opacity.
+    // Translucent: the colour is the mark, so the swatches are on the panel and
+    // the one slider is its opacity. The swatches are the whole offer — no well
+    // for a colour off the row.
     await expect(amount).toHaveText(/Opacity/)
-    expect(await white.getAttribute("data-disabled")).toBeNull()
-    await expect(custom).toBeEnabled()
+    await expect(white).toExist()
+    await expect($("[data-slot='rect-colors'] input[type='color']")).not.toExist()
     await expect(about).not.toExist()
 
     // A mosaic is built from the pixels under the box, so the colour has
-    // nothing to tint: it stays on the panel but goes inert.
+    // nothing to tint and leaves the panel altogether.
     await $("button[aria-label='Mosaic']").click()
     await expect(amount).toHaveText(/Mosaic size/)
-    expect(await white.getAttribute("data-disabled")).not.toBeNull()
-    await expect(custom).toBeDisabled()
+    await expect(colors).not.toExist()
 
     await expect(disclosure).not.toExist()
     await about.click()
@@ -142,11 +142,11 @@ describe("TFolio rectangle annotations", () => {
 
     await $("button[aria-label='Gaussian blur']").click()
     await expect(amount).toHaveText(/Blur strength/)
-    expect(await white.getAttribute("data-disabled")).not.toBeNull()
+    await expect(colors).not.toExist()
 
     await $("button[aria-label='Translucent']").click()
     await expect(amount).toHaveText(/Opacity/)
-    expect(await white.getAttribute("data-disabled")).toBeNull()
+    await expect(white).toExist()
     await expect(about).not.toExist()
 
     await $("button[aria-label='Mosaic']").click()

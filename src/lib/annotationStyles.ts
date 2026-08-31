@@ -44,15 +44,20 @@ export function storeHighlightColor(color: HexColor) {
 
 /**
  * A block covers what is under it, so white — the page's own ground — leads,
- * and the rest are strong enough to read as a deliberate cover rather than a
- * stain.
+ * then black, then one shade level of the hues so the row reads as a set rather
+ * than an assortment. These eight are the whole choice: a cover is a cover, and
+ * a colour wheel here would be a setting to get wrong rather than a mark to
+ * make.
  */
 export const rectSwatches: readonly HexColor[] = [
   "#ffffff",
   "#000000",
-  "#ff3b30",
-  "#0a84ff",
-  "#ffcc00",
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#3b82f6",
+  "#71717a",
 ]
 
 /** Slider ends, shared by the blur's sigma and the mosaic's block size. */
@@ -82,11 +87,13 @@ export const defaultRectStyle: RectStyle = {
 export const rectStyleStorageKey = "tfolio.annotate.rectStyle"
 
 /**
- * Whether `value` is a rectangle style this app could have written. The numeric
- * ranges are part of that: the sliders never emit a non-finite size or an
- * opacity below `RECT_MIN_OPACITY`, so a stored one is tampered or from an older
- * schema, and loading it would draw an invisible mark that still records as an
- * edit. Rejected here so the caller falls back to the visible default.
+ * Whether `value` is a rectangle style this app could have written. The ranges
+ * and the palette are part of that: the swatches are the whole colour offer and
+ * the sliders never emit a non-finite size or an opacity below
+ * `RECT_MIN_OPACITY`, so a stored style outside them is tampered or from an
+ * older schema — an off-palette colour would sit in the panel with no swatch
+ * checked, and an invisible one would draw a mark that still records as an edit.
+ * Rejected here so the caller falls back to the visible default.
  *
  * Both numbers are checked whichever effect is stored: the one the effect does
  * not use is still kept, and still becomes the mark as soon as the reader
@@ -101,6 +108,7 @@ export function isRectStyle(value: unknown): value is RectStyle {
 
   return (
     isHexColor(style.color) &&
+    rectSwatches.includes(style.color) &&
     isRectEffectKind(style.effect) &&
     // The comparisons reject a non-finite number on the way (NaN fails them all).
     typeof style.opacity === "number" &&
