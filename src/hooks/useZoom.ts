@@ -11,6 +11,11 @@ import {
 import type { PdfPageInfo } from "@/lib/pdf"
 import type { ViewMode } from "@/lib/viewMode"
 import {
+  anchorCorrection,
+  anchorOnPage,
+  type ViewportAnchor,
+} from "@/lib/viewportAnchor"
+import {
   applyWheelZoom,
   autoScale,
   bookColumnWidth,
@@ -28,20 +33,6 @@ import {
   ZOOM_PREVIEW_EVENT,
   type ZoomState,
 } from "@/lib/zoom"
-
-// A point the reader is looking at, held still across a zoom. The page is
-// remembered rather than a scroll offset because only the page scales: the gaps
-// and padding around it are fixed, so an offset cannot be scaled to predict
-// where the point lands. Re-measuring the page after the fact is exact.
-type ZoomAnchor = {
-  clientX: number
-  clientY: number
-  // Where in the page the point sits, as a fraction of its box. Outside 0..1 if
-  // the point was beside the page, which still resolves to the right correction.
-  fractionX: number
-  fractionY: number
-  pageNumber: number
-}
 
 type ZoomPreview = {
   baseScale: number
@@ -89,7 +80,8 @@ export function useZoom({
   // zoom resolved to the scale already showing — pressing `+` at the maximum,
   // say — leaving it to be paid back against some later, unrelated zoom.
   const [zoomRequest, setZoomRequest] = useState(0)
-  const anchorRef = useRef<ZoomAnchor | null>(null)
+  // The point the reader is looking at, held still across a zoom.
+  const anchorRef = useRef<ViewportAnchor | null>(null)
   const previewRef = useRef<ZoomPreview | null>(null)
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -188,18 +180,15 @@ export function useZoom({
         return
       }
 
-      const rect = page.getBoundingClientRect()
-
-      if (rect.width <= 0 || rect.height <= 0) {
-        return
-      }
-
-      anchorRef.current = {
+      const anchor = anchorOnPage(
+        Number(page.dataset.pageNumber),
+        page.getBoundingClientRect(),
         clientX,
         clientY,
-        fractionX: (clientX - rect.left) / rect.width,
-        fractionY: (clientY - rect.top) / rect.height,
-        pageNumber: Number(page.dataset.pageNumber),
+      )
+
+      if (anchor) {
+        anchorRef.current = anchor
       }
     },
     [viewerRef],
@@ -321,9 +310,9 @@ export function useZoom({
       return
     }
 
-    const rect = page.getBoundingClientRect()
-    viewer.scrollLeft += rect.left + anchor.fractionX * rect.width - anchor.clientX
-    viewer.scrollTop += rect.top + anchor.fractionY * rect.height - anchor.clientY
+    const correction = anchorCorrection(anchor, page.getBoundingClientRect())
+    viewer.scrollLeft += correction.left
+    viewer.scrollTop += correction.top
   }, [clearPreviewTransform, viewerRef, zoomRequest])
 
   const zoomTo = useCallback(
