@@ -75,10 +75,12 @@ export function useZoom({
 }: UseZoomOptions) {
   const [zoom, setZoom] = useState<ZoomState>(defaultZoomState)
   const [zoomPreviewing, setZoomPreviewing] = useState(false)
-  // Bumped by every zoom the reader asks for, and what the anchor below is paid
-  // back against. Watching the scale instead would strand an anchor whenever a
-  // zoom resolved to the scale already showing — pressing `+` at the maximum,
-  // say — leaving it to be paid back against some later, unrelated zoom.
+  // Bumped by every zoom the reader asks for: what the anchor below is paid
+  // back against, and what the viewport readout flashes the new level on.
+  // Watching the scale instead would strand an anchor whenever a zoom resolved
+  // to the scale already showing — pressing `+` at the maximum, say — leaving
+  // it to be paid back against some later, unrelated zoom, and would leave that
+  // press unanswered besides.
   const [zoomRequest, setZoomRequest] = useState(0)
   // The point the reader is looking at, held still across a zoom.
   const anchorRef = useRef<ViewportAnchor | null>(null)
@@ -239,6 +241,9 @@ export function useZoom({
     previewTimerRef.current = undefined
     previewDeadlineRef.current = 0
     previewRef.current = null
+    // Also what flashes the level a pinch or ctrl+wheel landed on. It costs no
+    // extra render: the gesture itself never leaves the compositor, and this is
+    // the one commit it makes when it settles.
     requestZoom({ customScale: preview.scale, mode: "custom" })
     setZoomPreviewing(false)
   }, [requestZoom, viewerRef])
@@ -332,10 +337,6 @@ export function useZoom({
   const zoomOut = useCallback(() => {
     const liveScale = previewRef.current?.scale ?? scaleRef.current
     zoomTo(stepZoomPercent(zoomToPercent(liveScale), -1) / 100)
-  }, [zoomTo])
-
-  const resetZoom = useCallback(() => {
-    zoomTo(1)
   }, [zoomTo])
 
   const toggleFit = useCallback(() => {
@@ -460,7 +461,6 @@ export function useZoom({
     canZoomOut: percent > MIN_ZOOM * 100,
     referencePageWidth: referenceWidth,
     resetToDefault,
-    resetZoom,
     scale,
     toggleFit,
     zoomIn,
@@ -468,5 +468,6 @@ export function useZoom({
     zoomOut,
     zoomPercent: percent,
     zoomPreviewing,
+    zoomRequest,
   }
 }

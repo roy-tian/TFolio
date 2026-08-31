@@ -63,7 +63,6 @@ const zhCN = {
     rotate: "顺时针旋转",
     zoomOut: "缩小",
     zoomIn: "放大",
-    zoomReset: "实际大小",
     zoomLevel: "缩放 {{percent}}%",
     zoomLevelFitWidth: "缩放 {{percent}}%，适合宽度",
     zoomLevelFitHeight: "缩放 {{percent}}%，适合高度",

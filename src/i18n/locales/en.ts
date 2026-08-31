@@ -56,7 +56,6 @@ const en = {
     rotate: "Rotate clockwise",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
-    zoomReset: "Actual size",
     zoomLevel: "Zoom {{percent}}%",
     zoomLevelFitWidth: "Zoom {{percent}}%, fitting width",
     zoomLevelFitHeight: "Zoom {{percent}}%, fitting height",

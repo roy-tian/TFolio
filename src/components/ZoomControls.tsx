@@ -9,7 +9,6 @@ type ZoomControlsProps = {
   canZoomIn: boolean
   canZoomOut: boolean
   disabled: boolean
-  onReset: () => void
   onToggleFit: () => void
   onZoomIn: () => void
   onZoomOut: () => void
@@ -21,7 +20,6 @@ export function ZoomControls({
   canZoomIn,
   canZoomOut,
   disabled,
-  onReset,
   onToggleFit,
   onZoomIn,
   onZoomOut,
@@ -41,7 +39,6 @@ export function ZoomControls({
 
   const zoomOutLabel = t("toolbar.zoomOut")
   const zoomInLabel = t("toolbar.zoomIn")
-  const resetLabel = t("toolbar.zoomReset")
 
   // Which fit is on belongs here rather than on the fit button, whose name is
   // the fit it would switch *to*. Naming it that and marking it pressed would
@@ -55,10 +52,12 @@ export function ZoomControls({
         : t("toolbar.zoomLevel", { percent: zoomPercent })
 
   return (
-    // The live percentage rides on the group rather than on the button showing
-    // it, whose own label has to stay the action it performs. A screen reader
-    // picks the level up on entering the group, instead of being read a new one
-    // on every notch of a zoom.
+    // Three actions, no readout: a figure sitting in the toolbar is read once
+    // and then ignored, so the viewport flashes it on each zoom instead. The
+    // group's own name is what keeps it available to a screen reader, and it
+    // belongs on the group rather than on any one button, whose label has to
+    // stay the action it performs — so entering the group reads the level once
+    // instead of re-reading it on every notch.
     <ButtonGroup aria-label={groupLabel}>
       <Button
         aria-label={zoomOutLabel}
@@ -69,18 +68,6 @@ export function ZoomControls({
         variant="outline"
       >
         <Minus />
-      </Button>
-      <Button
-        aria-label={resetLabel}
-        // Wide enough for every rung from 25% to 800%, so stepping through them
-        // never shifts the buttons either side.
-        className="w-14 tabular-nums"
-        disabled={disabled}
-        onClick={onReset}
-        title={resetLabel}
-        variant="outline"
-      >
-        {zoomPercent}%
       </Button>
       <Button
         aria-label={zoomInLabel}

@@ -22,6 +22,7 @@ import { WatermarkDialog } from "@/components/WatermarkDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
 import { ZoomControls } from "@/components/ZoomControls"
+import { ZoomIndicator } from "@/components/ZoomIndicator"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
@@ -1024,7 +1025,6 @@ function DocumentSession(
               canZoomIn={zoom.canZoomIn}
               canZoomOut={zoom.canZoomOut}
               disabled={!pdfDocument}
-              onReset={zoom.resetZoom}
               onToggleFit={zoom.toggleFit}
               onZoomIn={zoom.zoomIn}
               onZoomOut={zoom.zoomOut}
@@ -1140,49 +1140,57 @@ function DocumentSession(
           />
         ) : null}
 
-        <main
-          className={cn(
-            "relative min-w-0 flex-1 overflow-auto bg-zinc-200/70 dark:bg-zinc-950",
-            // Only while the tool can actually draw: the thumbnail grid hides
-            // the toggle that would turn it back off, so a crosshair left over
-            // it would promise a drag that does nothing.
-            drawingRect && "cursor-crosshair",
-            drawingTextNote && "cursor-text",
-          )}
-          ref={viewerRef}
-        >
-          <PdfViewerLayout
-            currentPage={currentPage}
-            documentId={pdfDocument.id}
-            draft={rectDraft ?? undefined}
-            fileName={fileName}
-            filesEdit={{
-              onAddFile: () => void chooseFileToMerge(),
-              onDeleteFile: (range) => void deleteFile(range),
-              onReorderPages: (order) => void reorderFiles(order),
-              ranges,
-            }}
-            key={pdfDocument.id}
-            pageEdit={{
-              onDeletePage: deleteThumbnailPage,
-              onInsertBlankPage: insertBlankPage,
-              onOpenPage: openThumbnailPage,
-              onReorderPages: reorderPages,
-              onSelectPage: selectThumbnailPage,
-              selectedPages: thumbnailSelection.selectedPages,
-            }}
-            pages={pdfDocument.pages}
-            referencePageWidth={zoom.referencePageWidth}
-            renderEpochs={annotations.renderEpochs}
-            rotation={rotation}
-            scale={zoom.scale}
-            textEpochs={annotations.textEpochs}
-            textSelectionDragging={textSelectionDragging}
-            viewMode={viewMode}
-            viewerWidth={viewerWidth}
-            zoomPreviewing={zoom.zoomPreviewing}
-          />
-        </main>
+        {/* The viewer's own scroll box cannot host the zoom readout — anything
+            absolute inside it is placed against the scrolled content and would
+            drift off the middle of the screen. This box holds still around it. */}
+        <div className="relative min-w-0 flex-1">
+          <main
+            className={cn(
+              "relative size-full overflow-auto bg-zinc-200/70 dark:bg-zinc-950",
+              // Only while the tool can actually draw: the thumbnail grid hides
+              // the toggle that would turn it back off, so a crosshair left over
+              // it would promise a drag that does nothing.
+              drawingRect && "cursor-crosshair",
+              drawingTextNote && "cursor-text",
+            )}
+            ref={viewerRef}
+          >
+            <PdfViewerLayout
+              currentPage={currentPage}
+              documentId={pdfDocument.id}
+              draft={rectDraft ?? undefined}
+              fileName={fileName}
+              filesEdit={{
+                onAddFile: () => void chooseFileToMerge(),
+                onDeleteFile: (range) => void deleteFile(range),
+                onReorderPages: (order) => void reorderFiles(order),
+                ranges,
+              }}
+              key={pdfDocument.id}
+              pageEdit={{
+                onDeletePage: deleteThumbnailPage,
+                onInsertBlankPage: insertBlankPage,
+                onOpenPage: openThumbnailPage,
+                onReorderPages: reorderPages,
+                onSelectPage: selectThumbnailPage,
+                selectedPages: thumbnailSelection.selectedPages,
+              }}
+              pages={pdfDocument.pages}
+              referencePageWidth={zoom.referencePageWidth}
+              renderEpochs={annotations.renderEpochs}
+              rotation={rotation}
+              scale={zoom.scale}
+              textEpochs={annotations.textEpochs}
+              textSelectionDragging={textSelectionDragging}
+              viewMode={viewMode}
+              viewerWidth={viewerWidth}
+              zoomPreviewing={zoom.zoomPreviewing}
+            />
+          </main>
+          {zoomApplies ? (
+            <ZoomIndicator flash={zoom.zoomRequest} percent={zoom.zoomPercent} />
+          ) : null}
+        </div>
       </div>
 
       {/* Outside the viewer's own scroll box, in the screen space it positions
