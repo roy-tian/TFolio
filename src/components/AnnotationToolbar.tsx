@@ -1,10 +1,10 @@
 import {
   ChevronDown,
-  Hash,
+  FileDigit,
+  FilePenLine,
   Highlighter,
   Square,
   Stamp,
-  Type,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -181,7 +181,7 @@ export function AnnotationToolbar({
               title={textNoteLabel}
               variant="outline"
             >
-              <Type />
+              <FilePenLine />
             </Toggle>
           ) : null}
         </ButtonGroup>
@@ -209,7 +209,7 @@ export function AnnotationToolbar({
           title={pageNumbersLabel}
           variant="ghost"
         >
-          <Hash />
+          <FileDigit />
         </Button>
       </ButtonGroup>
     </div>
