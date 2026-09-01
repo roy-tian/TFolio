@@ -68,134 +68,150 @@ export function AnnotationToolbar({
   const pageNumbersLabel = t("pageNumbers.open")
 
   return (
-    <ButtonGroup>
-      {highlightApplies ? (
-        <>
-          {/* A Toggle rather than a Button: unlike the fit control next to it, a
+    <div className="flex items-center gap-1">
+      {highlightApplies || rectApplies || textNoteApplies ? (
+        <ButtonGroup>
+          {highlightApplies ? (
+            <>
+              {/* A Toggle rather than a Button: unlike the fit control next to it, a
               tool really is on or off, and pressing the active one puts it away. */}
-          <Toggle
-            aria-label={highlightLabel}
-            className="size-8 border-r-transparent p-0 peer/highlight"
-            disabled={disabled}
-            onPressedChange={(pressed) =>
-              onToolChange(pressed ? "highlight" : null)
-            }
-            pressed={activeTool === "highlight"}
-            title={highlightLabel}
-            variant="outline"
-          >
-            <Highlighter />
-          </Toggle>
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  aria-label={t("annotate.highlightOptions")}
-                  className={cn(
-                    splitMenuButtonClassName,
-                    "peer-hover/highlight:before:opacity-100",
-                  )}
-                  disabled={disabled}
-                  size="icon"
-                  title={t("annotate.highlightOptions")}
-                  variant="ghost"
-                />
+              <Toggle
+                aria-label={highlightLabel}
+                className="size-8 border-r-transparent p-0 peer/highlight"
+                disabled={disabled}
+                onPressedChange={(pressed) =>
+                  onToolChange(pressed ? "highlight" : null)
+                }
+                pressed={activeTool === "highlight"}
+                title={highlightLabel}
+                variant="outline"
+              >
+                <Highlighter />
+              </Toggle>
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      aria-label={t("annotate.highlightOptions")}
+                      className={cn(
+                        splitMenuButtonClassName,
+                        "peer-hover/highlight:before:opacity-100",
+                      )}
+                      disabled={disabled}
+                      size="icon"
+                      title={t("annotate.highlightOptions")}
+                      variant="ghost"
+                    />
+                  }
+                >
+                  <ChevronDown />
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-auto p-3">
+                  <div className="space-y-2">
+                    <p
+                      className="text-xs font-medium"
+                      id="highlight-color-label"
+                    >
+                      {t("annotate.highlightColor")}
+                    </p>
+                    <ColorSwatchPicker
+                      labelledBy="highlight-color-label"
+                      onChange={onHighlightColorChange}
+                      swatches={highlightSwatches}
+                      value={highlightColor}
+                    />
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </>
+          ) : null}
+
+          {rectApplies ? (
+            <>
+              <Toggle
+                aria-label={rectLabel}
+                className="size-8 border-r-transparent p-0 peer/rect"
+                disabled={disabled}
+                onPressedChange={(pressed) =>
+                  onToolChange(pressed ? "rect" : null)
+                }
+                pressed={activeTool === "rect"}
+                title={rectLabel}
+                variant="outline"
+              >
+                <Square />
+              </Toggle>
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      aria-label={t("annotate.rectOptions")}
+                      className={cn(
+                        splitMenuButtonClassName,
+                        "peer-hover/rect:before:opacity-100",
+                      )}
+                      disabled={disabled}
+                      size="icon"
+                      title={t("annotate.rectOptions")}
+                      variant="ghost"
+                    />
+                  }
+                >
+                  <ChevronDown />
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-auto p-3">
+                  <RectStylePopover
+                    onChange={onRectStyleChange}
+                    style={rectStyle}
+                  />
+                </PopoverContent>
+              </Popover>
+            </>
+          ) : null}
+
+          {textNoteApplies ? (
+            <Toggle
+              aria-label={textNoteLabel}
+              className="size-8 p-0"
+              disabled={disabled}
+              onPressedChange={(pressed) =>
+                onToolChange(pressed ? "textNote" : null)
               }
+              pressed={activeTool === "textNote"}
+              title={textNoteLabel}
+              variant="outline"
             >
-              <ChevronDown />
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-auto p-3">
-              <div className="space-y-2">
-                <p className="text-xs font-medium" id="highlight-color-label">
-                  {t("annotate.highlightColor")}
-                </p>
-                <ColorSwatchPicker
-                  labelledBy="highlight-color-label"
-                  onChange={onHighlightColorChange}
-                  swatches={highlightSwatches}
-                  value={highlightColor}
-                />
-              </div>
-            </PopoverContent>
-          </Popover>
-        </>
+              <Type />
+            </Toggle>
+          ) : null}
+        </ButtonGroup>
       ) : null}
 
-      {rectApplies ? (
-        <>
-          <Toggle
-            aria-label={rectLabel}
-            className="size-8 border-r-transparent p-0 peer/rect"
-            disabled={disabled}
-            onPressedChange={(pressed) => onToolChange(pressed ? "rect" : null)}
-            pressed={activeTool === "rect"}
-            title={rectLabel}
-            variant="outline"
-          >
-            <Square />
-          </Toggle>
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  aria-label={t("annotate.rectOptions")}
-                  className={cn(
-                    splitMenuButtonClassName,
-                    "peer-hover/rect:before:opacity-100",
-                  )}
-                  disabled={disabled}
-                  size="icon"
-                  title={t("annotate.rectOptions")}
-                  variant="ghost"
-                />
-              }
-            >
-              <ChevronDown />
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-auto p-3">
-              <RectStylePopover onChange={onRectStyleChange} style={rectStyle} />
-            </PopoverContent>
-          </Popover>
-        </>
-      ) : null}
-
-      {textNoteApplies ? (
-        <Toggle
-          aria-label={textNoteLabel}
-          className="size-8 p-0"
+      <ButtonGroup>
+        <Button
+          aria-label={watermarkLabel}
+          className="border-input"
           disabled={disabled}
-          onPressedChange={(pressed) => onToolChange(pressed ? "textNote" : null)}
-          pressed={activeTool === "textNote"}
-          title={textNoteLabel}
-          variant="outline"
+          onClick={onWatermark}
+          size="icon"
+          title={watermarkLabel}
+          variant="ghost"
         >
-          <Type />
-        </Toggle>
-      ) : null}
+          <Stamp />
+        </Button>
 
-      <Button
-        aria-label={watermarkLabel}
-        className="border-input"
-        disabled={disabled}
-        onClick={onWatermark}
-        size="icon"
-        title={watermarkLabel}
-        variant="ghost"
-      >
-        <Stamp />
-      </Button>
-
-      <Button
-        aria-label={pageNumbersLabel}
-        className="border-input"
-        disabled={disabled}
-        onClick={onPageNumbers}
-        size="icon"
-        title={pageNumbersLabel}
-        variant="ghost"
-      >
-        <Hash />
-      </Button>
-    </ButtonGroup>
+        <Button
+          aria-label={pageNumbersLabel}
+          className="border-input"
+          disabled={disabled}
+          onClick={onPageNumbers}
+          size="icon"
+          title={pageNumbersLabel}
+          variant="ghost"
+        >
+          <Hash />
+        </Button>
+      </ButtonGroup>
+    </div>
   )
 }
