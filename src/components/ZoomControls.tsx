@@ -87,6 +87,7 @@ export function ZoomControls({
       </Button>
       <Button
         aria-label={fitLabel}
+        className={fitActive ? "border-border dark:border-input" : undefined}
         disabled={disabled}
         onClick={onToggleFit}
         size="icon"
@@ -98,7 +99,8 @@ export function ZoomControls({
         // A Toggle would also be the wrong shape here — its outline variant is
         // unfilled where Button's is, which reads as a hole in a joined group.
         // Secondary resolves to the same colour the view-mode group marks its
-        // own selection with, so the two groups agree.
+        // own selection with, so the two groups agree. Keep the outline colour
+        // explicit because the secondary variant otherwise makes it transparent.
         variant={fitActive ? "secondary" : "outline"}
       >
         <FitIcon />

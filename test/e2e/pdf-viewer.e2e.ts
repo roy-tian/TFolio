@@ -432,6 +432,26 @@ describe("TFolio PDF viewer", () => {
     const fittedWide = await pageBox()
     expect(fittedWide.width).toBe(Math.round(fittedWide.availableWidth))
 
+    // Fit width is now active, so the button offers fit page while retaining
+    // the selected fill. Its outer edge must stay visible in the joined group.
+    const fitButtonBorder = await browser.execute(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        "button[aria-label='Fit page']",
+      )!
+      const style = window.getComputedStyle(button)
+
+      return {
+        color: style.borderTopColor,
+        style: style.borderTopStyle,
+        width: style.borderTopWidth,
+      }
+    })
+    expect(fitButtonBorder.width).not.toBe("0px")
+    expect(fitButtonBorder.style).not.toBe("none")
+    expect(["transparent", "rgba(0, 0, 0, 0)"]).not.toContain(
+      fitButtonBorder.color,
+    )
+
     // Ctrl+wheel zooms; the same wheel without it is an ordinary scroll.
     await zoomToActualSize()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
