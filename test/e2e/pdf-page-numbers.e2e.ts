@@ -6,7 +6,7 @@ import "@wdio/tauri-service"
 import { languageStorageKey } from "../../src/i18n/config"
 import { pageNumbersPreferencesStorageKey } from "../../src/lib/pageNumbers"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { watermarkPreferencesStorageKey } from "../../src/lib/watermark"
+import { watermarkStorageKey } from "../../src/lib/watermark"
 import {
   appMenuItem,
   blankPdf,
@@ -49,13 +49,13 @@ describe("TFolio page numbers", () => {
         window.localStorage.setItem(keys.language, "en")
         window.localStorage.setItem(keys.viewMode, "single")
         window.localStorage.removeItem(keys.pageNumbersPreferences)
-        window.localStorage.removeItem(keys.watermarkPreferences)
+        window.localStorage.removeItem(keys.watermark)
       },
       {
         language: languageStorageKey,
         viewMode: viewModeStorageKey,
         pageNumbersPreferences: pageNumbersPreferencesStorageKey,
-        watermarkPreferences: watermarkPreferencesStorageKey,
+        watermark: watermarkStorageKey,
       },
     )
     await browser.refresh()

@@ -3,48 +3,51 @@ import { describe, expect, it } from "bun:test"
 import {
   clampWatermarkText,
   defaultWatermarkConfig,
-  defaultWatermarkPreferences,
-  isWatermarkPreferences,
-  normalizeWatermarkRotation,
-  readStoredWatermarkPreferences,
+  readStoredWatermarkConfig,
   sameWatermarkConfig,
   validateWatermarkConfig,
-  watermarkFontWeightValue,
-  watermarkPreferences,
+  watermarkFontSize,
+  watermarkRotation,
   watermarkUsesEmbeddedFont,
   WATERMARK_MAX_CHARS,
-  WATERMARK_MAX_FONT_SIZE,
-  WATERMARK_MAX_SPACING,
-  WATERMARK_MIN_FONT_SIZE,
-  WATERMARK_MIN_OPACITY,
-  WATERMARK_MIN_SPACING,
+  WATERMARK_MAX_WIDTH_RATIO,
+  WATERMARK_MIN_WIDTH_RATIO,
+  WATERMARK_REFERENCE_FONT_SIZE,
   type WatermarkConfig,
 } from "@/lib/watermark"
 
 function config(changes: Partial<WatermarkConfig> = {}): WatermarkConfig {
-  return { ...defaultWatermarkConfig(), text: "CONFIDENTIAL", ...changes }
+  return { ...defaultWatermarkConfig("CONFIDENTIAL"), ...changes }
+}
+
+/** Runs `read` against a stubbed `localStorage`, then puts `window` back. */
+function withStoredValue<Value>(stored: string | null, read: () => Value) {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { localStorage: { getItem: () => stored } },
+  })
+
+  try {
+    return read()
+  } finally {
+    if (previousWindow) {
+      Object.defineProperty(globalThis, "window", previousWindow)
+    } else {
+      Reflect.deleteProperty(globalThis, "window")
+    }
+  }
 }
 
 describe("validateWatermarkConfig", () => {
   it("accepts every shared range endpoint", () => {
-    expect(
-      validateWatermarkConfig(
-        config({
-          fontSize: WATERMARK_MIN_FONT_SIZE,
-          opacity: WATERMARK_MIN_OPACITY,
-          spacing: WATERMARK_MIN_SPACING,
-        }),
-      ),
-    ).toBeNull()
-    expect(
-      validateWatermarkConfig(
-        config({
-          fontSize: WATERMARK_MAX_FONT_SIZE,
-          opacity: 1,
-          spacing: WATERMARK_MAX_SPACING,
-        }),
-      ),
-    ).toBeNull()
+    for (const widthRatio of [
+      WATERMARK_MIN_WIDTH_RATIO,
+      WATERMARK_MAX_WIDTH_RATIO,
+    ]) {
+      expect(validateWatermarkConfig(config({ widthRatio }))).toBeNull()
+    }
   })
 
   it("rejects blank, multiline, and overlong text", () => {
@@ -59,13 +62,22 @@ describe("validateWatermarkConfig", () => {
     ).toBe("tooLong")
   })
 
-  it("rejects non-finite and out-of-range style values", () => {
-    expect(validateWatermarkConfig(config({ fontSize: Number.NaN }))).toBe("style")
-    expect(validateWatermarkConfig(config({ opacity: 0 }))).toBe("style")
-    expect(validateWatermarkConfig(config({ rotation: Number.POSITIVE_INFINITY }))).toBe(
+  it("rejects non-finite and out-of-range settings", () => {
+    expect(validateWatermarkConfig(config({ widthRatio: Number.NaN }))).toBe(
       "style",
     )
-    expect(validateWatermarkConfig(config({ spacing: 0 }))).toBe("style")
+    expect(validateWatermarkConfig(config({ widthRatio: 0 }))).toBe("style")
+    expect(
+      validateWatermarkConfig(
+        config({ widthRatio: WATERMARK_MAX_WIDTH_RATIO + 0.05 }),
+      ),
+    ).toBe("style")
+    expect(
+      validateWatermarkConfig({
+        ...config(),
+        direction: "sideways" as WatermarkConfig["direction"],
+      }),
+    ).toBe("style")
   })
 })
 
@@ -94,83 +106,70 @@ describe("clampWatermarkText", () => {
   })
 })
 
-describe("normalizeWatermarkRotation", () => {
-  // Mirrors `normalizes_equivalent_rotations` in the backend's watermark.rs:
-  // the two sides have to agree, or the frontend commits a history step the
-  // backend recognises as a no-op.
-  it("canonicalises equivalent directions the way the backend does", () => {
-    expect(normalizeWatermarkRotation(0)).toBe(0)
-    expect(normalizeWatermarkRotation(360)).toBe(0)
-    expect(normalizeWatermarkRotation(540)).toBe(180)
-    expect(normalizeWatermarkRotation(181)).toBe(-179)
-    expect(normalizeWatermarkRotation(-181)).toBe(179)
+describe("watermark geometry", () => {
+  // Mirrors `the_two_directions_follow_the_page_diagonal` and
+  // `the_derived_size_scales_the_measured_mark_to_the_asked_share` in the
+  // backend's watermark.rs: the preview draws what the page will carry, so the
+  // two derivations have to agree.
+  it("leans both directions along the page's own diagonal", () => {
+    expect(watermarkRotation("ascending", 600, 800)).toBeCloseTo(-53.13, 2)
+    expect(watermarkRotation("descending", 600, 800)).toBeCloseTo(53.13, 2)
+    // A landscape sheet leans by less, so the mark still meets its corners.
+    expect(watermarkRotation("descending", 800, 600)).toBeCloseTo(36.87, 2)
   })
 
-  it("folds both ends of the angle control onto one value", () => {
-    expect(normalizeWatermarkRotation(-180)).toBe(normalizeWatermarkRotation(180))
-    expect(sameWatermarkConfig(
-      config({ rotation: normalizeWatermarkRotation(-180) }),
-      config({ rotation: normalizeWatermarkRotation(180) }),
-    )).toBe(true)
+  it("scales the measured mark to the share of the width it was given", () => {
+    expect(watermarkFontSize(1, 600, 300)).toBe(
+      WATERMARK_REFERENCE_FONT_SIZE * 2,
+    )
+    expect(watermarkFontSize(0.5, 600, 300)).toBe(WATERMARK_REFERENCE_FONT_SIZE)
+    // Nothing has been measured yet on the first render of the sheet.
+    expect(watermarkFontSize(0.8, 600, 0)).toBe(0)
   })
 })
 
-describe("watermark preferences", () => {
-  it("never includes the watermark text in persisted preferences", () => {
-    const preferences = watermarkPreferences(config({ text: "sensitive" }))
-
-    expect("text" in preferences).toBe(false)
-    expect(JSON.stringify(preferences)).not.toContain("sensitive")
-    expect(isWatermarkPreferences(preferences)).toBe(true)
-    expect(isWatermarkPreferences({ ...preferences, bold: "yes" })).toBe(false)
-  })
-
+describe("watermark settings", () => {
   it("detects configurations without relying on object identity", () => {
     const value = config()
 
     expect(sameWatermarkConfig(value, { ...value })).toBe(true)
-    expect(sameWatermarkConfig(value, { ...value, bold: true })).toBe(false)
-    expect(sameWatermarkConfig(value, { ...value, opacity: 0.5 })).toBe(false)
+    expect(sameWatermarkConfig(value, { ...value, widthRatio: 0.5 })).toBe(false)
+    expect(sameWatermarkConfig(value, { ...value, direction: "descending" })).toBe(
+      false,
+    )
+    expect(sameWatermarkConfig(value, { ...value, layout: "zebra" })).toBe(false)
     expect(sameWatermarkConfig(null, null)).toBe(true)
   })
 
-  it("migrates stored styles from before the bold preference existed", () => {
-    const { bold: _bold, ...legacy } = defaultWatermarkPreferences
-    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+  it("reads back a stored watermark, text included", () => {
+    const stored = config({ layout: "zebra", text: "内部文件", widthRatio: 0.5 })
 
-    expect(_bold).toBe(false)
+    expect(withStoredValue(JSON.stringify(stored), readStoredWatermarkConfig)).toEqual(
+      stored,
+    )
+  })
 
-    Object.defineProperty(globalThis, "window", {
-      configurable: true,
-      value: {
-        localStorage: {
-          getItem: () => JSON.stringify(legacy),
-        },
-      },
+  it("drops a stored record this version cannot use", () => {
+    // What earlier versions kept — a font, a colour, an angle — no longer
+    // describes a watermark, so the reader starts from the defaults instead.
+    const legacy = JSON.stringify({
+      bold: false,
+      color: "#64748b",
+      fontFamily: "sans",
+      fontSize: 36,
+      layout: "single",
+      opacity: 0.25,
+      rotation: -30,
+      spacing: 54,
     })
 
-    try {
-      expect(readStoredWatermarkPreferences()).toEqual({ ...legacy, bold: false })
-    } finally {
-      if (previousWindow) {
-        Object.defineProperty(globalThis, "window", previousWindow)
-      } else {
-        Reflect.deleteProperty(globalThis, "window")
-      }
-    }
+    expect(withStoredValue(legacy, readStoredWatermarkConfig)).toBeNull()
+    expect(withStoredValue("not json", readStoredWatermarkConfig)).toBeNull()
+    expect(withStoredValue(null, readStoredWatermarkConfig)).toBeNull()
   })
 
   it("uses the bundled face for text outside printable Latin-1", () => {
     expect(watermarkUsesEmbeddedFont("CONFIDENTIAL")).toBe(false)
     expect(watermarkUsesEmbeddedFont("机密")).toBe(true)
-  })
-})
-
-describe("watermark font weight", () => {
-  it("uses 400/800 for the bundled face and Regular/Bold for standard fonts", () => {
-    expect(watermarkFontWeightValue(false, true)).toBe(400)
-    expect(watermarkFontWeightValue(true, true)).toBe(800)
-    expect(watermarkFontWeightValue(false, false)).toBe(400)
-    expect(watermarkFontWeightValue(true, false)).toBe(700)
   })
 })

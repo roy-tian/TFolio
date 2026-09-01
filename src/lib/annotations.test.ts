@@ -86,7 +86,7 @@ describe("commandPages", () => {
   })
 
   it("reports every page a document watermark changes", () => {
-    expect(commandPages(watermark(defaultWatermarkConfig()))).toEqual([1, 2, 3])
+    expect(commandPages(watermark(defaultWatermarkConfig("DRAFT")))).toEqual([1, 2, 3])
   })
 
   it("reports every page a page-number change covers", () => {
@@ -100,15 +100,15 @@ describe("commandPages", () => {
     expect(commandTextPages(pageNumbers(pageNumbersConfigValue()))).toEqual([
       1, 2, 3,
     ])
-    expect(commandTextPages(watermark(defaultWatermarkConfig()))).toEqual([
+    expect(commandTextPages(watermark(defaultWatermarkConfig("DRAFT")))).toEqual([
       1, 2, 3,
     ])
   })
 })
 
 describe("watermarkConfig", () => {
-  const first = { ...defaultWatermarkConfig(), text: "DRAFT" }
-  const second = { ...defaultWatermarkConfig(), text: "FINAL" }
+  const first = defaultWatermarkConfig("DRAFT")
+  const second = defaultWatermarkConfig("FINAL")
 
   it("tracks apply, replace, explicit remove, undo, and redo", () => {
     const applied = historyOf(watermark(first))
@@ -172,7 +172,7 @@ describe("pageNumbersConfig", () => {
   })
 
   it("is independent of the watermark layer in one history", () => {
-    const wm = { ...defaultWatermarkConfig(), text: "DRAFT" }
+    const wm = defaultWatermarkConfig("DRAFT")
     const history = historyOf(watermark(wm), pageNumbers(first))
 
     expect(watermarkConfig(history)).toEqual(wm)

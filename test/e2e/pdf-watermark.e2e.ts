@@ -5,7 +5,7 @@ import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { watermarkPreferencesStorageKey } from "../../src/lib/watermark"
+import { watermarkStorageKey } from "../../src/lib/watermark"
 import {
   appMenuItem,
   blankPdf,
@@ -52,12 +52,12 @@ describe("TFolio document watermark", () => {
       (keys) => {
         window.localStorage.setItem(keys.language, "en")
         window.localStorage.setItem(keys.viewMode, "single")
-        window.localStorage.removeItem(keys.watermarkPreferences)
+        window.localStorage.removeItem(keys.watermark)
       },
       {
         language: languageStorageKey,
         viewMode: viewModeStorageKey,
-        watermarkPreferences: watermarkPreferencesStorageKey,
+        watermark: watermarkStorageKey,
       },
     )
     await browser.refresh()
@@ -70,36 +70,36 @@ describe("TFolio document watermark", () => {
     const clean = await pagePixelFingerprint()
 
     await openWatermarkDialog()
+
+    // The field opens on this reader's own default mark, not empty.
+    await expect($("[data-testid='watermark-text']")).toHaveValue("CONFIDENTIAL")
     await $("[data-testid='watermark-text']").setValue("内部资料")
 
-    // Non-Latin text has one bundled face, so a font choice would be false.
-    await expect($("[data-testid='watermark-font']")).toBeDisabled()
-    const bold = $("[data-testid='watermark-bold']")
-    const previewWeight = () =>
+    // The preview leans the way the direction control says, so the two ends of
+    // it cannot both draw the same mark.
+    const previewTransform = () =>
       browser.execute(
         () =>
           getComputedStyle(
             document.querySelector<HTMLElement>(
               "[data-testid='watermark-preview']",
             )!,
-          ).fontWeight,
+          ).transform,
       )
+    const ascending = await previewTransform()
 
-    await expect(bold).toHaveAttribute("aria-pressed", "false")
-    expect(await previewWeight()).toBe("400")
-    await bold.click()
-    await expect(bold).toHaveAttribute("aria-pressed", "true")
-    expect(await previewWeight()).toBe("800")
-    await browser.saveScreenshot("artifacts/e2e/watermark-bold-dialog.png")
+    await $("//button[normalize-space()='Top-left to bottom-right']").click()
+    expect(await previewTransform()).not.toBe(ascending)
+    await browser.saveScreenshot("artifacts/e2e/watermark-dialog.png")
     await $("//button[normalize-space()='Tiled']").click()
 
-    // Exercise the angle control as a reader would. Its label and current value
+    // Exercise the size control as a reader would. Its label and current value
     // identify it without reaching into Base UI's generated ids.
-    const rotation = await $(
-      "[data-testid='watermark-rotation'] [data-slot='slider-thumb']",
+    const size = await $(
+      "[data-testid='watermark-size'] [data-slot='slider-thumb']",
     )
-    await rotation.click()
-    await browser.keys("ArrowRight")
+    await size.click()
+    await browser.keys("ArrowLeft")
 
     await $("[data-testid='watermark-apply']").click()
     await $("[data-testid='watermark-dialog']").waitForDisplayed({

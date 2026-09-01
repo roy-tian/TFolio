@@ -19,7 +19,6 @@ pub(super) const CJK_FONT_NAME: &str = "NotoSansSC.ttf";
 /// digit/dash glyphs by `download-fonts.mjs`, so — unlike the sans face — it is
 /// embedded whole rather than subset again at runtime.
 pub(super) const SERIF_CJK_FONT_NAME: &str = "NotoSerifSC.ttf";
-const CJK_BOLD_FONT_WEIGHT: i32 = 800;
 const CJK_REGULAR_FONT_WEIGHT: i32 = 400;
 
 /// One of the standard fonts a note may be set in.
@@ -126,10 +125,6 @@ pub(super) fn regular_cjk_font(font_bytes: &[u8]) -> Result<Vec<u8>, String> {
     cjk_font_at_weight(font_bytes, CJK_REGULAR_FONT_WEIGHT)
 }
 
-pub(super) fn bold_cjk_font(font_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    cjk_font_at_weight(font_bytes, CJK_BOLD_FONT_WEIGHT)
-}
-
 /// Cuts `font_bytes` down to just the glyphs `text` uses.
 ///
 /// Per note rather than per document: PDFium binds a text object to its font as
@@ -193,44 +188,34 @@ mod tests {
 
     #[test]
     #[ignore = "requires `bun run fonts:download`"]
-    fn bundled_cjk_font_resolves_requested_weights() {
+    fn bundled_cjk_font_resolves_its_regular_weight() {
         let source =
             std::fs::read(bundled_font_path(CJK_FONT_NAME)).expect("read bundled CJK font");
 
-        for (expected, instance) in [
-            (
-                CJK_REGULAR_FONT_WEIGHT,
-                regular_cjk_font(&source).expect("create Regular font instance"),
-            ),
-            (
-                CJK_BOLD_FONT_WEIGHT,
-                bold_cjk_font(&source).expect("create Bold font instance"),
-            ),
-        ] {
-            let font_data = ReadScope::new(&instance)
-                .read::<FontData<'_>>()
-                .expect("read static font instance");
-            let provider = font_data
-                .table_provider(0)
-                .expect("read static font tables");
-            let os2_data = provider
-                .read_table_data(tag::OS_2)
-                .expect("read static OS/2 table");
-            let os2 = ReadScope::new(&os2_data)
-                .read_dep::<Os2>(os2_data.len())
-                .expect("parse static OS/2 table");
+        let instance = regular_cjk_font(&source).expect("create Regular font instance");
+        let font_data = ReadScope::new(&instance)
+            .read::<FontData<'_>>()
+            .expect("read static font instance");
+        let provider = font_data
+            .table_provider(0)
+            .expect("read static font tables");
+        let os2_data = provider
+            .read_table_data(tag::OS_2)
+            .expect("read static OS/2 table");
+        let os2 = ReadScope::new(&os2_data)
+            .read_dep::<Os2>(os2_data.len())
+            .expect("parse static OS/2 table");
 
-            assert_eq!(os2.us_weight_class, expected as u16);
-            assert!(provider
-                .table_data(tag::FVAR)
-                .expect("inspect static variation table")
-                .is_none());
+        assert_eq!(os2.us_weight_class, CJK_REGULAR_FONT_WEIGHT as u16);
+        assert!(provider
+            .table_data(tag::FVAR)
+            .expect("inspect static variation table")
+            .is_none());
 
-            let subset = subset_for(&instance, "水印").expect("subset static font instance");
-            ReadScope::new(&subset)
-                .read::<FontData<'_>>()
-                .expect("read static font subset");
-        }
+        let subset = subset_for(&instance, "水印").expect("subset static font instance");
+        ReadScope::new(&subset)
+            .read::<FontData<'_>>()
+            .expect("read static font subset");
     }
 
     #[test]

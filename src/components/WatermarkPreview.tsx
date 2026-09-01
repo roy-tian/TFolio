@@ -1,10 +1,15 @@
 import { useLayoutEffect, useRef, useState } from "react"
 
 import {
-  watermarkFontWeightValue,
+  watermarkFontSize,
+  watermarkRotation,
   watermarkUsesEmbeddedFont,
+  watermarkZebraSpacing,
+  WATERMARK_COLOR,
+  WATERMARK_OPACITY,
+  WATERMARK_REFERENCE_FONT_SIZE,
   type WatermarkConfig,
-  type WatermarkFontFamily,
+  type WatermarkLayout,
 } from "@/lib/watermark"
 
 /** A4 in points: the sheet the preview stands in for, so sizes read as pt. */
@@ -14,13 +19,11 @@ const A4_HEIGHT = 841.89
 /** Mirrors the backend's per-page ceiling so a dense grid cannot flood the DOM. */
 const MAX_PREVIEW_TILES = 512
 
-const previewFontFamily: Record<WatermarkFontFamily, string> = {
-  mono: "ui-monospace, monospace",
-  sans: "Helvetica, Arial, sans-serif",
-  serif: "'Times New Roman', Times, serif",
-}
-
 type Placement = { x: number; y: number }
+
+function stepsToCover(distance: number, step: number) {
+  return Math.min(Math.ceil(distance / step), MAX_PREVIEW_TILES)
+}
 
 type Box = { height: number; width: number }
 
@@ -28,43 +31,49 @@ type Box = { height: number; width: number }
  * Mirrors `watermark_placements` in `src-tauri/src/pdfium/watermark.rs`: tiles
  * step by the rotated text box plus the spacing, and odd rows shift half a step.
  * An approximation of the real thing — PDFium measures the glyphs the page will
- * actually carry — so treat a mismatch here as a preview bug, not a page bug.
+ * actually carry, on the page's own box rather than this A4 stand-in — so treat
+ * a mismatch here as a preview bug, not a page bug.
  */
 function previewPlacements(
   sheet: Box,
   tile: Box,
-  config: WatermarkConfig,
+  spacing: number,
+  layout: WatermarkLayout,
 ): Placement[] {
-  if (config.layout === "single") {
+  if (layout === "single") {
     return [{ x: sheet.width / 2, y: sheet.height / 2 }]
   }
 
-  const stepX = tile.width + config.spacing
-  const stepY = tile.height + config.spacing
+  const stepX = tile.width + spacing
+  const stepY = tile.height + spacing
 
   if (!(stepX > 0) || !(stepY > 0)) {
     return []
   }
 
+  // The grid hangs on the middle of the sheet, so a mark too big to repeat
+  // inside it still leaves one whole copy where a single mark would have been.
+  const middleX = sheet.width / 2
+  const middleY = sheet.height / 2
+  const columns = stepsToCover(middleX + tile.width, stepX)
+  const rows = stepsToCover(middleY + tile.height, stepY)
   const placements: Placement[] = []
-  let row = 0
 
-  for (let y = -tile.height; y <= sheet.height + tile.height; y += stepY) {
+  for (let row = -rows; row <= rows; row += 1) {
+    // The half-step shift costs its half at the left edge, so the extra column
+    // goes there — the shift itself already covers the right.
     const offset = row % 2 === 0 ? 0 : stepX / 2
 
-    for (
-      let x = -tile.width + offset;
-      x <= sheet.width + tile.width;
-      x += stepX
-    ) {
+    for (let column = -columns - 1; column <= columns; column += 1) {
       if (placements.length >= MAX_PREVIEW_TILES) {
         return placements
       }
 
-      placements.push({ x, y })
+      placements.push({
+        x: middleX + column * stepX + offset,
+        y: middleY + row * stepY,
+      })
     }
-
-    row += 1
   }
 
   return placements
@@ -80,7 +89,10 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
   const sheetRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLSpanElement>(null)
   const [sheetWidth, setSheetWidth] = useState(0)
-  const [tile, setTile] = useState<Box>({ height: 0, width: 0 })
+  const [referenceBox, setReferenceBox] = useState<Box>({
+    height: 0,
+    width: 0,
+  })
 
   useLayoutEffect(() => {
     const node = sheetRef.current
@@ -105,31 +117,48 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
   }
   const embedded = watermarkUsesEmbeddedFont(config.text)
   const text = config.text || placeholder
-  const fontFamily = embedded
-    ? "sans-serif"
-    : previewFontFamily[config.fontFamily]
-  const fontSize = config.fontSize * scale
-  const fontWeight = watermarkFontWeightValue(config.bold, embedded)
-  const rotation = `rotate(${config.rotation}deg)`
+  const fontFamily = embedded ? "sans-serif" : "Helvetica, Arial, sans-serif"
+  const rotation = `rotate(${watermarkRotation(config.direction, A4_WIDTH, A4_HEIGHT)}deg)`
+  const referenceFontSize = WATERMARK_REFERENCE_FONT_SIZE * scale
 
-  // The rotated box is what the grid steps by, and a client rect already
-  // accounts for the transform — so measure rather than derive it.
+  // The rotated box is what both the size and the grid are derived from, and a
+  // client rect already accounts for the transform — so measure rather than
+  // derive it. One measurement at the reference size is enough: text scales
+  // with its font size, which is what the backend leans on too.
   useLayoutEffect(() => {
     const node = measureRef.current
+    const sheetNode = sheetRef.current
 
-    if (!node) {
+    if (!node || !sheetNode) {
       return
     }
 
+    // A client rect carries every ancestor transform, and the dialog scales this
+    // whole subtree while it opens; `sheetWidth` is a layout size, which does
+    // not. Divide that scale back out against the sheet's own two widths, or the
+    // mark keeps whatever the animation was mid-way through when it measured.
+    const rendered = sheetNode.getBoundingClientRect().width
+    const laidOut = sheetNode.offsetWidth
+    const transform = laidOut > 0 && rendered > 0 ? rendered / laidOut : 1
     const rect = node.getBoundingClientRect()
 
-    setTile({ height: rect.height, width: rect.width })
-  }, [fontFamily, fontSize, fontWeight, rotation, text])
+    setReferenceBox({
+      height: rect.height / transform,
+      width: rect.width / transform,
+    })
+  }, [fontFamily, referenceFontSize, rotation, text])
 
+  const fontSize = watermarkFontSize(
+    config.widthRatio,
+    A4_WIDTH,
+    referenceBox.width / (scale || 1),
+  )
+  const drawn = fontSize / WATERMARK_REFERENCE_FONT_SIZE
   const placements = previewPlacements(
     sheet,
-    tile,
-    { ...config, spacing: config.spacing * scale },
+    { height: referenceBox.height * drawn, width: referenceBox.width * drawn },
+    watermarkZebraSpacing(fontSize) * scale,
+    config.layout,
   )
 
   return (
@@ -144,8 +173,7 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
         ref={measureRef}
         style={{
           fontFamily,
-          fontSize: `${fontSize}px`,
-          fontWeight,
+          fontSize: `${referenceFontSize}px`,
           lineHeight: 1,
           transform: rotation,
         }}
@@ -159,13 +187,12 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
           data-testid={index === 0 ? "watermark-preview" : undefined}
           key={index}
           style={{
-            color: config.color,
+            color: WATERMARK_COLOR,
             fontFamily,
-            fontSize: `${fontSize}px`,
-            fontWeight,
+            fontSize: `${fontSize * scale}px`,
             left: `${placement.x}px`,
             lineHeight: 1,
-            opacity: config.opacity,
+            opacity: WATERMARK_OPACITY,
             top: `${placement.y}px`,
             transform: `translate(-50%, -50%) ${rotation}`,
           }}

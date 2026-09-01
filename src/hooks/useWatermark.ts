@@ -2,68 +2,63 @@ import { useCallback, useEffect, useState } from "react"
 
 import {
   defaultWatermarkConfig,
-  defaultWatermarkPreferences,
-  normalizeWatermarkRotation,
-  readStoredWatermarkPreferences,
-  storeWatermarkPreferences,
+  readStoredWatermarkConfig,
+  storeWatermarkConfig,
   validateWatermarkConfig,
   type WatermarkConfig,
 } from "@/lib/watermark"
 
 type UseWatermarkOptions = {
   activeConfig: WatermarkConfig | null
+  /** The mark a reader who has never applied one starts from, translated. */
+  defaultText: string
   documentId?: number
   /** Resolves to whether the change reached the document. */
   onSet: (config: WatermarkConfig | null, pageCount: number) => Promise<boolean>
   pageCount: number
 }
 
-function freshConfig(activeConfig: WatermarkConfig | null) {
+function freshConfig(activeConfig: WatermarkConfig | null, defaultText: string) {
   if (activeConfig) {
     return { ...activeConfig }
   }
 
-  return defaultWatermarkConfig(
-    readStoredWatermarkPreferences() ?? defaultWatermarkPreferences,
-  )
+  return readStoredWatermarkConfig() ?? defaultWatermarkConfig(defaultText)
 }
 
 /** Owns the dialog's disposable draft; only apply and remove touch the PDF. */
 export function useWatermark({
   activeConfig,
+  defaultText,
   documentId,
   onSet,
   pageCount,
 }: UseWatermarkOptions) {
   const [draft, setDraft] = useState<WatermarkConfig>(() =>
-    freshConfig(activeConfig),
+    freshConfig(activeConfig, defaultText),
   )
   const [isApplying, setIsApplying] = useState(false)
   const [open, setOpen] = useState(false)
 
   const openDialog = useCallback(() => {
-    setDraft(freshConfig(activeConfig))
+    setDraft(freshConfig(activeConfig, defaultText))
     setOpen(true)
-  }, [activeConfig])
+  }, [activeConfig, defaultText])
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (nextOpen) {
-        setDraft(freshConfig(activeConfig))
+        setDraft(freshConfig(activeConfig, defaultText))
       }
       setOpen(nextOpen)
     },
-    [activeConfig],
+    [activeConfig, defaultText],
   )
 
   const apply = useCallback(async () => {
-    // Canonicalised the way the backend will canonicalise it, so the two ends
-    // of the angle control do not read as a change the page never took.
-    const config = {
-      ...draft,
-      rotation: normalizeWatermarkRotation(draft.rotation),
-      text: draft.text.trim(),
-    }
+    // Trimmed the way the backend trims it, so a stray space does not read as
+    // a change the page never took.
+    const config = { ...draft, text: draft.text.trim() }
 
     if (validateWatermarkConfig(config) || pageCount < 1) {
       return
@@ -71,10 +66,10 @@ export function useWatermark({
 
     setIsApplying(true)
     try {
-      // Only a change the document accepted is worth remembering as a style,
-      // and only one is worth dismissing the dialog over.
+      // Only a change the document accepted is worth remembering as this
+      // reader's watermark, and only one is worth dismissing the dialog over.
       if (await onSet(config, pageCount)) {
-        storeWatermarkPreferences(config)
+        storeWatermarkConfig(config)
         setOpen(false)
       }
     } finally {
@@ -102,7 +97,9 @@ export function useWatermark({
   useEffect(() => {
     setOpen(false)
     setIsApplying(false)
-    setDraft(freshConfig(null))
+    // Deliberately not keyed on `defaultText`: a language change is not a
+    // document change, and the draft is rebuilt when the dialog next opens.
+    setDraft(freshConfig(null, defaultText))
   }, [documentId])
 
   return {

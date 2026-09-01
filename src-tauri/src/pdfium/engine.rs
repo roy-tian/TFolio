@@ -15,8 +15,8 @@ use tauri::AppHandle;
 
 use super::{
     font::{
-        bold_cjk_font, cjk_font_path, needs_embedded_font, regular_cjk_font, serif_cjk_font_path,
-        standard_face, subset_for, StandardFace,
+        cjk_font_path, needs_embedded_font, regular_cjk_font, serif_cjk_font_path, standard_face,
+        subset_for, StandardFace,
     },
     geometry::{
         annotation_color, page_rect_to_pdfium, page_rotation_degrees, quad_points_from_rect,
@@ -32,7 +32,9 @@ use super::{
     },
     size_limit_error,
     watermark::{
-        add_document_object_count, watermark_placements, WatermarkConfig, WatermarkPlacement,
+        add_document_object_count, watermark_font_size, watermark_placements, watermark_rotation,
+        watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
+        WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
     ExportOutcome, MergeOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem,
     PdfPageInfo, PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle,
@@ -153,7 +155,19 @@ impl OwnedContentState {
 /// leaves the document untouched.
 struct WatermarkLayerPlan {
     object_rotation: f32,
+    font_size: f32,
     placements: Vec<WatermarkPlacement>,
+}
+
+/// What one page geometry makes of a mark: the angle it reads along, the size
+/// that gives it the share of the width the reader asked for, and the box that
+/// size measures — which is what a zebra grid steps by.
+#[derive(Clone, Copy)]
+struct WatermarkMetrics {
+    object_rotation: f32,
+    font_size: f32,
+    text_width: f32,
+    text_height: f32,
 }
 
 /// A single page-number object, planned: its text, the angle that cancels the
@@ -232,17 +246,13 @@ fn rect_in_display_space(
 fn rotated_watermark_object<'a>(
     document: &PdfDocument<'a>,
     font: PdfFontToken,
-    config: &WatermarkConfig,
+    text: &str,
+    font_size: f32,
     color: PdfColor,
     object_rotation: f32,
 ) -> Result<PdfPageTextObject<'a>, String> {
-    let mut object = PdfPageTextObject::new(
-        document,
-        &config.text,
-        font,
-        PdfPoints::new(config.font_size),
-    )
-    .map_err(|error| format!("PDFium rejected the watermark text: {error}"))?;
+    let mut object = PdfPageTextObject::new(document, text, font, PdfPoints::new(font_size))
+        .map_err(|error| format!("PDFium rejected the watermark text: {error}"))?;
 
     object
         .set_fill_color(color)
@@ -252,6 +262,82 @@ fn rotated_watermark_object<'a>(
         .map_err(|error| format!("PDFium could not rotate the watermark: {error}"))?;
 
     Ok(object)
+}
+
+/// The rotated mark's bounding box in unrotated page space, at `font_size`.
+fn measured_watermark_size(
+    document: &PdfDocument<'_>,
+    font: PdfFontToken,
+    text: &str,
+    font_size: f32,
+    color: PdfColor,
+    object_rotation: f32,
+) -> Result<(f32, f32), String> {
+    let object = rotated_watermark_object(document, font, text, font_size, color, object_rotation)?;
+    let bounds = object
+        .bounds()
+        .map_err(|error| format!("PDFium could not measure the watermark: {error}"))?;
+
+    Ok((
+        bounds.right().value - bounds.left().value,
+        bounds.top().value - bounds.bottom().value,
+    ))
+}
+
+/// Reads a page's own geometry as the mark's angle and size: it leans along the
+/// page's diagonal, and it is scaled so its displayed width is the share of the
+/// page width the reader chose. The measurement runs twice — once at the
+/// reference size to find the scale, once at the size the page will carry, so
+/// the grid steps by the box that is really drawn.
+fn watermark_metrics(
+    document: &PdfDocument<'_>,
+    font: PdfFontToken,
+    config: &WatermarkConfig,
+    color: PdfColor,
+    page_rotation: f32,
+    page_width: f32,
+    page_height: f32,
+) -> Result<WatermarkMetrics, String> {
+    // `/Rotate` 90 and 270 turn the page a quarter over, so the width the
+    // reader sees is the unrotated height — and so is the axis the mark's
+    // measured box spans it along.
+    let quarter_turned = page_rotation == 90.0 || page_rotation == 270.0;
+    let (display_width, display_height) = if quarter_turned {
+        (page_height, page_width)
+    } else {
+        (page_width, page_height)
+    };
+    let object_rotation =
+        watermark_rotation(config.direction, display_width, display_height)? - page_rotation;
+    let reference = measured_watermark_size(
+        document,
+        font,
+        &config.text,
+        WATERMARK_REFERENCE_FONT_SIZE,
+        color,
+        object_rotation,
+    )?;
+    let measured_width = if quarter_turned {
+        reference.1
+    } else {
+        reference.0
+    };
+    let font_size = watermark_font_size(config.width_ratio, display_width, measured_width)?;
+    let (text_width, text_height) = measured_watermark_size(
+        document,
+        font,
+        &config.text,
+        font_size,
+        color,
+        object_rotation,
+    )?;
+
+    Ok(WatermarkMetrics {
+        object_rotation,
+        font_size,
+        text_width,
+        text_height,
+    })
 }
 
 /// Builds the page-number label as a text object in the serif face, coloured
@@ -485,9 +571,6 @@ pub(super) struct PdfiumEngine {
     /// so it is not read or resolved at startup — and once resolved it is kept,
     /// because every CJK note subsets it again.
     cjk_font: OnceLock<Vec<u8>>,
-    /// The same bundled face resolved to weight 800, created only if a bold CJK
-    /// watermark needs it and then reused by later replacements.
-    cjk_bold_font: OnceLock<Vec<u8>>,
     /// Where the bundled serif face — the page-number face — is, resolved at
     /// startup for the same reason `cjk_font_path` is.
     serif_cjk_font_path: Option<PathBuf>,
@@ -519,7 +602,6 @@ impl PdfiumState {
             // it, so a missing font cannot stop the app from opening PDFs.
             cjk_font_path: cjk_font_path(app),
             cjk_font: OnceLock::new(),
-            cjk_bold_font: OnceLock::new(),
             serif_cjk_font_path: serif_cjk_font_path(app),
             serif_cjk_font: OnceLock::new(),
             approved_paths: Mutex::new(HashSet::new()),
@@ -1303,29 +1385,6 @@ impl PdfiumEngine {
             .ok_or_else(|| "the bundled font could not be cached".to_string())
     }
 
-    /// The bundled CJK font's static weight-800 bytes, resolved once and kept.
-    fn cjk_bold_font_bytes(&self) -> Result<&[u8], String> {
-        if let Some(bytes) = self.cjk_bold_font.get() {
-            return Ok(bytes);
-        }
-
-        let path = self.cjk_font_path.as_ref().ok_or_else(|| {
-            "the bundled font is missing; run `bun run fonts:download`".to_string()
-        })?;
-        let source = fs::read(path)
-            .map_err(|error| format!("the bundled font could not be read: {error}"))?;
-        let bytes = bold_cjk_font(&source)?;
-
-        // A concurrent replacement may resolve the same instance too; both
-        // byte sequences are equivalent, so whichever stores first wins.
-        let _ = self.cjk_bold_font.set(bytes);
-
-        self.cjk_bold_font
-            .get()
-            .map(Vec::as_slice)
-            .ok_or_else(|| "the bundled bold font could not be cached".to_string())
-    }
-
     /// The bundled serif face bytes, read once and kept. The font pipeline has
     /// already instanced it to Regular and cut it to the digit and dash glyphs,
     /// so — unlike the sans face — nothing is instanced or subset here.
@@ -1762,7 +1821,7 @@ impl PdfiumEngine {
 
         let previous = entry.owned_content.as_ref();
         let mut plans = Vec::with_capacity(page_count as usize);
-        let mut measured_bounds: Vec<(u32, (f32, f32))> = Vec::new();
+        let mut measured_metrics: Vec<((u32, u32, u32), WatermarkMetrics)> = Vec::new();
         let mut document_objects = 0usize;
 
         for page_number in 1..=page_count {
@@ -1788,48 +1847,47 @@ impl PdfiumEngine {
             let watermark_plan = match watermark {
                 Some((config, font, color)) => {
                     let page_rotation = page_rotation_degrees(&page);
-                    let object_rotation = config.rotation - page_rotation;
                     let (page_width, page_height) = unrotated_page_size(&page);
-                    // One text at one angle always measures the same, and
-                    // `/Rotate` has only four values — so a document of any
-                    // length needs at most four of these.
-                    let key = object_rotation.to_bits();
-                    let (text_width, text_height) =
-                        match measured_bounds.iter().find(|(cached, _)| *cached == key) {
-                            Some((_, size)) => *size,
-                            None => {
-                                let measured = rotated_watermark_object(
-                                    &entry.document,
-                                    font,
-                                    config,
-                                    color,
-                                    object_rotation,
-                                )?;
-                                let bounds = measured.bounds().map_err(|error| {
-                                    format!("PDFium could not measure the watermark: {error}")
-                                })?;
-                                let size = (
-                                    bounds.right().value - bounds.left().value,
-                                    bounds.top().value - bounds.bottom().value,
-                                );
+                    // The mark follows the page box and nothing else, so every
+                    // page of one size measures the same — and a document of
+                    // any length usually holds only a size or two.
+                    let key = (
+                        page_rotation.to_bits(),
+                        page_width.to_bits(),
+                        page_height.to_bits(),
+                    );
+                    let metrics = match measured_metrics.iter().find(|(cached, _)| *cached == key) {
+                        Some((_, metrics)) => *metrics,
+                        None => {
+                            let metrics = watermark_metrics(
+                                &entry.document,
+                                font,
+                                config,
+                                color,
+                                page_rotation,
+                                page_width,
+                                page_height,
+                            )?;
 
-                                measured_bounds.push((key, size));
-                                size
-                            }
-                        };
+                            measured_metrics.push((key, metrics));
+                            metrics
+                        }
+                    };
                     let placements = watermark_placements(
                         page_width,
                         page_height,
-                        text_width,
-                        text_height,
-                        config,
+                        metrics.text_width,
+                        metrics.text_height,
+                        watermark_zebra_spacing(metrics.font_size),
+                        config.layout,
                     )?;
 
                     document_objects =
                         add_document_object_count(document_objects, placements.len())?;
 
                     Some(WatermarkLayerPlan {
-                        object_rotation,
+                        object_rotation: metrics.object_rotation,
+                        font_size: metrics.font_size,
                         placements,
                     })
                 }
@@ -2055,21 +2113,9 @@ impl PdfiumEngine {
                         .fonts_mut()
                         .load_true_type_from_bytes(bytes, true)
                         .map_err(|error| format!("PDFium rejected the bundled font: {error}"))?,
-                    None => {
-                        let config = &resources.config;
-                        let face = standard_face(config.font_family.as_str())
-                            .expect("WatermarkFontFamily only has standard-face variants");
-                        let fonts = entry.document.fonts_mut();
-
-                        match (face, config.bold) {
-                            (StandardFace::Sans, false) => fonts.helvetica(),
-                            (StandardFace::Sans, true) => fonts.helvetica_bold(),
-                            (StandardFace::Serif, false) => fonts.times_roman(),
-                            (StandardFace::Serif, true) => fonts.times_bold(),
-                            (StandardFace::Mono, false) => fonts.courier(),
-                            (StandardFace::Mono, true) => fonts.courier_bold(),
-                        }
-                    }
+                    // Latin-1 text needs no embedded face: the mark is always
+                    // drawn in PDF's own sans, which every reader already has.
+                    None => entry.document.fonts_mut().helvetica(),
                 }),
                 None => None,
             };
@@ -2132,7 +2178,8 @@ impl PdfiumEngine {
                         let object = rotated_watermark_object(
                             &entry.document,
                             font,
-                            &resources.config,
+                            &resources.config.text,
+                            layer.font_size,
                             resources.color,
                             layer.object_rotation,
                         )?;
@@ -2381,17 +2428,11 @@ impl PdfiumEngine {
     /// lock; an existing layer's — rebuilt to survive a change to the other —
     /// are prepared under it, from a config that cannot change while it is held.
     fn watermark_resources(&self, config: &WatermarkConfig) -> Result<WatermarkResources, String> {
-        let color = PdfColor::from_hex(&config.color)
+        let color = PdfColor::from_hex(WATERMARK_COLOR)
             .map_err(|error| format!("the watermark colour is unusable: {error}"))?
-            .with_alpha((config.opacity * 255.0).round() as u8);
+            .with_alpha((WATERMARK_OPACITY * 255.0).round() as u8);
         let embedded = if needs_embedded_font(&config.text) {
-            let font = if config.bold {
-                self.cjk_bold_font_bytes()?
-            } else {
-                self.cjk_font_bytes()?
-            };
-
-            Some(subset_for(font, &config.text)?)
+            Some(subset_for(self.cjk_font_bytes()?, &config.text)?)
         } else {
             None
         };

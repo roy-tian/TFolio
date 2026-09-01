@@ -284,6 +284,7 @@ function DocumentSession(
   })
   const watermark = useWatermark({
     activeConfig: annotations.watermarkConfig,
+    defaultText: t("watermark.defaultText"),
     documentId: pdfDocument?.id,
     onSet: annotations.setWatermark,
     pageCount: pdfDocument?.numPages ?? 0,

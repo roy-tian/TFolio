@@ -1,7 +1,6 @@
 import { Info, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { SliderRow } from "@/components/SliderRow"
 import { WatermarkPreview } from "@/components/WatermarkPreview"
 import { Button } from "@/components/ui/button"
@@ -26,43 +25,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { WatermarkValidationError } from "@/lib/watermark"
 import {
   clampWatermarkText,
-  isWatermarkFontFamily,
+  isWatermarkDirection,
   isWatermarkLayout,
-  WATERMARK_MAX_FONT_SIZE,
-  WATERMARK_MAX_SPACING,
-  WATERMARK_MIN_FONT_SIZE,
-  WATERMARK_MIN_OPACITY,
-  WATERMARK_MIN_SPACING,
-  watermarkUsesEmbeddedFont,
+  WATERMARK_MAX_WIDTH_RATIO,
+  WATERMARK_MIN_WIDTH_RATIO,
   type WatermarkConfig,
 } from "@/lib/watermark"
-
-const watermarkSwatches = [
-  "#64748b",
-  "#dc2626",
-  "#2563eb",
-  "#15803d",
-  "#000000",
-] as const
-
-const familyLabelKey = {
-  mono: "watermark.font_mono",
-  sans: "watermark.font_sans",
-  serif: "watermark.font_serif",
-} as const
 
 const validationLabelKey: Record<
   WatermarkValidationError,
@@ -101,11 +73,6 @@ export function WatermarkDialog({
   validationError,
 }: WatermarkDialogProps) {
   const { t } = useTranslation()
-  const embedded = watermarkUsesEmbeddedFont(draft.text)
-  const fontItems = (["sans", "serif", "mono"] as const).map((value) => ({
-    label: t(familyLabelKey[value]),
-    value,
-  }))
   const textError =
     validationError && validationError !== "style"
       ? t(validationLabelKey[validationError])
@@ -114,7 +81,7 @@ export function WatermarkDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="flex max-h-[calc(100svh-2rem)] w-[48rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[48rem]"
+        className="flex max-h-[calc(100svh-2rem)] w-[40rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[40rem]"
         data-testid="watermark-dialog"
       >
         <DialogHeader className="border-b px-5 py-4">
@@ -181,99 +148,45 @@ export function WatermarkDialog({
                 <FieldError>{textError}</FieldError>
               </Field>
 
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel>{t("watermark.font")}</FieldLabel>
-                  <div className="flex items-center gap-2">
-                    <Select
-                      disabled={embedded}
-                      items={fontItems}
-                      onValueChange={(value) => {
-                        if (isWatermarkFontFamily(value)) {
-                          onDraftChange({ ...draft, fontFamily: value })
-                        }
-                      }}
-                      value={draft.fontFamily}
-                    >
-                      <SelectTrigger
-                        className="min-w-0 flex-1"
-                        data-testid="watermark-font"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {fontItems.map((item) => (
-                            <SelectItem key={item.value} value={item.value}>
-                              {item.label}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <Toggle
-                      aria-label={t("watermark.weightBold")}
-                      data-testid="watermark-bold"
-                      onPressedChange={(bold) => onDraftChange({ ...draft, bold })}
-                      pressed={draft.bold}
-                      title={t("watermark.weightBold")}
-                      variant="outline"
-                    >
-                      <strong aria-hidden>B</strong>
-                    </Toggle>
-                  </div>
-                </Field>
-
-                <Field>
-                  <FieldLabel id="watermark-color-label">
-                    {t("watermark.color")}
-                  </FieldLabel>
-                  <ColorSwatchPicker
-                    labelledBy="watermark-color-label"
-                    onChange={(color) => onDraftChange({ ...draft, color })}
-                    swatches={watermarkSwatches}
-                    value={draft.color}
-                  />
-                </Field>
-              </div>
-
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field>
-                  <SliderRow
-                    display={t("watermark.pointsValue", { value: draft.fontSize })}
-                    label={t("watermark.fontSize")}
-                    max={WATERMARK_MAX_FONT_SIZE}
-                    min={WATERMARK_MIN_FONT_SIZE}
-                    onChange={(fontSize) => onDraftChange({ ...draft, fontSize })}
-                    step={1}
-                    value={draft.fontSize}
-                  />
-                </Field>
-                <Field>
-                  <SliderRow
-                    display={t("watermark.percentValue", {
-                      value: Math.round(draft.opacity * 100),
-                    })}
-                    label={t("watermark.opacity")}
-                    max={1}
-                    min={WATERMARK_MIN_OPACITY}
-                    onChange={(opacity) => onDraftChange({ ...draft, opacity })}
-                    step={0.05}
-                    value={draft.opacity}
-                  />
-                </Field>
-              </div>
-
-              <Field data-testid="watermark-rotation">
+              <Field data-testid="watermark-size">
                 <SliderRow
-                  display={t("watermark.degreesValue", { value: draft.rotation })}
-                  label={t("watermark.rotation")}
-                  max={180}
-                  min={-180}
-                  onChange={(rotation) => onDraftChange({ ...draft, rotation })}
-                  step={5}
-                  value={draft.rotation}
+                  display={t("watermark.percentValue", {
+                    value: Math.round(draft.widthRatio * 100),
+                  })}
+                  label={t("watermark.size")}
+                  max={WATERMARK_MAX_WIDTH_RATIO}
+                  min={WATERMARK_MIN_WIDTH_RATIO}
+                  onChange={(widthRatio) => onDraftChange({ ...draft, widthRatio })}
+                  step={0.05}
+                  value={draft.widthRatio}
                 />
+                <p className="text-xs text-muted-foreground">
+                  {t("watermark.sizeHint")}
+                </p>
+              </Field>
+
+              <Field>
+                <FieldLabel id="watermark-direction-label">
+                  {t("watermark.direction")}
+                </FieldLabel>
+                <ToggleGroup
+                  aria-labelledby="watermark-direction-label"
+                  onValueChange={([value]) => {
+                    if (isWatermarkDirection(value)) {
+                      onDraftChange({ ...draft, direction: value })
+                    }
+                  }}
+                  spacing={0}
+                  value={[draft.direction]}
+                  variant="outline"
+                >
+                  <ToggleGroupItem value="ascending">
+                    {t("watermark.directionAscending")}
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="descending">
+                    {t("watermark.directionDescending")}
+                  </ToggleGroupItem>
+                </ToggleGroup>
               </Field>
 
               <Field>
@@ -299,20 +212,6 @@ export function WatermarkDialog({
                   </ToggleGroupItem>
                 </ToggleGroup>
               </Field>
-
-              {draft.layout === "zebra" ? (
-                <Field>
-                  <SliderRow
-                    display={t("watermark.pointsValue", { value: draft.spacing })}
-                    label={t("watermark.spacing")}
-                    max={WATERMARK_MAX_SPACING}
-                    min={WATERMARK_MIN_SPACING}
-                    onChange={(spacing) => onDraftChange({ ...draft, spacing })}
-                    step={6}
-                    value={draft.spacing}
-                  />
-                </Field>
-              ) : null}
 
               {validationError === "style" ? (
                 <FieldError>{t("watermark.errorStyle")}</FieldError>

@@ -2,7 +2,7 @@ use super::*;
 
 use crate::pdfium::library::PDFIUM_LIBRARY_NAME;
 use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
-use crate::pdfium::watermark::{WatermarkFontFamily, WatermarkLayout};
+use crate::pdfium::watermark::{WatermarkDirection, WatermarkLayout};
 
 /// Serialises `objects` into a PDF. Shared by the fixtures below, which
 /// differ only in the objects they describe.
@@ -86,7 +86,6 @@ fn test_engine() -> &'static PdfiumEngine {
             crate::pdfium::font::CJK_FONT_NAME,
         )),
         cjk_font: OnceLock::new(),
-        cjk_bold_font: OnceLock::new(),
         serif_cjk_font_path: Some(crate::pdfium::font::bundled_font_path(
             crate::pdfium::font::SERIF_CJK_FONT_NAME,
         )),
@@ -203,14 +202,9 @@ fn rotated_blank_pdf(rotation: i32) -> Vec<u8> {
 fn watermark_config(text: &str) -> WatermarkConfig {
     WatermarkConfig {
         text: text.into(),
-        font_family: WatermarkFontFamily::Sans,
-        font_size: 36.0,
-        bold: false,
-        color: "#ef4444".into(),
-        opacity: 0.35,
-        rotation: -30.0,
+        width_ratio: 0.8,
+        direction: WatermarkDirection::Ascending,
         layout: WatermarkLayout::Single,
-        spacing: 54.0,
     }
 }
 
@@ -376,32 +370,37 @@ fn a_saved_watermark_reopens_as_plain_page_content() {
 fn tiles_sharing_a_baseline_keep_one_identity() {
     let engine = test_engine();
 
-    for rotation in [0.0, 5.0, 90.0, 180.0, -30.0] {
-        let document = engine
-            .open(minimal_pdf())
-            .expect("PDFium should open the watermark fixture");
-        let mut config = watermark_config("SPECIMEN");
-        config.layout = WatermarkLayout::Zebra;
-        config.font_size = 12.0;
-        config.rotation = rotation;
+    for rotation in [0, 90, 180, 270] {
+        for direction in [
+            WatermarkDirection::Ascending,
+            WatermarkDirection::Descending,
+        ] {
+            let label = format!("rotation {rotation} {direction:?}");
+            let document = engine
+                .open(rotated_blank_pdf(rotation))
+                .expect("PDFium should open the watermark fixture");
+            let mut config = watermark_config("SPECIMEN");
+            config.layout = WatermarkLayout::Zebra;
+            config.direction = direction;
+            config.width_ratio = 0.2;
 
-        engine
-            .apply_watermark(document.id, config)
-            .unwrap_or_else(|error| panic!("rotation {rotation} should tile: {error}"));
+            engine
+                .apply_watermark(document.id, config)
+                .unwrap_or_else(|error| panic!("{label} should tile: {error}"));
 
-        // The guard has to still recognise what it wrote: a replace reads
-        // the tail back before it touches anything.
-        let mut replacement = watermark_config("SPECIMEN");
-        replacement.layout = WatermarkLayout::Zebra;
-        replacement.font_size = 12.0;
-        replacement.rotation = rotation;
-        replacement.color = "#000000".into();
-        engine
-            .apply_watermark(document.id, replacement)
-            .unwrap_or_else(|error| panic!("rotation {rotation} should stay owned: {error}"));
-        engine
-            .remove_watermark(document.id)
-            .unwrap_or_else(|error| panic!("rotation {rotation} should stay removable: {error}"));
+            // The guard has to still recognise what it wrote: a replace reads
+            // the tail back before it touches anything.
+            let mut replacement = watermark_config("SPECIMEN II");
+            replacement.layout = WatermarkLayout::Zebra;
+            replacement.direction = direction;
+            replacement.width_ratio = 0.2;
+            engine
+                .apply_watermark(document.id, replacement)
+                .unwrap_or_else(|error| panic!("{label} should stay owned: {error}"));
+            engine
+                .remove_watermark(document.id)
+                .unwrap_or_else(|error| panic!("{label} should stay removable: {error}"));
+        }
     }
 }
 
@@ -435,10 +434,7 @@ fn places_watermark_in_display_space_on_rotated_pages() {
             .open(rotated_blank_pdf(rotation))
             .expect("PDFium should open the rotated watermark fixture");
         let mut config = watermark_config("DISPLAY DIRECTION");
-        config.color = "#000000".into();
-        config.font_size = 42.0;
-        config.opacity = 1.0;
-        config.rotation = 0.0;
+        config.width_ratio = 0.9;
 
         engine
             .apply_watermark(document.id, config)
@@ -467,11 +463,21 @@ fn places_watermark_in_display_space_on_rotated_pages() {
         }
 
         assert!(ink > 100, "rotation {rotation} rendered too little text");
+
+        // The mark leans along the diagonal of the page as displayed, so its
+        // drawn box has to keep the shape of the *displayed* sheet. A mark
+        // angled from the unrotated box instead would overshoot a quarter-turned
+        // page's edges and come back clipped to it, squarer than this.
+        let drawn = f64::from(bottom - top) / f64::from(right - left);
+        let displayed = f64::from(image.height()) / f64::from(image.width());
+
         assert!(
-            right - left > (bottom - top) * 3,
-            "rotation {rotation} did not leave a zero-degree watermark horizontal: bbox {}x{}",
-            right - left,
-            bottom - top
+            (drawn - displayed).abs() < 0.15,
+            "rotation {rotation} drew a {drawn:.2} box on a {displayed:.2} page"
+        );
+        assert!(
+            f64::from(right - left) > f64::from(image.width()) * 0.7,
+            "rotation {rotation} drew a mark narrower than the share it was given"
         );
     }
 }
@@ -500,17 +506,17 @@ fn watermark_text_is_extractable() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn latin_bold_watermark_uses_the_standard_bold_face() {
+fn latin_watermark_uses_the_standard_sans_face() {
     let engine = test_engine();
     let document = engine
         .open(minimal_pdf())
         .expect("PDFium should open the watermark fixture");
-    let mut config = watermark_config("BOLD WATERMARK");
-    config.bold = true;
+    let mut config = watermark_config("STANDARD WATERMARK");
+    config.width_ratio = 0.5;
 
     engine
         .apply_watermark(document.id, config)
-        .expect("PDFium should apply a bold watermark");
+        .expect("PDFium should apply a standard-face watermark");
     let bytes = {
         let documents = engine
             .documents
@@ -519,14 +525,14 @@ fn latin_bold_watermark_uses_the_standard_bold_face() {
         documents[&document.id]
             .document
             .save_to_bytes()
-            .expect("PDFium should save the bold watermark")
+            .expect("PDFium should save the standard-face watermark")
     };
 
     assert!(
         bytes
-            .windows(b"Helvetica-Bold".len())
-            .any(|window| window == b"Helvetica-Bold"),
-        "the Latin bold watermark should use PDF's standard bold face"
+            .windows(b"Helvetica".len())
+            .any(|window| window == b"Helvetica"),
+        "a Latin watermark should use PDF's standard sans face"
     );
 }
 
@@ -750,11 +756,7 @@ fn repeated_replacements_are_compacted_on_save() {
         .enumerate()
     {
         let mut config = watermark_config(text);
-        config.color = if index % 2 == 0 {
-            "#2563eb".into()
-        } else {
-            "#dc2626".into()
-        };
+        config.width_ratio = if index % 2 == 0 { 0.6 } else { 0.8 };
         engine
             .apply_watermark(document.id, config)
             .expect("PDFium should replace the CJK watermark");
