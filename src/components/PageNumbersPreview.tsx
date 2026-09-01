@@ -3,8 +3,7 @@ import {
   PAGE_NUMBERS_BOTTOM_MARGIN,
   PAGE_NUMBERS_FONT_STACK,
   PAGE_NUMBERS_SIDE_MARGIN,
-  type PageNumbersMode,
-  type PageNumbersPosition,
+  type PageNumbersPlacement,
 } from "@/lib/pageNumbers"
 
 /** A4's width in points: the sheet this preview stands in for, so the margins
@@ -14,7 +13,7 @@ const A4_WIDTH = 595.276
     top edge is what says the rest of the page carries on above. */
 const SLICE_HEIGHT = 280
 /** Teeth across the tear. Even, so it starts and ends on the paper's edge. */
-const TEAR_TEETH = 28
+const TEAR_TEETH = 56
 /**
  * The label's size here, in pixels, against the 11 pt it is set in on the page.
  * At this width a true-to-scale label would be four pixels tall and unreadable,
@@ -54,7 +53,7 @@ function TornEdge() {
   return (
     <svg
       aria-hidden
-      className="absolute inset-x-0 top-0 h-1.5 w-full"
+      className="absolute inset-x-0 top-0 h-[3px] w-full"
       preserveAspectRatio="none"
       viewBox={`0 0 ${TEAR_TEETH} 1`}
     >
@@ -105,27 +104,25 @@ function Sheet({ anchor, caption, printed, testId }: SheetProps) {
 }
 
 type PageNumbersPreviewProps = {
-  /** What the sheets are called: one sheet for single-sided printing, an odd
-      and an even one for double-sided. */
+  /** What the sheets are called: one sheet for a fixed place, an odd and an
+      even one for the mirrored one. */
   captions: { even: string; every: string; odd: string }
-  mode: PageNumbersMode
-  position: PageNumbersPosition
+  placement: PageNumbersPlacement
   /** The number the first numbered page prints, so a custom start shows. */
   printed: number
 }
 
 /**
- * The bottom of the page as the reader will get it: one sheet for single-sided
- * printing, two for double-sided, where odd pages carry the number on the
- * outer right and even pages mirror it to the outer left.
+ * The bottom of the page as the reader will get it: one sheet where the number
+ * keeps its place, two where it mirrors by binding — odd pages carrying it on
+ * the outer right, even pages on the outer left.
  */
 export function PageNumbersPreview({
   captions,
-  mode,
-  position,
+  placement,
   printed,
 }: PageNumbersPreviewProps) {
-  if (mode === "duplex") {
+  if (placement === "auto") {
     return (
       <div className="flex flex-col gap-3" data-testid="page-numbers-preview">
         <Sheet
@@ -142,7 +139,7 @@ export function PageNumbersPreview({
   return (
     <div className="flex flex-col gap-3" data-testid="page-numbers-preview">
       <Sheet
-        anchor={position === "bottomRight" ? "right" : "center"}
+        anchor={placement === "bottomRight" ? "right" : "center"}
         caption={captions.every}
         printed={printed}
         testId="page-numbers-sample"

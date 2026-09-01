@@ -121,15 +121,24 @@ describe("TFolio page numbers", () => {
     })
   })
 
-  it("disables the position control in double-sided mode and validates a range", async () => {
+  it("picks the placement from one control and validates a range", async () => {
     await openPageNumbersDialog()
 
-    // Single-sided offers a position; double-sided mirrors by binding instead,
-    // so the control stays in place but stops taking a choice.
-    const centre = $("//button[normalize-space()='Bottom centre']")
-    await expect(centre).toBeEnabled()
-    await $("//button[normalize-space()='Double-sided']").click()
-    await expect(centre).toBeDisabled()
+    // One control over both fixed places and the mirrored one, so the preview
+    // is what says which of them the reader has landed on: a single sheet for
+    // a fixed place, an odd and an even one for the mirrored choice.
+    const preview = $("[data-testid='page-numbers-preview']")
+    await $("//button[normalize-space()='Automatic']").click()
+    await browser.waitUntil(
+      async () => (await preview.getText()).includes("Even pages"),
+      { timeout: 15_000, timeoutMsg: "the mirrored choice never showed a pair" },
+    )
+
+    await $("//button[normalize-space()='Fixed centre']").click()
+    await browser.waitUntil(
+      async () => (await preview.getText()).includes("Every page"),
+      { timeout: 15_000, timeoutMsg: "the fixed place never went back to one sheet" },
+    )
 
     // A backwards range holds the apply button until it is valid. The fixture
     // is one page, so a valid range is 1–1.
@@ -148,13 +157,13 @@ describe("TFolio page numbers", () => {
     await openPageNumbersDialog()
     // The stored style arrives a round trip after the dialog opens, and the
     // file outlives the suite — so read what it left and apply the *other*
-    // mode, which no earlier run can have set for us.
+    // placement, which no earlier run can have set for us.
     await browser.pause(500)
-    const single = $("//button[normalize-space()='Single-sided']")
+    const centre = $("//button[normalize-space()='Fixed centre']")
     const wanted =
-      (await single.getAttribute("aria-pressed")) === "true"
-        ? "Double-sided"
-        : "Single-sided"
+      (await centre.getAttribute("aria-pressed")) === "true"
+        ? "Automatic"
+        : "Fixed centre"
 
     await $(`//button[normalize-space()='${wanted}']`).click()
     await $("[data-testid='page-numbers-apply']").click()
@@ -190,7 +199,7 @@ describe("TFolio page numbers", () => {
 
     // Replace the position; the page changes but stays one owned object.
     await openPageNumbersDialog()
-    await $("//button[normalize-space()='Bottom right']").click()
+    await $("//button[normalize-space()='Fixed right']").click()
     await $("[data-testid='page-numbers-apply']").click()
     await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
       reverse: true,

@@ -91,6 +91,37 @@ export function isPosition(value: unknown): value is PageNumbersPosition {
   return pageNumbersPositions.includes(value as PageNumbersPosition)
 }
 
+/**
+ * Where a number sits, as the one thing the reader picks: the two fixed places,
+ * or `auto` for the mirrored one. The backend keeps taking a mode and a
+ * position, so the pairing lives here rather than in either panel.
+ */
+export type PageNumbersPlacement = PageNumbersPosition | "auto"
+
+export const pageNumbersPlacements: readonly PageNumbersPlacement[] = [
+  ...pageNumbersPositions,
+  "auto",
+]
+
+export function isPlacement(value: unknown): value is PageNumbersPlacement {
+  return pageNumbersPlacements.includes(value as PageNumbersPlacement)
+}
+
+export function draftPlacement(draft: PageNumbersDraft): PageNumbersPlacement {
+  return draft.mode === "duplex" ? "auto" : draft.position
+}
+
+/** `auto` leaves `position` untouched, so coming back from it returns the
+    reader to the place they last picked rather than to the default. */
+export function draftWithPlacement(
+  draft: PageNumbersDraft,
+  placement: PageNumbersPlacement,
+): PageNumbersDraft {
+  return placement === "auto"
+    ? { ...draft, mode: "duplex" }
+    : { ...draft, mode: "single", position: placement }
+}
+
 /** Parses a field the reader typed into a positive integer, or null when it is
     empty, blank, or not a whole number — so the validator can tell "left blank"
     from "typed something unusable". */

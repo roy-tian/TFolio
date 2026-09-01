@@ -5,6 +5,8 @@ import {
   draftFirstPrinted,
   draftFromConfig,
   draftFromPreferences,
+  draftPlacement,
+  draftWithPlacement,
   defaultPageNumbersPreferences,
   isPageNumbersPreferences,
   pageNumbersLabel,
@@ -194,6 +196,32 @@ describe("draft round trips", () => {
 
     expect(fresh.rangeFrom).toBe("")
     expect(fresh.rangeTo).toBe("")
+  })
+})
+
+describe("placement", () => {
+  it("reads the mode and position back as one choice", () => {
+    const fresh = draftFromPreferences(defaultPageNumbersPreferences, 10)
+
+    expect(draftPlacement(fresh)).toBe("bottomCenter")
+    expect(draftPlacement({ ...fresh, position: "bottomRight" })).toBe(
+      "bottomRight",
+    )
+    expect(draftPlacement({ ...fresh, mode: "duplex" })).toBe("auto")
+  })
+
+  it("remembers the fixed place a reader leaves for the mirrored one", () => {
+    const fixed = draftWithPlacement(
+      draftFromPreferences(defaultPageNumbersPreferences, 10),
+      "bottomRight",
+    )
+    const auto = draftWithPlacement(fixed, "auto")
+
+    expect(auto.mode).toBe("duplex")
+    expect(draftPlacement(draftWithPlacement(auto, "bottomRight"))).toBe(
+      "bottomRight",
+    )
+    expect(auto.position).toBe("bottomRight")
   })
 })
 
