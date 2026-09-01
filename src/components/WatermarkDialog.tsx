@@ -1,8 +1,7 @@
-import { Info, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { SliderRow } from "@/components/SliderRow"
-import { WatermarkPreview } from "@/components/WatermarkPreview"
+import { WatermarkSettings } from "@/components/WatermarkSettings"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -13,41 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import type { WatermarkValidationError } from "@/lib/watermark"
-import {
-  clampWatermarkText,
-  isWatermarkDirection,
-  isWatermarkLayout,
-  WATERMARK_MAX_WIDTH_RATIO,
-  WATERMARK_MIN_WIDTH_RATIO,
-  type WatermarkConfig,
-} from "@/lib/watermark"
-
-const validationLabelKey: Record<
+import type {
+  WatermarkConfig,
   WatermarkValidationError,
-  | "watermark.errorEmpty"
-  | "watermark.errorMultiline"
-  | "watermark.errorTooLong"
-  | "watermark.errorStyle"
-> = {
-  empty: "watermark.errorEmpty",
-  multiline: "watermark.errorMultiline",
-  style: "watermark.errorStyle",
-  tooLong: "watermark.errorTooLong",
-}
+} from "@/lib/watermark"
 
 type WatermarkDialogProps = {
   draft: WatermarkConfig
@@ -73,10 +41,6 @@ export function WatermarkDialog({
   validationError,
 }: WatermarkDialogProps) {
   const { t } = useTranslation()
-  const textError =
-    validationError && validationError !== "style"
-      ? t(validationLabelKey[validationError])
-      : null
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -90,135 +54,14 @@ export function WatermarkDialog({
         </DialogHeader>
 
         {/* The body scrolls as a whole, so the columns keep their natural
-            heights and short content never earns a scrollbar; from `sm` the
-            sheet sticks so it stays in view while the controls pass it. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5 sm:flex-row">
-          <Field className="sm:sticky sm:top-0 sm:w-[14rem] sm:shrink-0 sm:self-start">
-            <div className="flex items-center gap-0.5">
-              <FieldLabel>{t("watermark.preview")}</FieldLabel>
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <Button
-                      aria-label={t("watermark.disclosureAbout")}
-                      size="icon-xs"
-                      title={t("watermark.disclosureAbout")}
-                      variant="ghost"
-                    />
-                  }
-                >
-                  <Info />
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-64">
-                  <p
-                    className="text-xs leading-relaxed text-muted-foreground"
-                    data-slot="watermark-disclosure"
-                  >
-                    {t("watermark.disclosure")}
-                  </p>
-                </PopoverContent>
-              </Popover>
-            </div>
-            <WatermarkPreview
-              config={draft}
-              placeholder={t("watermark.previewPlaceholder")}
-            />
-          </Field>
-
-          <div className="min-w-0 flex-1">
-            <FieldGroup>
-              <Field data-invalid={Boolean(textError)}>
-                <FieldLabel htmlFor="watermark-text">
-                  {t("watermark.text")}
-                </FieldLabel>
-                <Input
-                  aria-invalid={Boolean(textError)}
-                  autoFocus
-                  data-testid="watermark-text"
-                  id="watermark-text"
-                  onChange={(event) =>
-                    onDraftChange({
-                      ...draft,
-                      text: clampWatermarkText(event.target.value),
-                    })
-                  }
-                  placeholder={t("watermark.textPlaceholder")}
-                  value={draft.text}
-                />
-                <FieldError>{textError}</FieldError>
-              </Field>
-
-              <Field data-testid="watermark-size">
-                <SliderRow
-                  display={t("watermark.percentValue", {
-                    value: Math.round(draft.widthRatio * 100),
-                  })}
-                  label={t("watermark.size")}
-                  max={WATERMARK_MAX_WIDTH_RATIO}
-                  min={WATERMARK_MIN_WIDTH_RATIO}
-                  onChange={(widthRatio) => onDraftChange({ ...draft, widthRatio })}
-                  step={0.05}
-                  value={draft.widthRatio}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {t("watermark.sizeHint")}
-                </p>
-              </Field>
-
-              <Field>
-                <FieldLabel id="watermark-direction-label">
-                  {t("watermark.direction")}
-                </FieldLabel>
-                <ToggleGroup
-                  aria-labelledby="watermark-direction-label"
-                  onValueChange={([value]) => {
-                    if (isWatermarkDirection(value)) {
-                      onDraftChange({ ...draft, direction: value })
-                    }
-                  }}
-                  spacing={0}
-                  value={[draft.direction]}
-                  variant="outline"
-                >
-                  <ToggleGroupItem value="ascending">
-                    {t("watermark.directionAscending")}
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="descending">
-                    {t("watermark.directionDescending")}
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </Field>
-
-              <Field>
-                <FieldLabel id="watermark-layout-label">
-                  {t("watermark.layout")}
-                </FieldLabel>
-                <ToggleGroup
-                  aria-labelledby="watermark-layout-label"
-                  onValueChange={([value]) => {
-                    if (isWatermarkLayout(value)) {
-                      onDraftChange({ ...draft, layout: value })
-                    }
-                  }}
-                  spacing={0}
-                  value={[draft.layout]}
-                  variant="outline"
-                >
-                  <ToggleGroupItem value="single">
-                    {t("watermark.layoutSingle")}
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="zebra">
-                    {t("watermark.layoutZebra")}
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </Field>
-
-              {validationError === "style" ? (
-                <FieldError>{t("watermark.errorStyle")}</FieldError>
-              ) : null}
-            </FieldGroup>
-          </div>
-        </div>
+            heights and short content never earns a scrollbar. */}
+        <WatermarkSettings
+          autoFocus
+          className="min-h-0 flex-1 overflow-y-auto p-5"
+          draft={draft}
+          onDraftChange={onDraftChange}
+          validationError={validationError}
+        />
 
         <DialogFooter className="mx-0 mb-0 rounded-none px-5 py-4">
           {hasWatermark ? (
