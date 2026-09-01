@@ -1,9 +1,9 @@
 import {
   ChevronDown,
-  FilePenLine,
   FileScan,
   Highlighter,
   Square,
+  SquarePen,
   Stamp,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -187,7 +187,7 @@ export function AnnotationToolbar({
               title={textNoteLabel}
               variant="outline"
             >
-              <FilePenLine />
+              <SquarePen />
             </Toggle>
           ) : null}
         </ButtonGroup>

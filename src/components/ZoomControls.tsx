@@ -1,4 +1,4 @@
-import { Maximize, Minus, MoveHorizontal, Plus } from "lucide-react"
+import { Maximize, MoveHorizontal, ZoomIn, ZoomOut } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
@@ -67,7 +67,7 @@ export function ZoomControls({
         title={zoomOutLabel}
         variant="outline"
       >
-        <Minus />
+        <ZoomOut />
       </Button>
       <Button
         aria-label={zoomInLabel}
@@ -77,7 +77,7 @@ export function ZoomControls({
         title={zoomInLabel}
         variant="outline"
       >
-        <Plus />
+        <ZoomIn />
       </Button>
       <Button
         aria-label={fitLabel}
