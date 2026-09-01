@@ -9,7 +9,8 @@ renders PDFs with a bundled PDFium. `bun` is the package manager and runner.
 - `src/` — frontend. Primitives in `components/ui/`, helpers in `lib/`,
   translations in `i18n/locales/`.
 - `src-tauri/src/` — Rust backend: `pdfium/` (engine, commands, geometry, font,
-  watermark, page_numbers, library) and `recent.rs` (persisted recent files).
+  watermark, page_numbers, library), `recent.rs` (persisted recent files) and
+  `preferences.rs` (the reader's own settings, in the app data directory).
 - `src-tauri/tauri.conf.json` — app config and CSP; `tauri.e2e.conf.json`
   overlays the test-only build. `capabilities/` — Tauri permissions.
 - `test/e2e/` — WebdriverIO GUI specs; `scripts/` — asset download, version,

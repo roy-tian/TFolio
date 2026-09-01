@@ -16,6 +16,17 @@ pub(super) const MAX_START: i32 = 99_999;
 /// Below this average relative luminance the drop is dark, so the number is set
 /// in white; at or above it, black. A constant, not exposed.
 const LUMINANCE_THRESHOLD: f32 = 0.5;
+/// Below this relative luminance a sampled pixel counts as ink, so a page
+/// carrying it is not blank. Well above the smart-colour threshold: the
+/// question here is "did anything print", not "is this dark".
+const BLANK_INK_LUMINANCE: f32 = 0.9;
+/// The share of sampled pixels that may still be ink on a page called blank, so
+/// a speck of scanner noise does not make a sheet count as a printed page.
+const BLANK_INK_TOLERANCE: f32 = 0.001;
+/// How much of the page's bottom the blank test ignores: the band a page number
+/// of ours sits in. Without it a second apply would read its own first label as
+/// content — at the cost of calling a page whose only mark is a footer blank.
+const BLANK_SCAN_SKIRT: f32 = BOTTOM_MARGIN + FONT_SIZE * 1.5;
 
 const WHITE_INK: &str = "#FFFFFF";
 const BLACK_INK: &str = "#000000";
@@ -32,18 +43,40 @@ pub struct PageNumbersConfig {
     /// the range's first page and counts up from there.
     pub(super) start: Option<i32>,
     pub(super) smart_color: bool,
+    /// Whether a page that renders blank prints the number it took. Reading it
+    /// costs a render per page, so both flags on — the default — skips the test
+    /// altogether and every page in range is numbered.
+    pub(super) blank_numbered: bool,
+    /// Whether a page that renders blank takes a number from the sequence at
+    /// all. A page that takes none has nothing to print, so this off implies
+    /// `blank_numbered` off, whatever the caller sent.
+    pub(super) blank_counted: bool,
+}
+
+/// The part of a config that belongs to the reader rather than to one document:
+/// what `preferences.rs` keeps between runs. Mirrored by
+/// `PageNumbersPreferences` in `src/lib/pageNumbers.ts`; the range and the
+/// starting number are deliberately not here, being about one document.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PageNumbersPreferences {
+    pub mode: PageNumbersMode,
+    pub position: PageNumbersPosition,
+    pub smart_color: bool,
+    pub blank_numbered: bool,
+    pub blank_counted: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(super) enum PageNumbersMode {
+pub enum PageNumbersMode {
     Single,
     Duplex,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(super) enum PageNumbersPosition {
+pub enum PageNumbersPosition {
     BottomCenter,
     BottomRight,
 }
@@ -117,14 +150,10 @@ impl PageNumbersConfig {
         self.range.map_or(1, |(from, _)| from)
     }
 
-    /// The number printed on a 1-based document page.
-    pub(super) fn printed(&self, page_number: i32) -> i32 {
-        printed(page_number, self.range_from(), self.start)
-    }
-
-    /// The label drawn on a page: `— n —`, an em dash and a space on each side.
-    pub(super) fn label(&self, page_number: i32) -> String {
-        label(self.printed(page_number))
+    /// Whether a page has to be rendered to decide what it gets. Both rules on
+    /// — the default — treat every page in range alike, so nothing is sampled.
+    pub(super) fn needs_blank_scan(&self) -> bool {
+        !self.blank_numbered || !self.blank_counted
     }
 
     /// Where a 1-based document page's number sits. Odd/even for `Duplex` is the
@@ -148,12 +177,79 @@ impl PageNumbersConfig {
     }
 }
 
-pub(super) fn printed(page_number: i32, range_from: i32, start: Option<i32>) -> i32 {
-    start.map_or(page_number, |x| x + (page_number - range_from))
+fn label(printed: i32) -> String {
+    format!("— {printed} —")
 }
 
-pub(super) fn label(printed: i32) -> String {
-    format!("— {printed} —")
+/// Hands out the label each page prints, walking the document in order.
+///
+/// A walk rather than a formula because a blank page may take no number: what a
+/// page prints then depends on how many pages before it were counted, not on
+/// its own position in the document.
+pub(super) struct PageNumbering<'a> {
+    config: &'a PageNumbersConfig,
+    next: i32,
+}
+
+impl<'a> PageNumbering<'a> {
+    pub(super) fn new(config: &'a PageNumbersConfig) -> Self {
+        Self {
+            next: config.start.unwrap_or_else(|| config.range_from()),
+            config,
+        }
+    }
+
+    /// Advances past a 1-based document page and returns the label it prints.
+    ///
+    /// A page outside the range never enters the sequence. A blank one enters
+    /// it only when blank pages are counted, and prints only when they are also
+    /// numbered — so an uncounted blank page silently prints nothing, which is
+    /// the only coherent reading of "not counted but numbered".
+    pub(super) fn advance(&mut self, page_number: i32, blank: bool) -> Option<String> {
+        if !self.config.covers(page_number) || (blank && !self.config.blank_counted) {
+            return None;
+        }
+
+        let printed = self.next;
+        self.next += 1;
+
+        (!blank || self.config.blank_numbered).then(|| label(printed))
+    }
+}
+
+/// The part of a page the blank test looks at: everything above the band a page
+/// number of ours would sit in, in display space with a top-left origin. `None`
+/// when the page is too short to have anything above that band, so there is
+/// nothing to sample.
+pub(super) fn blank_scan_box(display_width: f32, display_height: f32) -> Option<DisplayBox> {
+    let height = display_height - BLANK_SCAN_SKIRT;
+
+    (height > 0.0 && display_width > 0.0).then_some(DisplayBox {
+        left: 0.0,
+        top: 0.0,
+        width: display_width,
+        height,
+    })
+}
+
+/// Whether a run of RGBA pixels carries no ink worth calling content. Pixels are
+/// composited over white first, so a page whose only "content" is transparent
+/// still reads blank.
+pub(super) fn is_blank_sample(rgba: &[u8]) -> bool {
+    let mut ink = 0u32;
+    let mut count = 0u32;
+
+    for pixel in rgba.chunks_exact(4) {
+        let alpha = pixel[3] as f32 / 255.0;
+        let luminance = (1.0 - alpha) + alpha * relative_luminance(pixel[0], pixel[1], pixel[2]);
+
+        if luminance < BLANK_INK_LUMINANCE {
+            ink += 1;
+        }
+        count += 1;
+    }
+
+    ink as f32 <= count as f32 * BLANK_INK_TOLERANCE
 }
 
 /// The natural upright size of the label as the reader sees it, from the
@@ -288,7 +384,24 @@ mod tests {
             range: None,
             start: None,
             smart_color: true,
+            blank_numbered: true,
+            blank_counted: true,
         }
+    }
+
+    /// The labels a whole document prints, given which of its pages are blank.
+    fn walk(config: &PageNumbersConfig, blanks: &[bool]) -> Vec<Option<String>> {
+        let mut numbering = PageNumbering::new(config);
+
+        blanks
+            .iter()
+            .enumerate()
+            .map(|(index, blank)| numbering.advance(index as i32 + 1, *blank))
+            .collect()
+    }
+
+    fn labels(config: &PageNumbersConfig, pages: usize) -> Vec<Option<String>> {
+        walk(config, &vec![false; pages])
     }
 
     #[test]
@@ -324,10 +437,16 @@ mod tests {
 
     #[test]
     fn prints_document_position_by_default() {
-        let value = config();
-        assert_eq!(value.printed(1), 1);
-        assert_eq!(value.printed(7), 7);
-        assert_eq!(value.label(3), "— 3 —");
+        let printed = labels(&config(), 3);
+
+        assert_eq!(
+            printed,
+            vec![
+                Some("— 1 —".to_string()),
+                Some("— 2 —".to_string()),
+                Some("— 3 —".to_string())
+            ]
+        );
     }
 
     #[test]
@@ -336,14 +455,124 @@ mod tests {
         value.range = Some((2, 4));
         value.start = Some(10);
 
-        // The range's first page prints the start; the rest count up; a page
-        // outside the range is not covered, but the mapping is still defined.
-        assert_eq!(value.printed(2), 10);
-        assert_eq!(value.printed(3), 11);
-        assert_eq!(value.printed(4), 12);
-        assert!(!value.covers(1));
-        assert!(value.covers(4));
-        assert!(!value.covers(5));
+        // The range's first page prints the start and the rest count up; the
+        // pages either side of the range print nothing at all.
+        assert_eq!(
+            labels(&value, 5),
+            vec![
+                None,
+                Some("— 10 —".to_string()),
+                Some("— 11 —".to_string()),
+                Some("— 12 —".to_string()),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn blank_pages_follow_the_two_rules_they_are_given() {
+        let blanks = [false, true, false];
+
+        // Both on — the default — treats a blank page like any other, and asks
+        // for no render at all.
+        let both = config();
+        assert!(!both.needs_blank_scan());
+        assert_eq!(
+            walk(&both, &blanks),
+            vec![
+                Some("— 1 —".to_string()),
+                Some("— 2 —".to_string()),
+                Some("— 3 —".to_string())
+            ]
+        );
+
+        // Counted but not numbered: the blank page keeps its place in the
+        // sequence, so the page after it still prints 3.
+        let mut counted = config();
+        counted.blank_numbered = false;
+        assert!(counted.needs_blank_scan());
+        assert_eq!(
+            walk(&counted, &blanks),
+            vec![Some("— 1 —".to_string()), None, Some("— 3 —".to_string())]
+        );
+
+        // Neither: the blank page leaves the sequence, and numbering closes up.
+        let mut skipped = config();
+        skipped.blank_numbered = false;
+        skipped.blank_counted = false;
+        assert_eq!(
+            walk(&skipped, &blanks),
+            vec![Some("— 1 —".to_string()), None, Some("— 2 —".to_string())]
+        );
+
+        // "Numbered but not counted" has no number to print, so it prints none.
+        let mut incoherent = config();
+        incoherent.blank_counted = false;
+        assert_eq!(
+            walk(&incoherent, &blanks),
+            vec![Some("— 1 —".to_string()), None, Some("— 2 —".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_blank_page_outside_the_range_costs_the_sequence_nothing() {
+        let mut value = config();
+        value.range = Some((2, 4));
+        value.blank_numbered = false;
+        value.blank_counted = false;
+
+        // The sequence starts at the range's first page — page 2 — and the
+        // blank page inside the range costs it nothing, so page 4 prints 3.
+        assert_eq!(
+            walk(&value, &[true, false, true, false, true]),
+            vec![
+                None,
+                Some("— 2 —".to_string()),
+                None,
+                Some("— 3 —".to_string()),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn the_blank_test_reads_the_page_above_its_own_number_band() {
+        let scanned = blank_scan_box(600.0, 800.0).expect("an A4-ish page has content space");
+        assert_eq!(scanned.left, 0.0);
+        assert_eq!(scanned.top, 0.0);
+        assert_eq!(scanned.width, 600.0);
+        assert!((scanned.height - (800.0 - BLANK_SCAN_SKIRT)).abs() < 1e-3);
+
+        // A page shorter than the band it would print its own number in has
+        // nowhere for content to be.
+        assert!(blank_scan_box(600.0, BLANK_SCAN_SKIRT).is_none());
+        assert!(blank_scan_box(0.0, 800.0).is_none());
+    }
+
+    #[test]
+    fn a_page_is_blank_until_something_prints_on_it() {
+        let white = [255u8, 255, 255, 255].repeat(1000);
+        assert!(is_blank_sample(&white));
+        // Nothing sampled at all is blank rather than a failure.
+        assert!(is_blank_sample(&[]));
+
+        // Transparent pixels are composited over white before they are read.
+        assert!(is_blank_sample(&[0, 0, 0, 0].repeat(1000)));
+
+        // A tolerance of stray dark pixels, but text is far past it.
+        let mut speck = white.clone();
+        speck[0..4].copy_from_slice(&[0, 0, 0, 255]);
+        assert!(is_blank_sample(&speck));
+
+        let mut printed = white.clone();
+        for pixel in printed.chunks_exact_mut(4).take(100) {
+            pixel.copy_from_slice(&[0, 0, 0, 255]);
+        }
+        assert!(!is_blank_sample(&printed));
+
+        // Pale grey is still paper; mid grey is ink.
+        assert!(is_blank_sample(&[250, 250, 250, 255].repeat(1000)));
+        assert!(!is_blank_sample(&[180, 180, 180, 255].repeat(1000)));
     }
 
     #[test]
@@ -355,7 +584,10 @@ mod tests {
 
         // Page 2 prints "10" — an even number — but sits on the left because it
         // is the second physical page. The side follows the binding, not the ink.
-        assert_eq!(value.printed(2), 10);
+        assert_eq!(
+            PageNumbering::new(&value).advance(2, false),
+            Some("— 10 —".to_string())
+        );
         assert_eq!(value.anchor(2), PageNumberAnchor::BottomLeft);
         assert_eq!(value.anchor(3), PageNumberAnchor::BottomRight);
     }

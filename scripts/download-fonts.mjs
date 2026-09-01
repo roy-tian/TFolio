@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -12,7 +13,6 @@ import { createHash } from "node:crypto"
 import { join, resolve } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
-import subsetFont from "subset-font"
 
 // The commit the fonts are taken from, not a branch: a moving reference would
 // change the bytes under the checksums below and break every build at once.
@@ -20,17 +20,13 @@ const FONT_COMMIT = "2894aab31764f10f29c421bdfd2340d3b382d384"
 const repositoryRoot = resolve(import.meta.dirname, "..")
 const outputDirectory = join(repositoryRoot, "src-tauri", "resources", "fonts")
 
-// Every glyph the page-number tool ever draws: the ten digits, an em dash, and
-// a space. The em dash alone forces an embedded font, so the whole label rides
-// the bundled serif face — see `needs_embedded_font` in `font.rs`.
-const PAGE_NUMBER_GLYPHS = "0123456789— "
-
-// Each font pins an exact size and checksum. `subset` — the page-number serif —
-// is instanced to Regular and cut to `PAGE_NUMBER_GLYPHS` before it is bundled,
-// so a 60 MB variable source becomes a ~20 KB face; `bytes`/`sha256` still guard
-// the whole download, not the subset. Fonts without `subset` are bundled whole
-// and cut per edit at runtime (see `subset_for`). `host` is `raw` where the
-// source is too large for jsDelivr's per-file ceiling.
+// One bundled face, for text a PDF's own standard fonts cannot draw — notes and
+// watermarks that leave Latin-1. It is bundled whole and cut per edit at runtime
+// (see `subset_for`). Page numbers take no bundled font at all: `font.rs`
+// resolves a 宋体 or another serif from the system the app is running on.
+//
+// Each font pins an exact size and checksum, and `host` is `raw` where a source
+// is too large for jsDelivr's per-file ceiling.
 const fonts = [
   {
     name: "NotoSansSC.ttf",
@@ -40,28 +36,12 @@ const fonts = [
     sha256: "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
     license: { name: "LICENSE.NotoSansSC", source: "ofl/notosanssc/OFL.txt" },
   },
-  {
-    name: "NotoSerifSC.ttf",
-    source: "ofl/notoserifsc/NotoSerifSC%5Bwght%5D.ttf",
-    host: "raw",
-    bytes: 59925648,
-    sha256: "03a7bc54364c5702e70e92b6877da74f4f0c5a22362910c66684bcc2dc03d3d1",
-    license: { name: "LICENSE.NotoSerifSC", source: "ofl/notoserifsc/OFL.txt" },
-    subset: { text: PAGE_NUMBER_GLYPHS, weight: 400 },
-  },
 ]
 
 const versionPath = join(outputDirectory, "VERSION")
-// The marker changes if the commit, any font, or any subset spec changes, so
-// editing this script never leaves a stale bundle in place.
-const cacheMarker = [
-  FONT_COMMIT,
-  ...fonts.map((font) =>
-    font.subset
-      ? `${font.name}\tsubset:${font.subset.text}@${font.subset.weight}`
-      : font.name,
-  ),
-].join("\n")
+// The marker changes if the commit or any font changes, so editing this script
+// never leaves a stale bundle in place.
+const cacheMarker = [FONT_COMMIT, ...fonts.map((font) => font.name)].join("\n")
 
 const ready =
   existsSync(versionPath) &&
@@ -129,23 +109,7 @@ try {
       )
     }
 
-    if (font.subset) {
-      // Instance the variable source to Regular and keep only the page-number
-      // glyphs, so what ships is kilobytes rather than the 60 MB source.
-      // `noLayoutClosure` drops the figure/dash alternates the font's GSUB/GPOS
-      // tables reach — page numbers apply no OpenType features, so only the
-      // dozen cmap glyphs are ever drawn.
-      const subset = await subsetFont(Buffer.from(bytes), font.subset.text, {
-        targetFormat: "truetype",
-        variationAxes: { wght: font.subset.weight },
-        noLayoutClosure: true,
-      })
-
-      writeFileSync(stagedOutput, subset)
-      console.log(`Subset ${font.name} to ${subset.length} bytes`)
-    } else {
-      renameSync(stagedDownload, stagedOutput)
-    }
+    renameSync(stagedDownload, stagedOutput)
 
     await download(contentUrl(font, font.license.source), stagedLicense)
 
@@ -157,7 +121,24 @@ try {
   }
 
   writeFileSync(versionPath, `${cacheMarker}\n`)
-  console.log(`Fonts are ready in ${outputDirectory}`)
 } finally {
   rmSync(temporaryDirectory, { force: true, recursive: true })
 }
+
+// The whole directory is bundled into the app, so a face this script no longer
+// manages — one dropped from the list above — must not be left behind for the
+// installer to ship. Only ever after the staging directory has gone.
+const expected = new Set([
+  ".gitkeep",
+  "VERSION",
+  ...fonts.flatMap((font) => [font.name, font.license.name]),
+])
+
+for (const entry of readdirSync(outputDirectory)) {
+  if (!expected.has(entry)) {
+    rmSync(join(outputDirectory, entry), { force: true, recursive: true })
+    console.log(`Removed ${entry}, which is no longer bundled`)
+  }
+}
+
+console.log(`Fonts are ready in ${outputDirectory}`)

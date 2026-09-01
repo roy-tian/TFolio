@@ -4,7 +4,7 @@ import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
-import { pageNumbersPreferencesStorageKey } from "../../src/lib/pageNumbers"
+import type { E2eOverrides } from "../../src/lib/e2e"
 import { viewModeStorageKey } from "../../src/lib/viewMode"
 import { watermarkStorageKey } from "../../src/lib/watermark"
 import {
@@ -17,6 +17,31 @@ import {
   pagePixelFingerprint,
   renderedPage,
 } from "./helpers"
+
+/**
+ * Holds the dialog to its defaults by standing in for the stored style, which
+ * lives in a user-level file and would otherwise carry one spec's choices into
+ * the next — and into the next run of the suite.
+ */
+async function useDefaultPageNumbersStyle() {
+  await browser.execute(() => {
+    const seam = window as Window & { __tfolioE2E?: E2eOverrides }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      pageNumbersPreferences: () => Promise.resolve(null),
+    }
+  })
+}
+
+/** Puts the real stored style back, for the one spec that is about it. */
+async function useStoredPageNumbersStyle() {
+  await browser.execute(() => {
+    const seam = window as Window & { __tfolioE2E?: E2eOverrides }
+
+    delete seam.__tfolioE2E?.pageNumbersPreferences
+  })
+}
 
 async function openPageNumbersDialog() {
   await $("button[aria-label='Page numbers']").click()
@@ -48,18 +73,17 @@ describe("TFolio page numbers", () => {
       (keys) => {
         window.localStorage.setItem(keys.language, "en")
         window.localStorage.setItem(keys.viewMode, "single")
-        window.localStorage.removeItem(keys.pageNumbersPreferences)
         window.localStorage.removeItem(keys.watermark)
       },
       {
         language: languageStorageKey,
         viewMode: viewModeStorageKey,
-        pageNumbersPreferences: pageNumbersPreferencesStorageKey,
         watermark: watermarkStorageKey,
       },
     )
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await useDefaultPageNumbersStyle()
     await openPdfFromDisk("page-numbers.pdf", blankPdf())
     await renderedPage()
   })
@@ -97,29 +121,62 @@ describe("TFolio page numbers", () => {
     })
   })
 
-  it("hides the position control in double-sided mode and validates a range", async () => {
+  it("disables the position control in double-sided mode and validates a range", async () => {
     await openPageNumbersDialog()
 
-    // Single-sided offers a position; double-sided mirrors by binding instead.
-    await expect($("//button[normalize-space()='Bottom centre']")).toBeDisplayed()
+    // Single-sided offers a position; double-sided mirrors by binding instead,
+    // so the control stays in place but stops taking a choice.
+    const centre = $("//button[normalize-space()='Bottom centre']")
+    await expect(centre).toBeEnabled()
     await $("//button[normalize-space()='Double-sided']").click()
-    await expect(
-      $("//button[normalize-space()='Bottom centre']"),
-    ).not.toBeDisplayed()
+    await expect(centre).toBeDisabled()
 
-    // Turning off "number every page" reveals the range, and a backwards range
-    // holds the apply button until it is valid. The fixture is one page, so a
-    // valid range is 1–1.
-    await $("[data-testid='page-numbers-all']").click()
+    // A backwards range holds the apply button until it is valid. The fixture
+    // is one page, so a valid range is 1–1.
     const from = $("[data-testid='page-numbers-from']")
     const to = $("[data-testid='page-numbers-to']")
-    await from.waitForDisplayed()
     await from.setValue("5")
     await to.setValue("1")
     await expect($("[data-testid='page-numbers-apply']")).toBeDisabled()
 
     await from.setValue("1")
     await expect($("[data-testid='page-numbers-apply']")).toBeEnabled()
+  })
+
+  it("remembers the style for the next document", async () => {
+    await useStoredPageNumbersStyle()
+    await openPageNumbersDialog()
+    // The stored style arrives a round trip after the dialog opens, and the
+    // file outlives the suite — so read what it left and apply the *other*
+    // mode, which no earlier run can have set for us.
+    await browser.pause(500)
+    const single = $("//button[normalize-space()='Single-sided']")
+    const wanted =
+      (await single.getAttribute("aria-pressed")) === "true"
+        ? "Double-sided"
+        : "Single-sided"
+
+    await $(`//button[normalize-space()='${wanted}']`).click()
+    await $("[data-testid='page-numbers-apply']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 30_000,
+    })
+
+    // A reload drops everything this WebView held, so what the next document's
+    // dialog opens on can only have come from the user-level file the backend
+    // keeps. A second document also has no numbers of its own to read instead.
+    await browser.refresh()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await useStoredPageNumbersStyle()
+    await openPdfFromDisk("page-numbers-style.pdf", blankPdf())
+    await renderedPage()
+    await openPageNumbersDialog()
+
+    await expect($(`//button[normalize-space()='${wanted}']`)).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
   })
 
   it("replaces and explicitly removes as single history steps", async () => {

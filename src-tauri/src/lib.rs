@@ -1,4 +1,5 @@
 mod pdfium;
+mod preferences;
 mod recent;
 
 use pdfium::{
@@ -9,6 +10,7 @@ use pdfium::{
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
     reorder_pdf_pages, restore_pdf_pages, save_pdf, PdfiumState,
 };
+use preferences::{page_numbers_preferences, set_page_numbers_preferences, Preferences};
 use recent::{recent_pdfs, RecentFiles};
 use tauri::Manager;
 
@@ -33,6 +35,7 @@ pub fn run() {
             pdfium.approve_paths(recent.stored().iter());
             app.manage(pdfium);
             app.manage(recent);
+            app.manage(Preferences::load(app.handle()));
             Ok(())
         })
         // Recorded on the Rust side of the boundary, because this is the only
@@ -64,6 +67,8 @@ pub fn run() {
             remove_pdf_watermark,
             apply_pdf_page_numbers,
             remove_pdf_page_numbers,
+            page_numbers_preferences,
+            set_page_numbers_preferences,
             reorder_pdf_pages,
             delete_pdf_pages,
             restore_pdf_pages,

@@ -86,10 +86,9 @@ fn test_engine() -> &'static PdfiumEngine {
             crate::pdfium::font::CJK_FONT_NAME,
         )),
         cjk_font: OnceLock::new(),
-        serif_cjk_font_path: Some(crate::pdfium::font::bundled_font_path(
-            crate::pdfium::font::SERIF_CJK_FONT_NAME,
-        )),
-        serif_cjk_font: OnceLock::new(),
+        // Resolved from the system's own fonts on the first apply, exactly as
+        // the app resolves it.
+        page_number_font: OnceLock::new(),
         approved_paths: Mutex::new(HashSet::new()),
     })
 }
@@ -3985,6 +3984,10 @@ fn page_numbers_config() -> PageNumbersConfig {
         // Off by default in the fixtures, so a test asserts a colour only when
         // it means to; `smart_color_flips_on_the_backdrop` turns it on.
         smart_color: false,
+        // Likewise: every fixture page is numbered until a test says otherwise,
+        // which is also the pair of rules that asks for no render at all.
+        blank_numbered: true,
+        blank_counted: true,
     }
 }
 
@@ -4476,6 +4479,152 @@ fn smart_colour_resamples_the_backdrop_not_its_own_label() {
         "the number must stay black after a resampling rebuild"
     );
     assert_eq!(bright, 0, "and never flip to white on its own ink");
+}
+
+/// Three pages where the middle one prints nothing the eye can see and the
+/// others carry a black band clear of the strip a page number sits in.
+fn blank_middle_page_pdf() -> Vec<u8> {
+    let mut objects = vec![
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>\nendobj\n".to_string(),
+    ];
+
+    for page in 0..3 {
+        objects.push(format!(
+            "{} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents {} 0 R >>\nendobj\n",
+            3 + page,
+            6 + page,
+        ));
+    }
+
+    for page in 0..3 {
+        // The empty page draws in white rather than drawing nothing, so it has
+        // an object of its own: the blank test then has to render it to find out
+        // it is blank, which is the path these tests are about.
+        let content = if page == 1 {
+            "1 1 1 rg\n40 150 120 100 re f\n".to_string()
+        } else {
+            "0 0 0 rg\n40 150 120 100 re f\n".to_string()
+        };
+
+        objects.push(format!(
+            "{} 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            6 + page,
+            content.len(),
+        ));
+    }
+
+    build_pdf(&objects)
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn blank_pages_can_leave_the_numbering_or_only_its_ink() {
+    let engine = test_engine();
+    let document = engine
+        .open(blank_middle_page_pdf())
+        .expect("PDFium should open the blank-middle fixture");
+
+    // Counted but not numbered: the empty page keeps its place, so the page
+    // after it still prints 3.
+    let mut silent = page_numbers_config();
+    silent.blank_numbered = false;
+
+    engine
+        .apply_page_numbers(document.id, silent)
+        .expect("PDFium should number around the blank page");
+
+    assert!(extracted_text(engine, document.id, 1).contains('1'));
+    assert!(
+        !extracted_text(engine, document.id, 2).contains('—'),
+        "an unnumbered blank page should carry no label"
+    );
+    assert!(extracted_text(engine, document.id, 3).contains('3'));
+
+    // Neither counted nor numbered: the numbering closes up over it. This also
+    // re-reads a page the first apply left a label on — pages 1 and 3 — and
+    // must still see them as printed pages rather than as its own ink.
+    let mut skipped = page_numbers_config();
+    skipped.blank_numbered = false;
+    skipped.blank_counted = false;
+
+    engine
+        .apply_page_numbers(document.id, skipped)
+        .expect("PDFium should renumber without the blank page");
+
+    assert!(extracted_text(engine, document.id, 1).contains('1'));
+    assert!(!extracted_text(engine, document.id, 2).contains('—'));
+    assert!(
+        extracted_text(engine, document.id, 3).contains('2'),
+        "the page after a skipped blank should take its number"
+    );
+}
+
+/// A note is an annotation, and annotations are no part of a page's object
+/// count — but they are drawn, so a page the reader has written on is a page
+/// with something on it.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_page_carrying_only_an_annotation_is_not_blank() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    engine
+        .add_text_note(
+            document.id,
+            2,
+            &note_origin(20.0, 100.0),
+            "note",
+            &text_note_style(24.0),
+        )
+        .expect("PDFium should add the note");
+
+    let mut skipped = page_numbers_config();
+    skipped.blank_numbered = false;
+    skipped.blank_counted = false;
+
+    engine
+        .apply_page_numbers(document.id, skipped)
+        .expect("PDFium should number the document");
+
+    assert!(
+        !extracted_text(engine, document.id, 1).contains('—'),
+        "the page with nothing on it takes no number"
+    );
+    assert!(
+        extracted_text(engine, document.id, 2).contains('1'),
+        "the page with a note on it takes the first one"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_page_stays_blank_under_a_number_this_session_drew() {
+    let engine = test_engine();
+    let document = engine
+        .open(blank_middle_page_pdf())
+        .expect("PDFium should open the blank-middle fixture");
+
+    // Number every page first, so the empty page carries a label of ours.
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number every page");
+    assert!(extracted_text(engine, document.id, 2).contains('—'));
+
+    let mut skipped = page_numbers_config();
+    skipped.blank_numbered = false;
+    skipped.blank_counted = false;
+
+    engine
+        .apply_page_numbers(document.id, skipped)
+        .expect("PDFium should renumber the document");
+
+    // The blank test reads the page above its own number's band, so the label
+    // the first apply drew there cannot make the page look printed-on.
+    assert!(!extracted_text(engine, document.id, 2).contains('—'));
+    assert!(extracted_text(engine, document.id, 3).contains('2'));
 }
 
 #[test]

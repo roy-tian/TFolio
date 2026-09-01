@@ -1,15 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test"
 
 import {
+  clampPageNumbersStart,
+  draftFirstPrinted,
   draftFromConfig,
   draftFromPreferences,
   defaultPageNumbersPreferences,
+  isPageNumbersPreferences,
   pageNumbersLabel,
-  pageNumbersPreferencesStorageKey,
+  pageNumbersPreferences,
   parsePageNumbersDraft,
-  readStoredPageNumbersPreferences,
   samePageNumbersConfig,
-  storePageNumbersPreferences,
   type PageNumbersConfig,
   type PageNumbersDraft,
 } from "@/lib/pageNumbers"
@@ -21,6 +22,8 @@ function config(overrides: Partial<PageNumbersConfig> = {}): PageNumbersConfig {
     range: null,
     smartColor: true,
     start: null,
+    blankNumbered: true,
+    blankCounted: true,
     ...overrides,
   }
 }
@@ -30,7 +33,8 @@ function draft(overrides: Partial<PageNumbersDraft> = {}): PageNumbersDraft {
     mode: "single",
     position: "bottomCenter",
     smartColor: true,
-    allPages: true,
+    blankNumbered: true,
+    blankCounted: true,
     rangeFrom: "",
     rangeTo: "",
     start: "",
@@ -39,7 +43,7 @@ function draft(overrides: Partial<PageNumbersDraft> = {}): PageNumbersDraft {
 }
 
 describe("parsePageNumbersDraft", () => {
-  it("numbers every page when the range is off", () => {
+  it("numbers every page when both ends of the range are blank", () => {
     const { config: parsed, error } = parsePageNumbersDraft(draft(), 10)
 
     expect(error).toBeNull()
@@ -48,7 +52,7 @@ describe("parsePageNumbersDraft", () => {
 
   it("reads a valid range", () => {
     const { config: parsed, error } = parsePageNumbersDraft(
-      draft({ allPages: false, rangeFrom: "2", rangeTo: "4" }),
+      draft({ rangeFrom: "2", rangeTo: "4" }),
       10,
     )
 
@@ -56,13 +60,33 @@ describe("parsePageNumbersDraft", () => {
     expect(parsed?.range).toEqual([2, 4])
   })
 
+  it("reads the whole document as no range at all", () => {
+    const { config: parsed, error } = parsePageNumbersDraft(
+      draft({ rangeFrom: "1", rangeTo: "10" }),
+      10,
+    )
+
+    expect(error).toBeNull()
+    expect(parsed?.range).toBeNull()
+  })
+
+  it("fills a blank end of the range from the document", () => {
+    expect(parsePageNumbersDraft(draft({ rangeFrom: "3" }), 10).config?.range).toEqual(
+      [3, 10],
+    )
+    expect(parsePageNumbersDraft(draft({ rangeTo: "4" }), 10).config?.range).toEqual([
+      1, 4,
+    ])
+  })
+
   it("rejects an unusable range", () => {
     const cases: PageNumbersDraft[] = [
-      draft({ allPages: false, rangeFrom: "", rangeTo: "4" }),
-      draft({ allPages: false, rangeFrom: "0", rangeTo: "4" }),
-      draft({ allPages: false, rangeFrom: "5", rangeTo: "4" }),
-      draft({ allPages: false, rangeFrom: "1", rangeTo: "11" }),
-      draft({ allPages: false, rangeFrom: "1.5", rangeTo: "4" }),
+      draft({ rangeFrom: "0", rangeTo: "4" }),
+      draft({ rangeFrom: "5", rangeTo: "4" }),
+      draft({ rangeFrom: "1", rangeTo: "11" }),
+      draft({ rangeFrom: "1.5", rangeTo: "4" }),
+      draft({ rangeFrom: "11" }),
+      draft({ rangeTo: "0" }),
     ]
 
     for (const value of cases) {
@@ -76,14 +100,45 @@ describe("parsePageNumbersDraft", () => {
     expect(parsePageNumbersDraft(draft({ start: "  " }), 10).config?.start).toBeNull()
   })
 
-  it("reads and bounds a custom start", () => {
+  it("reads a custom start, bounded by the document", () => {
     expect(parsePageNumbersDraft(draft({ start: "10" }), 10).config?.start).toBe(10)
 
-    for (const start of ["0", "-1", "100000", "abc", "1.5"]) {
+    for (const start of ["0", "-1", "11", "100000", "abc", "1.5"]) {
       const { config: parsed, error } = parsePageNumbersDraft(draft({ start }), 10)
       expect(parsed).toBeNull()
       expect(error).toBe("start")
     }
+  })
+
+  it("gives an uncounted blank page no number to print", () => {
+    const parsed = parsePageNumbersDraft(
+      draft({ blankCounted: false, blankNumbered: true }),
+      10,
+    ).config
+
+    expect(parsed?.blankCounted).toBe(false)
+    expect(parsed?.blankNumbered).toBe(false)
+  })
+})
+
+describe("clampPageNumbersStart", () => {
+  it("snaps a start back into the document", () => {
+    expect(clampPageNumbersStart("11", 10)).toBe("10")
+    expect(clampPageNumbersStart("100000", 10)).toBe("10")
+    expect(clampPageNumbersStart("0", 10)).toBe("1")
+    expect(clampPageNumbersStart("-4", 10)).toBe("1")
+    expect(clampPageNumbersStart(" 1.5 ", 10)).toBe("2")
+  })
+
+  it("leaves a start the document reaches alone", () => {
+    expect(clampPageNumbersStart("1", 10)).toBe("1")
+    expect(clampPageNumbersStart("10", 10)).toBe("10")
+  })
+
+  it("keeps a blank field blank, and anything unreadable as it is", () => {
+    expect(clampPageNumbersStart("", 10)).toBe("")
+    expect(clampPageNumbersStart("   ", 10)).toBe("")
+    expect(clampPageNumbersStart("abc", 10)).toBe("abc")
   })
 })
 
@@ -99,6 +154,9 @@ describe("samePageNumbersConfig", () => {
     expect(samePageNumbersConfig(config(), config({ smartColor: false }))).toBe(
       false,
     )
+    expect(samePageNumbersConfig(config(), config({ blankCounted: false }))).toBe(
+      false,
+    )
     expect(samePageNumbersConfig(null, null)).toBe(true)
     expect(samePageNumbersConfig(config(), null)).toBe(false)
   })
@@ -107,73 +165,79 @@ describe("samePageNumbersConfig", () => {
 describe("draft round trips", () => {
   it("restores an existing config into an editable draft", () => {
     const source = config({ position: "bottomRight", range: [2, 5], start: 3 })
-    const { config: parsed } = parsePageNumbersDraft(draftFromConfig(source), 10)
+    const { config: parsed } = parsePageNumbersDraft(draftFromConfig(source, 10), 10)
 
     expect(parsed).toEqual(source)
   })
 
-  it("opens fresh from preferences with every page numbered", () => {
-    const fresh = draftFromPreferences(defaultPageNumbersPreferences)
+  it("opens fresh from preferences on the whole document", () => {
+    const fresh = draftFromPreferences(defaultPageNumbersPreferences, 10)
 
-    expect(fresh.allPages).toBe(true)
-    expect(fresh.start).toBe("")
+    expect(fresh.rangeFrom).toBe("1")
+    expect(fresh.rangeTo).toBe("10")
+    expect(fresh.start).toBe("1")
     expect(fresh.smartColor).toBe(true)
+    expect(fresh.blankNumbered).toBe(true)
+    expect(fresh.blankCounted).toBe(true)
+    expect(parsePageNumbersDraft(fresh, 10).config?.range).toBeNull()
+  })
+
+  it("spells the document out for a config that numbers every page", () => {
+    expect(draftFromConfig(config(), 10)).toMatchObject({
+      rangeFrom: "1",
+      rangeTo: "10",
+    })
+  })
+
+  it("leaves the range blank with no document to measure", () => {
+    const fresh = draftFromPreferences(defaultPageNumbersPreferences, 0)
+
+    expect(fresh.rangeFrom).toBe("")
+    expect(fresh.rangeTo).toBe("")
   })
 })
 
-describe("preferences persistence", () => {
-  // The Bun runner has no DOM, so stand up an in-memory localStorage the way
-  // `watermark.test.ts` does for its own migration test.
-  let previousWindow: PropertyDescriptor | undefined
-  let store: Map<string, string>
-
-  beforeEach(() => {
-    previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
-    store = new Map<string, string>()
-
-    Object.defineProperty(globalThis, "window", {
-      configurable: true,
-      value: {
-        localStorage: {
-          getItem: (key: string) => store.get(key) ?? null,
-          setItem: (key: string, value: string) => store.set(key, value),
-          removeItem: (key: string) => store.delete(key),
-        },
-      },
-    })
-  })
-
-  afterEach(() => {
-    if (previousWindow) {
-      Object.defineProperty(globalThis, "window", previousWindow)
-    } else {
-      Reflect.deleteProperty(globalThis, "window")
-    }
-  })
-
-  it("stores only the style, never the document-relative range or start", () => {
-    storePageNumbersPreferences(
-      config({ position: "bottomRight", range: [2, 4], start: 9, smartColor: false }),
-    )
-
-    expect(JSON.parse(store.get(pageNumbersPreferencesStorageKey)!)).toEqual({
+describe("preferences", () => {
+  it("keeps only the style, never the document-relative range or start", () => {
+    expect(
+      pageNumbersPreferences(
+        config({
+          position: "bottomRight",
+          range: [2, 4],
+          start: 9,
+          smartColor: false,
+          blankNumbered: false,
+        }),
+      ),
+    ).toEqual({
       mode: "single",
       position: "bottomRight",
       smartColor: false,
-    })
-    expect(readStoredPageNumbersPreferences()).toEqual({
-      mode: "single",
-      position: "bottomRight",
-      smartColor: false,
+      blankNumbered: false,
+      blankCounted: true,
     })
   })
 
-  it("rejects a malformed record", () => {
-    store.set(pageNumbersPreferencesStorageKey, "{ not json")
-    expect(readStoredPageNumbersPreferences()).toBeNull()
+  it("rejects a record the stored file could have been edited into", () => {
+    const stored = pageNumbersPreferences(config())
 
-    store.set(pageNumbersPreferencesStorageKey, JSON.stringify({ mode: "triple" }))
-    expect(readStoredPageNumbersPreferences()).toBeNull()
+    expect(isPageNumbersPreferences(stored)).toBe(true)
+    expect(isPageNumbersPreferences(null)).toBe(false)
+    expect(isPageNumbersPreferences({ ...stored, mode: "triple" })).toBe(false)
+    expect(isPageNumbersPreferences({ ...stored, blankCounted: "yes" })).toBe(false)
+    // A record from before the blank-page rules existed is not one either: the
+    // dialog falls back to its defaults rather than to half a style.
+    const { blankCounted, ...older } = stored
+    expect(isPageNumbersPreferences(older)).toBe(false)
+  })
+})
+
+describe("draftFirstPrinted", () => {
+  it("prefers a custom start, then the range's first page, then one", () => {
+    expect(draftFirstPrinted(draft())).toBe(1)
+    expect(draftFirstPrinted(draft({ rangeFrom: "4" }))).toBe(4)
+    expect(draftFirstPrinted(draft({ rangeFrom: "4", start: "12" }))).toBe(12)
+    expect(draftFirstPrinted(draft({ start: "not a number" }))).toBe(1)
   })
 })
 

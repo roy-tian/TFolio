@@ -15,8 +15,8 @@ use tauri::AppHandle;
 
 use super::{
     font::{
-        cjk_font_path, needs_embedded_font, regular_cjk_font, serif_cjk_font_path, standard_face,
-        subset_for, StandardFace,
+        cjk_font_path, needs_embedded_font, page_number_face, regular_cjk_font, standard_face,
+        subset_for, StandardFace, PAGE_NUMBER_GLYPHS,
     },
     geometry::{
         annotation_color, page_rect_to_pdfium, page_rotation_degrees, quad_points_from_rect,
@@ -27,8 +27,9 @@ use super::{
     },
     library::bind_pdfium,
     page_numbers::{
-        average_luminance, ink_color, page_number_center, page_number_display_box, DisplayBox,
-        PageNumberPlacement, PageNumbersConfig, FONT_SIZE as PAGE_NUMBER_FONT_SIZE,
+        average_luminance, blank_scan_box, ink_color, is_blank_sample, page_number_center,
+        page_number_display_box, DisplayBox, PageNumberPlacement, PageNumbering, PageNumbersConfig,
+        FONT_SIZE as PAGE_NUMBER_FONT_SIZE,
     },
     size_limit_error,
     watermark::{
@@ -62,6 +63,10 @@ const PAGE_NUMBER_SAMPLE_DPI: f32 = 24.0;
 // A little slack around the label's box, in display points, so the sample reads
 // the drop the number sits on rather than a hairline of it.
 const PAGE_NUMBER_SAMPLE_PADDING: f32 = 4.0;
+// The blank test reads a whole page rather than one label's drop, and runs on
+// every page of a document, so it renders coarser still: at this resolution a
+// hairline rule is a grey pixel, which is all the test needs to see.
+const PAGE_BLANK_SCAN_DPI: f32 = 18.0;
 
 #[derive(Debug, PartialEq)]
 struct DisplayRect {
@@ -199,12 +204,12 @@ struct WatermarkResources {
     embedded: Option<Vec<u8>>,
 }
 
-/// The page-number layer's inputs to a rebuild: the config and the bundled
-/// serif face bytes, already instanced and subset by the font pipeline, so they
-/// are embedded whole. The font token is loaded inside the rebuild, once.
+/// The page-number layer's inputs to a rebuild: the config and the face the
+/// system offered, already cut to the label's glyphs, so it is embedded as it
+/// stands. The font token is loaded inside the rebuild, once.
 struct PageNumbersResources {
     config: PageNumbersConfig,
-    serif: Vec<u8>,
+    face: Vec<u8>,
 }
 
 /// Where an unrotated, top-left page rectangle lands after the PDF's intrinsic
@@ -571,13 +576,10 @@ pub(super) struct PdfiumEngine {
     /// so it is not read or resolved at startup — and once resolved it is kept,
     /// because every CJK note subsets it again.
     cjk_font: OnceLock<Vec<u8>>,
-    /// Where the bundled serif face — the page-number face — is, resolved at
-    /// startup for the same reason `cjk_font_path` is.
-    serif_cjk_font_path: Option<PathBuf>,
-    /// The serif face bytes, read on the first page-number apply that needs
-    /// them and kept. Already instanced and subset by `download-fonts.mjs`, so
-    /// unlike the sans face this is embedded whole, not cut again.
-    serif_cjk_font: OnceLock<Vec<u8>>,
+    /// The page-number face, subset to the label's glyphs. Resolved from the
+    /// system's own fonts on the first apply that needs it — a scan of every
+    /// installed face, so it is done once and kept — and embedded as it is.
+    page_number_font: OnceLock<Vec<u8>>,
     /// Paths something outside the WebView produced — a drop the window saw, a
     /// pick a dialog returned. `open_pdf_from_path` acts only on these: a path
     /// is a string any page code can make up, and opening one binds it as the
@@ -602,8 +604,7 @@ impl PdfiumState {
             // it, so a missing font cannot stop the app from opening PDFs.
             cjk_font_path: cjk_font_path(app),
             cjk_font: OnceLock::new(),
-            serif_cjk_font_path: serif_cjk_font_path(app),
-            serif_cjk_font: OnceLock::new(),
+            page_number_font: OnceLock::new(),
             approved_paths: Mutex::new(HashSet::new()),
         })))
     }
@@ -1044,24 +1045,9 @@ impl PdfiumEngine {
                 return Err("a rectangle effect must stay inside its page".into());
             }
 
-            let scale = (RECT_EFFECT_DPI / POINTS_PER_INCH)
-                .min(MAX_RENDER_WIDTH as f32 / displayed_width)
-                .min(MAX_RENDER_HEIGHT as f32 / displayed_height);
-            let render_width = (displayed_width * scale)
-                .round()
-                .clamp(1.0, MAX_RENDER_WIDTH as f32) as i32;
-            let config = PdfRenderConfig::new()
-                .set_target_width(render_width)
-                .set_maximum_width(MAX_RENDER_WIDTH)
-                .set_maximum_height(MAX_RENDER_HEIGHT)
-                .render_annotations(true)
-                .render_form_data(true);
-            let rendered = page
-                .render_with_config(&config)
-                .and_then(|bitmap| bitmap.as_image())
-                .map_err(|error| {
-                    format!("PDFium could not capture page {page_number} for an effect: {error}")
-                })?;
+            let rendered = Self::render_page_sample(&page, RECT_EFFECT_DPI).map_err(|error| {
+                format!("PDFium could not capture page {page_number} for an effect: {error}")
+            })?;
 
             (
                 rendered,
@@ -1385,28 +1371,34 @@ impl PdfiumEngine {
             .ok_or_else(|| "the bundled font could not be cached".to_string())
     }
 
-    /// The bundled serif face bytes, read once and kept. The font pipeline has
-    /// already instanced it to Regular and cut it to the digit and dash glyphs,
-    /// so — unlike the sans face — nothing is instanced or subset here.
-    fn serif_cjk_font_bytes(&self) -> Result<&[u8], String> {
-        if let Some(bytes) = self.serif_cjk_font.get() {
+    /// The page-number face's bytes, resolved once and kept. Already cut to the
+    /// label's glyphs by the chain that found it, so nothing is subset here —
+    /// except in the fallback, where the bundled sans is cut like any note's.
+    ///
+    /// That fallback is what keeps a host with no serif of its own — a bare
+    /// container, a stripped Linux — numbering its pages rather than failing the
+    /// apply outright; the system's own face is still what is tried first.
+    fn page_number_font_bytes(&self) -> Result<&[u8], String> {
+        if let Some(bytes) = self.page_number_font.get() {
             return Ok(bytes);
         }
 
-        let path = self.serif_cjk_font_path.as_ref().ok_or_else(|| {
-            "the bundled serif font is missing; run `bun run fonts:download`".to_string()
-        })?;
-        let source = fs::read(path)
-            .map_err(|error| format!("the bundled serif font could not be read: {error}"))?;
+        let face = match page_number_face() {
+            Ok(face) => face,
+            Err(missing) => self
+                .cjk_font_bytes()
+                .and_then(|bundled| subset_for(bundled, PAGE_NUMBER_GLYPHS))
+                .map_err(|_| missing)?,
+        };
 
         // Two applies can reach here at once; whichever stores first wins and
         // the other copy is dropped, both then seeing the same bytes.
-        let _ = self.serif_cjk_font.set(source);
+        let _ = self.page_number_font.set(face);
 
-        self.serif_cjk_font
+        self.page_number_font
             .get()
             .map(Vec::as_slice)
-            .ok_or_else(|| "the bundled serif font could not be cached".to_string())
+            .ok_or_else(|| "the page-number font could not be cached".to_string())
     }
 
     /// Writes `text` at `origin` as a stamp annotation carrying one text object
@@ -1823,6 +1815,9 @@ impl PdfiumEngine {
         let mut plans = Vec::with_capacity(page_count as usize);
         let mut measured_metrics: Vec<((u32, u32, u32), WatermarkMetrics)> = Vec::new();
         let mut document_objects = 0usize;
+        // The sequence is walked, not indexed: a skipped blank page shifts every
+        // number after it, so the pages have to be visited in order.
+        let mut numbering = page_numbers.map(|(config, _)| PageNumbering::new(config));
 
         for page_number in 1..=page_count {
             let page = entry
@@ -1894,15 +1889,33 @@ impl PdfiumEngine {
                 None => None,
             };
 
-            let page_number_label = match page_numbers {
-                Some((config, font)) if config.covers(page_number) => {
+            // Taken before the plan is built, because the walk has to advance
+            // once per page whether or not that page ends up printing anything.
+            let printed = match (page_numbers, numbering.as_mut()) {
+                (Some((config, _)), Some(numbering)) => {
+                    // A page with nothing of its own on it — no content objects
+                    // and no annotations, which render too — is blank without
+                    // being rendered. The rest are sampled only when one of the
+                    // two blank rules can change what this page gets, which a
+                    // page outside the range never is.
+                    let blank = config.needs_blank_scan()
+                        && config.covers(page_number)
+                        && ((base_objects == 0 && page.annotations().is_empty())
+                            || Self::page_is_blank(&page)?);
+
+                    numbering.advance(page_number, blank)
+                }
+                _ => None,
+            };
+
+            let page_number_label = match (page_numbers, printed) {
+                (Some((config, font)), Some(text)) => {
                     let page_rotation = page_rotation_degrees(&page);
                     // Page numbers are always upright as the reader sees them,
                     // so the object is turned by exactly the negative of the
                     // page's own `/Rotate`, which a render then puts back.
                     let object_rotation = -page_rotation;
                     let (unrotated_width, unrotated_height) = unrotated_page_size(&page);
-                    let text = config.label(page_number);
                     let anchor = config.anchor(page_number);
 
                     // Measure the label exactly as it will be built, so the
@@ -1966,6 +1979,69 @@ impl PdfiumEngine {
         Ok(plans)
     }
 
+    /// A whole page rendered coarsely for sampling: `dpi` under the same
+    /// ceilings a viewer render honours. Annotations and form data are drawn
+    /// because every sampler here asks what the reader sees, not what the
+    /// content stream alone holds. The caller has already established that the
+    /// page's dimensions are finite and positive.
+    fn render_page_sample(page: &PdfPage<'_>, dpi: f32) -> Result<DynamicImage, PdfiumError> {
+        let display_width = page.width().value;
+        let display_height = page.height().value;
+        let scale = (dpi / POINTS_PER_INCH)
+            .min(MAX_RENDER_WIDTH as f32 / display_width)
+            .min(MAX_RENDER_HEIGHT as f32 / display_height);
+        let render_width = (display_width * scale)
+            .round()
+            .clamp(1.0, MAX_RENDER_WIDTH as f32) as i32;
+        let config = PdfRenderConfig::new()
+            .set_target_width(render_width)
+            .set_maximum_width(MAX_RENDER_WIDTH)
+            .set_maximum_height(MAX_RENDER_HEIGHT)
+            .render_annotations(true)
+            .render_form_data(true);
+
+        page.render_with_config(&config)
+            .and_then(|bitmap| bitmap.as_image())
+    }
+
+    /// Whether a page has nothing printed on it, read from a coarse render of
+    /// everything above the band its own number would sit in.
+    ///
+    /// The render is of the page as it stands, which during a replacement still
+    /// carries this session's own marks — the number band is skipped for
+    /// exactly that reason, but a watermark covers the whole page and is not.
+    /// So a blank page under a watermark reads as printed, which is the honest
+    /// answer: the reader put that mark there.
+    ///
+    /// A page too small to measure is not blank: the test exists to skip empty
+    /// separator sheets, and refusing to guess about an odd page leaves it
+    /// numbered like every other.
+    fn page_is_blank(page: &PdfPage<'_>) -> Result<bool, String> {
+        let display_width = page.width().value;
+        let display_height = page.height().value;
+
+        if !display_width.is_finite() || !display_height.is_finite() {
+            return Ok(false);
+        }
+
+        let Some(region) = blank_scan_box(display_width, display_height) else {
+            return Ok(false);
+        };
+
+        let rendered = Self::render_page_sample(page, PAGE_BLANK_SCAN_DPI)
+            .map_err(|error| format!("PDFium could not sample a page for blankness: {error}"))?;
+
+        let height = ((region.height / display_height) * rendered.height() as f32)
+            .ceil()
+            .clamp(1.0, rendered.height() as f32) as u32;
+        let sample = rendered
+            .crop_imm(0, 0, rendered.width(), height)
+            .into_rgba8()
+            .into_raw();
+
+        Ok(is_blank_sample(&sample))
+    }
+
     /// Averages the relative luminance of the drop a page number will cover, at
     /// a low sampling resolution, and returns the ink that stays legible on it —
     /// white on a dark drop, black otherwise. A page with no usable dimensions,
@@ -1984,21 +2060,7 @@ impl PdfiumEngine {
 
         // Far cheaper than M5's print-resolution capture: the decision is a
         // single average, so a handful of pixels across the label suffices.
-        let scale = (PAGE_NUMBER_SAMPLE_DPI / POINTS_PER_INCH)
-            .min(MAX_RENDER_WIDTH as f32 / display_width)
-            .min(MAX_RENDER_HEIGHT as f32 / display_height);
-        let render_width = (display_width * scale)
-            .round()
-            .clamp(1.0, MAX_RENDER_WIDTH as f32) as i32;
-        let config = PdfRenderConfig::new()
-            .set_target_width(render_width)
-            .set_maximum_width(MAX_RENDER_WIDTH)
-            .set_maximum_height(MAX_RENDER_HEIGHT)
-            .render_annotations(true)
-            .render_form_data(true);
-        let rendered = page
-            .render_with_config(&config)
-            .and_then(|bitmap| bitmap.as_image())
+        let rendered = Self::render_page_sample(page, PAGE_NUMBER_SAMPLE_DPI)
             .map_err(|error| format!("PDFium could not sample a page for smart colour: {error}"))?;
 
         let scale_x = rendered.width() as f32 / display_width;
@@ -2124,9 +2186,9 @@ impl PdfiumEngine {
                     entry
                         .document
                         .fonts_mut()
-                        .load_true_type_from_bytes(&resources.serif, true)
+                        .load_true_type_from_bytes(&resources.face, true)
                         .map_err(|error| {
-                            format!("PDFium rejected the bundled serif font: {error}")
+                            format!("PDFium rejected the page-number font: {error}")
                         })?,
                 ),
                 None => None,
@@ -2444,16 +2506,16 @@ impl PdfiumEngine {
         })
     }
 
-    /// The page-number layer's rebuild inputs from a stored config: the bundled
-    /// serif bytes, which are kilobytes and cached, so this is cheap enough to
-    /// run under the lock.
+    /// The page-number layer's rebuild inputs from a stored config: the face
+    /// bytes, which are kilobytes and cached after the first resolve, so this is
+    /// cheap enough to run under the lock.
     fn page_numbers_resources(
         &self,
         config: &PageNumbersConfig,
     ) -> Result<PageNumbersResources, String> {
         Ok(PageNumbersResources {
             config: config.clone(),
-            serif: self.serif_cjk_font_bytes()?.to_vec(),
+            face: self.page_number_font_bytes()?.to_vec(),
         })
     }
 

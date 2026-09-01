@@ -63,6 +63,8 @@ function pageNumbersConfigValue(
     range: null,
     smartColor: true,
     start: null,
+    blankNumbered: true,
+    blankCounted: true,
     ...overrides,
   }
 }

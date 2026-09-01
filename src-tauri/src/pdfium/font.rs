@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    env,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -9,17 +9,60 @@ use allsorts::{
     font::{Font, MatchingPresentation},
     font_data::FontData,
     subset::{subset, CmapTarget, SubsetProfile},
-    tables::Fixed,
+    tables::{os2::Os2, Fixed, FontTableProvider},
+    tag,
     variations::instance,
 };
+use fontdb::{Database, Family, Query, Source, Stretch, Style, Weight};
 use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 pub(super) const CJK_FONT_NAME: &str = "NotoSansSC.ttf";
-/// The page-number serif face. Already instanced to Regular and cut to the
-/// digit/dash glyphs by `download-fonts.mjs`, so — unlike the sans face — it is
-/// embedded whole rather than subset again at runtime.
-pub(super) const SERIF_CJK_FONT_NAME: &str = "NotoSerifSC.ttf";
 const CJK_REGULAR_FONT_WEIGHT: i32 = 400;
+
+/// Every glyph a page-number label can carry: the ten digits, the em dash it
+/// wraps them in, and the space between. A face that misses one of them is not
+/// the page-number face, whatever its name.
+pub(super) const PAGE_NUMBER_GLYPHS: &str = "0123456789— ";
+
+/// The page-number face, tried in this order — the reader's own 宋体 first, then
+/// each platform's nearest Songti, then any serif at all. Nothing is bundled:
+/// the label is ten digits and a dash, which every desktop can already draw,
+/// and a Chinese system draws them in the face a Chinese document expects.
+///
+/// Localized family names are matched too, so a Chinese Windows that only calls
+/// the face 宋体 is found by the same list as an English one.
+const PAGE_NUMBER_FAMILIES: &[&str] = &[
+    // Windows
+    "SimSun",
+    "宋体",
+    "NSimSun",
+    "新宋体",
+    // macOS
+    "Songti SC",
+    "宋体-简",
+    "STSong",
+    "华文宋体",
+    "Songti TC",
+    // Linux distributions, where a Songti is a package rather than a given
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
+    "思源宋体",
+    "AR PL UMing CN",
+    "AR PL SungtiL GB",
+    // Any serif, since what is left to draw is Latin digits and a dash
+    "Noto Serif",
+    "Liberation Serif",
+    "Times New Roman",
+    "DejaVu Serif",
+    "FreeSerif",
+];
+
+/// Bits of the OS/2 `fsType` that forbid what embedding a subset in a PDF does:
+/// restricted licence (0x0002), no subsetting (0x0100), and bitmap-only
+/// embedding (0x0200). A face that sets one is skipped for the next candidate —
+/// this app puts other people's fonts inside the reader's documents, and the
+/// font itself is where that permission is recorded.
+const EMBEDDING_FORBIDDEN: u16 = 0x0002 | 0x0100 | 0x0200;
 
 /// One of the standard fonts a note may be set in.
 ///
@@ -61,11 +104,6 @@ pub(super) fn cjk_font_path(app: &AppHandle) -> Option<PathBuf> {
     font_path(app, CJK_FONT_NAME)
 }
 
-/// Where the bundled serif CJK font — the page-number face — is.
-pub(super) fn serif_cjk_font_path(app: &AppHandle) -> Option<PathBuf> {
-    font_path(app, SERIF_CJK_FONT_NAME)
-}
-
 /// Where a bundled font `name` is, searched the way `bind_pdfium` searches for
 /// the PDFium library so a dev build, a test and a bundle all find it. A
 /// `TFOLIO_FONT_PATH` directory overrides the search for every font; a file
@@ -104,6 +142,90 @@ pub(super) fn bundled_font_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// The page-number face as bytes PDFium can embed: the first family in the
+/// chain the system actually has, cut to the label's dozen glyphs.
+///
+/// Every candidate is held to what this use needs — TrueType outlines, since
+/// that is the only shape `load_true_type_from_bytes` describes correctly in the
+/// PDF it writes; every label glyph present, so no page prints a row of boxes;
+/// and an `fsType` that permits an embedded subset. A face that fails any of
+/// them is not an error, just the wrong candidate: the walk carries on.
+pub(super) fn page_number_face() -> Result<Vec<u8>, String> {
+    let mut database = Database::new();
+    database.load_system_fonts();
+
+    // The generic serif closes the chain: fontconfig, or the platform's own
+    // default, names a face the reader already reads text in.
+    let families: Vec<Family<'_>> = PAGE_NUMBER_FAMILIES
+        .iter()
+        .map(|name| Family::Name(name))
+        .chain([Family::Serif])
+        .collect();
+
+    for family in families {
+        let Some(id) = database.query(&Query {
+            families: &[family],
+            weight: Weight::NORMAL,
+            stretch: Stretch::Normal,
+            style: Style::Normal,
+        }) else {
+            continue;
+        };
+        let Some((source, index)) = database.face_source(id) else {
+            continue;
+        };
+        let bytes = match source {
+            Source::File(path) => match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            },
+            Source::Binary(data) => data.as_ref().as_ref().to_vec(),
+            Source::SharedFile(_, data) => data.as_ref().as_ref().to_vec(),
+        };
+
+        if let Ok(subset) = page_number_subset(&bytes, index as usize) {
+            return Ok(subset);
+        }
+    }
+
+    Err(
+        "no installed font can draw page numbers; install a serif font such as \
+         SimSun, Songti SC or Noto Serif"
+            .into(),
+    )
+}
+
+/// One candidate face, checked and cut, or the reason it is not usable.
+fn page_number_subset(font_bytes: &[u8], index: usize) -> Result<Vec<u8>, String> {
+    let font_data = ReadScope::new(font_bytes)
+        .read::<FontData<'_>>()
+        .map_err(|error| format!("the face could not be read: {error}"))?;
+    let provider = font_data
+        .table_provider(index)
+        .map_err(|error| format!("the face has no usable tables: {error}"))?;
+
+    if provider
+        .table_data(tag::GLYF)
+        .map_err(|error| format!("the face's outlines could not be read: {error}"))?
+        .is_none()
+    {
+        return Err("the face has no TrueType outlines".into());
+    }
+
+    let os2_data = provider
+        .read_table_data(tag::OS_2)
+        .map_err(|error| format!("the face has no OS/2 table: {error}"))?;
+    let os2 = ReadScope::new(&os2_data)
+        .read_dep::<Os2>(os2_data.len())
+        .map_err(|error| format!("the face's OS/2 table could not be parsed: {error}"))?;
+
+    if os2.fs_type & EMBEDDING_FORBIDDEN != 0 {
+        return Err("the face's licence forbids embedding a subset".into());
+    }
+
+    subset_face(font_bytes, index, PAGE_NUMBER_GLYPHS, true)
+}
+
 /// Resolves the bundled variable face to a static instance PDFium can embed.
 /// The source font's `wght` axis defaults to 100, and PDFium exposes no
 /// variation-axis selection when loading a font from bytes, so every requested
@@ -137,17 +259,32 @@ pub(super) fn regular_cjk_font(font_bytes: &[u8]) -> Result<Vec<u8>, String> {
 /// and a subset without one is accepted, embedded, saved, and drawn as a row of
 /// empty boxes — which is why `CmapTarget::Unicode` is named explicitly here.
 pub(super) fn subset_for(font_bytes: &[u8], text: &str) -> Result<Vec<u8>, String> {
+    subset_face(font_bytes, 0, text, false)
+}
+
+/// Cuts one face of `font_bytes` — a plain font or a collection member — down to
+/// just the glyphs `text` uses.
+///
+/// `require_coverage` refuses a face that would draw any of them as `.notdef`.
+/// The page-number chain asks for it, having a next candidate to try; a note's
+/// own text has none, and takes what the bundled face happens to hold.
+fn subset_face(
+    font_bytes: &[u8],
+    index: usize,
+    text: &str,
+    require_coverage: bool,
+) -> Result<Vec<u8>, String> {
     let font_data = ReadScope::new(font_bytes)
         .read::<FontData<'_>>()
-        .map_err(|error| format!("the bundled font could not be read: {error}"))?;
+        .map_err(|error| format!("the font could not be read: {error}"))?;
     let provider = font_data
-        .table_provider(0)
-        .map_err(|error| format!("the bundled font has no usable tables: {error}"))?;
+        .table_provider(index)
+        .map_err(|error| format!("the font has no usable tables: {error}"))?;
     let lookup_provider = font_data
-        .table_provider(0)
-        .map_err(|error| format!("the bundled font has no usable tables: {error}"))?;
+        .table_provider(index)
+        .map_err(|error| format!("the font has no usable tables: {error}"))?;
     let mut font = Font::new(lookup_provider)
-        .map_err(|error| format!("the bundled font could not be parsed: {error}"))?;
+        .map_err(|error| format!("the font could not be parsed: {error}"))?;
 
     // Glyph 0 is `.notdef` and allsorts requires it first and unrepeated. The
     // rest keep the order they were met in, so a subset is a function of the
@@ -159,6 +296,10 @@ pub(super) fn subset_for(font_bytes: &[u8], text: &str) -> Result<Vec<u8>, Strin
         let (glyph, _) =
             font.lookup_glyph_index(character, MatchingPresentation::NotRequired, None);
 
+        if require_coverage && glyph == 0 {
+            return Err(format!("the face cannot draw {character:?}"));
+        }
+
         // A character the font does not cover maps to `.notdef`, already present.
         if seen.insert(glyph) {
             glyphs.push(glyph);
@@ -166,16 +307,12 @@ pub(super) fn subset_for(font_bytes: &[u8], text: &str) -> Result<Vec<u8>, Strin
     }
 
     subset(&provider, &glyphs, &SubsetProfile::Pdf, CmapTarget::Unicode)
-        .map_err(|error| format!("the bundled font could not be subset: {error}"))
+        .map_err(|error| format!("the font could not be subset: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use allsorts::{
-        tables::{os2::Os2, FontTableProvider},
-        tag,
-    };
 
     #[test]
     fn latin_text_needs_no_embedded_font() {
@@ -216,6 +353,43 @@ mod tests {
         ReadScope::new(&subset)
             .read::<FontData<'_>>()
             .expect("read static font subset");
+    }
+
+    #[test]
+    fn the_page_number_face_is_embeddable_and_covers_the_label() {
+        // A machine with no font at all is a real answer, not a failed test —
+        // what is asserted here is what the chain hands back when it finds one.
+        let Ok(face) = page_number_face() else {
+            return;
+        };
+
+        let font_data = ReadScope::new(&face)
+            .read::<FontData<'_>>()
+            .expect("read the resolved face");
+        let provider = font_data
+            .table_provider(0)
+            .expect("read the resolved face's tables");
+
+        // A subset is a font of its own, so PDFium reads it at index 0 — and it
+        // has to still be the TrueType flavour the embed call promises.
+        assert!(provider
+            .table_data(tag::GLYF)
+            .expect("inspect the subset's outlines")
+            .is_some());
+
+        let mut font = Font::new(
+            font_data
+                .table_provider(0)
+                .expect("read the resolved face's tables"),
+        )
+        .expect("parse the resolved face");
+
+        for character in PAGE_NUMBER_GLYPHS.chars() {
+            let (glyph, _) =
+                font.lookup_glyph_index(character, MatchingPresentation::NotRequired, None);
+
+            assert_ne!(glyph, 0, "the subset should still draw {character:?}");
+        }
     }
 
     #[test]

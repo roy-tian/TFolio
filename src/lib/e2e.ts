@@ -8,9 +8,14 @@
  * `e2e` build: everywhere else the mode check is a compile-time constant and
  * the branch — hook and all — is dropped from the bundle.
  */
+import type { PageNumbersPreferences } from "@/lib/pageNumbers"
+
 export type E2eOverrides = {
   /** Stands in for the native open-file dialog: a path, or null for cancel. */
   pickPdfPath?: () => Promise<string | null>
+  /** Stands in for the stored page-number style, which outlives the app and so
+      would otherwise carry one spec's choices into the next. */
+  pageNumbersPreferences?: () => Promise<PageNumbersPreferences | null>
   /** Stands in for `open_pdf_from_path`, so a spec can hand the backend bytes
       with no path at all — the state the save key's disabled case needs. */
   openPdfFromPath?: (path: string) => Promise<unknown>

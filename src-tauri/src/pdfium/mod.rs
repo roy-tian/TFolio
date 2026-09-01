@@ -17,7 +17,7 @@ pub use commands::{
     reorder_pdf_pages, restore_pdf_pages, save_pdf,
 };
 pub use engine::PdfiumState;
-pub use page_numbers::PageNumbersConfig;
+pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};
 pub use watermark::WatermarkConfig;
 
 const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
