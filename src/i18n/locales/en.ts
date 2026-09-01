@@ -50,7 +50,6 @@ const en = {
     viewModeSingle: "Single page",
     viewModeBook: "Book",
     viewModeThumbnail: "Thumbnails",
-    viewModeFiles: "Files",
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
     rotate: "Rotate clockwise",
@@ -101,12 +100,14 @@ const en = {
     saveOwnedContent:
       "A document with a watermark or page numbers added this session can only be exported as a copy — they cannot be lifted once the file is closed",
     saveMerged:
-      "A document that merged other files can only be exported as a copy, never saved back over the first file",
+      "A document holding pages from another PDF can only be exported as a copy, never saved back over the file it was opened from",
     saveFailed: "This PDF could not be saved.",
     exportFilter: "PDF file",
     exportDefaultName: "annotated.pdf",
     exportFailed: "This PDF could not be exported.",
     failed: "That edit could not be applied.",
+    dropWhileEditing:
+      "Another page edit is still running — drop the PDF again in a moment.",
   },
   watermark: {
     open: "Watermark",
@@ -204,7 +205,6 @@ const en = {
     loading: "Opening PDF…",
     dropNow: "Drop to open this PDF",
     dropNowMerge: "Drop to add these PDFs",
-    appendHint: "The PDFs will be added to this document",
     fileTooLarge: "PDF files must be no larger than 512 MiB.",
     invalidFile: "Please choose a PDF file.",
     openFailed: "This PDF could not be opened.",
@@ -274,19 +274,6 @@ const en = {
     errorMerge: "These PDFs could not be merged.",
     errorTooMany_one: "At most {{count}} file can be merged at once.",
     errorTooMany_other: "At most {{count}} files can be merged at once.",
-  },
-  files: {
-    cardLabel: "File {{name}}",
-    pageCount_one: "{{count}} page",
-    pageCount_other: "{{count}} pages",
-    pageCountPadded_one: "{{count}} page (+{{pad}} blank)",
-    pageCountPadded_other: "{{count}} pages (+{{pad}} blank)",
-    deleteFile: "Remove {{name}}",
-    addFile: "Add a PDF",
-    addFileHint: "Click to choose a PDF to merge into this document",
-    smartPadding: "Odd-page file starts",
-    smartPaddingHint:
-      "Add a blank page before any file that would start on an even page, so each file begins on a right-hand page when printed double-sided",
   },
   bookmarks: {
     title: "Bookmarks",

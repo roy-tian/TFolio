@@ -1,4 +1,4 @@
-import { $, browser, expect } from "@wdio/globals"
+import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import { languageStorageKey } from "../../src/i18n/config"
@@ -7,8 +7,12 @@ import {
   appMenuItemEnabled,
   bandedPdf,
   clickAppMenuItem,
+  emitDrag,
+  gapPoint,
   openPdfFromDisk,
   openPathViaDialog,
+  stripedPdf,
+  writeScratchPdf,
 } from "./helpers"
 
 function thumbCount() {
@@ -100,6 +104,18 @@ async function paintedFingerprints(pageCount: number) {
   expect(new Set(fingerprints).size).toBe(pageCount)
 
   return fingerprints
+}
+
+/** Whether the gap shows the solid line that marks where a drop would land. A
+    wrapped gap is drawn twice — at the end of one row and the start of the next
+    — so any one of them showing is the answer. */
+function dropLineShowing(index: number) {
+  return browser.execute(
+    (at: number) =>
+      document.querySelectorAll(`[data-insert-index='${at}'] .border-solid`)
+        .length > 0,
+    index,
+  )
 }
 
 /**
@@ -305,6 +321,44 @@ describe("TFolio page editing", () => {
     await $("button[aria-label='Undo']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "undoing both inserts never restored the shape",
+    })
+    await waitForThumb(2, second!)
+  })
+
+  it("inserts a PDF dragged in from the desktop at the gap under it", async () => {
+    await openPdfFromDisk("drop.pdf", bandedPdf(3))
+    const [first, second, third] = await paintedFingerprints(3)
+    const filePath = writeScratchPdf("dropped.pdf", stripedPdf())
+    const point = await gapPoint(2)
+
+    await emitDrag("drag-over", point, [filePath])
+    await browser.waitUntil(async () => await dropLineShowing(2), {
+      timeoutMsg: "the insertion line never marked the gap under the pointer",
+    })
+
+    await emitDrag("drag-drop", point, [filePath])
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the dropped PDF never landed in the grid",
+    })
+
+    // The file's page opened the gap; the base's pages moved over intact.
+    await waitForThumb(1, first!)
+    await waitForThumb(3, second!)
+    await waitForThumb(4, third!)
+    const inserted = await thumbFingerprint(2)
+    expect(inserted).not.toBe(0)
+    expect([first, second, third]).not.toContain(inserted)
+
+    // The file joined this document at the gap rather than opening a tab.
+    await expect($$("button[role='tab']")).toBeElementsArrayOfSize(2)
+    // Another file's pages are in the document, so it may only be exported as a
+    // copy — never written back over the file it was opened from.
+    expect(await appMenuItemEnabled("save")).toBe(false)
+    expect(await appMenuItemEnabled("save-as")).toBe(true)
+
+    await $("button[aria-label='Undo']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the undo never took the inserted page back out",
     })
     await waitForThumb(2, second!)
   })

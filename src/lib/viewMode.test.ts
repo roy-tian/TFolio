@@ -6,7 +6,7 @@ import {
   isViewMode,
   pairPages,
   spreadPages,
-  THUMBNAIL_GAP,
+  THUMBNAIL_COLUMN_GAP,
   THUMBNAIL_WIDTH,
 } from "./viewMode"
 
@@ -15,7 +15,6 @@ describe("isViewMode", () => {
     expect(isViewMode("single")).toBe(true)
     expect(isViewMode("book")).toBe(true)
     expect(isViewMode("thumbnail")).toBe(true)
-    expect(isViewMode("files")).toBe(true)
   })
 
   test("rejects anything else", () => {
@@ -59,7 +58,7 @@ describe("spreadPages", () => {
 })
 
 describe("computeThumbnailColumns", () => {
-  const columnStride = THUMBNAIL_WIDTH + THUMBNAIL_GAP
+  const columnStride = THUMBNAIL_WIDTH + THUMBNAIL_COLUMN_GAP
 
   test("never drops below two columns", () => {
     expect(computeThumbnailColumns(0)).toBe(2)
@@ -68,13 +67,13 @@ describe("computeThumbnailColumns", () => {
 
   test("rounds an odd fit down to an even count", () => {
     // Exactly three columns fit; a row must stay even.
-    expect(computeThumbnailColumns(columnStride * 3 - THUMBNAIL_GAP)).toBe(2)
-    expect(computeThumbnailColumns(columnStride * 5 - THUMBNAIL_GAP)).toBe(4)
+    expect(computeThumbnailColumns(columnStride * 3 - THUMBNAIL_COLUMN_GAP)).toBe(2)
+    expect(computeThumbnailColumns(columnStride * 5 - THUMBNAIL_COLUMN_GAP)).toBe(4)
   })
 
   test("uses every column an even fit allows", () => {
-    expect(computeThumbnailColumns(columnStride * 4 - THUMBNAIL_GAP)).toBe(4)
-    expect(computeThumbnailColumns(columnStride * 6 - THUMBNAIL_GAP)).toBe(6)
+    expect(computeThumbnailColumns(columnStride * 4 - THUMBNAIL_COLUMN_GAP)).toBe(4)
+    expect(computeThumbnailColumns(columnStride * 6 - THUMBNAIL_COLUMN_GAP)).toBe(6)
   })
 })
 
@@ -91,6 +90,5 @@ describe("effectiveViewMode", () => {
   test("leaves every other mode to stand on its own", () => {
     expect(effectiveViewMode("single", 1)).toBe("single")
     expect(effectiveViewMode("thumbnail", 1)).toBe("thumbnail")
-    expect(effectiveViewMode("files", 1)).toBe("files")
   })
 })

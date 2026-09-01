@@ -7,17 +7,17 @@ import {
   commandTextPages,
   commit,
   emptyHistory,
-  fillMergeOutcome,
+  fillInsertFileOutcome,
   historyHead,
   inversePermutation,
   isDirty,
   markSaved,
-  mergeFilePages,
+  insertFilePages,
   movesPages,
   pageNumbersConfig,
   planDeletePages,
   planInsertBlankPage,
-  planMergeFile,
+  planInsertFile,
   planPageNumbersChange,
   planReorderPages,
   planWatermarkChange,
@@ -315,16 +315,16 @@ describe("movesPages", () => {
     const reorder: AnnotationCommand = { inverse: [2, 1], kind: "reorderPages", order: [2, 1] }
     const del: AnnotationCommand = { kind: "deletePages", pageCount: 3, pages: [2], stashId: 1 }
     const insert: AnnotationCommand = { index: 2, kind: "insertBlankPage", pageCount: 3, stashId: 1 }
-    const merge: AnnotationCommand = {
-      insertedAt: 0,
-      kind: "mergeFile",
-      name: "b.pdf",
-      pageCount: 0,
+    const insertFile: AnnotationCommand = {
+      index: 2,
+      insertedCount: 0,
+      kind: "insertFile",
+      pageCount: 3,
       path: "/b.pdf",
       stashId: 1,
     }
 
-    for (const command of [reorder, del, insert, merge]) {
+    for (const command of [reorder, del, insert, insertFile]) {
       expect(movesPages(command)).toBe(true)
     }
 
@@ -419,33 +419,18 @@ describe("structure commands", () => {
     expect(commandPages(insertion)).toEqual([1, 2, 3, 4])
     expect(commandTextPages(insertion)).toEqual([1, 2, 3, 4])
   })
-
-  it("marks a pad insert and leaves a plain one unflagged", () => {
-    expect(planInsertBlankPage(emptyHistory, 2, 3, true)!.command).toEqual({
-      index: 2,
-      kind: "insertBlankPage",
-      pad: true,
-      pageCount: 4,
-      stashId: emptyHistory.nextId,
-    })
-    // A plain insert carries no pad key at all, so it is byte-identical to what
-    // the page-editing grid produced before parity padding existed.
-    expect(
-      "pad" in planInsertBlankPage(emptyHistory, 2, 3)!.command,
-    ).toBe(false)
-  })
 })
 
-describe("merge commands", () => {
-  it("plans a merge with its counts unknown until the file is read", () => {
+describe("insert-file commands", () => {
+  it("plans an insert with the file's page count unknown until it is read", () => {
     const history = historyOf(highlight(1))
-    const planned = planMergeFile(history, "/b.pdf", "b.pdf")
+    const planned = planInsertFile(history, "/b.pdf", 2, 3)!
 
     expect(planned.command).toEqual({
-      insertedAt: 0,
-      kind: "mergeFile",
-      name: "b.pdf",
-      pageCount: 0,
+      index: 2,
+      insertedCount: 0,
+      kind: "insertFile",
+      pageCount: 3,
       path: "/b.pdf",
       stashId: history.nextId,
     })
@@ -454,22 +439,47 @@ describe("merge commands", () => {
     expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
   })
 
-  it("a merge never invalidates an existing page's pixels or text", () => {
-    const command = planMergeFile(emptyHistory, "/b.pdf", "b.pdf").command
-
-    expect(commandPages(command)).toEqual([])
-    expect(commandTextPages(command)).toEqual([])
+  it("refuses a position the document does not have", () => {
+    expect(planInsertFile(emptyHistory, "/b.pdf", 0, 3)).toBeNull()
+    expect(planInsertFile(emptyHistory, "/b.pdf", 5, 3)).toBeNull()
+    // One past the end is a position: the file goes after the last page.
+    expect(planInsertFile(emptyHistory, "/b.pdf", 4, 3)).not.toBeNull()
   })
 
-  it("fills the position and page count the first apply learned", () => {
-    const planned = planMergeFile(historyOf(highlight(1)), "/b.pdf", "b.pdf")
+  it("invalidates the gap and everything after it, not the pages before", () => {
+    const command = planInsertFile(emptyHistory, "/b.pdf", 2, 3)!.command
+
+    expect(commandPages(command)).toEqual([2, 3])
+    expect(commandTextPages(command)).toEqual([2, 3])
+  })
+
+  it("invalidates nothing when the file goes after the last page", () => {
+    const command = planInsertFile(emptyHistory, "/b.pdf", 4, 3)!.command
+
+    // Pages 1-3 keep their numbers and their pixels; the pages the file brings
+    // are components that mount for the first time and fetch on their own.
+    expect(commandPages(command)).toEqual([])
+  })
+
+  it("invalidates the file's own pages once the apply has counted them", () => {
+    const planned = planInsertFile(emptyHistory, "/b.pdf", 4, 3)!
     const id = planned.history.past.at(-1)!.id
-    const filled = fillMergeOutcome(planned.history, id, 3, 4)
+    const filled = fillInsertFileOutcome(planned.history, id, 2)
+
+    // What the undo takes back out, so the undo invalidates it.
+    expect(commandPages(filled.past.at(-1)!.command)).toEqual([4, 5])
+  })
+
+  it("fills the page count the first apply learned", () => {
+    const planned = planInsertFile(historyOf(highlight(1)), "/b.pdf", 3, 4)!
+    const id = planned.history.past.at(-1)!.id
+    const filled = fillInsertFileOutcome(planned.history, id, 4)
     const command = filled.past.at(-1)!.command
 
-    expect(command).toMatchObject({ insertedAt: 3, pageCount: 4 })
-    // The delete an undo runs, and the restore a redo runs, cover the appended
+    // Four pages arrived, so the document now has eight.
+    expect(command).toMatchObject({ insertedCount: 4, pageCount: 8 })
+    // The delete an undo runs, and the restore a redo runs, cover the file's own
     // range — pages 3 through 6.
-    expect(mergeFilePages(command as never)).toEqual([3, 4, 5, 6])
+    expect(insertFilePages(command as never)).toEqual([3, 4, 5, 6])
   })
 })

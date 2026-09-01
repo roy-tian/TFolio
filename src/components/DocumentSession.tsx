@@ -4,12 +4,11 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { BookCopy, Bookmark, RotateCw } from "lucide-react"
+import { Bookmark, RotateCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
@@ -49,29 +48,14 @@ import {
 } from "@/lib/annotationStyles"
 import {
   movesPages,
-  planDeletePages,
-  planInsertBlankPage,
-  type AnnotationCommand,
-  type AnnotationHistory,
   type HexColor,
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
-import { e2eOverride } from "@/lib/e2e"
-import {
-  documentPageCount,
-  fileBlockPages,
-  fileRanges,
-  hasMergedPages,
-  nextParityOp,
-  padPagePositions,
-  type FileRange,
-  type InitialFile,
-} from "@/lib/fileRanges"
+import { dropHitAt, insertIndexForHit } from "@/lib/fileDrop"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
-  fileNameFromPath,
   isPdfPath,
   type PdfDocumentInfo,
   type PdfExportOutcome,
@@ -99,6 +83,7 @@ import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 type ViewerError =
   | "annotateFailed"
+  | "editInFlight"
   | "exportFailed"
   | "fileTooLarge"
   | "invalidFile"
@@ -106,8 +91,21 @@ type ViewerError =
   | "saveFailed"
   | null
 
+/** A file dragged in from the desktop, as the window's own handler sees it —
+    positions in CSS pixels, not the OS's physical ones. `over` carries the
+    paths the drag announced on entry, or null when the window never heard
+    them; the OS itself names them only on entry and on release. */
+export type FileDragEvent =
+  | { kind: "over"; paths: string[] | null; point: { x: number; y: number } }
+  | { kind: "drop"; paths: string[]; point: { x: number; y: number } }
+  | { kind: "leave" }
+
 export type DocumentSessionHandle = {
   hasUnsavedWorkNow: () => boolean
+  /** Whether this session takes the drag: true only over its thumbnail grid,
+      where a dropped PDF is inserted at the gap under the pointer instead of
+      opening as a tab of its own. */
+  onFileDrag: (event: FileDragEvent) => boolean
 }
 
 type DocumentSessionProps = {
@@ -154,19 +152,15 @@ function DocumentSession(
   const { t } = useTranslation()
   const macOS = isMacOS()
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo>(openedDocument)
-  // The document as it was opened, before any merges — the initial file range's
-  // name and page count, which the command history alone cannot recover. Fixed
-  // for the session; a new open replaces it.
-  const [initialFile] = useState<InitialFile>(() => ({
-    name: fileName,
-    pageCount: openedDocument.numPages,
-  }))
-  // Whether the reader has turned smart parity padding on. Kept as intent rather
-  // than derived from the pads present, because a document that happens to need
-  // no pad right now is indistinguishable from one with the feature off — yet a
-  // later merge must still know to reconcile. Session state, reset on open, so
-  // it never drifts across documents.
-  const [parityEnabled, setParityEnabled] = useState(false)
+  // Whether any page another file brought in is still here, which — like a
+  // watermark — leaves the document export-only. The backend answers it with
+  // every structure update, so this never has to be replayed from history: a
+  // freshly opened document holds none of them.
+  const [hasMergedPages, setHasMergedPages] = useState(false)
+  // Where a PDF dragged in from the desktop would land, while one is over the
+  // grid. Only the insertion line reads it; the drop itself resolves the point
+  // again, so a stale index can never place a file.
+  const [fileDropIndex, setFileDropIndex] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageInput, setPageInput] = useState("1")
   const [rotation, setRotation] = useState(0)
@@ -189,11 +183,6 @@ function DocumentSession(
   )
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(openedDocument)
-  // Read by the parity reconcile, which runs after an awaited file operation —
-  // past the point the rendered `initialFile` can be trusted in a closure.
-  const initialFileRef = useRef<InitialFile | null>(initialFile)
-  // The parity intent, read by the same post-await reconcile.
-  const parityEnabledRef = useRef(false)
   const pendingScrollPageRef = useRef<number | null>(null)
   // Where the reader was when the viewport last changed size, taken before the
   // layout that change resolves to, and paid back once it has been made.
@@ -213,13 +202,13 @@ function DocumentSession(
   // the reader's stored choice, since it is the layout that strands an offset.
   const laidOutViewModeRef = useRef(viewMode)
 
-  // The thumbnail grid and the files view give every cell the same width
-  // whatever the page, so neither has a single scale to report or anything for a
-  // zoom to act on. The controls are absent there rather than disabled: disabled
-  // reads as "not just now", which is what an unopened document means, and it
-  // would leave the readout showing a figure that describes nothing on screen.
+  // The thumbnail grid gives every cell the same width whatever the page, so it
+  // has no single scale to report or anything for a zoom to act on. The controls
+  // are absent there rather than disabled: disabled reads as "not just now",
+  // which is what an unopened document means, and it would leave the readout
+  // showing a figure that describes nothing on screen.
   const zoomApplies = viewMode === "single" || viewMode === "book"
-  const bookmarksApply = viewMode === "thumbnail" || viewMode === "files"
+  const bookmarksApply = viewMode === "thumbnail"
   const zoom = useZoom({
     contentHeight: Math.max(0, viewerHeight - CONTENT_PADDING_Y),
     contentWidth: Math.max(0, viewerWidth - CONTENT_PADDING_X),
@@ -230,9 +219,9 @@ function DocumentSession(
     viewMode,
     viewerRef,
   })
-  // Every drawing tool needs a page under the pointer, which neither the
-  // thumbnail grid nor the files view shows. Only the watermark and the page
-  // numbers act on the document rather than a page, so they stay.
+  // Every drawing tool needs a page under the pointer, which the thumbnail grid
+  // does not show. Only the watermark and the page numbers act on the document
+  // rather than a page, so they stay.
   const drawingApplies = viewMode === "single" || viewMode === "book"
   // In the thumbnail grid a click is a selection, so the grid doubles as the
   // page-editing surface; leaving it clears what was chosen.
@@ -286,6 +275,7 @@ function DocumentSession(
 
         documentRef.current = next
         setPdfDocument(next)
+        setHasMergedPages(update.hasMergedPages)
         setCurrentPage((page) =>
           Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
         )
@@ -353,8 +343,6 @@ function DocumentSession(
       isNoteWorthKeeping(textNote.draft?.text ?? ""),
     [annotations, textNote.draft?.text],
   )
-
-  useImperativeHandle(ref, () => ({ hasUnsavedWorkNow }), [hasUnsavedWorkNow])
 
   useEffect(() => {
     onDirtyChange(openedDocument.id, annotations.isDirty || draftDirty)
@@ -618,12 +606,11 @@ function DocumentSession(
   // *before* it runs — a note is anchored by page number, which an edit can move
   // out from under it, and a note the reader finishes mid-edit would be dropped
   // by the in-flight-edit guard after the editor had already cleared its text.
-  // A merge only appends, so the draft is committed onto its own unmoved page
-  // (see mergePaths); undo and redo can move any page and can't take a note as
-  // their target, so the uncommitted draft is discarded before the step (see the
-  // toolbar). Both callbacks are stable.
+  // Undo and redo can move any page and can't take a note as their target, so
+  // the uncommitted draft is discarded before the step (see the toolbar); every
+  // other page edit lives in the thumbnail grid, where no note can be open. The
+  // callback is stable.
   const cancelTextNote = textNote.cancel
-  const commitTextNote = textNote.commit
 
   useCurrentPageTracker(
     viewerRef,
@@ -661,25 +648,13 @@ function DocumentSession(
   }
 
   // Every page-editing gesture carries page numbers read off the screen, so it
-  // must not be queued behind a *page-shifting* edit — above all the multi-step
-  // smart-parity reconcile — or it would land on the wrong page. The gesture is
-  // dropped while such an edit is in flight; the pages the reader sees then
-  // always match the numbers their next gesture names. An annotation in flight,
-  // which shifts nothing, does not block editing. Checked off the ref so a
-  // gesture in the same tick as the edit that started the churn is caught.
+  // must not be queued behind a *page-shifting* edit, or it would land on the
+  // wrong page. The gesture is dropped while such an edit is in flight; the
+  // pages the reader sees then always match the numbers their next gesture
+  // names. An annotation in flight, which shifts nothing, does not block
+  // editing. Checked off the ref so a gesture in the same tick as the edit that
+  // started the churn is caught.
   const editingBusy = () => annotations.isStructureBusyNow()
-
-  // After a page-level edit, bring the smart pads back to target if the feature
-  // is on — a delete, insert, or reorder can push a file onto an even page just
-  // as a file-level edit can, and the toggle staying on means the reader still
-  // wants odd starts. Re-derived from the resulting layout, so a pad the edit
-  // made surplus is removed and one it made necessary is added; a no-op when the
-  // toggle is off or the layout already meets the target.
-  const reconcileParityAfterEdit = () => {
-    if (parityEnabledRef.current) {
-      void applyParityTarget()
-    }
-  }
 
   // The x on a selected page takes the whole selection with it; on any other
   // page it takes that page alone. No confirmation — the delete is one undo
@@ -693,7 +668,7 @@ function DocumentSession(
       ? [...thumbnailSelection.selectedPages]
       : [pageNumber]
 
-    void annotations.deletePages(pages, pdfDocument.numPages).then(reconcileParityAfterEdit)
+    void annotations.deletePages(pages, pdfDocument.numPages)
   }
 
   const insertBlankPage = (index: number) => {
@@ -701,7 +676,7 @@ function DocumentSession(
       return
     }
 
-    void annotations.insertBlankPage(index, pdfDocument.numPages).then(reconcileParityAfterEdit)
+    void annotations.insertBlankPage(index, pdfDocument.numPages)
   }
 
   const reorderPages = (order: number[]) => {
@@ -709,27 +684,9 @@ function DocumentSession(
       return
     }
 
-    void annotations.reorderPages(order).then(reconcileParityAfterEdit)
+    void annotations.reorderPages(order)
   }
 
-  // The files are a positional accounting of the merged document's page ranges,
-  // derived from the same command history the watermark config is (see
-  // fileRanges). No document means no ranges.
-  const ranges = useMemo(
-    () => (initialFile ? fileRanges(annotations.history, initialFile) : []),
-    [annotations.history, initialFile],
-  )
-  // Save is forbidden while another file's pages are actually present — matching
-  // the backend guard, which tracks the merged page ids, not the mere history of
-  // a merge, and not a file card. A card can outlive its merged pages (a blank
-  // inserted inside the file keeps the card but is this app's own page), so this
-  // asks the backend's own question — does a merged page remain — rather than
-  // "does a non-zero-id range exist", which would keep save disabled after the
-  // last merged page is deleted while the backend already allows it.
-  const hasMergedContent = useMemo(
-    () => (initialFile ? hasMergedPages(annotations.history, initialFile) : false),
-    [annotations.history, initialFile],
-  )
   // Page content this session owns (a watermark, page numbers) and merged
   // pages each leave the document export-only, for the reasons the menu's hint
   // gives; a document opened from bytes has no file to write back to at all.
@@ -737,218 +694,111 @@ function DocumentSession(
     annotations.watermarkConfig !== null || annotations.pageNumbersConfig !== null
   const hasSourceFile = Boolean(pdfDocument?.path)
   const canSave =
-    hasSourceFile && annotations.isDirty && !hasOwnedContent && !hasMergedContent
+    hasSourceFile && annotations.isDirty && !hasOwnedContent && !hasMergedPages
   // Only where the reason is not already in front of the reader. Owned page
   // content is named first — it is the stricter, less recoverable reason.
   const saveHint = hasOwnedContent
     ? t("annotate.saveOwnedContent")
-    : hasMergedContent
+    : hasMergedPages
       ? t("annotate.saveMerged")
       : hasSourceFile
         ? undefined
         : t("annotate.saveNoSource")
-  // A parity run — the toggle, or the reconcile a file operation triggers —
-  // brings the whole document to its pad target through several queued edits.
-  // Two runs overlapping would oscillate (one adding a pad the other removes),
-  // so they are serialized: each waits for the previous to finish. A repeat run
-  // whose target is already met is then simply a no-op.
-  const parityChainRef = useRef<Promise<void>>(Promise.resolve())
-  const runParity = useCallback((run: () => Promise<void>) => {
-    const next = parityChainRef.current.then(run, run)
-    parityChainRef.current = next.then(
-      () => undefined,
-      () => undefined,
-    )
-    return next
-  }, [])
-
-  // Steps the document one pad at a time toward what `choose` asks for, each op
-  // re-derived *inside* the queue against the history it reached — so an
-  // ordinary edit the reader slips in between steps is fully counted, never
-  // shifting a position the loop had already fixed (the trap a precomputed
-  // batch falls into). Highest position first, so an earlier op never moves a
-  // later one's page. The bound guards against a pathological non-convergence.
-  const runParitySteps = useCallback(
-    (
-      choose: (
-        history: AnnotationHistory,
-        total: number,
-        initial: InitialFile,
-      ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
-    ) =>
-      runParity(async () => {
-        for (let guard = 0; guard < 512; guard += 1) {
-          const applied = await annotations.commitStructure((history) => {
-            const initial = initialFileRef.current
-
-            if (!initial) {
-              return null
-            }
-
-            return choose(history, documentPageCount(history, initial), initial)
-          })
-
-          if (!applied) {
-            return
-          }
-        }
-      }),
-    [annotations, runParity],
-  )
-
-  // Brings the smart pads to their target: one blank before every file that
-  // would otherwise open on an even page, and away with any blank that serves
-  // none. Each step is derived from the slots, so a stranded pad is counted.
-  const applyParityTarget = useCallback(
-    () =>
-      runParitySteps((history, total, initial) => {
-        const op = nextParityOp(history, initial)
-
-        if (!op) {
-          return null
-        }
-
-        return op.kind === "insert"
-          ? planInsertBlankPage(history, op.at, total, true)
-          : planDeletePages(history, [op.at], total)
-      }),
-    [runParitySteps],
-  )
-
-  // Removes every pad, found from the slots so a pad stranded from its file — a
-  // pad-only run that shows no card — is cleared too, not left behind.
-  const removeAllPads = useCallback(
-    () =>
-      runParitySteps((history, total, initial) => {
-        const positions = padPagePositions(history, initial)
-
-        return positions.length > 0
-          ? planDeletePages(history, [Math.max(...positions)], total)
-          : null
-      }),
-    [runParitySteps],
-  )
-
-  // Appends each PDF in turn — the queue keeps them in order — then, if the
-  // smart pads were in place before, brings them back to target once so a newly
-  // merged file gets its own pad without spending a reconcile per file.
-  const mergePaths = useCallback(
-    async (paths: string[]) => {
-      // Finish any open note first, while the pages it is anchored to still sit
-      // where the reader put them: the appends below (and the parity reconcile
-      // after) leave those pages in place, so the committed note lands exactly
-      // there, and is never left open to be dropped by the in-flight guard the
-      // merges raise. A no-op when no note or an empty one is open.
-      commitTextNote()
+  // Inserts each PDF in turn at `index`, in the order they were dropped: the
+  // second file goes after the first, so a multi-file drop reads down the grid
+  // the way the reader arranged it. How far to advance is what the file itself
+  // brought — only the backend knows that, and only it can say, since the
+  // document's own growth would also count an edit that landed in between.
+  const insertFiles = useCallback(
+    async (paths: string[], index: number) => {
+      let at = index
 
       for (const path of paths) {
-        await annotations.mergeFile(path, fileNameFromPath(path))
-      }
-
-      if (parityEnabledRef.current) {
-        await applyParityTarget()
+        at += await annotations.insertFile(
+          path,
+          at,
+          documentRef.current?.numPages ?? 0,
+        )
       }
     },
-    [annotations, applyParityTarget, commitTextNote],
+    [annotations],
   )
 
-  const mergeFilePath = useCallback(
-    (path: string) => {
-      if (!isPdfPath(path)) {
-        setViewerError("invalidFile")
-        return
+  // A PDF dragged in from the desktop, handed down by the window's one drag
+  // handler (see `App.tsx`). The thumbnail grid is the only surface that takes
+  // one: it is where a position can be pointed at — the page views show one page
+  // at a time and no gaps — so anywhere else the drag is left to the workspace,
+  // which opens the file as a tab of its own.
+  const handleFileDrag = useCallback(
+    (event: FileDragEvent): boolean => {
+      const viewer = viewerRef.current
+
+      if (
+        event.kind === "leave" ||
+        !active ||
+        !viewer ||
+        viewMode !== "thumbnail"
+      ) {
+        setFileDropIndex(null)
+        return false
       }
 
-      void mergePaths([path])
-    },
-    [mergePaths],
-  )
-
-  // The add-file button's picker, the same backend dialog `chooseFile` uses —
-  // which also records the path as one a merge may act on.
-  const chooseFileToMerge = useCallback(async () => {
-    try {
-      const pick = e2eOverride("pickPdfPath")
-      const path = pick
-        ? await pick()
-        : await invoke<string | null>("pick_pdf_path", {
-            filterLabel: t("annotate.exportFilter"),
-          })
-
-      if (typeof path === "string") {
-        mergeFilePath(path)
-      }
-    } catch {
-      setViewerError("annotateFailed")
-    }
-  }, [mergeFilePath, t])
-
-  // Removing a whole file deletes its block — up to the next file's start, the
-  // same span a card drag moves (`fileBlockPages`) — so its real pages, its
-  // pads, and any pad stranded between it and the next file all go together,
-  // none orphaned. The card disables this for the last remaining file.
-  const deleteFile = useCallback(
-    async (range: FileRange) => {
-      if (!documentRef.current || annotations.isStructureBusyNow()) {
-        return
+      // A drag this document could not take is left to the workspace, whose
+      // full-window target says honestly that the file opens rather than lands:
+      // an insertion line drawn for a folder promises a place it will refuse.
+      // Null paths mean the window never heard them, not that there are none.
+      if (!(event.paths?.some(isPdfPath) ?? true)) {
+        setFileDropIndex(null)
+        return false
       }
 
-      const index = ranges.findIndex(
-        (other) => other.id === range.id && other.start === range.start,
+      // Resolved from the point every time, drop included: the index the line
+      // was drawn at belongs to the render that drew it, and a file must land
+      // where the pointer is, not where it was.
+      const index = insertIndexForHit(
+        dropHitAt(event.point, viewer),
+        event.point.x,
       )
 
-      if (index < 0) {
-        return
+      setFileDropIndex(event.kind === "over" ? index : null)
+
+      if (index === null) {
+        return false
       }
 
-      const total = documentRef.current.numPages
-
-      await annotations.deletePages(fileBlockPages(ranges, index, total), total)
-
-      if (parityEnabledRef.current) {
-        await applyParityTarget()
+      if (event.kind === "over") {
+        return true
       }
-    },
-    [annotations, applyParityTarget, ranges],
-  )
 
-  // A card drag reorders whole files; the pads travel with them, then reconcile
-  // if enabled, since a new file order can change which files start even.
-  const reorderFiles = useCallback(
-    async (order: number[]) => {
+      // Claimed either way: the drag was over this document's grid, so a drop it
+      // cannot act on is an error to show here, not a tab to open behind the
+      // reader's back. A page-shifting edit in flight is the one such case —
+      // the gap was read off a grid that edit is about to renumber.
       if (annotations.isStructureBusyNow()) {
-        return
+        setViewerError("editInFlight")
+      } else {
+        void insertFiles(event.paths.filter(isPdfPath), index)
       }
 
-      await annotations.reorderPages(order)
-
-      if (parityEnabledRef.current) {
-        await applyParityTarget()
-      }
+      return true
     },
-    [annotations, applyParityTarget],
+    [active, annotations, insertFiles, viewMode],
   )
 
-  // The toggle carries the reader's intent, whether or not the current layout
-  // happens to need a pad: enabling reconciles to the target (perhaps a no-op
-  // right now), disabling clears every pad. The toggle sits in the main toolbar,
-  // so it is reachable from the page view with a note open; settle the draft
-  // first (like mergePaths), since enabling can insert a pad and disabling
-  // remove one ahead of the note's page. Committed rather than dropped: the note
-  // lands on its page and then travels with it through the pad shift, instead of
-  // being left bound to a number the shift invalidates or refused by the
-  // in-flight-edit guard the reconcile raises.
-  const toggleParity = (next: boolean) => {
-    commitTextNote()
-    parityEnabledRef.current = next
-    setParityEnabled(next)
-
-    if (next) {
-      void applyParityTarget()
-    } else {
-      void removeAllPads()
+  // A drag the reader started here but finished elsewhere — they switched tabs
+  // while a file was in the air, or the wizard took the drop — never sends this
+  // session a `leave`, so the line it drew would outlive the drag.
+  useEffect(() => {
+    if (!active) {
+      setFileDropIndex(null)
     }
-  }
+  }, [active])
+
+  useImperativeHandle(
+    ref,
+    () => ({ hasUnsavedWorkNow, onFileDrag: handleFileDrag }),
+    [handleFileDrag, hasUnsavedWorkNow],
+  )
 
   // Each mode stacks its pages to a different total height, and the viewer keeps
   // its scroll offset across the switch, so the old offset would land somewhere
@@ -1050,7 +900,9 @@ function DocumentSession(
               ? t("annotate.saveFailed")
               : viewerError === "annotateFailed"
                 ? t("annotate.failed")
-                : null
+                : viewerError === "editInFlight"
+                  ? t("annotate.dropWhileEditing")
+                  : null
 
   return (
     <div
@@ -1118,19 +970,6 @@ function DocumentSession(
             onChange={changeViewMode}
             value={viewMode}
           />
-          {/* Only worth showing once there is more than one file to align. */}
-          {ranges.length >= 2 ? (
-            <Toggle
-              aria-label={t("files.smartPadding")}
-              className="size-8"
-              onPressedChange={toggleParity}
-              pressed={parityEnabled}
-              title={t("files.smartPaddingHint")}
-              variant="outline"
-            >
-              <BookCopy />
-            </Toggle>
-          ) : null}
           {zoomApplies ? (
             <ZoomControls
               canZoomIn={zoom.canZoomIn}
@@ -1251,14 +1090,9 @@ function DocumentSession(
               documentId={pdfDocument.id}
               draft={rectDraft ?? undefined}
               fileName={fileName}
-              filesEdit={{
-                onAddFile: () => void chooseFileToMerge(),
-                onDeleteFile: (range) => void deleteFile(range),
-                onReorderPages: (order) => void reorderFiles(order),
-                ranges,
-              }}
               key={pdfDocument.id}
               pageEdit={{
+                fileDropIndex,
                 onDeletePage: deleteThumbnailPage,
                 onInsertBlankPage: insertBlankPage,
                 onOpenPage: openThumbnailPage,

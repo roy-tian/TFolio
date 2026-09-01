@@ -3666,9 +3666,9 @@ fn banded_pdf(offsets: &[i32]) -> Vec<u8> {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn merges_a_document_at_the_end() {
+fn inserts_a_document_at_the_end() {
     let engine = test_engine();
-    let directory = scratch_directory("merge-at-end");
+    let directory = scratch_directory("insert-at-end");
     let source_path = directory.join("addendum.pdf");
     let source_bytes = banded_pdf(&[110, 150, 190]);
     fs::write(&source_path, &source_bytes).expect("the source should write to disk");
@@ -3685,15 +3685,15 @@ fn merges_a_document_at_the_end() {
     let source_prints = page_fingerprints(engine, source.id, 3);
 
     let outcome = engine
-        .merge_from_path(document.id, source_path)
-        .expect("PDFium should merge the document");
+        .insert_from_path(document.id, source_path, 3)
+        .expect("PDFium should insert the document");
 
-    assert_eq!(
-        outcome.inserted_at, 3,
-        "the source lands after the base's pages"
-    );
     assert_eq!(outcome.page_count, 3);
     assert_eq!(outcome.update.num_pages, 5);
+    assert!(
+        outcome.update.has_merged_pages,
+        "another file's pages are present, so the document is export-only",
+    );
 
     let merged = page_fingerprints(engine, document.id, 5);
 
@@ -3707,6 +3707,80 @@ fn merges_a_document_at_the_end() {
         &source_prints[..],
         "the source's pages land at positions 3-5, in order",
     );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+/// One past the end is a position, and so is every gap before it: the source's
+/// pages open the gap they were dropped into and push the rest down.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn inserts_a_document_between_two_pages() {
+    let engine = test_engine();
+    let directory = scratch_directory("insert-between");
+    let source_path = directory.join("inserted.pdf");
+    let source_bytes = banded_pdf(&[110, 150]);
+    fs::write(&source_path, &source_bytes).expect("the source should write to disk");
+
+    let document = engine
+        .open(banded_pdf(&[20, 60]))
+        .expect("PDFium should open the base document");
+    let before = page_fingerprints(engine, document.id, 2);
+    let source = engine
+        .open(source_bytes)
+        .expect("PDFium should open the source on its own");
+    let source_prints = page_fingerprints(engine, source.id, 2);
+
+    let outcome = engine
+        .insert_from_path(document.id, source_path, 2)
+        .expect("PDFium should insert the document");
+
+    assert_eq!(outcome.page_count, 2);
+    assert_eq!(outcome.update.num_pages, 4);
+
+    let merged = page_fingerprints(engine, document.id, 4);
+
+    assert_eq!(
+        merged,
+        vec![
+            before[0].clone(),
+            source_prints[0].clone(),
+            source_prints[1].clone(),
+            before[1].clone(),
+        ],
+        "the source opens the gap it was dropped into, in order",
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+/// The one position check, made in Rust: the WebView names the gap, so a gap
+/// the document does not have has to be refused rather than clamped.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn refuses_an_insert_past_the_end() {
+    let engine = test_engine();
+    let directory = scratch_directory("insert-past-end");
+    let source_path = directory.join("inserted.pdf");
+    fs::write(&source_path, banded_pdf(&[110])).expect("the source should write to disk");
+
+    let document = engine
+        .open(banded_pdf(&[20, 60]))
+        .expect("PDFium should open the base document");
+    let error = engine
+        .insert_from_path(document.id, source_path, 4)
+        .expect_err("position 4 is two past the last page");
+
+    assert!(error.contains("cannot go to position"), "why: {error}");
+
+    let pages = engine
+        .documents
+        .lock()
+        .expect("the document store should be usable")[&document.id]
+        .page_ids
+        .len();
+
+    assert_eq!(pages, 2, "the refusal leaves the document as it was");
 
     fs::remove_dir_all(directory).ok();
 }
@@ -3735,8 +3809,8 @@ fn merge_preserves_both_documents_annotations() {
         .expect("PDFium should create the highlight");
 
     engine
-        .merge_from_path(document.id, source_path)
-        .expect("PDFium should merge the document");
+        .insert_from_path(document.id, source_path, 4)
+        .expect("PDFium should insert the document");
 
     // Both documents' annotations rode across: the base's link and highlight on
     // page 1, and the source's link on the new page 4.
@@ -3789,8 +3863,8 @@ fn merge_extends_watermark_state() {
         .apply_watermark(document.id, watermark_config("DRAFT"))
         .expect("PDFium should apply the watermark");
     engine
-        .merge_from_path(document.id, source_path)
-        .expect("PDFium should merge into the watermarked document");
+        .insert_from_path(document.id, source_path, 3)
+        .expect("PDFium should insert into the watermarked document");
 
     let objects_on = |page_number: i32| {
         with_page(engine, document.id, page_number, |page| {
@@ -3839,8 +3913,8 @@ fn merge_undo_redo_is_lossless() {
         .open(banded_pdf(&[20, 60]))
         .expect("PDFium should open the base document");
     engine
-        .merge_from_path(document.id, source_path)
-        .expect("PDFium should merge the document");
+        .insert_from_path(document.id, source_path, 3)
+        .expect("PDFium should insert the document");
     let merged = page_fingerprints(engine, document.id, 5);
 
     // Undo: delete the appended range under the history entry's stash id.
@@ -3883,8 +3957,8 @@ fn a_merged_document_will_not_overwrite_its_source() {
         .open_from_path(source.clone())
         .expect("PDFium should open the base by path");
     engine
-        .merge_from_path(document.id, addendum)
-        .expect("PDFium should merge the addendum");
+        .insert_from_path(document.id, addendum, 3)
+        .expect("PDFium should insert the addendum");
 
     // A plain save over the source is refused…
     let error = engine
@@ -3955,8 +4029,8 @@ fn merge_invalidates_a_captured_rect_effect() {
     let captured = revisions();
 
     engine
-        .merge_from_path(document.id, source_path)
-        .expect("PDFium should merge the document");
+        .insert_from_path(document.id, source_path, 3)
+        .expect("PDFium should insert the document");
 
     let after = revisions();
 
@@ -4680,7 +4754,10 @@ fn merge_sources(directory: &Path, files: &[(&str, Vec<u8>)]) -> Vec<PathBuf> {
 
 #[test]
 fn a_merged_bookmark_title_is_the_file_name_without_its_extension() {
-    assert_eq!(bookmark_title(Path::new("/tmp/Chapter One.pdf")), "Chapter One");
+    assert_eq!(
+        bookmark_title(Path::new("/tmp/Chapter One.pdf")),
+        "Chapter One"
+    );
     assert_eq!(bookmark_title(Path::new("report.PDF")), "report");
     // A path that ends in no name of its own still has to say something.
     assert_eq!(bookmark_title(Path::new("/")), "/");
@@ -4701,7 +4778,10 @@ fn a_kept_outline_moves_onto_the_pages_its_file_landed_on() {
     let nodes = remapped_outline(items, 4);
 
     assert_eq!(nodes.len(), 1);
-    assert_eq!(nodes[0].page, 5, "the file's page 2 is the document's page 6");
+    assert_eq!(
+        nodes[0].page, 5,
+        "the file's page 2 is the document's page 6"
+    );
     assert_eq!(nodes[0].children[0].page, 6);
 }
 
@@ -4731,7 +4811,9 @@ fn merge_files_appends_every_file_in_order() {
     // Each source rendered on its own, so the comparison is independent of the
     // merge under test rather than fed back from it.
     let first_prints = {
-        let opened = engine.open(first).expect("PDFium should open the first file");
+        let opened = engine
+            .open(first)
+            .expect("PDFium should open the first file");
 
         page_fingerprints(engine, opened.id, 2)
     };
@@ -4834,7 +4916,10 @@ fn merge_files_keeps_each_source_outline_at_its_merged_position() {
     let directory = scratch_directory("merge-files-keep");
     let paths = merge_sources(
         &directory,
-        &[("plain", two_page_pdf()), ("outlined", outlined_three_page_pdf())],
+        &[
+            ("plain", two_page_pdf()),
+            ("outlined", outlined_three_page_pdf()),
+        ],
     );
 
     let merged = engine
@@ -4857,7 +4942,10 @@ fn merge_files_nests_a_source_outline_under_its_own_file() {
     let directory = scratch_directory("merge-files-nested");
     let paths = merge_sources(
         &directory,
-        &[("plain", two_page_pdf()), ("outlined", outlined_three_page_pdf())],
+        &[
+            ("plain", two_page_pdf()),
+            ("outlined", outlined_three_page_pdf()),
+        ],
     );
 
     let merged = engine

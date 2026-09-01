@@ -1,29 +1,21 @@
 import { useRef } from "react"
-import { FilePlus, FileText, Plus } from "lucide-react"
+import { FileText, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { FileCard } from "@/components/FileCard"
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
-import { useFileCardDrag } from "@/hooks/useFileCardDrag"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
-import {
-  fileCardOrderToPageOrder,
-  type FileRange,
-} from "@/lib/fileRanges"
-import { type PdfPageInfo } from "@/lib/pdf"
+import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import {
-  computeFileCardColumns,
   computeThumbnailColumns,
-  FILE_CARD_GAP,
-  FILE_CARD_WIDTH,
   pairPages,
-  THUMBNAIL_GAP,
+  THUMBNAIL_COLUMN_GAP,
+  THUMBNAIL_ROW_GAP,
   THUMBNAIL_WIDTH,
   type ViewMode,
 } from "@/lib/viewMode"
@@ -36,6 +28,10 @@ const RENDER_SETTLE_MS = 150
 
 /** Everything the thumbnail grid's page editing needs from its owner. */
 export type PageEditProps = {
+  /** Where a PDF dragged in from the desktop would land: the 1-based position
+      its first page would take, or null while nothing is being dragged over the
+      grid. The owner reads the drop; the grid only draws where it points. */
+  fileDropIndex: number | null
   onDeletePage: (pageNumber: number) => void
   onInsertBlankPage: (index: number) => void
   /** Double-click: leave the grid for the page itself. */
@@ -43,16 +39,6 @@ export type PageEditProps = {
   onReorderPages: (order: number[]) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   selectedPages: ReadonlySet<number>
-}
-
-/** Everything the multi-file view needs from its owner. */
-export type FilesEditProps = {
-  /** The files as page ranges, derived from history by the owner. */
-  ranges: FileRange[]
-  onAddFile: () => void
-  onDeleteFile: (range: FileRange) => void
-  /** A full-document page permutation, the same seam page editing reorders by. */
-  onReorderPages: (order: number[]) => void
 }
 
 type LayoutProps = {
@@ -159,55 +145,82 @@ function BookLayout({
 }
 
 /**
- * The gap beside a thumbnail, as a button: hovering or focusing it shows a
- * dashed insertion line, clicking inserts a blank page there. During a drag
- * the same line, solid, marks where the drop would land — and the button goes
- * inert so the gesture above it keeps the pointer.
+ * The gap beside a thumbnail, as a button: it fills the space between the two
+ * pages, so hovering or focusing anywhere in there shows a dashed insertion line
+ * down the middle of the gap, and pressing it inserts a blank page. During a
+ * drag the same line, solid, marks where the drop would land: a page being
+ * dragged within the grid, or a PDF dragged in from the desktop — which is why
+ * the zone carries its own position as `data-insert-index`, for the drop to read
+ * off the element under the pointer. While a page drag runs the button goes
+ * inert, so the gesture above it keeps the pointer.
  */
 function InsertZone({
-  active,
+  dragGap,
   dragging,
+  fileDropIndex,
   index,
   label,
   onInsert,
+  paperHeight,
   trailing,
 }: {
-  /** Whether a drag in progress would drop into this gap. */
-  active: boolean
+  /** The gap a page drag in progress would drop into, counted from zero. */
+  dragGap: number | undefined
   dragging: boolean
+  /** The position a dropped file's first page would take, or null. */
+  fileDropIndex: number | null
   /** The 1-based position a page inserted here would take. */
   index: number
   label: string
   onInsert: (index: number) => void
+  /** The neighbouring page's own height in CSS pixels. The gap runs the full
+      cell, which is taller — it also holds the page number and the row's own
+      spacing — so the line is sized to the paper instead of stretched past it. */
+  paperHeight: number
   trailing?: boolean
 }) {
+  // The two drags name the same gap differently: a page drag counts the gaps
+  // from zero, a file drop names the position its first page would take, which
+  // is this zone's own `index`. Reconciled once, here, rather than at each
+  // call site.
+  const active = dragGap === index - 1 || fileDropIndex === index
+
   return (
     <button
       aria-label={label}
       className={cn(
-        "group/zone absolute top-0 z-10 flex h-full w-5 justify-center outline-none",
-        trailing ? "-right-2.5" : "-left-2.5",
+        "group/zone absolute top-0 z-10 flex h-full justify-center outline-none",
         dragging && "pointer-events-none",
       )}
+      data-insert-index={index}
       onClick={() => onInsert(index)}
       // A press in the gap is not the start of a page drag.
       onPointerDown={(event) => event.stopPropagation()}
+      // The whole gap, so every point over the grid names an insertion position
+      // — the cells answer for themselves — and the line lands in its middle.
+      style={{
+        [trailing ? "right" : "left"]: -THUMBNAIL_COLUMN_GAP,
+        width: THUMBNAIL_COLUMN_GAP,
+      }}
       title={label}
       type="button"
     >
       <span
         className={cn(
-          "pointer-events-none absolute inset-y-0 w-0 border-l-2 border-dashed border-primary opacity-0 transition-opacity",
+          "pointer-events-none absolute top-0 w-0 border-l border-dashed border-primary/50 opacity-0 transition-opacity",
           !dragging && "group-hover/zone:opacity-100 group-focus-visible/zone:opacity-100",
-          active && "border-solid opacity-100",
+          // A drop lands somewhere definite, so that line speaks up.
+          active && "border-l-2 border-solid border-primary opacity-100",
         )}
+        style={{ height: paperHeight }}
       />
       <span
         className={cn(
-          "pointer-events-none absolute -top-2 grid size-5 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
+          "pointer-events-none absolute grid size-5 -translate-y-1/2 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
           !dragging && "group-hover/zone:opacity-100 group-focus-visible/zone:opacity-100",
           active && "opacity-100",
         )}
+        style={{ top: paperHeight / 2 }}
       >
         <Plus className="size-3" />
       </span>
@@ -270,16 +283,38 @@ function ThumbnailLayout({
     <div
       className="grid"
       ref={gridRef}
+      // The row gap is the cell's own bottom padding rather than the grid's, so
+      // that every point between two rows still belongs to a cell: a file drag
+      // crossing it must keep naming a position, not fall through to the
+      // workspace's open-as-a-tab target for the height of the gap.
       style={{
-        gap: THUMBNAIL_GAP,
+        columnGap: THUMBNAIL_COLUMN_GAP,
         gridTemplateColumns: `repeat(${columns}, ${THUMBNAIL_WIDTH}px)`,
+        rowGap: 0,
       }}
     >
       {pages.map((page, index) => {
         const pageNumber = index + 1
+        // What the cell's own paper works out to: the grid fixes every cell's
+        // width, so the page's footprint fixes its height.
+        const footprint = dimensionsForRotation(
+          rotation,
+          page.width,
+          page.height,
+        )
+        const paperHeight =
+          (THUMBNAIL_WIDTH * footprint.height) / footprint.width
 
         return (
-          <div className="relative" key={`${documentId}-${pageNumber}`}>
+          <div
+            className="relative"
+            // The whole cell, page number and badge included, answers for the
+            // page it holds — `data-page-number` sits on the paper alone, which
+            // would leave the caption under it a hole in the drop target.
+            data-page-cell={pageNumber}
+            key={`${documentId}-${pageNumber}`}
+            style={{ paddingBottom: THUMBNAIL_ROW_GAP }}
+          >
             <PdfThumbnail
               deleteDisabled={
                 pages.length === 1 ||
@@ -303,19 +338,33 @@ function ThumbnailLayout({
               width={THUMBNAIL_WIDTH}
             />
             <InsertZone
-              active={drag?.gap === pageNumber - 1}
+              dragGap={drag?.gap}
               dragging={Boolean(drag)}
+              fileDropIndex={pageEdit.fileDropIndex}
               index={pageNumber}
               label={t("pageEdit.insertBefore", { pageNumber })}
               onInsert={pageEdit.onInsertBlankPage}
+              paperHeight={paperHeight}
             />
-            {pageNumber === pages.length ? (
+            {/* The gap after the last cell of every row, not only after the
+                last page: it is the same gap the next row's first cell leads
+                with, but drawn where the pointer actually is — a drop on the
+                right half of a row-final page would otherwise light a line a
+                whole row away. It also fills the layout's right padding, so
+                the row has no dead edge. */}
+            {pageNumber % columns === 0 || pageNumber === pages.length ? (
               <InsertZone
-                active={drag?.gap === pageNumber}
+                dragGap={drag?.gap}
                 dragging={Boolean(drag)}
+                fileDropIndex={pageEdit.fileDropIndex}
                 index={pageNumber + 1}
-                label={t("pageEdit.insertAtEnd")}
+                label={
+                  pageNumber === pages.length
+                    ? t("pageEdit.insertAtEnd")
+                    : t("pageEdit.insertBefore", { pageNumber: pageNumber + 1 })
+                }
                 onInsert={pageEdit.onInsertBlankPage}
+                paperHeight={paperHeight}
                 trailing
               />
             ) : null}
@@ -327,128 +376,11 @@ function ThumbnailLayout({
   )
 }
 
-/** The card riding the pointer during a file-card drag. */
-function FileDragGhost({
-  name,
-  pointer,
-}: {
-  name: string
-  pointer: { x: number; y: number }
-}) {
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full"
-      style={{ left: pointer.x, top: pointer.y - 8 }}
-    >
-      <div className="flex items-center gap-1.5 rounded-md border border-border bg-background/90 px-2.5 py-1.5 shadow-lg">
-        <FileText className="size-4 text-muted-foreground" />
-        <span className="max-w-40 truncate text-xs font-medium">{name}</span>
-      </div>
-    </div>
-  )
-}
-
-function FilesLayout({
-  contentWidth,
-  documentId,
-  filesEdit,
-  pages,
-  renderEpochs,
-  rotation,
-}: LayoutProps & { filesEdit: FilesEditProps }) {
-  const { t } = useTranslation()
-  const { ranges } = filesEdit
-  const columns = computeFileCardColumns(contentWidth)
-  const gridRef = useRef<HTMLDivElement>(null)
-  const { drag } = useFileCardDrag({
-    active: true,
-    cardCount: ranges.length,
-    columns,
-    gridRef,
-    onReorder: (cardOrder) =>
-      filesEdit.onReorderPages(
-        fileCardOrderToPageOrder(ranges, cardOrder, pages.length),
-      ),
-  })
-  const draggedName =
-    drag && ranges[drag.cardPosition - 1]
-      ? ranges[drag.cardPosition - 1]!.name
-      : ""
-
-  return (
-    <div
-      className="grid"
-      ref={gridRef}
-      style={{
-        gap: FILE_CARD_GAP,
-        gridTemplateColumns: `repeat(${columns}, ${FILE_CARD_WIDTH}px)`,
-      }}
-    >
-      {ranges.map((range, index) => {
-        // The face is the file's first real page, not its first slot: a pad
-        // moved to the run's front must not become the card's thumbnail.
-        const page = pages[range.firstReal - 1]
-
-        // A structure change updates the page list and the history in two steps;
-        // for the render between them, a range may point past the pages it has.
-        if (!page) {
-          return null
-        }
-
-        return (
-          <div
-            className={cn(
-              "transition-opacity",
-              drag?.cardPosition === index + 1 && "opacity-40",
-            )}
-            // A page-level move can split one file into two runs of the same id;
-            // the start disambiguates them so the two cards never share a key.
-            key={`${documentId}-${range.id}-${range.start}`}
-          >
-            <FileCard
-              deleteDisabled={ranges.length === 1}
-              documentId={documentId}
-              onDelete={filesEdit.onDeleteFile}
-              page={page}
-              position={index + 1}
-              range={range}
-              renderEpoch={renderEpochs[range.firstReal] ?? 0}
-              rotation={rotation}
-              width={FILE_CARD_WIDTH}
-            />
-          </div>
-        )
-      })}
-      {/* A keyboard- and no-drag-reachable way to merge a file, and the seam the
-          e2e suite drives (WebDriver cannot drop files). */}
-      <button
-        className="flex flex-col items-center justify-center gap-2 self-start rounded-md border border-dashed border-zinc-400 px-3 text-center text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        data-slot="add-file"
-        onClick={filesEdit.onAddFile}
-        style={{ aspectRatio: FILE_CARD_WIDTH / (FILE_CARD_WIDTH * 1.3) }}
-        title={t("files.addFile")}
-        type="button"
-      >
-        <FilePlus className="size-6" />
-        <span className="flex flex-col items-center gap-1">
-          <span className="text-sm font-medium">{t("files.addFile")}</span>
-          <span className="text-xs font-normal text-balance text-muted-foreground/75">
-            {t("files.addFileHint")}
-          </span>
-        </span>
-      </button>
-      {drag ? <FileDragGhost name={draggedName} pointer={drag.pointer} /> : null}
-    </div>
-  )
-}
-
 type PdfViewerLayoutProps = {
   currentPage: number
   documentId: number
   draft?: RectDraft
   fileName: string
-  filesEdit: FilesEditProps
   pageEdit: PageEditProps
   pages: PdfPageInfo[]
   referencePageWidth: number
@@ -472,7 +404,6 @@ export function PdfViewerLayout({
   documentId,
   draft,
   fileName,
-  filesEdit,
   pageEdit,
   pages,
   referencePageWidth,
@@ -522,8 +453,6 @@ export function PdfViewerLayout({
           currentPage={currentPage}
           pageEdit={pageEdit}
         />
-      ) : viewMode === "files" ? (
-        <FilesLayout {...layoutProps} filesEdit={filesEdit} />
       ) : (
         <SingleLayout {...layoutProps} />
       )}

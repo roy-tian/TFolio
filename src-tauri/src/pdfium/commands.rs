@@ -12,7 +12,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::recent::RecentFiles;
 
 use super::{
-    size_limit_error, ExportOutcome, MergeBookmarks, MergeOutcome, PageNumbersConfig, PagePoint,
+    size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks, PageNumbersConfig, PagePoint,
     PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfStructureUpdate, PdfTextSpan, PdfiumState,
     RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
 };
@@ -368,25 +368,26 @@ pub async fn open_pdf_from_path(
 }
 
 #[tauri::command]
-pub async fn merge_pdf_from_path(
+pub async fn insert_pdf_from_path(
     document_id: u64,
     path: String,
+    index: i32,
     state: State<'_, PdfiumState>,
-) -> Result<MergeOutcome, String> {
+) -> Result<InsertOutcome, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(path);
 
-        // The same approval a fresh open needs, and for the same reason: a
-        // merge reads a file the WebView named.
+        // The same approval a fresh open needs, and for the same reason: an
+        // insert reads a file the WebView named.
         #[cfg(not(feature = "e2e"))]
         ensure_approved(&engine, &path)?;
 
-        engine.merge_from_path(document_id, path)
+        engine.insert_from_path(document_id, path, index)
     })
     .await
-    .map_err(|error| format!("PDFium merge task failed: {error}"))?
+    .map_err(|error| format!("PDFium insert task failed: {error}"))?
 }
 
 /// Shows the native open dialog in multi-select mode, for the merge wizard's

@@ -57,7 +57,6 @@ const zhCN = {
     viewModeSingle: "单页",
     viewModeBook: "书本",
     viewModeThumbnail: "缩略图",
-    viewModeFiles: "文件",
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
     rotate: "顺时针旋转",
@@ -107,12 +106,13 @@ const zhCN = {
     saveNoSource: "没有可覆盖的源文件——导出将另存为副本",
     saveOwnedContent:
       "本次会话添加了水印或页码的文档只能导出副本——文件一旦关闭，它们便无法再由本应用移除",
-    saveMerged: "合并了其他文件的文档只能导出副本，不能保存回第一个文件",
+    saveMerged: "含有其他 PDF 页面的文档只能导出副本，不能保存回原文件",
     saveFailed: "无法保存此 PDF。",
     exportFilter: "PDF 文件",
     exportDefaultName: "已批注.pdf",
     exportFailed: "无法导出此 PDF。",
     failed: "无法应用该修改。",
+    dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖入此 PDF。",
   },
   watermark: {
     open: "水印",
@@ -208,7 +208,6 @@ const zhCN = {
     loading: "正在打开 PDF…",
     dropNow: "松开以打开此 PDF",
     dropNowMerge: "松开以添加这些 PDF",
-    appendHint: "这些 PDF 将被添加到当前文档",
     fileTooLarge: "PDF 文件不能超过 512 MiB。",
     invalidFile: "请选择 PDF 文件。",
     openFailed: "无法打开此 PDF 文件。",
@@ -275,21 +274,6 @@ const zhCN = {
     errorMerge: "无法合并这些 PDF。",
     errorTooMany_one: "一次最多合并 {{count}} 个文件。",
     errorTooMany_other: "一次最多合并 {{count}} 个文件。",
-  },
-  files: {
-    cardLabel: "文件 {{name}}",
-    // Chinese has one plural form; i18next uses `_other`, but the typed schema
-    // needs `_one` present too, so both carry the same text.
-    pageCount_one: "{{count}} 页",
-    pageCount_other: "{{count}} 页",
-    pageCountPadded_one: "{{count}} 页（+{{pad}} 空白）",
-    pageCountPadded_other: "{{count}} 页（+{{pad}} 空白）",
-    deleteFile: "移除 {{name}}",
-    addFile: "添加 PDF",
-    addFileHint: "点击选择要合并到当前文档的 PDF",
-    smartPadding: "文件从奇数页开始",
-    smartPaddingHint:
-      "在首页会落在偶数页的文件前插入一张空白页，使每个文件在双面打印时都从右侧页开始",
   },
   bookmarks: {
     title: "书签",

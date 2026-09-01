@@ -13,7 +13,7 @@ pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, close_pdf,
     create_pdf, delete_last_pdf_annotation, delete_pdf_pages, export_pdf, extract_pdf_page_text,
-    inspect_pdf_files, insert_pdf_blank_page, merge_pdf_files, merge_pdf_from_path, open_pdf,
+    insert_pdf_blank_page, insert_pdf_from_path, inspect_pdf_files, merge_pdf_files, open_pdf,
     open_pdf_from_path, pick_pdf_path, pick_pdf_paths, remove_pdf_page_numbers,
     remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, reorder_pdf_pages,
     restore_pdf_pages, save_pdf,
@@ -55,16 +55,20 @@ pub struct PdfStructureUpdate {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
+    /// Whether any page another file brought in is still in the document —
+    /// which, like a watermark, leaves it export-only. The frontend's save key
+    /// reads this instead of replaying its own history, so it asks exactly the
+    /// question `save` refuses on.
+    has_merged_pages: bool,
 }
 
-/// What a merge appended: where the source's first page landed, how many pages
-/// it brought, and the fresh document metadata. The frontend derives the merged
-/// file's page range from `page_count` — the one thing it cannot know until the
-/// backend has read the file.
+/// What an insert brought in: how many pages the source held, and the fresh
+/// document metadata. The frontend chose the position, but `page_count` is the
+/// one thing it cannot know until the backend has read the file — and what its
+/// undo needs to know which pages to take back out.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MergeOutcome {
-    inserted_at: i32,
+pub struct InsertOutcome {
     page_count: i32,
     update: PdfStructureUpdate,
 }

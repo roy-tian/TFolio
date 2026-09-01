@@ -43,9 +43,9 @@ export type ListDragState = {
 
 /**
  * Drag-to-reorder for a single-column list — the same self-drawn pointer
- * gesture the thumbnail grid and the file cards use (`usePageDrag`,
- * `useFileCardDrag`), with the geometry a stack of rows needs instead of a
- * grid's: `dropGapForRow` reads the row's own vertical midpoint.
+ * gesture the thumbnail grid uses (`usePageDrag`), with the geometry a stack of
+ * rows needs instead of a grid's: `dropGapForRow` reads the row's own vertical
+ * midpoint.
  *
  * Rows are measured in the list's own scrolled content space, not the
  * viewport's, so a list the reader scrolls mid-drag keeps answering about the
@@ -58,7 +58,7 @@ export function useListDrag({
 }: UseListDragOptions): { drag: ListDragState | null } {
   const [drag, setDrag] = useState<ListDragState | null>(null)
   // Read through a ref so an owner re-render mid-gesture cannot resubscribe the
-  // listeners and drop the gesture in flight, as in `useFileCardDrag`.
+  // listeners and drop the gesture in flight, as in `usePageDrag`.
   const onReorderRef = useRef(onReorder)
 
   onReorderRef.current = onReorder

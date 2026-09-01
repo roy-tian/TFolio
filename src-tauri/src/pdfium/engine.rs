@@ -38,7 +38,7 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, MergeBookmarks, MergeOutcome, PagePoint, PagePointsRect, PdfDocumentInfo,
+    ExportOutcome, InsertOutcome, MergeBookmarks, PagePoint, PagePointsRect, PdfDocumentInfo,
     PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfStructureUpdate, PdfTextSpan, RectEffect,
     RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
@@ -422,12 +422,13 @@ struct OpenDocument {
     /// this detects an annotation that changed the source page before the
     /// processed image is attached again.
     revisions: HashMap<u64, u64>,
-    /// Page ids that came from a merge and are still in the document. While any
-    /// remain, this document holds another file's pages, so — like a watermark —
-    /// it may only be exported as a copy, never written back over the first
-    /// file. Emptied when a merge is undone (its pages deleted) and refilled
-    /// when it is redone (its pages restored), so the guard tracks what is
-    /// actually present, not merely what once happened.
+    /// Page ids an insert brought in from another file and that are still in the
+    /// document. While any remain, this document holds another file's pages, so
+    /// — like a watermark — it may only be exported as a copy, never written
+    /// back over the file it was opened from. Emptied when an insert is undone
+    /// (its pages deleted) and refilled when it is redone (its pages restored),
+    /// so the guard tracks what is actually present, not merely what once
+    /// happened.
     merged_page_ids: HashSet<u64>,
     /// The file this document was opened from, and so the file a save writes
     /// back over. `None` — opened from bytes — leaves nothing to overwrite,
@@ -631,8 +632,8 @@ impl PdfiumEngine {
     /// Whether something outside the WebView — a drop, a dialog — produced
     /// this path. Kept rather than consumed: the reader may cancel the unsaved
     /// guard and open the same file again.
-    // The e2e build waives the check at both its call sites — `open_pdf_from_path`
-    // and `merge_pdf_from_path` — so the whole method is dead there.
+    // The e2e build waives the check at every call site — `open_pdf_from_path`,
+    // `insert_pdf_from_path` and the wizard's — so the whole method is dead there.
     #[cfg_attr(feature = "e2e", allow(dead_code))]
     pub(super) fn is_approved(&self, path: &Path) -> bool {
         self.approved_paths
@@ -709,7 +710,7 @@ impl PdfiumEngine {
             .pdfium
             .load_pdf_from_byte_vec(bytes, None)
             .map_err(|error| format!("PDFium could not open the document: {error}"))?;
-        let PdfStructureUpdate {
+        let DocumentLayout {
             num_pages,
             pages,
             outline,
@@ -2729,7 +2730,7 @@ impl PdfiumEngine {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
         let Some(indices) = validate_page_order(order, entry.page_ids.len())? else {
-            return Ok(document_layout(&entry.document));
+            return Ok(structure_update(entry));
         };
 
         // A failed FPDF_MovePages may leave the document in an indeterminate
@@ -2756,7 +2757,7 @@ impl PdfiumEngine {
         // captured before the move must fail its revision check after it.
         entry.invalidate_all_page_revisions();
 
-        Ok(document_layout(&entry.document))
+        Ok(structure_update(entry))
     }
 
     /// Deletes the given pages, first copying them — and the session state
@@ -2846,7 +2847,7 @@ impl PdfiumEngine {
         entry.needs_compaction = true;
         entry.invalidate_all_page_revisions();
 
-        Ok(document_layout(&entry.document))
+        Ok(structure_update(entry))
     }
 
     /// Puts a stash's pages back where they were deleted from, consuming it.
@@ -2956,7 +2957,7 @@ impl PdfiumEngine {
         entry.needs_compaction = true;
         entry.invalidate_all_page_revisions();
 
-        Ok(document_layout(&entry.document))
+        Ok(structure_update(entry))
     }
 
     /// Inserts a blank page at 1-based `index`, sized from the unrotated
@@ -3020,19 +3021,20 @@ impl PdfiumEngine {
 
         entry.invalidate_all_page_revisions();
 
-        Ok(document_layout(&entry.document))
+        Ok(structure_update(entry))
     }
 
-    /// Appends every page of the PDF at `path` to the end of the open document,
-    /// as one merge. The source is opened under the same limits as a fresh open
-    /// and never enters the document store; a "file" in the merged document is
-    /// only the frontend's accounting of a page range, not a second document.
-    pub(super) fn merge_from_path(
+    /// Inserts every page of the PDF at `path` into the open document at
+    /// 1-based `index`, as one edit. The source is opened under the same limits
+    /// as a fresh open and never enters the document store; its pages become
+    /// this document's own, not a second document the reader could tell apart.
+    pub(super) fn insert_from_path(
         &self,
         document_id: u64,
         path: PathBuf,
-    ) -> Result<MergeOutcome, String> {
-        // The same read an open makes, under the same MiB ceiling: a merge is
+        index: i32,
+    ) -> Result<InsertOutcome, String> {
+        // The same read an open makes, under the same MiB ceiling: an insert is
         // another door onto a reader's file, not a looser one.
         let bytes = read_pdf_bytes(&path)?;
 
@@ -3048,35 +3050,42 @@ impl PdfiumEngine {
         let added_count = source.pages().len();
 
         if added_count < 1 {
-            return Err("the merged PDF has no pages".into());
+            return Err("the inserted PDF has no pages".into());
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
-        let inserted_at = entry.page_ids.len() as i32 + 1;
+        let page_count = entry.page_ids.len();
+        // One past the end is a position too, exactly as a blank page's is.
+        let Some(slot) = page_index(index, page_count + 1) else {
+            return Err(format!("a page cannot go to position {index}"));
+        };
 
-        // Append imports the pages, which may fail partway; snapshot first so a
-        // failure rolls the document back whole, as every multi-page structure
-        // change does.
+        // The import may fail partway; snapshot first so a failure rolls the
+        // document back whole, as every multi-page structure change does.
         let snapshot = entry
             .document
             .save_to_bytes()
             .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
 
-        if let Err(error) = entry.document.pages_mut().append(&source) {
+        if let Err(error) = entry.document.pages_mut().copy_page_range_from_document(
+            &source,
+            0..=added_count - 1,
+            slot as i32,
+        ) {
             return Err(self.restore_document_snapshot(
                 entry,
                 snapshot,
-                format!("PDFium could not merge the document: {error}"),
+                format!("PDFium could not insert the document: {error}"),
             ));
         }
 
-        // A merged page carries its source's own content objects. When this
+        // An inserted page carries its source's own content objects. When this
         // session owns any layer, each new page takes an owned-but-bare record
         // whose base is that content and whose tail is empty — no active layer
         // covers a page it never marked. Measured before the recording loop,
         // which needs a mutable borrow of the same entry.
         //
-        // A read failure here rolls the append back like `append` itself does:
+        // A read failure here rolls the import back like the import itself does:
         // the pages are already on the document, so a bare `?` would leave them
         // there while `page_ids` never learned of them — a desync every later
         // command trusts against.
@@ -3084,7 +3093,7 @@ impl PdfiumEngine {
             Some(_) => {
                 let measured = (0..added_count)
                     .map(|offset| {
-                        let index = inserted_at - 1 + offset;
+                        let index = slot as i32 + offset as i32;
                         entry
                             .document
                             .pages()
@@ -3092,7 +3101,7 @@ impl PdfiumEngine {
                             .map(|page| page.objects().len())
                             .map_err(|error| {
                                 format!(
-                                    "PDFium could not inspect merged page {}: {error}",
+                                    "PDFium could not inspect inserted page {}: {error}",
                                     index + 1
                                 )
                             })
@@ -3109,13 +3118,13 @@ impl PdfiumEngine {
             None => Vec::new(),
         };
 
-        for offset in 0..added_count {
+        for offset in 0..added_count as usize {
             let page_id = entry.next_page_id;
 
             entry.next_page_id += 1;
-            entry.page_ids.push(page_id);
+            entry.page_ids.insert(slot + offset, page_id);
             // This page is another file's content: while it stays, the document
-            // may only be exported as a copy, not saved over the first file.
+            // may only be exported as a copy, not saved over its own file.
             entry.merged_page_ids.insert(page_id);
 
             if let Some(state) = entry.owned_content.as_mut() {
@@ -3124,7 +3133,7 @@ impl PdfiumEngine {
                 state.per_page.insert(
                     page_id,
                     OwnedTailState {
-                        base_objects: new_base_objects[offset as usize],
+                        base_objects: new_base_objects[offset],
                         segments: Vec::new(),
                     },
                 );
@@ -3133,13 +3142,12 @@ impl PdfiumEngine {
 
         // Nothing was removed, so no compaction is owed; but every page's
         // content now sits in a longer document, and an M5 effect captured
-        // before the merge must fail its revision check after it.
+        // before the insert must fail its revision check after it.
         entry.invalidate_all_page_revisions();
 
-        Ok(MergeOutcome {
-            inserted_at,
+        Ok(InsertOutcome {
             page_count: added_count,
-            update: document_layout(&entry.document),
+            update: structure_update(entry),
         })
     }
 
@@ -3239,7 +3247,10 @@ impl PdfiumEngine {
                     // file's own leading sheet rather than the last file's tail.
                     let (width, height) = {
                         let first = source.pages().get(0).map_err(|error| {
-                            format!("PDFium could not load a page of {}: {error}", path.display())
+                            format!(
+                                "PDFium could not load a page of {}: {error}",
+                                path.display()
+                            )
                         })?;
 
                         unrotated_page_size(&first)
@@ -3319,13 +3330,14 @@ impl PdfiumEngine {
             );
         }
 
-        // Merged-in pages carry the same restriction as a watermark, for the
-        // same reason the plan modelled on it: a save here would write another
-        // file's pages over the first file. Enforced in the command, not trusted
-        // to the disabled key, since the WebView can call this directly.
+        // Pages another file brought in carry the same restriction as a
+        // watermark, for the same reason the plan modelled on it: a save here
+        // would write another file's pages over the reader's own. Enforced in
+        // the command, not trusted to the disabled key, since the WebView can
+        // call this directly.
         if !entry.merged_page_ids.is_empty() {
             return Err(
-                "a document that merged other files may only be exported as a copy, not saved over its own file"
+                "a document holding another PDF's pages may only be exported as a copy, not saved over its own file"
                     .into(),
             );
         }
@@ -3347,8 +3359,8 @@ impl PdfiumEngine {
 
         // The same refusal `save` makes, at the other exit: a reader who picks
         // their own file in the export dialog would otherwise overwrite it with
-        // content this app cannot lift — a watermark, or another file's merged-in
-        // pages, both export-only for the same reason. Unlike the
+        // content this app cannot lift — a watermark, or another file's pages,
+        // both export-only for the same reason. Unlike the
         // `saved_to_source` comparison below, this one resolves aliases before it
         // answers — the two run in opposite directions. Missing a symlinked twin
         // there only leaves the history dirty; missing one here destroys the
@@ -3653,19 +3665,32 @@ fn remapped_outline(items: Vec<PdfOutlineItem>, start: usize) -> Vec<OutlineNode
         .into_iter()
         .map(|item| OutlineNode {
             title: item.title,
-            page: start + item.page_number.map_or(0, |number| number.max(1) as usize - 1),
+            page: start
+                + item
+                    .page_number
+                    .map_or(0, |number| number.max(1) as usize - 1),
             children: remapped_outline(item.items, start),
         })
         .collect()
 }
 
-/// The page list and outline as they stand: what an open reports, and what
-/// every structure command returns fresh — the frontend holds no mirror of
+/// Everything about a document's shape the document itself can answer. Kept
+/// apart from `PdfStructureUpdate` because that type carries one fact a
+/// document cannot know — whether a page in it came from another file — so
+/// this deliberately cannot be handed to the frontend on its own.
+struct DocumentLayout {
+    num_pages: i32,
+    pages: Vec<PdfPageInfo>,
+    outline: Vec<PdfOutlineItem>,
+}
+
+/// The page list and outline as they stand: what an open reports, and half of
+/// what every structure command returns fresh — the frontend holds no mirror of
 /// the page list to patch, only this to replace.
-fn document_layout(document: &PdfDocument<'static>) -> PdfStructureUpdate {
+fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
     let pages = document.pages();
 
-    PdfStructureUpdate {
+    DocumentLayout {
         num_pages: pages.len(),
         pages: pages
             .iter()
@@ -3676,6 +3701,27 @@ fn document_layout(document: &PdfDocument<'static>) -> PdfStructureUpdate {
             })
             .collect(),
         outline: collect_bookmark_siblings(document.bookmarks().root()),
+    }
+}
+
+/// The layout a structure command reports back, together with whether any page
+/// another file brought in is still present. The frontend's save key reads that
+/// flag rather than replaying its own command history: `merged_page_ids` is the
+/// same set `save` refuses on, so the key can never disagree with the command.
+/// The only way to build a `PdfStructureUpdate`, so a command that reaches for
+/// `document_layout` alone cannot report the flag away.
+fn structure_update(entry: &OpenDocument) -> PdfStructureUpdate {
+    let DocumentLayout {
+        num_pages,
+        pages,
+        outline,
+    } = document_layout(&entry.document);
+
+    PdfStructureUpdate {
+        has_merged_pages: !entry.merged_page_ids.is_empty(),
+        num_pages,
+        outline,
+        pages,
     }
 }
 

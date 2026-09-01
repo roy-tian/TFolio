@@ -71,7 +71,7 @@ decoded via `createImageBitmap`, never as a `blob:` source.
   `generate_handler!` is callable by the WebView with any arguments, so validate
   in the command. Today: `export_pdf` takes a file *name*, reduced to
   `Path::file_name()`; `save_pdf` writes only to the `source_path` recorded at
-  open; `open_pdf_from_path`, `merge_pdf_from_path`, `inspect_pdf_files` and
+  open; `open_pdf_from_path`, `insert_pdf_from_path`, `inspect_pdf_files` and
   `merge_pdf_files` act only on approved paths — ones the OS produced in Rust's
   sight (the drag-drop handler or a pick dialog, single or multi-select) —
   because opening a path binds it as what a later save overwrites, and reading
@@ -79,6 +79,9 @@ decoded via `createImageBitmap`, never as a `blob:` source.
   for every call site. `recent.rs` records a path only after an approved open and
   re-approves at startup. The e2e build waives that check; nothing else does.
   `tauri-plugin-fs` is a transitive dependency and deliberately never registered.
+  `insert_pdf_from_path` also validates its *position*, in the engine rather
+  than the command and so in the e2e build too: the gap comes off the WebView,
+  so an index the document does not have is refused, not clamped.
 - `delete_last_pdf_annotation` counts what the session added per page instead of
   trusting the frontend's undo history, so it can never delete a link, form
   field, or comment that was already in the reader's file.

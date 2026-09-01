@@ -9,6 +9,7 @@ import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import {
   DocumentSession,
   type DocumentSessionHandle,
+  type FileDragEvent,
 } from "@/components/DocumentSession"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
@@ -44,7 +45,7 @@ import {
   isPdfPath,
   type PdfDocumentInfo,
 } from "@/lib/pdf"
-import { isMacOS } from "@/lib/platform"
+import { isMacOS, isWindows } from "@/lib/platform"
 import { readRecentFiles, type RecentFile } from "@/lib/recentFiles"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type { ViewMode } from "@/lib/viewMode"
@@ -477,32 +478,76 @@ export default function App() {
       : null
   }, [mergeWizard.addPaths, mergeWizard.open])
 
+  // The active document's own take on a drag, for the one listener below. Read
+  // through the refs it already uses, so the subscription stays bound once.
+  const dragToSession = useCallback((event: FileDragEvent) => {
+    const tabId = activeIdRef.current
+
+    return (
+      tabId !== HOME_TAB_ID &&
+      (sessionRefs.current.get(tabId)?.onFileDrag(event) ?? false)
+    )
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
+    // Only `enter` and `drop` name the files; `over` — the event that moves the
+    // insertion line — carries a position and nothing else. Held from the enter
+    // so the grid can refuse to promise a landing place for a file it cannot
+    // take. Unknown (a listener bound mid-drag) is not "none".
+    let draggedPaths: string[] | null = null
 
     void getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (event.payload.type === "over") {
+        if (event.payload.type === "leave") {
+          draggedPaths = null
+          dragToSession({ kind: "leave" })
+          setIsDragging(false)
+          return
+        }
+
+        // wry reports the pointer in the window's own units and Tauri labels
+        // them physical either way: WebView2 really does hand over device
+        // pixels, while Cocoa's `draggingLocation` and GTK's widget coordinates
+        // are already the logical ones the page hit-tests with.
+        const scale = isWindows() ? window.devicePixelRatio : 1
+        const point = {
+          x: event.payload.position.x / scale,
+          y: event.payload.position.y / scale,
+        }
+
+        if (event.payload.type === "drop") {
+          draggedPaths = null
+          setIsDragging(false)
+
+          const toWizard = wizardDropRef.current
+
+          // The wizard is modal, so it takes every drop while it is open; the
+          // thumbnail grid takes one that points at a gap in it; anything else
+          // opens as tabs.
+          if (toWizard) {
+            toWizard(event.payload.paths)
+          } else if (
+            !dragToSession({ kind: "drop", paths: event.payload.paths, point })
+          ) {
+            void openPaths(event.payload.paths, "first")
+          }
+
           return
         }
 
         if (event.payload.type === "enter") {
-          setIsDragging(true)
-          return
+          draggedPaths = event.payload.paths
         }
 
-        setIsDragging(false)
+        // The grid draws its own insertion line, so the workspace's full-window
+        // drop target would only cover the answer the reader is aiming at.
+        const claimed =
+          !wizardDropRef.current &&
+          dragToSession({ kind: "over", paths: draggedPaths, point })
 
-        if (event.payload.type === "drop") {
-          const toWizard = wizardDropRef.current
-
-          if (toWizard) {
-            toWizard(event.payload.paths)
-          } else {
-            void openPaths(event.payload.paths, "first")
-          }
-        }
+        setIsDragging(!claimed)
       })
       .then((stop) => {
         if (cancelled) {
@@ -516,7 +561,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [openPaths])
+  }, [dragToSession, openPaths])
 
   useEffect(() => {
     if (isE2eBuild) {

@@ -257,7 +257,8 @@ export async function openPathViaDialog(filePath: string) {
 
 /**
  * Writes `contents` to a scratch file and hands back its path, without opening
- * it: the merge wizard reads files it never opens as documents.
+ * it: the merge wizard and the grid's insert both read files they never open as
+ * documents of their own.
  */
 export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
@@ -382,4 +383,51 @@ export async function renderedPage() {
     { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
   )
   await browser.pause(1500)
+}
+
+/**
+ * Emits the drag event the window's own handler listens for, standing in for a
+ * drag from the desktop: WebDriver cannot start one, and the app hears these
+ * through Tauri's event system rather than through DOM events. The position
+ * goes over exactly as GTK reports one — in the window's own logical units,
+ * which the suite's only platform makes the CSS pixels the page hit-tests with
+ * (see the scaling note in `App.tsx`).
+ */
+export function emitDrag(
+  name: "drag-over" | "drag-drop",
+  point: { x: number; y: number },
+  paths: string[],
+) {
+  return browser.execute(
+    (event: string, x: number, y: number, files: string[]) => {
+      const tauri = (
+        window as Window & {
+          __TAURI__?: {
+            event: { emit: (name: string, payload: unknown) => Promise<void> }
+          }
+        }
+      ).__TAURI__
+
+      return tauri!.event.emit(`tauri://${event}`, {
+        paths: files,
+        position: { x: Math.round(x), y: Math.round(y) },
+      })
+    },
+    name,
+    point.x,
+    point.y,
+    paths,
+  )
+}
+
+/** The middle of one thumbnail insert zone, in CSS pixels — where a dropped PDF
+    would land at that position. */
+export function gapPoint(index: number) {
+  return browser.execute((at: number) => {
+    const rect = document
+      .querySelector(`[data-insert-index='${at}']`)!
+      .getBoundingClientRect()
+
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  }, index)
 }

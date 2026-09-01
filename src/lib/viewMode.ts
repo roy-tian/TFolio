@@ -1,41 +1,22 @@
 import { readStored, store } from "@/lib/storage"
 
-export const viewModes = ["single", "book", "thumbnail", "files"] as const
+export const viewModes = ["single", "book", "thumbnail"] as const
 
 export type ViewMode = (typeof viewModes)[number]
 
 export const defaultViewMode: ViewMode = "single"
 export const viewModeStorageKey = "tfolio.ui.viewMode"
 
-/** Width of one thumbnail cell, and the gap between cells, in CSS pixels. */
+/** Width of one thumbnail cell, and the gaps around it, in CSS pixels. The
+    columns stand further apart than the rows: the space between two pages is
+    where the insertion line and its + button live, and it matches the layout's
+    own side padding so the gap after the last page is the same width. The row
+    gap is spent as each cell's bottom padding rather than the grid's `rowGap`,
+    so that no band between two rows belongs to no cell — a file dragged across
+    the grid has to name a position the whole way down. */
 export const THUMBNAIL_WIDTH = 160
-export const THUMBNAIL_GAP = 16
-
-/** Width of one file card's face, and the gap between cards, in CSS pixels. The
-    gap is wide enough to hold the leaves a multi-page card fans out behind it. */
-export const FILE_CARD_WIDTH = 176
-export const FILE_CARD_GAP = 40
-
-/** Columns of `columnWidth` with `gap` between them that fit `containerWidth`.
-    `n` columns occupy `n * columnWidth + (n - 1) * gap`, so lending the row one
-    extra gap makes the fit a plain division. */
-function columnsThatFit(
-  containerWidth: number,
-  columnWidth: number,
-  gap: number,
-): number {
-  return Math.floor((containerWidth + gap) / (columnWidth + gap))
-}
-
-/** File cards per row: as many as `containerWidth` fits, and never fewer than
-    one — unlike thumbnails, a row of cards need not stay even. */
-export function computeFileCardColumns(
-  containerWidth: number,
-  columnWidth = FILE_CARD_WIDTH,
-  gap = FILE_CARD_GAP,
-): number {
-  return Math.max(1, columnsThatFit(containerWidth, columnWidth, gap))
-}
+export const THUMBNAIL_ROW_GAP = 16
+export const THUMBNAIL_COLUMN_GAP = 32
 
 export function isViewMode(value: unknown): value is ViewMode {
   return viewModes.includes(value as ViewMode)
@@ -50,7 +31,7 @@ export function hasBookSpread(numPages: number): boolean {
  * The mode the viewer really lays out, which can outvote the reader's choice: a
  * one-page document has no spread, and book view would leave that page in the
  * left half of a double-width column (see `pairPages`). The choice itself is
- * left standing, so merging or inserting a page brings book view back.
+ * left standing, so inserting a page brings book view back.
  */
 export function effectiveViewMode(
   preferred: ViewMode,
@@ -100,9 +81,11 @@ export function spreadPages(pageNumber: number, numPages: number): number[] {
 export function computeThumbnailColumns(
   containerWidth: number,
   columnWidth = THUMBNAIL_WIDTH,
-  gap = THUMBNAIL_GAP,
+  gap = THUMBNAIL_COLUMN_GAP,
 ): number {
-  const fit = columnsThatFit(containerWidth, columnWidth, gap)
+  // `n` columns occupy `n * columnWidth + (n - 1) * gap`, so lending the row one
+  // extra gap makes the fit a plain division.
+  const fit = Math.floor((containerWidth + gap) / (columnWidth + gap))
 
   return Math.max(2, Math.floor(fit / 2) * 2)
 }

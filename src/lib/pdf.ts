@@ -46,16 +46,19 @@ export type PdfExportOutcome = {
     place: the page list and outline are replaced wholesale, because the
     backend's document is the only truth about what the pages now are. */
 export type PdfStructureUpdate = {
+  /** Whether any page another file brought in is still in the document, which
+      leaves it export-only. Answered by the backend rather than replayed from
+      history: it is the very set `save_pdf` refuses on. */
+  hasMergedPages: boolean
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
 }
 
-/** What a merge appended. `pageCount` is the one thing the frontend cannot
-    derive from history until the backend has read the file, so the merge
-    command carries it back from here. */
-export type PdfMergeOutcome = {
-  insertedAt: number
+/** What inserting a PDF brought in. `pageCount` is the one thing the frontend
+    cannot know until the backend has read the file, so the insert command
+    carries it back from here — it is what its undo takes out again. */
+export type PdfInsertOutcome = {
   pageCount: number
   update: PdfStructureUpdate
 }
