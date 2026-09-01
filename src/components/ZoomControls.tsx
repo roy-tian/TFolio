@@ -1,4 +1,4 @@
-import { Maximize, MoveHorizontal, ZoomIn, ZoomOut } from "lucide-react"
+import { Brackets, Maximize, ZoomIn, ZoomOut } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
@@ -31,9 +31,15 @@ export function ZoomControls({
   // The button offers the fit the reader does not have, so its icon and label
   // both name what pressing it will do. Whether a fit is on at all is what the
   // pressed state carries.
+  //
+  // Both fits are drawn as the frame the page is being fitted into — all four
+  // corners for the page, the two side edges alone for the width. An arrow
+  // would name the direction more plainly, but it is the one icon in the
+  // toolbar with no border, and next to the other it reads as a different kind
+  // of control rather than the same one in its other position.
   const fitActive = isFitActive(zoomMode)
   const nextFit = nextFitMode(zoomMode)
-  const FitIcon = nextFit === "fit-width" ? MoveHorizontal : Maximize
+  const FitIcon = nextFit === "fit-width" ? Brackets : Maximize
   const fitLabel =
     nextFit === "fit-width" ? t("toolbar.zoomFitWidth") : t("toolbar.zoomFitPage")
 
