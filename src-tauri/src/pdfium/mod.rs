@@ -3,6 +3,7 @@ mod engine;
 mod font;
 mod geometry;
 mod library;
+mod outline;
 mod page_numbers;
 mod watermark;
 
@@ -12,9 +13,10 @@ pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, close_pdf,
     create_pdf, delete_last_pdf_annotation, delete_pdf_pages, export_pdf, extract_pdf_page_text,
-    insert_pdf_blank_page, merge_pdf_from_path, open_pdf, open_pdf_from_path, pick_pdf_path,
-    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    reorder_pdf_pages, restore_pdf_pages, save_pdf,
+    inspect_pdf_files, insert_pdf_blank_page, merge_pdf_files, merge_pdf_from_path, open_pdf,
+    open_pdf_from_path, pick_pdf_path, pick_pdf_paths, remove_pdf_page_numbers,
+    remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, reorder_pdf_pages,
+    restore_pdf_pages, save_pdf,
 };
 pub use engine::PdfiumState;
 pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};
@@ -33,7 +35,7 @@ fn size_limit_error() -> String {
     )
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfDocumentInfo {
     id: u64,
@@ -65,6 +67,38 @@ pub struct MergeOutcome {
     inserted_at: i32,
     page_count: i32,
     update: PdfStructureUpdate,
+}
+
+/// How a guided merge turns its sources' bookmarks into the merged document's
+/// outline. Every mode but `None` needs an outline written, which PDFium cannot
+/// do — see `outline.rs`.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeBookmarks {
+    /// No outline at all — the shape a merge already produces, since imported
+    /// pages leave their source's bookmarks behind.
+    None,
+    /// One top-level bookmark per file, on the file's first page.
+    PerFile,
+    /// Each file's own bookmarks, remapped onto their merged positions and laid
+    /// out one file after another at the top level.
+    KeepExisting,
+    /// One bookmark per file, with that file's own bookmarks beneath it.
+    PerFileWithExisting,
+}
+
+/// What one candidate file of a guided merge holds, read before anything is
+/// merged so the wizard can show page counts and total up the result.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfFileSummary {
+    path: String,
+    /// `None` when the file could not be read as a PDF, so the row shows as
+    /// unusable rather than silently going missing from the list.
+    page_count: Option<i32>,
+    /// Whether the file brings bookmarks of its own — what makes the
+    /// bookmark-keeping modes worth offering.
+    has_outline: bool,
 }
 
 /// What an export wrote and where it stands relative to the document's source.

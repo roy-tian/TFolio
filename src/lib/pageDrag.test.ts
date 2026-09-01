@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test"
 
 import {
   dropGapForPoint,
+  dropGapForRow,
   exceedsDragThreshold,
+  indexAfterMove,
   orderAfterMove,
   type CellBox,
 } from "@/lib/pageDrag"
@@ -79,5 +81,37 @@ describe("orderAfterMove", () => {
 
   it("moves a block to the very end", () => {
     expect(orderAfterMove([1, 2], 5, 5)).toEqual([3, 4, 5, 1, 2])
+  })
+})
+
+describe("dropGapForRow", () => {
+  const rows = [
+    { height: 40, top: 0 },
+    { height: 40, top: 50 },
+    { height: 40, top: 100 },
+  ]
+
+  it("answers with the gap the pointer's own row half indicates", () => {
+    expect(dropGapForRow(5, rows)).toBe(0)
+    expect(dropGapForRow(30, rows)).toBe(1)
+    expect(dropGapForRow(55, rows)).toBe(1)
+    expect(dropGapForRow(80, rows)).toBe(2)
+    expect(dropGapForRow(200, rows)).toBe(3)
+  })
+
+  it("puts an empty list's only gap at the front", () => {
+    expect(dropGapForRow(40, [])).toBe(0)
+  })
+})
+
+describe("indexAfterMove", () => {
+  it("leaves an item dropped back where it already is", () => {
+    expect(indexAfterMove(2, 2)).toBe(2)
+    expect(indexAfterMove(2, 3)).toBe(2)
+  })
+
+  it("closes up over the hole a downward move leaves", () => {
+    expect(indexAfterMove(0, 3)).toBe(2)
+    expect(indexAfterMove(3, 1)).toBe(1)
   })
 })

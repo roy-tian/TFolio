@@ -1,7 +1,7 @@
 import {
   ChevronDown,
-  FileDigit,
   FilePenLine,
+  FileScan,
   Highlighter,
   Square,
   Stamp,
@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
+import { MergeWizardButton } from "@/components/MergeWizardButton"
 import { RectStylePopover } from "@/components/RectStylePopover"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -36,6 +37,10 @@ type AnnotationToolbarProps = {
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle) => void
+  /** Opens the merge wizard. It builds a document of its own rather than
+      touching this one, but it sits with the document tools because that is
+      where a reader looks for what acts on whole files. */
+  onMergeWizard: () => void
   onPageNumbers: () => void
   onToolChange: (tool: AnnotationTool) => void
   onWatermark: () => void
@@ -52,6 +57,7 @@ export function AnnotationToolbar({
   highlightApplies,
   highlightColor,
   onHighlightColorChange,
+  onMergeWizard,
   onPageNumbers,
   onRectStyleChange,
   onToolChange,
@@ -209,8 +215,12 @@ export function AnnotationToolbar({
           title={pageNumbersLabel}
           variant="ghost"
         >
-          <FileDigit />
+          <FileScan />
         </Button>
+
+        {/* Last in the group: the two before it mark the document on screen,
+            while this one leaves to build another. */}
+        <MergeWizardButton onClick={onMergeWizard} />
       </ButtonGroup>
     </div>
   )

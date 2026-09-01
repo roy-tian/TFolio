@@ -6,9 +6,10 @@ use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, close_pdf,
     create_pdf, delete_last_pdf_annotation, delete_pdf_pages, export_pdf, extract_pdf_page_text,
-    insert_pdf_blank_page, merge_pdf_from_path, open_pdf, open_pdf_from_path, pick_pdf_path,
-    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    reorder_pdf_pages, restore_pdf_pages, save_pdf, PdfiumState,
+    inspect_pdf_files, insert_pdf_blank_page, merge_pdf_files, merge_pdf_from_path, open_pdf,
+    open_pdf_from_path, pick_pdf_path, pick_pdf_paths, remove_pdf_page_numbers,
+    remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, reorder_pdf_pages,
+    restore_pdf_pages, save_pdf, PdfiumState,
 };
 use preferences::{page_numbers_preferences, set_page_numbers_preferences, Preferences};
 use recent::{recent_pdfs, RecentFiles};
@@ -54,6 +55,9 @@ pub fn run() {
             open_pdf,
             open_pdf_from_path,
             pick_pdf_path,
+            pick_pdf_paths,
+            inspect_pdf_files,
+            merge_pdf_files,
             recent_pdfs,
             render_pdf_page,
             render_pdf_page_thumbnail,

@@ -4652,3 +4652,308 @@ fn creates_a_blank_a4_document_with_no_file_of_its_own() {
         .close(document.id)
         .expect("the new document should close");
 }
+
+// A 400x500 single page, so a blank measured from the file it precedes can be
+// told from one measured from the file before it (200x300 everywhere else).
+fn wide_single_page_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 500] /Contents 4 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+    ])
+}
+
+/// Writes each fixture into its own file in `directory`, named `<stem>.pdf`,
+/// and hands back the paths in order — the shape `merge_files` takes.
+fn merge_sources(directory: &Path, files: &[(&str, Vec<u8>)]) -> Vec<PathBuf> {
+    files
+        .iter()
+        .map(|(stem, bytes)| {
+            let path = directory.join(format!("{stem}.pdf"));
+
+            fs::write(&path, bytes).expect("the source should write to disk");
+            path
+        })
+        .collect()
+}
+
+#[test]
+fn a_merged_bookmark_title_is_the_file_name_without_its_extension() {
+    assert_eq!(bookmark_title(Path::new("/tmp/Chapter One.pdf")), "Chapter One");
+    assert_eq!(bookmark_title(Path::new("report.PDF")), "report");
+    // A path that ends in no name of its own still has to say something.
+    assert_eq!(bookmark_title(Path::new("/")), "/");
+}
+
+#[test]
+fn a_kept_outline_moves_onto_the_pages_its_file_landed_on() {
+    let items = vec![PdfOutlineItem {
+        title: "Chapter".into(),
+        page_number: Some(2),
+        items: vec![PdfOutlineItem {
+            title: "Section".into(),
+            page_number: Some(3),
+            items: Vec::new(),
+        }],
+    }];
+
+    let nodes = remapped_outline(items, 4);
+
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes[0].page, 5, "the file's page 2 is the document's page 6");
+    assert_eq!(nodes[0].children[0].page, 6);
+}
+
+#[test]
+fn a_bookmark_with_no_destination_falls_back_to_its_own_file() {
+    let items = vec![PdfOutlineItem {
+        title: "Unplaced".into(),
+        page_number: None,
+        items: Vec::new(),
+    }];
+
+    assert_eq!(remapped_outline(items, 7)[0].page, 7);
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_files_appends_every_file_in_order() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-order");
+    let first = banded_pdf(&[20, 60]);
+    let second = banded_pdf(&[110, 150, 190]);
+    let paths = merge_sources(
+        &directory,
+        &[("first", first.clone()), ("second", second.clone())],
+    );
+
+    // Each source rendered on its own, so the comparison is independent of the
+    // merge under test rather than fed back from it.
+    let first_prints = {
+        let opened = engine.open(first).expect("PDFium should open the first file");
+
+        page_fingerprints(engine, opened.id, 2)
+    };
+    let second_prints = {
+        let opened = engine
+            .open(second)
+            .expect("PDFium should open the second file");
+
+        page_fingerprints(engine, opened.id, 3)
+    };
+
+    let merged = engine
+        .merge_files(paths, false, MergeBookmarks::None)
+        .expect("PDFium should merge the files");
+
+    assert_eq!(merged.num_pages, 5);
+    assert!(
+        merged.path.is_none(),
+        "a merged document has no file to be saved back over"
+    );
+    assert!(merged.outline.is_empty(), "no bookmarks were asked for");
+
+    let prints = page_fingerprints(engine, merged.id, 5);
+
+    assert_eq!(&prints[..2], &first_prints[..]);
+    assert_eq!(&prints[2..], &second_prints[..]);
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_files_pads_only_the_files_that_would_open_on_an_even_page() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-parity");
+    let paths = merge_sources(
+        &directory,
+        &[
+            ("one", minimal_pdf()),
+            ("wide", wide_single_page_pdf()),
+            ("two", two_page_pdf()),
+        ],
+    );
+
+    let padded = engine
+        .merge_files(paths.clone(), true, MergeBookmarks::None)
+        .expect("PDFium should merge the files");
+
+    // One page, a pad, the wide page, then the two-page file: the pad before
+    // the third file would be surplus, since it already opens on page 4… which
+    // is even, so it gets one too.
+    assert_eq!(padded.num_pages, 6);
+    assert_eq!(
+        (padded.pages[1].width, padded.pages[1].height),
+        (400.0, 500.0),
+        "a pad is sized like the file it precedes, not the one before it"
+    );
+
+    let plain = engine
+        .merge_files(paths, false, MergeBookmarks::None)
+        .expect("PDFium should merge the files");
+
+    assert_eq!(plain.num_pages, 4, "no pads without the option");
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_files_writes_one_bookmark_per_file() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-per-file");
+    let paths = merge_sources(
+        &directory,
+        &[("Front matter", two_page_pdf()), ("Body", minimal_pdf())],
+    );
+
+    let merged = engine
+        .merge_files(paths, false, MergeBookmarks::PerFile)
+        .expect("PDFium should merge the files");
+
+    assert_eq!(merged.outline.len(), 2);
+    assert_eq!(merged.outline[0].title, "Front matter");
+    assert_eq!(merged.outline[0].page_number, Some(1));
+    assert!(merged.outline[0].items.is_empty());
+    assert_eq!(merged.outline[1].title, "Body");
+    assert_eq!(
+        merged.outline[1].page_number,
+        Some(3),
+        "the second file's bookmark points at the page it landed on"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_files_keeps_each_source_outline_at_its_merged_position() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-keep");
+    let paths = merge_sources(
+        &directory,
+        &[("plain", two_page_pdf()), ("outlined", outlined_three_page_pdf())],
+    );
+
+    let merged = engine
+        .merge_files(paths, false, MergeBookmarks::KeepExisting)
+        .expect("PDFium should merge the files");
+
+    // The first file brings none; the second's one bookmark aims at its own
+    // third page, which is the merged document's fifth.
+    assert_eq!(merged.outline.len(), 1);
+    assert_eq!(merged.outline[0].title, "Chapter");
+    assert_eq!(merged.outline[0].page_number, Some(5));
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_files_nests_a_source_outline_under_its_own_file() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-nested");
+    let paths = merge_sources(
+        &directory,
+        &[("plain", two_page_pdf()), ("outlined", outlined_three_page_pdf())],
+    );
+
+    let merged = engine
+        .merge_files(paths, false, MergeBookmarks::PerFileWithExisting)
+        .expect("PDFium should merge the files");
+
+    assert_eq!(merged.outline.len(), 2);
+    assert_eq!(merged.outline[0].title, "plain");
+    assert!(
+        merged.outline[0].items.is_empty(),
+        "a file with no bookmarks of its own gets no children"
+    );
+    assert_eq!(merged.outline[1].title, "outlined");
+    assert_eq!(merged.outline[1].page_number, Some(3));
+    assert_eq!(merged.outline[1].items.len(), 1);
+    assert_eq!(merged.outline[1].items[0].title, "Chapter");
+    assert_eq!(merged.outline[1].items[0].page_number, Some(5));
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merge_files_refuses_a_run_of_fewer_than_two_files() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-single");
+    let paths = merge_sources(&directory, &[("only", minimal_pdf())]);
+
+    let error = engine
+        .merge_files(paths, false, MergeBookmarks::None)
+        .expect_err("one file is not a merge");
+
+    assert!(error.contains("at least two"), "{error}");
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn inspecting_files_reports_page_counts_and_leaves_unreadable_ones_in_place() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-inspect");
+    let paths = merge_sources(
+        &directory,
+        &[
+            ("plain", two_page_pdf()),
+            ("outlined", outlined_three_page_pdf()),
+            ("broken", b"not a pdf at all".to_vec()),
+        ],
+    );
+
+    let summaries = engine
+        .inspect_files(paths.clone())
+        .expect("the sweep should not fail over one bad file");
+
+    assert_eq!(summaries.len(), 3, "every row the reader added stays");
+    assert_eq!(summaries[0].page_count, Some(2));
+    assert!(!summaries[0].has_outline);
+    assert_eq!(summaries[1].page_count, Some(3));
+    assert!(summaries[1].has_outline);
+    assert_eq!(
+        summaries[2].page_count, None,
+        "a file PDFium cannot read is reported as unusable"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn writing_the_outline_leaves_the_pages_as_pdfium_saved_them() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-roundtrip");
+    let first = banded_pdf(&[20, 60]);
+    let second = banded_pdf(&[110, 150, 190]);
+    let paths = merge_sources(
+        &directory,
+        &[("first", first.clone()), ("second", second.clone())],
+    );
+
+    // The same merge twice: once straight from PDFium's own bytes, once through
+    // the outline writer. Only a bookmarked run is reparsed and rewritten by
+    // lopdf, so this is what says that pass changes nothing a reader can see.
+    let plain = engine
+        .merge_files(paths.clone(), false, MergeBookmarks::None)
+        .expect("PDFium should merge the files");
+    let bookmarked = engine
+        .merge_files(paths, false, MergeBookmarks::PerFile)
+        .expect("PDFium should merge the files");
+
+    assert_eq!(bookmarked.num_pages, plain.num_pages);
+    assert_eq!(
+        page_fingerprints(engine, bookmarked.id, bookmarked.num_pages),
+        page_fingerprints(engine, plain.id, plain.num_pages),
+        "the outline pass leaves every page rendering exactly as it did"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}

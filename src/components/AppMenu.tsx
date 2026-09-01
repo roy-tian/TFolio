@@ -38,6 +38,11 @@ export type AppMenuActions = {
   /** Whether anything is open to close. */
   canCloseAll: boolean
   onCloseAll: () => void
+  /** Opens the merge wizard, which builds a document of its own rather than
+      touching the one on screen — a workspace action like opening a file. Not
+      a menu entry: it is a button, in the document tools' group of the toolbar
+      (`MergeWizardButton`), and this bag is how it reaches every header. */
+  onMergeWizard: () => void
   onNew: () => void
   onOpen: () => void
   onOpenRecent: (path: string) => void

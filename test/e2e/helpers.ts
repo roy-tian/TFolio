@@ -255,6 +255,32 @@ export async function openPathViaDialog(filePath: string) {
   await openFileButton().click()
 }
 
+/**
+ * Writes `contents` to a scratch file and hands back its path, without opening
+ * it: the merge wizard reads files it never opens as documents.
+ */
+export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
+  const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
+  const filePath = path.join(directory, fileName)
+
+  writeFileSync(filePath, contents)
+
+  return filePath
+}
+
+/** The multi-select stand-in the merge wizard's add button reads, left beside
+    whatever other override is already in place. */
+export async function pointMultiPickerAt(filePaths: string[]) {
+  await browser.execute((mockPaths: string[]) => {
+    const seam = window as Window & { __tfolioE2E?: E2eOverrides }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      pickPdfPaths: () => Promise.resolve(mockPaths),
+    }
+  }, filePaths)
+}
+
 /** Writes the picker stand-in without disturbing any other override. */
 export async function pointPickerAt(filePath: string) {
   await browser.execute((mockPath: string) => {

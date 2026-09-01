@@ -26,6 +26,7 @@ use super::{
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
     library::bind_pdfium,
+    outline::{self, OutlineNode},
     page_numbers::{
         average_luminance, blank_scan_box, ink_color, is_blank_sample, page_number_center,
         page_number_display_box, DisplayBox, PageNumberPlacement, PageNumbering, PageNumbersConfig,
@@ -37,9 +38,9 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, MergeOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfOutlineItem,
-    PdfPageInfo, PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle,
-    TextNoteStyle, MAX_PDF_BYTES,
+    ExportOutcome, MergeBookmarks, MergeOutcome, PagePoint, PagePointsRect, PdfDocumentInfo,
+    PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfStructureUpdate, PdfTextSpan, RectEffect,
+    RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -51,6 +52,10 @@ const MAX_THUMBNAIL_WIDTH: i32 = 512;
 // Each quad is a PDFium call made under the lock every render waits on, and no
 // page has this many runs of text.
 const MAX_HIGHLIGHT_QUADS: usize = 8192;
+// A guided merge holds every source in memory at once, each under the same MiB
+// ceiling as an open, so the count is what bounds the whole run. Far past any
+// stack of files a reader assembles by hand.
+const MAX_MERGE_FILES: usize = 64;
 // Image effects capture page pixels at a print-like resolution, capped at the
 // same dimensions as an ordinary page render so one drag cannot allocate an
 // unbounded bitmap or inflate the saved file without limit.
@@ -679,22 +684,7 @@ impl PdfiumEngine {
     /// Opens the file at `path`, remembering it as the place a save writes back
     /// to.
     pub(super) fn open_from_path(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
-        // Sized before it is read: `open_with_source` checks the byte count too,
-        // but only after `fs::read` has already pulled an arbitrarily large file
-        // into memory.
-        let metadata = fs::metadata(&path)
-            .map_err(|error| format!("could not open {}: {error}", path.display()))?;
-
-        if !metadata.is_file() {
-            return Err(format!("{} is not a file", path.display()));
-        }
-
-        if metadata.len() > MAX_PDF_BYTES as u64 {
-            return Err(size_limit_error());
-        }
-
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        let bytes = read_pdf_bytes(&path)?;
 
         self.open_with_source(bytes, Some(path))
     }
@@ -3042,30 +3032,9 @@ impl PdfiumEngine {
         document_id: u64,
         path: PathBuf,
     ) -> Result<MergeOutcome, String> {
-        // Sized before it is read, like `open_from_path`: a merge honours the
-        // same MiB ceiling as an open, and reading the metadata first keeps an
-        // oversized file from being pulled wholesale into memory.
-        let metadata = fs::metadata(&path)
-            .map_err(|error| format!("could not open {}: {error}", path.display()))?;
-
-        if !metadata.is_file() {
-            return Err(format!("{} is not a file", path.display()));
-        }
-
-        if metadata.len() > MAX_PDF_BYTES as u64 {
-            return Err(size_limit_error());
-        }
-
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-
-        if bytes.is_empty() {
-            return Err("PDF file is empty".into());
-        }
-
-        if bytes.len() > MAX_PDF_BYTES {
-            return Err(size_limit_error());
-        }
+        // The same read an open makes, under the same MiB ceiling: a merge is
+        // another door onto a reader's file, not a looser one.
+        let bytes = read_pdf_bytes(&path)?;
 
         let mut documents = self.lock_documents()?;
         // The source is opened inside the lock — loading a PDF is PDFium work —
@@ -3172,6 +3141,161 @@ impl PdfiumEngine {
             page_count: added_count,
             update: document_layout(&entry.document),
         })
+    }
+
+    /// Reads each candidate file of a guided merge just far enough to report
+    /// what the wizard's first step shows: how many pages it brings, and whether
+    /// it has bookmarks of its own. A file that cannot be read is reported as
+    /// such rather than dropped, so the row the reader added stays on screen and
+    /// says why it is unusable.
+    pub(super) fn inspect_files(&self, paths: Vec<PathBuf>) -> Result<Vec<PdfFileSummary>, String> {
+        if paths.len() > MAX_MERGE_FILES {
+            return Err(merge_file_limit_error());
+        }
+
+        // Loading a PDF is PDFium work like any other, so the whole sweep runs
+        // under the store's lock even though it inserts nothing into the store.
+        let _documents = self.lock_documents()?;
+
+        Ok(paths
+            .into_iter()
+            .map(|path| {
+                let opened = read_pdf_bytes(&path)
+                    .ok()
+                    .and_then(|bytes| self.pdfium.load_pdf_from_byte_vec(bytes, None).ok());
+                let path = path.to_string_lossy().into_owned();
+
+                match opened {
+                    Some(document) => {
+                        let page_count = document.pages().len();
+
+                        PdfFileSummary {
+                            path,
+                            page_count: (page_count >= 1).then_some(page_count),
+                            has_outline: document.bookmarks().root().is_some(),
+                        }
+                    }
+                    None => PdfFileSummary {
+                        path,
+                        page_count: None,
+                        has_outline: false,
+                    },
+                }
+            })
+            .collect())
+    }
+
+    /// Merges `paths`, in the order given, into one new document — the guided
+    /// merge's whole backend half.
+    ///
+    /// Nothing is merged *into* an open document: the result is a document of
+    /// this app's own making with no source path, so it can only ever be
+    /// exported to a copy and never written back over one of its sources.
+    ///
+    /// `smart_padding` inserts a blank before any file that would otherwise open
+    /// on an even page — the rule the files view's toggle already follows, so
+    /// that each file begins on a right-hand leaf when printed double-sided.
+    pub(super) fn merge_files(
+        &self,
+        paths: Vec<PathBuf>,
+        smart_padding: bool,
+        bookmarks: MergeBookmarks,
+    ) -> Result<PdfDocumentInfo, String> {
+        if paths.len() < 2 {
+            return Err("a merge needs at least two files".into());
+        }
+
+        if paths.len() > MAX_MERGE_FILES {
+            return Err(merge_file_limit_error());
+        }
+
+        let (bytes, nodes) = {
+            // Building the document is PDFium work like any other, so it is done
+            // under the store's lock — given back before `open_with_source`
+            // takes it again, as `create_blank` does.
+            let _documents = self.lock_documents()?;
+            let mut merged = self
+                .pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+            let mut nodes = Vec::new();
+
+            for path in &paths {
+                // Each source is opened only to be copied from and dropped at the
+                // end of this loop; none of them ever enters the document store.
+                // The error wording matches `open`'s, so an encrypted file is
+                // refused the same way whichever door it comes through.
+                let source = self
+                    .pdfium
+                    .load_pdf_from_byte_vec(read_pdf_bytes(path)?, None)
+                    .map_err(|error| format!("PDFium could not open the document: {error}"))?;
+
+                if source.pages().len() < 1 {
+                    return Err(format!("{} has no pages", path.display()));
+                }
+
+                if smart_padding && merged.pages().len() % 2 == 1 {
+                    // Sized like the file it precedes, so the blank reads as that
+                    // file's own leading sheet rather than the last file's tail.
+                    let (width, height) = {
+                        let first = source.pages().get(0).map_err(|error| {
+                            format!("PDFium could not load a page of {}: {error}", path.display())
+                        })?;
+
+                        unrotated_page_size(&first)
+                    };
+                    let page = merged
+                        .pages_mut()
+                        .create_page_at_end(PdfPagePaperSize::Custom(
+                            PdfPoints::new(width),
+                            PdfPoints::new(height),
+                        ))
+                        .map_err(|error| {
+                            format!("PDFium could not create the blank page: {error}")
+                        })?;
+
+                    drop(page);
+                }
+
+                // Taken after the pad, so a bookmark points at the file's own
+                // first page rather than the blank in front of it.
+                let start = merged.pages().len().max(0) as usize;
+                // Read before the append, which imports pages alone: PDFium
+                // leaves the source's outline behind, which is the whole reason
+                // the merged one has to be written by hand afterwards.
+                let outline = collect_bookmark_siblings(source.bookmarks().root());
+
+                merged.pages_mut().append(&source).map_err(|error| {
+                    format!("PDFium could not merge {}: {error}", path.display())
+                })?;
+
+                nodes.extend(merge_bookmark_nodes(
+                    bookmarks,
+                    bookmark_title(path),
+                    start,
+                    outline,
+                ));
+            }
+
+            let bytes = merged
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not build the merged document: {error}"))?;
+
+            (bytes, nodes)
+        };
+        // Writing the outline is byte work rather than PDFium work, so it
+        // happens with the store's lock given back — a long merge must not park
+        // every render behind it.
+        let bytes = outline::write_outline(bytes, &nodes)?;
+
+        // The sources each passed the ceiling on their own; their sum is what
+        // this checks, and it is checked before the bytes are opened rather than
+        // after, so an oversized merge is refused rather than parked in the store.
+        if bytes.len() > MAX_PDF_BYTES {
+            return Err(size_limit_error());
+        }
+
+        self.open_with_source(bytes, None)
     }
 
     /// Writes the document back over the file it was opened from.
@@ -3452,6 +3576,87 @@ fn same_file(left: &Path, right: &Path) -> bool {
     }
 
     resolved(left) == resolved(right)
+}
+
+/// A PDF read into memory under the app's size ceiling. Sized from its metadata
+/// before it is read, so an oversized file is refused rather than pulled
+/// wholesale into memory first, and checked again after — the file on disk may
+/// have grown between the two.
+fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+
+    if metadata.len() > MAX_PDF_BYTES as u64 {
+        return Err(size_limit_error());
+    }
+
+    let bytes =
+        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+
+    if bytes.is_empty() {
+        return Err("PDF file is empty".into());
+    }
+
+    if bytes.len() > MAX_PDF_BYTES {
+        return Err(size_limit_error());
+    }
+
+    Ok(bytes)
+}
+
+fn merge_file_limit_error() -> String {
+    format!("a merge takes at most {MAX_MERGE_FILES} files")
+}
+
+/// The name a per-file bookmark carries: the file's own name without the
+/// extension, which is what a reader calls it. A path that ends in no name at
+/// all falls back to the whole path, so a bookmark is never blank.
+fn bookmark_title(path: &Path) -> String {
+    path.file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+/// What one merged file contributes to the outline under `mode`. `start` is the
+/// 0-based position its first page landed at.
+fn merge_bookmark_nodes(
+    mode: MergeBookmarks,
+    title: String,
+    start: usize,
+    outline: Vec<PdfOutlineItem>,
+) -> Vec<OutlineNode> {
+    match mode {
+        MergeBookmarks::None => Vec::new(),
+        MergeBookmarks::PerFile => vec![OutlineNode {
+            title,
+            page: start,
+            children: Vec::new(),
+        }],
+        MergeBookmarks::KeepExisting => remapped_outline(outline, start),
+        MergeBookmarks::PerFileWithExisting => vec![OutlineNode {
+            title,
+            page: start,
+            children: remapped_outline(outline, start),
+        }],
+    }
+}
+
+/// A source file's own outline moved onto the pages it now occupies. An item
+/// whose destination could not be read points at the file's first page instead,
+/// so a heading never lands outside the file it came from.
+fn remapped_outline(items: Vec<PdfOutlineItem>, start: usize) -> Vec<OutlineNode> {
+    items
+        .into_iter()
+        .map(|item| OutlineNode {
+            title: item.title,
+            page: start + item.page_number.map_or(0, |number| number.max(1) as usize - 1),
+            children: remapped_outline(item.items, start),
+        })
+        .collect()
 }
 
 /// The page list and outline as they stand: what an open reports, and what

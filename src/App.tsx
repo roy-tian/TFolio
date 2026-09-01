@@ -12,6 +12,8 @@ import {
 } from "@/components/DocumentSession"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
+import { MergeWizard } from "@/components/MergeWizard"
+import { MergeWizardButton } from "@/components/MergeWizardButton"
 import { WindowControls } from "@/components/WindowControls"
 import {
   AlertDialog,
@@ -23,6 +25,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { ButtonGroup } from "@/components/ui/button-group"
+import {
+  useMergeWizard,
+  type MergeWizardResult,
+} from "@/hooks/useMergeWizard"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
@@ -39,6 +46,9 @@ import {
 } from "@/lib/pdf"
 import { isMacOS } from "@/lib/platform"
 import { readRecentFiles, type RecentFile } from "@/lib/recentFiles"
+import type { PageNumbersConfig } from "@/lib/pageNumbers"
+import type { ViewMode } from "@/lib/viewMode"
+import type { WatermarkConfig } from "@/lib/watermark"
 
 type OpenTab = {
   dirty: boolean
@@ -46,6 +56,14 @@ type OpenTab = {
   id: number
   name: string
   path: string
+  /** What a document the app itself built opens with, over and above the file
+      it was read from: the merge wizard's view and its two page-content
+      layers. Absent for every ordinary open. */
+  opensWith?: {
+    pageNumbers: PageNumbersConfig | null
+    viewMode: ViewMode
+    watermark: WatermarkConfig | null
+  }
 }
 
 type WorkspaceError =
@@ -273,6 +291,35 @@ export default function App() {
     [activateTab, replaceTabs, runOpenBatch, t],
   )
 
+  // A merged document is the app's own, like a new one: it has no file behind
+  // it, so it lives in the workspace until an export gives it one — which is
+  // the only way it can be written, since it holds other files' pages.
+  const openMergeResult = useCallback(
+    ({ document, pageNumbers, watermark }: MergeWizardResult) => {
+      if (!mountedRef.current) {
+        void invoke("close_pdf", { documentId: document.id }).catch(
+          () => undefined,
+        )
+        return
+      }
+
+      const tab: OpenTab = {
+        dirty: false,
+        document,
+        id: document.id,
+        name: t("mergeWizard.mergedName"),
+        opensWith: { pageNumbers, viewMode: "thumbnail", watermark },
+        path: "",
+      }
+
+      replaceTabs((current) => [...current, tab])
+      activateTab(tab.id)
+      setWorkspaceError(null)
+    },
+    [activateTab, replaceTabs, t],
+  )
+  const mergeWizard = useMergeWizard({ onMerged: openMergeResult })
+
   const chooseFile = useCallback(async () => {
     if (choosingFileRef.current) {
       return
@@ -400,6 +447,7 @@ export default function App() {
     () => ({
       canCloseAll: tabs.length > 0,
       onCloseAll: requestCloseAll,
+      onMergeWizard: mergeWizard.openWizard,
       onNew: () => void createDocument(),
       onOpen: () => void chooseFile(),
       onOpenRecent: (path) => void openPaths([path]),
@@ -409,6 +457,7 @@ export default function App() {
     [
       chooseFile,
       createDocument,
+      mergeWizard.openWizard,
       openPaths,
       recentFiles,
       refreshRecentFiles,
@@ -416,6 +465,17 @@ export default function App() {
       tabs.length,
     ],
   )
+
+  // The drop listener is bound once, so what a drop should do is read from a
+  // ref rather than captured: while the wizard is open the files join its list
+  // instead of opening as tabs of their own.
+  const wizardDropRef = useRef<((paths: string[]) => void) | null>(null)
+
+  useEffect(() => {
+    wizardDropRef.current = mergeWizard.open
+      ? (paths) => void mergeWizard.addPaths(paths)
+      : null
+  }, [mergeWizard.addPaths, mergeWizard.open])
 
   useEffect(() => {
     let cancelled = false
@@ -435,7 +495,13 @@ export default function App() {
         setIsDragging(false)
 
         if (event.payload.type === "drop") {
-          void openPaths(event.payload.paths, "first")
+          const toWizard = wizardDropRef.current
+
+          if (toWizard) {
+            toWizard(event.payload.paths)
+          } else {
+            void openPaths(event.payload.paths, "first")
+          }
         }
       })
       .then((stop) => {
@@ -524,6 +590,12 @@ export default function App() {
           data-tauri-drag-region="deep"
         >
           <div className="flex items-center gap-2">
+            {/* The home tab has no document toolbar, and the wizard is the one
+                tool there that needs no document — so it keeps the look it has
+                in that toolbar, as a group of its own. */}
+            <ButtonGroup>
+              <MergeWizardButton onClick={mergeWizard.openWizard} />
+            </ButtonGroup>
             <AppMenu {...menuActions} />
             {macOS ? null : <WindowControls />}
           </div>
@@ -546,6 +618,9 @@ export default function App() {
           active={tab.id === activeId}
           document={tab.document}
           fileName={tab.name}
+          initialPageNumbers={tab.opensWith?.pageNumbers}
+          initialViewMode={tab.opensWith?.viewMode}
+          initialWatermark={tab.opensWith?.watermark}
           key={tab.id}
           menu={menuActions}
           onDirtyChange={updateDirty}
@@ -573,9 +648,13 @@ export default function App() {
         <div className="pointer-events-none fixed inset-3 top-24 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm">
           <div className="flex flex-col items-center text-center">
             <FileUp className="mb-4 size-12" />
-            <p className="text-lg font-semibold">{t("tabs.dropNow")}</p>
+            <p className="text-lg font-semibold">
+              {mergeWizard.open ? t("viewer.dropNowMerge") : t("tabs.dropNow")}
+            </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {t("tabs.dropHint")}
+              {mergeWizard.open
+                ? t("mergeWizard.filesDescription")
+                : t("tabs.dropHint")}
             </p>
           </div>
         </div>
@@ -589,6 +668,8 @@ export default function App() {
           {errorMessage}
         </div>
       ) : null}
+
+      <MergeWizard wizard={mergeWizard} />
 
       <AlertDialog
         onOpenChange={(open) => {

@@ -71,6 +71,40 @@ export function dropGapForPoint(
 }
 
 /**
+ * The gap a pointer at `y` indicates in a single-column list: 0 above the first
+ * row, `rows.length` below the last. Each row's own midpoint is the boundary,
+ * which is what a stack of rows wants — `dropGapForPoint` answers with the
+ * *horizontal* midpoint, right for a cell in a grid row and meaningless here.
+ *
+ * `y` and the rows are in the scroll container's content space, so a list the
+ * reader scrolls mid-drag still answers about the row under the pointer.
+ */
+export function dropGapForRow(
+  y: number,
+  rows: Pick<CellBox, "height" | "top">[],
+): number {
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!
+
+    if (y < row.top + row.height / 2) {
+      return index
+    }
+  }
+
+  return rows.length
+}
+
+/**
+ * Where the item at `from` lands when dropped into `gap`, both 0-based. The gap
+ * counts the positions between the items as they stand, so one past the dragged
+ * item's own place is where it already is — every gap beyond that shifts down by
+ * the hole the item leaves behind.
+ */
+export function indexAfterMove(from: number, gap: number): number {
+  return gap > from ? gap - 1 : gap
+}
+
+/**
  * The 1-based page order after dropping `dragged` into `gap`. The dragged
  * pages land as one block, keeping their relative order; everything else keeps
  * its own. A drop that reproduces the current order comes back as the

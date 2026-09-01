@@ -69,6 +69,7 @@ import {
   type FileRange,
   type InitialFile,
 } from "@/lib/fileRanges"
+import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
   fileNameFromPath,
   isPdfPath,
@@ -93,6 +94,7 @@ import {
   anchorOnPage,
   type ViewportAnchor,
 } from "@/lib/viewportAnchor"
+import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 type ViewerError =
@@ -112,6 +114,16 @@ type DocumentSessionProps = {
   active: boolean
   document: PdfDocumentInfo
   fileName: string
+  /** Page numbers to lay on as the session opens — what the merge wizard asked
+      for. Applied through the ordinary command, so they are one undo away and
+      the dialog finds them where it expects. */
+  initialPageNumbers?: PageNumbersConfig | null
+  /** The view this document opens in, where something other than the reader's
+      stored preference suits it: a merge opens on the thumbnail grid, which is
+      where the whole result can be looked over at once. */
+  initialViewMode?: ViewMode
+  /** A watermark to lay on as the session opens — see `initialPageNumbers`. */
+  initialWatermark?: WatermarkConfig | null
   /** The workspace half of the header's menu, which every tab shares. */
   menu: AppMenuActions
   onDirtyChange: (documentId: number, dirty: boolean) => void
@@ -130,6 +142,9 @@ function DocumentSession(
     active,
     document: openedDocument,
     fileName,
+    initialPageNumbers,
+    initialViewMode,
+    initialWatermark,
     menu,
     onDirtyChange,
     onSourceChange,
@@ -160,7 +175,7 @@ function DocumentSession(
   const [viewerWidth, setViewerWidth] = useState(0)
   const [viewerHeight, setViewerHeight] = useState(0)
   const [preferredViewMode, setPreferredViewMode] = useState<ViewMode>(
-    () => readStoredViewMode() ?? defaultViewMode,
+    () => initialViewMode ?? readStoredViewMode() ?? defaultViewMode,
   )
   const [activeTool, setActiveTool] = useState<AnnotationTool>(null)
   const [highlightColor, setHighlightColor] = useState<HexColor>(
@@ -388,6 +403,38 @@ function DocumentSession(
     }
   }, [])
 
+  // Applied once, on the first render of a session that was handed them: the
+  // wizard's own steps, run through the same commands the dialogs use so the
+  // reader can undo either. Page numbers first, so the watermark lands above
+  // them — the order the two dialogs leave a document in.
+  const initialLayers = useRef({
+    pageNumbers: initialPageNumbers ?? null,
+    watermark: initialWatermark ?? null,
+  })
+
+  useEffect(() => {
+    const { pageNumbers, watermark } = initialLayers.current
+
+    if (!pageNumbers && !watermark) {
+      return
+    }
+
+    initialLayers.current = { pageNumbers: null, watermark: null }
+
+    void (async () => {
+      const pageCount = documentRef.current?.numPages ?? 0
+
+      if (pageNumbers) {
+        await annotations.setPageNumbers(pageNumbers, pageCount)
+      }
+      if (watermark) {
+        await annotations.setWatermark(watermark, pageCount)
+      }
+    })()
+    // The layers are read off the ref, so this runs once for the session
+    // rather than following the hook's identity.
+  }, [])
+
   useEffect(() => {
     currentPageRef.current = currentPage
     setPageInput(String(currentPage))
@@ -554,7 +601,16 @@ function DocumentSession(
     pendingScrollPageRef.current = currentPage
   }, [active, currentPage])
 
+  // A view this document was opened in rather than chosen in is not the
+  // reader's preference, so it is not stored — only what they press after is.
+  const viewModeChosen = useRef(initialViewMode === undefined)
+
   useEffect(() => {
+    if (!viewModeChosen.current) {
+      viewModeChosen.current = true
+      return
+    }
+
     storeViewMode(preferredViewMode)
   }, [preferredViewMode])
 
@@ -1145,6 +1201,7 @@ function DocumentSession(
             highlightApplies={drawingApplies}
             highlightColor={highlightColor}
             onHighlightColorChange={changeHighlightColor}
+            onMergeWizard={menu.onMergeWizard}
             onPageNumbers={pageNumbers.openDialog}
             onRectStyleChange={changeRectStyle}
             onToolChange={setActiveTool}

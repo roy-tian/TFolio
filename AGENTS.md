@@ -9,8 +9,9 @@ renders PDFs with a bundled PDFium. `bun` is the package manager and runner.
 - `src/` — frontend. Primitives in `components/ui/`, helpers in `lib/`,
   translations in `i18n/locales/`.
 - `src-tauri/src/` — Rust backend: `pdfium/` (engine, commands, geometry, font,
-  watermark, page_numbers, library), `recent.rs` (persisted recent files) and
-  `preferences.rs` (the reader's own settings, in the app data directory).
+  watermark, page_numbers, outline, library), `recent.rs` (persisted recent
+  files) and `preferences.rs` (the reader's own settings, in the app data
+  directory).
 - `src-tauri/tauri.conf.json` — app config and CSP; `tauri.e2e.conf.json`
   overlays the test-only build. `capabilities/` — Tauri permissions.
 - `test/e2e/` — WebdriverIO GUI specs; `scripts/` — asset download, version,
@@ -70,10 +71,12 @@ decoded via `createImageBitmap`, never as a `blob:` source.
   `generate_handler!` is callable by the WebView with any arguments, so validate
   in the command. Today: `export_pdf` takes a file *name*, reduced to
   `Path::file_name()`; `save_pdf` writes only to the `source_path` recorded at
-  open; `open_pdf_from_path` and `merge_pdf_from_path` act only on approved
-  paths — ones the OS produced in Rust's sight (the drag-drop handler or the
-  pick dialog) — because opening a path binds it as what a later save
-  overwrites. `recent.rs` records a path only after an approved open and
+  open; `open_pdf_from_path`, `merge_pdf_from_path`, `inspect_pdf_files` and
+  `merge_pdf_files` act only on approved paths — ones the OS produced in Rust's
+  sight (the drag-drop handler or a pick dialog, single or multi-select) —
+  because opening a path binds it as what a later save overwrites, and reading
+  one at all discloses its content. That check is `ensure_approved`, one wording
+  for every call site. `recent.rs` records a path only after an approved open and
   re-approves at startup. The e2e build waives that check; nothing else does.
   `tauri-plugin-fs` is a transitive dependency and deliberately never registered.
 - `delete_last_pdf_annotation` counts what the session added per page instead of
@@ -89,6 +92,11 @@ decoded via `createImageBitmap`, never as a `blob:` source.
   (overwriting the original with a mark this app can no longer lift is
   unrecoverable; a dirty history is not). Any third write path needs the same
   guard.
+- PDFium reads outlines but cannot write one, so the merge wizard's bookmark
+  modes hand the bytes PDFium just saved to `outline.rs`, which writes
+  `/Outlines` with lopdf and reopens the result. lopdf parses **only this app's
+  own fresh output**, never a reader's file — keep it off the untrusted path, and
+  keep PDFium the one parser an opened file meets.
 - Security-related changes must pass `bun run build`, `bun run tauri:build`, and
   a manual WebView console check for unexpected CSP violations.
 

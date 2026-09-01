@@ -12,10 +12,33 @@ use tauri_plugin_dialog::DialogExt;
 use crate::recent::RecentFiles;
 
 use super::{
-    size_limit_error, ExportOutcome, MergeOutcome, PageNumbersConfig, PagePoint, PagePointsRect,
-    PdfDocumentInfo, PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle,
-    TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
+    size_limit_error, ExportOutcome, MergeBookmarks, MergeOutcome, PageNumbersConfig, PagePoint,
+    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfStructureUpdate, PdfTextSpan, PdfiumState,
+    RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
 };
+
+// Only the check below reaches into the engine's own type, and the e2e build
+// drops the check.
+#[cfg(not(feature = "e2e"))]
+use super::engine::PdfiumEngine;
+
+/// The one approval check every path-taking command makes, in the one wording.
+/// A path is a string any page code can make up, so only paths the OS produced
+/// in this process's sight — a drop the window handler saw, a pick a dialog
+/// returned, or one an earlier run recorded as recent — are ever acted on. The
+/// e2e harness works on scratch files no dialog ever blessed, so its build
+/// waives the check.
+#[cfg(not(feature = "e2e"))]
+fn ensure_approved(engine: &PdfiumEngine, path: &Path) -> Result<(), String> {
+    if engine.is_approved(path) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} did not come from a file dialog or a drop",
+            path.display()
+        ))
+    }
+}
 
 #[tauri::command]
 pub async fn open_pdf(
@@ -328,20 +351,10 @@ pub async fn open_pdf_from_path(
     tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(path);
 
-        // A path is a string any page code can make up, and opening one binds
-        // it as the file `save_pdf` will overwrite — so only paths the OS
-        // produced in this process's sight (a drop the window handler saw, a
-        // pick `pick_pdf_path` returned, or one an earlier run recorded as
-        // recent, which is the same set made durable) are acted on. The e2e
-        // harness opens scratch files no dialog ever blessed, so its build
-        // waives the check.
+        // Opening a path binds it as the file `save_pdf` will overwrite, which
+        // is why an unapproved one is refused — see `ensure_approved`.
         #[cfg(not(feature = "e2e"))]
-        if !engine.is_approved(&path) {
-            return Err(format!(
-                "{} did not come from a file dialog or a drop",
-                path.display()
-            ));
-        }
+        ensure_approved(&engine, &path)?;
 
         let document = engine.open_from_path(path.clone())?;
         // Recorded only once the file actually opened, so the list the next
@@ -366,20 +379,104 @@ pub async fn merge_pdf_from_path(
         let path = PathBuf::from(path);
 
         // The same approval a fresh open needs, and for the same reason: a
-        // merge reads a file the WebView named, so only paths the OS produced
-        // in this process's sight (a drop the window saw, a pick the dialog
-        // returned) are acted on. The e2e harness merges scratch files no
-        // dialog blessed, so its build waives the check — as `open_pdf_from_path`
-        // does at its one call site.
+        // merge reads a file the WebView named.
         #[cfg(not(feature = "e2e"))]
-        if !engine.is_approved(&path) {
-            return Err(format!(
-                "{} did not come from a file dialog or a drop",
-                path.display()
-            ));
-        }
+        ensure_approved(&engine, &path)?;
 
         engine.merge_from_path(document_id, path)
+    })
+    .await
+    .map_err(|error| format!("PDFium merge task failed: {error}"))?
+}
+
+/// Shows the native open dialog in multi-select mode, for the merge wizard's
+/// file list. Every chosen path is recorded as approved, exactly as the
+/// single-file pick does — see `pick_pdf_path`.
+#[tauri::command]
+pub async fn pick_pdf_paths(
+    filter_label: String,
+    app: AppHandle,
+    state: State<'_, PdfiumState>,
+) -> Result<Vec<String>, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
+        let Some(picked) = app
+            .dialog()
+            .file()
+            .add_filter(filter_label, &["pdf"])
+            .blocking_pick_files()
+        else {
+            return Ok(Vec::new());
+        };
+
+        let paths = picked
+            .into_iter()
+            .map(|file| {
+                file.into_path()
+                    .map_err(|error| format!("a chosen file is unusable: {error}"))
+            })
+            .collect::<Result<Vec<PathBuf>, _>>()?;
+
+        engine.approve_paths(paths.iter());
+
+        Ok(paths
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect())
+    })
+    .await
+    .map_err(|error| format!("dialog task failed: {error}"))?
+}
+
+/// Reports what each candidate file of a merge holds, so the wizard's first
+/// step can show page counts and total the result up before anything is merged.
+#[tauri::command]
+pub async fn inspect_pdf_files(
+    paths: Vec<String>,
+    state: State<'_, PdfiumState>,
+) -> Result<Vec<PdfFileSummary>, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+
+        // Reading a file the WebView merely named would let a page learn what
+        // any PDF on the disk holds, so an inspection is approved like an open.
+        #[cfg(not(feature = "e2e"))]
+        for path in &paths {
+            ensure_approved(&engine, path)?;
+        }
+
+        engine.inspect_files(paths)
+    })
+    .await
+    .map_err(|error| format!("PDFium inspection task failed: {error}"))?
+}
+
+/// Merges the named files, in order, into one new document — the merge
+/// wizard's whole backend half. The result has no source path, so it can only
+/// ever be exported to a copy: nothing it merged can be written back over.
+#[tauri::command]
+pub async fn merge_pdf_files(
+    paths: Vec<String>,
+    smart_padding: bool,
+    bookmarks: MergeBookmarks,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfDocumentInfo, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+
+        // The same approval a fresh open needs, for the same reason a merge into
+        // an open document needs it: a merge reads files the WebView named.
+        #[cfg(not(feature = "e2e"))]
+        for path in &paths {
+            ensure_approved(&engine, path)?;
+        }
+
+        engine.merge_files(paths, smart_padding, bookmarks)
     })
     .await
     .map_err(|error| format!("PDFium merge task failed: {error}"))?
