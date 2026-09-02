@@ -42,6 +42,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-wdio = { version = "1", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+# The settings file's format. Already in the tree — `tauri-build` reads
+# `tauri.conf.json`'s Cargo side with it — so naming it here adds a name,
+# not a dependency.
+toml = "1"
 
 # pdfium-render 0.9.3 binds FPDF_MovePages but exposes no safe wrapper, and
 # same-document page reordering has no other route (rebuilding via

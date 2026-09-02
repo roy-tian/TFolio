@@ -1,15 +1,13 @@
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { rectStyleStorageKey } from "../../src/lib/annotationStyles"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
   pagePixelFingerprint,
   renderedPage,
+  seedSettings,
   stripedPdf,
 } from "./helpers"
 
@@ -49,19 +47,8 @@ async function dragRectOnPage() {
 
 describe("TFolio rectangle annotations", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-        // Draw with the default style, whatever a prior run persisted.
-        window.localStorage.removeItem(keys.rectStyle)
-      },
-      {
-        language: languageStorageKey,
-        rectStyle: rectStyleStorageKey,
-        viewMode: viewModeStorageKey,
-      },
-    )
+    // Draw with the default style, whatever a prior run persisted.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("striped.pdf", stripedPdf())

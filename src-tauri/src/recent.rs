@@ -7,62 +7,97 @@
 //! opens a recent file by path, and a path a save may later overwrite still
 //! has to be one this process watched the OS produce, even when it produced it
 //! in an earlier run.
+//!
+//! It keeps its own file rather than joining `settings.toml`: this is the app's
+//! bookkeeping and not the reader's to set, and folding a record with a security
+//! role in among the settings would make hand-editing those a way to name a file
+//! to open and then save over.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
+
+use crate::store::{Store, Stored};
 
 /// How many paths the file keeps. The home tab shows fewer: the surplus is
 /// what keeps that shorter list full once entries whose file has since gone
 /// are left out of it.
 const RECENT_LIMIT: usize = 20;
 
-const RECENT_FILE_NAME: &str = "recent-files.json";
+/// What 0.1.3 and earlier wrote this list to. Read once into `recent-files.toml`
+/// and deleted, so the reader keeps their list and the app writes one format.
+const REPLACED_FILE_NAME: &str = "recent-files.json";
 
 #[derive(Default, Deserialize, Serialize)]
 struct RecentFilesDocument {
     files: Vec<PathBuf>,
 }
 
-struct RecentFilesInner {
-    /// None when no app data directory resolves. The list then lives for this
-    /// run only, which beats failing an open over where to write it.
-    file: Option<PathBuf>,
-    entries: Mutex<Vec<PathBuf>>,
+impl Stored for RecentFilesDocument {
+    const FILE_NAME: &'static str = "recent-files.toml";
+
+    fn parse(contents: &str) -> Self {
+        Self {
+            files: recordable(toml::from_str::<Self>(contents).unwrap_or_default().files),
+        }
+    }
+
+    fn render(&self) -> Option<String> {
+        toml::to_string_pretty(self).ok()
+    }
+}
+
+/// The entries a stored list may contribute.
+///
+/// What is on disk may come from an older version of the app, or from a reader
+/// with a text editor. An unreadable list is an empty one — and a readable one
+/// is still outside input, so every entry has to look like something this app
+/// could have recorded before `run()` approves it: an absolute path to a `.pdf`.
+/// Without that check a hand-edited list is a way to hand the WebView an
+/// arbitrary file to open and then save over.
+fn recordable(files: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut kept: Vec<PathBuf> = files
+        .into_iter()
+        .filter(|path| is_recordable(path))
+        .collect();
+    kept.truncate(RECENT_LIMIT);
+
+    kept
+}
+
+/// The list the file this replaced held, held to the same rule.
+fn replaced_files(contents: &str) -> Vec<PathBuf> {
+    recordable(
+        serde_json::from_str::<RecentFilesDocument>(contents)
+            .unwrap_or_default()
+            .files,
+    )
 }
 
 #[derive(Clone)]
-pub struct RecentFiles(Arc<RecentFilesInner>);
+pub struct RecentFiles(Store<RecentFilesDocument>);
 
 impl RecentFiles {
     pub fn load(app: &AppHandle) -> Self {
-        let file = app
-            .path()
-            .app_data_dir()
-            .ok()
-            .map(|directory| directory.join(RECENT_FILE_NAME));
-        let entries = file.as_deref().map(read_entries).unwrap_or_default();
+        let store = Store::<RecentFilesDocument>::load(app);
 
-        Self(Arc::new(RecentFilesInner {
-            file,
-            entries: Mutex::new(entries),
-        }))
+        // Only where this run has nothing of its own: a list already in the new
+        // file is the later of the two.
+        store.adopt(REPLACED_FILE_NAME, |document, contents| {
+            if document.files.is_empty() {
+                document.files = replaced_files(contents);
+            }
+        });
+
+        Self(store)
     }
 
     /// Every stored path, including any whose file has gone — approving one
     /// that no longer exists costs nothing, and the open would fail on its own
     /// were the file to come back after this run started.
     pub fn stored(&self) -> Vec<PathBuf> {
-        self.0
-            .entries
-            .lock()
-            .map(|entries| entries.clone())
-            .unwrap_or_default()
+        self.0.read(|document| document.files.clone())
     }
 
     /// The paths still on disk, most recently opened first.
@@ -78,12 +113,7 @@ impl RecentFiles {
     }
 
     pub fn record(&self, path: &Path) {
-        let Ok(mut entries) = self.0.entries.lock() else {
-            return;
-        };
-
-        promote(&mut entries, path);
-        write_entries(self.0.file.as_deref(), &entries);
+        self.0.write(|document| promote(&mut document.files, path));
     }
 }
 
@@ -100,30 +130,6 @@ fn promote(entries: &mut Vec<PathBuf>, path: &Path) {
     entries.truncate(RECENT_LIMIT);
 }
 
-fn read_entries(file: &Path) -> Vec<PathBuf> {
-    let Ok(contents) = fs::read_to_string(file) else {
-        return Vec::new();
-    };
-
-    // What is on disk may come from an older version of the app, or from a
-    // reader with a text editor. An unreadable list is an empty one — and a
-    // readable one is still outside input, so every entry has to look like
-    // something this app could have recorded before `run()` approves it: an
-    // absolute path to a `.pdf`. Without that check a hand-edited list is a
-    // way to hand the WebView an arbitrary file to open and then save over.
-    serde_json::from_str::<RecentFilesDocument>(&contents)
-        .map(|document| {
-            let mut files: Vec<PathBuf> = document
-                .files
-                .into_iter()
-                .filter(|path| is_recordable(path))
-                .collect();
-            files.truncate(RECENT_LIMIT);
-            files
-        })
-        .unwrap_or_default()
-}
-
 /// The shape every recorded path has: absolute, and named as a PDF — the same
 /// two things the frontend's `isPdfPath` and the OS's own dialogs guarantee of
 /// what reaches `open_pdf_from_path`.
@@ -132,29 +138,6 @@ fn is_recordable(path: &Path) -> bool {
         && path
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
-}
-
-/// Writes the list, and gives up quietly if it cannot: a recent list is a
-/// convenience, and no failure to record one may fail the open that earned it.
-fn write_entries(file: Option<&Path>, entries: &[PathBuf]) {
-    let Some(file) = file else {
-        return;
-    };
-    let Some(directory) = file.parent() else {
-        return;
-    };
-
-    if fs::create_dir_all(directory).is_err() {
-        return;
-    }
-
-    let document = RecentFilesDocument {
-        files: entries.to_vec(),
-    };
-
-    if let Ok(contents) = serde_json::to_string_pretty(&document) {
-        let _ = fs::write(file, contents);
-    }
 }
 
 /// Async so the `is_file` probe behind `existing()` runs off the main thread:
@@ -211,6 +194,18 @@ mod tests {
         assert!(is_recordable(Path::new("/docs/A.PDF")));
         assert!(!is_recordable(Path::new("/home/roy/.ssh/authorized_keys")));
         assert!(!is_recordable(Path::new("relative.pdf")));
+
+        let parsed =
+            RecentFilesDocument::parse(r#"files = ["/docs/a.pdf", "relative.pdf", "/etc/passwd"]"#);
+
+        assert_eq!(paths(&parsed.files), ["/docs/a.pdf"]);
+        // The same rule over what the file this replaced held.
+        assert_eq!(
+            paths(&replaced_files(
+                r#"{"files":["/docs/b.pdf","/etc/shadow"]}"#
+            )),
+            ["/docs/b.pdf"]
+        );
     }
 
     #[test]
@@ -220,5 +215,25 @@ mod tests {
         promote(&mut entries, Path::new("/docs/./a.pdf"));
 
         assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn an_unreadable_list_reads_as_empty() {
+        assert!(RecentFilesDocument::parse("{ not toml").files.is_empty());
+        assert!(RecentFilesDocument::parse("").files.is_empty());
+        assert!(replaced_files("{ not json").is_empty());
+    }
+
+    #[test]
+    fn round_trips_the_list_through_the_file() {
+        let document = RecentFilesDocument {
+            files: vec![PathBuf::from("/docs/a.pdf"), PathBuf::from("/docs/b.pdf")],
+        };
+        let rendered = document.render().expect("the list should render");
+
+        assert_eq!(
+            paths(&RecentFilesDocument::parse(&rendered).files),
+            ["/docs/a.pdf", "/docs/b.pdf"]
+        );
     }
 }

@@ -7,13 +7,28 @@
 // (`window.__tfolioE2E`, read via `src/lib/e2e.ts` in e2e builds only) and
 // then drives the real UI, so everything past the dialog really runs.
 
-import { mkdtempSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 
 import { $, browser } from "@wdio/globals"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
+import type { Settings } from "../../src/lib/settings"
+
+/** Where the backend keeps this build's settings: the app data directory
+    Tauri resolves for `com.roytian.tfolio.e2e` on the suite's one platform. */
+const settingsFile = path.join(
+  process.env.XDG_DATA_HOME || path.join(homedir(), ".local/share"),
+  "com.roytian.tfolio.e2e",
+  "settings.toml",
+)
 
 /**
  * A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
@@ -166,6 +181,78 @@ function buildPdf(objects: string[]) {
   )
 
   return Buffer.from(chunks.join(""), "ascii")
+}
+
+/**
+ * Writes the settings the app boots on, straight into the file the backend
+ * keeps — which is what makes them survive the `browser.refresh()` that has to
+ * follow, the app reading them once before its first render.
+ *
+ * The whole document, replacing what was there: settings outlive a spec and
+ * outlive the suite, so a spec that cares states everything it wants and
+ * inherits nothing. What it does not name is unset, which is how a spec asks
+ * for a default. `__TAURI__` is the e2e build's own global (`withGlobalTauri`),
+ * and reading it is fine — only `__TAURI_INTERNALS__` is sealed.
+ */
+export async function seedSettings(settings: Settings = {}) {
+  // The write goes through the backend, so it needs a page that has finished
+  // booting; one still on its way there loses it when the app replaces it.
+  // Waited for here rather than at each call site, because every call site is a
+  // `browser.refresh()` away from exactly that.
+  await openFileButton().waitForExist({ timeout: 30_000 })
+
+  // The file rather than the page is what says the write landed, so the wait
+  // below costs this fragile bridge no round trips at all — and it checks the
+  // bytes the app will actually read back. Cleared first so that its being
+  // there again is the signal.
+  rmSync(settingsFile, { force: true })
+
+  // As a string: the old seeding passed flat strings through this bridge for a
+  // year without trouble, and there is no reason to be the first to hand it
+  // something shaped differently. The promise stays in the page too — this
+  // driver cannot serialise one back ("Unsupported result type").
+  await browser.execute((json: string) => {
+    const tauri = (
+      window as Window & {
+        __TAURI__?: {
+          core: { invoke: (command: string, args?: unknown) => Promise<unknown> }
+        }
+      }
+    ).__TAURI__
+
+    void tauri?.core.invoke("set_settings", {
+      settings: JSON.parse(json) as unknown,
+    })
+  }, JSON.stringify(settings))
+
+  // Not merely that a file is there again — that it holds what was just asked
+  // for, so a write still in flight from the spec before cannot satisfy this.
+  const wanted = seededValues(settings)
+
+  await browser.waitUntil(
+    () => {
+      if (!existsSync(settingsFile)) {
+        return false
+      }
+
+      // A half-written file simply fails the check and is polled again.
+      const written = readFileSync(settingsFile, "utf8")
+
+      return wanted.every((value) => written.includes(value))
+    },
+    { timeout: 15_000, timeoutMsg: "the settings never reached the backend" },
+  )
+}
+
+/** Every string a seeded document puts in the file. */
+function seededValues(settings: object): string[] {
+  return Object.values(settings).flatMap((value: unknown) => {
+    if (typeof value === "string") {
+      return [value]
+    }
+
+    return typeof value === "object" && value !== null ? seededValues(value) : []
+  })
 }
 
 /** The home tab's drop zone, its own route to the native picker. It is in the

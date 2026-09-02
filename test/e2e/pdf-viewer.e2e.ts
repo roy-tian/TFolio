@@ -1,13 +1,12 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   clickAppMenuItem,
   dropZoneButton,
   minimalPdf,
   openPdfFromDisk,
+  seedSettings,
 } from "./helpers"
 
 // Every workspace panel carries a `<main>`, the home tab's included, and all but
@@ -39,14 +38,8 @@ function wheelOverViewer(init: { ctrlKey: boolean; deltaY: number }) {
 
 describe("TFolio PDF viewer", () => {
   before(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        // The view mode persists, so drop it to start from the single view.
-        window.localStorage.removeItem(keys.viewMode)
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    // The view mode persists, so leave it unset to start from the single view.
+    await seedSettings({ ui: { language: "en" } })
     await browser.refresh()
     await dropZoneButton().waitForExist()
   })
@@ -200,13 +193,7 @@ describe("TFolio PDF viewer", () => {
   it("switches between the single, book, and thumbnail views", async () => {
     // This test both asserts the single-view default and leaves a mode behind,
     // so it clears the key itself rather than leaning on the one-time `before`.
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.removeItem(keys.viewMode)
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en" } })
     await browser.refresh()
     await openPdfFromDisk("nine-pages.pdf", minimalPdf(9))
     await $("[data-page-number='1']").waitForDisplayed()
@@ -278,13 +265,7 @@ describe("TFolio PDF viewer", () => {
   // A case of its own rather than a coda to the one above: a reload plus a second
   // document is most of a test's time budget on its own.
   it("keeps the chosen view mode across a reload", async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.removeItem(keys.viewMode)
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en" } })
     await browser.refresh()
     await openPdfFromDisk("mode-kept.pdf", minimalPdf(3))
     await $("[data-page-number='1']").waitForDisplayed()
@@ -304,13 +285,7 @@ describe("TFolio PDF viewer", () => {
   })
 
   it("zooms from the toolbar and from ctrl+wheel", async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await openPdfFromDisk("two-pages.pdf", minimalPdf(2))
     await $("[data-page-number='1']").waitForDisplayed()
@@ -643,13 +618,7 @@ describe("TFolio PDF viewer", () => {
   // fit must measure that page, not the portrait size the document is mostly
   // made of — which is still what the opening zoom and the spread column go on.
   it("fits the page the reader is on, not the document's usual page", async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await openPdfFromDisk(
       "mixed.pdf",
@@ -691,13 +660,7 @@ describe("TFolio PDF viewer", () => {
   // nothing). Narrowing the app's own root box instead reaches the viewer as
   // exactly the ResizeObserver callback a window resize delivers.
   it("holds the reading position when the viewport changes width", async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await openPdfFromDisk("resized.pdf", minimalPdf(12))
     await $("[data-page-number='1']").waitForDisplayed()
@@ -786,13 +749,7 @@ describe("TFolio PDF viewer", () => {
   })
 
   it("keeps only near-viewport full-page surfaces mounted", async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await openPdfFromDisk("forty-pages.pdf", minimalPdf(40))
     await $("[data-page-number='1'] canvas").waitForExist()
@@ -831,13 +788,7 @@ describe("TFolio PDF viewer", () => {
   // must not assume a row is tall enough to reach some fixed depth down the
   // viewer, or navigation lands on a row and the tracker reports a later one.
   it("stays on the requested page in a grid of landscape pages", async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.removeItem(keys.viewMode)
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en" } })
     await browser.refresh()
     await openPdfFromDisk("landscape.pdf", minimalPdf(40, "0 0 300 200"))
     await $("[data-page-number='1']").waitForDisplayed()

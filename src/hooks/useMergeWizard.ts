@@ -16,8 +16,8 @@ import {
 import {
   defaultPageNumbersPreferences,
   draftFromPreferences,
-  loadPageNumbersPreferences,
   parsePageNumbersDraft,
+  storedPageNumbersPreferences,
   storePageNumbersPreferences,
   type PageNumbersConfig,
   type PageNumbersDraft,
@@ -249,13 +249,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
       // themselves, so going back for one more file never undoes their work.
       if (next === 3 && pageNumbersUntouched.current) {
         setPageNumbersDraft(
-          draftFromPreferences(defaultPageNumbersPreferences, totalPages),
+          draftFromPreferences(storedPageNumbersPreferences(), totalPages),
         )
-        void loadPageNumbersPreferences().then((stored) => {
-          if (stored && pageNumbersUntouched.current) {
-            setPageNumbersDraft(draftFromPreferences(stored, totalPages))
-          }
-        })
       }
 
       setStep(next)
@@ -299,7 +294,7 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
       // Remembered only once the merge itself landed, so a run that failed
       // leaves no trace in the styles the next document opens with.
       if (pageNumbers) {
-        void storePageNumbersPreferences(pageNumbers)
+        storePageNumbersPreferences(pageNumbers)
       }
       if (watermark) {
         storeWatermarkConfig(watermark)

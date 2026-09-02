@@ -9,7 +9,7 @@ Tailwind v4, shadcn/ui, i18next), Rust backend rendering with a bundled PDFium.
 - `src/` — `components/ui/` (shadcn primitives), `hooks/`, `lib/` (framework-free
   logic, unit-tested), `i18n/locales/`.
 - `src-tauri/src/` — `pdfium/` (engine, commands, geometry, font, watermark,
-  page_numbers, outline, library), `recent.rs`, `preferences.rs`.
+  page_numbers, outline, library), `store.rs`, `settings.rs`, `recent.rs`.
 - `src-tauri/tauri.conf.json` — config and CSP; `tauri.e2e.conf.json` overlays
   the test-only build. `capabilities/` — Tauri permissions.
 - `test/e2e/` — WebdriverIO specs; `scripts/` — asset download, version,
@@ -52,6 +52,17 @@ Commits enforced by commitlint on `commit-msg`.
   `base-nova`); prefer registry variants over bespoke Tailwind.
 - No hard-coded user-facing text — `useTranslation()`, key in every locale. `en`
   is the typed schema; gaps in `zh-CN` fail the build.
+- Everything kept between runs goes through `store.rs`, in the app data
+  directory, and all of it is TOML: the reader's settings in `settings.toml`,
+  the recent list in `recent-files.toml`. Nothing persists in `localStorage` —
+  `settings.rs` owns the file's shape (camelCase keys, so a setting has one name
+  in the file, over IPC and in TypeScript; a section that will not parse resets
+  alone), and `src/lib/settings.ts` loads it once in `main.tsx` before the first
+  render, so every reader is a synchronous lookup on that snapshot. A new
+  setting is a field in `settings.rs` plus a guarded read/store pair beside its
+  feature — the guard belongs there because the file is the reader's to edit.
+  e2e specs seed it with `seedSettings` (a real `set_settings`, so it survives
+  the refresh) rather than through a stub.
 - Frontend tests sit beside their modules as `*.test.ts(x)`.
 - e2e specs cannot drive native dialogs (Tauri seals `invoke`); they use the seam
   `window.__tfolioE2E` (`src/lib/e2e.ts`, set by `test/e2e/helpers.ts`), live only
@@ -75,7 +86,9 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
     `merge_pdf_files` accept only paths the OS produced in Rust's sight (drop
     handler, `pick_pdf_path(s)`) — a path binds what a later save overwrites, and
     reading one discloses its content. One check, `ensure_approved`, waived only
-    in the e2e build; `recent.rs` stores approved opens, re-approved at startup.
+    in the e2e build; `recent.rs` stores approved opens, re-approved at startup,
+    in a file of its own rather than in `settings.toml` — hand-editing the
+    settings must not become a way to name a file to open and save over.
   - `insert_pdf_from_path` validates its position in the engine, not the command,
     so the e2e build checks it too: an out-of-range index is refused, not clamped.
   - `tauri-plugin-fs` is transitive and deliberately never registered.

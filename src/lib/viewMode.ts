@@ -1,11 +1,10 @@
-import { readStored, store } from "@/lib/storage"
+import { rememberSettings, storedSettings } from "@/lib/settings"
 
 export const viewModes = ["single", "book", "thumbnail"] as const
 
 export type ViewMode = (typeof viewModes)[number]
 
 export const defaultViewMode: ViewMode = "single"
-export const viewModeStorageKey = "tfolio.ui.viewMode"
 
 /** Width of one thumbnail cell, and the gaps around it, in CSS pixels. The
     columns stand further apart than the rows: the space between two pages is
@@ -41,11 +40,13 @@ export function effectiveViewMode(
 }
 
 export function readStoredViewMode(): ViewMode | null {
-  return readStored(viewModeStorageKey, isViewMode)
+  const stored = storedSettings().ui?.viewMode
+
+  return isViewMode(stored) ? stored : null
 }
 
 export function storeViewMode(mode: ViewMode) {
-  store(viewModeStorageKey, mode)
+  rememberSettings({ ui: { viewMode: mode } })
 }
 
 /**

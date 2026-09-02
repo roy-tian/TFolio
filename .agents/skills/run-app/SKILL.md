@@ -121,13 +121,16 @@ Each of these was hit during first bring-up — they're the non-obvious failures
 - **Stale UI** — the e2e binary embeds the frontend at build time. Re-run
   `bun run test:e2e:build` after editing `src/` or `src-tauri/`.
 - **The app's UI state survives across runs.** Language, theme, and view mode
-  live in `localStorage` (`tfolio.ui.*`), which WebKitGTK backs with a SQLite DB
-  under `~/.local/share/com.roytian.tfolio.e2e/localstorage/`. A run that ends in
-  thumbnail view leaves the *next* run there, so a spec that assumes single view
-  silently shoots the wrong screen — or hangs waiting on a page-sized canvas that
-  a 160px thumbnail will never produce. The spec pins language and view mode
-  before every run for exactly this reason; pin any `tfolio.ui.*` key your own
-  spec depends on. To wipe the slate, delete that directory.
+  are settings, kept in `~/.local/share/com.roytian.tfolio.e2e/settings.toml`. A
+  run that ends in thumbnail view leaves the *next* run there, so a spec that
+  assumes single view silently shoots the wrong screen — or hangs waiting on a
+  page-sized canvas that a 160px thumbnail will never produce. The spec writes
+  the whole settings document (`set_settings`, then a refresh) before every run
+  for exactly this reason; do the same for any setting your own spec depends on,
+  and note that what you leave out is *unset*, not inherited. To wipe the slate,
+  delete that file — and, until a run of the current build has migrated it,
+  the `localstorage/` directory beside it, which is where 0.1.3 and earlier kept
+  the same three and which the first run after the move still folds back in.
 - **Don't `pkill -f 'target/release/tfolio'`** — the pattern also matches the
   shell running the command and kills it (exit 144). Use the bracket trick,
   `kill $(pgrep -f '[t]arget/release/tfolio')`, or kill the exact PID. Same for

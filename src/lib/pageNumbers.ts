@@ -1,6 +1,4 @@
-import { invoke } from "@tauri-apps/api/core"
-
-import { e2eOverride } from "@/lib/e2e"
+import { rememberSettings, storedSettings } from "@/lib/settings"
 
 export type PageNumbersMode = "single" | "duplex"
 export type PageNumbersPosition = "bottomCenter" | "bottomRight"
@@ -332,38 +330,21 @@ export function samePageNumbersConfig(
 }
 
 /**
- * The style the reader last applied, from the user-level file `preferences.rs`
- * keeps — not from the WebView's own storage, which is per install and goes
- * with a cleared cache.
+ * The style the reader last applied, or the defaults if they never have.
  *
- * The record is typed on the Rust side, and still checked here: the file is the
- * reader's to edit, and a style that fails the check simply leaves the dialog on
- * its defaults.
+ * The record is typed on the Rust side, and still checked here: the settings
+ * file is the reader's to edit, and a style that fails the check simply leaves
+ * the dialog on its defaults.
  */
-export async function loadPageNumbersPreferences(): Promise<PageNumbersPreferences | null> {
-  const stub = e2eOverride("pageNumbersPreferences")
+export function storedPageNumbersPreferences(): PageNumbersPreferences {
+  const stored = storedSettings().pageNumbers
 
-  if (stub) {
-    return stub()
-  }
-
-  try {
-    const stored = await invoke<unknown>("page_numbers_preferences")
-
-    return isPageNumbersPreferences(stored) ? stored : null
-  } catch {
-    return null
-  }
+  return isPageNumbersPreferences(stored)
+    ? stored
+    : defaultPageNumbersPreferences
 }
 
-/** Records the style behind an applied config. Failing to remember it must
-    never fail the apply that earned it, so this swallows its errors. */
-export async function storePageNumbersPreferences(config: PageNumbersConfig) {
-  try {
-    await invoke("set_page_numbers_preferences", {
-      preferences: pageNumbersPreferences(config),
-    })
-  } catch {
-    // A style is a convenience; the applied page numbers are the real work.
-  }
+/** Records the style behind an applied config. */
+export function storePageNumbersPreferences(config: PageNumbersConfig) {
+  rememberSettings({ pageNumbers: pageNumbersPreferences(config) })
 }

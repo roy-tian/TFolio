@@ -1,13 +1,12 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   bandedPdf,
   dropZoneButton,
   minimalPdf,
   pointMultiPickerAt,
+  seedSettings,
   writeScratchPdf,
 } from "./helpers"
 
@@ -144,15 +143,9 @@ function thumbCount() {
 
 describe("merge wizard", () => {
   beforeEach(async () => {
-    await browser.execute(
-      ({ langKey, viewKey }) => {
-        window.localStorage.setItem(langKey, "en")
-        // The merged document opens on the grid of its own accord; pinning the
-        // stored preference to single view is what proves it.
-        window.localStorage.setItem(viewKey, "single")
-      },
-      { langKey: languageStorageKey, viewKey: viewModeStorageKey },
-    )
+    // The merged document opens on the grid of its own accord; pinning the
+    // stored preference to single view is what proves it.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
   })

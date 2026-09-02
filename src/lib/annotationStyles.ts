@@ -4,7 +4,7 @@ import type {
   RectStyle,
   TextNoteStyle,
 } from "@/lib/annotations"
-import { readStored, store } from "@/lib/storage"
+import { rememberSettings, storedSettings } from "@/lib/settings"
 
 /**
  * A marker pen's colours rather than a palette's: each is pale enough to read
@@ -26,19 +26,19 @@ export const defaultHighlightColor: HexColor = highlightSwatches[0]!
  */
 export const HIGHLIGHT_OPACITY = 0.4
 
-export const highlightColorStorageKey = "tfolio.annotate.highlightColor"
-
 /** Whether `value` is a colour this app could have written. */
 export function isHexColor(value: unknown): value is HexColor {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
 }
 
 export function readStoredHighlightColor(): HexColor | null {
-  return readStored(highlightColorStorageKey, isHexColor)
+  const stored = storedSettings().annotate?.highlightColor
+
+  return isHexColor(stored) ? stored : null
 }
 
 export function storeHighlightColor(color: HexColor) {
-  store(highlightColorStorageKey, color)
+  rememberSettings({ annotate: { highlightColor: color } })
 }
 
 /**
@@ -83,8 +83,6 @@ export const defaultRectStyle: RectStyle = {
   strength: 8,
 }
 
-export const rectStyleStorageKey = "tfolio.annotate.rectStyle"
-
 /**
  * Whether `value` is a rectangle style this app could have written. The ranges
  * and the palette are part of that: the swatches are the whole colour offer and
@@ -120,27 +118,13 @@ export function isRectStyle(value: unknown): value is RectStyle {
 }
 
 export function readStoredRectStyle(): RectStyle | null {
-  const raw = readStored(
-    rectStyleStorageKey,
-    (value): value is string => typeof value === "string",
-  )
+  const stored = storedSettings().annotate?.rect
 
-  if (raw === null) {
-    return null
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(raw)
-
-    return isRectStyle(parsed) ? parsed : null
-  } catch {
-    // An older version may have written a shape this one no longer reads.
-    return null
-  }
+  return isRectStyle(stored) ? stored : null
 }
 
 export function storeRectStyle(style: RectStyle) {
-  store(rectStyleStorageKey, JSON.stringify(style))
+  rememberSettings({ annotate: { rect: style } })
 }
 
 /** Ink a note is read as a note in, rather than mistaken for the page's text. */
@@ -167,8 +151,6 @@ export const defaultTextNoteStyle: TextNoteStyle = {
   fontSize: 12,
   opacity: 1,
 }
-
-export const textNoteStyleStorageKey = "tfolio.annotate.textNoteStyle"
 
 /**
  * What the backend answers with when nothing installed can draw a note and no
@@ -211,25 +193,11 @@ export function isTextNoteStyle(value: unknown): value is TextNoteStyle {
 }
 
 export function readStoredTextNoteStyle(): TextNoteStyle | null {
-  const raw = readStored(
-    textNoteStyleStorageKey,
-    (value): value is string => typeof value === "string",
-  )
+  const stored = storedSettings().annotate?.textNote
 
-  if (raw === null) {
-    return null
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(raw)
-
-    return isTextNoteStyle(parsed) ? parsed : null
-  } catch {
-    // An older version may have written a shape this one no longer reads.
-    return null
-  }
+  return isTextNoteStyle(stored) ? stored : null
 }
 
 export function storeTextNoteStyle(style: TextNoteStyle) {
-  store(textNoteStyleStorageKey, JSON.stringify(style))
+  rememberSettings({ annotate: { textNote: style } })
 }

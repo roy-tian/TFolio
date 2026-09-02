@@ -1,4 +1,4 @@
-import { readStored, store } from "@/lib/storage"
+import { rememberSettings, storedSettings } from "@/lib/settings"
 
 /** Reads from the page's bottom-left corner towards its top-right, or back. */
 export type WatermarkDirection = "ascending" | "descending"
@@ -44,8 +44,6 @@ const defaultWatermarkSettings = {
   layout: "single",
   widthRatio: 0.8,
 } as const satisfies Omit<WatermarkConfig, "text">
-
-export const watermarkStorageKey = "tfolio.watermark.settings"
 
 /** `text` comes from the caller because its default is a translated one. */
 export function defaultWatermarkConfig(text: string): WatermarkConfig {
@@ -193,41 +191,28 @@ export function sameWatermarkConfig(
  * opens on the mark this reader always applies rather than an empty field.
  */
 export function readStoredWatermarkConfig(): WatermarkConfig | null {
-  const raw = readStored(
-    watermarkStorageKey,
-    (value): value is string => typeof value === "string",
-  )
+  const stored = storedSettings().watermark
 
-  if (raw === null) {
+  if (typeof stored !== "object" || stored === null) {
     return null
   }
 
-  try {
-    const parsed: unknown = JSON.parse(raw)
+  const config = stored as WatermarkConfig
 
-    if (typeof parsed !== "object" || parsed === null) {
-      return null
-    }
-
-    const config = parsed as WatermarkConfig
-
-    // What is in storage may come from an older version of the app, or a reader
-    // with a console open, so it earns its way back in through the same check
-    // the dialog applies.
-    return typeof config.text === "string" &&
-      validateWatermarkConfig(config) === null
-      ? {
-          direction: config.direction,
-          layout: config.layout,
-          text: config.text,
-          widthRatio: config.widthRatio,
-        }
-      : null
-  } catch {
-    return null
-  }
+  // The settings file may have been written by an older version of the app, or
+  // edited by hand, so a stored mark earns its way back in through the same
+  // check the dialog applies — and comes back as its four fields alone.
+  return typeof config.text === "string" &&
+    validateWatermarkConfig(config) === null
+    ? {
+        direction: config.direction,
+        layout: config.layout,
+        text: config.text,
+        widthRatio: config.widthRatio,
+      }
+    : null
 }
 
 export function storeWatermarkConfig(config: WatermarkConfig) {
-  store(watermarkStorageKey, JSON.stringify(config))
+  rememberSettings({ watermark: config })
 }

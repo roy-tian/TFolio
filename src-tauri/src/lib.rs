@@ -1,6 +1,7 @@
 mod pdfium;
-mod preferences;
 mod recent;
+mod settings;
+mod store;
 
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
@@ -11,8 +12,8 @@ use pdfium::{
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
     reorder_pdf_pages, restore_pdf_pages, save_pdf, PdfiumState,
 };
-use preferences::{page_numbers_preferences, set_page_numbers_preferences, Preferences};
 use recent::{recent_pdfs, RecentFiles};
+use settings::{set_settings, settings};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,7 +37,7 @@ pub fn run() {
             pdfium.approve_paths(recent.stored().iter());
             app.manage(pdfium);
             app.manage(recent);
-            app.manage(Preferences::load(app.handle()));
+            app.manage(settings::load(app.handle()));
             Ok(())
         })
         // Recorded on the Rust side of the boundary, because this is the only
@@ -72,8 +73,8 @@ pub fn run() {
             remove_pdf_watermark,
             apply_pdf_page_numbers,
             remove_pdf_page_numbers,
-            page_numbers_preferences,
-            set_page_numbers_preferences,
+            settings,
+            set_settings,
             reorder_pdf_pages,
             delete_pdf_pages,
             restore_pdf_pages,

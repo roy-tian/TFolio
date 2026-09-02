@@ -3,10 +3,6 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import type { E2eOverrides } from "../../src/lib/e2e"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { watermarkStorageKey } from "../../src/lib/watermark"
 import {
   appMenuItem,
   blankPdf,
@@ -16,32 +12,8 @@ import {
   openPdfFromDisk,
   pagePixelFingerprint,
   renderedPage,
+  seedSettings,
 } from "./helpers"
-
-/**
- * Holds the dialog to its defaults by standing in for the stored style, which
- * lives in a user-level file and would otherwise carry one spec's choices into
- * the next — and into the next run of the suite.
- */
-async function useDefaultPageNumbersStyle() {
-  await browser.execute(() => {
-    const seam = window as Window & { __tfolioE2E?: E2eOverrides }
-
-    seam.__tfolioE2E = {
-      ...seam.__tfolioE2E,
-      pageNumbersPreferences: () => Promise.resolve(null),
-    }
-  })
-}
-
-/** Puts the real stored style back, for the one spec that is about it. */
-async function useStoredPageNumbersStyle() {
-  await browser.execute(() => {
-    const seam = window as Window & { __tfolioE2E?: E2eOverrides }
-
-    delete seam.__tfolioE2E?.pageNumbersPreferences
-  })
-}
 
 async function openPageNumbersDialog() {
   await $("button[aria-label='Page numbers']").click()
@@ -69,21 +41,11 @@ async function extractedText() {
 
 describe("TFolio page numbers", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-        window.localStorage.removeItem(keys.watermark)
-      },
-      {
-        language: languageStorageKey,
-        viewMode: viewModeStorageKey,
-        watermark: watermarkStorageKey,
-      },
-    )
+    // Everything else unset, the stored page-number style included: it outlives
+    // the suite, and would otherwise carry one spec's choices into the next.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
-    await useDefaultPageNumbersStyle()
     await openPdfFromDisk("page-numbers.pdf", blankPdf())
     await renderedPage()
   })
@@ -153,12 +115,10 @@ describe("TFolio page numbers", () => {
   })
 
   it("remembers the style for the next document", async () => {
-    await useStoredPageNumbersStyle()
     await openPageNumbersDialog()
-    // The stored style arrives a round trip after the dialog opens, and the
-    // file outlives the suite — so read what it left and apply the *other*
-    // placement, which no earlier run can have set for us.
-    await browser.pause(500)
+    // The seeded settings name no style, so the dialog opens on its defaults —
+    // and the placement applied below is the *other* one, which is what makes
+    // the reopened dialog's answer the file's rather than the default's.
     const centre = $("//button[normalize-space()='Fixed centre']")
     const wanted =
       (await centre.getAttribute("aria-pressed")) === "true"
@@ -177,7 +137,6 @@ describe("TFolio page numbers", () => {
     // keeps. A second document also has no numbers of its own to read instead.
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
-    await useStoredPageNumbersStyle()
     await openPdfFromDisk("page-numbers-style.pdf", blankPdf())
     await renderedPage()
     await openPageNumbersDialog()

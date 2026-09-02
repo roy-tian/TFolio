@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   draftFromConfig,
   draftFromPreferences,
-  defaultPageNumbersPreferences,
-  loadPageNumbersPreferences,
   parsePageNumbersDraft,
+  storedPageNumbersPreferences,
   storePageNumbersPreferences,
   type PageNumbersConfig,
   type PageNumbersDraft,
@@ -19,6 +18,20 @@ type UsePageNumbersOptions = {
   pageCount: number
 }
 
+/**
+ * What the dialog opens on: the document's own numbers where it has them, and
+ * otherwise the style this reader last applied. Both are in hand before the
+ * dialog paints — the settings are loaded once, at startup.
+ */
+function openingDraft(
+  activeConfig: PageNumbersConfig | null,
+  pageCount: number,
+): PageNumbersDraft {
+  return activeConfig
+    ? draftFromConfig(activeConfig, pageCount)
+    : draftFromPreferences(storedPageNumbersPreferences(), pageCount)
+}
+
 /** Owns the dialog's disposable draft; only apply and remove touch the PDF. */
 export function usePageNumbers({
   activeConfig,
@@ -27,47 +40,18 @@ export function usePageNumbers({
   pageCount,
 }: UsePageNumbersOptions) {
   const [draft, setDraft] = useState<PageNumbersDraft>(() =>
-    activeConfig
-      ? draftFromConfig(activeConfig, pageCount)
-      : draftFromPreferences(defaultPageNumbersPreferences, pageCount),
+    openingDraft(activeConfig, pageCount),
   )
   const [isApplying, setIsApplying] = useState(false)
   const [open, setOpen] = useState(false)
-  // Whether the reader has changed anything since the dialog opened, so the
-  // stored style — which arrives an IPC round trip later — is only ever laid
-  // over a draft nobody has touched.
-  const untouched = useRef(false)
-
-  const changeDraft = useCallback((next: PageNumbersDraft) => {
-    untouched.current = false
-    setDraft(next)
-  }, [])
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {
       setOpen(nextOpen)
 
-      if (!nextOpen) {
-        return
+      if (nextOpen) {
+        setDraft(openingDraft(activeConfig, pageCount))
       }
-
-      // The document's own numbers, where it has them; otherwise the defaults
-      // now and the reader's remembered style as soon as the file answers. The
-      // read is a user-level file rather than WebView storage, so it cannot be
-      // waited for while the dialog opens.
-      if (activeConfig) {
-        untouched.current = false
-        setDraft(draftFromConfig(activeConfig, pageCount))
-        return
-      }
-
-      untouched.current = true
-      setDraft(draftFromPreferences(defaultPageNumbersPreferences, pageCount))
-      void loadPageNumbersPreferences().then((stored) => {
-        if (stored && untouched.current) {
-          setDraft(draftFromPreferences(stored, pageCount))
-        }
-      })
     },
     [activeConfig, pageCount],
   )
@@ -92,7 +76,7 @@ export function usePageNumbers({
       // Only a change the document accepted is worth remembering as a style,
       // and only one is worth dismissing the dialog over.
       if (await onSet(parsed.config, pageCount)) {
-        void storePageNumbersPreferences(parsed.config)
+        storePageNumbersPreferences(parsed.config)
         setOpen(false)
       }
     } finally {
@@ -131,7 +115,7 @@ export function usePageNumbers({
     open,
     openDialog,
     remove,
-    setDraft: changeDraft,
+    setDraft,
     validationError: parsed.error,
   }
 }

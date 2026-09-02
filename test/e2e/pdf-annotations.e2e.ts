@@ -1,25 +1,18 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
   renderedPage,
+  seedSettings,
   textPdf,
 } from "./helpers"
 
 describe("TFolio annotations", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("text.pdf", textPdf())

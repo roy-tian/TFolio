@@ -1,16 +1,15 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   appMenuItemEnabled,
   bandedPdf,
   clickAppMenuItem,
   emitDrag,
   gapPoint,
-  openPdfFromDisk,
   openPathViaDialog,
+  openPdfFromDisk,
+  seedSettings,
   stripedPdf,
   writeScratchPdf,
 } from "./helpers"
@@ -213,13 +212,7 @@ function dragThumbToGap(from: number, target: number, pastEnd = false) {
 
 describe("TFolio page editing", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "thumbnail")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
     await browser.refresh()
   })
 
@@ -427,13 +420,7 @@ describe("TFolio page editing", () => {
 
     // The saved file, reopened, still reads [4, 2, 3].
     await browser.refresh()
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "thumbnail")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
     await openPathViaDialog(filePath)
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "the reopened file lost its shape",

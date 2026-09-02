@@ -54,7 +54,7 @@ pub struct PageNumbersConfig {
 }
 
 /// The part of a config that belongs to the reader rather than to one document:
-/// what `preferences.rs` keeps between runs. Mirrored by
+/// what `settings.rs` keeps between runs. Mirrored by
 /// `PageNumbersPreferences` in `src/lib/pageNumbers.ts`; the range and the
 /// starting number are deliberately not here, being about one document.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]

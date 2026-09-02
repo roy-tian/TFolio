@@ -5,8 +5,6 @@ import path from "node:path"
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   dropZoneButton,
   emitDrag,
@@ -15,6 +13,7 @@ import {
   openFileButton,
   openPathViaDialog,
   openPdfFromDisk,
+  seedSettings,
 } from "./helpers"
 
 function writePdf(name: string, pages: number) {
@@ -60,13 +59,8 @@ async function settledScrollTop() {
 
 async function resetWorkspace() {
   await browser.refresh()
-  await browser.execute(
-    ({ languageKey, viewKey }: { languageKey: string; viewKey: string }) => {
-      window.localStorage.setItem(languageKey, "en")
-      window.localStorage.removeItem(viewKey)
-    },
-    { languageKey: languageStorageKey, viewKey: viewModeStorageKey },
-  )
+  // The view mode persists, so leave it unset to start from the single view.
+  await seedSettings({ ui: { language: "en" } })
   await browser.refresh()
   await openFileButton().waitForExist({ timeout: 30_000 })
 }

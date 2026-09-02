@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
+import { loadSettings } from "@/lib/settings"
+
 import {
   clampWatermarkText,
   defaultWatermarkConfig,
@@ -20,16 +22,27 @@ function config(changes: Partial<WatermarkConfig> = {}): WatermarkConfig {
   return { ...defaultWatermarkConfig("CONFIDENTIAL"), ...changes }
 }
 
-/** Runs `read` against a stubbed `localStorage`, then puts `window` back. */
-function withStoredValue<Value>(stored: string | null, read: () => Value) {
+/**
+ * Runs `read` against the settings a file holding `stored` would have loaded,
+ * then puts `window` back. The load goes through the real IPC seam, so this
+ * also pins that a watermark reaches the dialog as the backend sends it.
+ */
+async function withStoredWatermark<Value>(stored: unknown, read: () => Value) {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { localStorage: { getItem: () => stored } },
+    value: {
+      __TAURI_INTERNALS__: {
+        invoke: (command: string) =>
+          Promise.resolve(command === "settings" ? { watermark: stored } : null),
+      },
+    },
   })
 
   try {
+    await loadSettings()
+
     return read()
   } finally {
     if (previousWindow) {
@@ -141,18 +154,18 @@ describe("watermark settings", () => {
     expect(sameWatermarkConfig(null, null)).toBe(true)
   })
 
-  it("reads back a stored watermark, text included", () => {
+  it("reads back a stored watermark, text included", async () => {
     const stored = config({ layout: "zebra", text: "内部文件", widthRatio: 0.5 })
 
-    expect(withStoredValue(JSON.stringify(stored), readStoredWatermarkConfig)).toEqual(
+    expect(await withStoredWatermark(stored, readStoredWatermarkConfig)).toEqual(
       stored,
     )
   })
 
-  it("drops a stored record this version cannot use", () => {
+  it("drops a stored record this version cannot use", async () => {
     // What earlier versions kept — a font, a colour, an angle — no longer
     // describes a watermark, so the reader starts from the defaults instead.
-    const legacy = JSON.stringify({
+    const legacy = {
       bold: false,
       color: "#64748b",
       fontFamily: "sans",
@@ -161,11 +174,13 @@ describe("watermark settings", () => {
       opacity: 0.25,
       rotation: -30,
       spacing: 54,
-    })
+    }
 
-    expect(withStoredValue(legacy, readStoredWatermarkConfig)).toBeNull()
-    expect(withStoredValue("not json", readStoredWatermarkConfig)).toBeNull()
-    expect(withStoredValue(null, readStoredWatermarkConfig)).toBeNull()
+    expect(await withStoredWatermark(legacy, readStoredWatermarkConfig)).toBeNull()
+    expect(await withStoredWatermark("zebra", readStoredWatermarkConfig)).toBeNull()
+    expect(
+      await withStoredWatermark(undefined, readStoredWatermarkConfig),
+    ).toBeNull()
   })
 
   it("leaves text a standard PDF font can draw alone", () => {

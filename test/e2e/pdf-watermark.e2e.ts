@@ -3,9 +3,6 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { watermarkStorageKey } from "../../src/lib/watermark"
 import {
   appMenuItem,
   blankPdf,
@@ -14,6 +11,7 @@ import {
   openPdfFromDisk,
   pagePixelFingerprint,
   renderedPage,
+  seedSettings,
 } from "./helpers"
 
 async function openWatermarkDialog() {
@@ -48,18 +46,9 @@ async function extractedText() {
 
 describe("TFolio document watermark", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-        window.localStorage.removeItem(keys.watermark)
-      },
-      {
-        language: languageStorageKey,
-        viewMode: viewModeStorageKey,
-        watermark: watermarkStorageKey,
-      },
-    )
+    // Everything else unset, the stored mark included: it outlives the suite,
+    // and would otherwise carry one spec's choices into the next.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("watermark.pdf", blankPdf())
