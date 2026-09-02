@@ -10,16 +10,19 @@ use allsorts::{
     font::{Font, MatchingPresentation},
     font_data::FontData,
     subset::{subset, CmapTarget, SubsetProfile},
-    tables::{os2::Os2, Fixed, FontTableProvider},
+    tables::{os2::Os2, variable_fonts::fvar::FvarTable, Fixed, FontTableProvider},
     tag,
-    variations::instance,
+    variations::{instance, VariationError},
 };
 use fontdb::{Database, Family, Query, Source, Stretch, Style, Weight};
 use sha2::{Digest, Sha256};
 use tauri::{path::BaseDirectory, AppHandle, Manager};
 
 pub(super) const CJK_FONT_NAME: &str = "NotoSansSC.ttf";
-const CJK_REGULAR_FONT_WEIGHT: i32 = 400;
+/// The `wght` position every embedded face is pinned to. A note, a watermark
+/// and a page number are all body text, and a variable face left unpinned is
+/// embedded wherever its own axes default to — Thin, for the fetched fallback.
+const REGULAR_FONT_WEIGHT: i32 = 400;
 
 /// The error a caller gets when nothing on this machine can draw the text and
 /// no fallback face has been fetched yet. Matched verbatim by the frontend,
@@ -213,20 +216,31 @@ pub(super) fn bundled_font_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// Every face this machine has installed: the library both chains walk in the
+/// app. Built per walk rather than held, since what a caller keeps is the face
+/// a walk found and not the scan that found it.
+///
+/// A test walks a library holding one known file instead — the only way an
+/// assertion about a chain can be about the chain rather than about whichever
+/// fonts the machine running it happens to have.
+fn installed_faces() -> Database {
+    let mut database = Database::new();
+    database.load_system_fonts();
+    database
+}
+
 /// The first face in `families` — then `generics`, which close the chain with
 /// whatever this platform calls its default — that `accept` can use.
 ///
-/// The one walk both font chains take: read the system database, read each
-/// candidate's bytes in turn, and stop at the first its caller accepts. A face
-/// the caller turns down is not an error, just the wrong candidate.
+/// The one walk both font chains take: ask `library` for each candidate in
+/// turn, read its bytes, and stop at the first its caller accepts. A face the
+/// caller turns down is not an error, just the wrong candidate.
 fn first_usable_face<T>(
+    library: &Database,
     families: &[&str],
     generics: &[Family<'static>],
     mut accept: impl FnMut(&[u8], usize) -> Option<T>,
 ) -> Option<T> {
-    let mut database = Database::new();
-    database.load_system_fonts();
-
     let candidates: Vec<Family<'_>> = families
         .iter()
         .map(|name| Family::Name(name))
@@ -234,7 +248,7 @@ fn first_usable_face<T>(
         .collect();
 
     for family in candidates {
-        let Some(id) = database.query(&Query {
+        let Some(id) = library.query(&Query {
             families: &[family],
             weight: Weight::NORMAL,
             stretch: Stretch::Normal,
@@ -242,7 +256,7 @@ fn first_usable_face<T>(
         }) else {
             continue;
         };
-        let Some((source, index)) = database.face_source(id) else {
+        let Some((source, index)) = library.face_source(id) else {
             continue;
         };
         let bytes = match source {
@@ -274,17 +288,43 @@ fn first_usable_face<T>(
 /// own text on the path that would otherwise refuse it: a machine with a sans
 /// that draws Cyrillic but no CJK is not a machine that can draw nothing.
 ///
+/// A variable face comes back pinned to Regular and standing on its own, so the
+/// index that comes with it is then 0 rather than the one it had in its file.
+///
 /// `None` is the ordinary answer on a machine whose only CJK face is
 /// PostScript-flavoured — Noto Sans CJK and Source Han Sans both are, and so,
 /// on macOS, is PingFang. That is what the downloadable fallback is for.
 pub(super) fn system_embedded_face(probe: &str) -> Option<(Vec<u8>, usize)> {
-    first_usable_face(EMBEDDED_FAMILIES, &[Family::SansSerif], |bytes, index| {
-        // Subsetting the probe is the whole check: it reads the same tables an
-        // embed would, and fails the same way. The result is thrown away, only
-        // its success is kept.
-        (embeddable_face(bytes, index).is_ok() && subset_face(bytes, index, probe, true).is_ok())
-            .then(|| (bytes.to_vec(), index))
-    })
+    embedded_face(&installed_faces(), probe)
+}
+
+/// The embedded chain's walk over `library`, which is every installed face
+/// everywhere but the tests.
+fn embedded_face(library: &Database, probe: &str) -> Option<(Vec<u8>, usize)> {
+    first_usable_face(
+        library,
+        EMBEDDED_FAMILIES,
+        &[Family::SansSerif],
+        |bytes, index| embedded_candidate(bytes, index, probe),
+    )
+}
+
+/// One candidate face, checked and resolved to the bytes that would be
+/// embedded, or `None` where it is the wrong candidate.
+fn embedded_candidate(font_bytes: &[u8], index: usize, probe: &str) -> Option<(Vec<u8>, usize)> {
+    embeddable_face(font_bytes, index).ok()?;
+
+    // Pinned to Regular before it is judged, because this is the face that
+    // would be embedded, and a face that cannot be pinned is one this app
+    // cannot place — the wrong candidate, like one it cannot read.
+    let (bytes, index) = regular_face(font_bytes, index).ok()?;
+
+    // Subsetting the probe is the whole coverage check: it reads the same
+    // tables an embed would, and fails the same way. The result is thrown away,
+    // only its success is kept.
+    subset_face(&bytes, index, probe, true).ok()?;
+
+    Some((bytes, index))
 }
 
 /// Whether one face of `font_bytes` may be embedded as a subset at all: the
@@ -409,8 +449,9 @@ pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), Str
 ///
 /// Every candidate is held to what this use needs — TrueType outlines, since
 /// that is the only shape `load_true_type_from_bytes` describes correctly in the
-/// PDF it writes; every label glyph present, so no page prints a row of boxes;
-/// and an `fsType` that permits an embedded subset. A face that fails any of
+/// PDF it writes; an `fsType` that permits an embedded subset; a variable face
+/// resolved to Regular, so a label is not numbered in Thin; and every label
+/// glyph present, so no page prints a row of boxes. A face that fails any of
 /// them is not an error, just the wrong candidate: the walk carries on.
 ///
 /// The generic serif closes the chain, and the generic sans behind it: what is
@@ -419,6 +460,7 @@ pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), Str
 /// to a face that has to be fetched first.
 pub(super) fn page_number_face() -> Result<Vec<u8>, String> {
     first_usable_face(
+        &installed_faces(),
         PAGE_NUMBER_FAMILIES,
         &[Family::Serif, Family::SansSerif],
         |bytes, index| page_number_subset(bytes, index).ok(),
@@ -434,28 +476,64 @@ pub(super) fn page_number_face() -> Result<Vec<u8>, String> {
 fn page_number_subset(font_bytes: &[u8], index: usize) -> Result<Vec<u8>, String> {
     embeddable_face(font_bytes, index)?;
 
-    subset_face(font_bytes, index, PAGE_NUMBER_GLYPHS, true)
+    let (bytes, index) = regular_face(font_bytes, index)?;
+
+    subset_face(&bytes, index, PAGE_NUMBER_GLYPHS, true)
 }
 
-/// Resolves the fallback variable face to a static instance PDFium can embed.
-/// The source font's `wght` axis defaults to 100, and PDFium exposes no
-/// variation-axis selection when loading a font from bytes, so every requested
-/// weight has to be resolved before the text's glyph subset is taken.
-fn cjk_font_at_weight(font_bytes: &[u8], weight: i32) -> Result<Vec<u8>, String> {
+/// The face at `index` as the static one PDFium would embed: a variable face
+/// resolved to Regular — its `wght` axis at 400, every other axis left where
+/// the face itself puts it — and a face whose outlines do not vary handed
+/// straight back.
+///
+/// PDFium exposes no variation-axis selection when it loads a font from bytes,
+/// and the subset taken afterwards keeps outlines rather than axes, so a
+/// variable face that is not resolved here reaches the reader's document at
+/// whatever position its own axes default to. The fetched fallback defaults to
+/// `wght` 100 — every note Thin — and a system's own face can default anywhere.
+///
+/// A resolved instance is a font of its own, so the index that comes back with
+/// it is 0 rather than the one that went in.
+pub(super) fn regular_face(font_bytes: &[u8], index: usize) -> Result<(Vec<u8>, usize), String> {
     let font_data = ReadScope::new(font_bytes)
         .read::<FontData<'_>>()
-        .map_err(|error| format!("the fallback font could not be read: {error}"))?;
+        .map_err(|error| format!("the face could not be read: {error}"))?;
     let provider = font_data
-        .table_provider(0)
-        .map_err(|error| format!("the fallback font has no usable tables: {error}"))?;
+        .table_provider(index)
+        .map_err(|error| format!("the face has no usable tables: {error}"))?;
+    let Some(fvar_data) = provider
+        .table_data(tag::FVAR)
+        .map_err(|error| format!("the face's variations could not be read: {error}"))?
+    else {
+        return Ok((font_bytes.to_vec(), index));
+    };
+    let fvar = ReadScope::new(&fvar_data)
+        .read::<FvarTable<'_>>()
+        .map_err(|error| format!("the face's variations could not be parsed: {error}"))?;
 
-    instance(&provider, &[Fixed::from(weight)])
-        .map(|(bytes, _)| bytes)
-        .map_err(|error| format!("the fallback font could not select weight {weight}: {error}"))
-}
+    // A position is a value per axis, in the face's own order — anything short
+    // of that is refused. So: the weight this app draws in, and for every other
+    // axis, whatever the face itself calls normal.
+    let position: Vec<Fixed> = fvar
+        .axes()
+        .map(|axis| {
+            if axis.axis_tag == tag::WGHT {
+                Fixed::from(REGULAR_FONT_WEIGHT)
+            } else {
+                axis.default_value
+            }
+        })
+        .collect();
 
-pub(super) fn regular_cjk_font(font_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    cjk_font_at_weight(font_bytes, CJK_REGULAR_FONT_WEIGHT)
+    match instance(&provider, &position) {
+        Ok((bytes, _)) => Ok((bytes, 0)),
+        // Axes but no `gvar`: whatever this face varies, it is not the outlines
+        // — allsorts names COLRv1 colour as the likely reason — so the shape at
+        // every position is the shape it already has, and its own bytes are the
+        // instance. Refusing it would drop a face that embeds perfectly well.
+        Err(VariationError::NotImplemented) => Ok((font_bytes.to_vec(), index)),
+        Err(error) => Err(format!("the face could not be pinned to Regular: {error}")),
+    }
 }
 
 /// Cuts one face of `font_bytes` down to just the glyphs `text` uses.
@@ -540,7 +618,10 @@ mod tests {
         let source =
             std::fs::read(bundled_font_path(CJK_FONT_NAME)).expect("read the fallback CJK font");
 
-        let instance = regular_cjk_font(&source).expect("create Regular font instance");
+        let (instance, index) = regular_face(&source, 0).expect("create Regular font instance");
+
+        assert_eq!(index, 0, "a resolved instance is a font of its own");
+
         let font_data = ReadScope::new(&instance)
             .read::<FontData<'_>>()
             .expect("read static font instance");
@@ -554,7 +635,7 @@ mod tests {
             .read_dep::<Os2>(os2_data.len())
             .expect("parse static OS/2 table");
 
-        assert_eq!(os2.us_weight_class, CJK_REGULAR_FONT_WEIGHT as u16);
+        assert_eq!(os2.us_weight_class, REGULAR_FONT_WEIGHT as u16);
         assert!(provider
             .table_data(tag::FVAR)
             .expect("inspect static variation table")
@@ -564,6 +645,13 @@ mod tests {
         ReadScope::new(&subset)
             .read::<FontData<'_>>()
             .expect("read static font subset");
+
+        // A subset is static, and a static face is already the instance it
+        // would resolve to — the other half of what `regular_face` promises.
+        let (resolved, index) = regular_face(&subset, 0).expect("resolve a static face");
+
+        assert_eq!(index, 0);
+        assert_eq!(resolved, subset, "a static face should come back untouched");
     }
 
     #[test]
@@ -628,6 +716,69 @@ mod tests {
             .table_data(tag::GLYF)
             .expect("inspect the subset's outlines")
             .is_some());
+    }
+
+    // The test above can only assert what the machine running it has installed:
+    // on a runner with nothing that draws Chinese it asserts nothing and passes,
+    // which is how the whole of this chain — the point of drawing embedded text
+    // in the system's own sans — went unasserted in CI. Here the library holds
+    // one known file, so the walk is the same walk and the answer is fixed.
+    #[test]
+    #[ignore = "requires `bun run fonts:download`"]
+    fn the_embedded_chain_resolves_the_face_it_is_given() {
+        let mut library = Database::new();
+        library
+            .load_font_file(bundled_font_path(CJK_FONT_NAME))
+            .expect("load the face `bun run fonts:download` wrote");
+
+        // Nothing generic can answer here — a library of one file has no
+        // platform default — so this also holds `EMBEDDED_FAMILIES` to still
+        // naming the family the face calls itself.
+        let (bytes, index) = embedded_face(&library, EMBEDDED_FACE_PROBE)
+            .expect("the chain should accept the pinned Noto Sans SC");
+
+        assert_eq!(index, 0, "a resolved instance is a font of its own");
+
+        let font_data = ReadScope::new(&bytes)
+            .read::<FontData<'_>>()
+            .expect("read the resolved face");
+        let provider = font_data
+            .table_provider(index)
+            .expect("read the resolved face's tables");
+
+        assert!(
+            provider
+                .table_data(tag::GLYF)
+                .expect("inspect the resolved face's outlines")
+                .is_some(),
+            "the chain should hand back the TrueType flavour the embed promises"
+        );
+
+        // The reason this face is the one to point the chain at: it is variable,
+        // and PDFium chooses no axis position when it loads bytes. A chain that
+        // handed it back as it stands would draw every note at wght 100.
+        assert!(
+            provider
+                .table_data(tag::FVAR)
+                .expect("inspect the resolved face's variations")
+                .is_none(),
+            "the chain should hand back a face with no axes left to place"
+        );
+
+        let os2_data = provider
+            .read_table_data(tag::OS_2)
+            .expect("read the resolved face's OS/2 table");
+        let os2 = ReadScope::new(&os2_data)
+            .read_dep::<Os2>(os2_data.len())
+            .expect("parse the resolved face's OS/2 table");
+
+        assert_eq!(
+            os2.us_weight_class, REGULAR_FONT_WEIGHT as u16,
+            "an embedded run is body text, not Thin"
+        );
+
+        subset_face(&bytes, index, EMBEDDED_FACE_PROBE, true)
+            .expect("the resolved face should still draw the probe");
     }
 
     #[test]

@@ -1,5 +1,11 @@
 use super::*;
 
+use allsorts::{
+    binary::read::ReadScope,
+    font::{Font, MatchingPresentation},
+    font_data::FontData,
+};
+
 use crate::pdfium::library::PDFIUM_LIBRARY_NAME;
 use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 use crate::pdfium::watermark::{WatermarkDirection, WatermarkLayout};
@@ -89,7 +95,11 @@ fn test_engine() -> &'static PdfiumEngine {
         // Seeded rather than resolved, so every embedded run in the tests takes
         // the one face the source tree pins. Left to scan, these assertions
         // would be about whichever CJK sans the machine running them happens to
-        // have installed.
+        // have installed — and on a runner with none, about nothing at all.
+        //
+        // That pins every test here to the fetched fallback, so the branch the
+        // app takes on a machine that has its own sans is covered separately,
+        // by `font_engine` below.
         system_face: OnceLock::from(None),
         // Resolved from the system's own fonts on the first apply, exactly as
         // the app resolves it.
@@ -2703,6 +2713,143 @@ fn embeds_no_font_for_a_latin_note() {
         "a Latin note grew the file by {growth} bytes, so it embedded a font \
              it had no need of"
     );
+}
+
+/// An engine for the assertions about *which* face an embedded run is drawn
+/// in, seeded with what the app would have resolved.
+///
+/// A second engine is safe beside the shared one above only because nothing
+/// reached from here touches PDFium: choosing a face reads fonts and returns
+/// bytes, leaving the document store — and the lock that serialises PDFium
+/// through it — alone.
+fn font_engine(system_face: Option<(Vec<u8>, usize)>, fallback: Vec<PathBuf>) -> PdfiumEngine {
+    PdfiumEngine {
+        pdfium: test_pdfium(),
+        documents: Mutex::new(HashMap::new()),
+        next_document_id: AtomicU64::new(1),
+        fallback_font_candidates: fallback,
+        fallback_font: OnceLock::new(),
+        system_face: OnceLock::from(system_face),
+        page_number_font: OnceLock::new(),
+        approved_paths: Mutex::new(HashSet::new()),
+    }
+}
+
+/// The face the embedded chain hands back on a machine that has a sans of its
+/// own — the source tree's here, so what is asserted is the branch rather than
+/// whichever fonts the machine running it happens to have.
+fn resolved_system_face() -> (Vec<u8>, usize) {
+    let source = fs::read(crate::pdfium::font::bundled_font_path(
+        crate::pdfium::font::CJK_FONT_NAME,
+    ))
+    .expect("read the face `bun run fonts:download` wrote");
+
+    regular_face(&source, 0).expect("resolve the face the chain would hand back")
+}
+
+/// The subset an embedded run should come back as: the source tree's face,
+/// resolved as the app resolves it and cut to `text`.
+///
+/// Both faces a run can be drawn in are this one file here, so a subset that is
+/// not these bytes was cut from something else — whatever CJK sans the machine
+/// running the test happens to have — and the branch under test was not the
+/// branch taken.
+fn expected_subset(text: &str) -> Vec<u8> {
+    let (bytes, index) = resolved_system_face();
+
+    subset_for(&bytes, index, text).expect("cut the resolved face to the run")
+}
+
+/// Whether `subset` can draw every character of `text` — the question a note
+/// that reached the page as a row of empty boxes answers with `false`.
+fn draws(subset: &[u8], text: &str) -> bool {
+    let font_data = ReadScope::new(subset)
+        .read::<FontData<'_>>()
+        .expect("read the subset");
+    let mut font = Font::new(
+        font_data
+            .table_provider(0)
+            .expect("read the subset's tables"),
+    )
+    .expect("parse the subset");
+
+    text.chars().all(|character| {
+        font.lookup_glyph_index(character, MatchingPresentation::NotRequired, None)
+            .0
+            != 0
+    })
+}
+
+// The branch the app takes wherever the reader's own machine has a sans that
+// can be embedded, which is most of them and the whole point of resolving one.
+// There is nothing to fall back to here, and the bytes say which face answered:
+// a machine with a CJK sans of its own would otherwise cover a broken branch,
+// since the last resort asks the run's own text of the system all over again.
+#[test]
+#[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+fn draws_an_embedded_run_in_the_system_face() {
+    let engine = font_engine(Some(resolved_system_face()), Vec::new());
+    let subset = engine
+        .embedded_face_subset("你好")
+        .expect("the system's own face should serve the run");
+
+    assert_eq!(
+        subset,
+        expected_subset("你好"),
+        "the run was cut from some other face than the resolved one"
+    );
+    assert!(
+        draws(&subset, "你好"),
+        "the subset cut from the system face draws the note as empty boxes"
+    );
+}
+
+// The other branch: nothing installed can be embedded, but the reader has
+// accepted the download at some point, so the fetched face serves the run.
+#[test]
+#[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+fn draws_an_embedded_run_in_the_fetched_face_when_the_system_has_none() {
+    let engine = font_engine(
+        None,
+        vec![crate::pdfium::font::bundled_font_path(
+            crate::pdfium::font::CJK_FONT_NAME,
+        )],
+    );
+    let subset = engine
+        .embedded_face_subset("你好")
+        .expect("the fetched face should serve the run");
+
+    assert_eq!(
+        subset,
+        expected_subset("你好"),
+        "the run was cut from some other face than the fetched one"
+    );
+    assert!(
+        draws(&subset, "你好"),
+        "the subset cut from the fetched face draws the note as empty boxes"
+    );
+}
+
+// Neither: no face the probe accepted, nothing fetched, and a run that is
+// outside Latin-1 without being Chinese. Both answers are correct — this
+// machine's own sans draws Cyrillic, or it does not and the reader is offered
+// the download — so what is asserted is that it is one of them, and never a
+// subsetting error reaching the frontend as text nobody can act on.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn asks_the_run_itself_before_offering_the_download() {
+    let engine = font_engine(None, Vec::new());
+
+    match engine.embedded_face_subset("Привет") {
+        Ok(subset) => assert!(
+            draws(&subset, "Привет"),
+            "a face accepted for this run should draw it"
+        ),
+        Err(error) => assert_eq!(
+            error, FONT_MISSING_ERROR,
+            "the only refusal the frontend can act on is the offer to fetch"
+        ),
+    }
 }
 
 #[test]

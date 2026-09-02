@@ -15,9 +15,8 @@ use tauri::AppHandle;
 
 use super::{
     font::{
-        fallback_font_candidates, needs_embedded_font, page_number_face, regular_cjk_font,
-        subset_for, system_embedded_face, EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR,
-        PAGE_NUMBER_GLYPHS,
+        fallback_font_candidates, needs_embedded_font, page_number_face, regular_face, subset_for,
+        system_embedded_face, EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR, PAGE_NUMBER_GLYPHS,
     },
     geometry::{
         annotation_color, page_rect_to_pdfium, page_rotation_degrees, quad_points_from_rect,
@@ -586,7 +585,8 @@ pub(super) struct PdfiumEngine {
     /// startup, and once resolved it is kept, because every embedded run
     /// subsets it again.
     fallback_font: OnceLock<Vec<u8>>,
-    /// The system's own sans and the index of the face inside its file, or
+    /// The system's own sans, pinned to Regular, and the index to read it at —
+    /// the one inside its file, or 0 where pinning made a font of its own — or
     /// `None` where this machine has nothing that can be embedded. Resolved on
     /// the first run of text that needs it — a scan of every installed face —
     /// and kept either way, so a machine with no candidate does not rescan for
@@ -1380,7 +1380,7 @@ impl PdfiumEngine {
             .ok_or_else(|| FONT_MISSING_ERROR.to_string())?;
         let source = fs::read(path)
             .map_err(|error| format!("the fallback font could not be read: {error}"))?;
-        let bytes = regular_cjk_font(&source)?;
+        let (bytes, _) = regular_face(&source, 0)?;
 
         // Two notes can reach here at once and both resolve the font; whichever
         // stores first wins and the other's copy is dropped. Both then see the

@@ -89,9 +89,11 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
   its terms. The CSP is untouched: the fetch is Rust's, not the WebView's.
 - Faces embedded in a reader's documents are held to what embedding needs, in
   `font.rs`: TrueType outlines (PDFium's loader describes no other shape
-  correctly), an `fsType` that permits a subset, and coverage. A face failing any
-  of them is the wrong candidate, not an error — the chain walks on, and its end
-  is the fetch offer above.
+  correctly), an `fsType` that permits a subset, coverage, and — since PDFium
+  picks no axis position when it loads bytes, and a subset keeps outlines rather
+  than axes — a variable face resolved to Regular before it is cut. A face
+  failing any of them is the wrong candidate, not an error — the chain walks on,
+  and its end is the fetch offer above.
 - `delete_last_pdf_annotation` counts the session's own additions per page, never
   the frontend's undo history, so it cannot delete a link, form field, or comment
   already in the file.
