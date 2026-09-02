@@ -37,13 +37,16 @@ const FALLBACK_FONT_SOURCE: &str = "ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf";
 const FALLBACK_FONT_BYTES: usize = 17772300;
 const FALLBACK_FONT_SHA256: &str =
     "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da";
-/// The face is OFL, which asks that the licence travel with it. It used to
-/// travel as a bundled resource; now that the face is fetched, its licence is
-/// fetched with it and written beside it — and, since it is not pinned by
-/// digest, bounded, because an unpinned response is not a known length.
-const FALLBACK_FONT_LICENSE_SOURCE: &str = "ofl/notosanssc/OFL.txt";
+/// The face is OFL, which asks that the licence travel with it. Compiled in
+/// rather than fetched alongside the face: the terms are then always the terms,
+/// where a second unpinned response could have been anything the host served
+/// and would still have been written under this name. It also means the licence
+/// cannot fail to arrive after 17 MB has already been downloaded.
+///
+/// Copied from the same pinned commit the face comes from; a test below holds
+/// it to what `bun run fonts:download` writes.
+const FALLBACK_FONT_LICENSE: &str = include_str!("../../resources/OFL.NotoSansSC.txt");
 const FALLBACK_FONT_LICENSE_NAME: &str = "LICENSE.NotoSansSC";
-const MAX_FALLBACK_FONT_LICENSE_BYTES: usize = 64 * 1024;
 /// How long a fetch may take before it is given up on. Generous, because 17 MB
 /// over a slow line is not a failure, but finite: without it a connection that
 /// opens and then stalls leaves the reader watching a button spin for ever,
@@ -315,18 +318,26 @@ fn embeddable_face(font_bytes: &[u8], index: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// One file from the pinned commit, or the reason it did not arrive.
+/// Fetches the fallback face to `destination`, replacing whatever is there.
 ///
-/// Takes the client rather than making one: building it reads the platform's
-/// trust store, which is work neither of a download's two requests needs to do
-/// twice, and it is where the timeout lives.
-async fn fetch_pinned(
-    client: &reqwest::Client,
-    source: &str,
-    limit: usize,
-) -> Result<Vec<u8>, String> {
-    let url = format!("https://cdn.jsdelivr.net/gh/google/fonts@{FALLBACK_FONT_COMMIT}/{source}");
-    let response = client
+/// The bytes are held to the size and digest pinned above *before* anything is
+/// written, so a truncated download, a captive portal's login page, or a CDN
+/// serving something else leaves no file behind rather than one that fails
+/// later inside a reader's document. Written through a temporary sibling and
+/// renamed, so an interrupted fetch cannot leave a half file under the name the
+/// next run will trust.
+///
+/// The licence lands first and the face last, so the face is never on disk
+/// without the terms it came under — and since the licence is compiled in, that
+/// ordering cannot be undone by anything the network does.
+pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), String> {
+    let url = format!(
+        "https://cdn.jsdelivr.net/gh/google/fonts@{FALLBACK_FONT_COMMIT}/{FALLBACK_FONT_SOURCE}"
+    );
+    let response = reqwest::Client::builder()
+        .timeout(FETCH_TIMEOUT)
+        .build()
+        .map_err(|error| format!("the font could not be fetched: {error}"))?
         .get(&url)
         .send()
         .await
@@ -340,44 +351,19 @@ async fn fetch_pinned(
     }
 
     // Refused on the declared length before the body is buffered, so a response
-    // that is not the file this app asked for costs nothing to turn away. A
-    // response that lies about its length is caught by the same check below.
+    // that is not the file this app asked for costs nothing to turn away. One
+    // that lies about its length is caught by the same check below.
     if response
         .content_length()
-        .is_some_and(|length| length > limit as u64)
+        .is_some_and(|length| length != FALLBACK_FONT_BYTES as u64)
     {
-        return Err("the font is larger than this app expects".into());
+        return Err("the font's size is not the one this app expects".into());
     }
 
     let bytes = response
         .bytes()
         .await
         .map_err(|error| format!("the font could not be read: {error}"))?;
-
-    if bytes.len() > limit {
-        return Err("the font is larger than this app expects".into());
-    }
-
-    Ok(bytes.to_vec())
-}
-
-/// Fetches the fallback face to `destination`, replacing whatever is there.
-///
-/// The bytes are held to the size and digest pinned above *before* anything is
-/// written, so a truncated download, a captive portal's login page, or a CDN
-/// serving something else leaves no file behind rather than one that fails
-/// later inside a reader's document. Written through a temporary sibling and
-/// renamed, so an interrupted fetch cannot leave a half file under the name the
-/// next run will trust.
-///
-/// The licence lands first and the face last, so the face is never on disk
-/// without the terms it came under.
-pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .build()
-        .map_err(|error| format!("the font could not be fetched: {error}"))?;
-    let bytes = fetch_pinned(&client, FALLBACK_FONT_SOURCE, FALLBACK_FONT_BYTES).await?;
 
     if bytes.len() != FALLBACK_FONT_BYTES {
         return Err("the font's size is not the one this app expects".into());
@@ -389,21 +375,17 @@ pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), Str
         return Err("the font's checksum is not the one this app expects".into());
     }
 
-    let license = fetch_pinned(
-        &client,
-        FALLBACK_FONT_LICENSE_SOURCE,
-        MAX_FALLBACK_FONT_LICENSE_BYTES,
-    )
-    .await?;
-
     let directory = destination
         .parent()
         .ok_or_else(|| "the font has nowhere to be written".to_string())?;
 
     fs::create_dir_all(directory)
         .map_err(|error| format!("could not make room for the font: {error}"))?;
-    fs::write(directory.join(FALLBACK_FONT_LICENSE_NAME), &license)
-        .map_err(|error| format!("the font's licence could not be written: {error}"))?;
+    fs::write(
+        directory.join(FALLBACK_FONT_LICENSE_NAME),
+        FALLBACK_FONT_LICENSE,
+    )
+    .map_err(|error| format!("the font's licence could not be written: {error}"))?;
 
     // Named apart per attempt, as a save's temporary is: two fetches racing —
     // a double-pressed button, two windows — would otherwise interleave into
@@ -663,13 +645,30 @@ mod tests {
             FALLBACK_FONT_COMMIT,
             FALLBACK_FONT_SOURCE,
             FALLBACK_FONT_SHA256,
-            FALLBACK_FONT_LICENSE_SOURCE,
             FALLBACK_FONT_LICENSE_NAME,
             CJK_FONT_NAME,
             &FALLBACK_FONT_BYTES.to_string(),
         ] {
             assert!(script.contains(pin), "the script no longer pins {pin}");
         }
+    }
+
+    #[test]
+    #[ignore = "requires `bun run fonts:download`"]
+    fn the_compiled_in_licence_matches_the_fetched_face() {
+        // The licence is compiled in while the face is fetched, so nothing at
+        // runtime can notice the two describing different things. What the
+        // download script writes beside the face *is* the pinned commit's own
+        // copy, so it is the one thing that can hold this one to it.
+        let fetched = fs::read_to_string(
+            bundled_font_path(CJK_FONT_NAME).with_file_name(FALLBACK_FONT_LICENSE_NAME),
+        )
+        .expect("read the licence `bun run fonts:download` wrote");
+
+        assert_eq!(
+            FALLBACK_FONT_LICENSE, fetched,
+            "the compiled-in licence has drifted from the pinned commit's own"
+        );
     }
 
     #[test]

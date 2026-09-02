@@ -84,8 +84,9 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
   destination all live in `font.rs` — so it can fetch exactly one file to one
   place; a version taking a URL would be an open request forwarder. The bytes
   are checked against the pin *before* anything is written, and the face's OFL
-  licence is written beside it first, so the face is never on disk without its
-  terms. The CSP is untouched: the fetch is Rust's, not the WebView's.
+  licence — compiled in, never fetched, so no second response can be written
+  under that name — lands beside it first, so the face is never on disk without
+  its terms. The CSP is untouched: the fetch is Rust's, not the WebView's.
 - Faces embedded in a reader's documents are held to what embedding needs, in
   `font.rs`: TrueType outlines (PDFium's loader describes no other shape
   correctly), an `fsType` that permits a subset, and coverage. A face failing any
