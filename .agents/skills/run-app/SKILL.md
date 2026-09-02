@@ -17,20 +17,34 @@ One command handles the common cases — launching, optionally opening a PDF, an
 saving a screenshot of the WebView:
 
 ```bash
-# Screenshot the empty drop-zone state
-.agents/skills/run-app/scripts/screenshot.sh --out .temp/screenshot.png
+# Screenshot the empty drop-zone state -> artifacts/run/screenshot.png
+.agents/skills/run-app/scripts/screenshot.sh
 
 # Open a PDF and screenshot page 1 (toolbar shows 1 / N)
-.agents/skills/run-app/scripts/screenshot.sh \
-  --pdf .temp/2026-109-4010.pdf --out .temp/screenshot.png
+.agents/skills/run-app/scripts/screenshot.sh --pdf .temp/2026-109-4010.pdf
 
-# UI language (default zh-CN)
-.agents/skills/run-app/scripts/screenshot.sh --lang en --out .temp/en.png
+# UI language (default zh-CN). --out only *names* the file; keep it in artifacts/run/
+.agents/skills/run-app/scripts/screenshot.sh --lang en --out artifacts/run/en.png
 
 # View mode: single (default), book, or thumbnail
 .agents/skills/run-app/scripts/screenshot.sh \
-  --pdf .temp/2026-109-4010.pdf --view thumbnail --out .temp/thumbs.png
+  --pdf .temp/2026-109-4010.pdf --view thumbnail --out artifacts/run/thumbs.png
 ```
+
+## Where output goes
+
+Fixed locations — do not invent a path per run:
+
+| what | where | why there |
+|---|---|---|
+| screenshots | `artifacts/run/*.png` (the default) | `bun run test:e2e` wipes `artifacts/e2e/` on every start; nothing wipes `run/` |
+| throwaway specs | `artifacts/run/*.e2e.ts` | outside `wdio.conf.ts`'s `specs` glob, so the suite never picks them up |
+| input PDFs | `.temp/*.pdf` | hand-placed fixtures, not tooling output |
+
+Everything this skill writes lives under `artifacts/run/`, so `rm -rf
+artifacts/run` is a clean reset that leaves your PDFs alone. A spec worth keeping
+graduates to `test/e2e/`, which `bun run test:e2e:types` typechecks and the suite
+runs — specs under `artifacts/` get neither.
 
 Then **open the PNG with the Read tool and look at it** — a screenshot you never
 inspected proves nothing, and a black or blank-white frame means a failure (see
@@ -65,7 +79,7 @@ The spec (`scripts/open-and-screenshot.e2e.ts`) is env-driven and reusable:
 
 To drive more of the UI (bookmarks, page jumps, About/Language menus,
 invalid-file handling), copy the selectors from `test/e2e/pdf-viewer.e2e.ts` into
-a spec and point `--spec` at it — same harness.
+`artifacts/run/<name>.e2e.ts` and point `--spec` at it — same harness.
 
 ## Alternative: genuine release window (no PDF)
 
@@ -85,7 +99,7 @@ export PDFIUM_LIB_PATH="$PWD/src-tauri/resources/pdfium/libpdfium.so"
 # Window is 1100x760 centered on 1280x800 => region +90,+20; multi-frame grab
 # gives the WebView time to paint, last frame wins.
 ffmpeg -y -f x11grab -video_size 1100x760 -framerate 1 -i :99+90,20 \
-  -frames:v 12 -update 1 .temp/screenshot.png
+  -frames:v 12 -update 1 artifacts/run/screenshot.png
 ```
 
 ## Gotchas

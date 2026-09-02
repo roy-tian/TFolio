@@ -14,6 +14,8 @@ Tailwind v4, shadcn/ui, i18next), Rust backend rendering with a bundled PDFium.
   the test-only build. `capabilities/` — Tauri permissions.
 - `test/e2e/` — WebdriverIO specs; `scripts/` — asset download, version,
   preflight.
+- Tooling writes only under `artifacts/<tool>/` (`e2e/`, `run/`), so
+  `rm -rf artifacts/` resets cleanly; `.temp/` holds hand-placed fixtures.
 - Skills live in `.agents/skills/`; `.claude/skills/` holds only symlinks
   (`ln -s ../../.agents/skills/<name> .claude/skills/<name>`).
 
@@ -50,7 +52,7 @@ Commits enforced by commitlint on `commit-msg`.
 - Frontend tests sit beside their modules as `*.test.ts(x)`.
 - e2e specs cannot drive native dialogs (Tauri seals `invoke`); they use the seam
   `window.__tfolioE2E` (`src/lib/e2e.ts`, set by `test/e2e/helpers.ts`), live only
-  in `e2e` Vite mode. Failures land in `artifacts/e2e/`.
+  in `e2e` Vite mode. Failures land in `artifacts/e2e/`, wiped at each run.
 
 ## Security & PDF invariants
 
