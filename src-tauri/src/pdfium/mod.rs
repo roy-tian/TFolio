@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, close_pdf,
-    create_pdf, delete_last_pdf_annotation, delete_pdf_pages, download_pdf_note_font, export_pdf,
+    create_pdf, delete_pdf_annotations, delete_pdf_pages, download_pdf_note_font, export_pdf,
     extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path, inspect_pdf_files,
-    merge_pdf_files, open_pdf, open_pdf_from_path, pick_pdf_path, pick_pdf_paths,
-    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    reorder_pdf_pages, restore_pdf_pages, save_pdf,
+    merge_pdf_files, open_pdf, open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path,
+    pick_pdf_paths, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
+    render_pdf_page_thumbnail, reorder_pdf_pages, restore_pdf_pages, save_pdf,
 };
 pub use engine::PdfiumState;
 pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};

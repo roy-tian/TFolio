@@ -108,6 +108,38 @@ fn test_engine() -> &'static PdfiumEngine {
     })
 }
 
+/// The id of the last mark this session put on `page_number`, or `None` where
+/// it has none of its own there.
+fn last_mark(engine: &PdfiumEngine, document_id: u64, page_number: i32) -> Option<u64> {
+    let documents = engine
+        .documents
+        .lock()
+        .expect("the document store should be usable");
+    let page_id = documents[&document_id]
+        .page_id(page_number)
+        .expect("the document should have the page");
+
+    documents[&document_id]
+        .marks
+        .get(&page_id)
+        .and_then(|marks| marks.last().copied())
+}
+
+/// Takes the last mark this session made on `page_number` back off, which is
+/// what an undo of the reader's most recent mark there comes to. A page with
+/// none of its own refuses, since the ids are the only handles there are and
+/// the document's own annotations have none.
+fn delete_last_mark(
+    engine: &PdfiumEngine,
+    document_id: u64,
+    page_number: i32,
+) -> Result<Vec<i32>, String> {
+    let mark_id = last_mark(engine, document_id, page_number)
+        .ok_or_else(|| format!("page {page_number} has no mark of this session's"))?;
+
+    engine.delete_marks(document_id, &[mark_id])
+}
+
 /// Hands `inspect` a page with the store locked, which is the only way a test
 /// may look at one: loading and dropping a page is PDFium work like any
 /// other. The page drops before the guard, so nothing reaches PDFium
@@ -1217,9 +1249,7 @@ fn mosaic_changes_the_covered_pixels() {
     );
     assert_eq!(outside, 0, "the mosaic changed pixels outside its band");
 
-    engine
-        .delete_last_annotation(document.id, 1)
-        .expect("PDFium should remove the mosaic");
+    delete_last_mark(engine, document.id, 1).expect("PDFium should remove the mosaic");
     assert_eq!(
         rendered_rgb(engine, document.id),
         before,
@@ -1548,9 +1578,7 @@ fn draws_a_highlight_where_it_was_asked_for() {
         "the highlight put ink outside the run it was asked to cover"
     );
 
-    engine
-        .delete_last_annotation(document.id, 1)
-        .expect("PDFium should remove the highlight");
+    delete_last_mark(engine, document.id, 1).expect("PDFium should remove the highlight");
     assert_eq!(
         ink_inside_and_outside(engine, document.id, 1, band),
         (inside_before, outside_before),
@@ -1591,9 +1619,7 @@ fn draws_a_square_where_it_was_asked_for() {
         "the rectangle put ink outside the bounds it was asked to fill"
     );
 
-    engine
-        .delete_last_annotation(document.id, 1)
-        .expect("PDFium should remove the rectangle");
+    delete_last_mark(engine, document.id, 1).expect("PDFium should remove the rectangle");
     assert_eq!(
         ink_inside_and_outside(engine, document.id, 1, band),
         (inside_before, outside_before),
@@ -2170,8 +2196,7 @@ fn a_save_after_deletions_collects_what_they_left_behind() {
                 &text_note_style(24.0),
             )
             .expect("PDFium should add the note");
-        engine
-            .delete_last_annotation(document.id, 1)
+        delete_last_mark(engine, document.id, 1)
             .expect("the session's own note should be removable");
     }
     engine
@@ -2193,12 +2218,11 @@ fn a_save_after_deletions_collects_what_they_left_behind() {
 
     // The reload the collection rides on must not surrender the undo guard:
     // the session's note is still the tail of the page's annotations…
-    engine
-        .delete_last_annotation(document.id, 1)
+    delete_last_mark(engine, document.id, 1)
         .expect("the session's note should survive the collecting save");
     // …and past the session's own marks it still refuses.
     assert!(
-        engine.delete_last_annotation(document.id, 1).is_err(),
+        delete_last_mark(engine, document.id, 1).is_err(),
         "the guard should still refuse the document's own annotations"
     );
 }
@@ -2274,9 +2298,7 @@ fn deletes_only_the_most_recent_annotation() {
             .expect("PDFium should create the highlight");
     }
 
-    engine
-        .delete_last_annotation(document.id, 1)
-        .expect("PDFium should remove the annotation");
+    delete_last_mark(engine, document.id, 1).expect("PDFium should remove the annotation");
 
     let (remaining, bounds) = with_page(engine, document.id, 1, |page| {
         (
@@ -2297,14 +2319,12 @@ fn deletes_only_the_most_recent_annotation() {
         bounds.top().value
     );
 
-    engine
-        .delete_last_annotation(document.id, 1)
+    delete_last_mark(engine, document.id, 1)
         .expect("PDFium should remove the remaining annotation");
 
-    let error = engine
-        .delete_last_annotation(document.id, 1)
+    let error = delete_last_mark(engine, document.id, 1)
         .expect_err("a page with nothing on it has nothing to undo");
-    assert!(error.contains("no annotation of this session's"));
+    assert!(error.contains("no mark of this session's"));
 }
 
 // The guard between a frontend that has lost count and the reader's own
@@ -2321,12 +2341,13 @@ fn refuses_to_remove_an_annotation_it_did_not_add() {
         1
     );
 
-    let error = engine
-        .delete_last_annotation(document.id, 1)
-        .expect_err("nothing of this session's is on the page yet");
-    assert!(error.contains("no annotation of this session's"));
+    assert_eq!(
+        last_mark(engine, document.id, 1),
+        None,
+        "nothing of this session's is on the page yet"
+    );
 
-    engine
+    let mark = engine
         .add_highlight(
             document.id,
             1,
@@ -2336,18 +2357,272 @@ fn refuses_to_remove_an_annotation_it_did_not_add() {
         )
         .expect("PDFium should create the highlight");
     engine
-        .delete_last_annotation(document.id, 1)
+        .delete_marks(document.id, &[mark])
         .expect("the session's own highlight comes back off");
 
-    // Once its own mark is gone it stops, rather than taking the document's.
+    // The id names one mark, once. Offered again — a frontend that has lost
+    // track — it reaches nothing rather than the document's own annotation
+    // now sitting at the end of the page.
     let error = engine
-        .delete_last_annotation(document.id, 1)
+        .delete_marks(document.id, &[mark])
         .expect_err("the document's own annotation is not the session's to remove");
-    assert!(error.contains("no annotation of this session's"));
+    assert!(error.contains("is not one of this session's"));
     assert_eq!(
         with_page(engine, document.id, 1, |page| page.annotations().len()),
         1,
         "the document's own annotation should still be there"
+    );
+}
+
+// The eraser's aim: the mark a point lands on, topmost first, and only ever one
+// of this session's own.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn finds_the_mark_under_a_point() {
+    let engine = test_engine();
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(50.0, 30.0))
+            .expect("an empty page answers"),
+        None,
+        "a page with nothing of this session's on it has nothing to erase"
+    );
+
+    let upper = engine
+        .add_rect(
+            document.id,
+            1,
+            &quad(10.0, 20.0, 80.0, 40.0),
+            &rect_style("#3b82f6", 0.5),
+        )
+        .expect("PDFium should draw the rectangle");
+    let lower = engine
+        .add_rect(
+            document.id,
+            1,
+            &quad(10.0, 120.0, 80.0, 40.0),
+            &rect_style("#3b82f6", 0.5),
+        )
+        .expect("PDFium should draw the second rectangle");
+
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(50.0, 30.0))
+            .expect("the hit test runs"),
+        Some(upper),
+    );
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(50.0, 130.0))
+            .expect("the hit test runs"),
+        Some(lower),
+    );
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(50.0, 250.0))
+            .expect("the hit test runs"),
+        None,
+        "a point on neither rectangle is a point on nothing"
+    );
+    assert!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(f32::NAN, 0.0))
+            .is_err(),
+        "a coordinate off the scale is refused rather than searched"
+    );
+}
+
+// Two marks over one another: the reader sees the later one, so that is the one
+// the point names.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn finds_the_topmost_of_two_marks_over_one_another() {
+    let engine = test_engine();
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+    let bounds = quad(10.0, 20.0, 80.0, 40.0);
+
+    engine
+        .add_rect(document.id, 1, &bounds, &rect_style("#3b82f6", 0.5))
+        .expect("PDFium should draw the rectangle");
+    let above = engine
+        .add_rect(document.id, 1, &bounds, &rect_style("#ef4444", 0.5))
+        .expect("PDFium should draw the second rectangle");
+
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(50.0, 30.0))
+            .expect("the hit test runs"),
+        Some(above),
+    );
+}
+
+// A highlight's `/Rect` encloses every run it covers; only the runs themselves
+// are drawn, and only they answer a point.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_highlight_answers_for_its_runs_rather_than_the_block_around_them() {
+    let engine = test_engine();
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+    let mark = engine
+        .add_highlight(
+            document.id,
+            1,
+            &[quad(10.0, 20.0, 30.0, 12.0), quad(120.0, 60.0, 30.0, 12.0)],
+            "#ffd54a",
+            0.4,
+        )
+        .expect("PDFium should create the highlight");
+
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(20.0, 25.0))
+            .expect("the hit test runs"),
+        Some(mark),
+    );
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(130.0, 65.0))
+            .expect("the hit test runs"),
+        Some(mark),
+    );
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(130.0, 25.0))
+            .expect("the hit test runs"),
+        None,
+        "the corner of the block the two runs span carries no ink"
+    );
+}
+
+// The eraser reaches into the middle of a page's owned tail, which is what an
+// undo never had to do — and what the ids are for.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn removes_a_mark_from_the_middle_of_the_tail() {
+    let engine = test_engine();
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+    let marks = [20.0_f32, 100.0, 180.0]
+        .iter()
+        .map(|top| {
+            engine
+                .add_rect(
+                    document.id,
+                    1,
+                    &quad(10.0, *top, 80.0, 40.0),
+                    &rect_style("#3b82f6", 0.5),
+                )
+                .expect("PDFium should draw the rectangle")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        engine
+            .delete_marks(document.id, &[marks[1]])
+            .expect("the middle mark is the session's to remove"),
+        vec![1],
+    );
+    assert_eq!(
+        with_page(engine, document.id, 1, |page| page.annotations().len()),
+        2,
+        "only the middle one should have gone"
+    );
+
+    // The two either side still answer to their own ids, wherever the removal
+    // left them sitting.
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(50.0, 110.0))
+            .expect("the hit test runs"),
+        None,
+    );
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 1, &note_origin(50.0, 190.0))
+            .expect("the hit test runs"),
+        Some(marks[2]),
+    );
+    engine
+        .delete_marks(document.id, &[marks[2], marks[0]])
+        .expect("both survivors are still the session's to remove");
+    assert_eq!(
+        with_page(engine, document.id, 1, |page| page.annotations().len()),
+        0,
+    );
+}
+
+// One list, one mark each: an id repeated would delete twice at one position,
+// the second time taking whatever slid into it.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn refuses_a_removal_that_names_one_mark_twice() {
+    let engine = test_engine();
+    let document = engine.open(link_pdf()).expect("PDFium should open the PDF");
+    let mark = engine
+        .add_rect(
+            document.id,
+            1,
+            &quad(10.0, 20.0, 80.0, 40.0),
+            &rect_style("#3b82f6", 0.5),
+        )
+        .expect("PDFium should draw the rectangle");
+
+    let error = engine
+        .delete_marks(document.id, &[mark, mark])
+        .expect_err("a mark cannot be removed twice in one step");
+
+    assert!(error.contains("twice"));
+    assert_eq!(
+        with_page(engine, document.id, 1, |page| page.annotations().len()),
+        2,
+        "the refusal should leave the page exactly as it was"
+    );
+}
+
+// A page the reader moved carries its marks with it, so an erase after a
+// reorder names the page the mark is on now.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_mark_follows_its_page_through_a_reorder() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the PDF");
+    let mark = engine
+        .add_rect(
+            document.id,
+            1,
+            &quad(10.0, 20.0, 80.0, 40.0),
+            &rect_style("#3b82f6", 0.5),
+        )
+        .expect("PDFium should draw the rectangle");
+
+    engine
+        .reorder_pages(document.id, &[2, 1])
+        .expect("PDFium should reorder the pages");
+
+    assert_eq!(
+        engine
+            .mark_at_point(document.id, 2, &note_origin(50.0, 30.0))
+            .expect("the hit test runs"),
+        Some(mark),
+        "the mark is on page 2 now"
+    );
+    assert_eq!(
+        engine
+            .delete_marks(document.id, &[mark])
+            .expect("the mark is still the session's to remove"),
+        vec![2],
+        "and the removal reports where it really was"
     );
 }
 
@@ -2927,7 +3202,7 @@ fn rejects_an_unusable_note() {
     let origin = note_origin(20.0, 100.0);
     let style = text_note_style(24.0);
 
-    let cases: Vec<(&str, Result<(), String>)> = vec![
+    let cases: Vec<(&str, Result<u64, String>)> = vec![
         (
             "empty text",
             engine.add_text_note(document.id, 1, &origin, "", &style),
@@ -3281,7 +3556,8 @@ fn reorder_keeps_annotations_with_their_page() {
 
     assert_eq!(count, 2, "both annotations should ride with their page");
     // `/Annots` order survives the move: the document's link is still first and
-    // the session's highlight still the tail, which the `added` guard counts on.
+    // the session's highlight still the tail, which is where a mark id resolves
+    // its annotation.
     assert!(
         (262.0..=278.0).contains(&first_top),
         "the link sat at top {first_top}",
@@ -3291,17 +3567,21 @@ fn reorder_keeps_annotations_with_their_page() {
         "the highlight sat at top {last_top}",
     );
 
-    // The ownership count moved with the page: the session's highlight comes
-    // off its new position, and the document's link stays beyond reach.
-    engine
-        .delete_last_annotation(document.id, 3)
+    // The marks moved with the page: the session's highlight comes off its new
+    // position, and the document's link is left with no id to name it by.
+    delete_last_mark(engine, document.id, 3)
         .expect("the session's highlight should come off the moved page");
 
-    let error = engine
-        .delete_last_annotation(document.id, 3)
-        .expect_err("the document's own link must stay beyond reach");
-
-    assert!(error.contains("no annotation of this session's"));
+    assert_eq!(
+        last_mark(engine, document.id, 3),
+        None,
+        "the document's own link must stay beyond reach"
+    );
+    assert_eq!(
+        with_page(engine, document.id, 3, |page| page.annotations().len()),
+        1,
+        "the link should still be on the page"
+    );
 }
 
 #[test]
@@ -3380,8 +3660,7 @@ fn delete_then_restore_is_lossless() {
     );
 
     // The session's ownership count came back with the page.
-    engine
-        .delete_last_annotation(document.id, 2)
+    delete_last_mark(engine, document.id, 2)
         .expect("the restored highlight should still be the session's to remove");
 
     let error = engine
@@ -3933,21 +4212,22 @@ fn merge_preserves_both_documents_annotations() {
         "the merged page keeps its own link",
     );
 
-    // The `added` guard only counts this session's marks: the highlight comes
-    // off page 1, then the base's own link is beyond reach.
-    engine
-        .delete_last_annotation(document.id, 1)
+    // Only this session's marks carry ids: the highlight comes off page 1, and
+    // the base's own link is then left with nothing to name it by.
+    delete_last_mark(engine, document.id, 1)
         .expect("the session highlight is the session's to remove");
-    let error = engine
-        .delete_last_annotation(document.id, 1)
-        .expect_err("the base's own link must stay beyond reach");
-    assert!(error.contains("no annotation of this session's"));
+    assert_eq!(
+        last_mark(engine, document.id, 1),
+        None,
+        "the base's own link must stay beyond reach"
+    );
 
     // The merged page's link is input content too — nothing the session added.
-    let error = engine
-        .delete_last_annotation(document.id, 4)
-        .expect_err("the merged page's link must stay beyond reach");
-    assert!(error.contains("no annotation of this session's"));
+    assert_eq!(
+        last_mark(engine, document.id, 4),
+        None,
+        "the merged page's link must stay beyond reach"
+    );
 
     fs::remove_dir_all(directory).ok();
 }

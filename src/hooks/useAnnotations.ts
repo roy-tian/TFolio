@@ -8,18 +8,21 @@ import {
   commandTextPages,
   commit,
   emptyHistory,
+  fillErasedPages,
   fillInsertFileOutcome,
   insertFilePages,
   isDirty,
   markSaved,
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
+  planEraseAnnotation,
   planInsertBlankPage,
   planInsertFile,
   planPageNumbersChange,
   planReorderPages,
   planWatermarkChange,
   redo,
+  retargetCommand,
   undo,
   watermarkConfig as currentWatermarkConfig,
   type AnnotationCommand,
@@ -27,6 +30,7 @@ import {
   type HighlightCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
+import type { PagePoint } from "@/lib/annotationGeometry"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
   PdfExportOutcome,
@@ -59,57 +63,115 @@ type UseAnnotationsOptions = {
 }
 
 /**
+ * The marks each applied history entry put on the document, by entry id.
+ *
+ * PDFium owns the annotations themselves; these are only the handles it answers
+ * to, which nothing in the history could work out for itself — and which are
+ * what let a mark be taken off wherever it has come to sit, rather than only
+ * from the end of its page.
+ */
+type MarkStore = Map<number, number[]>
+
+/** The entry whose command put mark `markId` on the page, if it is still
+    applied — how the eraser turns a hit test into a history entry. */
+function entryForMark(marks: MarkStore, markId: number) {
+  for (const [entryId, ids] of marks) {
+    if (ids.includes(markId)) {
+      return entryId
+    }
+  }
+
+  return undefined
+}
+
+/** Takes an entry's marks off the document and forgets them, reporting the
+    pages the backend found them on. */
+async function removeMarks(
+  documentId: number,
+  entryId: number,
+  marks: MarkStore,
+): Promise<number[]> {
+  const markIds = marks.get(entryId)
+
+  if (!markIds || markIds.length === 0) {
+    return []
+  }
+
+  const pages = await invoke<number[]>("delete_pdf_annotations", {
+    documentId,
+    markIds,
+  })
+
+  marks.delete(entryId)
+
+  return pages
+}
+
+/**
  * A command that fails partway is wound back rather than left where it stopped:
  * the history holds one entry for the whole command and only gains it if this
  * resolves, so a page keeping its share of a failed command would hold a mark
  * nothing could take back.
+ *
+ * Marks the command creates are recorded under `entryId`, and marks it removes
+ * are forgotten; the pages the backend reports it touched come back, since a
+ * command's own page numbers are the ones it was made with.
  */
 async function applyCommand(
   documentId: number,
+  entryId: number,
   command: AnnotationCommand,
   onStructureChange: StructureChangeHandler,
-) {
+  marks: MarkStore,
+): Promise<number[]> {
   switch (command.kind) {
     case "highlight":
-      await applyHighlight(documentId, command)
-      return
+      marks.set(entryId, await applyHighlight(documentId, command))
+      return []
     case "rect":
       // One page, one annotation, so there is nothing to wind back: the command
       // either lands whole or leaves the page untouched. A translucent block is
       // a drawn shape while a blur or a mosaic is built from the page's own
       // pixels, so each takes the backend path that suits it.
-      if (command.style.effect === "translucent") {
-        await invoke("add_pdf_rect_annotation", {
-          bounds: command.bounds,
-          documentId,
-          pageNumber: command.pageNumber,
-          style: {
-            color: command.style.color,
-            opacity: command.style.opacity,
-          },
-        })
-      } else {
-        await invoke("add_pdf_rect_effect_annotation", {
-          bounds: command.bounds,
-          documentId,
-          effect: {
-            kind: command.style.effect,
-            strength: command.style.strength,
-          },
-          pageNumber: command.pageNumber,
-        })
-      }
-      return
+      marks.set(entryId, [
+        command.style.effect === "translucent"
+          ? await invoke<number>("add_pdf_rect_annotation", {
+              bounds: command.bounds,
+              documentId,
+              pageNumber: command.pageNumber,
+              style: {
+                color: command.style.color,
+                opacity: command.style.opacity,
+              },
+            })
+          : await invoke<number>("add_pdf_rect_effect_annotation", {
+              bounds: command.bounds,
+              documentId,
+              effect: {
+                kind: command.style.effect,
+                strength: command.style.strength,
+              },
+              pageNumber: command.pageNumber,
+            }),
+      ])
+      return []
     case "textNote":
       // One page and one annotation, as a rectangle is.
-      await invoke("add_pdf_text_note_annotation", {
-        documentId,
-        origin: command.origin,
-        pageNumber: command.pageNumber,
-        style: command.style,
-        text: command.text,
-      })
-      return
+      marks.set(entryId, [
+        await invoke<number>("add_pdf_text_note_annotation", {
+          documentId,
+          origin: command.origin,
+          pageNumber: command.pageNumber,
+          style: command.style,
+          text: command.text,
+        }),
+      ])
+      return []
+    case "eraseAnnotation":
+      // The marks go, the entry that made them is already out of the applied
+      // history, and what comes back is where they were — which is what puts
+      // them back in the right place should this be undone.
+      return await removeMarks(documentId, command.target.id, marks)
     case "watermark":
       if (command.config) {
         await invoke("apply_pdf_watermark", {
@@ -119,7 +181,7 @@ async function applyCommand(
       } else {
         await invoke("remove_pdf_watermark", { documentId })
       }
-      return
+      return []
     case "pageNumbers":
       if (command.config) {
         await invoke("apply_pdf_page_numbers", {
@@ -129,7 +191,7 @@ async function applyCommand(
       } else {
         await invoke("remove_pdf_page_numbers", { documentId })
       }
-      return
+      return []
     case "reorderPages":
       onStructureChange(
         documentId,
@@ -138,7 +200,7 @@ async function applyCommand(
           order: command.order,
         }),
       )
-      return
+      return []
     case "deletePages":
       onStructureChange(
         documentId,
@@ -148,7 +210,7 @@ async function applyCommand(
           stashId: command.stashId,
         }),
       )
-      return
+      return []
     case "insertBlankPage":
       onStructureChange(
         documentId,
@@ -157,7 +219,7 @@ async function applyCommand(
           index: command.index,
         }),
       )
-      return
+      return []
     case "insertFile":
       // Only ever a redo here — the first apply reads the file through
       // `insertFile` below. A redo restores the pages the undo stashed rather
@@ -169,44 +231,53 @@ async function applyCommand(
           stashId: command.stashId,
         }),
       )
-      return
+      return []
   }
 }
 
+/** The marks it made, one per page the selection ran across, in that order. */
 async function applyHighlight(documentId: number, command: HighlightCommand) {
   const written: number[] = []
 
   try {
     for (const target of command.targets) {
-      await invoke("add_pdf_highlight_annotation", {
-        color: command.color,
-        documentId,
-        opacity: command.opacity,
-        pageNumber: target.pageNumber,
-        quads: target.quads,
-      })
-      written.push(target.pageNumber)
+      written.push(
+        await invoke<number>("add_pdf_highlight_annotation", {
+          color: command.color,
+          documentId,
+          opacity: command.opacity,
+          pageNumber: target.pageNumber,
+          quads: target.quads,
+        }),
+      )
     }
   } catch (error) {
-    for (const pageNumber of written.reverse()) {
-      await invoke("delete_last_pdf_annotation", { documentId, pageNumber }).catch(
-        () => undefined,
-      )
+    if (written.length > 0) {
+      await invoke("delete_pdf_annotations", {
+        documentId,
+        markIds: written,
+      }).catch(() => undefined)
     }
 
     throw error
   }
+
+  return written
 }
 
 /**
- * Unwound in reverse of `applyCommand`: the backend removes whichever annotation
- * a page was given last, so the two have to agree about what "last" means.
+ * The inverse of `applyCommand`: a mark is taken off by the ids its apply
+ * recorded, so an undo finds its own annotations wherever the eraser has left
+ * them sitting on the page. Reports the pages the backend touched, as an apply
+ * does.
  */
 async function retractCommand(
   documentId: number,
+  entryId: number,
   command: AnnotationCommand,
   onStructureChange: StructureChangeHandler,
-) {
+  marks: MarkStore,
+): Promise<number[]> {
   switch (command.kind) {
     case "watermark":
       if (command.previous) {
@@ -218,7 +289,7 @@ async function retractCommand(
         await invoke("remove_pdf_watermark", { documentId })
       }
 
-      return
+      return []
     case "pageNumbers":
       if (command.previous) {
         await invoke("apply_pdf_page_numbers", {
@@ -229,7 +300,7 @@ async function retractCommand(
         await invoke("remove_pdf_page_numbers", { documentId })
       }
 
-      return
+      return []
     case "reorderPages":
       onStructureChange(
         documentId,
@@ -238,7 +309,7 @@ async function retractCommand(
           order: command.inverse,
         }),
       )
-      return
+      return []
     case "deletePages":
       // Not a re-creation but a restore: the stash holds the pages themselves.
       onStructureChange(
@@ -248,7 +319,7 @@ async function retractCommand(
           stashId: command.stashId,
         }),
       )
-      return
+      return []
     case "insertBlankPage":
       // The page is pristine at this point — LIFO undo has already taken back
       // anything drawn on it — but it is stashed anyway, under this entry's
@@ -261,7 +332,7 @@ async function retractCommand(
           stashId: command.stashId,
         }),
       )
-      return
+      return []
     case "insertFile":
       // Undo an insert by deleting the range it brought in, stashed under this
       // entry's id so a redo can restore exactly those bytes.
@@ -273,18 +344,34 @@ async function retractCommand(
           stashId: command.stashId,
         }),
       )
-      return
+      return []
+    case "eraseAnnotation":
+      // Undoing an erase is applying the mark's own command again, aimed at the
+      // pages the marks were really on rather than the ones the command was
+      // first made with. PDFium only appends, so it lands at the end of each
+      // page's annotations rather than back among them: the history is exact,
+      // and so is every other entry's undo — which knows its own marks by id —
+      // but a mark that was under another comes back over it.
+      await applyCommand(
+        documentId,
+        command.target.id,
+        retargetCommand(command.target.command, command.pages),
+        onStructureChange,
+        marks,
+      )
+
+      return []
     default:
-      for (const pageNumber of [...commandPages(command)].reverse()) {
-        await invoke("delete_last_pdf_annotation", { documentId, pageNumber })
-      }
+      return await removeMarks(documentId, entryId, marks)
   }
 }
 
 /**
  * The document PDFium holds is the truth about what is on a page, so nothing
  * here mirrors the annotations. This keeps only what PDFium cannot answer: what
- * the reader did, in what order, and how much they have taken back.
+ * the reader did, in what order, how much they have taken back — and which of
+ * PDFium's marks each of those steps is holding, which is a handle rather than
+ * a copy.
  */
 export function useAnnotations({
   documentId,
@@ -321,6 +408,10 @@ export function useAnnotations({
   // same order, so `undo` is never planned against a document a queued `commit`
   // is about to change.
   const queueRef = useRef<Promise<unknown>>(Promise.resolve())
+  // The one thing about the annotations themselves this has to keep: which of
+  // the backend's marks each applied entry is holding, so an undo and the
+  // eraser can name them rather than count them off the end of a page.
+  const marksRef = useRef<MarkStore>(new Map())
 
   const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
     setRenderEpochs((epochs) => {
@@ -369,6 +460,10 @@ export function useAnnotations({
             it: rebuilds the history to commit from what work resolved. `next` is
             the placeholder used until then, and when this is absent. */
         reconcile?: () => AnnotationHistory
+        /** Pages only the backend can name — the ones a mark turned out to be
+            on, which a structure edit may have renumbered since the command
+            that made it. Redrawn alongside `pages`. */
+        touched?: () => number[]
       } | null,
       onFailure: (error: unknown) => void,
     ) => {
@@ -417,7 +512,10 @@ export function useAnnotations({
           // Whether or not the work succeeded: a command that failed partway
           // still changed the pages it reached.
           if (generation === generationRef.current) {
-            applyEpochs(step.pages, step.textPages)
+            applyEpochs(
+              [...step.pages, ...(step.touched?.() ?? [])],
+              step.textPages,
+            )
           }
         }
       })
@@ -450,7 +548,15 @@ export function useAnnotations({
           pages: commandPages(command),
           textPages: commandTextPages(command),
           work: async () => {
-            await applyCommand(documentId, command, onStructureChange)
+            // `commit` gives the entry `nextId`; the marks are filed under it.
+            await applyCommand(
+              documentId,
+              current.nextId,
+              command,
+              onStructureChange,
+              marksRef.current,
+            )
+
             return true
           },
         }),
@@ -498,7 +604,13 @@ export function useAnnotations({
             pages: commandPages(step.command),
             textPages: commandTextPages(step.command),
             work: async () => {
-              await applyCommand(documentId, step.command, onStructureChange)
+              await applyCommand(
+                documentId,
+                current.nextId,
+                step.command,
+                onStructureChange,
+                marksRef.current,
+              )
               landed = true
               return true
             },
@@ -600,6 +712,85 @@ export function useAnnotations({
   )
 
   /**
+   * Rubs out whichever of this session's marks lies under `point` on
+   * `pageNumber`; a point on nothing of the reader's own leaves the document
+   * alone, and so leaves the history alone too.
+   *
+   * The hit test is the backend's because the annotations are: the history
+   * records what was asked for, not the box PDFium gave it. It runs ahead of
+   * the queue rather than inside it — a mark another queued step takes away
+   * first simply no longer answers to its entry, and the plan finds nothing to
+   * erase.
+   */
+  const eraseAt = useCallback(
+    async (pageNumber: number, point: PagePoint) => {
+      // The same guard a drawing takes: a page-moving edit in flight is about
+      // to renumber the page this hit test would name.
+      if (documentId === undefined || structurePendingRef.current > 0) {
+        return
+      }
+
+      let markId: number | null
+
+      try {
+        markId = await invoke<number | null>("pdf_annotation_at_point", {
+          documentId,
+          pageNumber,
+          point,
+        })
+      } catch (error) {
+        onAnnotateError(error)
+        return
+      }
+
+      if (markId === null) {
+        return
+      }
+
+      const target = markId
+
+      await enqueue((current) => {
+        const entryId = entryForMark(marksRef.current, target)
+
+        if (entryId === undefined) {
+          return null
+        }
+
+        const planned = planEraseAnnotation(current, entryId)
+
+        if (!planned) {
+          return null
+        }
+
+        const eraseId = planned.history.past.at(-1)!.id
+        let reported: number[] = []
+
+        return {
+          next: planned.history,
+          // Where the mark was made; where it actually was comes back from the
+          // work itself, and both are redrawn.
+          pages: commandPages(planned.command),
+          textPages: [],
+          touched: () => reported,
+          work: async () => {
+            reported = await applyCommand(
+              documentId,
+              eraseId,
+              planned.command,
+              onStructureChange,
+              marksRef.current,
+            )
+
+            return true
+          },
+          reconcile: () => fillErasedPages(planned.history, eraseId, reported),
+        }
+      }, onAnnotateError)
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  /**
    * Plans against the history the shared queue has actually reached, and
    * reports whether the change landed — the dialog stays open on a refusal
    * rather than closing over an error the reader would have to hunt for.
@@ -626,7 +817,14 @@ export function useAnnotations({
           pages,
           textPages: pages,
           work: async () => {
-            await applyCommand(documentId, command, onStructureChange)
+            await applyCommand(
+              documentId,
+              current.nextId,
+              command,
+              onStructureChange,
+              marksRef.current,
+            )
+
             return true
           },
         }
@@ -664,7 +862,14 @@ export function useAnnotations({
           pages,
           textPages: pages,
           work: async () => {
-            await applyCommand(documentId, command, onStructureChange)
+            await applyCommand(
+              documentId,
+              current.nextId,
+              command,
+              onStructureChange,
+              marksRef.current,
+            )
+
             return true
           },
         }
@@ -693,17 +898,29 @@ export function useAnnotations({
       await enqueue((current) => {
         const step = undo(current)
 
-        return step
-          ? {
-              next: step.history,
-              pages: commandPages(step.entry.command),
-              textPages: commandTextPages(step.entry.command),
-              work: async () => {
-                await retractCommand(documentId, step.entry.command, onStructureChange)
-                return true
-              },
-            }
-          : null
+        if (!step) {
+          return null
+        }
+
+        let reported: number[] = []
+
+        return {
+          next: step.history,
+          pages: commandPages(step.entry.command),
+          textPages: commandTextPages(step.entry.command),
+          touched: () => reported,
+          work: async () => {
+            reported = await retractCommand(
+              documentId,
+              step.entry.id,
+              step.entry.command,
+              onStructureChange,
+              marksRef.current,
+            )
+
+            return true
+          },
+        }
       }, onAnnotateError)
     } finally {
       structurePendingRef.current -= 1
@@ -721,17 +938,29 @@ export function useAnnotations({
       await enqueue((current) => {
         const step = redo(current)
 
-        return step
-          ? {
-              next: step.history,
-              pages: commandPages(step.entry.command),
-              textPages: commandTextPages(step.entry.command),
-              work: async () => {
-                await applyCommand(documentId, step.entry.command, onStructureChange)
-                return true
-              },
-            }
-          : null
+        if (!step) {
+          return null
+        }
+
+        let reported: number[] = []
+
+        return {
+          next: step.history,
+          pages: commandPages(step.entry.command),
+          textPages: commandTextPages(step.entry.command),
+          touched: () => reported,
+          work: async () => {
+            reported = await applyCommand(
+              documentId,
+              step.entry.id,
+              step.entry.command,
+              onStructureChange,
+              marksRef.current,
+            )
+
+            return true
+          },
+        }
       }, onAnnotateError)
     } finally {
       structurePendingRef.current -= 1
@@ -829,6 +1058,7 @@ export function useAnnotations({
   const reset = useCallback(() => {
     generationRef.current += 1
     historyRef.current = emptyHistory
+    marksRef.current = new Map()
     setHistory(emptyHistory)
     setRenderEpochs({})
     setTextEpochs({})
@@ -842,6 +1072,7 @@ export function useAnnotations({
       canUndo: canUndo(history) && !isBusy,
       commit: commitCommand,
       deletePages,
+      eraseAt,
       exportCopy,
       hasPendingWorkNow,
       historyNow,
@@ -865,6 +1096,7 @@ export function useAnnotations({
     [
       commitCommand,
       deletePages,
+      eraseAt,
       exportCopy,
       hasPendingWorkNow,
       history,

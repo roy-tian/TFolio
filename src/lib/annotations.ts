@@ -173,6 +173,28 @@ export type InsertFileCommand = {
   stashId: number
 }
 
+/**
+ * A mark the reader rubbed out with the eraser.
+ *
+ * The entry that made it is carried whole rather than pointed at: an undo
+ * re-applies exactly that command and puts the entry back at the position it
+ * was taken from, so the history keeps reading in the order the marks were
+ * made — and every other entry's undo still finds its own annotations, which
+ * it knows by id rather than by where they sit on the page.
+ */
+export type EraseAnnotationCommand = {
+  kind: "eraseAnnotation"
+  /** Where `target` sat in the applied history, for an undo to splice it back
+      into. LIFO undo has already taken back everything above it by then, so the
+      position still means what it did. */
+  index: number
+  /** The page each of the entry's annotations was really on when it went — the
+      backend's answer, since a structure edit may have renumbered the pages the
+      command itself names. Empty until the first apply reports them. */
+  pages: number[]
+  target: AnnotationEntry
+}
+
 export type AnnotationCommand =
   | HighlightCommand
   | RectCommand
@@ -183,6 +205,7 @@ export type AnnotationCommand =
   | DeletePagesCommand
   | InsertBlankPageCommand
   | InsertFileCommand
+  | EraseAnnotationCommand
 
 /**
  * Redoing re-runs the command and gets a fresh annotation out of PDFium, but it
@@ -246,6 +269,13 @@ export function commandPages(command: AnnotationCommand): number[] {
       // count after it once the apply has learned it, so the same expression
       // covers the apply and the undo.
       return pagesFrom(command.index, command.pageCount)
+    case "eraseAnnotation":
+      // What the backend reported, once it has: the erased entry's own page
+      // numbers are the ones it was made with, which a structure edit since may
+      // have moved.
+      return command.pages.length > 0
+        ? command.pages
+        : commandPages(command.target.command)
   }
 }
 
@@ -268,6 +298,9 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "textNote":
     case "watermark":
     case "pageNumbers":
+    // Only ever a mark, which is why the eraser can take one from the middle of
+    // the history without the pages beneath it moving.
+    case "eraseAnnotation":
       return false
   }
 }
@@ -286,6 +319,90 @@ export function commandTextPages(command: AnnotationCommand): number[] {
       return commandPages(command)
     default:
       return []
+  }
+}
+
+/**
+ * Plans an erase of the mark entry `entryId` made: it leaves the applied
+ * history, and an entry recording where it stood takes its place at the top.
+ *
+ * An entry no longer applied — the reader undid it between the hit test and
+ * this — is nothing to erase.
+ */
+export function planEraseAnnotation(history: AnnotationHistory, entryId: number) {
+  const index = history.past.findIndex((entry) => entry.id === entryId)
+
+  if (index < 0) {
+    return null
+  }
+
+  const command: EraseAnnotationCommand = {
+    index,
+    kind: "eraseAnnotation",
+    pages: [],
+    target: history.past[index]!,
+  }
+
+  return {
+    command,
+    history: {
+      future: [],
+      nextId: history.nextId + 1,
+      past: [
+        ...history.past.slice(0, index),
+        ...history.past.slice(index + 1),
+        { command, id: history.nextId },
+      ],
+      savedId: history.savedId,
+    } satisfies AnnotationHistory,
+  }
+}
+
+/** Records where the erased annotations actually were, which only the apply
+    learns — the counterpart of `fillInsertFileOutcome`. */
+export function fillErasedPages(
+  history: AnnotationHistory,
+  entryId: number,
+  pages: number[],
+): AnnotationHistory {
+  return {
+    ...history,
+    past: history.past.map((entry) =>
+      entry.id === entryId && entry.command.kind === "eraseAnnotation"
+        ? { ...entry, command: { ...entry.command, pages } }
+        : entry,
+    ),
+  }
+}
+
+/**
+ * `command` with its page numbers replaced by the pages its annotations were
+ * really on — one per annotation, in the order the command wrote them. What
+ * puts an erased mark back where it was rather than where it was first made,
+ * across a structure edit that renumbered the pages in between.
+ */
+export function retargetCommand(
+  command: AnnotationCommand,
+  pages: number[],
+): AnnotationCommand {
+  if (pages.length === 0) {
+    return command
+  }
+
+  switch (command.kind) {
+    case "highlight":
+      return {
+        ...command,
+        targets: command.targets.map((target, index) => ({
+          ...target,
+          pageNumber: pages[index] ?? target.pageNumber,
+        })),
+      }
+    case "rect":
+    case "textNote":
+      return { ...command, pageNumber: pages[0] ?? command.pageNumber }
+    default:
+      return command
   }
 }
 
@@ -542,12 +659,20 @@ export function undo(history: AnnotationHistory) {
     return null
   }
 
+  const past = history.past.slice(0, -1)
+
+  // Taking back an erase gives the mark's own entry its place back, so the
+  // history reads in the order the marks were made whichever way it is walked.
+  if (entry.command.kind === "eraseAnnotation") {
+    past.splice(entry.command.index, 0, entry.command.target)
+  }
+
   return {
     entry,
     history: {
       future: [...history.future, entry],
       nextId: history.nextId,
-      past: history.past.slice(0, -1),
+      past,
       savedId: history.savedId,
     },
   }
@@ -560,12 +685,20 @@ export function redo(history: AnnotationHistory) {
     return null
   }
 
+  const erased =
+    entry.command.kind === "eraseAnnotation" ? entry.command.target.id : null
+
   return {
     entry,
     history: {
       future: history.future.slice(0, -1),
       nextId: history.nextId,
-      past: [...history.past, entry],
+      past: [
+        ...(erased === null
+          ? history.past
+          : history.past.filter((applied) => applied.id !== erased)),
+        entry,
+      ],
       savedId: history.savedId,
     },
   }

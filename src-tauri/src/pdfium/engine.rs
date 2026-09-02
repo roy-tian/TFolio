@@ -19,9 +19,9 @@ use super::{
         system_embedded_face, EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR, PAGE_NUMBER_GLYPHS,
     },
     geometry::{
-        annotation_color, page_rect_to_pdfium, page_rotation_degrees, quad_points_from_rect,
-        union_rect, unrotated_page_height, unrotated_page_size, within_page_range,
-        MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
+        annotation_color, annotation_covers, page_rect_to_pdfium, page_rotation_degrees,
+        quad_points_from_rect, union_rect, unrotated_page_height, unrotated_page_size,
+        within_page_range, MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
         MAX_TEXT_NOTE_LINES, MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_TEXT_NOTE_FONT_SIZE,
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
@@ -132,7 +132,8 @@ struct StashedPage {
     /// guarantees the document is back in that shape when a restore runs.
     position: i32,
     page_id: u64,
-    added: u32,
+    /// The page's own mark ids, in the order their annotations sit on it.
+    marks: Vec<u64>,
     revision: u64,
     owned: Option<OwnedTailState>,
     /// Whether the page came from a merge, so a restore puts it back into the
@@ -410,13 +411,20 @@ struct OpenDocument {
     /// identifies one history entry, so a redo of that delete re-stashes the
     /// same logical pages — and an insert undone more than once reuses its key.
     stashes: HashMap<u64, PageStash>,
-    /// How many annotations this session has added to each page, keyed by
-    /// stable page id.
+    /// The marks this session has added to each page, keyed by stable page id:
+    /// one id per annotation, in the order the annotations sit on the page.
     ///
     /// PDFium appends, so the reader's own marks are the tail of a page's
     /// annotations and this is how long that tail is. Past it lie the document's
-    /// own — links, form fields, comments — which an undo must never reach.
-    added: HashMap<u64, u32>,
+    /// own — links, form fields, comments — which a removal must never reach.
+    ///
+    /// The ids, not the mere count, are what let a mark be removed from the
+    /// middle of that tail: the eraser takes whichever mark the reader points
+    /// at, so "the last one" stopped naming the mark an undo means.
+    marks: HashMap<u64, Vec<u64>>,
+    /// Ids for the marks above, never reused within a session, so an id the
+    /// frontend still holds cannot come to name a different mark.
+    next_mark_id: u64,
     /// Monotonic content version per page, keyed by stable page id. Rectangle
     /// effects release the global PDFium lock while processing owned pixels;
     /// this detects an annotation that changed the source page before the
@@ -452,6 +460,39 @@ impl OpenDocument {
         page_index(page_number, self.page_ids.len())
             .map(|index| self.page_ids[index])
             .ok_or_else(|| format!("page {page_number} does not exist"))
+    }
+
+    /// Records one more annotation at the end of a page's owned tail and hands
+    /// back the id that names it from here on.
+    fn record_mark(&mut self, page_id: u64) -> u64 {
+        let mark_id = self.next_mark_id;
+
+        self.next_mark_id += 1;
+        self.marks.entry(page_id).or_default().push(mark_id);
+        *self.revisions.entry(page_id).or_insert(0) += 1;
+
+        mark_id
+    }
+
+    /// Where a mark sits: its page's stable id, that page's 1-based number now,
+    /// and its position in the page's owned tail.
+    ///
+    /// A mark the session never made — or has already removed — has no place,
+    /// which is what refuses an id the WebView made up.
+    fn locate_mark(&self, mark_id: u64) -> Result<(u64, i32, usize), String> {
+        self.page_ids
+            .iter()
+            .enumerate()
+            .find_map(|(index, page_id)| {
+                let position = self
+                    .marks
+                    .get(page_id)?
+                    .iter()
+                    .position(|id| *id == mark_id)?;
+
+                Some((*page_id, index as i32 + 1, position))
+            })
+            .ok_or_else(|| format!("mark {mark_id} is not one of this session's"))
     }
 
     /// Bumps every page's revision so an M5 effect captured before a structure
@@ -559,6 +600,22 @@ fn open_entry_mut(
     documents
         .get_mut(&document_id)
         .ok_or_else(|| "PDF document is no longer open".to_string())
+}
+
+/// Where this session's own marks begin among a page's annotations: PDFium
+/// appends, so they are the last `tail` of `annotation_count`, and a mark's
+/// position within the tail is measured from here.
+///
+/// A page holding fewer annotations than the session recorded is a desync, and
+/// a position measured against it would reach into the document's own.
+fn owned_tail_base(
+    page_number: i32,
+    annotation_count: usize,
+    tail: usize,
+) -> Result<usize, String> {
+    annotation_count
+        .checked_sub(tail)
+        .ok_or_else(|| format!("page {page_number} no longer carries this session's marks"))
 }
 
 pub(super) struct PdfiumEngine {
@@ -734,10 +791,11 @@ impl PdfiumEngine {
         documents.insert(
             id,
             OpenDocument {
-                added: HashMap::new(),
                 document,
+                marks: HashMap::new(),
                 merged_page_ids: HashSet::new(),
                 needs_compaction: false,
+                next_mark_id: 1,
                 next_page_id: num_pages as u64,
                 owned_content: None,
                 page_ids: (0..num_pages as u64).collect(),
@@ -888,7 +946,7 @@ impl PdfiumEngine {
         quads: &[PagePointsRect],
         color: &str,
         opacity: f32,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         if quads.is_empty() {
             return Err("a highlight needs at least one quad".into());
         }
@@ -968,10 +1026,7 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(page_id).or_insert(0) += 1;
-        *entry.revisions.entry(page_id).or_insert(0) += 1;
-
-        Ok(())
+        Ok(entry.record_mark(page_id))
     }
 
     /// Replaces the pixels inside `bounds` with a raster treatment carried by
@@ -983,7 +1038,7 @@ impl PdfiumEngine {
         page_number: i32,
         bounds: &PagePointsRect,
         effect: &RectEffect,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         if ![bounds.left, bounds.top, bounds.width, bounds.height]
             .iter()
             .all(|value| within_page_range(*value))
@@ -1212,10 +1267,7 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(captured_page_id).or_insert(0) += 1;
-        *entry.revisions.entry(captured_page_id).or_insert(0) += 1;
-
-        Ok(())
+        Ok(entry.record_mark(captured_page_id))
     }
 
     /// Draws a rectangle on `page_number` — one mark, so one step to take back.
@@ -1235,7 +1287,7 @@ impl PdfiumEngine {
         page_number: i32,
         bounds: &PagePointsRect,
         style: &RectStyle,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         // The WebView can call this with any arguments. Coordinates are held to a
         // range that covers any real page with room to spare; one outside it is
         // refused here rather than clamped, before it can slip past the `> 0`
@@ -1343,10 +1395,7 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(page_id).or_insert(0) += 1;
-        *entry.revisions.entry(page_id).or_insert(0) += 1;
-
-        Ok(())
+        Ok(entry.record_mark(page_id))
     }
 
     /// The system's own sans, or `None` where this machine has none that can be
@@ -1475,7 +1524,7 @@ impl PdfiumEngine {
         origin: &PagePoint,
         text: &str,
         style: &TextNoteStyle,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         if !within_page_range(origin.left) || !within_page_range(origin.top) {
             return Err("a note's coordinates are out of range".into());
         }
@@ -1690,10 +1739,7 @@ impl PdfiumEngine {
             return Err(error);
         }
 
-        *entry.added.entry(page_id).or_insert(0) += 1;
-        *entry.revisions.entry(page_id).or_insert(0) += 1;
-
-        Ok(())
+        Ok(entry.record_mark(page_id))
     }
 
     /// Verifies that every page still ends with exactly the objects this
@@ -2719,54 +2765,154 @@ impl PdfiumEngine {
         self.rebuild_owned_content(entry, watermark, None)
     }
 
-    /// Removes the annotation most recently added to `page_number`, refusing
-    /// anything this session did not put there.
+    /// Removes the marks `mark_ids` names, and reports the 1-based page each of
+    /// them was on, in the order they were given.
     ///
-    /// Checked here rather than trusted from the caller, which is a browser and
-    /// can always be wrong: deleting one of the document's own annotations would
-    /// be silent, permanent, and saved into the reader's file.
-    pub(super) fn delete_last_annotation(
+    /// An id is itself the proof that the annotation behind it is the reader's
+    /// to remove: only marks this session made have one, so the document's own
+    /// links, form fields, and comments can never be named. Checked here rather
+    /// than trusted from the caller, which is a browser and can always be wrong:
+    /// deleting one of the document's own annotations would be silent,
+    /// permanent, and saved into the reader's file.
+    pub(super) fn delete_marks(
+        &self,
+        document_id: u64,
+        mark_ids: &[u64],
+    ) -> Result<Vec<i32>, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        // One id twice would delete twice at one position, the second time
+        // taking whichever annotation slid into it.
+        let mut seen = HashSet::with_capacity(mark_ids.len());
+
+        if !mark_ids.iter().all(|mark_id| seen.insert(*mark_id)) {
+            return Err("a mark cannot be removed twice in one step".into());
+        }
+
+        // Every id is placed before any annotation goes, so a list naming one
+        // mark this session never made removes nothing at all.
+        let located = mark_ids
+            .iter()
+            .map(|mark_id| entry.locate_mark(*mark_id))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Nothing named, nothing removed — and in particular nothing to collect
+        // afterwards, so the next write keeps the cheap route.
+        if located.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Deleted from the back of each page's tail forward, so every position
+        // still names its own annotation when its turn comes.
+        let mut order = (0..located.len()).collect::<Vec<_>>();
+
+        order.sort_by_key(|index| {
+            let (page_id, _, position) = located[*index];
+
+            (page_id, std::cmp::Reverse(position))
+        });
+
+        // Every page this touches is loaded and measured before the first
+        // annotation goes, the same way the ids are all placed first: a removal
+        // that stopped halfway would leave the document holding some of a
+        // command's marks while the history still holds them all, and neither
+        // the reader nor an undo could get back to either shape.
+        for (page_id, page_number, _) in &located {
+            let tail = entry.marks.get(page_id).map_or(0, Vec::len);
+            let page = entry
+                .document
+                .pages()
+                .get(page_number - 1)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+
+            owned_tail_base(*page_number, page.annotations().len(), tail)?;
+        }
+
+        // Set before the first removal rather than after the last: a step that
+        // fails partway has still left orphans behind, and the next write has to
+        // take the collecting route either way.
+        entry.needs_compaction = true;
+
+        for index in order {
+            let (page_id, page_number, position) = located[index];
+            let tail = entry.marks.get(&page_id).map_or(0, Vec::len);
+            let mut page = entry
+                .document
+                .pages_mut()
+                .get(page_number - 1)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+            let annotations = page.annotations_mut();
+            let base = owned_tail_base(page_number, annotations.len(), tail)?;
+            let annotation = annotations
+                .get(base + position)
+                .map_err(|error| format!("PDFium could not load the annotation: {error}"))?;
+
+            annotations
+                .delete_annotation(annotation)
+                .map_err(|error| format!("PDFium could not remove the annotation: {error}"))?;
+
+            if let Some(marks) = entry.marks.get_mut(&page_id) {
+                marks.remove(position);
+            }
+
+            *entry.revisions.entry(page_id).or_insert(0) += 1;
+        }
+
+        Ok(located
+            .iter()
+            .map(|(_, page_number, _)| *page_number)
+            .collect())
+    }
+
+    /// The mark under `point` on `page_number`, or `None` where the reader
+    /// pointed at nothing of theirs.
+    ///
+    /// Topmost first, which is the one they see: PDFium draws a page's
+    /// annotations in order, so the last of this session's marks to cover the
+    /// point is the one on top of the others. Only the session's own tail is
+    /// searched — the document's own annotations are not the eraser's to find.
+    pub(super) fn mark_at_point(
         &self,
         document_id: u64,
         page_number: i32,
-    ) -> Result<(), String> {
-        let mut documents = self.lock_documents()?;
-        let entry = open_entry_mut(&mut documents, document_id)?;
-        let page_id = entry.page_id(page_number)?;
-
-        if entry.added.get(&page_id).copied().unwrap_or(0) == 0 {
-            return Err(format!(
-                "page {page_number} has no annotation of this session's to remove"
-            ));
+        point: &PagePoint,
+    ) -> Result<Option<u64>, String> {
+        if !within_page_range(point.left) || !within_page_range(point.top) {
+            return Err("the point is out of range".into());
         }
 
-        let mut page = entry
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+        let page_id = entry.page_id(page_number)?;
+        let marks = match entry.marks.get(&page_id) {
+            Some(marks) if !marks.is_empty() => marks,
+            _ => return Ok(None),
+        };
+
+        let page = entry
             .document
-            .pages_mut()
+            .pages()
             .get(page_number - 1)
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
-        let annotations = page.annotations_mut();
-        let count = annotations.len();
+        let annotations = page.annotations();
+        let base = owned_tail_base(page_number, annotations.len(), marks.len())?;
+        // The point arrives in unrotated page points from the top left, as every
+        // annotation payload does; PDFium counts from the bottom left.
+        let x = point.left;
+        let y = unrotated_page_height(&page) - point.top;
 
-        if count == 0 {
-            return Err(format!("page {page_number} has no annotation to remove"));
+        for (position, mark_id) in marks.iter().enumerate().rev() {
+            let annotation = annotations
+                .get(base + position)
+                .map_err(|error| format!("PDFium could not load the annotation: {error}"))?;
+
+            if annotation_covers(&annotation, x, y) {
+                return Ok(Some(*mark_id));
+            }
         }
 
-        let annotation = annotations
-            .get(count - 1)
-            .map_err(|error| format!("PDFium could not load the annotation: {error}"))?;
-
-        annotations
-            .delete_annotation(annotation)
-            .map_err(|error| format!("PDFium could not remove the annotation: {error}"))?;
-
-        if let Some(added) = entry.added.get_mut(&page_id) {
-            *added -= 1;
-        }
-        *entry.revisions.entry(page_id).or_insert(0) += 1;
-        entry.needs_compaction = true;
-
-        Ok(())
+        Ok(None)
     }
 
     /// Rearranges the pages into `order` — the current 1-based page numbers in
@@ -2873,7 +3019,7 @@ impl PdfiumEngine {
             pages.push(StashedPage {
                 position: *index as i32 + 1,
                 page_id,
-                added: entry.added.remove(&page_id).unwrap_or(0),
+                marks: entry.marks.remove(&page_id).unwrap_or_default(),
                 revision: entry.revisions.remove(&page_id).unwrap_or(0),
                 owned: entry
                     .owned_content
@@ -2990,8 +3136,8 @@ impl PdfiumEngine {
 
         entry.page_ids = next_page_ids;
         for stashed in &stash.pages {
-            if stashed.added > 0 {
-                entry.added.insert(stashed.page_id, stashed.added);
+            if !stashed.marks.is_empty() {
+                entry.marks.insert(stashed.page_id, stashed.marks.clone());
             }
 
             if stashed.merged {

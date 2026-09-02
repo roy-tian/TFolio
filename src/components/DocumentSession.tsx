@@ -28,6 +28,7 @@ import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
+import { useEraserTool } from "@/hooks/useEraserTool"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
@@ -354,6 +355,15 @@ function DocumentSession(
     pages: pdfDocument?.pages ?? [],
     rotation,
     style: rectStyle,
+    viewerRef,
+  })
+
+  const erasing = drawingApplies && activeTool === "eraser"
+  useEraserTool({
+    active: active && erasing,
+    onErase: annotations.eraseAt,
+    pages: pdfDocument?.pages ?? [],
+    rotation,
     viewerRef,
   })
 
@@ -999,6 +1009,18 @@ function DocumentSession(
             macOS && "pl-[72px]",
           )}
         >
+          {/* First in the header, ahead of the document tools: the menu is the
+              window's, not this document's, and it sits in the same place on
+              the home tab. */}
+          {active ? (
+            <AppMenu
+              {...menu}
+              canSave={canSave}
+              onSave={() => void annotations.save()}
+              onSaveAs={() => void exportPdf()}
+              saveHint={saveHint}
+            />
+          ) : null}
           <Toggle
             aria-label={bookmarksLabel}
             className="size-8"
@@ -1107,6 +1129,7 @@ function DocumentSession(
           <AnnotationToolbar
             activeTool={activeTool}
             disabled={!pdfDocument}
+            eraserApplies={drawingApplies}
             highlightApplies={drawingApplies}
             highlightColor={highlightColor}
             onHighlightColorChange={changeHighlightColor}
@@ -1119,15 +1142,6 @@ function DocumentSession(
             rectStyle={rectStyle}
             textNoteApplies={drawingApplies}
           />
-          {active ? (
-            <AppMenu
-              {...menu}
-              canSave={canSave}
-              onSave={() => void annotations.save()}
-              onSaveAs={() => void exportPdf()}
-              saveHint={saveHint}
-            />
-          ) : null}
           {active && !macOS ? <WindowControls /> : null}
         </div>
       </header>
@@ -1152,6 +1166,9 @@ function DocumentSession(
               // it would promise a drag that does nothing.
               drawingRect && "cursor-crosshair",
               drawingTextNote && "cursor-text",
+              // The eraser aims at a mark rather than at a point of the page,
+              // so it takes the same aiming pointer the rectangle draws with.
+              erasing && "cursor-crosshair",
             )}
             ref={viewerRef}
           >

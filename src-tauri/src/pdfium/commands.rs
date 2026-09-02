@@ -126,7 +126,7 @@ pub async fn add_pdf_highlight_annotation(
     color: String,
     opacity: f32,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -143,7 +143,7 @@ pub async fn add_pdf_rect_annotation(
     bounds: PagePointsRect,
     style: RectStyle,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -160,7 +160,7 @@ pub async fn add_pdf_rect_effect_annotation(
     bounds: PagePointsRect,
     effect: RectEffect,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -178,7 +178,7 @@ pub async fn add_pdf_text_note_annotation(
     text: String,
     style: TextNoteStyle,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -254,19 +254,38 @@ pub async fn remove_pdf_page_numbers(
         .map_err(|error| format!("PDFium page-number removal task failed: {error}"))?
 }
 
+/// Removes marks this session made, by the ids their adds handed back — what an
+/// undo and the eraser both go through. Reports the page each was on, so the
+/// frontend can redraw exactly those.
 #[tauri::command]
-pub async fn delete_last_pdf_annotation(
+pub async fn delete_pdf_annotations(
+    document_id: u64,
+    mark_ids: Vec<u64>,
+    state: State<'_, PdfiumState>,
+) -> Result<Vec<i32>, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.delete_marks(document_id, &mark_ids))
+        .await
+        .map_err(|error| format!("PDFium annotation removal task failed: {error}"))?
+}
+
+/// The mark under a point on a page, for the eraser to aim at — `None` where
+/// the reader pointed at nothing of this session's.
+#[tauri::command]
+pub async fn pdf_annotation_at_point(
     document_id: u64,
     page_number: i32,
+    point: PagePoint,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<Option<u64>, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.delete_last_annotation(document_id, page_number)
+        engine.mark_at_point(document_id, page_number, &point)
     })
     .await
-    .map_err(|error| format!("PDFium annotation removal task failed: {error}"))?
+    .map_err(|error| format!("PDFium annotation hit test task failed: {error}"))?
 }
 
 #[tauri::command]

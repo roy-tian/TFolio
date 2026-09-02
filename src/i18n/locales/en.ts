@@ -95,6 +95,7 @@ const en = {
     textNotePlaceholder: "Type a note…",
     textNoteConfirm: "Add this note",
     textNoteCancel: "Discard this note",
+    eraser: "Erase a mark",
     save: "Save",
     saveNoSource: "No file to save over — exporting will save a copy",
     saveOwnedContent:

@@ -1,5 +1,6 @@
 import {
   ChevronDown,
+  Eraser,
   FileScan,
   Highlighter,
   Square,
@@ -26,12 +27,14 @@ import { cn } from "@/lib/utils"
 const splitMenuButtonClassName =
   "relative w-5 border-input px-0 before:pointer-events-none before:absolute before:inset-y-1.5 before:left-0 before:w-px before:bg-border before:opacity-0 before:transition-opacity hover:before:opacity-100"
 
-/** The tool the reader is drawing with, or none. */
-export type AnnotationTool = "highlight" | "rect" | "textNote" | null
+/** The tool the reader is drawing with — or rubbing out with — or none. */
+export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
   disabled: boolean
+  /** Whether a page is on show to rub a mark off; the thumbnail grid is not. */
+  eraserApplies: boolean
   /** Whether the layout has text to mark; the grid of thumbnails does not. */
   highlightApplies: boolean
   highlightColor: HexColor
@@ -54,6 +57,7 @@ type AnnotationToolbarProps = {
 export function AnnotationToolbar({
   activeTool,
   disabled,
+  eraserApplies,
   highlightApplies,
   highlightColor,
   onHighlightColorChange,
@@ -70,12 +74,13 @@ export function AnnotationToolbar({
   const highlightLabel = t("annotate.highlight")
   const rectLabel = t("annotate.rect")
   const textNoteLabel = t("annotate.textNote")
+  const eraserLabel = t("annotate.eraser")
   const watermarkLabel = t("watermark.open")
   const pageNumbersLabel = t("pageNumbers.open")
 
   return (
     <div className="flex items-center gap-1">
-      {highlightApplies || rectApplies || textNoteApplies ? (
+      {highlightApplies || rectApplies || textNoteApplies || eraserApplies ? (
         <ButtonGroup>
           {highlightApplies ? (
             <>
@@ -188,6 +193,25 @@ export function AnnotationToolbar({
               variant="outline"
             >
               <SquarePen />
+            </Toggle>
+          ) : null}
+
+          {/* Last of the drawing tools, and the one that undoes their work: it
+              takes off a mark this session made, wherever in the stack it sits,
+              which is what plain undo cannot do. */}
+          {eraserApplies ? (
+            <Toggle
+              aria-label={eraserLabel}
+              className="size-8 p-0"
+              disabled={disabled}
+              onPressedChange={(pressed) =>
+                onToolChange(pressed ? "eraser" : null)
+              }
+              pressed={activeTool === "eraser"}
+              title={eraserLabel}
+              variant="outline"
+            >
+              <Eraser />
             </Toggle>
           ) : null}
         </ButtonGroup>

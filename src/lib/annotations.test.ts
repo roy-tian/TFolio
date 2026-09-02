@@ -7,6 +7,7 @@ import {
   commandTextPages,
   commit,
   emptyHistory,
+  fillErasedPages,
   fillInsertFileOutcome,
   historyHead,
   inversePermutation,
@@ -16,12 +17,14 @@ import {
   movesPages,
   pageNumbersConfig,
   planDeletePages,
+  planEraseAnnotation,
   planInsertBlankPage,
   planInsertFile,
   planPageNumbersChange,
   planReorderPages,
   planWatermarkChange,
   redo,
+  retargetCommand,
   undo,
   watermarkConfig,
   type AnnotationCommand,
@@ -481,5 +484,101 @@ describe("insert-file commands", () => {
     // The delete an undo runs, and the restore a redo runs, cover the file's own
     // range — pages 3 through 6.
     expect(insertFilePages(command as never)).toEqual([3, 4, 5, 6])
+  })
+})
+
+describe("erasing a mark", () => {
+  /** The ids of the entries the history holds, oldest first. */
+  function applied(history: AnnotationHistory) {
+    return history.past.map((entry) => entry.id)
+  }
+
+  it("takes the mark's entry out of the applied history", () => {
+    const history = historyOf(highlight(1), highlight(2), highlight(3))
+    const target = history.past[0]!.id
+    const planned = planEraseAnnotation(history, target)!
+
+    expect(applied(planned.history)).toEqual([2, 3, 4])
+    expect(planned.command).toMatchObject({ index: 0, kind: "eraseAnnotation" })
+    // The erase is an edit like any other, so a redo branch it starts from is
+    // dropped the same way.
+    expect(planned.history.future).toEqual([])
+  })
+
+  it("has nothing to erase for an entry the reader has already undone", () => {
+    const history = historyOf(highlight(1))
+    const undone = undo(history)!.history
+
+    expect(planEraseAnnotation(undone, history.past[0]!.id)).toBeNull()
+  })
+
+  it("puts the entry back where it stood when the erase is undone", () => {
+    const history = historyOf(highlight(1), highlight(2), highlight(3))
+    const erased = planEraseAnnotation(history, history.past[1]!.id)!.history
+    const restored = undo(erased)!.history
+
+    expect(applied(restored)).toEqual([1, 2, 3])
+    // …and a redo takes it back out again.
+    expect(applied(redo(restored)!.history)).toEqual([1, 3, 4])
+  })
+
+  it("leaves the document dirty until the erase is taken back", () => {
+    const history = markSaved(historyOf(highlight(1), highlight(2)))
+    const erased = planEraseAnnotation(history, history.past[0]!.id)!.history
+
+    expect(isDirty(erased)).toBe(true)
+    // Undoing it puts the document back at exactly what was saved.
+    expect(isDirty(undo(erased)!.history)).toBe(false)
+  })
+
+  it("stays dirty where the erase itself was what was saved", () => {
+    const history = historyOf(highlight(1), highlight(2))
+    const erased = markSaved(
+      planEraseAnnotation(history, history.past[0]!.id)!.history,
+    )
+
+    // The file on disk has no first highlight; putting it back is a change.
+    expect(isDirty(undo(erased)!.history)).toBe(true)
+  })
+
+  it("redraws where the marks were made until the backend says otherwise", () => {
+    const history = historyOf(highlight(1, 2))
+    const planned = planEraseAnnotation(history, history.past[0]!.id)!
+    const id = planned.history.past.at(-1)!.id
+
+    expect(commandPages(planned.command)).toEqual([1, 2])
+    expect(movesPages(planned.command)).toBe(false)
+    // An annotation is not page content, so nothing extractable moved.
+    expect(commandTextPages(planned.command)).toEqual([])
+
+    const filled = fillErasedPages(planned.history, id, [4, 5])
+
+    expect(commandPages(filled.past.at(-1)!.command)).toEqual([4, 5])
+  })
+})
+
+describe("retargetCommand", () => {
+  it("aims a highlight at the pages its marks were really on", () => {
+    expect(retargetCommand(highlight(1, 2), [5, 6])).toMatchObject({
+      targets: [{ pageNumber: 5 }, { pageNumber: 6 }],
+    })
+  })
+
+  it("aims a single-page command at the page its mark was on", () => {
+    const note: AnnotationCommand = {
+      kind: "textNote",
+      origin: { left: 10, top: 10 },
+      pageNumber: 1,
+      style: { color: "#111827", fontSize: 12, opacity: 1 },
+      text: "hi",
+    }
+
+    expect(retargetCommand(note, [7])).toMatchObject({ pageNumber: 7 })
+  })
+
+  it("leaves the command alone where the backend reported nothing", () => {
+    const command = highlight(1, 2)
+
+    expect(retargetCommand(command, [])).toBe(command)
   })
 })

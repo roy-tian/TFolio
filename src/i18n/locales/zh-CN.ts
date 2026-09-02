@@ -101,6 +101,7 @@ const zhCN = {
     textNotePlaceholder: "输入注释…",
     textNoteConfirm: "添加此注释",
     textNoteCancel: "放弃此注释",
+    eraser: "擦除标记",
     save: "保存",
     saveNoSource: "没有可覆盖的源文件——导出将另存为副本",
     saveOwnedContent:

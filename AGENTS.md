@@ -107,9 +107,12 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
   than axes — a variable face resolved to Regular before it is cut. A face
   failing any of them is the wrong candidate, not an error — the chain walks on,
   and its end is the fetch offer above.
-- `delete_last_pdf_annotation` counts the session's own additions per page, never
-  the frontend's undo history, so it cannot delete a link, form field, or comment
-  already in the file.
+- Only annotations this session added carry a mark id, and `delete_pdf_annotations`
+  takes ids — never a page position and never the frontend's undo history — so it
+  cannot reach a link, form field, or comment already in the file. The ids are
+  what let the eraser take a mark out of the middle of a page's own stack while
+  every other entry's undo still finds its own; `pdf_annotation_at_point` does the
+  hit test, over that same session tail alone.
 - Watermarks are appended page content objects, not annotations. The app owns
   only the tail it appended this session — after save + reopen they are input
   content, so never call them redaction or tamper-proofing. A watermarked

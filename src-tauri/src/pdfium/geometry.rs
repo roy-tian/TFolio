@@ -72,6 +72,32 @@ pub(super) fn quad_points_from_rect(rect: &PdfRect) -> PdfQuadPoints {
     )
 }
 
+/// Whether `(x, y)` — in PDFium's own bottom-left page space — lands on what
+/// this annotation draws.
+///
+/// A text markup annotation's `/Rect` encloses every run it covers, so a
+/// highlight wrapped across three lines would answer for the whole block down
+/// to its ragged right edge. Its quad points are what it actually paints, so
+/// they are what a point is tested against wherever it has them.
+pub(super) fn annotation_covers(annotation: &PdfPageAnnotation<'_>, x: f32, y: f32) -> bool {
+    let points = annotation.attachment_points();
+
+    if !points.is_empty() {
+        return points.iter().any(|quad| rect_covers(&quad.to_rect(), x, y));
+    }
+
+    annotation
+        .bounds()
+        .is_ok_and(|bounds| rect_covers(&bounds, x, y))
+}
+
+fn rect_covers(rect: &PdfRect, x: f32, y: f32) -> bool {
+    x >= rect.left().value
+        && x <= rect.right().value
+        && y >= rect.bottom().value
+        && y <= rect.top().value
+}
+
 /// The ceiling on a coordinate a rectangle carries, in page points. The PDF spec
 /// caps a page's MediaBox at 14400pt; this leaves generous room past that, so a
 /// real annotation always fits while an absurd value from the WebView falls
