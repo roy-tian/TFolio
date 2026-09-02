@@ -44,7 +44,9 @@ const FALLBACK_FONT_SHA256: &str =
 /// cannot fail to arrive after 17 MB has already been downloaded.
 ///
 /// Copied from the same pinned commit the face comes from; a test below holds
-/// it to what `bun run fonts:download` writes.
+/// it to what `bun run fonts:download` writes. It sits beside `resources/fonts/`
+/// rather than in it: that directory is ignored, and `download-fonts.mjs` sweeps
+/// out every file it did not write itself.
 const FALLBACK_FONT_LICENSE: &str = include_str!("../../resources/OFL.NotoSansSC.txt");
 const FALLBACK_FONT_LICENSE_NAME: &str = "LICENSE.NotoSansSC";
 /// How long a fetch may take before it is given up on. Generous, because 17 MB
