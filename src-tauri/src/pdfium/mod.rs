@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, close_pdf,
-    create_pdf, delete_last_pdf_annotation, delete_pdf_pages, export_pdf, extract_pdf_page_text,
-    insert_pdf_blank_page, insert_pdf_from_path, inspect_pdf_files, merge_pdf_files, open_pdf,
-    open_pdf_from_path, pick_pdf_path, pick_pdf_paths, remove_pdf_page_numbers,
-    remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, reorder_pdf_pages,
-    restore_pdf_pages, save_pdf,
+    create_pdf, delete_last_pdf_annotation, delete_pdf_pages, download_pdf_note_font, export_pdf,
+    extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path, inspect_pdf_files,
+    merge_pdf_files, open_pdf, open_pdf_from_path, pick_pdf_path, pick_pdf_paths,
+    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
+    reorder_pdf_pages, restore_pdf_pages, save_pdf,
 };
 pub use engine::PdfiumState;
 pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};
@@ -187,15 +187,12 @@ pub struct PagePoint {
     top: f32,
 }
 
-/// How a text note is drawn. `font_family` picks one of the standard 14 and is
-/// ignored for text that needs the bundled CJK font, which is the only face
-/// available once a note leaves Latin-1 — the frontend disables the control to
-/// match rather than letting a reader pick a face they will not get.
+/// How a text note is drawn. There is no family to pick: Latin text is drawn in
+/// Helvetica, and anything else in whichever face the machine can actually
+/// embed, so a control here would have offered a choice a note might not get.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextNoteStyle {
-    /// `"sans"`, `"serif"` or `"mono"`.
-    font_family: String,
     /// Point size, as a PDF measures type.
     font_size: f32,
     color: String,

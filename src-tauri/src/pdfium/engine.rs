@@ -15,8 +15,9 @@ use tauri::AppHandle;
 
 use super::{
     font::{
-        cjk_font_path, needs_embedded_font, page_number_face, regular_cjk_font, standard_face,
-        subset_for, StandardFace, PAGE_NUMBER_GLYPHS,
+        fallback_font_candidates, needs_embedded_font, page_number_face, regular_cjk_font,
+        subset_for, system_embedded_face, EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR,
+        PAGE_NUMBER_GLYPHS,
     },
     geometry::{
         annotation_color, page_rect_to_pdfium, page_rotation_degrees, quad_points_from_rect,
@@ -201,7 +202,7 @@ struct PageOwnedPlan {
 
 /// The watermark layer's inputs to a rebuild, prepared before the document lock
 /// is taken: the config, its resolved colour, and — when the text leaves
-/// Latin-1 — the bundled face subset to embed. Its font token is loaded inside
+/// Latin-1 — the resolved face subset to embed. Its font token is loaded inside
 /// the rebuild, once, and reused for every page.
 struct WatermarkResources {
     config: WatermarkConfig,
@@ -574,14 +575,23 @@ pub(super) struct PdfiumEngine {
     /// which touches every page before there is anything to insert here.
     documents: Mutex<HashMap<u64, OpenDocument>>,
     next_document_id: AtomicU64,
-    /// Where the bundled CJK font is, resolved at startup because that is the
-    /// only point an `AppHandle` reaches this module.
-    cjk_font_path: Option<PathBuf>,
-    /// The font's static Regular (weight 400) instance, created on the first
-    /// note that needs it. Most sessions never touch the ~17 MB variable source,
-    /// so it is not read or resolved at startup — and once resolved it is kept,
-    /// because every CJK note subsets it again.
-    cjk_font: OnceLock<Vec<u8>>,
+    /// Every place the downloadable fallback face may be, in the order they are
+    /// tried. Resolved at startup because that is the only point an `AppHandle`
+    /// reaches this module; the file itself may arrive later, when a reader
+    /// accepts the download.
+    fallback_font_candidates: Vec<PathBuf>,
+    /// The fallback face's static Regular (weight 400) instance, created on the
+    /// first run of text that needs it. Most sessions never touch the ~17 MB
+    /// variable source — most never fetch it at all — so it is not read at
+    /// startup, and once resolved it is kept, because every embedded run
+    /// subsets it again.
+    fallback_font: OnceLock<Vec<u8>>,
+    /// The system's own sans and the index of the face inside its file, or
+    /// `None` where this machine has nothing that can be embedded. Resolved on
+    /// the first run of text that needs it — a scan of every installed face —
+    /// and kept either way, so a machine with no candidate does not rescan for
+    /// every note.
+    system_face: OnceLock<Option<(Vec<u8>, usize)>>,
     /// The page-number face, subset to the label's glyphs. Resolved from the
     /// system's own fonts on the first apply that needs it — a scan of every
     /// installed face, so it is done once and kept — and embedded as it is.
@@ -608,8 +618,9 @@ impl PdfiumState {
             next_document_id: AtomicU64::new(1),
             // Absent is not fatal here: it only fails the first note that needs
             // it, so a missing font cannot stop the app from opening PDFs.
-            cjk_font_path: cjk_font_path(app),
-            cjk_font: OnceLock::new(),
+            fallback_font_candidates: fallback_font_candidates(app),
+            fallback_font: OnceLock::new(),
+            system_face: OnceLock::new(),
             page_number_font: OnceLock::new(),
             approved_paths: Mutex::new(HashSet::new()),
         })))
@@ -1338,37 +1349,87 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// The bundled CJK font's static Regular bytes, resolved once and kept.
-    fn cjk_font_bytes(&self) -> Result<&[u8], String> {
-        if let Some(bytes) = self.cjk_font.get() {
+    /// The system's own sans, or `None` where this machine has none that can be
+    /// embedded. Scanned once — the answer is kept whichever way it goes, so a
+    /// machine with no candidate pays for the scan once rather than per note.
+    fn system_face(&self) -> Option<&(Vec<u8>, usize)> {
+        self.system_face
+            .get_or_init(|| system_embedded_face(EMBEDDED_FACE_PROBE))
+            .as_ref()
+    }
+
+    /// The first fallback-face file that is actually there, or `None` until a
+    /// reader has accepted the download.
+    fn fallback_font_file(&self) -> Option<&Path> {
+        self.fallback_font_candidates
+            .iter()
+            .find(|path| path.is_file())
+            .map(PathBuf::as_path)
+    }
+
+    /// The fallback face's static Regular bytes, resolved once and kept.
+    fn fallback_font_bytes(&self) -> Result<&[u8], String> {
+        if let Some(bytes) = self.fallback_font.get() {
             return Ok(bytes);
         }
 
-        let path = self.cjk_font_path.as_ref().ok_or_else(|| {
-            "the bundled font is missing; run `bun run fonts:download`".to_string()
-        })?;
+        // The one failure a reader can act on, so it travels as itself: the
+        // frontend turns exactly this string into the offer to fetch the face.
+        let path = self
+            .fallback_font_file()
+            .ok_or_else(|| FONT_MISSING_ERROR.to_string())?;
         let source = fs::read(path)
-            .map_err(|error| format!("the bundled font could not be read: {error}"))?;
+            .map_err(|error| format!("the fallback font could not be read: {error}"))?;
         let bytes = regular_cjk_font(&source)?;
 
         // Two notes can reach here at once and both resolve the font; whichever
         // stores first wins and the other's copy is dropped. Both then see the
         // same Regular instance, which is all that matters.
-        let _ = self.cjk_font.set(bytes);
+        let _ = self.fallback_font.set(bytes);
 
-        self.cjk_font
+        self.fallback_font
             .get()
             .map(Vec::as_slice)
-            .ok_or_else(|| "the bundled font could not be cached".to_string())
+            .ok_or_else(|| "the fallback font could not be cached".to_string())
+    }
+
+    /// The face an embedded run — a note or a watermark — is drawn in, cut to
+    /// `text`.
+    ///
+    /// The system's own sans first, so a machine that already has one fetches
+    /// nothing; the downloaded fallback second. Neither is held to covering
+    /// `text`: a face is chosen once per session and then takes what it happens
+    /// to hold, which is the trade the bundled face already made — a note in a
+    /// script the chosen face lacks draws boxes rather than refusing.
+    fn embedded_face_subset(&self, text: &str) -> Result<Vec<u8>, String> {
+        if let Some((bytes, index)) = self.system_face() {
+            return subset_for(bytes, *index, text);
+        }
+
+        match self.fallback_font_bytes() {
+            Ok(bytes) => subset_for(bytes, 0, text),
+            // No CJK face and nothing fetched — but "outside Latin-1" is not
+            // "Chinese", and a machine whose sans draws Cyrillic, Greek or kana
+            // can draw this run without fetching a 17 MB Chinese face for it.
+            // Asked with the text itself rather than the cached probe, so it is
+            // not cached either: it runs only where the answer would otherwise
+            // have been a refusal.
+            Err(missing) => {
+                let (bytes, index) = system_embedded_face(text).ok_or(missing)?;
+
+                subset_for(&bytes, index, text)
+            }
+        }
     }
 
     /// The page-number face's bytes, resolved once and kept. Already cut to the
     /// label's glyphs by the chain that found it, so nothing is subset here —
-    /// except in the fallback, where the bundled sans is cut like any note's.
+    /// except in the fallback, where the fetched sans is cut like any note's.
     ///
-    /// That fallback is what keeps a host with no serif of its own — a bare
-    /// container, a stripped Linux — numbering its pages rather than failing the
-    /// apply outright; the system's own face is still what is tried first.
+    /// That fallback catches only a host whose every installed face refuses the
+    /// label — the chain itself already ends at the generic sans — and on a host
+    /// with neither, the page-number chain's own error survives rather than the
+    /// fallback's.
     fn page_number_font_bytes(&self) -> Result<&[u8], String> {
         if let Some(bytes) = self.page_number_font.get() {
             return Ok(bytes);
@@ -1377,8 +1438,8 @@ impl PdfiumEngine {
         let face = match page_number_face() {
             Ok(face) => face,
             Err(missing) => self
-                .cjk_font_bytes()
-                .and_then(|bundled| subset_for(bundled, PAGE_NUMBER_GLYPHS))
+                .fallback_font_bytes()
+                .and_then(|fallback| subset_for(fallback, 0, PAGE_NUMBER_GLYPHS))
                 .map_err(|_| missing)?,
         };
 
@@ -1428,12 +1489,6 @@ impl PdfiumEngine {
             return Err("a note's style values are out of range".into());
         }
 
-        // Resolved here rather than where the font is chosen below, so an
-        // unknown family is refused before a ~17 MB face is read and subset —
-        // and so it is refused for a Chinese note too, which never reaches the
-        // standard fonts and so never used to be checked at all.
-        let face = standard_face(&style.font_family)
-            .ok_or_else(|| "a note's font family is not one this app offers".to_string())?;
         let color = annotation_color(&style.color, style.opacity)?;
 
         // Invisible is a failure, not a note: a fully transparent one would be
@@ -1463,11 +1518,11 @@ impl PdfiumEngine {
             return Err("a note has too many lines".into());
         }
 
-        // Subset before the lock: reading and cutting down a ~17 MB font is the
-        // slow part of this, and it needs no document, so renders should not
-        // queue behind it.
+        // Subset before the lock: reading and cutting down a face — a system
+        // one the first time, or the ~17 MB fallback — is the slow part of
+        // this, and it needs no document, so renders should not queue behind it.
         let embedded = if needs_embedded_font(text) {
-            Some(subset_for(self.cjk_font_bytes()?, text)?)
+            Some(self.embedded_face_subset(text)?)
         } else {
             None
         };
@@ -1486,7 +1541,7 @@ impl PdfiumEngine {
             unrotated_page_height(&page)
         };
 
-        // A face the standard 14 cover costs no embedded bytes at all, which is
+        // Text the standard 14 cover costs no embedded bytes at all, which is
         // the common case for a Latin note; anything else carries its subset.
         let font = match &embedded {
             // Loaded afresh each time, so a redo of a note that was just undone
@@ -1504,16 +1559,8 @@ impl PdfiumEngine {
                 .document
                 .fonts_mut()
                 .load_true_type_from_bytes(bytes, true)
-                .map_err(|error| format!("PDFium rejected the bundled font: {error}"))?,
-            None => {
-                let fonts = entry.document.fonts_mut();
-
-                match face {
-                    StandardFace::Sans => fonts.helvetica(),
-                    StandardFace::Serif => fonts.times_roman(),
-                    StandardFace::Mono => fonts.courier(),
-                }
-            }
+                .map_err(|error| format!("PDFium rejected the note's font: {error}"))?,
+            None => entry.document.fonts_mut().helvetica(),
         };
 
         let ascent = entry
@@ -2165,7 +2212,9 @@ impl PdfiumEngine {
                         .document
                         .fonts_mut()
                         .load_true_type_from_bytes(bytes, true)
-                        .map_err(|error| format!("PDFium rejected the bundled font: {error}"))?,
+                        .map_err(|error| {
+                            format!("PDFium rejected the watermark's font: {error}")
+                        })?,
                     // Latin-1 text needs no embedded face: the mark is always
                     // drawn in PDF's own sans, which every reader already has.
                     None => entry.document.fonts_mut().helvetica(),
@@ -2476,7 +2525,7 @@ impl PdfiumEngine {
     }
 
     /// The watermark layer's rebuild inputs from a stored config: its resolved
-    /// colour and, for embedded text, the bundled face subset. The subset is the
+    /// colour and, for embedded text, the resolved face subset. The subset is the
     /// expensive part, so a *new* watermark's resources are prepared outside the
     /// lock; an existing layer's — rebuilt to survive a change to the other —
     /// are prepared under it, from a config that cannot change while it is held.
@@ -2485,7 +2534,7 @@ impl PdfiumEngine {
             .map_err(|error| format!("the watermark colour is unusable: {error}"))?
             .with_alpha((WATERMARK_OPACITY * 255.0).round() as u8);
         let embedded = if needs_embedded_font(&config.text) {
-            Some(subset_for(self.cjk_font_bytes()?, &config.text)?)
+            Some(self.embedded_face_subset(&config.text)?)
         } else {
             None
         };
@@ -2568,7 +2617,7 @@ impl PdfiumEngine {
             }
         }
 
-        // Prepared without the PDFium lock because cutting the bundled face is
+        // Prepared without the PDFium lock because cutting the face is
         // pure CPU work; the whole document reuses this one subset.
         let watermark = self.watermark_resources(&config)?;
 

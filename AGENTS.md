@@ -32,8 +32,11 @@ Tailwind v4, shadcn/ui, i18next), Rust backend rendering with a bundled PDFium.
 | `bun run preflight` | every single-platform CI check plus a local bundle |
 | `bun run version:check` / `version:bump <patch\|minor\|major\|x.y.z>` | version across `package.json`, `bun.lock`, `Cargo.toml`, `Cargo.lock` |
 
-`pdfium:download` and `fonts:download` run automatically before
-`tauri:dev|build|bundle`; without them the `#[ignore]` Rust tests fail, not skip.
+`pdfium:download` runs automatically before `tauri:dev|build|bundle`. Fonts are
+**not** bundled: `fonts:download` is run by the test scripts only, and without it
+the `#[ignore]` Rust tests fail, not skip. At runtime a note or watermark that
+leaves Latin-1 takes the system's own sans, and only where nothing installed can
+draw it does the app offer to fetch one (see below).
 
 CI gates, all required before a PR: `bun run build`, `bun run test`,
 `bun run version:check`, and against `src-tauri/Cargo.toml` —
@@ -76,6 +79,18 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
   - `insert_pdf_from_path` validates its position in the engine, not the command,
     so the e2e build checks it too: an out-of-range index is refused, not clamped.
   - `tauri-plugin-fs` is transitive and deliberately never registered.
+- `download_pdf_note_font` is the app's only outbound request. It takes no
+  argument the WebView could shape — host, pinned commit, size, SHA-256 and
+  destination all live in `font.rs` — so it can fetch exactly one file to one
+  place; a version taking a URL would be an open request forwarder. The bytes
+  are checked against the pin *before* anything is written, and the face's OFL
+  licence is written beside it first, so the face is never on disk without its
+  terms. The CSP is untouched: the fetch is Rust's, not the WebView's.
+- Faces embedded in a reader's documents are held to what embedding needs, in
+  `font.rs`: TrueType outlines (PDFium's loader describes no other shape
+  correctly), an `fsType` that permits a subset, and coverage. A face failing any
+  of them is the wrong candidate, not an error — the chain walks on, and its end
+  is the fetch offer above.
 - `delete_last_pdf_annotation` counts the session's own additions per page, never
   the frontend's undo history, so it cannot delete a link, form field, or comment
   already in the file.

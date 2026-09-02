@@ -7,23 +7,20 @@ import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { SliderRow } from "@/components/SliderRow"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   fractionToClientPoint,
   pagePointToFraction,
 } from "@/lib/annotationGeometry"
 import { ZOOM_PREVIEW_EVENT } from "@/lib/zoom"
-import type { TextNoteFontFamily, TextNoteStyle } from "@/lib/annotations"
+import type { TextNoteStyle } from "@/lib/annotations"
 import {
-  isTextNoteFontFamily,
   TEXT_NOTE_MAX_FONT_SIZE,
   TEXT_NOTE_MIN_FONT_SIZE,
   TEXT_NOTE_MIN_OPACITY,
-  textNoteFontFamilies,
   textNoteSwatches,
 } from "@/lib/annotationStyles"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
-import { usesEmbeddedFont, type TextNoteDraft } from "@/lib/textNoteDraft"
+import type { TextNoteDraft } from "@/lib/textNoteDraft"
 import { cn } from "@/lib/utils"
 
 type TextNoteEditorProps = {
@@ -48,25 +45,13 @@ const EDITOR_WIDTH = 256
 /** How close the editor may come to the window's edge before it is pulled in. */
 const VIEWPORT_MARGIN = 8
 
-/** The CSS the three offered families map to while a note is being typed. */
-const previewFontFamily: Record<TextNoteFontFamily, string> = {
-  mono: "ui-monospace, monospace",
-  sans: "Helvetica, Arial, sans-serif",
-  serif: "'Times New Roman', Times, serif",
-}
-
-/** Spelled out rather than built from the family: a key assembled at runtime is
-    not one the locale schema can check at build time. */
-const familyLabelKey: Record<
-  TextNoteFontFamily,
-  | "annotate.textNoteFont_sans"
-  | "annotate.textNoteFont_serif"
-  | "annotate.textNoteFont_mono"
-> = {
-  mono: "annotate.textNoteFont_mono",
-  sans: "annotate.textNoteFont_sans",
-  serif: "annotate.textNoteFont_serif",
-}
+/**
+ * What the note will be drawn in, as closely as CSS can say it: Helvetica for
+ * the Latin the standard fonts cover, and the system's own sans for everything
+ * past it — the same pair the backend picks between, and in the same order, so
+ * the browser's fallback lands where PDFium's does.
+ */
+const PREVIEW_FONT_FAMILY = "Helvetica, Arial, sans-serif"
 
 /**
  * Where a note is typed, floating over the page at the point it was placed.
@@ -207,7 +192,6 @@ export function TextNoteEditor({
     return null
   }
 
-  const embedded = usesEmbeddedFont(draft.text)
   // Big enough to type in whatever the note's own size, so a 6pt note is not
   // edited through a slit, while a large one still previews at its real size.
   const previewSize = Math.max(12, style.fontSize * placement.pxPerPoint)
@@ -238,44 +222,6 @@ export function TextNoteEditor({
             swatches={textNoteSwatches}
             value={style.color}
           />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <p className="text-xs font-medium" id="text-note-family-label">
-            {t("annotate.textNoteFont")}
-          </p>
-          {/* Disabled the moment the note leaves Latin-1: the bundled face is
-              the only one that can draw it, so offering a choice here would be
-              offering one the note would not be given. */}
-          <ToggleGroup
-            aria-labelledby="text-note-family-label"
-            disabled={embedded}
-            onValueChange={([next]) => {
-              // Base UI empties the array when the active item is pressed
-              // again, but a note is always drawn in some font.
-              if (isTextNoteFontFamily(next)) {
-                onStyleChange({ ...style, fontFamily: next })
-              }
-            }}
-            spacing={0}
-            value={[style.fontFamily]}
-            variant="outline"
-          >
-            {textNoteFontFamilies.map((family) => (
-              <ToggleGroupItem
-                className="flex-1 text-xs"
-                key={family}
-                value={family}
-              >
-                {t(familyLabelKey[family])}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-          {embedded ? (
-            <p className="text-xs text-muted-foreground">
-              {t("annotate.textNoteFontFixed")}
-            </p>
-          ) : null}
         </div>
 
         <SliderRow
@@ -310,7 +256,7 @@ export function TextNoteEditor({
           rows={3}
           style={{
             color: style.color,
-            fontFamily: previewFontFamily[style.fontFamily],
+            fontFamily: PREVIEW_FONT_FAMILY,
             fontSize: previewSize,
             lineHeight: 1.2,
             opacity: style.opacity,

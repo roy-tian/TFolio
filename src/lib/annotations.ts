@@ -69,19 +69,16 @@ export type RectCommand = {
 }
 
 /**
- * How a note's text is drawn. `fontFamily` picks one of the PDF's standard
- * fonts, none of which can draw Chinese — text that needs the bundled face is
- * drawn in it whatever this says, which is why the control is disabled for it.
+ * How a note's text is drawn. There is no family to pick: Latin text is drawn
+ * in Helvetica, and anything else in whichever face the machine can embed, so
+ * a control here would offer a choice a note might not be given.
  */
 export type TextNoteStyle = {
   color: HexColor
-  fontFamily: TextNoteFontFamily
   /** Point size, as a PDF measures type. */
   fontSize: number
   opacity: number
 }
-
-export type TextNoteFontFamily = "sans" | "serif" | "mono"
 
 /**
  * A note is typed at one point on one page, so like a rectangle it is one

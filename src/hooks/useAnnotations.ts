@@ -43,7 +43,10 @@ type StructureChangeHandler = (
 
 type UseAnnotationsOptions = {
   documentId: number | undefined
-  onAnnotateError: () => void
+  /** `command` is the edit that failed, where re-running it is the whole
+      recovery — a note whose text would otherwise be lost with the editor that
+      held it. Absent for a refusal there is nothing to hold on to. */
+  onAnnotateError: (error?: unknown, command?: AnnotationCommand) => void
   onExportError: () => void
   /** An export landed; `outcome` says where, and whether that was the
       document's own file. */
@@ -367,7 +370,7 @@ export function useAnnotations({
             the placeholder used until then, and when this is absent. */
         reconcile?: () => AnnotationHistory
       } | null,
-      onFailure: () => void,
+      onFailure: (error: unknown) => void,
     ) => {
       if (documentId === undefined) {
         return queueRef.current
@@ -403,9 +406,12 @@ export function useAnnotations({
             setHistory(committed)
           }
           onSuccess()
-        } catch {
+        } catch (error) {
+          // Carried rather than swallowed: one refusal — nothing installed can
+          // draw this text — is the reader's to act on, and only the error
+          // itself says which one it was.
           if (generation === generationRef.current) {
-            onFailure()
+            onFailure(error)
           }
         } finally {
           // Whether or not the work succeeded: a command that failed partway
@@ -448,7 +454,7 @@ export function useAnnotations({
             return true
           },
         }),
-        onAnnotateError,
+        (error) => onAnnotateError(error, command),
       )
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
@@ -624,9 +630,9 @@ export function useAnnotations({
             return true
           },
         }
-      }, () => {
+      }, (error) => {
         failed = true
-        onAnnotateError()
+        onAnnotateError(error)
       })
 
       return !failed
@@ -662,9 +668,9 @@ export function useAnnotations({
             return true
           },
         }
-      }, () => {
+      }, (error) => {
         failed = true
-        onAnnotateError()
+        onAnnotateError(error)
       })
 
       return !failed

@@ -8,7 +8,6 @@ import {
   startNoteDraft,
   TEXT_NOTE_MAX_CHARS,
   TEXT_NOTE_MAX_LINES,
-  usesEmbeddedFont,
 } from "@/lib/textNoteDraft"
 
 describe("isNoteWorthKeeping", () => {
@@ -21,35 +20,6 @@ describe("isNoteWorthKeeping", () => {
     expect(isNoteWorthKeeping("")).toBe(false)
     expect(isNoteWorthKeeping("   ")).toBe(false)
     expect(isNoteWorthKeeping("\n\n  \n")).toBe(false)
-  })
-})
-
-describe("usesEmbeddedFont", () => {
-  test("leaves text a standard PDF font can draw alone", () => {
-    expect(usesEmbeddedFont("Hello, world!")).toBe(false)
-    expect(usesEmbeddedFont("two\nlines")).toBe(false)
-    expect(usesEmbeddedFont("Voilà, café")).toBe(false)
-    expect(usesEmbeddedFont("")).toBe(false)
-  })
-
-  test("claims text that leaves Latin-1", () => {
-    expect(usesEmbeddedFont("你好")).toBe(true)
-    expect(usesEmbeddedFont("Hello 你好")).toBe(true)
-    expect(usesEmbeddedFont("，")).toBe(true)
-    expect(usesEmbeddedFont("Привет")).toBe(true)
-    // Reads as Western text but is outside Latin-1 all the same.
-    expect(usesEmbeddedFont("a — b")).toBe(true)
-  })
-
-  test("agrees with the backend on the boundary itself", () => {
-    // The two ends of each range the Rust side accepts, and the gap between
-    // them — where the two could most easily drift apart.
-    expect(usesEmbeddedFont("\u0020\u007e")).toBe(false)
-    expect(usesEmbeddedFont("\u00a0\u00ff")).toBe(false)
-    // The gap between the two ranges, which neither side may quietly widen.
-    expect(usesEmbeddedFont("\u007f")).toBe(true)
-    expect(usesEmbeddedFont("\u009f")).toBe(true)
-    expect(usesEmbeddedFont("\u0100")).toBe(true)
   })
 })
 

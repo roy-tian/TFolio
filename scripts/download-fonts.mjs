@@ -20,13 +20,16 @@ const FONT_COMMIT = "2894aab31764f10f29c421bdfd2340d3b382d384"
 const repositoryRoot = resolve(import.meta.dirname, "..")
 const outputDirectory = join(repositoryRoot, "src-tauri", "resources", "fonts")
 
-// One bundled face, for text a PDF's own standard fonts cannot draw — notes and
-// watermarks that leave Latin-1. It is bundled whole and cut per edit at runtime
-// (see `subset_for`). Page numbers take no bundled font at all: `font.rs`
-// resolves a 宋体 or another serif from the system the app is running on.
+// One fallback face, for text a PDF's own standard fonts cannot draw — notes
+// and watermarks that leave Latin-1 on a machine with no sans of its own that
+// can be embedded. Nothing here is bundled: the app fetches this same file from
+// the same pinned commit at runtime (see `download_fallback_font` in
+// `font.rs`), and this script puts a copy in the source tree so the tests never
+// reach for the network. Page numbers take no fetched font at all.
 //
-// Each font pins an exact size and checksum, and `host` is `raw` where a source
-// is too large for jsDelivr's per-file ceiling.
+// Each font pins an exact size and checksum — matched by `font.rs`, which
+// fetches the same bytes — and `host` is `raw` where a source is too large for
+// jsDelivr's per-file ceiling.
 const fonts = [
   {
     name: "NotoSansSC.ttf",
@@ -125,9 +128,9 @@ try {
   rmSync(temporaryDirectory, { force: true, recursive: true })
 }
 
-// The whole directory is bundled into the app, so a face this script no longer
-// manages — one dropped from the list above — must not be left behind for the
-// installer to ship. Only ever after the staging directory has gone.
+// The whole directory is what the tests read from, so a face this script no
+// longer manages — one dropped from the list above — must not be left behind
+// for one of them to pick up. Only ever after the staging directory has gone.
 const expected = new Set([
   ".gitkeep",
   "VERSION",

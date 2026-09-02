@@ -39,6 +39,7 @@ import {
   defaultRectStyle,
   defaultTextNoteStyle,
   HIGHLIGHT_OPACITY,
+  isNoteFontMissing,
   readStoredHighlightColor,
   readStoredRectStyle,
   readStoredTextNoteStyle,
@@ -48,6 +49,7 @@ import {
 } from "@/lib/annotationStyles"
 import {
   movesPages,
+  type AnnotationCommand,
   type HexColor,
   type RectStyle,
   type TextNoteStyle,
@@ -87,6 +89,8 @@ type ViewerError =
   | "exportFailed"
   | "fileTooLarge"
   | "invalidFile"
+  | "noteFontFailed"
+  | "noteFontMissing"
   | "openFailed"
   | "saveFailed"
   | null
@@ -166,6 +170,16 @@ function DocumentSession(
   const [rotation, setRotation] = useState(0)
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
+  /**
+   * The edit that failed for want of a face to draw it in, kept so accepting
+   * the download can re-run it. A note's text lives nowhere else by then — the
+   * editor that held it closed when the note was committed — so without this
+   * the reader would fetch a 17 MB font and then have to type the note again.
+   */
+  const [unfontedEdit, setUnfontedEdit] = useState<AnnotationCommand | null>(
+    null,
+  )
+  const [fetchingNoteFont, setFetchingNoteFont] = useState(false)
   const [viewerWidth, setViewerWidth] = useState(0)
   const [viewerHeight, setViewerHeight] = useState(0)
   const [preferredViewMode, setPreferredViewMode] = useState<ViewMode>(
@@ -231,7 +245,20 @@ function DocumentSession(
   const clearThumbnailSelection = thumbnailSelection.clear
   const annotations = useAnnotations({
     documentId: pdfDocument?.id,
-    onAnnotateError: useCallback(() => setViewerError("annotateFailed"), []),
+    onAnnotateError: useCallback(
+      (error?: unknown, command?: AnnotationCommand) => {
+        // The one refusal with a way out: nothing installed can draw this text,
+        // and the reader can fetch something that will.
+        if (isNoteFontMissing(error)) {
+          setUnfontedEdit(command ?? null)
+          setViewerError("noteFontMissing")
+          return
+        }
+
+        setViewerError("annotateFailed")
+      },
+      [],
+    ),
     onExportError: useCallback(() => setViewerError("exportFailed"), []),
     // A byte-opened document adopts its first export's destination as its
     // source, which is when `path` appears and the save key comes alive.
@@ -284,8 +311,13 @@ function DocumentSession(
       [clearThumbnailSelection],
     ),
     // A toast that outlives what it describes would sit over every mark the
-    // reader went on to make successfully.
-    onSuccess: useCallback(() => setViewerError(null), []),
+    // reader went on to make successfully. The edit held for a retry goes with
+    // it: once the offer is off the screen there is no way back to it, so
+    // keeping the edit would only leave it to be re-run by the next offer.
+    onSuccess: useCallback(() => {
+      setViewerError(null)
+      setUnfontedEdit(null)
+    }, []),
   })
   const watermark = useWatermark({
     activeConfig: annotations.watermarkConfig,
@@ -887,6 +919,40 @@ function DocumentSession(
     ? t("toolbar.hideBookmarks")
     : t("toolbar.showBookmarks")
 
+  /**
+   * Fetches the fallback face, then re-runs the edit that wanted it.
+   *
+   * The retry is the whole point: by now the note's text is in `unfontedEdit`
+   * and nowhere else. A failed fetch leaves it there and keeps the offer on
+   * screen, so it can be taken again rather than costing the reader what they
+   * typed.
+   */
+  const fetchNoteFont = useCallback(async () => {
+    setFetchingNoteFont(true)
+
+    // Only the fetch is caught here: an edit that fails after it reports
+    // through `onAnnotateError`, and reading that as a download failure would
+    // send the reader to check a connection that had just worked.
+    try {
+      await invoke("download_pdf_note_font")
+    } catch {
+      setViewerError("noteFontFailed")
+
+      return
+    } finally {
+      setFetchingNoteFont(false)
+    }
+
+    setViewerError(null)
+
+    // Let go before the retry rather than after: an edit that wants a face
+    // again comes back through `onAnnotateError`, which is what puts it back.
+    if (unfontedEdit) {
+      setUnfontedEdit(null)
+      await annotations.commit(unfontedEdit)
+    }
+  }, [annotations, unfontedEdit])
+
   const errorMessage =
     viewerError === "fileTooLarge"
       ? t("viewer.fileTooLarge")
@@ -902,7 +968,11 @@ function DocumentSession(
                 ? t("annotate.failed")
                 : viewerError === "editInFlight"
                   ? t("annotate.dropWhileEditing")
-                  : null
+                  : viewerError === "noteFontMissing"
+                    ? t("annotate.noteFontMissing")
+                    : viewerError === "noteFontFailed"
+                      ? t("annotate.noteFontFailed")
+                      : null
 
   return (
     <div
@@ -1163,10 +1233,27 @@ function DocumentSession(
 
       {errorMessage ? (
         <div
-          className="fixed top-25 right-4 z-40 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+          className="fixed top-25 right-4 z-40 flex max-w-80 items-center gap-3 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
           role="alert"
         >
-          {errorMessage}
+          <span>{errorMessage}</span>
+          {/* The only refusals the reader can answer from here, so the only
+              ones that carry a button — a fetch that failed included, since
+              the edit waiting on it is still held. */}
+          {viewerError === "noteFontMissing" ||
+          viewerError === "noteFontFailed" ? (
+            <Button
+              className="shrink-0"
+              disabled={fetchingNoteFont}
+              onClick={() => void fetchNoteFont()}
+              size="sm"
+              variant="outline"
+            >
+              {fetchingNoteFont
+                ? t("annotate.noteFontFetching")
+                : t("annotate.noteFontFetch")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </div>

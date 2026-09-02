@@ -168,8 +168,30 @@ describe("watermark settings", () => {
     expect(withStoredValue(null, readStoredWatermarkConfig)).toBeNull()
   })
 
-  it("uses the bundled face for text outside printable Latin-1", () => {
+  it("leaves text a standard PDF font can draw alone", () => {
     expect(watermarkUsesEmbeddedFont("CONFIDENTIAL")).toBe(false)
+    expect(watermarkUsesEmbeddedFont("two\nlines")).toBe(false)
+    expect(watermarkUsesEmbeddedFont("Voilà, café")).toBe(false)
+    expect(watermarkUsesEmbeddedFont("")).toBe(false)
+  })
+
+  it("claims text that leaves Latin-1", () => {
     expect(watermarkUsesEmbeddedFont("机密")).toBe(true)
+    expect(watermarkUsesEmbeddedFont("Hello 你好")).toBe(true)
+    expect(watermarkUsesEmbeddedFont("，")).toBe(true)
+    expect(watermarkUsesEmbeddedFont("Привет")).toBe(true)
+    // Reads as Western text but is outside Latin-1 all the same.
+    expect(watermarkUsesEmbeddedFont("a — b")).toBe(true)
+  })
+
+  it("agrees with the backend on the boundary itself", () => {
+    // The two ends of each range the Rust side accepts, and the gap between
+    // them — where the two could most easily drift apart.
+    expect(watermarkUsesEmbeddedFont("\u0020\u007e")).toBe(false)
+    expect(watermarkUsesEmbeddedFont("\u00a0\u00ff")).toBe(false)
+    // The gap between the two ranges, which neither side may quietly widen.
+    expect(watermarkUsesEmbeddedFont("\u007f")).toBe(true)
+    expect(watermarkUsesEmbeddedFont("\u009f")).toBe(true)
+    expect(watermarkUsesEmbeddedFont("\u0100")).toBe(true)
   })
 })

@@ -89,12 +89,6 @@ describe("TFolio text notes", () => {
     await editor.waitForDisplayed({ timeout: 15_000 })
     await editor.setValue("你好")
 
-    // The font choice gives way as soon as the note leaves Latin-1, because the
-    // bundled face is the only one that can draw it, and the editor says so.
-    await expect(
-      $("p=Chinese and other non-Latin text uses the bundled font."),
-    ).toBeDisplayed()
-
     await $("button[aria-label='Add this note']").click()
 
     await browser.waitUntil(async () => (await pageInk()) > clean, {

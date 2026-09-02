@@ -2,7 +2,6 @@ import type {
   HexColor,
   RectEffectKind,
   RectStyle,
-  TextNoteFontFamily,
   TextNoteStyle,
 } from "@/lib/annotations"
 import { readStored, store } from "@/lib/storage"
@@ -162,26 +161,29 @@ export const TEXT_NOTE_MIN_FONT_SIZE = 6
 export const TEXT_NOTE_MAX_FONT_SIZE = 72
 export const TEXT_NOTE_MIN_OPACITY = 0.1
 
-export const textNoteFontFamilies: readonly TextNoteFontFamily[] = [
-  "sans",
-  "serif",
-  "mono",
-]
-
 /** Body-text size, so a note reads alongside the page rather than shouting. */
 export const defaultTextNoteStyle: TextNoteStyle = {
   color: textNoteSwatches[0]!,
-  fontFamily: "sans",
   fontSize: 12,
   opacity: 1,
 }
 
 export const textNoteStyleStorageKey = "tfolio.annotate.textNoteStyle"
 
-export function isTextNoteFontFamily(
-  value: unknown,
-): value is TextNoteFontFamily {
-  return textNoteFontFamilies.includes(value as TextNoteFontFamily)
+/**
+ * What the backend answers with when nothing installed can draw a note and no
+ * fallback face has been fetched. The one error the reader can act on, so it
+ * travels as a value rather than a message — kept in step with
+ * `FONT_MISSING_ERROR` in `src-tauri/src/pdfium/font.rs`.
+ */
+export const NOTE_FONT_MISSING = "tfolio:font-missing"
+
+/** Whether a failed edit failed for want of a face to draw it in. */
+export function isNoteFontMissing(error: unknown): boolean {
+  return (
+    error === NOTE_FONT_MISSING ||
+    (error instanceof Error && error.message === NOTE_FONT_MISSING)
+  )
 }
 
 /**
@@ -204,8 +206,7 @@ export function isTextNoteStyle(value: unknown): value is TextNoteStyle {
     typeof style.opacity === "number" &&
     style.opacity >= TEXT_NOTE_MIN_OPACITY &&
     style.opacity <= 1 &&
-    isHexColor(style.color) &&
-    isTextNoteFontFamily(style.fontFamily)
+    isHexColor(style.color)
   )
 }
 

@@ -28,8 +28,16 @@ image = { version = "0.25", default-features = false, features = ["png", "webp"]
 # parallelism helpers this use has no need of.
 lopdf = { version = "0.44", default-features = false }
 pdfium-render = { version = "=0.9.3", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
+# The fallback face is fetched at runtime rather than bundled, so the app needs
+# an HTTPS client of its own. `tauri` already depends on reqwest, but with no
+# TLS backend compiled in; naming it here turns one on rather than adding a
+# second HTTP stack. `rustls` verifies against the platform's own trust store.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The fallback face's checksum is verified before it is ever handed to PDFium:
+# these bytes end up inside the reader's own documents.
+sha2 = "0.10"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-wdio = { version = "1", optional = true }

@@ -11,6 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::recent::RecentFiles;
 
+use super::font::{download_fallback_font, fallback_font_destination};
 use super::{
     size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks, PageNumbersConfig, PagePoint,
     PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfStructureUpdate, PdfTextSpan, PdfiumState,
@@ -185,6 +186,22 @@ pub async fn add_pdf_text_note_annotation(
     })
     .await
     .map_err(|error| format!("PDFium note task failed: {error}"))?
+}
+
+/// Fetches the fallback face, so text no installed font can draw has something
+/// to be embedded in. Answered by the frontend's offer to download, which is
+/// itself raised only by `FONT_MISSING_ERROR` coming back from an edit.
+///
+/// Takes nothing the WebView could shape. The host, the pinned commit, the
+/// digest and the destination are all fixed in `font.rs`, so however this is
+/// called it can only ever fetch that one file to that one place — a command
+/// that took a URL would be an open request forwarder wearing this one's name.
+#[tauri::command]
+pub async fn download_pdf_note_font(app: AppHandle) -> Result<(), String> {
+    let destination = fallback_font_destination(&app)
+        .ok_or_else(|| "this machine has nowhere to keep a downloaded font".to_string())?;
+
+    download_fallback_font(&destination).await
 }
 
 #[tauri::command]

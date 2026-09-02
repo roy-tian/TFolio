@@ -81,11 +81,16 @@ fn test_engine() -> &'static PdfiumEngine {
         documents: Mutex::new(HashMap::new()),
         next_document_id: AtomicU64::new(1),
         // Straight from the source tree: the tests have no `AppHandle` to
-        // resolve a bundled resource through.
-        cjk_font_path: Some(crate::pdfium::font::bundled_font_path(
+        // resolve an app-data path through, and no business fetching a font.
+        fallback_font_candidates: vec![crate::pdfium::font::bundled_font_path(
             crate::pdfium::font::CJK_FONT_NAME,
-        )),
-        cjk_font: OnceLock::new(),
+        )],
+        fallback_font: OnceLock::new(),
+        // Seeded rather than resolved, so every embedded run in the tests takes
+        // the one face the source tree pins. Left to scan, these assertions
+        // would be about whichever CJK sans the machine running them happens to
+        // have installed.
+        system_face: OnceLock::from(None),
         // Resolved from the system's own fonts on the first apply, exactly as
         // the app resolves it.
         page_number_font: OnceLock::new(),
@@ -2451,7 +2456,6 @@ fn fills_the_whole_box_it_was_dragged() {
 
 fn text_note_style(font_size: f32) -> TextNoteStyle {
     TextNoteStyle {
-        font_family: "sans".into(),
         font_size,
         color: "#000000".into(),
         opacity: 1.0,
@@ -2638,36 +2642,6 @@ fn draws_a_chinese_note_where_it_was_asked_for() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
-fn refuses_a_font_family_it_does_not_offer_for_chinese_too() {
-    let engine = test_engine();
-    let document = engine
-        .open(minimal_pdf())
-        .expect("PDFium should open the PDF");
-    let style = TextNoteStyle {
-        font_family: "comic".into(),
-        ..text_note_style(24.0)
-    };
-
-    // Chinese carries its own face and never reaches the standard fonts, so
-    // the family it names went unchecked on that path.
-    assert!(engine
-        .add_text_note(
-            document.id,
-            1,
-            &note_origin(20.0, 100.0),
-            "\u{4f60}\u{597d}",
-            &style,
-        )
-        .is_err());
-    assert_eq!(
-        with_page(engine, document.id, 1, |page| page.annotations().len()),
-        0,
-        "a refused note should leave no annotation behind"
-    );
-}
-
-#[test]
-#[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
 fn embeds_only_the_glyphs_a_chinese_note_uses() {
     let engine = test_engine();
     let document = engine
@@ -2721,7 +2695,7 @@ fn embeds_no_font_for_a_latin_note() {
     let growth = saved_size(engine, document.id) - before;
 
     // Between the two outcomes, not merely above the smaller: embedding
-    // even the tightest possible subset of the bundled face costs ~3.4 KB
+    // even the tightest possible subset of the fallback face costs ~3.4 KB
     // against ~650 bytes for a standard font, and a ceiling above both would
     // pass whether or not a font went in.
     assert!(
@@ -2849,19 +2823,6 @@ fn rejects_an_unusable_note() {
                 "Hi",
                 &TextNoteStyle {
                     color: "not a colour".into(),
-                    ..text_note_style(24.0)
-                },
-            ),
-        ),
-        (
-            "a font family this app does not offer",
-            engine.add_text_note(
-                document.id,
-                1,
-                &origin,
-                "Hi",
-                &TextNoteStyle {
-                    font_family: "comic".into(),
                     ..text_note_style(24.0)
                 },
             ),
