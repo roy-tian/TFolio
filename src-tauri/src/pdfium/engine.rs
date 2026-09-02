@@ -3138,11 +3138,11 @@ impl PdfiumEngine {
         // the pages are already on the document, so a bare `?` would leave them
         // there while `page_ids` never learned of them — a desync every later
         // command trusts against.
-        let new_base_objects = match &entry.owned_content {
+        let mut new_base_objects = match &entry.owned_content {
             Some(_) => {
                 let measured = (0..added_count)
                     .map(|offset| {
-                        let index = slot as i32 + offset as i32;
+                        let index = slot as i32 + offset;
                         entry
                             .document
                             .pages()
@@ -3165,7 +3165,8 @@ impl PdfiumEngine {
                 }
             }
             None => Vec::new(),
-        };
+        }
+        .into_iter();
 
         for offset in 0..added_count as usize {
             let page_id = entry.next_page_id;
@@ -3182,7 +3183,9 @@ impl PdfiumEngine {
                 state.per_page.insert(
                     page_id,
                     OwnedTailState {
-                        base_objects: new_base_objects[offset],
+                        base_objects: new_base_objects
+                            .next()
+                            .expect("one measured base count per inserted page"),
                         segments: Vec::new(),
                     },
                 );
@@ -3287,7 +3290,7 @@ impl PdfiumEngine {
                     .load_pdf_from_byte_vec(read_pdf_bytes(path)?, None)
                     .map_err(|error| format!("PDFium could not open the document: {error}"))?;
 
-                if source.pages().len() < 1 {
+                if source.pages().is_empty() {
                     return Err(format!("{} has no pages", path.display()));
                 }
 

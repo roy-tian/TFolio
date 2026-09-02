@@ -419,7 +419,9 @@ mod tests {
 
     #[test]
     fn rejects_unusable_ranges_and_starts() {
-        let cases: Vec<(Box<dyn Fn(&mut PageNumbersConfig)>, i32)> = vec![
+        type Change = Box<dyn Fn(&mut PageNumbersConfig)>;
+
+        let cases: Vec<(Change, i32)> = vec![
             (Box::new(|value| value.range = Some((0, 5))), 10),
             (Box::new(|value| value.range = Some((5, 4))), 10),
             (Box::new(|value| value.range = Some((1, 11))), 10),

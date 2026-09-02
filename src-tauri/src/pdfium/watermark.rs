@@ -263,7 +263,9 @@ mod tests {
 
     #[test]
     fn rejects_unusable_watermark_values() {
-        let changes: Vec<Box<dyn Fn(&mut WatermarkConfig)>> = vec![
+        type Change = Box<dyn Fn(&mut WatermarkConfig)>;
+
+        let changes: Vec<Change> = vec![
             Box::new(|value| value.text = "   ".into()),
             Box::new(|value| value.text = "two\nlines".into()),
             Box::new(|value| value.text = "x".repeat(MAX_WATERMARK_CHARS + 1)),
