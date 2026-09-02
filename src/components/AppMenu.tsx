@@ -63,9 +63,9 @@ type AppMenuProps = AppMenuActions & {
 }
 
 /**
- * The window's one menu, in the slot the settings button used to hold: the
- * file actions the toolbar no longer carries, the recent list the home tab
- * shows, and the app-level entries under them.
+ * The window's one menu, at the left end of every header: the file actions the
+ * toolbar no longer carries, the recent list the home tab shows, and the
+ * app-level entries under them.
  */
 export function AppMenu({
   canCloseAll,
@@ -112,7 +112,7 @@ export function AppMenu({
         >
           <Menu />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuGroup>
             <DropdownMenuItem data-action="new" onClick={onNew}>
               <FilePlus2 />

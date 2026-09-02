@@ -48,6 +48,7 @@ import {
 import { isMacOS, isWindows } from "@/lib/platform"
 import { readRecentFiles, type RecentFile } from "@/lib/recentFiles"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
+import { cn } from "@/lib/utils"
 import type { ViewMode } from "@/lib/viewMode"
 import type { WatermarkConfig } from "@/lib/watermark"
 
@@ -631,9 +632,14 @@ export default function App() {
         // The document tools — bookmarks, view mode — have no document to act
         // on here, so the home header carries only what still works.
         <header
-          className="fixed inset-x-0 top-0 z-50 flex h-12 items-center justify-end border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
+          className="fixed inset-x-0 top-0 z-50 flex h-12 items-center justify-between border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
           data-tauri-drag-region="deep"
         >
+          {/* Left, as in a document's header: the menu is the window's, so it
+              keeps one place whichever tab is showing. */}
+          <div className={cn("flex items-center", macOS && "pl-[72px]")}>
+            <AppMenu {...menuActions} />
+          </div>
           <div className="flex items-center gap-2">
             {/* The home tab has no document toolbar, and the wizard is the one
                 tool there that needs no document — so it keeps the look it has
@@ -641,7 +647,6 @@ export default function App() {
             <ButtonGroup>
               <MergeWizardButton onClick={mergeWizard.openWizard} />
             </ButtonGroup>
-            <AppMenu {...menuActions} />
             {macOS ? null : <WindowControls />}
           </div>
         </header>
