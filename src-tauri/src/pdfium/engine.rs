@@ -406,6 +406,15 @@ struct OpenDocument {
     /// id-keyed map below survive them.
     page_ids: Vec<u64>,
     next_page_id: u64,
+    /// Each page's own geometry, keyed by that stable id. A memo, not state:
+    /// every structure command reports the whole page list back, and measuring
+    /// it costs one `FPDF_LoadPage` per page — more than the edit itself once a
+    /// document runs to hundreds of pages, and paid again on every later edit.
+    /// Nothing in a session resizes or re-rotates a page, so an entry is
+    /// written the first time that page is measured and only read afterwards;
+    /// an id is never reused, so a deleted page's entry is still its own if the
+    /// undo brings it back.
+    page_geometry: HashMap<u64, PdfPageInfo>,
     /// Deleted pages awaiting a possible undo, keyed by the history entry that
     /// deleted them. A delete under an occupied key replaces the stash: the key
     /// identifies one history entry, so a redo of that delete re-stashes the
@@ -798,6 +807,7 @@ impl PdfiumEngine {
                 next_mark_id: 1,
                 next_page_id: num_pages as u64,
                 owned_content: None,
+                page_geometry: (0..num_pages as u64).zip(pages.iter().copied()).collect(),
                 page_ids: (0..num_pages as u64).collect(),
                 revisions: HashMap::new(),
                 source_path,
@@ -3882,9 +3892,10 @@ struct DocumentLayout {
     outline: Vec<PdfOutlineItem>,
 }
 
-/// The page list and outline as they stand: what an open reports, and half of
-/// what every structure command returns fresh — the frontend holds no mirror of
-/// the page list to patch, only this to replace.
+/// The page list and outline as they stand, measured out of PDFium page by
+/// page. What an open reports; every later structure command answers from
+/// `page_infos` instead, which is the same list read off a memo. The frontend
+/// holds no mirror of the page list to patch, only this to replace.
 fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
     let pages = document.pages();
 
@@ -3902,23 +3913,79 @@ fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
     }
 }
 
+/// What a page PDFium will not load is reported as. It cannot simply be left
+/// out: the frontend numbers pages by their place in this list, so a gap would
+/// renumber every page after it and send the reader's next delete at the wrong
+/// one. Deliberately not memoised, so a page that can be measured later still
+/// will be.
+const UNMEASURED_PAGE: PdfPageInfo = PdfPageInfo {
+    width: 595.0,
+    height: 842.0,
+    rotation: 0.0,
+};
+
+/// Every page's geometry, in page order, measuring only the pages this session
+/// has not measured before — see `OpenDocument::page_geometry`. A reorder or a
+/// delete therefore touches PDFium not at all here; only a page new to the
+/// document is loaded, and only once.
+///
+/// One entry per page id, always, which is what keeps the count the frontend is
+/// given the same one every command validates against.
+fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
+    let unmeasured = entry
+        .page_ids
+        .iter()
+        .enumerate()
+        .filter(|(_, page_id)| !entry.page_geometry.contains_key(page_id))
+        .map(|(index, page_id)| (index as PdfPageIndex, *page_id))
+        .collect::<Vec<_>>();
+    let measured = {
+        let pages = entry.document.pages();
+
+        unmeasured
+            .into_iter()
+            .filter_map(|(index, page_id)| {
+                let page = pages.get(index).ok()?;
+
+                Some((
+                    page_id,
+                    PdfPageInfo {
+                        width: page.width().value,
+                        height: page.height().value,
+                        rotation: page_rotation_degrees(&page),
+                    },
+                ))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    entry.page_geometry.extend(measured);
+    entry
+        .page_ids
+        .iter()
+        .map(|page_id| {
+            entry
+                .page_geometry
+                .get(page_id)
+                .copied()
+                .unwrap_or(UNMEASURED_PAGE)
+        })
+        .collect()
+}
+
 /// The layout a structure command reports back, together with whether any page
 /// another file brought in is still present. The frontend's save key reads that
 /// flag rather than replaying its own command history: `merged_page_ids` is the
 /// same set `save` refuses on, so the key can never disagree with the command.
 /// The only way to build a `PdfStructureUpdate`, so a command that reaches for
-/// `document_layout` alone cannot report the flag away.
-fn structure_update(entry: &OpenDocument) -> PdfStructureUpdate {
-    let DocumentLayout {
-        num_pages,
-        pages,
-        outline,
-    } = document_layout(&entry.document);
+/// the page list alone cannot report the flag away.
+fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
+    let pages = page_infos(entry);
 
     PdfStructureUpdate {
         has_merged_pages: !entry.merged_page_ids.is_empty(),
-        num_pages,
-        outline,
+        num_pages: pages.len() as i32,
+        outline: collect_bookmark_siblings(entry.document.bookmarks().root()),
         pages,
     }
 }

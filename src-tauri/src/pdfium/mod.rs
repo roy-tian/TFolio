@@ -117,7 +117,7 @@ pub struct ExportOutcome {
     saved_to_source: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 struct PdfPageInfo {
     // `width`/`height` are the displayed dimensions (the page's intrinsic
     // `/Rotate` already applied), matching the rendered bitmap. `rotation` is

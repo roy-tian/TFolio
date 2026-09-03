@@ -3466,6 +3466,100 @@ fn reorders_pages_and_their_content() {
     }
 }
 
+// Three pages no two of which measure alike, the middle one rotated: enough
+// that a page list reported in the wrong order, or read off a stale entry,
+// cannot pass for the right one.
+fn three_size_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 500] /Rotate 90 /Contents 6 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 700] /Contents 6 0 R >>\nendobj\n".to_string(),
+        "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+    ])
+}
+
+/// Each page's reported geometry, as the frontend receives it.
+fn reported_geometry(update: &PdfStructureUpdate) -> Vec<(f32, f32, f32)> {
+    update
+        .pages
+        .iter()
+        .map(|page| (page.width, page.height, page.rotation))
+        .collect()
+}
+
+// A structure command reports the whole page list back, and measuring it out of
+// PDFium costs a page load apiece — more than the edit itself once a document
+// runs long, and paid again on every later edit. The engine therefore measures
+// a page once and keeps the answer under that page's stable id. This is what
+// says the memo still follows the pages: it has to travel with them through a
+// permutation, shrink with a delete, come back with the undo, and leave a page
+// new to the document measured rather than guessed.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn reported_page_geometry_follows_the_pages_through_every_structure_edit() {
+    let engine = test_engine();
+    let document = engine
+        .open(three_size_pdf())
+        .expect("PDFium should open the three-size PDF");
+    let original = vec![
+        (200.0, 300.0, 0.0),
+        // Displayed through its own /Rotate 90, so its sides are swapped.
+        (500.0, 400.0, 90.0),
+        (600.0, 700.0, 0.0),
+    ];
+
+    assert_eq!(
+        document
+            .pages
+            .iter()
+            .map(|page| (page.width, page.height, page.rotation))
+            .collect::<Vec<_>>(),
+        original,
+    );
+
+    let reordered = engine
+        .reorder_pages(document.id, &[3, 1, 2])
+        .expect("PDFium should reorder the pages");
+
+    assert_eq!(
+        reported_geometry(&reordered),
+        vec![original[2], original[0], original[1]],
+        "each page's size should travel to its new position",
+    );
+
+    let deleted = engine
+        .delete_pages(document.id, &[1], 1)
+        .expect("PDFium should delete the page");
+
+    assert_eq!(
+        reported_geometry(&deleted),
+        vec![original[0], original[1]],
+        "the deleted page's size should go with it",
+    );
+
+    let inserted = engine
+        .insert_blank_page(document.id, 1)
+        .expect("PDFium should insert a blank page");
+
+    assert_eq!(
+        reported_geometry(&inserted),
+        vec![original[0], original[0], original[1]],
+        "a page new to the document should be measured, not guessed",
+    );
+
+    let restored = engine
+        .restore_pages(document.id, 1)
+        .expect("PDFium should restore the stashed page");
+
+    assert_eq!(
+        reported_geometry(&restored),
+        vec![original[2], original[0], original[0], original[1]],
+        "a page out of the stash should come back with its own size",
+    );
+}
+
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn reorder_is_a_no_op_for_the_identity_order() {
