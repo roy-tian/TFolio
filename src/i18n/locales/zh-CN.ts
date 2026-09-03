@@ -220,6 +220,7 @@ const zhCN = {
     pageLabel: "第 {{pageNumber}} 页",
     pageError: "第 {{pageNumber}} 页渲染失败",
     thumbnailLabel: "选中第 {{pageNumber}} 页",
+    copyText: "复制",
   },
   pageEdit: {
     deletePage: "删除第 {{pageNumber}} 页",

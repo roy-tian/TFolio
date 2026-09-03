@@ -220,6 +220,7 @@ const en = {
     pageLabel: "Page {{pageNumber}}",
     pageError: "Page {{pageNumber}} could not be rendered",
     thumbnailLabel: "Select page {{pageNumber}}",
+    copyText: "Copy",
   },
   pageEdit: {
     deletePage: "Delete page {{pageNumber}}",

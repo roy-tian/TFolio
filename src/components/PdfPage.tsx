@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
@@ -199,8 +200,7 @@ function PdfPageSurface({
           width={Math.max(1, Math.round(page.width))}
         />
         {hasRendered && positionedSpans.length > 0 ? (
-          <div
-            className="pdf-text-layer"
+          <PageTextMenu
             style={{
               height: `${(layoutHeight / page.height) * 100}%`,
               left: "50%",
@@ -222,7 +222,7 @@ function PdfPageSurface({
                 {span.text}
               </span>
             ))}
-          </div>
+          </PageTextMenu>
         ) : null}
       </div>
       {!hasRendered && !renderFailed ? (

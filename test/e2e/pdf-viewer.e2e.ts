@@ -7,6 +7,7 @@ import {
   minimalPdf,
   openPdfFromDisk,
   seedSettings,
+  textPdf,
 } from "./helpers"
 
 // Every workspace panel carries a `<main>`, the home tab's included, and all but
@@ -34,6 +35,28 @@ function wheelOverViewer(init: { ctrlKey: boolean; deltaY: number }) {
       }),
     )
   }, init)
+}
+
+/** Where the copy test parks the outcome of the page's real clipboard call. */
+type CopyWatch = Window & { __copied?: string }
+
+// A right-click where a reader's would land: the middle of the element, with
+// the coordinates the menu anchors itself to.
+function rightClick(selector: string) {
+  return browser.execute((query: string) => {
+    const element = document.querySelector(query)!
+    const box = element.getBoundingClientRect()
+
+    element.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        cancelable: true,
+        clientX: box.left + box.width / 2,
+        clientY: box.top + box.height / 2,
+      }),
+    )
+  }, selector)
 }
 
 describe("TFolio PDF viewer", () => {
@@ -822,5 +845,102 @@ describe("TFolio PDF viewer", () => {
     // so asserting straight away would pass against the pre-scroll value.
     await browser.pause(1500)
     await expect(pageInput).toHaveValue(target)
+  })
+
+  // The WebView's own context menu is the browser's — reload, back, view
+  // source over a page of a PDF — so only a field being typed in keeps it.
+  // `dispatchEvent` reports the cancellation, so this reads the app's real
+  // listener rather than a stand-in for it.
+  it("drops the WebView's context menu away from a text field", async () => {
+    await seedSettings({ ui: { language: "en" } })
+    await browser.refresh()
+    await openPdfFromDisk("one-page.pdf", minimalPdf())
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const prevented = await browser.execute(() => {
+      const rightClick = (selector: string) =>
+        !document.querySelector(selector)!.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+        )
+
+      return {
+        input: rightClick("input[aria-label='Page number']"),
+        page: rightClick("[data-page-number='1']"),
+        toolbar: rightClick("[data-slot='page-status']"),
+      }
+    })
+
+    expect(prevented).toEqual({ input: false, page: true, toolbar: true })
+  })
+  // What stands in for the menu the last test drops: over selected page text
+  // the app opens one of its own, and its copy hands that text to the WebView's
+  // clipboard. The clipboard cannot be read back here — `readText` is refused
+  // and this driver's keys reach the page as events, not as native input, so no
+  // paste happens — so the assertion wraps the real call and waits on the real
+  // promise instead of replacing either.
+  it("copies selected page text from a menu of its own", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await browser.refresh()
+    await openPdfFromDisk("text.pdf", textPdf())
+    await $(".pdf-text-layer span").waitForDisplayed({ timeout: 15_000 })
+
+    await browser.execute(() => {
+      const clipboard = navigator.clipboard
+      const write = clipboard.writeText.bind(clipboard)
+      const watched = window as CopyWatch
+
+      watched.__copied = "not called"
+      clipboard.writeText = (text: string) => {
+        watched.__copied = "pending"
+
+        return write(text).then(
+          () => {
+            watched.__copied = text
+          },
+          (error: unknown) => {
+            watched.__copied = `refused: ${String(error)}`
+
+            throw error
+          },
+        )
+      }
+    })
+
+    // Nothing selected: the menu would have no entry to show, so the
+    // right-click opens nothing at all rather than an empty popup.
+    await rightClick(".pdf-text-layer span")
+    await browser.pause(500)
+    await expect($("[data-slot='context-menu-content']")).not.toExist()
+
+    const selected = await browser.execute(() => {
+      const span = document.querySelector(".pdf-text-layer span")!
+      const range = document.createRange()
+      const selection = window.getSelection()!
+
+      range.selectNodeContents(span)
+      selection.removeAllRanges()
+      selection.addRange(range)
+
+      return span.textContent
+    })
+    expect(selected).toContain("Highlight")
+
+    await rightClick(".pdf-text-layer span")
+
+    const copyItem = await $("[data-action='copy-text']")
+    await copyItem.waitForDisplayed({ timeout: 15_000 })
+    await expect(copyItem).toHaveText("Copy")
+    await copyItem.click()
+    await expect($("[data-slot='context-menu-content']")).not.toExist()
+
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(() => (window as CopyWatch).__copied)) ===
+        selected,
+      {
+        timeout: 10_000,
+        timeoutMsg: "the selected text never reached the clipboard",
+      },
+    )
   })
 })
