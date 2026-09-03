@@ -45,6 +45,35 @@ async function dragRectOnPage() {
   })
 }
 
+/**
+ * The share of page 1 the default red wash has tinted. The fixture is black bars
+ * on white, so a red-dominant pixel can only have come from the mark.
+ */
+async function washedShare() {
+  return browser.execute(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      "[data-page-number='1'] canvas",
+    )!
+    const { data } = canvas.getContext("2d")!.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    )
+    let washed = 0
+
+    for (let index = 0; index < data.length; index += 4) {
+      const red = data[index]!
+
+      if (red - data[index + 1]! > 60 && red - data[index + 2]! > 60) {
+        washed += 1
+      }
+    }
+
+    return washed / (data.length / 4)
+  })
+}
+
 describe("TFolio rectangle annotations", () => {
   beforeEach(async () => {
     // Draw with the default style, whatever a prior run persisted.
@@ -57,7 +86,6 @@ describe("TFolio rectangle annotations", () => {
 
   it("draws a rectangle, and undo and redo restore it exactly", async () => {
     const clean = await pagePixelFingerprint()
-    const cleanInk = await pageInk()
 
     await $("button[aria-label='Draw a rectangle']").click()
     await expect($("button[aria-label='Draw a rectangle']")).toHaveAttribute(
@@ -74,9 +102,9 @@ describe("TFolio rectangle annotations", () => {
       timeoutMsg: "the rectangle never reached the page",
     })
     // Drawn, not merely stored: PDFium will accept and keep a mark it then
-    // declines to paint. The drag covers the fixture's stripes exactly, so the
-    // default half-opaque white block has to wash away much of the page's ink.
-    expect(await pageInk()).toBeLessThan(cleanInk * 0.75)
+    // declines to paint. The drag covers the middle two fifths of each side, so
+    // the default half-opaque red block has to tint about a sixth of the page.
+    expect(await washedShare()).toBeGreaterThan(0.1)
 
     const drawn = await pagePixelFingerprint()
 

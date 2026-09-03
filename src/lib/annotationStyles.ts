@@ -42,21 +42,20 @@ export function storeHighlightColor(color: HexColor) {
 }
 
 /**
- * A block covers what is under it, so white — the page's own ground — leads,
- * then black, then one shade level of the hues so the row reads as a set rather
- * than an assortment. These eight are the whole choice: a cover is a cover, and
- * a colour wheel here would be a setting to get wrong rather than a mark to
- * make.
+ * A mark before a cover: the hues lead in spectrum order, at one shade level so
+ * the row reads as a set rather than an assortment, and the neutrals close it,
+ * palest first. These eight are the whole choice: a colour wheel here would be
+ * a setting to get wrong rather than a mark to make.
  */
 export const rectSwatches: readonly HexColor[] = [
-  "#ffffff",
-  "#000000",
   "#ef4444",
   "#f97316",
   "#eab308",
   "#22c55e",
   "#3b82f6",
+  "#ffffff",
   "#71717a",
+  "#000000",
 ]
 
 /** Slider ends, shared by the blur's sigma and the mosaic's block size. */
