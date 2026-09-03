@@ -1895,6 +1895,7 @@ impl PdfiumEngine {
         entry: &OpenDocument,
         watermark: Option<(&WatermarkConfig, PdfFontToken, PdfColor)>,
         page_numbers: Option<(&PageNumbersConfig, PdfFontToken)>,
+        on_progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Vec<PageOwnedPlan>, String> {
         let page_count = entry.document.pages().len();
 
@@ -2068,6 +2069,7 @@ impl PdfiumEngine {
                 watermark: watermark_plan,
                 page_number_label,
             });
+            on_progress(page_number as usize, page_count as usize * 2);
         }
 
         Ok(plans)
@@ -2251,7 +2253,12 @@ impl PdfiumEngine {
         entry: &mut OpenDocument,
         watermark: Option<WatermarkResources>,
         page_numbers: Option<PageNumbersResources>,
+        on_progress: &mut dyn FnMut(usize, usize),
     ) -> Result<(), String> {
+        let page_count = entry.document.pages().len() as usize;
+        let total = page_count * 2;
+        on_progress(0, total);
+
         let previous = entry.owned_content.clone();
         let snapshot = entry
             .document
@@ -2298,6 +2305,7 @@ impl PdfiumEngine {
                 page_numbers
                     .as_ref()
                     .map(|resources| (&resources.config, page_number_font.unwrap())),
+                on_progress,
             )?;
 
             // A scratch page receives every retired object; created only when
@@ -2316,9 +2324,10 @@ impl PdfiumEngine {
                 None
             };
 
-            let mut per_page = HashMap::with_capacity(plans.len());
+            let planned_pages = plans.len();
+            let mut per_page = HashMap::with_capacity(planned_pages);
 
-            for plan in plans {
+            for (index, plan) in plans.into_iter().enumerate() {
                 let page_id = entry.page_id(plan.page_number)?;
 
                 // Build the watermark objects up front — a font or placement
@@ -2537,6 +2546,11 @@ impl PdfiumEngine {
                 )?;
 
                 per_page.insert(page_id, tail);
+
+                let completed = planned_pages + index + 1;
+                if completed < total {
+                    on_progress(completed, total);
+                }
             }
 
             if let Some(index) = scratch_index {
@@ -2576,6 +2590,7 @@ impl PdfiumEngine {
             None
         };
         entry.invalidate_all_page_revisions();
+        on_progress(total, total);
 
         Ok(())
     }
@@ -2651,10 +2666,11 @@ impl PdfiumEngine {
 
     /// Applies a new document-wide watermark, replacing the one this open
     /// session owns and rebuilding every owned layer's tail in canonical order.
-    pub(super) fn apply_watermark(
+    pub(super) fn apply_watermark_with_progress(
         &self,
         document_id: u64,
         config: WatermarkConfig,
+        mut on_progress: impl FnMut(usize, usize),
     ) -> Result<(), String> {
         let config = config.validated()?;
 
@@ -2693,12 +2709,25 @@ impl PdfiumEngine {
 
         let page_numbers = self.existing_page_numbers(entry)?;
 
-        self.rebuild_owned_content(entry, Some(watermark), page_numbers)
+        self.rebuild_owned_content(entry, Some(watermark), page_numbers, &mut on_progress)
+    }
+
+    #[cfg(test)]
+    pub(super) fn apply_watermark(
+        &self,
+        document_id: u64,
+        config: WatermarkConfig,
+    ) -> Result<(), String> {
+        self.apply_watermark_with_progress(document_id, config, |_, _| {})
     }
 
     /// Removes only the watermark this open session owns, rebuilding any other
     /// owned layer's tail so it survives the change unaltered.
-    pub(super) fn remove_watermark(&self, document_id: u64) -> Result<(), String> {
+    pub(super) fn remove_watermark_with_progress(
+        &self,
+        document_id: u64,
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -2715,16 +2744,22 @@ impl PdfiumEngine {
 
         let page_numbers = self.existing_page_numbers(entry)?;
 
-        self.rebuild_owned_content(entry, None, page_numbers)
+        self.rebuild_owned_content(entry, None, page_numbers, &mut on_progress)
+    }
+
+    #[cfg(test)]
+    pub(super) fn remove_watermark(&self, document_id: u64) -> Result<(), String> {
+        self.remove_watermark_with_progress(document_id, |_, _| {})
     }
 
     /// Applies page numbers, replacing the ones this open session owns and
     /// rebuilding every owned layer's tail in canonical order — the page numbers
     /// on top. The range is validated against the document's current length.
-    pub(super) fn apply_page_numbers(
+    pub(super) fn apply_page_numbers_with_progress(
         &self,
         document_id: u64,
         config: PageNumbersConfig,
+        mut on_progress: impl FnMut(usize, usize),
     ) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
@@ -2750,12 +2785,25 @@ impl PdfiumEngine {
         let watermark = self.existing_watermark(entry)?;
         let page_numbers = self.page_numbers_resources(&config)?;
 
-        self.rebuild_owned_content(entry, watermark, Some(page_numbers))
+        self.rebuild_owned_content(entry, watermark, Some(page_numbers), &mut on_progress)
+    }
+
+    #[cfg(test)]
+    pub(super) fn apply_page_numbers(
+        &self,
+        document_id: u64,
+        config: PageNumbersConfig,
+    ) -> Result<(), String> {
+        self.apply_page_numbers_with_progress(document_id, config, |_, _| {})
     }
 
     /// Removes only the page numbers this open session owns, rebuilding any
     /// watermark so it survives the change unaltered.
-    pub(super) fn remove_page_numbers(&self, document_id: u64) -> Result<(), String> {
+    pub(super) fn remove_page_numbers_with_progress(
+        &self,
+        document_id: u64,
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -2772,7 +2820,12 @@ impl PdfiumEngine {
 
         let watermark = self.existing_watermark(entry)?;
 
-        self.rebuild_owned_content(entry, watermark, None)
+        self.rebuild_owned_content(entry, watermark, None, &mut on_progress)
+    }
+
+    #[cfg(test)]
+    pub(super) fn remove_page_numbers(&self, document_id: u64) -> Result<(), String> {
+        self.remove_page_numbers_with_progress(document_id, |_, _| {})
     }
 
     /// Removes the marks `mark_ids` names, and reports the 1-based page each of
@@ -3411,11 +3464,12 @@ impl PdfiumEngine {
     /// `smart_padding` inserts a blank before any file that would otherwise open
     /// on an even page — the rule the files view's toggle already follows, so
     /// that each file begins on a right-hand leaf when printed double-sided.
-    pub(super) fn merge_files(
+    pub(super) fn merge_files_with_progress(
         &self,
         paths: Vec<PathBuf>,
         smart_padding: bool,
         bookmarks: MergeBookmarks,
+        mut on_progress: impl FnMut(usize, usize),
     ) -> Result<PdfDocumentInfo, String> {
         if paths.len() < 2 {
             return Err("a merge needs at least two files".into());
@@ -3424,6 +3478,12 @@ impl PdfiumEngine {
         if paths.len() > MAX_MERGE_FILES {
             return Err(merge_file_limit_error());
         }
+
+        // One unit per source, followed by serialization, outline writing, and
+        // opening the completed bytes into the document store.
+        let total = paths.len() + 3;
+        let mut completed = 0usize;
+        on_progress(completed, total);
 
         let (bytes, nodes) = {
             // Building the document is PDFium work like any other, so it is done
@@ -3494,11 +3554,15 @@ impl PdfiumEngine {
                     start,
                     outline,
                 ));
+                completed += 1;
+                on_progress(completed, total);
             }
 
             let bytes = merged
                 .save_to_bytes()
                 .map_err(|error| format!("PDFium could not build the merged document: {error}"))?;
+            completed += 1;
+            on_progress(completed, total);
 
             (bytes, nodes)
         };
@@ -3506,6 +3570,8 @@ impl PdfiumEngine {
         // happens with the store's lock given back — a long merge must not park
         // every render behind it.
         let bytes = outline::write_outline(bytes, &nodes)?;
+        completed += 1;
+        on_progress(completed, total);
 
         // The sources each passed the ceiling on their own; their sum is what
         // this checks, and it is checked before the bytes are opened rather than
@@ -3514,7 +3580,21 @@ impl PdfiumEngine {
             return Err(size_limit_error());
         }
 
-        self.open_with_source(bytes, None)
+        let document = self.open_with_source(bytes, None)?;
+        completed += 1;
+        on_progress(completed, total);
+
+        Ok(document)
+    }
+
+    #[cfg(test)]
+    pub(super) fn merge_files(
+        &self,
+        paths: Vec<PathBuf>,
+        smart_padding: bool,
+        bookmarks: MergeBookmarks,
+    ) -> Result<PdfDocumentInfo, String> {
+        self.merge_files_with_progress(paths, smart_padding, bookmarks, |_, _| {})
     }
 
     /// Writes the document back over the file it was opened from.

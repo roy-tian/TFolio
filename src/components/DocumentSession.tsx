@@ -65,6 +65,7 @@ import {
   type PdfStructureUpdate,
 } from "@/lib/pdf"
 import { isMacOS } from "@/lib/platform"
+import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import {
   defaultViewMode,
@@ -125,6 +126,10 @@ type DocumentSessionProps = {
       stored preference suits it: a merge opens on the thumbnail grid, which is
       where the whole result can be looked over at once. */
   initialViewMode?: ViewMode
+  /** Reports the merge wizard's initial page-content work while it stays open. */
+  onInitialLayerProgress?: PdfOwnedLayerProgressHandler
+  /** Resolves the merge wizard once all requested initial layers have settled. */
+  onInitialLayersSettled?: () => void
   /** A watermark to lay on as the session opens — see `initialPageNumbers`. */
   initialWatermark?: WatermarkConfig | null
   /** The workspace half of the header's menu, which every tab shares. */
@@ -149,6 +154,8 @@ function DocumentSession(
     initialViewMode,
     initialWatermark,
     menu,
+    onInitialLayerProgress,
+    onInitialLayersSettled,
     onDirtyChange,
     onSourceChange,
   },
@@ -454,15 +461,29 @@ function DocumentSession(
     void (async () => {
       const pageCount = documentRef.current?.numPages ?? 0
 
-      if (pageNumbers) {
-        await annotations.setPageNumbers(pageNumbers, pageCount)
-      }
-      if (watermark) {
-        await annotations.setWatermark(watermark, pageCount)
+      try {
+        if (pageNumbers) {
+          await annotations.setPageNumbers(
+            pageNumbers,
+            pageCount,
+            (progress) => onInitialLayerProgress?.("pageNumbers", progress),
+          )
+        }
+        if (watermark) {
+          await annotations.setWatermark(
+            watermark,
+            pageCount,
+            (progress) => onInitialLayerProgress?.("watermark", progress),
+          )
+        }
+      } finally {
+        // The wizard owns the progress surface; it closes whether a layer
+        // landed or reported its failure through the session's normal error.
+        onInitialLayersSettled?.()
       }
     })()
-    // The layers are read off the ref, so this runs once for the session
-    // rather than following the hook's identity.
+    // The layers and their lifecycle callbacks belong to this one-shot ref
+    // effect. Strict Mode's second effect sees the ref already cleared.
   }, [])
 
   useEffect(() => {
@@ -1234,6 +1255,7 @@ function DocumentSession(
         onOpenChange={watermark.onOpenChange}
         onRemove={() => void watermark.remove()}
         open={active && watermark.open}
+        progress={watermark.progress}
         validationError={watermark.validationError}
       />
 
@@ -1247,6 +1269,7 @@ function DocumentSession(
         onRemove={() => void pageNumbers.remove()}
         open={active && pageNumbers.open}
         pageCount={pdfDocument?.numPages ?? 0}
+        progress={pageNumbers.progress}
         validationError={pageNumbers.validationError}
       />
 

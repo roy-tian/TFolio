@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 
+import type { PdfProgress } from "@/lib/progress"
 import {
   defaultWatermarkConfig,
   readStoredWatermarkConfig,
@@ -14,7 +15,11 @@ type UseWatermarkOptions = {
   defaultText: string
   documentId?: number
   /** Resolves to whether the change reached the document. */
-  onSet: (config: WatermarkConfig | null, pageCount: number) => Promise<boolean>
+  onSet: (
+    config: WatermarkConfig | null,
+    pageCount: number,
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<boolean>
   pageCount: number
 }
 
@@ -38,6 +43,7 @@ export function useWatermark({
     freshConfig(activeConfig, defaultText),
   )
   const [isApplying, setIsApplying] = useState(false)
+  const [progress, setProgress] = useState<PdfProgress | null>(null)
   const [open, setOpen] = useState(false)
 
   const openDialog = useCallback(() => {
@@ -47,12 +53,18 @@ export function useWatermark({
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {
+      // Keep the determinate feedback in view until the document transaction
+      // settles. The successful path closes itself below.
+      if (!nextOpen && isApplying) {
+        return
+      }
+
       if (nextOpen) {
         setDraft(freshConfig(activeConfig, defaultText))
       }
       setOpen(nextOpen)
     },
-    [activeConfig, defaultText],
+    [activeConfig, defaultText, isApplying],
   )
 
   const apply = useCallback(async () => {
@@ -64,15 +76,17 @@ export function useWatermark({
       return
     }
 
+    setProgress({ completed: 0, total: pageCount * 2 })
     setIsApplying(true)
     try {
       // Only a change the document accepted is worth remembering as this
       // reader's watermark, and only one is worth dismissing the dialog over.
-      if (await onSet(config, pageCount)) {
+      if (await onSet(config, pageCount, setProgress)) {
         storeWatermarkConfig(config)
         setOpen(false)
       }
     } finally {
+      setProgress(null)
       setIsApplying(false)
     }
   }, [draft, onSet, pageCount])
@@ -82,12 +96,14 @@ export function useWatermark({
       return
     }
 
+    setProgress({ completed: 0, total: pageCount * 2 })
     setIsApplying(true)
     try {
-      if (await onSet(null, pageCount)) {
+      if (await onSet(null, pageCount, setProgress)) {
         setOpen(false)
       }
     } finally {
+      setProgress(null)
       setIsApplying(false)
     }
   }, [activeConfig, onSet, pageCount])
@@ -97,6 +113,7 @@ export function useWatermark({
   useEffect(() => {
     setOpen(false)
     setIsApplying(false)
+    setProgress(null)
     // Deliberately not keyed on `defaultText`: a language change is not a
     // document change, and the draft is rebuilt when the dialog next opens.
     setDraft(freshConfig(null, defaultText))
@@ -110,6 +127,7 @@ export function useWatermark({
     onOpenChange,
     open,
     openDialog,
+    progress,
     remove,
     setDraft,
     validationError: validateWatermarkConfig(draft),

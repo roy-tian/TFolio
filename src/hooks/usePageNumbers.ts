@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
+import type { PdfProgress } from "@/lib/progress"
 import {
   draftFromConfig,
   draftFromPreferences,
@@ -14,7 +15,11 @@ type UsePageNumbersOptions = {
   activeConfig: PageNumbersConfig | null
   documentId?: number
   /** Resolves to whether the change reached the document. */
-  onSet: (config: PageNumbersConfig | null, pageCount: number) => Promise<boolean>
+  onSet: (
+    config: PageNumbersConfig | null,
+    pageCount: number,
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<boolean>
   pageCount: number
 }
 
@@ -43,17 +48,24 @@ export function usePageNumbers({
     openingDraft(activeConfig, pageCount),
   )
   const [isApplying, setIsApplying] = useState(false)
+  const [progress, setProgress] = useState<PdfProgress | null>(null)
   const [open, setOpen] = useState(false)
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {
+      // Keep the determinate feedback in view until the document transaction
+      // settles. The successful path closes itself below.
+      if (!nextOpen && isApplying) {
+        return
+      }
+
       setOpen(nextOpen)
 
       if (nextOpen) {
         setDraft(openingDraft(activeConfig, pageCount))
       }
     },
-    [activeConfig, pageCount],
+    [activeConfig, isApplying, pageCount],
   )
 
   // Opening from the toolbar is just the open half of `onOpenChange`.
@@ -71,15 +83,17 @@ export function usePageNumbers({
       return
     }
 
+    setProgress({ completed: 0, total: pageCount * 2 })
     setIsApplying(true)
     try {
       // Only a change the document accepted is worth remembering as a style,
       // and only one is worth dismissing the dialog over.
-      if (await onSet(parsed.config, pageCount)) {
+      if (await onSet(parsed.config, pageCount, setProgress)) {
         storePageNumbersPreferences(parsed.config)
         setOpen(false)
       }
     } finally {
+      setProgress(null)
       setIsApplying(false)
     }
   }, [onSet, pageCount, parsed])
@@ -89,12 +103,14 @@ export function usePageNumbers({
       return
     }
 
+    setProgress({ completed: 0, total: pageCount * 2 })
     setIsApplying(true)
     try {
-      if (await onSet(null, pageCount)) {
+      if (await onSet(null, pageCount, setProgress)) {
         setOpen(false)
       }
     } finally {
+      setProgress(null)
       setIsApplying(false)
     }
   }, [activeConfig, onSet, pageCount])
@@ -104,6 +120,7 @@ export function usePageNumbers({
   useEffect(() => {
     setOpen(false)
     setIsApplying(false)
+    setProgress(null)
   }, [documentId])
 
   return {
@@ -114,6 +131,7 @@ export function usePageNumbers({
     onOpenChange,
     open,
     openDialog,
+    progress,
     remove,
     setDraft,
     validationError: parsed.error,

@@ -46,6 +46,7 @@ import {
   type PdfDocumentInfo,
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
+import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
 import { readRecentFiles, type RecentFile } from "@/lib/recentFiles"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { cn } from "@/lib/utils"
@@ -62,6 +63,8 @@ type OpenTab = {
       it was read from: the merge wizard's view and its two page-content
       layers. Absent for every ordinary open. */
   opensWith?: {
+    onLayerProgress?: PdfOwnedLayerProgressHandler
+    onLayersSettled?: () => void
     pageNumbers: PageNumbersConfig | null
     viewMode: ViewMode
     watermark: WatermarkConfig | null
@@ -297,26 +300,51 @@ export default function App() {
   // it, so it lives in the workspace until an export gives it one — which is
   // the only way it can be written, since it holds other files' pages.
   const openMergeResult = useCallback(
-    ({ document, pageNumbers, watermark }: MergeWizardResult) => {
+    (
+      { document, pageNumbers, watermark }: MergeWizardResult,
+      onLayerProgress: PdfOwnedLayerProgressHandler,
+    ) => {
       if (!mountedRef.current) {
         void invoke("close_pdf", { documentId: document.id }).catch(
           () => undefined,
         )
-        return
+        return Promise.resolve()
       }
 
+      const hasInitialLayers = pageNumbers !== null || watermark !== null
+      let resolveLayers: () => void = () => undefined
+      const layersSettled = hasInitialLayers
+        ? new Promise<void>((resolve) => {
+            resolveLayers = resolve
+          })
+        : Promise.resolve()
+      let didSettle = false
+      const onLayersSettled = () => {
+        if (!didSettle) {
+          didSettle = true
+          resolveLayers()
+        }
+      }
       const tab: OpenTab = {
         dirty: false,
         document,
         id: document.id,
         name: t("mergeWizard.mergedName"),
-        opensWith: { pageNumbers, viewMode: "thumbnail", watermark },
+        opensWith: {
+          onLayerProgress: hasInitialLayers ? onLayerProgress : undefined,
+          onLayersSettled: hasInitialLayers ? onLayersSettled : undefined,
+          pageNumbers,
+          viewMode: "thumbnail",
+          watermark,
+        },
         path: "",
       }
 
       replaceTabs((current) => [...current, tab])
       activateTab(tab.id)
       setWorkspaceError(null)
+
+      return layersSettled
     },
     [activateTab, replaceTabs, t],
   )
@@ -674,6 +702,8 @@ export default function App() {
           key={tab.id}
           menu={menuActions}
           onDirtyChange={updateDirty}
+          onInitialLayerProgress={tab.opensWith?.onLayerProgress}
+          onInitialLayersSettled={tab.opensWith?.onLayersSettled}
           onSourceChange={updateSource}
           ref={(handle) => {
             if (handle) {

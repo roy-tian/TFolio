@@ -9,6 +9,7 @@
  * the branch — hook and all — is dropped from the bundle.
  */
 import type { PdfDocumentInfo } from "@/lib/pdf"
+import type { PdfProgress } from "@/lib/progress"
 
 export type E2eOverrides = {
   /** Stands in for the native open-file dialog: a path, or null for cancel. */
@@ -26,11 +27,14 @@ export type E2eOverrides = {
   >
   /** Stands in for `merge_pdf_files`, whose result a spec would otherwise have
       to build a real multi-file merge to reach. */
-  mergePdfFiles?: (plan: {
-    bookmarks: string
-    paths: string[]
-    smartPadding: boolean
-  }) => Promise<PdfDocumentInfo>
+  mergePdfFiles?: (
+    plan: {
+      bookmarks: string
+      paths: string[]
+      smartPadding: boolean
+    },
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<PdfDocumentInfo>
 }
 
 /** Compile-time constant; every `if (isE2eBuild)` body is dead code outside

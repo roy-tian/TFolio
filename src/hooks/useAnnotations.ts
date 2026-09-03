@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react"
-import { invoke } from "@tauri-apps/api/core"
+import { Channel, invoke } from "@tauri-apps/api/core"
 
 import {
   canRedo,
@@ -37,7 +37,18 @@ import type {
   PdfInsertOutcome,
   PdfStructureUpdate,
 } from "@/lib/pdf"
+import type { PdfProgress } from "@/lib/progress"
 import type { WatermarkConfig } from "@/lib/watermark"
+
+type ProgressHandler = (progress: PdfProgress) => void
+
+/** A command channel that is kept for the duration of its invoke call. */
+function progressChannel(onProgress?: ProgressHandler) {
+  const channel = new Channel<PdfProgress>()
+
+  channel.onmessage = onProgress ?? (() => undefined)
+  return channel
+}
 
 /** Where a structure command's fresh metadata lands, applied or undone. */
 type StructureChangeHandler = (
@@ -123,6 +134,7 @@ async function applyCommand(
   command: AnnotationCommand,
   onStructureChange: StructureChangeHandler,
   marks: MarkStore,
+  onProgress?: ProgressHandler,
 ): Promise<number[]> {
   switch (command.kind) {
     case "highlight":
@@ -177,9 +189,13 @@ async function applyCommand(
         await invoke("apply_pdf_watermark", {
           config: command.config,
           documentId,
+          onProgress: progressChannel(onProgress),
         })
       } else {
-        await invoke("remove_pdf_watermark", { documentId })
+        await invoke("remove_pdf_watermark", {
+          documentId,
+          onProgress: progressChannel(onProgress),
+        })
       }
       return []
     case "pageNumbers":
@@ -187,9 +203,13 @@ async function applyCommand(
         await invoke("apply_pdf_page_numbers", {
           config: command.config,
           documentId,
+          onProgress: progressChannel(onProgress),
         })
       } else {
-        await invoke("remove_pdf_page_numbers", { documentId })
+        await invoke("remove_pdf_page_numbers", {
+          documentId,
+          onProgress: progressChannel(onProgress),
+        })
       }
       return []
     case "reorderPages":
@@ -284,9 +304,13 @@ async function retractCommand(
         await invoke("apply_pdf_watermark", {
           config: command.previous,
           documentId,
+          onProgress: progressChannel(),
         })
       } else {
-        await invoke("remove_pdf_watermark", { documentId })
+        await invoke("remove_pdf_watermark", {
+          documentId,
+          onProgress: progressChannel(),
+        })
       }
 
       return []
@@ -295,9 +319,13 @@ async function retractCommand(
         await invoke("apply_pdf_page_numbers", {
           config: command.previous,
           documentId,
+          onProgress: progressChannel(),
         })
       } else {
-        await invoke("remove_pdf_page_numbers", { documentId })
+        await invoke("remove_pdf_page_numbers", {
+          documentId,
+          onProgress: progressChannel(),
+        })
       }
 
       return []
@@ -796,7 +824,11 @@ export function useAnnotations({
    * rather than closing over an error the reader would have to hunt for.
    */
   const setWatermark = useCallback(
-    async (config: WatermarkConfig | null, pageCount: number) => {
+    async (
+      config: WatermarkConfig | null,
+      pageCount: number,
+      onProgress?: ProgressHandler,
+    ) => {
       if (documentId === undefined) {
         return false
       }
@@ -823,6 +855,7 @@ export function useAnnotations({
               command,
               onStructureChange,
               marksRef.current,
+              onProgress,
             )
 
             return true
@@ -841,7 +874,11 @@ export function useAnnotations({
   /** The page-number counterpart of `setWatermark`, planned against the history
       the shared queue has reached; reports whether the change landed. */
   const setPageNumbers = useCallback(
-    async (config: PageNumbersConfig | null, pageCount: number) => {
+    async (
+      config: PageNumbersConfig | null,
+      pageCount: number,
+      onProgress?: ProgressHandler,
+    ) => {
       if (documentId === undefined) {
         return false
       }
@@ -868,6 +905,7 @@ export function useAnnotations({
               command,
               onStructureChange,
               marksRef.current,
+              onProgress,
             )
 
             return true

@@ -4,7 +4,7 @@ use std::{
 };
 
 use tauri::{
-    ipc::{InvokeBody, Request, Response},
+    ipc::{Channel, InvokeBody, Request, Response},
     AppHandle, State,
 };
 use tauri_plugin_dialog::DialogExt;
@@ -14,8 +14,8 @@ use crate::recent::RecentFiles;
 use super::font::{download_fallback_font, fallback_font_destination};
 use super::{
     size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks, PageNumbersConfig, PagePoint,
-    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfStructureUpdate, PdfTextSpan, PdfiumState,
-    RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
+    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfProgress, PdfStructureUpdate, PdfTextSpan,
+    PdfiumState, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
 };
 
 // Only the check below reaches into the engine's own type, and the e2e build
@@ -38,6 +38,27 @@ fn ensure_approved(engine: &PdfiumEngine, path: &Path) -> Result<(), String> {
             "{} did not come from a file dialog or a drop",
             path.display()
         ))
+    }
+}
+
+/// Turns fine-grained engine work into at most one channel message per whole
+/// percentage. A PDF with tens of thousands of pages must not spend more time
+/// repainting its progress bar than processing its pages.
+fn channel_progress(on_progress: Channel<PdfProgress>) -> impl FnMut(usize, usize) {
+    let mut last_percentage = None;
+
+    move |completed, total| {
+        let percentage = completed
+            .saturating_mul(100)
+            .checked_div(total)
+            .unwrap_or(0);
+
+        if last_percentage == Some(percentage) {
+            return;
+        }
+
+        last_percentage = Some(percentage);
+        let _ = on_progress.send(PdfProgress::new(completed, total));
     }
 }
 
@@ -208,50 +229,62 @@ pub async fn download_pdf_note_font(app: AppHandle) -> Result<(), String> {
 pub async fn apply_pdf_watermark(
     document_id: u64,
     config: WatermarkConfig,
+    on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<(), String> {
     let engine = Arc::clone(&state.0);
 
-    tauri::async_runtime::spawn_blocking(move || engine.apply_watermark(document_id, config))
-        .await
-        .map_err(|error| format!("PDFium watermark task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.apply_watermark_with_progress(document_id, config, channel_progress(on_progress))
+    })
+    .await
+    .map_err(|error| format!("PDFium watermark task failed: {error}"))?
 }
 
 #[tauri::command]
 pub async fn remove_pdf_watermark(
     document_id: u64,
+    on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<(), String> {
     let engine = Arc::clone(&state.0);
 
-    tauri::async_runtime::spawn_blocking(move || engine.remove_watermark(document_id))
-        .await
-        .map_err(|error| format!("PDFium watermark removal task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.remove_watermark_with_progress(document_id, channel_progress(on_progress))
+    })
+    .await
+    .map_err(|error| format!("PDFium watermark removal task failed: {error}"))?
 }
 
 #[tauri::command]
 pub async fn apply_pdf_page_numbers(
     document_id: u64,
     config: PageNumbersConfig,
+    on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<(), String> {
     let engine = Arc::clone(&state.0);
 
-    tauri::async_runtime::spawn_blocking(move || engine.apply_page_numbers(document_id, config))
-        .await
-        .map_err(|error| format!("PDFium page-number task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.apply_page_numbers_with_progress(document_id, config, channel_progress(on_progress))
+    })
+    .await
+    .map_err(|error| format!("PDFium page-number task failed: {error}"))?
 }
 
 #[tauri::command]
 pub async fn remove_pdf_page_numbers(
     document_id: u64,
+    on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<(), String> {
     let engine = Arc::clone(&state.0);
 
-    tauri::async_runtime::spawn_blocking(move || engine.remove_page_numbers(document_id))
-        .await
-        .map_err(|error| format!("PDFium page-number removal task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.remove_page_numbers_with_progress(document_id, channel_progress(on_progress))
+    })
+    .await
+    .map_err(|error| format!("PDFium page-number removal task failed: {error}"))?
 }
 
 /// Removes marks this session made, by the ids their adds handed back — what an
@@ -499,6 +532,7 @@ pub async fn merge_pdf_files(
     paths: Vec<String>,
     smart_padding: bool,
     bookmarks: MergeBookmarks,
+    on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfDocumentInfo, String> {
     let engine = Arc::clone(&state.0);
@@ -513,7 +547,12 @@ pub async fn merge_pdf_files(
             ensure_approved(&engine, path)?;
         }
 
-        engine.merge_files(paths, smart_padding, bookmarks)
+        engine.merge_files_with_progress(
+            paths,
+            smart_padding,
+            bookmarks,
+            channel_progress(on_progress),
+        )
     })
     .await
     .map_err(|error| format!("PDFium merge task failed: {error}"))?

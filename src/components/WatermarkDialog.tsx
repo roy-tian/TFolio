@@ -1,6 +1,7 @@
 import { Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { OperationProgress } from "@/components/OperationProgress"
 import { WatermarkSettings } from "@/components/WatermarkSettings"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import type { PdfProgress } from "@/lib/progress"
 import type {
   WatermarkConfig,
   WatermarkValidationError,
@@ -26,6 +28,7 @@ type WatermarkDialogProps = {
   onOpenChange: (open: boolean) => void
   onRemove: () => void
   open: boolean
+  progress: PdfProgress | null
   validationError: WatermarkValidationError | null
 }
 
@@ -38,6 +41,7 @@ export function WatermarkDialog({
   onOpenChange,
   onRemove,
   open,
+  progress,
   validationError,
 }: WatermarkDialogProps) {
   const { t } = useTranslation()
@@ -45,23 +49,39 @@ export function WatermarkDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
+        aria-busy={isApplying}
         className="flex max-h-[calc(100svh-2rem)] w-[40rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[40rem]"
         data-testid="watermark-dialog"
+        showCloseButton={!isApplying}
       >
         <DialogHeader className="border-b px-5 py-4">
           <DialogTitle>{t("watermark.title")}</DialogTitle>
           <DialogDescription>{t("watermark.description")}</DialogDescription>
         </DialogHeader>
 
-        {/* The body scrolls as a whole, so the columns keep their natural
-            heights and short content never earns a scrollbar. */}
-        <WatermarkSettings
-          autoFocus
-          className="min-h-0 flex-1 overflow-y-auto p-5"
-          draft={draft}
-          onDraftChange={onDraftChange}
-          validationError={validationError}
-        />
+        {isApplying && progress ? (
+          <div className="flex min-h-80 flex-1 flex-col items-center justify-center gap-3 p-8">
+            <OperationProgress
+              className="max-w-sm"
+              label={t("watermark.updating")}
+              progress={progress}
+              testId="watermark-progress"
+            />
+            <p className="text-center text-xs text-muted-foreground">
+              {t("watermark.progressHint")}
+            </p>
+          </div>
+        ) : (
+          /* The body scrolls as a whole, so the columns keep their natural
+              heights and short content never earns a scrollbar. */
+          <WatermarkSettings
+            autoFocus
+            className="min-h-0 flex-1 overflow-y-auto p-5"
+            draft={draft}
+            onDraftChange={onDraftChange}
+            validationError={validationError}
+          />
+        )}
 
         <DialogFooter className="mx-0 mb-0 rounded-none px-5 py-4">
           {hasWatermark ? (

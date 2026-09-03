@@ -206,6 +206,97 @@ describe("merge wizard", () => {
     await expect($("[data-slot='merge-wizard-button']")).toBeDisplayed()
   })
 
+  it("shows determinate progress while the final merge is pending", async () => {
+    const first = writeScratchPdf("progress-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("progress-second.pdf", minimalPdf(1))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+    await nextStep()
+    await nextStep()
+    await nextStep()
+
+    // Hold the final operation open long enough to observe both its initial and
+    // advanced state. The real backend's progress sequence is covered in its
+    // engine test; this seam tests the wizard's face without a timing race.
+    await browser.execute(() => {
+      const seam = window as unknown as {
+        __tfolioE2E?: Record<string, unknown>
+      }
+
+      seam.__tfolioE2E = {
+        ...seam.__tfolioE2E,
+        mergePdfFiles: (
+          _plan: unknown,
+          onProgress: (progress: { completed: number; total: number }) => void,
+        ) =>
+          new Promise((_resolve, reject) => {
+            window.setTimeout(
+              () => onProgress({ completed: 2, total: 5 }),
+              300,
+            )
+            window.setTimeout(
+              () => reject(new Error("expected progress-test failure")),
+              900,
+            )
+          }),
+      }
+    })
+
+    await $("[data-testid='merge-wizard-merge']").click()
+
+    const progress = $("[data-testid='merge-wizard-progress']")
+    await progress.waitForDisplayed({ timeout: 15_000 })
+    await browser.waitUntil(
+      async () => (await progress.getAttribute("aria-valuenow")) === "40",
+      { timeout: 15_000, timeoutMsg: "the merge progress never advanced" },
+    )
+    await expect(progress).toHaveText(expect.stringContaining("40%"))
+
+    await progress.waitForDisplayed({ reverse: true, timeout: 15_000 })
+    await expect($("[role='alert']")).toHaveText(
+      expect.stringContaining("could not be merged"),
+    )
+  })
+
+  it("keeps final progress open while requested page layers are applied", async () => {
+    const first = writeScratchPdf("layer-progress-first.pdf", minimalPdf(100))
+    const second = writeScratchPdf("layer-progress-second.pdf", minimalPdf(100))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks-none']").click()
+    await nextStep()
+    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await nextStep()
+    await $("[data-testid='merge-wizard-watermark']").click()
+    await $("[data-testid='merge-wizard-merge']").click()
+
+    const progress = $("[data-testid='merge-wizard-progress']")
+    await progress.waitForDisplayed({ timeout: 15_000 })
+    await browser.waitUntil(
+      async () => (await progress.getText()).includes("Adding page numbers"),
+      { timeout: 60_000, timeoutMsg: "page-number progress never followed the merge" },
+    )
+    expect(Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(
+      33,
+    )
+    await browser.waitUntil(
+      async () => (await progress.getText()).includes("Adding watermark"),
+      { timeout: 60_000, timeoutMsg: "watermark progress never followed page numbers" },
+    )
+    expect(Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(
+      67,
+    )
+
+    await progress.waitForDisplayed({ reverse: true, timeout: 60_000 })
+    await browser.waitUntil(async () => (await thumbCount()) === 200, {
+      timeout: 30_000,
+      timeoutMsg: "the fully prepared merged document never opened",
+    })
+  })
+
   it("pads the files onto odd starts when asked", async () => {
     const first = writeScratchPdf("odd.pdf", minimalPdf(1))
     const second = writeScratchPdf("also-odd.pdf", minimalPdf(1))

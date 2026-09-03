@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react"
-import { invoke } from "@tauri-apps/api/core"
+import { Channel, invoke } from "@tauri-apps/api/core"
 import { useTranslation } from "react-i18next"
 
 import { e2eOverride } from "@/lib/e2e"
@@ -23,6 +23,11 @@ import {
   type PageNumbersDraft,
 } from "@/lib/pageNumbers"
 import type { PdfDocumentInfo } from "@/lib/pdf"
+import type {
+  PdfOwnedLayer,
+  PdfOwnedLayerProgressHandler,
+  PdfProgress,
+} from "@/lib/progress"
 import {
   defaultWatermarkConfig,
   readStoredWatermarkConfig,
@@ -33,6 +38,7 @@ import {
 
 /** The four steps, in the order they are asked. */
 export const MERGE_WIZARD_STEPS = 4
+const MERGE_PROGRESS_PHASE_UNITS = 100
 
 export type MergeWizardStep = 1 | 2 | 3 | 4
 
@@ -53,8 +59,28 @@ export type MergeWizardResult = {
   watermark: WatermarkConfig | null
 }
 
+type MergeProgressPhase = "merge" | PdfOwnedLayer
+
 type UseMergeWizardOptions = {
-  onMerged: (result: MergeWizardResult) => void
+  onMerged: (
+    result: MergeWizardResult,
+    onLayerProgress: PdfOwnedLayerProgressHandler,
+  ) => Promise<void>
+}
+
+/** Fits one backend phase's own progress into its part of the whole merge. */
+function completedPhaseUnits(progress: PdfProgress, units: number) {
+  if (
+    !Number.isFinite(progress.completed) ||
+    !Number.isFinite(progress.total) ||
+    progress.total <= 0
+  ) {
+    return 0
+  }
+
+  return Math.round(
+    Math.min(1, Math.max(0, progress.completed / progress.total)) * units,
+  )
 }
 
 /**
@@ -80,6 +106,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     defaultWatermarkConfig(""),
   )
   const [isBusy, setIsBusy] = useState(false)
+  const [mergePhase, setMergePhase] = useState<MergeProgressPhase>("merge")
+  const [mergeProgress, setMergeProgress] = useState<PdfProgress | null>(null)
   const [error, setError] = useState<MergeWizardError>(null)
   // The list as the handlers see it: an add reads it to decide what the ceiling
   // turned away, which a state updater cannot report from inside itself.
@@ -126,19 +154,27 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
         defaultWatermarkConfig(t("watermark.defaultText")),
     )
     setIsBusy(false)
+    setMergePhase("merge")
+    setMergeProgress(null)
     setError(null)
     pageNumbersUntouched.current = true
   }, [t])
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {
+      // A long merge stays visible until it settles. Success closes the wizard
+      // directly in `finish`; a failure returns it to the editable last step.
+      if (!nextOpen && isBusy) {
+        return
+      }
+
       if (nextOpen) {
         reset()
       }
 
       setOpen(nextOpen)
     },
-    [reset],
+    [isBusy, reset],
   )
 
   const openWizard = useCallback(() => onOpenChange(true), [onOpenChange])
@@ -283,16 +319,40 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     setIsBusy(true)
     setError(null)
 
+    const paths = usableFiles(files).map((file) => file.path)
+    // Give each visible phase the same share, while its own backend events
+    // describe progress within that share. Raw page counts would otherwise pin
+    // a two-file merge near 0% until hundreds of layer pages began processing.
+    const mergeUnits = MERGE_PROGRESS_PHASE_UNITS
+    const pageNumberUnits = pageNumbers ? MERGE_PROGRESS_PHASE_UNITS : 0
+    const watermarkUnits = watermark ? MERGE_PROGRESS_PHASE_UNITS : 0
+    const operationTotal = mergeUnits + pageNumberUnits + watermarkUnits
+    setMergePhase("merge")
+    setMergeProgress({ completed: 0, total: operationTotal })
+
     try {
-      const paths = usableFiles(files).map((file) => file.path)
       const plan = { bookmarks, paths, smartPadding }
       const stub = e2eOverride("mergePdfFiles")
-      const document = stub
-        ? await stub(plan)
-        : await invoke<PdfDocumentInfo>("merge_pdf_files", plan)
+      const onMergeProgress = (progress: PdfProgress) =>
+        setMergeProgress({
+          completed: completedPhaseUnits(progress, mergeUnits),
+          total: operationTotal,
+        })
+      let document: PdfDocumentInfo
 
-      // Remembered only once the merge itself landed, so a run that failed
-      // leaves no trace in the styles the next document opens with.
+      if (stub) {
+        document = await stub(plan, onMergeProgress)
+      } else {
+        const progress = new Channel<PdfProgress>()
+        progress.onmessage = onMergeProgress
+        document = await invoke<PdfDocumentInfo>("merge_pdf_files", {
+          ...plan,
+          onProgress: progress,
+        })
+      }
+
+      // Remembered only once the base merge landed, so a run that failed before
+      // producing a document leaves no trace in the next document's styles.
       if (pageNumbers) {
         storePageNumbersPreferences(pageNumbers)
       }
@@ -300,13 +360,33 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
         storeWatermarkConfig(watermark)
       }
 
+      // Keep the same progress surface alive while the new session applies the
+      // optional layers through its ordinary, undoable commands.
+      setMergePhase(pageNumbers ? "pageNumbers" : watermark ? "watermark" : "merge")
+      setMergeProgress({ completed: mergeUnits, total: operationTotal })
+
+      const onLayerProgress: PdfOwnedLayerProgressHandler = (layer, progress) => {
+        const pageNumberOffset = mergeUnits
+        const watermarkOffset = mergeUnits + pageNumberUnits
+        const units = layer === "pageNumbers" ? pageNumberUnits : watermarkUnits
+        const offset =
+          layer === "pageNumbers" ? pageNumberOffset : watermarkOffset
+
+        setMergePhase(layer)
+        setMergeProgress({
+          completed: offset + completedPhaseUnits(progress, units),
+          total: operationTotal,
+        })
+      }
+
+      await onMerged({ document, pageNumbers, watermark }, onLayerProgress)
       setOpen(false)
-      onMerged({ document, pageNumbers, watermark })
     } catch (failure) {
       setError(
         String(failure).includes("MiB limit") ? "fileTooLarge" : "mergeFailed",
       )
     } finally {
+      setMergeProgress(null)
       setIsBusy(false)
     }
   }, [
@@ -331,6 +411,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     files,
     finish,
     isBusy,
+    mergePhase,
+    mergeProgress,
     next,
     onOpenChange,
     open,

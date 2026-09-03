@@ -458,9 +458,16 @@ fn applies_a_watermark_to_every_page() {
         .open(two_page_pdf())
         .expect("PDFium should open the two-page fixture");
 
+    let mut progress = Vec::new();
     engine
-        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .apply_watermark_with_progress(
+            document.id,
+            watermark_config("DRAFT"),
+            |completed, total| progress.push((completed, total)),
+        )
         .expect("PDFium should apply the watermark");
+
+    assert_eq!(progress, [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]);
 
     for page_number in 1..=2 {
         assert!(
@@ -4599,9 +4606,14 @@ fn numbers_every_page_and_extracts_the_label() {
         .open(two_page_pdf())
         .expect("PDFium should open the two-page fixture");
 
+    let mut progress = Vec::new();
     engine
-        .apply_page_numbers(document.id, page_numbers_config())
+        .apply_page_numbers_with_progress(document.id, page_numbers_config(), |completed, total| {
+            progress.push((completed, total))
+        })
         .expect("PDFium should number every page");
+
+    assert_eq!(progress, [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]);
 
     for (page_number, digit) in [(1, "1"), (2, "2")] {
         // The label lands in a band along the bottom-centre of the page.
@@ -5307,10 +5319,14 @@ fn merge_files_appends_every_file_in_order() {
         page_fingerprints(engine, opened.id, 3)
     };
 
+    let mut progress = Vec::new();
     let merged = engine
-        .merge_files(paths, false, MergeBookmarks::None)
+        .merge_files_with_progress(paths, false, MergeBookmarks::None, |completed, total| {
+            progress.push((completed, total))
+        })
         .expect("PDFium should merge the files");
 
+    assert_eq!(progress, [(0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]);
     assert_eq!(merged.num_pages, 5);
     assert!(
         merged.path.is_none(),

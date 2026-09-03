@@ -35,6 +35,22 @@ fn size_limit_error() -> String {
     )
 }
 
+/// A bounded operation's completed work, streamed to the WebView over a Tauri
+/// channel. Both values count work units rather than bytes: pages for owned
+/// content, and source/finishing stages for a merge.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfProgress {
+    completed: usize,
+    total: usize,
+}
+
+impl PdfProgress {
+    fn new(completed: usize, total: usize) -> Self {
+        Self { completed, total }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfDocumentInfo {

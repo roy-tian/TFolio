@@ -3,6 +3,7 @@ import { createPortal } from "react-dom"
 import { Check, FilePlus2, FileWarning, GripVertical, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { OperationProgress } from "@/components/OperationProgress"
 import { PageNumbersSettings } from "@/components/PageNumbersSettings"
 import { WatermarkSettings } from "@/components/WatermarkSettings"
 import { Button } from "@/components/ui/button"
@@ -179,6 +180,8 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     files,
     finish,
     isBusy,
+    mergePhase,
+    mergeProgress,
     next,
     onOpenChange,
     open,
@@ -213,6 +216,12 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
   // a row the backend could not read is not counted into the total beside it.
   const usableCount = usableFiles(files).length
   const draggedFile = drag ? files[drag.index] : undefined
+  const progressLabel =
+    mergePhase === "pageNumbers"
+      ? t("mergeWizard.addingPageNumbers")
+      : mergePhase === "watermark"
+        ? t("mergeWizard.addingWatermark")
+        : t("mergeWizard.merging")
   const errorMessage =
     error === "fileTooLarge"
       ? t("viewer.fileTooLarge")
@@ -227,8 +236,10 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
+        aria-busy={mergeProgress !== null}
         className="flex max-h-[calc(100svh-2rem)] w-[46rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[46rem]"
         data-testid="merge-wizard"
+        showCloseButton={!isBusy}
       >
         {/* The step's own switch — is there anything to configure at all? —
             rides the header rather than the body, where it would read as the
@@ -264,7 +275,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             </div>
           ) : null}
 
-          {step === 4 ? (
+          {step === 4 && !mergeProgress ? (
             <div className="flex items-center gap-2">
               <FieldLabel htmlFor="merge-wizard-watermark">
                 {t("mergeWizard.watermarkEnable")}
@@ -280,7 +291,21 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          {step === 1 ? (
+          {mergeProgress ? (
+            <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8">
+              <OperationProgress
+                className="max-w-sm"
+                label={progressLabel}
+                progress={mergeProgress}
+                testId="merge-wizard-progress"
+              />
+              <p className="text-center text-xs text-muted-foreground">
+                {t("mergeWizard.progressHint")}
+              </p>
+            </div>
+          ) : null}
+
+          {!mergeProgress && step === 1 ? (
             <div className="flex flex-col gap-4" data-testid="merge-wizard-files">
               {files.length === 0 ? (
                 <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
@@ -379,7 +404,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             </div>
           ) : null}
 
-          {step === 2 ? (
+          {!mergeProgress && step === 2 ? (
             <div className="flex flex-col gap-3">
               {/* Four exclusive answers, each carrying its own explanation —
                   which is what a reader compares here, so it belongs on the
@@ -423,7 +448,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             </div>
           ) : null}
 
-          {step === 3 ? (
+          {!mergeProgress && step === 3 ? (
             pageNumbersOn ? (
               <PageNumbersSettings
                 draft={pageNumbersDraft}
@@ -442,7 +467,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             )
           ) : null}
 
-          {step === 4 ? (
+          {!mergeProgress && step === 4 ? (
             watermarkOn ? (
               <WatermarkSettings
                 draft={watermarkDraft}
@@ -473,15 +498,15 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
         <DialogFooter className="mx-0 mb-0 items-center rounded-none border-t px-5 py-4">
           {/* The trail sits with the controls that move along it: a step behind
               the reader carries a tick rather than its number, the one they are
-              on is named, and the rest wait their turn. */}
+              on is named, and all four tick once the merge itself begins. */}
           <ol
             aria-label={t("mergeWizard.steps")}
             className="mr-auto flex items-center gap-1 text-xs"
           >
             {stepTitleKey.map((key, index) => {
               const position = index + 1
-              const done = position < step
-              const current = position === step
+              const done = position < step || mergeProgress !== null
+              const current = position === step && mergeProgress === null
 
               return (
                 <li
@@ -533,7 +558,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
                 onClick={() => void finish()}
                 type="button"
               >
-                {isBusy ? t("mergeWizard.merging") : t("mergeWizard.merge")}
+                {isBusy ? progressLabel : t("mergeWizard.merge")}
               </Button>
             )}
           </div>
