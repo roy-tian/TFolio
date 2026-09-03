@@ -72,9 +72,14 @@ function nextStep() {
  * which under WebKitGTK are the only press semantics a test can produce (the
  * same route `dragThumbToGap` takes in the page-edit suite).
  */
-function dragRow(from: number, to: number, edge: "above" | "below") {
+function dragRow(
+  from: number,
+  to: number,
+  edge: "above" | "below",
+  release = true,
+) {
   return browser.execute(
-    (f: number, t: number, low: boolean) => {
+    (f: number, t: number, low: boolean, shouldRelease: boolean) => {
       const row = (index: number) =>
         document.querySelector(`[data-list-index='${index}']`)!
       const fromBox = row(f).getBoundingClientRect()
@@ -112,18 +117,39 @@ function dragRow(from: number, to: number, edge: "above" | "below") {
           clientY: dest.y,
         }),
       )
-      document.dispatchEvent(
-        new PointerEvent("pointerup", {
-          bubbles: true,
-          clientX: dest.x,
-          clientY: dest.y,
-        }),
-      )
+      if (shouldRelease) {
+        document.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            clientX: dest.x,
+            clientY: dest.y,
+          }),
+        )
+      }
     },
     from,
     to,
     edge === "below",
+    release,
   )
+}
+
+/** Releases a drag held by `dragRow`, at the ghost's current grip. */
+function releaseRow() {
+  return browser.execute(() => {
+    const ghost = document.querySelector<HTMLElement>(
+      "[data-slot='merge-file-drag-ghost']",
+    )!
+    const box = ghost.getBoundingClientRect()
+
+    document.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        clientX: box.left + 40,
+        clientY: box.top + box.height / 2,
+      }),
+    )
+  })
 }
 
 /** The file names on the wizard's list, top to bottom. */
@@ -265,7 +291,30 @@ describe("merge wizard", () => {
     await addPickedFiles(3)
     expect(await listedNames()).toEqual(["a.pdf", "b.pdf", "c.pdf"])
 
-    await dragRow(2, 0, "above")
+    // Hold it beyond the scroll box's top edge: the moving copy belongs to the
+    // document root, so overflow cannot cut off the part outside the list.
+    await dragRow(2, 0, "above", false)
+    await browser.waitUntil(
+      () => $("[data-slot='merge-file-drag-ghost']").isExisting(),
+      { timeout: 15_000, timeoutMsg: "the drag ghost never appeared" },
+    )
+    const ghost = await browser.execute(() => {
+      const moving = document.querySelector<HTMLElement>(
+        "[data-slot='merge-file-drag-ghost']",
+      )!
+      const list = document.querySelector<HTMLElement>(
+        "[data-slot='merge-file']",
+      )!.parentElement!
+
+      return {
+        escapedTop:
+          moving.getBoundingClientRect().top < list.getBoundingClientRect().top,
+        atRoot: moving.parentElement === document.body,
+      }
+    })
+
+    expect(ghost).toEqual({ atRoot: true, escapedTop: true })
+    await releaseRow()
     await browser.waitUntil(async () => (await listedNames())[0] === "c.pdf", {
       timeout: 15_000,
       timeoutMsg: "the dragged row never moved",

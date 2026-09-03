@@ -1,10 +1,12 @@
-import { useRef } from "react"
+import { memo, useRef } from "react"
+import { createPortal } from "react-dom"
 import { Check, FilePlus2, FileWarning, GripVertical, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { PageNumbersSettings } from "@/components/PageNumbersSettings"
 import { WatermarkSettings } from "@/components/WatermarkSettings"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogClose,
@@ -22,7 +24,7 @@ import {
 } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
-import { useListDrag } from "@/hooks/useListDrag"
+import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import type { useMergeWizard } from "@/hooks/useMergeWizard"
 import { MERGE_WIZARD_STEPS } from "@/hooks/useMergeWizard"
 import {
@@ -33,6 +35,7 @@ import {
   mergeBookmarksModes,
   usableFiles,
   type MergeBookmarksMode,
+  type MergeFile,
 } from "@/lib/mergeWizard"
 import { cn } from "@/lib/utils"
 
@@ -59,6 +62,103 @@ const bookmarksHintKey = {
 
 type MergeWizardProps = {
   wizard: ReturnType<typeof useMergeWizard>
+}
+
+type MergeFileRowContentProps = {
+  file: MergeFile
+  index: number
+  onRemove?: (path: string) => void
+  showHandle: boolean
+}
+
+/** The one rendering of a file row's contents, shared by its place in the list
+    and the copy that rides the pointer. */
+const MergeFileRowContent = memo(function MergeFileRowContent({
+  file,
+  index,
+  onRemove,
+  showHandle,
+}: MergeFileRowContentProps) {
+  const { t } = useTranslation()
+  const usable = isUsableFile(file)
+
+  return (
+    <>
+      {showHandle ? (
+        <GripVertical className="size-4 shrink-0 text-muted-foreground" />
+      ) : null}
+      {/* Centred in a fixed column, so the number sits the same distance from
+          the handle as from the name, on every row whatever its digits. */}
+      <span className="w-4 shrink-0 text-center font-mono text-xs tabular-nums text-muted-foreground">
+        {index + 1}
+      </span>
+      {usable ? null : (
+        <FileWarning className="size-4 shrink-0 text-destructive" />
+      )}
+      <span className="min-w-0 flex-1 truncate text-sm" title={file.path}>
+        {file.name}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 text-xs",
+          usable ? "text-muted-foreground" : "text-destructive",
+        )}
+      >
+        {usable
+          ? t("mergeWizard.pageCount", { count: file.pageCount })
+          : t("mergeWizard.unreadable")}
+      </span>
+      {onRemove ? (
+        <Button
+          aria-label={t("mergeWizard.remove", { name: file.name })}
+          onClick={() => onRemove(file.path)}
+          size="icon-sm"
+          title={t("mergeWizard.remove", { name: file.name })}
+          variant="ghost"
+        >
+          <X />
+        </Button>
+      ) : (
+        // Keep the ghost the same width as the real row without putting a
+        // second interactive control under the pointer.
+        <span className="grid size-7 shrink-0 place-items-center text-muted-foreground">
+          <X className="size-4" />
+        </span>
+      )}
+    </>
+  )
+})
+
+/** The row in hand lives at the document root, outside both of the dialog's
+    clipped scroll boxes. It can therefore follow the pointer beyond either
+    edge instead of losing whichever half crossed the boundary. */
+function MergeFileDragGhost({
+  drag,
+  file,
+}: {
+  drag: ListDragState
+  file: MergeFile
+}) {
+  return createPortal(
+    <div
+      aria-hidden
+      className="pointer-events-none fixed z-60 flex items-center gap-2 rounded-lg border bg-popover px-3 py-2 select-none shadow-xl ring-1 ring-primary/20"
+      data-slot="merge-file-drag-ghost"
+      style={{
+        height: drag.height,
+        left: drag.pointer.x + drag.grip.x,
+        top: drag.pointer.y + drag.grip.y,
+        width: drag.width,
+      }}
+    >
+      <MergeFileRowContent
+        file={file}
+        index={drag.index}
+        showHandle
+      />
+    </div>,
+    document.body,
+  )
 }
 
 /**
@@ -112,6 +212,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
   // The files that will actually be merged — the count the summary reports, so
   // a row the backend could not read is not counted into the total beside it.
   const usableCount = usableFiles(files).length
+  const draggedFile = drag ? files[drag.index] : undefined
   const errorMessage =
     error === "fileTooLarge"
       ? t("viewer.fileTooLarge")
@@ -187,32 +288,42 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
                 </p>
               ) : (
                 // A box of its own rather than the dialog's: a long list scrolls
-                // here, leaving the add button, the padding switch and the total
+                // here, leaving the add button, the padding option and total
                 // where the reader left them. The right padding keeps the
                 // overlay scrollbar off the rows' own border.
                 <ol
-                  className="flex max-h-64 flex-col gap-1.5 overflow-y-auto pr-2"
+                  className="flex max-h-64 select-none flex-col gap-1.5 overflow-y-auto pr-2"
                   ref={listRef}
                 >
                   {files.map((file, index) => {
-                    const usable = isUsableFile(file)
+                    const rowOffset = drag?.rowOffsets[index] ?? 0
 
                     return (
                       <li
                         className={cn(
-                          "relative flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2",
+                          "relative flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 select-none",
                           files.length > 1 && "cursor-grab",
-                          drag?.index === index && "opacity-40",
+                          drag &&
+                            drag.index !== index &&
+                            "transition-transform duration-200 ease-out",
+                          // The portal ghost carries this file; its real row
+                          // stays in the layout as the hole the others move
+                          // around, but must not show beneath the copy.
+                          drag?.index === index && "opacity-0",
                         )}
                         data-list-index={index}
                         data-slot="merge-file"
                         key={file.path}
+                        style={{
+                          transform:
+                            rowOffset === 0
+                              ? undefined
+                              : `translateY(${rowOffset}px)`,
+                        }}
                       >
-                        {/* The line the drop would land on: above this row, or
-                            below the last one for the gap past the end — one
-                            line per gap, never a pair around it. Absolute, so
-                            showing it never shifts the rows the drag was
-                            measured against. */}
+                        {/* Keep the landing line in the list's original
+                            coordinate space while its host row animates aside.
+                            The equal, opposite transform cancels the row's. */}
                         {drag &&
                         (drag.gap === index ||
                           (drag.gap === files.length &&
@@ -221,74 +332,50 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
                             className={cn(
                               "pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-primary",
                               drag.gap === index ? "-top-1" : "-bottom-1",
+                              drag.index !== index &&
+                                "transition-transform duration-200 ease-out",
                             )}
+                            style={{
+                              transform:
+                                rowOffset === 0
+                                  ? undefined
+                                  : `translateY(${-rowOffset}px)`,
+                            }}
                           />
                         ) : null}
-                        {files.length > 1 ? (
-                          <GripVertical className="size-4 shrink-0 text-muted-foreground" />
-                        ) : null}
-                        {/* Centred in a fixed column, so the number sits the
-                            same distance from the handle as from the name, on
-                            every row whatever its digits. */}
-                        <span className="w-4 shrink-0 text-center font-mono text-xs tabular-nums text-muted-foreground">
-                          {index + 1}
-                        </span>
-                        {usable ? null : (
-                          <FileWarning className="size-4 shrink-0 text-destructive" />
-                        )}
-                        <span
-                          className="min-w-0 flex-1 truncate text-sm"
-                          title={file.path}
-                        >
-                          {file.name}
-                        </span>
-                        <span
-                          className={cn(
-                            "shrink-0 text-xs",
-                            usable ? "text-muted-foreground" : "text-destructive",
-                          )}
-                        >
-                          {usable
-                            ? t("mergeWizard.pageCount", { count: file.pageCount })
-                            : t("mergeWizard.unreadable")}
-                        </span>
-                        <Button
-                          aria-label={t("mergeWizard.remove", { name: file.name })}
-                          onClick={() => removeFile(file.path)}
-                          size="icon-sm"
-                          title={t("mergeWizard.remove", { name: file.name })}
-                          variant="ghost"
-                        >
-                          <X />
-                        </Button>
+                        <MergeFileRowContent
+                          file={file}
+                          index={index}
+                          onRemove={removeFile}
+                          showHandle={files.length > 1}
+                        />
                       </li>
                     )
                   })}
                 </ol>
               )}
 
-              <Field orientation="horizontal">
+              <div className="flex items-center gap-4">
                 <FieldLabel className="min-w-0" htmlFor="merge-wizard-padding">
-                  {t("mergeWizard.smartPadding")}
+                  <Checkbox
+                    checked={smartPadding}
+                    data-testid="merge-wizard-padding"
+                    id="merge-wizard-padding"
+                    onCheckedChange={setSmartPadding}
+                  />
+                  <span>{t("mergeWizard.smartPadding")}</span>
                 </FieldLabel>
-                <Switch
-                  checked={smartPadding}
-                  className="ml-auto"
-                  data-testid="merge-wizard-padding"
-                  id="merge-wizard-padding"
-                  onCheckedChange={setSmartPadding}
-                />
-              </Field>
 
-              <p
-                className="text-center text-sm text-muted-foreground"
-                data-testid="merge-wizard-total"
-              >
-                {t("mergeWizard.total", {
-                  files: t("mergeWizard.fileCount", { count: usableCount }),
-                  pages: t("mergeWizard.pageCount", { count: totalPages }),
-                })}
-              </p>
+                <p
+                  className="ml-auto shrink-0 text-sm text-muted-foreground"
+                  data-testid="merge-wizard-total"
+                >
+                  {t("mergeWizard.total", {
+                    files: t("mergeWizard.fileCount", { count: usableCount }),
+                    pages: t("mergeWizard.pageCount", { count: totalPages }),
+                  })}
+                </p>
+              </div>
             </div>
           ) : null}
 
@@ -451,6 +538,10 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             )}
           </div>
         </DialogFooter>
+
+        {drag && draggedFile ? (
+          <MergeFileDragGhost drag={drag} file={draggedFile} />
+        ) : null}
       </DialogContent>
     </Dialog>
   )

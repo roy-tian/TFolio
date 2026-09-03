@@ -33,12 +33,46 @@ function measureRows(list: HTMLElement) {
   )
 }
 
-/** A row drag in progress, for dimming the row and drawing the drop line. */
+/** A row drag in progress, for carrying the row and opening its landing
+    place in the list. */
 export type ListDragState = {
   /** The 0-based row in hand. */
   index: number
   /** Where the drop would land: 0 above the first row, n below the last. */
   gap: number
+  /** Where the row's top-left sits relative to the pointer, so the ghost keeps
+      the exact grip it was picked up by. */
+  grip: { x: number; y: number }
+  /** The original row's dimensions, which keep its fixed ghost identical. */
+  height: number
+  /** Client coordinates the ghost follows. */
+  pointer: { x: number; y: number }
+  /** How far every other row slides to close the old hole and open the new. */
+  rowOffsets: number[]
+  width: number
+}
+
+/** The make-way slide for a row moving to `gap`. Measured slot distances
+    put each shifted row exactly where its neighbour stood. */
+function makeWayOffsets(
+  index: number,
+  gap: number,
+  rows: { height: number; top: number }[],
+) {
+  const offsets = Array.from({ length: rows.length }, () => 0)
+  const destination = indexAfterMove(index, gap)
+
+  if (destination < index) {
+    for (let row = destination; row < index; row += 1) {
+      offsets[row] = rows[row + 1]!.top - rows[row]!.top
+    }
+  } else if (destination > index) {
+    for (let row = index + 1; row <= destination; row += 1) {
+      offsets[row] = rows[row - 1]!.top - rows[row]!.top
+    }
+  }
+
+  return offsets
 }
 
 /**
@@ -73,8 +107,11 @@ export function useListDrag({
       pointerId: number
       index: number
       from: { x: number; y: number }
+      grip: { x: number; y: number }
+      height: number
       rows: { height: number; top: number }[]
       dragging: boolean
+      width: number
     } | null = null
 
     /** The pointer's y in the list's own scrolled content space. */
@@ -120,12 +157,25 @@ export function useListDrag({
         return
       }
 
+      const rowRect = row.getBoundingClientRect()
+
+      // Text and image selection are never an alternate meaning for a press on
+      // a reorderable row. In particular, WebKit must not start a native text
+      // drag before this gesture crosses its own threshold.
+      event.preventDefault()
+
       gesture = {
         dragging: false,
         from: { x: event.clientX, y: event.clientY },
+        grip: {
+          x: rowRect.left - event.clientX,
+          y: rowRect.top - event.clientY,
+        },
+        height: rowRect.height,
         index,
         pointerId: event.pointerId,
         rows: measureRows(list),
+        width: rowRect.width,
       }
     }
 
@@ -147,13 +197,25 @@ export function useListDrag({
         gesture.dragging = true
       }
 
+      event.preventDefault()
+
       const y = contentY(event)
 
       if (y === null) {
         return
       }
 
-      setDrag({ gap: dropGapForRow(y, gesture.rows), index: gesture.index })
+      const gap = dropGapForRow(y, gesture.rows)
+
+      setDrag({
+        gap,
+        grip: gesture.grip,
+        height: gesture.height,
+        index: gesture.index,
+        pointer: { x: event.clientX, y: event.clientY },
+        rowOffsets: makeWayOffsets(gesture.index, gap, gesture.rows),
+        width: gesture.width,
+      })
     }
 
     const handlePointerUp = (event: PointerEvent) => {
@@ -169,6 +231,8 @@ export function useListDrag({
       if (!current.dragging) {
         return
       }
+
+      event.preventDefault()
 
       const y = contentY(event)
 
