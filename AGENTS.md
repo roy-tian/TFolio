@@ -38,11 +38,21 @@ the `#[ignore]` Rust tests fail, not skip. At runtime a note or watermark that
 leaves Latin-1 takes the system's own sans, and only where nothing installed can
 draw it does the app offer to fetch one (see below).
 
-CI gates, all required before a PR: `bun run build`, `bun run test`,
-`bun run version:check`, and against `src-tauri/Cargo.toml` —
-`cargo fmt -- --check`, `cargo clippy --locked -- -D warnings`,
-`cargo check --locked`. Add `test:all` for backend or GUI changes. Conventional
-Commits enforced by commitlint on `commit-msg`.
+`bun update` and `cargo update` move everything inside the ranges already
+declared, so a new major is always a hand edit to `package.json` or
+`Cargo.toml`. Two things sit outside that: `pdfium-render`, pinned `=0.9.3`
+behind a `[patch.crates-io]` rev (the note in `Cargo.toml` says why), and Bun
+itself — `packageManager` is the only thing naming a version, since no workflow
+passes `bun-version` to `setup-bun`, so bumping the local toolchain without that
+field leaves CI quietly on the old Bun.
+
+CI runs three jobs on every PR, and none of it is optional: frontend
+(`version:check`, `test`, `build`), Rust (against `src-tauri/Cargo.toml` —
+`cargo fmt -- --check`, `clippy --locked -- -D warnings`, `check --locked`,
+`test --locked`), and, gated on both, a GUI job adding
+`cargo test --locked -- --ignored` and the headless e2e suite. Run the first two
+before a PR; add `test:all` for backend or GUI changes. Conventional Commits
+enforced by commitlint on `commit-msg`.
 
 ## Style & tests
 
