@@ -12,20 +12,36 @@ type UsePageDragOptions = {
   columns: number
   /** The thumbnail grid element the cells are laid out in. */
   gridRef: RefObject<HTMLElement | null>
-  onReorder: (order: number[]) => void
+  /** May answer with the reorder's own promise; the make-way layout is held
+      until it settles. */
+  onReorder: (order: number[]) => void | Promise<unknown>
   pageCount: number
   /** Dragging a selected page carries the whole selection with it. */
   selectedPages: ReadonlySet<number>
 }
 
-/** A drag in progress, for the ghost and the target-gap indicator. */
+/** A drag in progress, for the ghost and the make-way preview. */
 export type PageDragState = {
+  /** The cell boxes as they stood when the drag began, in grid coordinates:
+      the slots the grid's own pages slide between to open the drop's hole. */
+  cells: CellBox[]
+  /** The gap the drop would land in: 0 before page 1, n after the last. */
+  gap: number
+  /** Where the grabbed page's own top-left sits relative to the pointer, so
+      the ghost keeps the grip it was picked up by. */
+  grip: { x: number; y: number }
+  /** The page actually pressed — the one the ghost shows, whatever else in
+      the selection travels with it. */
+  lead: number
   /** Ascending page numbers travelling with the pointer. */
   pages: number[]
   /** Client coordinates the ghost follows. */
   pointer: { x: number; y: number }
-  /** The gap the drop would land in: 0 before page 1, n after the last. */
-  gap: number
+  /** Set once the pointer is up and the reorder is in flight. The pages only
+      change when the backend has moved them, so the made way stands until then
+      — dropping it here would snap every cell back to the old order for the
+      length of that round trip — while the ghost is already gone. */
+  released: boolean
 }
 
 /**
@@ -78,10 +94,14 @@ export function usePageDrag({
       return
     }
 
+    // Bumped by every gesture that takes the grid, so a reorder resolving late
+    // cannot clear a drag that started after it.
+    let release = 0
     let gesture: {
       pointerId: number
       pageNumber: number
       from: { x: number; y: number }
+      grip: { x: number; y: number }
       cells: CellBox[]
       /** Set once the threshold is passed; mirrors the `drag` state. */
       dragging: boolean
@@ -101,6 +121,7 @@ export function usePageDrag({
 
     const handlePointerDown = (event: PointerEvent) => {
       gesture = null
+      release += 1
       dragEndedAtRef.current = Number.NEGATIVE_INFINITY
       setDrag(null)
 
@@ -145,10 +166,16 @@ export function usePageDrag({
         },
       )
 
+      const pressed = cellElement.getBoundingClientRect()
+
       gesture = {
         cells,
         dragging: false,
         from: { x: event.clientX, y: event.clientY },
+        grip: {
+          x: pressed.left - event.clientX,
+          y: pressed.top - event.clientY,
+        },
         pageNumber,
         pointerId: event.pointerId,
       }
@@ -184,9 +211,13 @@ export function usePageDrag({
         : [gesture.pageNumber]
 
       setDrag({
+        cells: gesture.cells,
         gap: dropGapForPoint(point, gesture.cells, columnsRef.current),
+        grip: gesture.grip,
+        lead: gesture.pageNumber,
         pages,
         pointer: { x: event.clientX, y: event.clientY },
+        released: false,
       })
     }
 
@@ -198,9 +229,9 @@ export function usePageDrag({
       const current = gesture
 
       gesture = null
-      setDrag(null)
 
       if (!current.dragging) {
+        setDrag(null)
         return
       }
 
@@ -209,6 +240,7 @@ export function usePageDrag({
       const point = gridPoint(event)
 
       if (!point) {
+        setDrag(null)
         return
       }
 
@@ -218,7 +250,28 @@ export function usePageDrag({
         : [current.pageNumber]
       const gap = dropGapForPoint(point, current.cells, columnsRef.current)
 
-      onReorderRef.current(orderAfterMove(pages, gap, pageCountRef.current))
+      setDrag({
+        cells: current.cells,
+        gap,
+        grip: current.grip,
+        lead: current.pageNumber,
+        pages,
+        pointer: { x: event.clientX, y: event.clientY },
+        released: true,
+      })
+
+      // Only this release may clear what it put up: a press that starts a new
+      // gesture while the reorder is still in flight owns the grid from then on.
+      const token = (release += 1)
+      const clear = () => {
+        if (token === release) {
+          setDrag(null)
+        }
+      }
+
+      void Promise.resolve(
+        onReorderRef.current(orderAfterMove(pages, gap, pageCountRef.current)),
+      ).then(clear, clear)
     }
 
     const handlePointerCancel = (event: PointerEvent) => {
@@ -227,6 +280,7 @@ export function usePageDrag({
       }
 
       gesture = null
+      release += 1
       setDrag(null)
     }
 

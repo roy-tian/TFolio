@@ -6,6 +6,7 @@ import {
   exceedsDragThreshold,
   indexAfterMove,
   orderAfterMove,
+  slotOffsets,
   type CellBox,
 } from "@/lib/pageDrag"
 
@@ -113,5 +114,53 @@ describe("indexAfterMove", () => {
   it("closes up over the hole a downward move leaves", () => {
     expect(indexAfterMove(0, 3)).toBe(2)
     expect(indexAfterMove(3, 1)).toBe(1)
+  })
+})
+
+describe("slotOffsets", () => {
+  // Three across, so a move within a row is horizontal and a move between rows
+  // has both components.
+  const cells = grid(6, 3)
+
+  it("slides the pages a lifted one moves past, and leaves the rest", () => {
+    // Page 1 dropped before page 4: [2, 3, 1, 4, 5, 6].
+    const offsets = slotOffsets(orderAfterMove([1], 3, 6), cells, new Set([1]))
+
+    // Pages 2 and 3 close up over the hole; the rest never move.
+    expect(offsets.get(2)).toEqual({ x: -176, y: 0 })
+    expect(offsets.get(3)).toEqual({ x: -176, y: 0 })
+    expect(offsets.has(1)).toBe(false)
+    expect(offsets.has(4)).toBe(false)
+    expect(offsets.has(6)).toBe(false)
+  })
+
+  it("carries a page over the row break it is pushed across", () => {
+    // Page 6 dropped before page 1: [6, 1, 2, 3, 4, 5].
+    const offsets = slotOffsets(orderAfterMove([6], 0, 6), cells, new Set([6]))
+
+    // Page 3 drops to the second row; everything after it just steps right.
+    expect(offsets.get(3)).toEqual({ x: -352, y: 236 })
+    expect(offsets.get(4)).toEqual({ x: 176, y: 0 })
+  })
+
+  it("has nothing to move for a drop that changes no order", () => {
+    const offsets = slotOffsets(orderAfterMove([2], 2, 6), cells, new Set([2]))
+
+    expect(offsets.size).toBe(0)
+  })
+
+  it("keeps a block together and skips the pages carrying it", () => {
+    // Pages 1 and 2 dropped past the end: [3, 4, 5, 6, 1, 2].
+    const offsets = slotOffsets(
+      orderAfterMove([1, 2], 6, 6),
+      cells,
+      new Set([1, 2]),
+    )
+
+    expect(offsets.get(3)).toEqual({ x: -352, y: 0 })
+    expect(offsets.get(4)).toEqual({ x: 176, y: -236 })
+    expect(offsets.get(6)).toEqual({ x: -352, y: 0 })
+    expect(offsets.has(1)).toBe(false)
+    expect(offsets.has(2)).toBe(false)
   })
 })

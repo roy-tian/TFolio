@@ -1,5 +1,5 @@
-import { useRef } from "react"
-import { FileText, Plus } from "lucide-react"
+import { useLayoutEffect, useRef, type RefObject } from "react"
+import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { PdfPage } from "@/components/PdfPage"
@@ -8,6 +8,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
+import { orderAfterMove, slotOffsets, type CellBox } from "@/lib/pageDrag"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -36,7 +37,10 @@ export type PageEditProps = {
   onInsertBlankPage: (index: number) => void
   /** Double-click: leave the grid for the page itself. */
   onOpenPage: (pageNumber: number) => void
-  onReorderPages: (order: number[]) => void
+  /** Answers with the reorder's own promise, which the grid holds its
+      make-way layout until: the pages change only once the backend has moved
+      them. */
+  onReorderPages: (order: number[]) => void | Promise<unknown>
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   selectedPages: ReadonlySet<number>
 }
@@ -147,15 +151,14 @@ function BookLayout({
 /**
  * The gap beside a thumbnail, as a button: it fills the space between the two
  * pages, so hovering or focusing anywhere in there shows a dashed insertion line
- * down the middle of the gap, and pressing it inserts a blank page. During a
- * drag the same line, solid, marks where the drop would land: a page being
- * dragged within the grid, or a PDF dragged in from the desktop — which is why
- * the zone carries its own position as `data-insert-index`, for the drop to read
- * off the element under the pointer. While a page drag runs the button goes
- * inert, so the gesture above it keeps the pointer.
+ * down the middle of the gap, and pressing it inserts a blank page. The same
+ * line, solid, marks where a PDF dragged in from the desktop would land — which
+ * is why the zone carries its own position as `data-insert-index`, for the drop
+ * to read off the element under the pointer. A page dragged *within* the grid
+ * says it differently: the cells themselves move aside, so while that gesture
+ * runs the zone shows nothing and goes inert, leaving it the pointer.
  */
 function InsertZone({
-  dragGap,
   dragging,
   fileDropIndex,
   index,
@@ -164,8 +167,7 @@ function InsertZone({
   paperHeight,
   trailing,
 }: {
-  /** The gap a page drag in progress would drop into, counted from zero. */
-  dragGap: number | undefined
+  /** Whether a page drag has the grid, which mutes every zone. */
   dragging: boolean
   /** The position a dropped file's first page would take, or null. */
   fileDropIndex: number | null
@@ -179,11 +181,7 @@ function InsertZone({
   paperHeight: number
   trailing?: boolean
 }) {
-  // The two drags name the same gap differently: a page drag counts the gaps
-  // from zero, a file drop names the position its first page would take, which
-  // is this zone's own `index`. Reconciled once, here, rather than at each
-  // call site.
-  const active = dragGap === index - 1 || fileDropIndex === index
+  const active = fileDropIndex === index
 
   return (
     <button
@@ -228,22 +226,132 @@ function InsertZone({
   )
 }
 
-/** The card riding the pointer during a drag: how many pages are in hand. */
-function DragGhost({ drag }: { drag: PageDragState }) {
+/**
+ * The page riding the pointer: the grabbed thumbnail itself, its pixels copied
+ * straight out of the cell it was lifted from. The grid's canvas is a bitmap
+ * the frontend already holds, so the ghost costs no second render and needs no
+ * image source — the same reason page bitmaps never become `blob:` URLs. A
+ * block of pages stacks two blank cards behind the one on top and counts
+ * itself in the corner.
+ *
+ * It hangs off the pointer by the grip it was picked up by, so the paper stays
+ * under the same spot of itself the whole way to the drop.
+ */
+function DragGhost({
+  drag,
+  gridRef,
+  page,
+  rotation,
+}: {
+  drag: PageDragState
+  gridRef: RefObject<HTMLElement | null>
+  /** The grabbed page, for the paper's own proportions. */
+  page: PdfPageInfo
+  rotation: number
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Every render, deliberately: the cell's own bitmap arrives asynchronously,
+  // so a page grabbed the moment it scrolled into view has nothing to copy yet.
+  // The drag re-renders on each move, which is when the pixels are picked up.
+  useLayoutEffect(() => {
+    const source = gridRef.current?.querySelector<HTMLCanvasElement>(
+      `[data-page-number="${drag.lead}"] canvas`,
+    )
+    const canvas = canvasRef.current
+    const context = canvas?.getContext("2d")
+
+    if (!source || !canvas || !context) {
+      return
+    }
+
+    // Assigning either dimension clears the canvas, so only on a real change.
+    if (canvas.width !== source.width || canvas.height !== source.height) {
+      canvas.width = source.width
+      canvas.height = source.height
+    }
+
+    context.drawImage(source, 0, 0)
+  })
+
+  const footprint = dimensionsForRotation(rotation, page.width, page.height)
+  const height = (THUMBNAIL_WIDTH * footprint.height) / footprint.width
+
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full"
-      style={{ left: drag.pointer.x, top: drag.pointer.y - 8 }}
+      className="pointer-events-none fixed z-50"
+      style={{
+        height,
+        left: drag.pointer.x + drag.grip.x,
+        top: drag.pointer.y + drag.grip.y,
+        width: THUMBNAIL_WIDTH,
+      }}
     >
-      <div className="flex items-center gap-1.5 rounded-md border border-border bg-background/90 px-2.5 py-1.5 shadow-lg">
-        <FileText className="size-4 text-muted-foreground" />
-        <span className="font-mono text-xs font-semibold tabular-nums">
+      {/* Two cards for a block of any size: the stack says "more than this
+          one", the badge says how many. */}
+      {drag.pages.length > 1
+        ? [8, 4].map((step) => (
+            <div
+              className="absolute inset-0 bg-white opacity-70 shadow-md ring-1 ring-black/10"
+              key={step}
+              style={{
+                transform: `translate(${step}px, ${step}px) rotate(${step / 2}deg)`,
+              }}
+            />
+          ))
+        : null}
+      <div className="absolute inset-0 -rotate-2 overflow-hidden bg-white opacity-90 shadow-2xl ring-1 ring-black/10">
+        <div
+          className="absolute"
+          style={{
+            height: `${(page.height / footprint.height) * 100}%`,
+            left: "50%",
+            top: "50%",
+            transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+            width: `${(page.width / footprint.width) * 100}%`,
+          }}
+        >
+          <canvas className="block h-full w-full" ref={canvasRef} />
+        </div>
+      </div>
+      {drag.pages.length > 1 ? (
+        <span className="absolute -right-2 -top-2 grid min-w-5 place-items-center rounded-full bg-primary px-1 py-0.5 font-mono text-xs font-semibold tabular-nums text-primary-foreground shadow-md">
           {drag.pages.length}
         </span>
-      </div>
+      ) : null}
     </div>
   )
+}
+
+/**
+ * What the grid shows while a drag hovers a gap: the pages in hand, where every
+ * other page slides to make room for them, and the slot the block would land
+ * in. Read straight from the drag, so the preview and the drop that follows it
+ * are the same arithmetic.
+ *
+ * Letting go changes none of it. The pages have not moved yet — the backend
+ * has still to be asked — so the way stays made and the hole stays open, held
+ * for the pages the ghost was carrying, until the reorder lands and the grid
+ * really holds what this was drawing.
+ */
+function dropPreview(
+  drag: PageDragState,
+  pageCount: number,
+): {
+  landing: CellBox | undefined
+  lifted: ReadonlySet<number>
+  offsets: Map<number, { x: number; y: number }>
+} {
+  const order = orderAfterMove(drag.pages, drag.gap, pageCount)
+  const lifted = new Set(drag.pages)
+
+  return {
+    // The block keeps its order, so its first page is where it starts.
+    landing: drag.cells[order.indexOf(drag.pages[0]!)],
+    lifted,
+    offsets: slotOffsets(order, drag.cells, lifted),
+  }
 }
 
 function ThumbnailLayout({
@@ -270,6 +378,9 @@ function ThumbnailLayout({
     selectedPages: pageEdit.selectedPages,
   })
 
+  const preview = drag ? dropPreview(drag, pages.length) : null
+  const ghostPage = drag ? pages[drag.lead - 1] : undefined
+
   const selectPage = (pageNumber: number, modifiers: SelectionModifiers) => {
     // The click a finished drag releases is the gesture ending, not a choice.
     if (wasDragClick()) {
@@ -281,7 +392,7 @@ function ThumbnailLayout({
 
   return (
     <div
-      className="grid"
+      className="relative grid"
       ref={gridRef}
       // The row gap is the cell's own bottom padding rather than the grid's, so
       // that every point between two rows still belongs to a cell: a file drag
@@ -293,8 +404,26 @@ function ThumbnailLayout({
         rowGap: 0,
       }}
     >
+      {/* The hole the block would drop into, drawn before the cells so a page
+          sliding past it passes over it rather than under. */}
+      {preview?.landing ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute border-2 border-dashed border-primary/60 bg-primary/5 transition-all duration-200 ease-out"
+          style={{
+            height: preview.landing.height,
+            left: preview.landing.left,
+            top: preview.landing.top,
+            width: preview.landing.width,
+          }}
+        />
+      ) : null}
       {pages.map((page, index) => {
         const pageNumber = index + 1
+        // Where this page stands while the drag hovers: aside, to open the
+        // hole, or gone from the grid because it is in hand.
+        const offset = preview?.offsets.get(pageNumber)
+        const lifted = preview?.lifted.has(pageNumber) ?? false
         // What the cell's own paper works out to: the grid fixes every cell's
         // width, so the page's footprint fixes its height.
         const footprint = dimensionsForRotation(
@@ -307,13 +436,29 @@ function ThumbnailLayout({
 
         return (
           <div
-            className="relative"
+            className={cn(
+              "relative",
+              // Only while a drag runs. It outlives the pointer by the
+              // reorder's own round trip, so the transform and the transition
+              // that carries it both go in the very commit that reorders the
+              // pages: that commit is the no-op it looks like, not a slide
+              // back out of a place the page by then really holds.
+              drag && "transition-transform duration-200 ease-out",
+              // The ghost carries this page; the grid it left has to read as
+              // one page short, not as a page sitting under its own ghost.
+              lifted && "opacity-0",
+            )}
             // The whole cell, page number and badge included, answers for the
             // page it holds — `data-page-number` sits on the paper alone, which
             // would leave the caption under it a hole in the drop target.
             data-page-cell={pageNumber}
             key={`${documentId}-${pageNumber}`}
-            style={{ paddingBottom: THUMBNAIL_ROW_GAP }}
+            style={{
+              paddingBottom: THUMBNAIL_ROW_GAP,
+              transform: offset
+                ? `translate(${offset.x}px, ${offset.y}px)`
+                : undefined,
+            }}
           >
             <PdfThumbnail
               deleteDisabled={
@@ -338,7 +483,6 @@ function ThumbnailLayout({
               width={THUMBNAIL_WIDTH}
             />
             <InsertZone
-              dragGap={drag?.gap}
               dragging={Boolean(drag)}
               fileDropIndex={pageEdit.fileDropIndex}
               index={pageNumber}
@@ -354,7 +498,6 @@ function ThumbnailLayout({
                 the row has no dead edge. */}
             {pageNumber % columns === 0 || pageNumber === pages.length ? (
               <InsertZone
-                dragGap={drag?.gap}
                 dragging={Boolean(drag)}
                 fileDropIndex={pageEdit.fileDropIndex}
                 index={pageNumber + 1}
@@ -371,7 +514,18 @@ function ThumbnailLayout({
           </div>
         )
       })}
-      {drag ? <DragGhost drag={drag} /> : null}
+      {/* Gone the moment the pointer is up, though the made way stands until
+          the reorder lands. The page it names may already be out of range —
+          the grid can be handed a shorter document mid-gesture — and a ghost
+          is not worth taking the viewer down for. */}
+      {drag && !drag.released && ghostPage ? (
+        <DragGhost
+          drag={drag}
+          gridRef={gridRef}
+          page={ghostPage}
+          rotation={rotation}
+        />
+      ) : null}
     </div>
   )
 }

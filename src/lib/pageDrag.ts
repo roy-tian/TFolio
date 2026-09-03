@@ -135,3 +135,40 @@ export function orderAfterMove(
     ...remaining.slice(insertAt),
   ]
 }
+
+/**
+ * How far each page has to slide for the grid to read as `order`: the page
+ * standing in slot i moves to the box of the slot `order` gives it, which is
+ * what opens a hole where the drop would land. Keyed by 1-based page number.
+ *
+ * The boxes are the ones measured at drag start, so a page lands exactly on a
+ * slot that is really there — a preview that re-measured mid-gesture would
+ * chase its own movement. Pages already in place, and any page in `lifted` —
+ * travelling with the pointer, so it has no slot to slide to — are left out.
+ */
+export function slotOffsets(
+  order: number[],
+  cells: CellBox[],
+  lifted: ReadonlySet<number>,
+): Map<number, { x: number; y: number }> {
+  const offsets = new Map<number, { x: number; y: number }>()
+
+  for (let slot = 0; slot < order.length; slot += 1) {
+    const pageNumber = order[slot]!
+    const from = cells[pageNumber - 1]
+    const to = cells[slot]
+
+    if (!from || !to || lifted.has(pageNumber)) {
+      continue
+    }
+
+    const x = to.left - from.left
+    const y = to.top - from.top
+
+    if (x !== 0 || y !== 0) {
+      offsets.set(pageNumber, { x, y })
+    }
+  }
+
+  return offsets
+}

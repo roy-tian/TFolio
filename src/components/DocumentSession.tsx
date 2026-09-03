@@ -721,12 +721,14 @@ function DocumentSession(
     void annotations.insertBlankPage(index, pdfDocument.numPages)
   }
 
+  // Answered with, rather than voided: the grid holds the pages where the drop
+  // put them until this settles, since nothing moves before the backend has.
   const reorderPages = (order: number[]) => {
     if (editingBusy()) {
       return
     }
 
-    void annotations.reorderPages(order)
+    return annotations.reorderPages(order)
   }
 
   // Page content this session owns (a watermark, page numbers) and merged
