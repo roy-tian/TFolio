@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
-import { resolveOutputScale, type PdfPageInfo } from "@/lib/pdf"
+import { resolveOutputScale } from "@/lib/pdf"
 
 type PageBitmapOptions = {
   canvasRef: RefObject<HTMLCanvasElement | null>
@@ -15,8 +15,13 @@ type PageBitmapOptions = {
   mimeType: string
   /** Minimum backing pixels per CSS pixel; useful for low-DPI reading surfaces. */
   minOutputScale?: number
-  page: PdfPageInfo
+  /** The page's displayed size in points. Taken apart rather than as a
+      `PdfPageInfo` so a caller whose page list is replaced wholesale — every
+      structure edit replaces it — hands this hook numbers that compare equal
+      instead of a fresh object. */
+  pageHeight: number
   pageNumber: number
+  pageWidth: number
   /**
    * Bumped when the page's content changes: the same page at the same width
    * renders differently once it has been drawn on, which nothing else about a
@@ -41,8 +46,9 @@ export function usePageBitmap({
   maxRenderWidth,
   mimeType,
   minOutputScale = 1,
-  page,
+  pageHeight,
   pageNumber,
+  pageWidth,
   renderEpoch,
   rotation,
   targetWidth,
@@ -75,7 +81,7 @@ export function usePageBitmap({
     // rotated, so the base target already covers them (scale stays 1).
     const rotationScale =
       rotation === 90 || rotation === 270
-        ? Math.max(1, page.width / page.height)
+        ? Math.max(1, pageWidth / pageHeight)
         : 1
     // The output-scale floor is a render *intent*, not a guarantee: once heavy
     // zoom pushes `targetWidth * outputScale * rotationScale` past
@@ -151,9 +157,9 @@ export function usePageBitmap({
     maxRenderWidth,
     mimeType,
     minOutputScale,
-    page.height,
-    page.width,
+    pageHeight,
     pageNumber,
+    pageWidth,
     renderEpoch,
     rotation,
     targetWidth,

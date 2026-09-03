@@ -115,8 +115,9 @@ function PdfPageSurface({
     maxRenderWidth: MAX_RENDER_WIDTH,
     mimeType: "image/png",
     minOutputScale: MIN_PAGE_OUTPUT_SCALE,
-    page,
+    pageHeight: page.height,
     pageNumber,
+    pageWidth: page.width,
     renderEpoch,
     rotation,
     targetWidth:

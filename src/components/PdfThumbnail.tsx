@@ -4,11 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
-import {
-  dimensionsForRotation,
-  MAX_THUMBNAIL_RENDER_WIDTH,
-  type PdfPageInfo,
-} from "@/lib/pdf"
+import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 
@@ -29,8 +25,12 @@ type PdfThumbnailProps = {
   onOpen: (pageNumber: number) => void
   /** Single click, with its modifiers, is selection. */
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
-  page: PdfPageInfo
+  /** The page's displayed size in points, taken apart rather than as a
+      `PdfPageInfo`: every structure edit replaces the whole page list, and a
+      cell whose own page did not change must still compare equal. */
+  pageHeight: number
   pageNumber: number
+  pageWidth: number
   /** Bumped when the page is drawn on, so the bitmap is fetched again. */
   renderEpoch: number
   rotation: number
@@ -55,8 +55,9 @@ export function PdfThumbnail({
   onDelete,
   onOpen,
   onSelect,
-  page,
+  pageHeight,
   pageNumber,
+  pageWidth,
   renderEpoch,
   rotation,
   selectedCount,
@@ -74,8 +75,9 @@ export function PdfThumbnail({
     isNearViewport,
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
-    page,
+    pageHeight,
     pageNumber,
+    pageWidth,
     renderEpoch,
     rotation,
     targetWidth: width,
@@ -84,7 +86,7 @@ export function PdfThumbnail({
   // The user rotation spins the preview clockwise, swapping the footprint a
   // quarter turn leaves behind.
   const { height: footprintHeight, width: footprintWidth } =
-    dimensionsForRotation(rotation, page.width, page.height)
+    dimensionsForRotation(rotation, pageWidth, pageHeight)
   const label = t("viewer.thumbnailLabel", { pageNumber })
   const deletesSelection = isSelected && selectedCount > 1
   const deleteLabel = deletesSelection
@@ -123,18 +125,18 @@ export function PdfThumbnail({
         <div
           className="absolute"
           style={{
-            height: `${(page.height / footprintHeight) * 100}%`,
+            height: `${(pageHeight / footprintHeight) * 100}%`,
             left: "50%",
             top: "50%",
             transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-            width: `${(page.width / footprintWidth) * 100}%`,
+            width: `${(pageWidth / footprintWidth) * 100}%`,
           }}
         >
           <canvas
             className="block h-full w-full"
-            height={Math.max(1, Math.round(page.height))}
+            height={Math.max(1, Math.round(pageHeight))}
             ref={canvasRef}
-            width={Math.max(1, Math.round(page.width))}
+            width={Math.max(1, Math.round(pageWidth))}
           />
         </div>
         {!hasRendered && !renderFailed ? (

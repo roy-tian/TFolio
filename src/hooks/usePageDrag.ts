@@ -52,7 +52,8 @@ export type PageDragState = {
  * A press only becomes a drag past a small movement threshold, which is what
  * keeps single and double click working on the same cells. Cell geometry is
  * measured once at that moment, in grid coordinates; every later move is pure
- * math against the snapshot plus one rect read of the grid itself.
+ * math against the snapshot plus one rect read of the grid itself, and those
+ * are settled once a frame rather than once per pointer report.
  */
 export function usePageDrag({
   active,
@@ -97,6 +98,12 @@ export function usePageDrag({
     // Bumped by every gesture that takes the grid, so a reorder resolving late
     // cannot clear a drag that started after it.
     let release = 0
+    // A pointer reports faster than the display refreshes, and every report
+    // re-renders a grid that can hold hundreds of cells. Hold the latest
+    // position and settle it once a frame: the drop still reads the pointer's
+    // own coordinates at release, so only the preview is coalesced.
+    let frame = 0
+    let latest: { x: number; y: number } | null = null
     let gesture: {
       pointerId: number
       pageNumber: number
@@ -107,7 +114,7 @@ export function usePageDrag({
       dragging: boolean
     } | null = null
 
-    const gridPoint = (event: PointerEvent) => {
+    const gridPointAt = (client: { x: number; y: number }) => {
       const grid = gridRef.current
 
       if (!grid) {
@@ -116,12 +123,58 @@ export function usePageDrag({
 
       const rect = grid.getBoundingClientRect()
 
-      return { x: event.clientX - rect.left, y: event.clientY - rect.top }
+      return { x: client.x - rect.left, y: client.y - rect.top }
+    }
+
+    const cancelFrame = () => {
+      if (frame !== 0) {
+        cancelAnimationFrame(frame)
+        frame = 0
+      }
+
+      latest = null
+    }
+
+    /** The pages travelling with the pointer: a grabbed page that is part of
+        the selection brings the whole selection with it, any other goes alone. */
+    const draggedPages = (pageNumber: number) => {
+      const selectedPages = selectedPagesRef.current
+
+      return selectedPages.has(pageNumber)
+        ? [...selectedPages].sort((left, right) => left - right)
+        : [pageNumber]
+    }
+
+    const settleMove = () => {
+      frame = 0
+
+      const pointer = latest
+
+      if (!gesture?.dragging || !pointer) {
+        return
+      }
+
+      const point = gridPointAt(pointer)
+
+      if (!point) {
+        return
+      }
+
+      setDrag({
+        cells: gesture.cells,
+        gap: dropGapForPoint(point, gesture.cells, columnsRef.current),
+        grip: gesture.grip,
+        lead: gesture.pageNumber,
+        pages: draggedPages(gesture.pageNumber),
+        pointer,
+        released: false,
+      })
     }
 
     const handlePointerDown = (event: PointerEvent) => {
       gesture = null
       release += 1
+      cancelFrame()
       dragEndedAtRef.current = Number.NEGATIVE_INFINITY
       setDrag(null)
 
@@ -199,26 +252,11 @@ export function usePageDrag({
         gesture.dragging = true
       }
 
-      const point = gridPoint(event)
+      latest = { x: event.clientX, y: event.clientY }
 
-      if (!point) {
-        return
+      if (frame === 0) {
+        frame = requestAnimationFrame(settleMove)
       }
-
-      const selectedPages = selectedPagesRef.current
-      const pages = selectedPages.has(gesture.pageNumber)
-        ? [...selectedPages].sort((left, right) => left - right)
-        : [gesture.pageNumber]
-
-      setDrag({
-        cells: gesture.cells,
-        gap: dropGapForPoint(point, gesture.cells, columnsRef.current),
-        grip: gesture.grip,
-        lead: gesture.pageNumber,
-        pages,
-        pointer: { x: event.clientX, y: event.clientY },
-        released: false,
-      })
     }
 
     const handlePointerUp = (event: PointerEvent) => {
@@ -229,6 +267,9 @@ export function usePageDrag({
       const current = gesture
 
       gesture = null
+      // The release reads the pointer where it actually let go, so a frame
+      // still holding an older position has nothing left to say.
+      cancelFrame()
 
       if (!current.dragging) {
         setDrag(null)
@@ -237,17 +278,14 @@ export function usePageDrag({
 
       dragEndedAtRef.current = performance.now()
 
-      const point = gridPoint(event)
+      const point = gridPointAt({ x: event.clientX, y: event.clientY })
 
       if (!point) {
         setDrag(null)
         return
       }
 
-      const selectedPages = selectedPagesRef.current
-      const pages = selectedPages.has(current.pageNumber)
-        ? [...selectedPages].sort((left, right) => left - right)
-        : [current.pageNumber]
+      const pages = draggedPages(current.pageNumber)
       const gap = dropGapForPoint(point, current.cells, columnsRef.current)
 
       setDrag({
@@ -281,6 +319,7 @@ export function usePageDrag({
 
       gesture = null
       release += 1
+      cancelFrame()
       setDrag(null)
     }
 
@@ -290,6 +329,7 @@ export function usePageDrag({
     document.addEventListener("pointercancel", handlePointerCancel)
 
     return () => {
+      cancelFrame()
       document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("pointermove", handlePointerMove)
       document.removeEventListener("pointerup", handlePointerUp)

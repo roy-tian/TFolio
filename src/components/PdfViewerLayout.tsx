@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, type RefObject } from "react"
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type RefObject,
+} from "react"
 import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -159,18 +166,21 @@ function BookLayout({
  * runs the zone shows nothing and goes inert, leaving it the pointer.
  */
 function InsertZone({
+  active,
   dragging,
-  fileDropIndex,
   index,
   label,
   onInsert,
   paperHeight,
   trailing,
 }: {
+  /** Whether a file dragged in from the desktop would land in this gap.
+      Resolved by the caller rather than compared against the drop position
+      here, so a drag over the grid re-renders the two gaps it names instead of
+      every gap in the document. */
+  active: boolean
   /** Whether a page drag has the grid, which mutes every zone. */
   dragging: boolean
-  /** The position a dropped file's first page would take, or null. */
-  fileDropIndex: number | null
   /** The 1-based position a page inserted here would take. */
   index: number
   label: string
@@ -181,8 +191,6 @@ function InsertZone({
   paperHeight: number
   trailing?: boolean
 }) {
-  const active = fileDropIndex === index
-
   return (
     <button
       aria-label={label}
@@ -354,6 +362,154 @@ function dropPreview(
   }
 }
 
+/**
+ * One cell of the grid: a page's preview, the gap before it, and — at the end
+ * of a row — the gap after it.
+ *
+ * Memoised on primitives alone, which is what keeps a long document usable. The
+ * grid re-renders on every pointer move of a page drag and again after every
+ * edit; an unmemoised cell takes its whole subtree through each of those — an
+ * intersection observer, a translation lookup, a bitmap effect — and several
+ * hundred of them turn a drag into something the reader can feel. So nothing
+ * here may be an object or a fresh closure: either compares unequal on every
+ * render and switches the memo back off.
+ */
+const ThumbnailCell = memo(function ThumbnailCell({
+  deleteDisabled,
+  documentId,
+  dragging,
+  insertActive,
+  isCurrent,
+  isSelected,
+  lifted,
+  offsetX,
+  offsetY,
+  onDelete,
+  onInsert,
+  onOpen,
+  onSelect,
+  pageHeight,
+  pageNumber,
+  pageWidth,
+  renderEpoch,
+  rotation,
+  selectedCount,
+  trailingInsertActive,
+  trailingZone,
+}: {
+  deleteDisabled: boolean
+  documentId: number
+  /** Whether a page drag has the grid — every cell carries the transition the
+      make-way slide rides on, so it has to be in place before one moves. */
+  dragging: boolean
+  /** Whether a file dragged in from the desktop would land in the gap before
+      this page, and — below — in the gap after it. */
+  insertActive: boolean
+  isCurrent: boolean
+  isSelected: boolean
+  /** This page is travelling with the pointer, so the grid it left reads as one
+      page short rather than as a page sitting under its own ghost. */
+  lifted: boolean
+  /** How far this cell slides to make way for the drop, in CSS pixels. Numbers
+      rather than the point they came from: a fresh object every pointer move is
+      exactly what the memo above cannot have. */
+  offsetX: number
+  offsetY: number
+  onDelete: (pageNumber: number) => void
+  onInsert: (index: number) => void
+  onOpen: (pageNumber: number) => void
+  onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
+  pageHeight: number
+  pageNumber: number
+  pageWidth: number
+  renderEpoch: number
+  rotation: number
+  selectedCount: number
+  trailingInsertActive: boolean
+  /** Which gap follows this cell: none, the one closing its row, or the one
+      past the last page of the document. */
+  trailingZone: "none" | "row" | "end"
+}) {
+  const { t } = useTranslation()
+  // What the cell's own paper works out to: the grid fixes every cell's width,
+  // so the page's footprint fixes its height.
+  const footprint = dimensionsForRotation(rotation, pageWidth, pageHeight)
+  const paperHeight = (THUMBNAIL_WIDTH * footprint.height) / footprint.width
+
+  return (
+    <div
+      className={cn(
+        "relative",
+        // Only while a drag runs. It outlives the pointer by the reorder's own
+        // round trip, so the transform and the transition that carries it both
+        // go in the very commit that reorders the pages: that commit is the
+        // no-op it looks like, not a slide back out of a place the page by then
+        // really holds.
+        dragging && "transition-transform duration-200 ease-out",
+        // The ghost carries this page; the grid it left has to read as one page
+        // short, not as a page sitting under its own ghost.
+        lifted && "opacity-0",
+      )}
+      // The whole cell, page number and badge included, answers for the page it
+      // holds — `data-page-number` sits on the paper alone, which would leave
+      // the caption under it a hole in the drop target.
+      data-page-cell={pageNumber}
+      style={{
+        paddingBottom: THUMBNAIL_ROW_GAP,
+        transform:
+          offsetX !== 0 || offsetY !== 0
+            ? `translate(${offsetX}px, ${offsetY}px)`
+            : undefined,
+      }}
+    >
+      <PdfThumbnail
+        deleteDisabled={deleteDisabled}
+        documentId={documentId}
+        isCurrent={isCurrent}
+        isSelected={isSelected}
+        onDelete={onDelete}
+        onOpen={onOpen}
+        onSelect={onSelect}
+        pageHeight={pageHeight}
+        pageNumber={pageNumber}
+        pageWidth={pageWidth}
+        renderEpoch={renderEpoch}
+        rotation={rotation}
+        selectedCount={selectedCount}
+        width={THUMBNAIL_WIDTH}
+      />
+      <InsertZone
+        active={insertActive}
+        dragging={dragging}
+        index={pageNumber}
+        label={t("pageEdit.insertBefore", { pageNumber })}
+        onInsert={onInsert}
+        paperHeight={paperHeight}
+      />
+      {/* The gap after the last cell of every row, not only after the last
+          page: it is the same gap the next row's first cell leads with, but
+          drawn where the pointer actually is — a drop on the right half of a
+          row-final page would otherwise light a line a whole row away. It also
+          fills the layout's right padding, so the row has no dead edge. */}
+      {trailingZone !== "none" ? (
+        <InsertZone
+          active={trailingInsertActive}
+          dragging={dragging}
+          index={pageNumber + 1}
+          label={
+            trailingZone === "end"
+              ? t("pageEdit.insertAtEnd")
+              : t("pageEdit.insertBefore", { pageNumber: pageNumber + 1 })
+          }
+          onInsert={onInsert}
+          paperHeight={paperHeight}
+          trailing
+        />
+      ) : null}
+    </div>
+  )
+})
+
 function ThumbnailLayout({
   contentWidth,
   currentPage,
@@ -366,7 +522,6 @@ function ThumbnailLayout({
   currentPage: number
   pageEdit: PageEditProps
 }) {
-  const { t } = useTranslation()
   const columns = computeThumbnailColumns(contentWidth)
   const gridRef = useRef<HTMLDivElement>(null)
   const { drag, wasDragClick } = usePageDrag({
@@ -377,18 +532,45 @@ function ThumbnailLayout({
     pageCount: pages.length,
     selectedPages: pageEdit.selectedPages,
   })
+  // The owner hands its handlers down fresh on every render, and this grid
+  // re-renders on every pointer move of a drag. Latched here, the cells below
+  // see the same four callbacks throughout a gesture and can stand still — the
+  // same reason `usePageDrag` holds its own `onReorder` this way.
+  const pageEditRef = useRef(pageEdit)
 
-  const preview = drag ? dropPreview(drag, pages.length) : null
+  pageEditRef.current = pageEdit
+
+  const deletePage = useCallback(
+    (pageNumber: number) => pageEditRef.current.onDeletePage(pageNumber),
+    [],
+  )
+  const openPage = useCallback(
+    (pageNumber: number) => pageEditRef.current.onOpenPage(pageNumber),
+    [],
+  )
+  const insertPage = useCallback(
+    (index: number) => pageEditRef.current.onInsertBlankPage(index),
+    [],
+  )
+  const selectPage = useCallback(
+    (pageNumber: number, modifiers: SelectionModifiers) => {
+      // The click a finished drag releases is the gesture ending, not a choice.
+      if (wasDragClick()) {
+        return
+      }
+
+      pageEditRef.current.onSelectPage(pageNumber, modifiers)
+    },
+    [wasDragClick],
+  )
+
+  const preview = useMemo(
+    () => (drag ? dropPreview(drag, pages.length) : null),
+    [drag, pages.length],
+  )
   const ghostPage = drag ? pages[drag.lead - 1] : undefined
-
-  const selectPage = (pageNumber: number, modifiers: SelectionModifiers) => {
-    // The click a finished drag releases is the gesture ending, not a choice.
-    if (wasDragClick()) {
-      return
-    }
-
-    pageEdit.onSelectPage(pageNumber, modifiers)
-  }
+  const dragging = Boolean(drag)
+  const { fileDropIndex, selectedPages } = pageEdit
 
   return (
     <div
@@ -423,95 +605,52 @@ function ThumbnailLayout({
         // Where this page stands while the drag hovers: aside, to open the
         // hole, or gone from the grid because it is in hand.
         const offset = preview?.offsets.get(pageNumber)
-        const lifted = preview?.lifted.has(pageNumber) ?? false
-        // What the cell's own paper works out to: the grid fixes every cell's
-        // width, so the page's footprint fixes its height.
-        const footprint = dimensionsForRotation(
-          rotation,
-          page.width,
-          page.height,
-        )
-        const paperHeight =
-          (THUMBNAIL_WIDTH * footprint.height) / footprint.width
+        const isSelected = selectedPages.has(pageNumber)
+        const trailingZone =
+          pageNumber === pages.length
+            ? "end"
+            : pageNumber % columns === 0
+              ? "row"
+              : "none"
 
         return (
-          <div
-            className={cn(
-              "relative",
-              // Only while a drag runs. It outlives the pointer by the
-              // reorder's own round trip, so the transform and the transition
-              // that carries it both go in the very commit that reorders the
-              // pages: that commit is the no-op it looks like, not a slide
-              // back out of a place the page by then really holds.
-              drag && "transition-transform duration-200 ease-out",
-              // The ghost carries this page; the grid it left has to read as
-              // one page short, not as a page sitting under its own ghost.
-              lifted && "opacity-0",
-            )}
-            // The whole cell, page number and badge included, answers for the
-            // page it holds — `data-page-number` sits on the paper alone, which
-            // would leave the caption under it a hole in the drop target.
-            data-page-cell={pageNumber}
+          <ThumbnailCell
+            deleteDisabled={
+              pages.length === 1 ||
+              // Deleting a selected page takes the whole selection; when that
+              // is every page the backend refuses it, so the button that would
+              // silently do nothing is disabled instead.
+              (isSelected && selectedPages.size === pages.length)
+            }
+            documentId={documentId}
+            dragging={dragging}
+            insertActive={fileDropIndex === pageNumber}
+            isCurrent={currentPage === pageNumber}
+            isSelected={isSelected}
             key={`${documentId}-${pageNumber}`}
-            style={{
-              paddingBottom: THUMBNAIL_ROW_GAP,
-              transform: offset
-                ? `translate(${offset.x}px, ${offset.y}px)`
-                : undefined,
-            }}
-          >
-            <PdfThumbnail
-              deleteDisabled={
-                pages.length === 1 ||
-                // Deleting a selected page takes the whole selection; when that
-                // is every page the backend refuses it, so the button that
-                // would silently do nothing is disabled instead.
-                (pageEdit.selectedPages.has(pageNumber) &&
-                  pageEdit.selectedPages.size === pages.length)
-              }
-              documentId={documentId}
-              isCurrent={currentPage === pageNumber}
-              isSelected={pageEdit.selectedPages.has(pageNumber)}
-              onDelete={pageEdit.onDeletePage}
-              onOpen={pageEdit.onOpenPage}
-              onSelect={selectPage}
-              page={page}
-              pageNumber={pageNumber}
-              renderEpoch={renderEpochs[pageNumber] ?? 0}
-              rotation={rotation}
-              selectedCount={pageEdit.selectedPages.size}
-              width={THUMBNAIL_WIDTH}
-            />
-            <InsertZone
-              dragging={Boolean(drag)}
-              fileDropIndex={pageEdit.fileDropIndex}
-              index={pageNumber}
-              label={t("pageEdit.insertBefore", { pageNumber })}
-              onInsert={pageEdit.onInsertBlankPage}
-              paperHeight={paperHeight}
-            />
-            {/* The gap after the last cell of every row, not only after the
-                last page: it is the same gap the next row's first cell leads
-                with, but drawn where the pointer actually is — a drop on the
-                right half of a row-final page would otherwise light a line a
-                whole row away. It also fills the layout's right padding, so
-                the row has no dead edge. */}
-            {pageNumber % columns === 0 || pageNumber === pages.length ? (
-              <InsertZone
-                dragging={Boolean(drag)}
-                fileDropIndex={pageEdit.fileDropIndex}
-                index={pageNumber + 1}
-                label={
-                  pageNumber === pages.length
-                    ? t("pageEdit.insertAtEnd")
-                    : t("pageEdit.insertBefore", { pageNumber: pageNumber + 1 })
-                }
-                onInsert={pageEdit.onInsertBlankPage}
-                paperHeight={paperHeight}
-                trailing
-              />
-            ) : null}
-          </div>
+            lifted={preview?.lifted.has(pageNumber) ?? false}
+            offsetX={offset?.x ?? 0}
+            offsetY={offset?.y ?? 0}
+            onDelete={deletePage}
+            onInsert={insertPage}
+            onOpen={openPage}
+            onSelect={selectPage}
+            pageHeight={page.height}
+            pageNumber={pageNumber}
+            pageWidth={page.width}
+            renderEpoch={renderEpochs[pageNumber] ?? 0}
+            rotation={rotation}
+            // Only a page the delete would actually take the selection with
+            // needs the count; giving it to the rest would re-render the whole
+            // grid every time the selection grew by one.
+            selectedCount={isSelected ? selectedPages.size : 1}
+            // Only where that gap is actually drawn: a cell with none of its
+            // own must not re-render for a drop it cannot show.
+            trailingInsertActive={
+              trailingZone !== "none" && fileDropIndex === pageNumber + 1
+            }
+            trailingZone={trailingZone}
+          />
         )
       })}
       {/* Gone the moment the pointer is up, though the made way stands until
