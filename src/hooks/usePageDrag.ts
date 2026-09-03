@@ -23,7 +23,8 @@ type UsePageDragOptions = {
 /** A drag in progress, for the ghost and the make-way preview. */
 export type PageDragState = {
   /** The cell boxes as they stood when the drag began, in grid coordinates:
-      the slots the grid's own pages slide between to open the drop's hole. */
+      the slots the grid's own pages slide between to open the drop's hole. Each
+      is the whole cell, the row gap it carries as padding included. */
   cells: CellBox[]
   /** The gap the drop would land in: 0 before page 1, n after the last. */
   gap: number
@@ -189,13 +190,15 @@ export function usePageDrag({
         return
       }
 
-      const cellElement = target.closest("[data-page-number]")
+      // The paper alone starts a drag; the caption under it and the button over
+      // its corner are the cell's, not the page's.
+      const paper = target.closest("[data-page-number]")
 
-      if (!cellElement) {
+      if (!paper) {
         return
       }
 
-      const pageNumber = Number(cellElement.getAttribute("data-page-number"))
+      const pageNumber = Number(paper.getAttribute("data-page-number"))
 
       if (!Number.isInteger(pageNumber) || pageNumber < 1) {
         return
@@ -204,9 +207,16 @@ export function usePageDrag({
       // The layout cannot change mid-drag, so one measurement pass here is the
       // whole geometry: cell boxes in the grid's own space stay true however
       // the viewer scrolls underneath the pointer.
+      //
+      // The whole cell, not the paper inside it: cells tile the grid, so every
+      // row is one band and the slide that opens the drop's hole is the plain
+      // difference between two slots. Paper boxes would be neither — a page
+      // centred in a row taller than itself sits at its own height, and a
+      // landscape page sliding into a portrait page's slot would jump to the
+      // top of the row on the way.
       const gridRect = grid.getBoundingClientRect()
       const cells = Array.from(
-        grid.querySelectorAll<HTMLElement>("[data-page-number]"),
+        grid.querySelectorAll<HTMLElement>("[data-page-cell]"),
         (cell) => {
           const rect = cell.getBoundingClientRect()
 
@@ -219,7 +229,9 @@ export function usePageDrag({
         },
       )
 
-      const pressed = cellElement.getBoundingClientRect()
+      // The grip is the paper's, so the ghost — which is a paper — stays under
+      // the same spot of itself all the way to the drop.
+      const pressed = paper.getBoundingClientRect()
 
       gesture = {
         cells,

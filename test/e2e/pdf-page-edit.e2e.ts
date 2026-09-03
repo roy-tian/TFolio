@@ -295,6 +295,17 @@ describe("TFolio page editing", () => {
     await openPdfFromDisk("insert.pdf", bandedPdf(3))
     const [first, second] = await paintedFingerprints(3)
 
+    // The gap only shows where a page would go — the + it draws is the button
+    // — so a click that lands beside a page adds nothing. What says so is the
+    // count at the end of this test rather than one taken here: an insert is a
+    // round trip, so the grid is still three pages long either way for as long
+    // as a synchronous read can see.
+    await browser.execute(() => {
+      document
+        .querySelector("[data-insert-index='2']")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
     await $("button[aria-label='Insert a blank page before page 2']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the insert never landed",
@@ -303,6 +314,9 @@ describe("TFolio page editing", () => {
     await waitForThumb(2, 0)
     await waitForThumb(1, first!)
     await waitForThumb(3, second!)
+    // Three round trips later: the + inserted one page, the click on the gap
+    // beside it none.
+    expect(await thumbCount()).toBe(4)
 
     await $("button[aria-label='Insert a blank page at the end']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 5, {

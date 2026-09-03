@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import {
   computeThumbnailColumns,
   pairPages,
+  THUMBNAIL_CAPTION_HEIGHT,
   THUMBNAIL_COLUMN_GAP,
   THUMBNAIL_ROW_GAP,
   THUMBNAIL_WIDTH,
@@ -155,15 +156,22 @@ function BookLayout({
   ))
 }
 
+/** What draws the line and the +: a hover anywhere in the gap, or a keyboard
+    reaching the button inside it. */
+const ZONE_SHOWN =
+  "group-hover/zone:opacity-100 group-has-[:focus-visible]/zone:opacity-100"
+
 /**
- * The gap beside a thumbnail, as a button: it fills the space between the two
- * pages, so hovering or focusing anywhere in there shows a dashed insertion line
- * down the middle of the gap, and pressing it inserts a blank page. The same
- * line, solid, marks where a PDF dragged in from the desktop would land — which
- * is why the zone carries its own position as `data-insert-index`, for the drop
- * to read off the element under the pointer. A page dragged *within* the grid
- * says it differently: the cells themselves move aside, so while that gesture
- * runs the zone shows nothing and goes inert, leaving it the pointer.
+ * The gap beside a thumbnail: it fills the space between the two pages, so
+ * hovering anywhere in there shows a dashed insertion line down the middle of
+ * the gap and, on the line, the + that inserts a blank page. Only that button
+ * inserts — the gap is a target for the eye and for a drop, not for a click, so
+ * reaching past a page cannot add one. The same line, solid, marks where a PDF
+ * dragged in from the desktop would land — which is why the zone carries its own
+ * position as `data-insert-index`, for the drop to read off the element under
+ * the pointer. A page dragged *within* the grid says it differently: the cells
+ * themselves move aside, so while that gesture runs the zone shows nothing and
+ * goes inert, leaving it the pointer.
  */
 function InsertZone({
   active,
@@ -192,45 +200,62 @@ function InsertZone({
   trailing?: boolean
 }) {
   return (
-    <button
-      aria-label={label}
+    <div
       className={cn(
-        "group/zone absolute top-0 z-10 flex h-full justify-center outline-none",
+        "group/zone absolute top-0 z-10 flex h-full flex-col items-center justify-center",
         dragging && "pointer-events-none",
       )}
       data-insert-index={index}
-      onClick={() => onInsert(index)}
-      // A press in the gap is not the start of a page drag.
-      onPointerDown={(event) => event.stopPropagation()}
       // The whole gap, so every point over the grid names an insertion position
       // — the cells answer for themselves — and the line lands in its middle.
+      // The cell beside it centres its page in the row and hangs the page
+      // number under it, so this column stands the same way: what the line runs
+      // beside is that page's own paper, not the row's tallest.
       style={{
         [trailing ? "right" : "left"]: -THUMBNAIL_COLUMN_GAP,
+        paddingBottom: THUMBNAIL_ROW_GAP,
         width: THUMBNAIL_COLUMN_GAP,
       }}
-      title={label}
-      type="button"
     >
-      <span
-        className={cn(
-          "pointer-events-none absolute top-0 w-0 border-l border-dashed border-primary/50 opacity-0 transition-opacity",
-          !dragging && "group-hover/zone:opacity-100 group-focus-visible/zone:opacity-100",
-          // A drop lands somewhere definite, so that line speaks up.
-          active && "border-l-2 border-solid border-primary opacity-100",
-        )}
-        style={{ height: paperHeight }}
-      />
-      <span
-        className={cn(
-          "pointer-events-none absolute grid size-5 -translate-y-1/2 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
-          !dragging && "group-hover/zone:opacity-100 group-focus-visible/zone:opacity-100",
-          active && "opacity-100",
-        )}
-        style={{ top: paperHeight / 2 }}
+      <div
+        className="relative w-0"
+        style={{ height: `calc(${paperHeight}px + ${THUMBNAIL_CAPTION_HEIGHT})` }}
       >
-        <Plus className="size-3" />
-      </span>
-    </button>
+        <span
+          className={cn(
+            "pointer-events-none absolute left-0 top-0 w-0 border-l border-dashed border-primary/50 opacity-0 transition-opacity",
+            !dragging && ZONE_SHOWN,
+            // A drop lands somewhere definite, so that line speaks up.
+            active && "border-l-2 border-solid border-primary opacity-100",
+          )}
+          style={{ height: paperHeight }}
+        />
+        <button
+          aria-label={label}
+          // The button is the whole target and nothing else in the gap is, so
+          // the circle it fades in is the only place a page can be added from.
+          // It keeps its own hit area rather than borrowing the gap's: the
+          // pointer that made it appear is already on it.
+          className="absolute left-0 grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none"
+          onClick={() => onInsert(index)}
+          // A press here is a press on the button, not on the grid under it.
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{ top: paperHeight / 2 }}
+          title={label}
+          type="button"
+        >
+          <span
+            className={cn(
+              "grid size-5 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
+              !dragging && ZONE_SHOWN,
+              active && "opacity-100",
+            )}
+          >
+            <Plus className="size-3" />
+          </span>
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -439,7 +464,12 @@ const ThumbnailCell = memo(function ThumbnailCell({
   return (
     <div
       className={cn(
-        "relative",
+        // Centred, so a page shorter than the row it sits in — a landscape page
+        // among portrait ones — stands in the middle of its row rather than
+        // hanging from the top of it. The cell itself still fills the row: the
+        // band beside a short page has to keep naming its position for a file
+        // dragged across the grid.
+        "relative flex flex-col justify-center",
         // Only while a drag runs. It outlives the pointer by the reorder's own
         // round trip, so the transform and the transition that carries it both
         // go in the very commit that reorders the pages: that commit is the
@@ -593,7 +623,9 @@ function ThumbnailLayout({
           aria-hidden
           className="pointer-events-none absolute border-2 border-dashed border-primary/60 bg-primary/5 transition-all duration-200 ease-out"
           style={{
-            height: preview.landing.height,
+            // The cell carries the row gap as its own bottom padding, which
+            // lies between two slots rather than in either.
+            height: preview.landing.height - THUMBNAIL_ROW_GAP,
             left: preview.landing.left,
             top: preview.landing.top,
             width: preview.landing.width,

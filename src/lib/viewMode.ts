@@ -17,6 +17,16 @@ export const THUMBNAIL_WIDTH = 160
 export const THUMBNAIL_ROW_GAP = 16
 export const THUMBNAIL_COLUMN_GAP = 32
 
+/** The page number under a thumbnail, the space over it included, as a CSS
+    length. A cell shorter than its row stands centred in it, so the gap beside
+    the cell can only put its insertion line beside that page's own paper by
+    knowing how much of the cell's height is spent below the paper. Said in
+    `rem` rather than pixels because the number itself is `text-xs` — one `rem`
+    of line box, plus the `0.375rem` that used to be the column's gap — so a
+    WebView whose root font size is not 16px keeps the box and the line agreed
+    instead of clipping the one and misplacing the other. */
+export const THUMBNAIL_CAPTION_HEIGHT = "1.375rem"
+
 export function isViewMode(value: unknown): value is ViewMode {
   return viewModes.includes(value as ViewMode)
 }

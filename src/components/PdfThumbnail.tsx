@@ -7,6 +7,7 @@ import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
+import { THUMBNAIL_CAPTION_HEIGHT } from "@/lib/viewMode"
 
 // A thumbnail cell is a fraction of a page's height, so the page-sized prefetch
 // margin would reach several rows past the viewport and burst dozens of renders
@@ -94,7 +95,7 @@ export function PdfThumbnail({
     : t("pageEdit.deletePage", { pageNumber })
 
   return (
-    <div className="group/thumb relative flex flex-col items-center gap-1.5">
+    <div className="group/thumb relative flex flex-col items-center">
       <button
         aria-current={isCurrent ? "page" : undefined}
         aria-label={label}
@@ -172,11 +173,16 @@ export function PdfThumbnail({
       >
         <X className="size-3.5" />
       </button>
+      {/* The space over the number is the caption's own box rather than the
+          column's gap, so what the number costs the cell is one known height —
+          which is what lets the insertion line beside the cell find the paper
+          in a row taller than it. */}
       <span
         className={cn(
-          "font-mono text-xs tabular-nums",
+          "flex items-end font-mono text-xs tabular-nums",
           isCurrent ? "font-semibold text-foreground" : "text-muted-foreground",
         )}
+        style={{ height: THUMBNAIL_CAPTION_HEIGHT }}
       >
         {pageNumber}
       </span>
