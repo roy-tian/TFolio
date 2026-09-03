@@ -128,9 +128,11 @@ export function DocumentTabs({
 
         {/* Sized by its tabs rather than by the strip, so the open action
             stays at their end until they fill the row — and only then at
-            its edge. */}
+            its edge. The other axis has to be pinned: `overflow-x` alone
+            promotes it to `auto`, and each tab's `mb-[-1px]` is enough
+            overflow for a scrollbar (steppers and all) to appear. */}
         <div
-          className="flex h-full min-w-0 items-end overflow-x-auto"
+          className="flex h-full min-w-0 items-end overflow-x-auto overflow-y-hidden"
           ref={scrollerRef}
         >
           {tabs.map((tab, index) => {
