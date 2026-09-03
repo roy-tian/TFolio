@@ -409,18 +409,38 @@ describe("structure commands", () => {
     expect(planInsertBlankPage(emptyHistory, 6, 4)).toBeNull()
   })
 
-  it("invalidates every page, bitmaps and text alike", () => {
+  it("invalidates only the pages it moves, bitmaps and text alike", () => {
     const reorder = planReorderPages(emptyHistory, [2, 1, 3])!.command
-    const deletion = planDeletePages(emptyHistory, [2], 3)!.command
-    const insertion = planInsertBlankPage(emptyHistory, 1, 3)!.command
+    const deletion = planDeletePages(emptyHistory, [3], 4)!.command
+    const insertion = planInsertBlankPage(emptyHistory, 2, 3)!.command
 
+    // Page 3 keeps its number, so it keeps its bitmap; a long document redrawn
+    // whole would cost a render per visible thumbnail for nothing.
+    expect(commandPages(reorder)).toEqual([1, 2])
+    expect(commandTextPages(reorder)).toEqual([1, 2])
+    // Delete invalidates from the first page taken out, against the wider,
+    // pre-delete shape of the document.
+    expect(commandPages(deletion)).toEqual([3, 4])
+    // Insert invalidates from the gap, against the wider, post-insert shape.
+    expect(commandPages(insertion)).toEqual([2, 3, 4])
+    expect(commandTextPages(insertion)).toEqual([2, 3, 4])
+  })
+
+  it("names the same pages for a reorder's undo as for its apply", () => {
+    const order = [3, 1, 2, 4]
+    const reorder = planReorderPages(emptyHistory, order)!.command as {
+      inverse: number[]
+      kind: "reorderPages"
+      order: number[]
+    }
+
+    // The undo re-enters through the same command, so one expression has to
+    // cover both directions — which it does, since a permutation and its
+    // inverse leave exactly the same positions untouched.
     expect(commandPages(reorder)).toEqual([1, 2, 3])
-    expect(commandTextPages(reorder)).toEqual([1, 2, 3])
-    // Delete invalidates the wider, pre-delete shape of the document.
-    expect(commandPages(deletion)).toEqual([1, 2, 3])
-    // Insert invalidates the wider, post-insert shape.
-    expect(commandPages(insertion)).toEqual([1, 2, 3, 4])
-    expect(commandTextPages(insertion)).toEqual([1, 2, 3, 4])
+    expect(commandPages({ ...reorder, order: reorder.inverse })).toEqual([
+      1, 2, 3,
+    ])
   })
 })
 

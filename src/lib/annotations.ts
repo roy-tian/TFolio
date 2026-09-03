@@ -244,6 +244,22 @@ function pagesFrom(index: number, pageCount: number): number[] {
   )
 }
 
+/** The positions a reorder actually changes the content of: slot `i + 1` shows
+    a different page only when `order` does not leave it holding its own number.
+    A permutation and its inverse fix exactly the same slots, so this answers
+    for the undo as well as the apply. */
+function movedPositions(order: number[]): number[] {
+  const moved: number[] = []
+
+  for (let index = 0; index < order.length; index += 1) {
+    if (order[index] !== index + 1) {
+      moved.push(index + 1)
+    }
+  }
+
+  return moved
+}
+
 /** The pages a command writes to, and so the pages an undo has to take back. */
 export function commandPages(command: AnnotationCommand): number[] {
   switch (command.kind) {
@@ -256,12 +272,16 @@ export function commandPages(command: AnnotationCommand): number[] {
     case "pageNumbers":
       return everyPage(command.pageCount)
     case "reorderPages":
-      return everyPage(command.order.length)
+      return movedPositions(command.order)
     case "deletePages":
+      // From the first page taken out: every page ahead of it keeps both its
+      // number and its pixels. `pageCount` is the count before the delete — the
+      // larger shape — so the same range covers the undo's restore.
+      return pagesFrom(Math.min(...command.pages), command.pageCount)
     case "insertBlankPage":
-      // The larger of the before and after counts, so both the apply and the
-      // undo invalidate every page number either shape of the document has.
-      return everyPage(command.pageCount)
+      // From the gap on, as an inserted file is, and against the count after
+      // the insertion — again the larger of the two shapes.
+      return pagesFrom(command.index, command.pageCount)
     case "insertFile":
       // Only from the gap on: a page ahead of it keeps both its number and its
       // pixels, and a file appended at the very end therefore invalidates
