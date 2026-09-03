@@ -19,7 +19,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
 fontdb = "0.24.0"
-getrandom = "0.3"
+getrandom = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 # PDFium reads outlines but cannot write one, so the merge wizard hands the
 # bytes PDFium just produced to lopdf to have their /Outlines written. It
@@ -37,7 +37,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The fallback face's checksum is verified before it is ever handed to PDFium:
 # these bytes end up inside the reader's own documents.
-sha2 = "0.10"
+sha2 = "0.11"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-wdio = { version = "1", optional = true }

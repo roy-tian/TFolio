@@ -1,6 +1,8 @@
 use std::{
     collections::HashSet,
-    env, fs,
+    env,
+    fmt::Write,
+    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -360,6 +362,18 @@ fn embeddable_face(font_bytes: &[u8], index: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// The pin above is written the way the face's publisher prints it, and a
+/// digest carries no rendering of its own.
+fn hex(digest: &[u8]) -> String {
+    digest.iter().fold(
+        String::with_capacity(digest.len() * 2),
+        |mut rendered, byte| {
+            let _ = write!(rendered, "{byte:02x}");
+            rendered
+        },
+    )
+}
+
 /// Fetches the fallback face to `destination`, replacing whatever is there.
 ///
 /// The bytes are held to the size and digest pinned above *before* anything is
@@ -411,7 +425,7 @@ pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), Str
         return Err("the font's size is not the one this app expects".into());
     }
 
-    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let digest = hex(&Sha256::digest(&bytes));
 
     if digest != FALLBACK_FONT_SHA256 {
         return Err("the font's checksum is not the one this app expects".into());
@@ -779,6 +793,17 @@ mod tests {
 
         subset_face(&bytes, index, EMBEDDED_FACE_PROBE, true)
             .expect("the resolved face should still draw the probe");
+    }
+
+    #[test]
+    fn a_digest_renders_the_way_the_pin_is_written() {
+        // The pin is compared as text, so a byte rendered without its leading
+        // zero would quietly widen what the fetch accepts.
+        assert_eq!(
+            hex(&Sha256::digest(b"")),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(hex(&[0x00, 0x0f, 0xa0, 0xff]), "000fa0ff");
     }
 
     #[test]
