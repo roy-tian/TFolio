@@ -38,11 +38,20 @@ const watermarkDirections: readonly WatermarkDirection[] = [
   "descending",
 ]
 const watermarkLayouts: readonly WatermarkLayout[] = ["single", "zebra"]
+const defaultWatermarkWidthRatios = {
+  single: 0.8,
+  zebra: 0.3,
+} as const satisfies Record<WatermarkLayout, number>
+
+/** The useful starting size for each repeat pattern. */
+export function defaultWatermarkWidthRatio(layout: WatermarkLayout): number {
+  return defaultWatermarkWidthRatios[layout]
+}
 
 const defaultWatermarkSettings = {
   direction: "ascending",
   layout: "single",
-  widthRatio: 0.8,
+  widthRatio: defaultWatermarkWidthRatio("single"),
 } as const satisfies Omit<WatermarkConfig, "text">
 
 /** `text` comes from the caller because its default is a translated one. */

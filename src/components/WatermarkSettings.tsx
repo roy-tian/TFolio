@@ -14,6 +14,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   clampWatermarkText,
+  defaultWatermarkWidthRatio,
   isWatermarkDirection,
   isWatermarkLayout,
   WATERMARK_MAX_WIDTH_RATIO,
@@ -171,7 +172,11 @@ export function WatermarkSettings({
               aria-labelledby={layoutId}
               onValueChange={([value]) => {
                 if (isWatermarkLayout(value)) {
-                  onDraftChange({ ...draft, layout: value })
+                  onDraftChange({
+                    ...draft,
+                    layout: value,
+                    widthRatio: defaultWatermarkWidthRatio(value),
+                  })
                 }
               }}
               spacing={0}

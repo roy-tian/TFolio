@@ -5,6 +5,7 @@ import { loadSettings } from "@/lib/settings"
 import {
   clampWatermarkText,
   defaultWatermarkConfig,
+  defaultWatermarkWidthRatio,
   readStoredWatermarkConfig,
   sameWatermarkConfig,
   validateWatermarkConfig,
@@ -142,6 +143,20 @@ describe("watermark geometry", () => {
 })
 
 describe("watermark settings", () => {
+  it("starts a new watermark as a single 80% mark", () => {
+    expect(defaultWatermarkConfig("CONFIDENTIAL")).toEqual({
+      direction: "ascending",
+      layout: "single",
+      text: "CONFIDENTIAL",
+      widthRatio: 0.8,
+    })
+  })
+
+  it("gives each repeat pattern its own starting size", () => {
+    expect(defaultWatermarkWidthRatio("single")).toBe(0.8)
+    expect(defaultWatermarkWidthRatio("zebra")).toBe(0.3)
+  })
+
   it("detects configurations without relying on object identity", () => {
     const value = config()
 

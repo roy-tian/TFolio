@@ -62,6 +62,9 @@ describe("TFolio document watermark", () => {
 
     // The field opens on this reader's own default mark, not empty.
     await expect($("[data-testid='watermark-text']")).toHaveValue("CONFIDENTIAL")
+    await expect($("[data-testid='watermark-size']")).toHaveText(
+      expect.stringContaining("80%"),
+    )
     await $("[data-testid='watermark-text']").setValue("内部资料")
 
     // The preview leans the way the direction control says, so the two ends of
@@ -79,8 +82,11 @@ describe("TFolio document watermark", () => {
 
     await $("//button[normalize-space()='Top-left to bottom-right']").click()
     expect(await previewTransform()).not.toBe(ascending)
-    await browser.saveScreenshot("artifacts/e2e/watermark-dialog.png")
     await $("//button[normalize-space()='Tiled']").click()
+    await expect($("[data-testid='watermark-size']")).toHaveText(
+      expect.stringContaining("30%"),
+    )
+    await browser.saveScreenshot("artifacts/e2e/watermark-dialog.png")
 
     // Exercise the size control as a reader would. Its label and current value
     // identify it without reaching into Base UI's generated ids.

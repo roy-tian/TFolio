@@ -205,6 +205,27 @@ describe("merge wizard", () => {
     })
   })
 
+  it("uses the repeat pattern's starting watermark size", async () => {
+    const first = writeScratchPdf("watermark-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("watermark-second.pdf", minimalPdf(1))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+    await nextStep()
+    await nextStep()
+    await nextStep()
+    await $("[data-testid='merge-wizard-watermark']").click()
+
+    const size = $("[data-testid='watermark-size']")
+    await expect(size).toHaveText(expect.stringContaining("80%"))
+
+    await $("//button[normalize-space()='Tiled']").click()
+    await expect(size).toHaveText(expect.stringContaining("30%"))
+
+    await $("//button[normalize-space()='Once']").click()
+    await expect(size).toHaveText(expect.stringContaining("80%"))
+  })
+
   it("writes one bookmark per file, keeping each file's own beneath it", async () => {
     const first = writeScratchPdf("Front matter.pdf", minimalPdf(1))
     const second = writeScratchPdf("Chapters.pdf", outlinedPdf())
