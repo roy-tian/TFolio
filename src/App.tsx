@@ -604,6 +604,19 @@ export default function App() {
     )
   }, [])
 
+  // Nothing here is dragged with the browser's own drag and drop — the
+  // thumbnail grid reorders from pointer events — so a drag starting inside the
+  // window is only ever a text selection or the page-number field's digits,
+  // with nowhere to land. Refused where it starts, so it never reaches the
+  // window's file handler below at all.
+  useEffect(() => {
+    const refuseDrag = (event: DragEvent) => event.preventDefault()
+
+    document.addEventListener("dragstart", refuseDrag)
+
+    return () => document.removeEventListener("dragstart", refuseDrag)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
@@ -612,11 +625,23 @@ export default function App() {
     // so the grid can refuse to promise a landing place for a file it cannot
     // take. Unknown (a listener bound mid-drag) is not "none".
     let draggedPaths: string[] | null = null
+    // The OS reports a drag of anything at all, text from another window
+    // included, and one carrying no file names no path. There is nothing to
+    // open, so it is left alone rather than met with a drop target and then an
+    // error about not being a PDF. Held from the enter, since the `over` events
+    // in between name nothing either.
+    let namesNoFile = false
 
     void getCurrentWebview()
       .onDragDropEvent((event) => {
-        if (event.payload.type === "leave") {
+        // A drop naming no file ends its drag the way a `leave` does: nothing
+        // was ever offered, so nothing lands.
+        if (
+          event.payload.type === "leave" ||
+          (event.payload.type === "drop" && event.payload.paths.length === 0)
+        ) {
           draggedPaths = null
+          namesNoFile = false
           dragToSession({ kind: "leave" })
           setIsDragging(false)
           return
@@ -634,6 +659,7 @@ export default function App() {
 
         if (event.payload.type === "drop") {
           draggedPaths = null
+          namesNoFile = false
           setIsDragging(false)
 
           const toWizard = wizardDropRef.current
@@ -654,6 +680,11 @@ export default function App() {
 
         if (event.payload.type === "enter") {
           draggedPaths = event.payload.paths
+          namesNoFile = draggedPaths.length === 0
+        }
+
+        if (namesNoFile) {
+          return
         }
 
         // The grid draws its own insertion line, so the workspace's full-window
