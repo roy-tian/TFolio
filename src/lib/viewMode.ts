@@ -86,6 +86,31 @@ export function spreadPages(pageNumber: number, numPages: number): number[] {
 }
 
 /**
+ * The page whose top a whole-page keyboard turn lands on. A book turn advances
+ * one spread rather than one half, and always names the spread's left page so
+ * either half being current gives the same answer. Kept independent of scale:
+ * Page Up/Down turn pages, not a viewport-sized number of pixels.
+ */
+export function pageTurnTarget(
+  pageNumber: number,
+  numPages: number,
+  viewMode: Exclude<ViewMode, "thumbnail">,
+  direction: -1 | 1,
+): number {
+  const lastPage = Math.max(1, numPages)
+  const current = Math.min(lastPage, Math.max(1, pageNumber))
+
+  if (viewMode === "single") {
+    return Math.min(lastPage, Math.max(1, current + direction))
+  }
+
+  const spreadStart = current % 2 === 1 ? current : current - 1
+  const lastSpreadStart = lastPage % 2 === 1 ? lastPage : lastPage - 1
+
+  return Math.min(lastSpreadStart, Math.max(1, spreadStart + direction * 2))
+}
+
+/**
  * Thumbnails per row: as many as `containerWidth` fits, rounded down to an even
  * count so a row never splits a spread, and never fewer than two.
  */

@@ -4,6 +4,7 @@ import {
   computeThumbnailColumns,
   effectiveViewMode,
   isViewMode,
+  pageTurnTarget,
   pairPages,
   spreadPages,
   THUMBNAIL_COLUMN_GAP,
@@ -54,6 +55,28 @@ describe("spreadPages", () => {
 
   test("leaves a trailing odd page alone", () => {
     expect(spreadPages(5, 5)).toEqual([5])
+  })
+})
+
+describe("pageTurnTarget", () => {
+  test("turns one page at a time in single-page view", () => {
+    expect(pageTurnTarget(3, 7, "single", 1)).toBe(4)
+    expect(pageTurnTarget(3, 7, "single", -1)).toBe(2)
+  })
+
+  test("turns one whole spread from either half in book view", () => {
+    expect(pageTurnTarget(3, 8, "book", 1)).toBe(5)
+    expect(pageTurnTarget(4, 8, "book", 1)).toBe(5)
+    expect(pageTurnTarget(3, 8, "book", -1)).toBe(1)
+    expect(pageTurnTarget(4, 8, "book", -1)).toBe(1)
+  })
+
+  test("stays on the first or last page row at the document bounds", () => {
+    expect(pageTurnTarget(1, 6, "single", -1)).toBe(1)
+    expect(pageTurnTarget(6, 6, "single", 1)).toBe(6)
+    expect(pageTurnTarget(2, 6, "book", -1)).toBe(1)
+    expect(pageTurnTarget(6, 6, "book", 1)).toBe(5)
+    expect(pageTurnTarget(5, 5, "book", 1)).toBe(5)
   })
 })
 

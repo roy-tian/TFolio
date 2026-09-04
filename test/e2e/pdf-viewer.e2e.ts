@@ -304,6 +304,89 @@ describe("TFolio PDF viewer", () => {
     await expect(pageInput).toHaveValue("3")
   })
 
+  it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await browser.refresh()
+    await openPdfFromDisk("page-turns.pdf", minimalPdf(8))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    // Put the document at a scale where the viewport contains more than one of
+    // these short pages. A native Page Down would move by the viewport height;
+    // a document turn must still land exactly at the next page's top.
+    const zoomOut = () => $("button[aria-label='Zoom out']")
+
+    while (await zoomOut().isEnabled()) {
+      await zoomOut().click()
+    }
+    for (let rung = 0; rung < 2; rung += 1) {
+      await $("button[aria-label='Zoom in']").click()
+    }
+    await expect(
+      $("[data-slot='button-group'][aria-label^='Zoom ']"),
+    ).toHaveAttribute("aria-label", "Zoom 75%")
+
+    const pageInput = $("input[aria-label='Page number']")
+    const focusViewerAtStart = () =>
+      browser.execute(() => {
+        const viewer = document.querySelector<HTMLElement>(
+          "[data-document-session][data-active='true'] main",
+        )!
+        viewer.scrollTop = 0
+        viewer.tabIndex = -1
+        viewer.focus()
+      })
+    const pageTopInViewer = (pageNumber: number) =>
+      browser.execute((number: number) => {
+        const viewer = document.querySelector<HTMLElement>(
+          "[data-document-session][data-active='true'] main",
+        )!
+        const page = document.querySelector<HTMLElement>(
+          `[data-page-number='${number}']`,
+        )!
+
+        return Math.round(
+          page.getBoundingClientRect().top - viewer.getBoundingClientRect().top,
+        )
+      }, pageNumber)
+    // The embedded WebKit WebDriver passes W3C navigation-key constants through
+    // as private-use characters, so dispatch the same cancellable DOM key event
+    // a physical key produces and verify the app claims it.
+    const pressPageKey = (key: "PageDown" | "PageUp") =>
+      browser.execute((value: "PageDown" | "PageUp") => {
+        const event = new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: value,
+        })
+        document.activeElement!.dispatchEvent(event)
+
+        return event.defaultPrevented
+      }, key)
+
+    await focusViewerAtStart()
+    await expect(pageInput).toHaveValue("1")
+    expect(await pressPageKey("PageDown")).toBe(true)
+    await expect(pageInput).toHaveValue("2")
+    expect(await pageTopInViewer(2)).toBe(20)
+
+    expect(await pressPageKey("PageUp")).toBe(true)
+    await expect(pageInput).toHaveValue("1")
+
+    await $("button[aria-label='Book']").click()
+    await expect($("button[aria-label='Book']")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await focusViewerAtStart()
+    await expect(pageInput).toHaveValue("1")
+    expect(await pressPageKey("PageDown")).toBe(true)
+    await expect(pageInput).toHaveValue("3")
+    expect(await pageTopInViewer(3)).toBe(20)
+
+    expect(await pressPageKey("PageUp")).toBe(true)
+    await expect(pageInput).toHaveValue("1")
+  })
+
   // A case of its own rather than a coda to the one above: a reload plus a second
   // document is most of a test's time budget on its own.
   it("keeps the chosen view mode across a reload", async () => {

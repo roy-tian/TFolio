@@ -77,7 +77,9 @@ import {
   defaultViewMode,
   effectiveViewMode,
   hasBookSpread,
+  pageTurnTarget,
   readStoredViewMode,
+  spreadPages,
   storeViewMode,
   type ViewMode,
 } from "@/lib/viewMode"
@@ -823,17 +825,83 @@ function DocumentSession(
     zoom.zoomPreviewing || restoringRecentView,
   )
 
-  const scrollToPage = (
-    pageNumber: number,
-    behavior: ScrollBehavior = "smooth",
-  ) => {
-    const page = viewerRef.current?.querySelector<HTMLElement>(
-      `[data-page-number="${pageNumber}"]`,
-    )
+  const scrollToPage = useCallback(
+    (pageNumber: number, behavior: ScrollBehavior = "smooth") => {
+      const page = viewerRef.current?.querySelector<HTMLElement>(
+        `[data-page-number="${pageNumber}"]`,
+      )
 
-    setCurrentPage(pageNumber)
-    page?.scrollIntoView({ behavior, block: "start" })
-  }
+      setCurrentPage(pageNumber)
+      page?.scrollIntoView({ behavior, block: "start" })
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (!active || viewMode === "thumbnail") {
+      return
+    }
+
+    const handlePageTurn = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        (event.key !== "PageUp" && event.key !== "PageDown") ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return
+      }
+
+      const eventTarget = event.target
+
+      // A page key being used in a field or an open popup belongs to that UI,
+      // not to the document behind it. In particular, do not turn the PDF while
+      // its page-number field or a text-note draft is being edited.
+      if (
+        (eventTarget instanceof Element &&
+          eventTarget.closest("input, textarea, select, [contenteditable]")) ||
+        document.querySelector(
+          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
+        )
+      ) {
+        return
+      }
+
+      event.preventDefault()
+
+      const current = currentPageRef.current
+      const target = pageTurnTarget(
+        current,
+        pdfDocument.numPages,
+        viewMode,
+        event.key === "PageDown" ? 1 : -1,
+      )
+      const currentRow =
+        viewMode === "book"
+          ? (spreadPages(current, pdfDocument.numPages)[0] ?? current)
+          : current
+
+      // Consume the key at either document edge too. Letting the WebView handle
+      // it there would reintroduce a partial viewport scroll within the first
+      // or last page.
+      if (target === currentRow) {
+        return
+      }
+
+      // A held key may repeat before React's effect mirrors state into this ref.
+      // Advance it now so every repeat still turns exactly one page or spread.
+      currentPageRef.current = target
+      scrollToPage(target, "auto")
+    }
+
+    document.addEventListener("keydown", handlePageTurn)
+
+    return () => {
+      document.removeEventListener("keydown", handlePageTurn)
+    }
+  }, [active, pdfDocument.numPages, scrollToPage, viewMode])
 
   // Double-clicking a thumbnail leaves the grid for the page itself; a single
   // click is selection now, so navigation moved to the second click.
