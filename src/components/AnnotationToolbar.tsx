@@ -23,6 +23,7 @@ import {
 import { Toggle } from "@/components/ui/toggle"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import { highlightSwatches } from "@/lib/annotationStyles"
+import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 
 const splitMenuButtonClassName =
@@ -90,7 +91,10 @@ export function AnnotationToolbar({
               <ToolbarTooltip label={highlightLabel}>
                 <Toggle
                   aria-label={highlightLabel}
-                  className="size-8 border-r-transparent p-0 peer/highlight"
+                  className={cn(
+                    toolbarSelectionBarClassName,
+                    "size-8 border-r-transparent p-0 peer/highlight",
+                  )}
                   disabled={disabled}
                   onPressedChange={(pressed) =>
                     onToolChange(pressed ? "highlight" : null)
@@ -145,7 +149,10 @@ export function AnnotationToolbar({
               <ToolbarTooltip label={rectLabel}>
                 <Toggle
                   aria-label={rectLabel}
-                  className="size-8 border-r-transparent p-0 peer/rect"
+                  className={cn(
+                    toolbarSelectionBarClassName,
+                    "size-8 border-r-transparent p-0 peer/rect",
+                  )}
                   disabled={disabled}
                   onPressedChange={(pressed) =>
                     onToolChange(pressed ? "rect" : null)
@@ -189,7 +196,7 @@ export function AnnotationToolbar({
             <ToolbarTooltip label={textNoteLabel}>
               <Toggle
                 aria-label={textNoteLabel}
-                className="size-8 p-0"
+                className={cn(toolbarSelectionBarClassName, "size-8 p-0")}
                 disabled={disabled}
                 onPressedChange={(pressed) =>
                   onToolChange(pressed ? "textNote" : null)
@@ -209,7 +216,7 @@ export function AnnotationToolbar({
             <ToolbarTooltip label={eraserLabel}>
               <Toggle
                 aria-label={eraserLabel}
-                className="size-8 p-0"
+                className={cn(toolbarSelectionBarClassName, "size-8 p-0")}
                 disabled={disabled}
                 onPressedChange={(pressed) =>
                   onToolChange(pressed ? "eraser" : null)
