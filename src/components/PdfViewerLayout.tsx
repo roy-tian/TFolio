@@ -16,6 +16,10 @@ import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
 import { orderAfterMove, slotOffsets, type CellBox } from "@/lib/pageDrag"
+import {
+  rotationForPage,
+  type PageRotations,
+} from "@/lib/pageRotation"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -41,6 +45,7 @@ export type PageEditProps = {
       its first page would take, or null while nothing is being dragged over the
       grid. The owner reads the drop; the grid only draws where it points. */
   fileDropIndex: number | null
+  onClearSelection: () => void
   onDeletePage: (pageNumber: number) => void
   onInsertBlankPage: (index: number) => void
   /** Double-click: leave the grid for the page itself. */
@@ -65,7 +70,7 @@ type LayoutProps = {
   /** How many times each page has been drawn on, keyed by page number. */
   renderEpochs: RenderEpochs
   renderScale: number
-  rotation: number
+  rotations: PageRotations
   /** Resolved zoom; the fit modes have already been worked out against it. */
   scale: number
   /** How many times each page's extracted text has changed. */
@@ -82,7 +87,7 @@ function SingleLayout({
   pages,
   renderEpochs,
   renderScale,
-  rotation,
+  rotations,
   scale,
   textEpochs,
   virtualizationPaused,
@@ -97,7 +102,7 @@ function SingleLayout({
       pageNumber={index + 1}
       renderEpoch={renderEpochs[index + 1] ?? 0}
       renderScale={renderScale}
-      rotation={rotation}
+      rotation={rotationForPage(rotations, index + 1)}
       scale={scale}
       textEpoch={textEpochs[index + 1] ?? 0}
       virtualizationPaused={virtualizationPaused}
@@ -113,7 +118,7 @@ function BookLayout({
   referencePageWidth,
   renderEpochs,
   renderScale,
-  rotation,
+  rotations,
   scale,
   textEpochs,
   virtualizationPaused,
@@ -144,7 +149,7 @@ function BookLayout({
           renderEpoch={renderEpochs[pageNumber] ?? 0}
           renderScale={renderScale}
           renderWidth={renderColumnWidth}
-          rotation={rotation}
+          rotation={rotationForPage(rotations, pageNumber)}
           scale={scale}
           textEpoch={textEpochs[pageNumber] ?? 0}
           virtualizationPaused={virtualizationPaused}
@@ -547,7 +552,7 @@ function ThumbnailLayout({
   pageEdit,
   pages,
   renderEpochs,
-  rotation,
+  rotations,
 }: LayoutProps & {
   currentPage: number
   pageEdit: PageEditProps
@@ -671,7 +676,7 @@ function ThumbnailLayout({
             pageNumber={pageNumber}
             pageWidth={page.width}
             renderEpoch={renderEpochs[pageNumber] ?? 0}
-            rotation={rotation}
+            rotation={rotationForPage(rotations, pageNumber)}
             // Only a page the delete would actually take the selection with
             // needs the count; giving it to the rest would re-render the whole
             // grid every time the selection grew by one.
@@ -694,7 +699,7 @@ function ThumbnailLayout({
           drag={drag}
           gridRef={gridRef}
           page={ghostPage}
-          rotation={rotation}
+          rotation={rotationForPage(rotations, drag.lead)}
         />
       ) : null}
     </div>
@@ -710,7 +715,7 @@ type PdfViewerLayoutProps = {
   pages: PdfPageInfo[]
   referencePageWidth: number
   renderEpochs: RenderEpochs
-  rotation: number
+  rotations: PageRotations
   scale: number
   textEpochs: RenderEpochs
   viewMode: ViewMode
@@ -733,7 +738,7 @@ export function PdfViewerLayout({
   pages,
   referencePageWidth,
   renderEpochs,
-  rotation,
+  rotations,
   scale,
   textEpochs,
   viewMode,
@@ -751,7 +756,7 @@ export function PdfViewerLayout({
     referencePageWidth,
     renderEpochs,
     renderScale,
-    rotation,
+    rotations,
     scale,
     textEpochs,
     virtualizationPaused: zoomPreviewing,
@@ -762,6 +767,19 @@ export function PdfViewerLayout({
     <div
       aria-label={fileName}
       data-pdf-viewer-layout
+      onClick={(event) => {
+        if (viewMode !== "thumbnail") {
+          return
+        }
+
+        const target = event.target
+
+        // A page or editing control owns its click. Everything else in this
+        // layout is blank grid or workspace and clears the thumbnail choice.
+        if (!(target instanceof Element) || !target.closest("button")) {
+          pageEdit.onClearSelection()
+        }
+      }}
       // `min-w-fit` is what keeps a zoomed-in page reachable. Without it this
       // box would only ever be as wide as the viewer, and `items-center` would
       // centre an overflowing page by splitting the overflow across both sides

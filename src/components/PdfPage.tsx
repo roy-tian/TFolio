@@ -293,6 +293,7 @@ export function PdfPage({
       aria-label={t("viewer.pageLabel", { pageNumber })}
       className="relative shrink-0 scroll-mt-5 overflow-hidden bg-white shadow-md ring-1 ring-black/10"
       data-page-number={pageNumber}
+      data-rotation={rotation}
       ref={wrapperRef}
       style={{ aspectRatio: footprintWidth / footprintHeight, width: displayWidth }}
     >

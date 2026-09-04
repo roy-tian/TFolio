@@ -6,6 +6,7 @@ import {
   fractionToPagePoint,
   type PagePoint,
 } from "@/lib/annotationGeometry"
+import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 
 /**
@@ -19,7 +20,7 @@ type UseEraserToolOptions = {
   active: boolean
   onErase: (pageNumber: number, point: PagePoint) => void
   pages: PdfPageInfo[]
-  rotation: number
+  rotations: PageRotations
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -33,7 +34,7 @@ export function useEraserTool({
   active,
   onErase,
   pages,
-  rotation,
+  rotations,
   viewerRef,
 }: UseEraserToolOptions) {
   useEffect(() => {
@@ -123,7 +124,7 @@ export function useEraserTool({
             ),
           ),
           current.page,
-          rotation,
+          rotationForPage(rotations, current.pageNumber),
         ),
       )
     }
@@ -143,5 +144,5 @@ export function useEraserTool({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, onErase, pages, rotation, viewerRef])
+  }, [active, onErase, pages, rotations, viewerRef])
 }

@@ -7,6 +7,7 @@ import {
   type PagePointsRect,
 } from "@/lib/annotationGeometry"
 import type { HighlightCommand, HighlightTarget } from "@/lib/annotations"
+import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 
 type UseHighlightToolOptions = {
@@ -15,7 +16,7 @@ type UseHighlightToolOptions = {
   onCommit: (command: HighlightCommand) => void
   opacity: number
   pages: PdfPageInfo[]
-  rotation: number
+  rotations: PageRotations
   /** Whether native text selection is available, even without the highlighter. */
   selectable: boolean
   viewerRef: RefObject<HTMLElement | null>
@@ -100,7 +101,7 @@ export function useHighlightTool({
   onCommit,
   opacity,
   pages,
-  rotation,
+  rotations,
   selectable,
   viewerRef,
 }: UseHighlightToolOptions) {
@@ -160,7 +161,12 @@ export function useHighlightTool({
           continue
         }
 
-        const quads = quadsOnPage(selection, pageElement, page, rotation)
+        const quads = quadsOnPage(
+          selection,
+          pageElement,
+          page,
+          rotationForPage(rotations, pageNumber),
+        )
 
         if (quads.length > 0) {
           targets.push({ pageNumber, quads })
@@ -191,7 +197,7 @@ export function useHighlightTool({
       document.removeEventListener("pointercancel", handlePointerCancel)
       document.removeEventListener("pointerup", handlePointerUp)
     }
-  }, [active, color, onCommit, opacity, pages, rotation, selectable, viewerRef])
+  }, [active, color, onCommit, opacity, pages, rotations, selectable, viewerRef])
 
   return selectionDragging
 }

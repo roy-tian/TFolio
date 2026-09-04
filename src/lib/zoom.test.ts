@@ -61,7 +61,7 @@ describe("POINT_TO_PX", () => {
 
 describe("referenceDimensions", () => {
   test("is exact for the ordinary uniform document", () => {
-    expect(referenceDimensions([a4, a4, a4], 0)).toEqual({
+    expect(referenceDimensions([a4, a4, a4], [0, 0, 0])).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(595),
@@ -76,7 +76,7 @@ describe("referenceDimensions", () => {
       ...Array.from({ length: 3 }, () => page(842, 595)),
     ]
 
-    expect(referenceDimensions(pages, 0)).toEqual({
+    expect(referenceDimensions(pages, pages.map(() => 0))).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(842),
@@ -84,7 +84,7 @@ describe("referenceDimensions", () => {
   })
 
   test("takes the larger page when a document is split evenly", () => {
-    expect(referenceDimensions([page(595, 842), page(300, 400)], 0)).toEqual({
+    expect(referenceDimensions([page(595, 842), page(300, 400)], [0, 0])).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(595),
@@ -93,17 +93,17 @@ describe("referenceDimensions", () => {
 
   // Rotating the document swaps what a page spans, so a fit has to follow it.
   test("applies the user rotation", () => {
-    expect(referenceDimensions([a4], 90)).toEqual({
+    expect(referenceDimensions([a4], [90])).toEqual({
       referenceHeight: px(595),
       referenceWidth: px(842),
       widestWidth: px(842),
     })
-    expect(referenceDimensions([a4], 180)).toEqual({
+    expect(referenceDimensions([a4], [180])).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(595),
     })
-    expect(referenceDimensions([a4], 270)).toEqual({
+    expect(referenceDimensions([a4], [270])).toEqual({
       referenceHeight: px(595),
       referenceWidth: px(842),
       widestWidth: px(842),
@@ -111,7 +111,7 @@ describe("referenceDimensions", () => {
   })
 
   test("survives a document with no pages", () => {
-    expect(referenceDimensions([], 0)).toEqual({
+    expect(referenceDimensions([], [])).toEqual({
       referenceHeight: 0,
       referenceWidth: 0,
       widestWidth: 0,
@@ -185,14 +185,14 @@ describe("fitDimensions", () => {
   const mixed = [a4, page(842, 595)]
 
   test("measures the page the fit was asked from, in CSS pixels", () => {
-    expect(fitDimensions(mixed, [2], 0, reference, false)).toEqual({
+    expect(fitDimensions(mixed, [2], [0, 0], reference, false)).toEqual({
       height: 595 * POINT_TO_PX,
       width: 842 * POINT_TO_PX,
     })
   })
 
   test("takes the rotation with it", () => {
-    expect(fitDimensions(mixed, [2], 90, reference, false)).toEqual({
+    expect(fitDimensions(mixed, [2], [0, 90], reference, false)).toEqual({
       height: 842 * POINT_TO_PX,
       width: 595 * POINT_TO_PX,
     })
@@ -201,7 +201,7 @@ describe("fitDimensions", () => {
   // A spread lays both halves out in the reference page's column, so an odd
   // page's own width never reaches the screen — only its aspect does.
   test("keeps only the aspect of a page in a spread", () => {
-    const spread = fitDimensions(mixed, [2], 0, reference, true)
+    const spread = fitDimensions(mixed, [2], [0, 0], reference, true)
 
     expect(spread.width).toBe(reference.referenceWidth)
     expect(spread.height).toBeCloseTo((reference.referenceWidth * 595) / 842)
@@ -210,17 +210,17 @@ describe("fitDimensions", () => {
   // Both halves are on screen, so the fit is of the taller one — here the
   // portrait page beside the landscape one.
   test("measures the taller half of a spread", () => {
-    const spread = fitDimensions(mixed, [1, 2], 0, reference, true)
+    const spread = fitDimensions(mixed, [1, 2], [0, 0], reference, true)
 
     expect(spread.height).toBeCloseTo(reference.referenceHeight)
   })
 
   test("falls back to the reference page for a number out of range", () => {
-    expect(fitDimensions(mixed, [9], 0, reference, false)).toEqual({
+    expect(fitDimensions(mixed, [9], [0, 0], reference, false)).toEqual({
       height: reference.referenceHeight,
       width: reference.referenceWidth,
     })
-    expect(fitDimensions(mixed, [9, 10], 0, reference, true)).toEqual({
+    expect(fitDimensions(mixed, [9, 10], [0, 0], reference, true)).toEqual({
       height: reference.referenceHeight,
       width: reference.referenceWidth,
     })

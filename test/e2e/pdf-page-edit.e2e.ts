@@ -151,6 +151,15 @@ function selectedThumbs() {
   )
 }
 
+function pageRotations() {
+  return browser.execute(() =>
+    Array.from(
+      document.querySelectorAll<HTMLElement>("[data-page-number]"),
+      (page) => Number(page.dataset.rotation),
+    ),
+  )
+}
+
 /**
  * Drags a thumbnail the way a reader would — press, move past the threshold,
  * drop in a gap — with dispatched pointer events, which under WebKitGTK are
@@ -250,6 +259,43 @@ describe("TFolio page editing", () => {
       )
     })
     expect(await selectedThumbs()).toEqual([])
+  })
+
+  it("rotates the thumbnail selection and clears it from blank space", async () => {
+    await openPdfFromDisk("rotate.pdf", bandedPdf(4))
+    await paintedFingerprints(4)
+    const rotate = () => $("button[aria-label='Rotate clockwise']").click()
+
+    // A partial selection is the rotation target.
+    await clickThumb(2)
+    await rotate()
+    expect(await pageRotations()).toEqual([0, 90, 0, 0])
+
+    // Blank workspace clears the selection, so the next press turns every page.
+    await browser.execute(() => {
+      document
+        .querySelector("[data-pdf-viewer-layout]")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+    expect(await selectedThumbs()).toEqual([])
+    await rotate()
+    expect(await pageRotations()).toEqual([90, 180, 90, 90])
+
+    // A complete selection has the same all-page meaning.
+    await clickThumb(1)
+    await clickThumb(4, { shift: true })
+    expect(await selectedThumbs()).toEqual([1, 2, 3, 4])
+    await rotate()
+    expect(await pageRotations()).toEqual([180, 270, 180, 180])
+
+    // Reading views continue to rotate every page, even when the pages arrived
+    // there with different orientations from the grid.
+    await $("button[aria-label='Single page']").click()
+    await rotate()
+    expect(await pageRotations()).toEqual([270, 0, 270, 270])
+    await $("button[aria-label='Book']").click()
+    await rotate()
+    expect(await pageRotations()).toEqual([0, 90, 0, 0])
   })
 
   it("deletes pages, undoes them back, and redoes the delete", async () => {

@@ -66,6 +66,11 @@ import {
   type PdfExportOutcome,
   type PdfStructureUpdate,
 } from "@/lib/pdf"
+import {
+  rotationForPage,
+  rotationsAfterRotate,
+  rotationsForPageCount,
+} from "@/lib/pageRotation"
 import { isMacOS } from "@/lib/platform"
 import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
 import {
@@ -198,7 +203,9 @@ function DocumentSession(
     ),
   )
   const [pageInput, setPageInput] = useState(() => String(currentPage))
-  const [rotation, setRotation] = useState(0)
+  const [pageRotations, setPageRotations] = useState(() =>
+    openedDocument.pages.map(() => 0),
+  )
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
   const [viewerErrorVersion, setViewerErrorVersion] = useState(0)
@@ -309,7 +316,7 @@ function DocumentSession(
         }
       : undefined,
     pages: pdfDocument?.pages ?? [],
-    rotation,
+    rotations: pageRotations,
     viewMode,
     viewerRef,
   })
@@ -393,6 +400,9 @@ function DocumentSession(
           Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
         )
         clearThumbnailSelection()
+        setPageRotations((rotations) =>
+          rotationsForPageCount(rotations, update.numPages),
+        )
       },
       [clearThumbnailSelection],
     ),
@@ -424,7 +434,7 @@ function DocumentSession(
     onCommit: annotations.commit,
     opacity: HIGHLIGHT_OPACITY,
     pages: pdfDocument?.pages ?? [],
-    rotation,
+    rotations: pageRotations,
     selectable:
       active &&
       drawingApplies &&
@@ -437,7 +447,7 @@ function DocumentSession(
     active: active && drawingRect,
     onCommit: annotations.commit,
     pages: pdfDocument?.pages ?? [],
-    rotation,
+    rotations: pageRotations,
     style: rectStyle,
     viewerRef,
   })
@@ -447,7 +457,7 @@ function DocumentSession(
     active: active && erasing,
     onErase: annotations.eraseAt,
     pages: pdfDocument?.pages ?? [],
-    rotation,
+    rotations: pageRotations,
     viewerRef,
   })
 
@@ -457,7 +467,7 @@ function DocumentSession(
     onCommit: annotations.commit,
     suspended: !active,
     pages: pdfDocument.pages,
-    rotation,
+    rotations: pageRotations,
     style: textNoteStyle,
     viewerRef,
   })
@@ -1231,7 +1241,7 @@ function DocumentSession(
     preferredViewMode,
     queueRecentView,
     restoringRecentView,
-    rotation,
+    pageRotations,
     recentPath,
     viewMode,
     viewerHeight,
@@ -1460,7 +1470,15 @@ function DocumentSession(
             <Button
               aria-label={t("toolbar.rotate")}
               disabled={!pdfDocument}
-              onClick={() => setRotation((value) => (value + 90) % 360)}
+              onClick={() =>
+                setPageRotations((rotations) =>
+                  rotationsAfterRotate(
+                    rotations,
+                    viewMode,
+                    thumbnailSelection.selectedPages,
+                  ),
+                )
+              }
               size="icon"
               variant="outline"
             >
@@ -1563,6 +1581,7 @@ function DocumentSession(
               key={pdfDocument.id}
               pageEdit={{
                 fileDropIndex,
+                onClearSelection: clearThumbnailSelection,
                 onDeletePage: deleteThumbnailPage,
                 onInsertBlankPage: insertBlankPage,
                 onOpenPage: openThumbnailPage,
@@ -1573,7 +1592,7 @@ function DocumentSession(
               pages={pdfDocument.pages}
               referencePageWidth={zoom.referencePageWidth}
               renderEpochs={annotations.renderEpochs}
-              rotation={rotation}
+              rotations={pageRotations}
               scale={zoom.scale}
               textEpochs={annotations.textEpochs}
               textSelectionDragging={textSelectionDragging}
@@ -1600,7 +1619,7 @@ function DocumentSession(
           onStyleChange={changeTextNoteStyle}
           onTextChange={textNote.setText}
           page={pdfDocument.pages[textNote.draft.pageNumber - 1]!}
-          rotation={rotation}
+          rotation={rotationForPage(pageRotations, textNote.draft.pageNumber)}
           style={textNoteStyle}
           viewerRef={viewerRef}
         />

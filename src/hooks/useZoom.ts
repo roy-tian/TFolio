@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from "react"
 
+import type { PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import { spreadPages, type ViewMode } from "@/lib/viewMode"
 import {
@@ -61,7 +62,7 @@ type UseZoomOptions = {
   /** A recent file's own zoom, over the fresh-document default. */
   initialZoom?: ZoomState
   pages: PdfPageInfo[]
-  rotation: number
+  rotations: PageRotations
   viewMode: ViewMode
   viewerRef: RefObject<HTMLElement | null>
 }
@@ -73,7 +74,7 @@ export function useZoom({
   disabled,
   initialZoom,
   pages,
-  rotation,
+  rotations,
   viewMode,
   viewerRef,
 }: UseZoomOptions) {
@@ -97,8 +98,8 @@ export function useZoom({
   const previewDeadlineRef = useRef(0)
 
   const { referenceHeight, referenceWidth, widestWidth } = useMemo(
-    () => referenceDimensions(pages, rotation),
-    [pages, rotation],
+    () => referenceDimensions(pages, rotations),
+    [pages, rotations],
   )
 
   // A spread puts two pages in the column, so each fits half of it.
@@ -123,11 +124,11 @@ export function useZoom({
         viewMode === "book"
           ? spreadPages(zoom.fitPage, pages.length)
           : [zoom.fitPage],
-        rotation,
+        rotations,
         { referenceHeight, referenceWidth },
         viewMode === "book",
       ),
-    [pages, referenceHeight, referenceWidth, rotation, viewMode, zoom.fitPage],
+    [pages, referenceHeight, referenceWidth, rotations, viewMode, zoom.fitPage],
   )
 
   const fits = useMemo(

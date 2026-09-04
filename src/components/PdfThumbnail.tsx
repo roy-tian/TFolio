@@ -111,6 +111,7 @@ export function PdfThumbnail({
             "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary dark:ring-offset-zinc-950",
         )}
         data-page-number={pageNumber}
+        data-rotation={rotation}
         onClick={(event) =>
           onSelect(pageNumber, {
             range: event.shiftKey,

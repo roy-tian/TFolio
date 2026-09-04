@@ -1,3 +1,4 @@
+import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import { dimensionsForRotation, MAX_PAGE_WIDTH, type PdfPageInfo } from "@/lib/pdf"
 
 // `auto` is the sizing a document opens with and is not one of the modes the fit
@@ -98,18 +99,22 @@ export function zoomToPercent(scale: number) {
  * For the ordinary document, where every page is the same size, there is no odd
  * page out and this is exactly that size.
  */
-export function referenceDimensions(pages: PdfPageInfo[], rotation: number) {
+export function referenceDimensions(
+  pages: PdfPageInfo[],
+  rotations: PageRotations,
+) {
   const counts = new Map<
     string,
     { count: number; height: number; width: number }
   >()
 
-  for (const page of pages) {
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index]!
     // Converted here, at the one boundary where a PDF's own units become a size
     // on screen, so that every scale downstream is a plain pixels-over-pixels
     // ratio.
     const { height, width } = dimensionsForRotation(
-      rotation,
+      rotationForPage(rotations, index + 1),
       page.width * POINT_TO_PX,
       page.height * POINT_TO_PX,
     )
@@ -201,7 +206,7 @@ export function autoScale(
 export function fitDimensions(
   pages: PdfPageInfo[],
   pageNumbers: number[],
-  rotation: number,
+  rotations: PageRotations,
   reference: { referenceHeight: number; referenceWidth: number },
   sharedColumn: boolean,
 ) {
@@ -215,7 +220,7 @@ export function fitDimensions(
 
     return page
       ? dimensionsForRotation(
-          rotation,
+          rotationForPage(rotations, pageNumbers[0]),
           page.width * POINT_TO_PX,
           page.height * POINT_TO_PX,
         )
@@ -232,7 +237,7 @@ export function fitDimensions(
     }
 
     const footprint = dimensionsForRotation(
-      rotation,
+      rotationForPage(rotations, pageNumber),
       page.width * POINT_TO_PX,
       page.height * POINT_TO_PX,
     )
