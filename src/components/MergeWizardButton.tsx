@@ -1,6 +1,7 @@
 import { WandSparkles } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 
 type MergeWizardButtonProps = {
@@ -18,16 +19,17 @@ export function MergeWizardButton({ onClick }: MergeWizardButtonProps) {
   const label = t("mergeWizard.open")
 
   return (
-    <Button
-      aria-label={label}
-      className="border-input"
-      data-slot="merge-wizard-button"
-      onClick={onClick}
-      size="icon"
-      title={label}
-      variant="ghost"
-    >
-      <WandSparkles />
-    </Button>
+    <ToolbarTooltip label={label}>
+      <Button
+        aria-label={label}
+        className="border-input"
+        data-slot="merge-wizard-button"
+        onClick={onClick}
+        size="icon"
+        variant="ghost"
+      >
+        <WandSparkles />
+      </Button>
+    </ToolbarTooltip>
   )
 }

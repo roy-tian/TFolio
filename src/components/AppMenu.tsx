@@ -18,6 +18,7 @@ import {
   SettingsDialog,
   type SettingsSection,
 } from "@/components/SettingsDialog"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -98,20 +99,21 @@ export function AppMenu({
           }
         }}
       >
-        <DropdownMenuTrigger
-          render={
-            <Button
-              aria-label={t("menu.title")}
-              className="text-blue-600 hover:text-blue-700 aria-expanded:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 dark:aria-expanded:text-blue-300"
-              data-slot="app-menu"
-              size="icon"
-              title={t("menu.title")}
-              variant="outline"
-            />
-          }
-        >
-          <Menu />
-        </DropdownMenuTrigger>
+        <ToolbarTooltip label={t("menu.title")}>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                aria-label={t("menu.title")}
+                className="text-blue-600 hover:text-blue-700 aria-expanded:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 dark:aria-expanded:text-blue-300"
+                data-slot="app-menu"
+                size="icon"
+                variant="outline"
+              />
+            }
+          >
+            <Menu />
+          </DropdownMenuTrigger>
+        </ToolbarTooltip>
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuGroup>
             <DropdownMenuItem data-action="new" onClick={onNew}>

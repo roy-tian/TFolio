@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { MergeWizardButton } from "@/components/MergeWizardButton"
 import { RectStylePopover } from "@/components/RectStylePopover"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -86,37 +87,39 @@ export function AnnotationToolbar({
             <>
               {/* A Toggle rather than a Button: unlike the fit control next to it, a
               tool really is on or off, and pressing the active one puts it away. */}
-              <Toggle
-                aria-label={highlightLabel}
-                className="size-8 border-r-transparent p-0 peer/highlight"
-                disabled={disabled}
-                onPressedChange={(pressed) =>
-                  onToolChange(pressed ? "highlight" : null)
-                }
-                pressed={activeTool === "highlight"}
-                title={highlightLabel}
-                variant="outline"
-              >
-                <Highlighter />
-              </Toggle>
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <Button
-                      aria-label={t("annotate.highlightOptions")}
-                      className={cn(
-                        splitMenuButtonClassName,
-                        "peer-hover/highlight:before:opacity-100",
-                      )}
-                      disabled={disabled}
-                      size="icon"
-                      title={t("annotate.highlightOptions")}
-                      variant="ghost"
-                    />
+              <ToolbarTooltip label={highlightLabel}>
+                <Toggle
+                  aria-label={highlightLabel}
+                  className="size-8 border-r-transparent p-0 peer/highlight"
+                  disabled={disabled}
+                  onPressedChange={(pressed) =>
+                    onToolChange(pressed ? "highlight" : null)
                   }
+                  pressed={activeTool === "highlight"}
+                  variant="outline"
                 >
-                  <ChevronDown />
-                </PopoverTrigger>
+                  <Highlighter />
+                </Toggle>
+              </ToolbarTooltip>
+              <Popover>
+                <ToolbarTooltip label={t("annotate.highlightOptions")}>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        aria-label={t("annotate.highlightOptions")}
+                        className={cn(
+                          splitMenuButtonClassName,
+                          "peer-hover/highlight:before:opacity-100",
+                        )}
+                        disabled={disabled}
+                        size="icon"
+                        variant="ghost"
+                      />
+                    }
+                  >
+                    <ChevronDown />
+                  </PopoverTrigger>
+                </ToolbarTooltip>
                 <PopoverContent align="end" className="w-auto p-3">
                   <div className="space-y-2">
                     <p
@@ -139,37 +142,39 @@ export function AnnotationToolbar({
 
           {rectApplies ? (
             <>
-              <Toggle
-                aria-label={rectLabel}
-                className="size-8 border-r-transparent p-0 peer/rect"
-                disabled={disabled}
-                onPressedChange={(pressed) =>
-                  onToolChange(pressed ? "rect" : null)
-                }
-                pressed={activeTool === "rect"}
-                title={rectLabel}
-                variant="outline"
-              >
-                <Square />
-              </Toggle>
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <Button
-                      aria-label={t("annotate.rectOptions")}
-                      className={cn(
-                        splitMenuButtonClassName,
-                        "peer-hover/rect:before:opacity-100",
-                      )}
-                      disabled={disabled}
-                      size="icon"
-                      title={t("annotate.rectOptions")}
-                      variant="ghost"
-                    />
+              <ToolbarTooltip label={rectLabel}>
+                <Toggle
+                  aria-label={rectLabel}
+                  className="size-8 border-r-transparent p-0 peer/rect"
+                  disabled={disabled}
+                  onPressedChange={(pressed) =>
+                    onToolChange(pressed ? "rect" : null)
                   }
+                  pressed={activeTool === "rect"}
+                  variant="outline"
                 >
-                  <ChevronDown />
-                </PopoverTrigger>
+                  <Square />
+                </Toggle>
+              </ToolbarTooltip>
+              <Popover>
+                <ToolbarTooltip label={t("annotate.rectOptions")}>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        aria-label={t("annotate.rectOptions")}
+                        className={cn(
+                          splitMenuButtonClassName,
+                          "peer-hover/rect:before:opacity-100",
+                        )}
+                        disabled={disabled}
+                        size="icon"
+                        variant="ghost"
+                      />
+                    }
+                  >
+                    <ChevronDown />
+                  </PopoverTrigger>
+                </ToolbarTooltip>
                 <PopoverContent align="end" className="w-auto p-3">
                   <RectStylePopover
                     onChange={onRectStyleChange}
@@ -181,66 +186,70 @@ export function AnnotationToolbar({
           ) : null}
 
           {textNoteApplies ? (
-            <Toggle
-              aria-label={textNoteLabel}
-              className="size-8 p-0"
-              disabled={disabled}
-              onPressedChange={(pressed) =>
-                onToolChange(pressed ? "textNote" : null)
-              }
-              pressed={activeTool === "textNote"}
-              title={textNoteLabel}
-              variant="outline"
-            >
-              <SquarePen />
-            </Toggle>
+            <ToolbarTooltip label={textNoteLabel}>
+              <Toggle
+                aria-label={textNoteLabel}
+                className="size-8 p-0"
+                disabled={disabled}
+                onPressedChange={(pressed) =>
+                  onToolChange(pressed ? "textNote" : null)
+                }
+                pressed={activeTool === "textNote"}
+                variant="outline"
+              >
+                <SquarePen />
+              </Toggle>
+            </ToolbarTooltip>
           ) : null}
 
           {/* Last of the drawing tools, and the one that undoes their work: it
               takes off a mark this session made, wherever in the stack it sits,
               which is what plain undo cannot do. */}
           {eraserApplies ? (
-            <Toggle
-              aria-label={eraserLabel}
-              className="size-8 p-0"
-              disabled={disabled}
-              onPressedChange={(pressed) =>
-                onToolChange(pressed ? "eraser" : null)
-              }
-              pressed={activeTool === "eraser"}
-              title={eraserLabel}
-              variant="outline"
-            >
-              <Eraser />
-            </Toggle>
+            <ToolbarTooltip label={eraserLabel}>
+              <Toggle
+                aria-label={eraserLabel}
+                className="size-8 p-0"
+                disabled={disabled}
+                onPressedChange={(pressed) =>
+                  onToolChange(pressed ? "eraser" : null)
+                }
+                pressed={activeTool === "eraser"}
+                variant="outline"
+              >
+                <Eraser />
+              </Toggle>
+            </ToolbarTooltip>
           ) : null}
         </ButtonGroup>
       ) : null}
 
       <ButtonGroup>
-        <Button
-          aria-label={watermarkLabel}
-          className="border-input"
-          disabled={disabled}
-          onClick={onWatermark}
-          size="icon"
-          title={watermarkLabel}
-          variant="ghost"
-        >
-          <Stamp />
-        </Button>
+        <ToolbarTooltip label={watermarkLabel}>
+          <Button
+            aria-label={watermarkLabel}
+            className="border-input"
+            disabled={disabled}
+            onClick={onWatermark}
+            size="icon"
+            variant="ghost"
+          >
+            <Stamp />
+          </Button>
+        </ToolbarTooltip>
 
-        <Button
-          aria-label={pageNumbersLabel}
-          className="border-input"
-          disabled={disabled}
-          onClick={onPageNumbers}
-          size="icon"
-          title={pageNumbersLabel}
-          variant="ghost"
-        >
-          <FileScan />
-        </Button>
+        <ToolbarTooltip label={pageNumbersLabel}>
+          <Button
+            aria-label={pageNumbersLabel}
+            className="border-input"
+            disabled={disabled}
+            onClick={onPageNumbers}
+            size="icon"
+            variant="ghost"
+          >
+            <FileScan />
+          </Button>
+        </ToolbarTooltip>
 
         {/* Last in the group: the two before it mark the document on screen,
             while this one leaves to build another. */}

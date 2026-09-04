@@ -18,6 +18,7 @@ import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
@@ -1052,17 +1053,18 @@ function DocumentSession(
               saveHint={saveHint}
             />
           ) : null}
-          <Toggle
-            aria-label={bookmarksLabel}
-            className="size-8"
-            disabled={!pdfDocument || !bookmarksApply}
-            onPressedChange={setBookmarksOpen}
-            pressed={bookmarksOpen}
-            title={bookmarksLabel}
-            variant="outline"
-          >
-            <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
-          </Toggle>
+          <ToolbarTooltip label={bookmarksLabel}>
+            <Toggle
+              aria-label={bookmarksLabel}
+              className="size-8"
+              disabled={!pdfDocument || !bookmarksApply}
+              onPressedChange={setBookmarksOpen}
+              pressed={bookmarksOpen}
+              variant="outline"
+            >
+              <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
+            </Toggle>
+          </ToolbarTooltip>
           <HistoryControls
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
@@ -1105,16 +1107,17 @@ function DocumentSession(
               zoomPercent={zoom.zoomPercent}
             />
           ) : null}
-          <Button
-            aria-label={t("toolbar.rotate")}
-            disabled={!pdfDocument}
-            onClick={() => setRotation((value) => (value + 90) % 360)}
-            size="icon"
-            title={t("toolbar.rotate")}
-            variant="outline"
-          >
-            <RotateCw />
-          </Button>
+          <ToolbarTooltip label={t("toolbar.rotate")}>
+            <Button
+              aria-label={t("toolbar.rotate")}
+              disabled={!pdfDocument}
+              onClick={() => setRotation((value) => (value + 90) % 360)}
+              size="icon"
+              variant="outline"
+            >
+              <RotateCw />
+            </Button>
+          </ToolbarTooltip>
         </div>
 
         <div

@@ -1,6 +1,7 @@
 import { Brackets, Maximize, ZoomIn, ZoomOut } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { isFitActive, nextFitMode, type ZoomMode } from "@/lib/zoom"
@@ -65,46 +66,49 @@ export function ZoomControls({
     // stay the action it performs — so entering the group reads the level once
     // instead of re-reading it on every notch.
     <ButtonGroup aria-label={groupLabel}>
-      <Button
-        aria-label={zoomOutLabel}
-        disabled={disabled || !canZoomOut}
-        onClick={onZoomOut}
-        size="icon"
-        title={zoomOutLabel}
-        variant="outline"
-      >
-        <ZoomOut />
-      </Button>
-      <Button
-        aria-label={zoomInLabel}
-        disabled={disabled || !canZoomIn}
-        onClick={onZoomIn}
-        size="icon"
-        title={zoomInLabel}
-        variant="outline"
-      >
-        <ZoomIn />
-      </Button>
-      <Button
-        aria-label={fitLabel}
-        className={fitActive ? "border-border dark:border-input" : undefined}
-        disabled={disabled}
-        onClick={onToggleFit}
-        size="icon"
-        title={fitLabel}
-        // Filled while a fit is on, which the group's own name spells out. Not a
-        // Toggle, and not aria-pressed: this cycles rather than toggles, and its
-        // name is the fit it moves to, not the one it would be reporting.
-        //
-        // A Toggle would also be the wrong shape here — its outline variant is
-        // unfilled where Button's is, which reads as a hole in a joined group.
-        // Secondary resolves to the same colour the view-mode group marks its
-        // own selection with, so the two groups agree. Keep the outline colour
-        // explicit because the secondary variant otherwise makes it transparent.
-        variant={fitActive ? "secondary" : "outline"}
-      >
-        <FitIcon />
-      </Button>
+      <ToolbarTooltip label={zoomOutLabel}>
+        <Button
+          aria-label={zoomOutLabel}
+          disabled={disabled || !canZoomOut}
+          onClick={onZoomOut}
+          size="icon"
+          variant="outline"
+        >
+          <ZoomOut />
+        </Button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={zoomInLabel}>
+        <Button
+          aria-label={zoomInLabel}
+          disabled={disabled || !canZoomIn}
+          onClick={onZoomIn}
+          size="icon"
+          variant="outline"
+        >
+          <ZoomIn />
+        </Button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={fitLabel}>
+        <Button
+          aria-label={fitLabel}
+          className={fitActive ? "border-border dark:border-input" : undefined}
+          disabled={disabled}
+          onClick={onToggleFit}
+          size="icon"
+          // Filled while a fit is on, which the group's own name spells out. Not a
+          // Toggle, and not aria-pressed: this cycles rather than toggles, and its
+          // name is the fit it moves to, not the one it would be reporting.
+          //
+          // A Toggle would also be the wrong shape here — its outline variant is
+          // unfilled where Button's is, which reads as a hole in a joined group.
+          // Secondary resolves to the same colour the view-mode group marks its
+          // own selection with, so the two groups agree. Keep the outline colour
+          // explicit because the secondary variant otherwise makes it transparent.
+          variant={fitActive ? "secondary" : "outline"}
+        >
+          <FitIcon />
+        </Button>
+      </ToolbarTooltip>
     </ButtonGroup>
   )
 }

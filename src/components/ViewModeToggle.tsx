@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
@@ -58,15 +59,15 @@ export function ViewModeToggle({
         const label = t(option.labelKey)
 
         return (
-          <ToggleGroupItem
-            aria-label={label}
-            disabled={option.value === "book" && !bookApplies}
-            key={option.value}
-            title={label}
-            value={option.value}
-          >
-            <Icon />
-          </ToggleGroupItem>
+          <ToolbarTooltip key={option.value} label={label}>
+            <ToggleGroupItem
+              aria-label={label}
+              disabled={option.value === "book" && !bookApplies}
+              value={option.value}
+            >
+              <Icon />
+            </ToggleGroupItem>
+          </ToolbarTooltip>
         )
       })}
     </ToggleGroup>
