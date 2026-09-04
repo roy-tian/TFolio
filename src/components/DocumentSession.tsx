@@ -68,6 +68,10 @@ import {
 } from "@/lib/pdf"
 import { isMacOS } from "@/lib/platform"
 import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
+import {
+  storeRecentPdfView,
+  type RecentPdfView,
+} from "@/lib/recentFiles"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import {
   defaultViewMode,
@@ -86,6 +90,8 @@ import {
 } from "@/lib/viewportAnchor"
 import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
+
+const RECENT_VIEW_WRITE_INTERVAL_MS = 250
 
 type ViewerError =
   | "annotateFailed"
@@ -110,6 +116,8 @@ export type FileDragEvent =
 
 export type DocumentSessionHandle = {
   hasUnsavedWorkNow: () => boolean
+  /** Captures and durably queues the latest reading view before a close. */
+  rememberViewNow: () => Promise<void>
   /** Whether this session takes the drag: true only over its thumbnail grid,
       where a dropped PDF is inserted at the gap under the pointer instead of
       opening as a tab of its own. */
@@ -124,6 +132,8 @@ type DocumentSessionProps = {
       for. Applied through the ordinary command, so they are one undo away and
       the dialog finds them where it expects. */
   initialPageNumbers?: PageNumbersConfig | null
+  /** A path-backed document's last reading view. */
+  initialRecentView?: RecentPdfView
   /** The view this document opens in, where something other than the reader's
       stored preference suits it: a merge opens on the thumbnail grid, which is
       where the whole result can be looked over at once. */
@@ -140,6 +150,8 @@ type DocumentSessionProps = {
   /** An export that gave a document its first file: the tab now stands for
       that file, not for the bytes it opened from. */
   onSourceChange: (documentId: number, path: string) => void
+  /** Present only when Rust recorded this opened path as recent. */
+  recentPath?: string
 }
 
 function closePdf(documentId: number) {
@@ -153,6 +165,7 @@ function DocumentSession(
     document: openedDocument,
     fileName,
     initialPageNumbers,
+    initialRecentView,
     initialViewMode,
     initialWatermark,
     menu,
@@ -160,6 +173,7 @@ function DocumentSession(
     onInitialLayersSettled,
     onDirtyChange,
     onSourceChange,
+    recentPath,
   },
   ref,
 ) {
@@ -175,8 +189,13 @@ function DocumentSession(
   // grid. Only the insertion line reads it; the drop itself resolves the point
   // again, so a stale index can never place a file.
   const [fileDropIndex, setFileDropIndex] = useState<number | null>(null)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageInput, setPageInput] = useState("1")
+  const [currentPage, setCurrentPage] = useState(() =>
+    Math.min(
+      Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
+      Math.max(openedDocument.numPages, 1),
+    ),
+  )
+  const [pageInput, setPageInput] = useState(() => String(currentPage))
   const [rotation, setRotation] = useState(0)
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
@@ -194,7 +213,17 @@ function DocumentSession(
   const [viewerWidth, setViewerWidth] = useState(0)
   const [viewerHeight, setViewerHeight] = useState(0)
   const [preferredViewMode, setPreferredViewMode] = useState<ViewMode>(
-    () => initialViewMode ?? readStoredViewMode() ?? defaultViewMode,
+    () =>
+      initialViewMode ??
+      initialRecentView?.viewMode ??
+      readStoredViewMode() ??
+      defaultViewMode,
+  )
+  // Current-page tracking and persistence wait until the saved point has been
+  // put back. Otherwise the first, temporary layout would immediately replace
+  // the very position this session is trying to restore.
+  const [restoringRecentView, setRestoringRecentView] = useState(
+    initialRecentView !== undefined,
   )
   const [activeTool, setActiveTool] = useState<AnnotationTool>(null)
   const [highlightColor, setHighlightColor] = useState<HexColor>(
@@ -209,6 +238,27 @@ function DocumentSession(
   const viewerRef = useRef<HTMLElement>(null)
   const documentRef = useRef<PdfDocumentInfo | null>(openedDocument)
   const pendingScrollPageRef = useRef<number | null>(null)
+  const initialRecentPositionRef = useRef(
+    initialRecentView
+      ? {
+          ...initialRecentView.position,
+          pageNumber: Math.min(
+            initialRecentView.position.pageNumber,
+            Math.max(openedDocument.numPages, 1),
+          ),
+        }
+      : null,
+  )
+  const pendingRecentViewRef = useRef<{
+    path: string
+    version: number
+    view: RecentPdfView
+  } | null>(null)
+  const writtenRecentViewVersionRef = useRef(0)
+  const recentViewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+  const recentViewWriteChainRef = useRef<Promise<void>>(Promise.resolve())
   // Where the reader was when the viewport last changed size, taken before the
   // layout that change resolves to, and paid back once it has been made.
   const resizeAnchorRef = useRef<ViewportAnchor | null>(null)
@@ -247,6 +297,15 @@ function DocumentSession(
     contentWidth: Math.max(0, viewerWidth - CONTENT_PADDING_X),
     currentPage,
     disabled: !active || !zoomApplies,
+    initialZoom: initialRecentView
+      ? {
+          ...initialRecentView.zoom,
+          fitPage: Math.min(
+            initialRecentView.zoom.fitPage,
+            Math.max(openedDocument.numPages, 1),
+          ),
+        }
+      : undefined,
     pages: pdfDocument?.pages ?? [],
     rotation,
     viewMode,
@@ -658,7 +717,7 @@ function DocumentSession(
   useLayoutEffect(() => {
     const viewer = viewerRef.current
 
-    if (!active || !viewer) {
+    if (!active || !viewer || restoringRecentView) {
       return
     }
 
@@ -672,11 +731,70 @@ function DocumentSession(
     }
 
     pendingScrollPageRef.current = currentPage
-  }, [active, currentPage])
+  }, [active, currentPage, restoringRecentView])
+
+  // Restore against the first real layout, after this visible panel's size and
+  // the saved zoom have both sized its pages. A normalized point on the page is
+  // placed under the new viewport's top-centre reading line, so a different
+  // window size does not turn a useful position into an unrelated raw offset.
+  useLayoutEffect(() => {
+    const position = initialRecentPositionRef.current
+    const viewer = viewerRef.current
+
+    if (!restoringRecentView || !active || !position || !viewer) {
+      return
+    }
+
+    const committed = committedSizeRef.current
+
+    if (
+      viewerWidth <= 0 ||
+      viewerHeight <= 0 ||
+      viewer.clientWidth !== committed.width ||
+      viewer.clientHeight !== committed.height
+    ) {
+      return
+    }
+
+    const page = viewer.querySelector<HTMLElement>(
+      `[data-page-number="${position.pageNumber}"]`,
+    )
+    const viewerRect = viewer.getBoundingClientRect()
+    const pageRect = page?.getBoundingClientRect()
+
+    if (!pageRect || pageRect.width <= 0 || pageRect.height <= 0) {
+      return
+    }
+
+    const correction = anchorCorrection(
+      {
+        clientX: viewerRect.left + viewerRect.width / 2,
+        clientY: viewerRect.top,
+        fractionX: position.fractionX,
+        fractionY: position.fractionY,
+        pageNumber: position.pageNumber,
+      },
+      pageRect,
+    )
+
+    viewer.scrollLeft += correction.left
+    viewer.scrollTop += correction.top
+    initialRecentPositionRef.current = null
+    setRestoringRecentView(false)
+  }, [
+    active,
+    restoringRecentView,
+    viewMode,
+    viewerHeight,
+    viewerWidth,
+    zoom.scale,
+  ])
 
   // A view this document was opened in rather than chosen in is not the
   // reader's preference, so it is not stored — only what they press after is.
-  const viewModeChosen = useRef(initialViewMode === undefined)
+  const viewModeChosen = useRef(
+    initialViewMode === undefined && initialRecentView === undefined,
+  )
 
   useEffect(() => {
     if (!viewModeChosen.current) {
@@ -702,7 +820,7 @@ function DocumentSession(
     active ? pdfDocument.id : undefined,
     viewMode,
     setCurrentPage,
-    zoom.zoomPreviewing,
+    zoom.zoomPreviewing || restoringRecentView,
   )
 
   const scrollToPage = (
@@ -881,12 +999,6 @@ function DocumentSession(
     }
   }, [active])
 
-  useImperativeHandle(
-    ref,
-    () => ({ hasUnsavedWorkNow, onFileDrag: handleFileDrag }),
-    [handleFileDrag, hasUnsavedWorkNow],
-  )
-
   // Each mode stacks its pages to a different total height, and the viewer keeps
   // its scroll offset across the switch, so the old offset would land somewhere
   // unrelated. Remember the page being read and seek back to it instead. Queued
@@ -948,6 +1060,160 @@ function DocumentSession(
       pendingScrollPageRef.current = null
     }
   }, [viewerHeight, viewerWidth, viewMode])
+
+  const flushRecentView = useCallback(() => {
+    const pending = pendingRecentViewRef.current
+
+    if (!pending || pending.version <= writtenRecentViewVersionRef.current) {
+      return recentViewWriteChainRef.current
+    }
+
+    writtenRecentViewVersionRef.current = pending.version
+    // Keep writes from two nearby scroll samples in capture order. Tauri calls
+    // are asynchronous; without the chain a slower old write could otherwise
+    // arrive after the newer position and put the document back too far.
+    recentViewWriteChainRef.current = recentViewWriteChainRef.current.then(() =>
+      storeRecentPdfView(pending.path, pending.view),
+    )
+
+    return recentViewWriteChainRef.current
+  }, [])
+
+  const queueRecentView = useCallback(
+    (view: RecentPdfView) => {
+      if (!recentPath) {
+        return
+      }
+
+      const version = (pendingRecentViewRef.current?.version ?? 0) + 1
+      pendingRecentViewRef.current = { path: recentPath, version, view }
+
+      // Leading and trailing samples, with at most one trailing timer. A long
+      // scroll is consequently durable as it goes, while its exact resting
+      // point is written no more than a quarter second later.
+      if (recentViewTimerRef.current !== undefined) {
+        return
+      }
+
+      flushRecentView()
+      recentViewTimerRef.current = setTimeout(() => {
+        recentViewTimerRef.current = undefined
+        flushRecentView()
+      }, RECENT_VIEW_WRITE_INTERVAL_MS)
+    },
+    [flushRecentView, recentPath],
+  )
+
+  const rememberCurrentView = useCallback(() => {
+    const viewer = viewerRef.current
+
+    if (
+      !active ||
+      !recentPath ||
+      restoringRecentView ||
+      zoom.zoomPreviewing ||
+      viewerWidth <= 0 ||
+      viewerHeight <= 0 ||
+      pendingScrollPageRef.current !== null ||
+      !viewer
+    ) {
+      return
+    }
+
+    const committed = committedSizeRef.current
+
+    if (
+      viewer.clientWidth !== committed.width ||
+      viewer.clientHeight !== committed.height
+    ) {
+      return
+    }
+
+    const page = viewer.querySelector<HTMLElement>(
+      `[data-page-number="${currentPage}"]`,
+    )
+    const viewerRect = viewer.getBoundingClientRect()
+    const pageRect = page?.getBoundingClientRect()
+    const anchor = pageRect
+      ? anchorOnPage(
+          currentPage,
+          pageRect,
+          viewerRect.left + viewerRect.width / 2,
+          viewerRect.top,
+        )
+      : null
+
+    if (!anchor) {
+      return
+    }
+
+    queueRecentView({
+      position: {
+        fractionX: anchor.fractionX,
+        fractionY: anchor.fractionY,
+        pageNumber: anchor.pageNumber,
+      },
+      viewMode: preferredViewMode,
+      zoom: { ...zoom.zoomState },
+    })
+  }, [
+    active,
+    currentPage,
+    pdfDocument.pages,
+    preferredViewMode,
+    queueRecentView,
+    restoringRecentView,
+    rotation,
+    recentPath,
+    viewMode,
+    viewerHeight,
+    viewerWidth,
+    zoom.zoomPreviewing,
+    zoom.zoomState,
+  ])
+
+  const rememberViewNow = useCallback(() => {
+    rememberCurrentView()
+    flushRecentView()
+
+    return recentViewWriteChainRef.current
+  }, [flushRecentView, rememberCurrentView])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      hasUnsavedWorkNow,
+      onFileDrag: handleFileDrag,
+      rememberViewNow,
+    }),
+    [handleFileDrag, hasUnsavedWorkNow, rememberViewNow],
+  )
+
+  useEffect(() => {
+    const viewer = viewerRef.current
+
+    if (!viewer) {
+      return
+    }
+
+    viewer.addEventListener("scroll", rememberCurrentView, { passive: true })
+    rememberCurrentView()
+
+    return () => {
+      viewer.removeEventListener("scroll", rememberCurrentView)
+    }
+  }, [rememberCurrentView])
+
+  useEffect(() => {
+    window.addEventListener("pagehide", flushRecentView)
+
+    return () => {
+      window.removeEventListener("pagehide", flushRecentView)
+      clearTimeout(recentViewTimerRef.current)
+      recentViewTimerRef.current = undefined
+      flushRecentView()
+    }
+  }, [flushRecentView])
 
   const submitPageNumber = () => {
     if (!pdfDocument) {

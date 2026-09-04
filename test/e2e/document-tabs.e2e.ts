@@ -193,6 +193,74 @@ describe("independent document tabs", () => {
     )
   })
 
+  it("restores a recent file's view, zoom, and reading position", async () => {
+    const filePath = await openPdfFromDisk("view-kept.pdf", minimalPdf(9))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    await $("button[aria-label='Book']").click()
+    await expect($("button[aria-label='Book']")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+
+    // Land on a known custom zoom: down to the floor, then three rungs back to
+    // actual size (50%, 75%, 100%).
+    const zoomOut = () => $("button[aria-label='Zoom out']")
+    while (await zoomOut().isEnabled()) {
+      await zoomOut().click()
+    }
+    for (let rung = 0; rung < 3; rung += 1) {
+      await $("button[aria-label='Zoom in']").click()
+    }
+    await expect(
+      $("[data-slot='button-group'][aria-label^='Zoom ']"),
+    ).toHaveAttribute("aria-label", "Zoom 100%")
+
+    const pageInput = $("[data-active='true'] input[aria-label='Page number']")
+    await pageInput.setValue("5")
+    await browser.keys("Enter")
+    await settledScrollTop()
+
+    // Keep a point inside the page, not merely its page number, so restoring a
+    // raw "page 5" jump would not satisfy the offset assertion below.
+    await browser.execute(() => {
+      const viewer = document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] main",
+      )!
+      viewer.scrollTop += 80
+    })
+    await browser.pause(400)
+    const readingOffset = await activeScrollTop()
+    await expect(pageInput).toHaveValue("5")
+
+    await $("button[aria-label='Close view-kept.pdf']").click()
+    await dropZoneButton().waitForDisplayed()
+
+    // The global default now disagrees with this file, proving that Book comes
+    // from the recent entry rather than the ordinary view-mode preference.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await browser.refresh()
+    await dropZoneButton().waitForDisplayed()
+
+    const entry = $("[data-slot='recent-file'][title='" + filePath + "']")
+    await entry.click()
+    await $("button[role='tab'][title='view-kept.pdf']").waitForExist()
+    await expect($("button[aria-label='Book']")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect(
+      $("[data-slot='button-group'][aria-label^='Zoom ']"),
+    ).toHaveAttribute("aria-label", "Zoom 100%")
+    await expect(
+      $("[data-active='true'] input[aria-label='Page number']"),
+    ).toHaveValue("5")
+    await browser.waitUntil(
+      async () => Math.abs((await activeScrollTop()) - readingOffset) <= 2,
+      { timeoutMsg: "the recent file opened at a different reading position" },
+    )
+  })
+
   it("keeps a PDF dropped on the grid inside the current tab", async () => {
     await openPdfFromDisk("base.pdf", minimalPdf(2))
     await $("button[aria-label='Thumbnails']").click()

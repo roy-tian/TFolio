@@ -58,6 +58,8 @@ type UseZoomOptions = {
   contentWidth: number
   currentPage: number
   disabled: boolean
+  /** A recent file's own zoom, over the fresh-document default. */
+  initialZoom?: ZoomState
   pages: PdfPageInfo[]
   rotation: number
   viewMode: ViewMode
@@ -69,12 +71,15 @@ export function useZoom({
   contentWidth,
   currentPage,
   disabled,
+  initialZoom,
   pages,
   rotation,
   viewMode,
   viewerRef,
 }: UseZoomOptions) {
-  const [zoom, setZoom] = useState<ZoomState>(defaultZoomState)
+  const [zoom, setZoom] = useState<ZoomState>(
+    () => initialZoom ?? defaultZoomState,
+  )
   const [zoomPreviewing, setZoomPreviewing] = useState(false)
   // Bumped by every zoom the reader asks for: what the anchor below is paid
   // back against, and what the viewport readout flashes the new level on.
@@ -497,6 +502,7 @@ export function useZoom({
     toggleFit,
     zoomIn,
     zoomMode: zoom.mode,
+    zoomState: zoom,
     zoomOut,
     zoomPercent: percent,
     zoomPreviewing,

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { describeRecentFiles, directoryFromPath } from "./recentFiles"
+import {
+  describeRecentFiles,
+  directoryFromPath,
+  parseRecentPdfView,
+  type RecentPdfView,
+} from "./recentFiles"
 
 describe("recent files", () => {
   test("reads the containing folder from either platform's separator", () => {
@@ -31,5 +36,37 @@ describe("recent files", () => {
         path: "/home/roy/docs/report.pdf",
       },
     ])
+  })
+
+  test("accepts a usable persisted view", () => {
+    const view: RecentPdfView = {
+      position: { fractionX: 0.5, fractionY: 0.4, pageNumber: 3 },
+      viewMode: "book",
+      zoom: { customScale: 1.25, fitPage: 3, mode: "custom" },
+    }
+
+    expect(parseRecentPdfView(view)).toEqual(view)
+  })
+
+  test("drops a persisted view with unusable geometry", () => {
+    const view: RecentPdfView = {
+      position: { fractionX: 0.5, fractionY: 0.4, pageNumber: 3 },
+      viewMode: "book",
+      zoom: { customScale: 1.25, fitPage: 3, mode: "custom" },
+    }
+
+    expect(
+      parseRecentPdfView({
+        ...view,
+        zoom: { ...view.zoom, customScale: 1000 },
+      }),
+    ).toBeNull()
+    expect(
+      parseRecentPdfView({
+        ...view,
+        position: { ...view.position, pageNumber: "3" },
+      }),
+    ).toBeNull()
+    expect(parseRecentPdfView({ ...view, viewMode: "continuous" })).toBeNull()
   })
 })

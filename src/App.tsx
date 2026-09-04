@@ -48,7 +48,12 @@ import {
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
 import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
-import { readRecentFiles, type RecentFile } from "@/lib/recentFiles"
+import {
+  readRecentFiles,
+  readRecentPdfView,
+  type RecentFile,
+  type RecentPdfView,
+} from "@/lib/recentFiles"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { cn } from "@/lib/utils"
 import type { ViewMode } from "@/lib/viewMode"
@@ -60,6 +65,12 @@ type OpenTab = {
   id: number
   name: string
   path: string
+  /** The path whose successful Rust-side open put it in the recent list.
+      Unlike `path`, this stays absent when an app-created document adopts its
+      first export destination. */
+  recentPath?: string
+  /** The reading view this path last held when it was open before. */
+  recentView?: RecentPdfView
   /** What a document the app itself built opens with, over and above the file
       it was read from: the merge wizard's view and its two page-content
       layers. Absent for every ordinary open. */
@@ -161,6 +172,14 @@ export default function App() {
       return
     }
 
+    const leavingId = activeIdRef.current
+
+    if (leavingId !== HOME_TAB_ID && leavingId !== tabId) {
+      // Capture while the old panel still has a layout box. Once React hides
+      // it there is no page geometry left from which to read an exact point.
+      void sessionRefs.current.get(leavingId)?.rememberViewNow()
+    }
+
     activeIdRef.current = tabId
     setActiveId(tabId)
     focusWorkspaceTarget(tabId)
@@ -238,12 +257,23 @@ export default function App() {
               continue
             }
 
+            const recentView = await readRecentPdfView(path)
+
+            if (!mountedRef.current) {
+              void invoke("close_pdf", { documentId: document.id }).catch(
+                () => undefined,
+              )
+              continue
+            }
+
             const tab: OpenTab = {
               dirty: false,
               document,
               id: document.id,
               name: fileNameFromPath(path),
               path,
+              recentPath: path,
+              recentView: recentView ?? undefined,
             }
             replaceTabs((current) => [...current, tab])
             openedIds.push(tab.id)
@@ -405,8 +435,26 @@ export default function App() {
     }
   }, [openPaths, showWorkspaceError, t])
 
+  const rememberAllViews = useCallback(
+    () =>
+      Promise.all(
+        [...sessionRefs.current.values()].map((session) =>
+          session.rememberViewNow(),
+        ),
+      ).then(() => undefined),
+    [],
+  )
+
   const removeTabNow = useCallback(
     (documentId: number) => {
+      // Capture synchronously while the panel still has geometry, but do not
+      // hold the close behind a convenience write. Waiting here leaves a clean
+      // document editable after its unsaved-work check, which can then discard
+      // work created during the wait without asking again.
+      const remembered =
+        sessionRefs.current.get(documentId)?.rememberViewNow() ??
+        Promise.resolve()
+
       const current = tabsRef.current
       const currentActiveId = activeIdRef.current
       const candidateId = activeTabAfterClose(
@@ -429,6 +477,8 @@ export default function App() {
       }
 
       focusWorkspaceTarget(nextActiveId, true)
+
+      return remembered
     },
     [replaceTabs],
   )
@@ -438,18 +488,24 @@ export default function App() {
       if (sessionRefs.current.get(documentId)?.hasUnsavedWorkNow()) {
         setPendingClose({ kind: "tab", documentId })
       } else {
-        removeTabNow(documentId)
+        void removeTabNow(documentId)
       }
     },
     [removeTabNow],
   )
 
   const removeAllTabsNow = useCallback(() => {
+    // `rememberAllViews` captures every visible value before returning its
+    // promise. Remove the sessions now, so no edit can slip between the dirty
+    // check (or discard confirmation) and the close.
+    const remembered = rememberAllViews()
     replaceTabs(() => [])
     activeIdRef.current = HOME_TAB_ID
     setActiveId(HOME_TAB_ID)
     focusWorkspaceTarget(HOME_TAB_ID, true)
-  }, [replaceTabs])
+
+    return remembered
+  }, [rememberAllViews, replaceTabs])
 
   // One question for the lot, rather than a dialog per dirty document: the
   // reader asked to close everything, and answering the same prompt five times
@@ -466,7 +522,7 @@ export default function App() {
     if (anyUnsaved) {
       setPendingClose({ kind: "all" })
     } else {
-      removeAllTabsNow()
+      void removeAllTabsNow()
     }
   }, [removeAllTabsNow])
 
@@ -636,9 +692,15 @@ export default function App() {
           sessionRefs.current.get(tab.id)?.hasUnsavedWorkNow(),
         )
 
+        // Even a clean close waits for the latest reading positions to reach
+        // Rust. Destroying the window immediately after a scroll could
+        // otherwise end the process ahead of the trailing persistence write.
+        event.preventDefault()
+
         if (hasUnsaved) {
-          event.preventDefault()
           setPendingClose({ kind: "window" })
+        } else {
+          void removeAllTabsNow().then(() => getCurrentWindow().destroy())
         }
       })
       .then((stop) => {
@@ -653,7 +715,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [])
+  }, [removeAllTabsNow])
 
   useEffect(() => {
     mountedRef.current = true
@@ -729,6 +791,7 @@ export default function App() {
           document={tab.document}
           fileName={tab.name}
           initialPageNumbers={tab.opensWith?.pageNumbers}
+          initialRecentView={tab.recentView}
           initialViewMode={tab.opensWith?.viewMode}
           initialWatermark={tab.opensWith?.watermark}
           key={tab.id}
@@ -744,6 +807,7 @@ export default function App() {
               sessionRefs.current.delete(tab.id)
             }
           }}
+          recentPath={tab.recentPath}
         />
       ))}
 
@@ -811,11 +875,13 @@ export default function App() {
                 setPendingClose(null)
 
                 if (action?.kind === "tab") {
-                  removeTabNow(action.documentId)
+                  void removeTabNow(action.documentId)
                 } else if (action?.kind === "all") {
-                  removeAllTabsNow()
+                  void removeAllTabsNow()
                 } else if (action?.kind === "window") {
-                  void getCurrentWindow().destroy()
+                  void removeAllTabsNow().then(() =>
+                    getCurrentWindow().destroy(),
+                  )
                 }
               }}
             >
