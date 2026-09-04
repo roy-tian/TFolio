@@ -16,6 +16,9 @@ const zhCN = {
     restore: "还原",
     close: "关闭",
   },
+  notification: {
+    dismiss: "关闭通知",
+  },
   tabs: {
     home: "主页",
     openFile: "在新标签页中打开 PDF",

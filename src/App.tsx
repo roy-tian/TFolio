@@ -11,6 +11,7 @@ import {
   type DocumentSessionHandle,
   type FileDragEvent,
 } from "@/components/DocumentSession"
+import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { MergeWizard } from "@/components/MergeWizard"
@@ -114,7 +115,18 @@ export default function App() {
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [workspaceError, setWorkspaceError] = useState<WorkspaceError>(null)
+  const [workspaceErrorVersion, setWorkspaceErrorVersion] = useState(0)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
+  const dismissWorkspaceError = useCallback(() => setWorkspaceError(null), [])
+  const showWorkspaceError = useCallback(
+    (error: NonNullable<WorkspaceError>) => {
+      setWorkspaceError(error)
+      // The same refusal can happen twice before the first notice expires. Its
+      // identity still changes so the second occurrence gets a full lifetime.
+      setWorkspaceErrorVersion((version) => version + 1)
+    },
+    [],
+  )
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -187,7 +199,7 @@ export default function App() {
       const pdfPaths = paths.filter(isPdfPath)
 
       if (pdfPaths.length === 0) {
-        setWorkspaceError("invalidFile")
+        showWorkspaceError("invalidFile")
         return Promise.resolve()
       }
 
@@ -254,13 +266,24 @@ export default function App() {
 
         if (selectedId !== null) {
           activateTab(selectedId)
-          setWorkspaceError(firstError)
+
+          if (firstError) {
+            showWorkspaceError(firstError)
+          } else {
+            dismissWorkspaceError()
+          }
         } else if (firstError) {
-          setWorkspaceError(firstError)
+          showWorkspaceError(firstError)
         }
       })
     },
-    [activateTab, replaceTabs, runOpenBatch],
+    [
+      activateTab,
+      dismissWorkspaceError,
+      replaceTabs,
+      runOpenBatch,
+      showWorkspaceError,
+    ],
   )
 
   // A new document is the app's own rather than a file's: with no path it
@@ -288,12 +311,19 @@ export default function App() {
           }
           replaceTabs((current) => [...current, tab])
           activateTab(tab.id)
-          setWorkspaceError(null)
+          dismissWorkspaceError()
         } catch {
-          setWorkspaceError("createFailed")
+          showWorkspaceError("createFailed")
         }
       }),
-    [activateTab, replaceTabs, runOpenBatch, t],
+    [
+      activateTab,
+      dismissWorkspaceError,
+      replaceTabs,
+      runOpenBatch,
+      showWorkspaceError,
+      t,
+    ],
   )
 
   // A merged document is the app's own, like a new one: it has no file behind
@@ -342,11 +372,11 @@ export default function App() {
 
       replaceTabs((current) => [...current, tab])
       activateTab(tab.id)
-      setWorkspaceError(null)
+      dismissWorkspaceError()
 
       return layersSettled
     },
-    [activateTab, replaceTabs, t],
+    [activateTab, dismissWorkspaceError, replaceTabs, t],
   )
   const mergeWizard = useMergeWizard({ onMerged: openMergeResult })
 
@@ -369,11 +399,11 @@ export default function App() {
         await openPaths([path])
       }
     } catch {
-      setWorkspaceError("openFailed")
+      showWorkspaceError("openFailed")
     } finally {
       choosingFileRef.current = false
     }
-  }, [openPaths, t])
+  }, [openPaths, showWorkspaceError, t])
 
   const removeTabNow = useCallback(
     (documentId: number) => {
@@ -684,7 +714,9 @@ export default function App() {
         active={homeActive}
         // Only the showing panel carries the message: two live `role="alert"`
         // nodes for one error is one too many for a screen reader to reach.
+        errorKey={workspaceErrorVersion}
         errorMessage={homeActive ? errorMessage : null}
+        onDismissError={dismissWorkspaceError}
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
         opening={isOpening}
@@ -741,12 +773,13 @@ export default function App() {
       ) : null}
 
       {!homeActive && errorMessage ? (
-        <div
-          className="fixed top-25 right-4 z-60 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-          role="alert"
+        <DismissibleAlert
+          className="fixed top-25 right-4 z-60 max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+          dismissKey={workspaceErrorVersion}
+          onDismiss={dismissWorkspaceError}
         >
           {errorMessage}
-        </div>
+        </DismissibleAlert>
       ) : null}
 
       <MergeWizard wizard={mergeWizard} />

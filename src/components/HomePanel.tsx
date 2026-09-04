@@ -1,6 +1,7 @@
 import { Clock, FileText, FileUp, LoaderCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { DismissibleAlert } from "@/components/DismissibleAlert"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -10,7 +11,9 @@ import type { RecentFile } from "@/lib/recentFiles"
 
 type HomePanelProps = {
   active: boolean
+  errorKey: number
   errorMessage: string | null
+  onDismissError: () => void
   onOpenFile: () => void
   onOpenRecent: (path: string) => void
   opening: boolean
@@ -19,7 +22,9 @@ type HomePanelProps = {
 
 export function HomePanel({
   active,
+  errorKey,
   errorMessage,
+  onDismissError,
   onOpenFile,
   onOpenRecent,
   opening,
@@ -71,12 +76,13 @@ export function HomePanel({
               </button>
 
               {errorMessage ? (
-                <span
-                  className="mt-4 text-center text-sm text-destructive"
-                  role="alert"
+                <DismissibleAlert
+                  className="mt-4 self-center text-sm text-destructive"
+                  dismissKey={errorKey}
+                  onDismiss={onDismissError}
                 >
                   {errorMessage}
-                </span>
+                </DismissibleAlert>
               ) : null}
             </div>
 

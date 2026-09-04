@@ -8,6 +8,9 @@ const en = {
     restore: "Restore",
     close: "Close",
   },
+  notification: {
+    dismiss: "Dismiss notification",
+  },
   tabs: {
     home: "Home",
     openFile: "Open PDF in a new tab",

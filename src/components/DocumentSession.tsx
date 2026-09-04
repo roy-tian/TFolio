@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next"
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
+import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
@@ -179,6 +180,7 @@ function DocumentSession(
   const [rotation, setRotation] = useState(0)
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
+  const [viewerErrorVersion, setViewerErrorVersion] = useState(0)
   /**
    * The edit that failed for want of a face to draw it in, kept so accepting
    * the download can re-run it. A note's text lives nowhere else by then — the
@@ -216,6 +218,14 @@ function DocumentSession(
   // The last geometry the viewer really had, which a hidden tab keeps.
   const committedSizeRef = useRef({ height: 0, width: 0 })
   const mountedRef = useRef(false)
+  const dismissViewerError = useCallback(() => {
+    setViewerError(null)
+    setUnfontedEdit(null)
+  }, [])
+  const showViewerError = useCallback((error: NonNullable<ViewerError>) => {
+    setViewerError(error)
+    setViewerErrorVersion((version) => version + 1)
+  }, [])
 
   const bookApplies = hasBookSpread(pdfDocument.numPages)
   const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
@@ -260,15 +270,18 @@ function DocumentSession(
         // and the reader can fetch something that will.
         if (isNoteFontMissing(error)) {
           setUnfontedEdit(command ?? null)
-          setViewerError("noteFontMissing")
+          showViewerError("noteFontMissing")
           return
         }
 
-        setViewerError("annotateFailed")
+        showViewerError("annotateFailed")
       },
-      [],
+      [showViewerError],
     ),
-    onExportError: useCallback(() => setViewerError("exportFailed"), []),
+    onExportError: useCallback(
+      () => showViewerError("exportFailed"),
+      [showViewerError],
+    ),
     // A byte-opened document adopts its first export's destination as its
     // source, which is when `path` appears and the save key comes alive.
     onExported: useCallback(
@@ -290,7 +303,10 @@ function DocumentSession(
       },
       [onSourceChange],
     ),
-    onSaveError: useCallback(() => setViewerError("saveFailed"), []),
+    onSaveError: useCallback(
+      () => showViewerError("saveFailed"),
+      [showViewerError],
+    ),
     // A structure command moved the page list under everything keyed by page
     // number, so the metadata is replaced wholesale and every position-derived
     // state — the current page, the selection — is brought back into range.
@@ -323,10 +339,7 @@ function DocumentSession(
     // reader went on to make successfully. The edit held for a retry goes with
     // it: once the offer is off the screen there is no way back to it, so
     // keeping the edit would only leave it to be re-run by the next offer.
-    onSuccess: useCallback(() => {
-      setViewerError(null)
-      setUnfontedEdit(null)
-    }, []),
+    onSuccess: dismissViewerError,
   })
   const watermark = useWatermark({
     activeConfig: annotations.watermarkConfig,
@@ -849,14 +862,14 @@ function DocumentSession(
       // reader's back. A page-shifting edit in flight is the one such case —
       // the gap was read off a grid that edit is about to renumber.
       if (annotations.isStructureBusyNow()) {
-        setViewerError("editInFlight")
+        showViewerError("editInFlight")
       } else {
         void insertFiles(event.paths.filter(isPdfPath), index)
       }
 
       return true
     },
-    [active, annotations, insertFiles, viewMode],
+    [active, annotations, insertFiles, showViewerError, viewMode],
   )
 
   // A drag the reader started here but finished elsewhere — they switched tabs
@@ -978,7 +991,7 @@ function DocumentSession(
     try {
       await invoke("download_pdf_note_font")
     } catch {
-      setViewerError("noteFontFailed")
+      showViewerError("noteFontFailed")
 
       return
     } finally {
@@ -993,8 +1006,10 @@ function DocumentSession(
       setUnfontedEdit(null)
       await annotations.commit(unfontedEdit)
     }
-  }, [annotations, unfontedEdit])
+  }, [annotations, showViewerError, unfontedEdit])
 
+  const errorAutoDismisses =
+    viewerError !== "noteFontMissing" && viewerError !== "noteFontFailed"
   const errorMessage =
     viewerError === "fileTooLarge"
       ? t("viewer.fileTooLarge")
@@ -1289,29 +1304,35 @@ function DocumentSession(
       />
 
       {errorMessage ? (
-        <div
-          className="fixed top-25 right-4 z-40 flex max-w-80 items-center gap-3 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-          role="alert"
+        <DismissibleAlert
+          // A hidden tab has not shown its warning yet, and the font notices
+          // hold the reader's otherwise-lost note until they answer the offer.
+          autoDismiss={active && errorAutoDismisses}
+          className="fixed top-25 right-4 z-40 max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+          dismissKey={viewerErrorVersion}
+          onDismiss={dismissViewerError}
         >
-          <span>{errorMessage}</span>
-          {/* The only refusals the reader can answer from here, so the only
-              ones that carry a button — a fetch that failed included, since
-              the edit waiting on it is still held. */}
-          {viewerError === "noteFontMissing" ||
-          viewerError === "noteFontFailed" ? (
-            <Button
-              className="shrink-0"
-              disabled={fetchingNoteFont}
-              onClick={() => void fetchNoteFont()}
-              size="sm"
-              variant="outline"
-            >
-              {fetchingNoteFont
-                ? t("annotate.noteFontFetching")
-                : t("annotate.noteFontFetch")}
-            </Button>
-          ) : null}
-        </div>
+          <div className="flex items-center gap-3">
+            <span>{errorMessage}</span>
+            {/* The only refusals the reader can answer from here, so the only
+                ones that carry a button — a fetch that failed included, since
+                the edit waiting on it is still held. */}
+            {viewerError === "noteFontMissing" ||
+            viewerError === "noteFontFailed" ? (
+              <Button
+                className="shrink-0"
+                disabled={fetchingNoteFont}
+                onClick={() => void fetchNoteFont()}
+                size="sm"
+                variant="outline"
+              >
+                {fetchingNoteFont
+                  ? t("annotate.noteFontFetching")
+                  : t("annotate.noteFontFetch")}
+              </Button>
+            ) : null}
+          </div>
+        </DismissibleAlert>
       ) : null}
     </div>
   )

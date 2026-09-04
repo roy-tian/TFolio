@@ -113,6 +113,25 @@ describe("TFolio PDF viewer", () => {
     await openPdfFromDisk("not-a-pdf.txt", Buffer.from("not a PDF", "utf8"))
     await expect($("[role='alert']")).toHaveText("Please choose a PDF file.")
 
+    const dismissAlert = $("button[aria-label='Dismiss notification']")
+    await dismissAlert.waitForDisplayed()
+    await dismissAlert.click()
+    await $("[role='alert']").waitForDisplayed({ reverse: true })
+
+    // A repeated refusal gets a fresh lifetime rather than inheriting the
+    // first one's nearly-expired timer, then leaves on its own.
+    await openPdfFromDisk("not-a-pdf.txt", Buffer.from("not a PDF", "utf8"))
+    await $("[role='alert']").waitForDisplayed()
+    await browser.pause(3_000)
+    await openPdfFromDisk("not-a-pdf.txt", Buffer.from("not a PDF", "utf8"))
+    await browser.pause(2_500)
+    await expect($("[role='alert']")).toBeDisplayed()
+    await $("[role='alert']").waitForDisplayed({
+      reverse: true,
+      timeout: 4_000,
+      timeoutMsg: "the repeated warning did not dismiss itself",
+    })
+
     await openPdfFromDisk("one-page.pdf", minimalPdf())
 
     const firstPage = await $("[data-page-number='1']")
