@@ -11,6 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::recent::RecentFiles;
 
+use super::engine::OperationTarget;
 use super::font::{download_fallback_font, fallback_font_destination};
 use super::{
     size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks, PageNumbersConfig, PagePoint,
@@ -225,13 +226,16 @@ pub async fn download_pdf_note_font(app: AppHandle) -> Result<(), String> {
     download_fallback_font(&destination).await
 }
 
+/// Lays a watermark over every page, and answers whether it landed: `false` is
+/// the reader stopping it partway through a long document, which leaves the
+/// document exactly as it was rather than half-marked.
 #[tauri::command]
 pub async fn apply_pdf_watermark(
     document_id: u64,
     config: WatermarkConfig,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -246,7 +250,7 @@ pub async fn remove_pdf_watermark(
     document_id: u64,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -256,13 +260,15 @@ pub async fn remove_pdf_watermark(
     .map_err(|error| format!("PDFium watermark removal task failed: {error}"))?
 }
 
+/// Numbers the pages, and answers whether it landed — `false` for a run the
+/// reader stopped, exactly as `apply_pdf_watermark` reports one.
 #[tauri::command]
 pub async fn apply_pdf_page_numbers(
     document_id: u64,
     config: PageNumbersConfig,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -277,7 +283,7 @@ pub async fn remove_pdf_page_numbers(
     document_id: u64,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -285,6 +291,36 @@ pub async fn remove_pdf_page_numbers(
     })
     .await
     .map_err(|error| format!("PDFium page-number removal task failed: {error}"))?
+}
+
+/// Stops the watermark or page-number work now running on `document_id`, which
+/// then rolls the document back to the bytes it started from. Answers whether
+/// anything was running to stop.
+///
+/// Deliberately not `spawn_blocking`: every other command parks a blocking
+/// thread on the PDFium lock, and the operation this one has to reach is the
+/// very thing holding it — a cancel queued behind that would arrive only once
+/// there was nothing left to cancel. It takes the operations lock alone, which
+/// is never held for more than a few instructions.
+///
+/// A document id is all it takes, which is all any command here takes: the
+/// worst a page can do with it is stop work that same page asked for.
+#[tauri::command]
+pub async fn cancel_pdf_operation(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<bool, String> {
+    Ok(state
+        .0
+        .cancel_operation(OperationTarget::Document(document_id)))
+}
+
+/// Stops the merge now running, which then produces nothing at all. Takes no
+/// argument because a merge has no document to name until it has finished
+/// building one — and is not `spawn_blocking` for the reason above.
+#[tauri::command]
+pub async fn cancel_pdf_merge(state: State<'_, PdfiumState>) -> Result<bool, String> {
+    Ok(state.0.cancel_operation(OperationTarget::Merge))
 }
 
 /// Removes marks this session made, by the ids their adds handed back — what an
@@ -527,6 +563,9 @@ pub async fn inspect_pdf_files(
 /// Merges the named files, in order, into one new document — the merge
 /// wizard's whole backend half. The result has no source path, so it can only
 /// ever be exported to a copy: nothing it merged can be written back over.
+///
+/// `None` is the reader stopping it partway: a merge builds its document off to
+/// the side, so a stopped one leaves nothing behind to close or clean up.
 #[tauri::command]
 pub async fn merge_pdf_files(
     paths: Vec<String>,
@@ -534,7 +573,7 @@ pub async fn merge_pdf_files(
     bookmarks: MergeBookmarks,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<PdfDocumentInfo, String> {
+) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -626,6 +665,12 @@ pub async fn export_pdf(
 #[tauri::command]
 pub async fn close_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result<(), String> {
     let engine = Arc::clone(&state.0);
+
+    // A document the reader has closed has no work worth finishing: without
+    // this the close — and everything queued behind it, an open of the next
+    // file included — would wait out a whole rebuild of a document that is no
+    // longer on screen.
+    engine.cancel_operation(OperationTarget::Document(document_id));
 
     tauri::async_runtime::spawn_blocking(move || engine.close(document_id))
         .await

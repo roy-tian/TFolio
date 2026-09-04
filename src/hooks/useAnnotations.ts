@@ -37,7 +37,11 @@ import type {
   PdfInsertOutcome,
   PdfStructureUpdate,
 } from "@/lib/pdf"
-import type { PdfProgress } from "@/lib/progress"
+import {
+  PdfOperationCancelled,
+  type PdfLayerOutcome,
+  type PdfProgress,
+} from "@/lib/progress"
 import type { WatermarkConfig } from "@/lib/watermark"
 
 type ProgressHandler = (progress: PdfProgress) => void
@@ -186,13 +190,13 @@ async function applyCommand(
       return await removeMarks(documentId, command.target.id, marks)
     case "watermark":
       if (command.config) {
-        await invoke("apply_pdf_watermark", {
+        await runOwnedLayerCommand("apply_pdf_watermark", {
           config: command.config,
           documentId,
           onProgress: progressChannel(onProgress),
         })
       } else {
-        await invoke("remove_pdf_watermark", {
+        await runOwnedLayerCommand("remove_pdf_watermark", {
           documentId,
           onProgress: progressChannel(onProgress),
         })
@@ -200,13 +204,13 @@ async function applyCommand(
       return []
     case "pageNumbers":
       if (command.config) {
-        await invoke("apply_pdf_page_numbers", {
+        await runOwnedLayerCommand("apply_pdf_page_numbers", {
           config: command.config,
           documentId,
           onProgress: progressChannel(onProgress),
         })
       } else {
-        await invoke("remove_pdf_page_numbers", {
+        await runOwnedLayerCommand("remove_pdf_page_numbers", {
           documentId,
           onProgress: progressChannel(onProgress),
         })
@@ -252,6 +256,23 @@ async function applyCommand(
         }),
       )
       return []
+  }
+}
+
+/**
+ * Runs one of the two owned-layer commands, which answer whether the change
+ * landed rather than merely succeeding.
+ *
+ * `false` is the reader having stopped a long run: the backend has already put
+ * the document back as it was, so the step must leave no history entry either —
+ * which is what throwing gets, the queue committing nothing that threw.
+ */
+async function runOwnedLayerCommand(
+  command: string,
+  args: Record<string, unknown>,
+) {
+  if (!(await invoke<boolean>(command, args))) {
+    throw new PdfOperationCancelled()
   }
 }
 
@@ -301,13 +322,13 @@ async function retractCommand(
   switch (command.kind) {
     case "watermark":
       if (command.previous) {
-        await invoke("apply_pdf_watermark", {
+        await runOwnedLayerCommand("apply_pdf_watermark", {
           config: command.previous,
           documentId,
           onProgress: progressChannel(),
         })
       } else {
-        await invoke("remove_pdf_watermark", {
+        await runOwnedLayerCommand("remove_pdf_watermark", {
           documentId,
           onProgress: progressChannel(),
         })
@@ -316,13 +337,13 @@ async function retractCommand(
       return []
     case "pageNumbers":
       if (command.previous) {
-        await invoke("apply_pdf_page_numbers", {
+        await runOwnedLayerCommand("apply_pdf_page_numbers", {
           config: command.previous,
           documentId,
           onProgress: progressChannel(),
         })
       } else {
-        await invoke("remove_pdf_page_numbers", {
+        await runOwnedLayerCommand("remove_pdf_page_numbers", {
           documentId,
           onProgress: progressChannel(),
         })
@@ -828,12 +849,12 @@ export function useAnnotations({
       config: WatermarkConfig | null,
       pageCount: number,
       onProgress?: ProgressHandler,
-    ) => {
+    ): Promise<PdfLayerOutcome> => {
       if (documentId === undefined) {
-        return false
+        return "failed"
       }
 
-      let failed = false
+      let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
         const planned = planWatermarkChange(current, config, pageCount)
@@ -862,28 +883,35 @@ export function useAnnotations({
           },
         }
       }, (error) => {
-        failed = true
+        // A stop is the reader's own doing: nothing to report, and nothing for
+        // the dialog to stay open over.
+        if (error instanceof PdfOperationCancelled) {
+          outcome = "cancelled"
+          return
+        }
+
+        outcome = "failed"
         onAnnotateError(error)
       })
 
-      return !failed
+      return outcome
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
   /** The page-number counterpart of `setWatermark`, planned against the history
-      the shared queue has reached; reports whether the change landed. */
+      the shared queue has reached; reports how the change ended. */
   const setPageNumbers = useCallback(
     async (
       config: PageNumbersConfig | null,
       pageCount: number,
       onProgress?: ProgressHandler,
-    ) => {
+    ): Promise<PdfLayerOutcome> => {
       if (documentId === undefined) {
-        return false
+        return "failed"
       }
 
-      let failed = false
+      let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
         const planned = planPageNumbersChange(current, config, pageCount)
@@ -912,14 +940,46 @@ export function useAnnotations({
           },
         }
       }, (error) => {
-        failed = true
+        if (error instanceof PdfOperationCancelled) {
+          outcome = "cancelled"
+          return
+        }
+
+        outcome = "failed"
         onAnnotateError(error)
       })
 
-      return !failed
+      return outcome
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
+
+  /**
+   * Asks the backend to stop the watermark or page-number work now running on
+   * this document, which then rolls it back to the bytes it started from.
+   *
+   * The one gesture that reaches a rebuild already in flight: everything else
+   * the reader can do queues behind the PDFium lock that rebuild is holding,
+   * which on a long document is exactly the wait they are trying to leave.
+   *
+   * Answers whether the backend found a run to stop. `false` is not a failure
+   * but a miss — the ask arrived before the command listed itself, which the
+   * caller has to repeat rather than drop, or the reader's stop is silently
+   * spent and the run they walked out of lands anyway.
+   */
+  const cancelOperation = useCallback(async () => {
+    if (documentId === undefined) {
+      return false
+    }
+
+    try {
+      return await invoke<boolean>("cancel_pdf_operation", { documentId })
+    } catch {
+      // Nothing to report: the work either stops or finishes, and both are
+      // already answered by the operation's own result.
+      return false
+    }
+  }, [documentId])
 
   // Undo and redo count as page-shifting: the entry they take back may be a
   // structure edit, and a page-numbered command queued behind it would go
@@ -1108,6 +1168,7 @@ export function useAnnotations({
     () => ({
       canRedo: canRedo(history) && !isBusy,
       canUndo: canUndo(history) && !isBusy,
+      cancelOperation,
       commit: commitCommand,
       deletePages,
       eraseAt,
@@ -1132,6 +1193,7 @@ export function useAnnotations({
       watermarkConfig: currentWatermarkConfig(history),
     }),
     [
+      cancelOperation,
       commitCommand,
       deletePages,
       eraseAt,

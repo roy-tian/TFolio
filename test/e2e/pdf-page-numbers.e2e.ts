@@ -185,6 +185,44 @@ describe("TFolio page numbers", () => {
     })
   })
 
+  it("stops a long run, rolling the document back and freeing the app", async () => {
+    await browser.refresh()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    // Long enough that the stop always lands mid-run: this build spends about
+    // ten seconds on 600 pages, and the click comes inside the first one.
+    await openPdfFromDisk("page-numbers-long.pdf", minimalPdf(600))
+    await renderedPage()
+    const clean = await pagePixelFingerprint()
+
+    await openPageNumbersDialog()
+    await $("[data-testid='page-numbers-apply']").click()
+    await $("[data-testid='page-numbers-stop']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 60_000,
+    })
+
+    // Back at the bytes it started from: the page is the one it opened as, and
+    // the session owns nothing — a dialog with numbers to remove would offer to.
+    expect(await pagePixelFingerprint()).toBe(clean)
+    await openPageNumbersDialog()
+    await expect(
+      $("//button[normalize-space()='Remove page numbers']"),
+    ).not.toBeExisting()
+    await $("//button[normalize-space()='Cancel']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 15_000,
+    })
+
+    // And the app is free at once: the next document opens rather than queueing
+    // behind a rebuild the reader has left.
+    await openPdfFromDisk("page-numbers-after-stop.pdf", blankPdf())
+    await $(
+      "button[role='tab'][title='page-numbers-after-stop.pdf']",
+    ).waitForExist({ timeout: 15_000 })
+  })
+
   it("coexists with a watermark, disables save, and leaves the file alone", async () => {
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })

@@ -23,10 +23,12 @@ type PageNumbersDialogProps = {
   draft: PageNumbersDraft
   hasPageNumbers: boolean
   isApplying: boolean
+  isStopping: boolean
   onApply: () => void
   onDraftChange: (draft: PageNumbersDraft) => void
   onOpenChange: (open: boolean) => void
   onRemove: () => void
+  onStop: () => void
   open: boolean
   pageCount: number
   progress: PdfProgress | null
@@ -37,10 +39,12 @@ export function PageNumbersDialog({
   draft,
   hasPageNumbers,
   isApplying,
+  isStopping,
   onApply,
   onDraftChange,
   onOpenChange,
   onRemove,
+  onStop,
   open,
   pageCount,
   progress,
@@ -72,6 +76,17 @@ export function PageNumbersDialog({
             <p className="text-center text-xs text-muted-foreground">
               {t("pageNumbers.progressHint")}
             </p>
+            {/* The one control that reaches work already running: everything
+                else the reader could press waits on the same document. */}
+            <Button
+              data-testid="page-numbers-stop"
+              disabled={isStopping}
+              onClick={onStop}
+              type="button"
+              variant="outline"
+            >
+              {isStopping ? t("pageNumbers.stopping") : t("pageNumbers.stop")}
+            </Button>
           </div>
         ) : (
           /* The body scrolls as a whole, so the columns keep their natural

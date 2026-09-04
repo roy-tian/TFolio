@@ -297,6 +297,49 @@ describe("merge wizard", () => {
     })
   })
 
+  it("stops the run from its footer, keeping what the merge already made", async () => {
+    const first = writeScratchPdf("stop-first.pdf", minimalPdf(200))
+    const second = writeScratchPdf("stop-second.pdf", minimalPdf(200))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks-none']").click()
+    await nextStep()
+    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await nextStep()
+    await $("[data-testid='merge-wizard-merge']").click()
+
+    // Stopped inside the page-number phase — 400 pages of it, which is where a
+    // run like this spends its time and where the reader gives up.
+    const progress = $("[data-testid='merge-wizard-progress']")
+    await progress.waitForDisplayed({ timeout: 15_000 })
+    await browser.waitUntil(
+      async () => (await progress.getText()).includes("Adding page numbers"),
+      { timeout: 60_000, timeoutMsg: "page-number progress never followed the merge" },
+    )
+    await $("[data-testid='merge-wizard-stop']").click()
+
+    // The merge itself had already landed, so its document opens — with none of
+    // the numbering the reader walked out of.
+    await $("[data-testid='merge-wizard']").waitForDisplayed({
+      reverse: true,
+      timeout: 60_000,
+    })
+    await browser.waitUntil(async () => (await thumbCount()) === 400, {
+      timeout: 60_000,
+      timeoutMsg: "the merged document never opened",
+    })
+
+    await $("button[aria-label='Page numbers']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+      timeout: 15_000,
+    })
+    await expect(
+      $("//button[normalize-space()='Remove page numbers']"),
+    ).not.toBeExisting()
+  })
+
   it("pads the files onto odd starts when asked", async () => {
     const first = writeScratchPdf("odd.pdf", minimalPdf(1))
     const second = writeScratchPdf("also-odd.pdf", minimalPdf(1))

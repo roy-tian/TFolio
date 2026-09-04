@@ -4,7 +4,7 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, MutexGuard, OnceLock,
     },
 };
@@ -627,6 +627,59 @@ fn owned_tail_base(
         .ok_or_else(|| format!("page {page_number} no longer carries this session's marks"))
 }
 
+/// What a cancellable operation is working on. A merge has no document to name
+/// until it has finished building one, so it is its own target — and the
+/// wizard is modal, so there is only ever the one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum OperationTarget {
+    Document(u64),
+    Merge,
+}
+
+/// One long operation, listed while it runs so the reader's cancel can find it.
+struct RunningOperation {
+    cancelled: Arc<AtomicBool>,
+    target: OperationTarget,
+}
+
+/// Lists an operation for as long as it runs, and takes it off the list again
+/// on every way out — an early return, an error, a panic.
+///
+/// The flag is read between pages rather than checked once, which is what makes
+/// a rebuild of a long document interruptible; `PdfiumEngine::cancel_operation`
+/// is the only thing that ever sets it.
+struct OperationGuard<'a> {
+    cancelled: Arc<AtomicBool>,
+    id: u64,
+    operations: &'a Mutex<HashMap<u64, RunningOperation>>,
+}
+
+/// The operations list, through a poisoning that must not be fatal: it holds
+/// bookkeeping rather than PDFium state, so a panic elsewhere leaves it
+/// perfectly usable — and refusing it would make every later run
+/// uninterruptible and leave phantom entries a cancel would answer for.
+fn lock_operations(
+    operations: &Mutex<HashMap<u64, RunningOperation>>,
+) -> MutexGuard<'_, HashMap<u64, RunningOperation>> {
+    operations
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl OperationGuard<'_> {
+    /// Whether the reader has asked for this operation to stop. Read once per
+    /// page: the answer costs an atomic load, and a page is milliseconds.
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for OperationGuard<'_> {
+    fn drop(&mut self) {
+        lock_operations(self.operations).remove(&self.id);
+    }
+}
+
 pub(super) struct PdfiumEngine {
     pdfium: &'static Pdfium,
     /// The open documents, and — load-bearing beyond that — the lock that
@@ -668,6 +721,14 @@ pub(super) struct PdfiumEngine {
     /// file a save will later overwrite. Grows only by the reader's own
     /// gestures, so it is never cleared.
     approved_paths: Mutex<HashSet<PathBuf>>,
+    /// The cancel flags of the long owned-content operations now running.
+    ///
+    /// A lock of its own, and one held only for the moment it takes to list,
+    /// find, or retire an entry. It has to be: the operation a cancel must
+    /// reach holds `documents` for its whole run, so a flag kept behind that
+    /// lock could never be set in time to stop anything.
+    operations: Mutex<HashMap<u64, RunningOperation>>,
+    next_operation_id: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -689,6 +750,8 @@ impl PdfiumState {
             system_face: OnceLock::new(),
             page_number_font: OnceLock::new(),
             approved_paths: Mutex::new(HashSet::new()),
+            operations: Mutex::new(HashMap::new()),
+            next_operation_id: AtomicU64::new(1),
         })))
     }
 
@@ -725,6 +788,52 @@ impl PdfiumEngine {
         self.documents
             .lock()
             .map_err(|_| "PDFium document store is unavailable".to_string())
+    }
+
+    /// Lists a cancellable operation on `target` and hands back the guard that
+    /// both reads its flag and retires it.
+    ///
+    /// Called *before* the documents lock is taken, so a cancel that arrives
+    /// while this operation is still queued behind another one is seen the
+    /// moment it starts rather than missed.
+    fn begin_operation(&self, target: OperationTarget) -> OperationGuard<'_> {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
+
+        lock_operations(&self.operations).insert(
+            id,
+            RunningOperation {
+                cancelled: Arc::clone(&cancelled),
+                target,
+            },
+        );
+
+        OperationGuard {
+            cancelled,
+            id,
+            operations: &self.operations,
+        }
+    }
+
+    /// Asks whatever long operation is running on `target` to stop and leave
+    /// the document as it found it, and answers whether one was listening.
+    ///
+    /// Takes no document lock — that is the whole point, since the operation it
+    /// stops is holding it — so it answers while the work is still in flight.
+    /// Every operation on the target is flagged: they cannot overlap in the
+    /// engine, but two the WebView fired at once can both be waiting to run.
+    pub(super) fn cancel_operation(&self, target: OperationTarget) -> bool {
+        let operations = lock_operations(&self.operations);
+        let mut asked = false;
+
+        for operation in operations.values() {
+            if operation.target == target {
+                operation.cancelled.store(true, Ordering::Relaxed);
+                asked = true;
+            }
+        }
+
+        asked
     }
 
     /// A new one-page A4 document, built in memory. It has no file of its own,
@@ -1896,7 +2005,8 @@ impl PdfiumEngine {
         watermark: Option<(&WatermarkConfig, PdfFontToken, PdfColor)>,
         page_numbers: Option<(&PageNumbersConfig, PdfFontToken)>,
         on_progress: &mut dyn FnMut(usize, usize),
-    ) -> Result<Vec<PageOwnedPlan>, String> {
+        operation: &OperationGuard<'_>,
+    ) -> Result<Option<Vec<PageOwnedPlan>>, String> {
         let page_count = entry.document.pages().len();
 
         // Without this an empty document takes an empty ownership record, which
@@ -1915,6 +2025,13 @@ impl PdfiumEngine {
         let mut numbering = page_numbers.map(|(config, _)| PageNumbering::new(config));
 
         for page_number in 1..=page_count {
+            // Read before the page is touched, so a stopped run costs the
+            // reader one page of work at most. Planning changes nothing on the
+            // document, but its blank scan is half of a long document's wait.
+            if operation.is_cancelled() {
+                return Ok(None);
+            }
+
             let page = entry
                 .document
                 .pages()
@@ -2072,7 +2189,7 @@ impl PdfiumEngine {
             on_progress(page_number as usize, page_count as usize * 2);
         }
 
-        Ok(plans)
+        Ok(Some(plans))
     }
 
     /// A whole page rendered coarsely for sampling: `dpi` under the same
@@ -2193,14 +2310,26 @@ impl PdfiumEngine {
         snapshot: Vec<u8>,
         cause: String,
     ) -> String {
-        match self.pdfium.load_pdf_from_byte_vec(snapshot, None) {
-            Ok(document) => {
-                entry.document = document;
-                cause
-            }
+        match self.load_document_snapshot(entry, snapshot) {
+            Ok(()) => cause,
             Err(error) => format!(
                 "{cause}; PDFium also could not roll the document back to its previous bytes: {error}"
             ),
+        }
+    }
+
+    /// Puts a transaction's own bytes back in place of whatever it left behind.
+    fn load_document_snapshot(
+        &self,
+        entry: &mut OpenDocument,
+        snapshot: Vec<u8>,
+    ) -> Result<(), String> {
+        match self.pdfium.load_pdf_from_byte_vec(snapshot, None) {
+            Ok(document) => {
+                entry.document = document;
+                Ok(())
+            }
+            Err(error) => Err(error.to_string()),
         }
     }
 
@@ -2240,7 +2369,9 @@ impl PdfiumEngine {
     }
 
     /// Rebuilds every page's owned-content tail to match the given active layer
-    /// configs, replacing whatever this session previously owned.
+    /// configs, replacing whatever this session previously owned. Answers
+    /// whether the change landed: `false` is the reader stopping it partway,
+    /// which the same snapshot rolls back that a failure does.
     ///
     /// The whole tail is popped and re-appended in the fixed layer order on
     /// every page, so a change to one layer can never leave it stacked wrong
@@ -2254,10 +2385,18 @@ impl PdfiumEngine {
         watermark: Option<WatermarkResources>,
         page_numbers: Option<PageNumbersResources>,
         on_progress: &mut dyn FnMut(usize, usize),
-    ) -> Result<(), String> {
+        operation: &OperationGuard<'_>,
+    ) -> Result<bool, String> {
         let page_count = entry.document.pages().len() as usize;
         let total = page_count * 2;
         on_progress(0, total);
+
+        // Nothing has been touched yet, so a stop that has already arrived costs
+        // neither the snapshot below — a whole 17 MB serialization — nor a
+        // rollback.
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
 
         let previous = entry.owned_content.clone();
         let snapshot = entry
@@ -2265,7 +2404,9 @@ impl PdfiumEngine {
             .save_to_bytes()
             .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
 
-        let rebuilt = (|| -> Result<OwnedContentState, String> {
+        // `None` is the reader's stop: the rollback below is the same one a
+        // failure takes, so a stopped run leaves the document it started on.
+        let rebuilt = (|| -> Result<Option<OwnedContentState>, String> {
             // Load each active layer's font once, into the document, and thread
             // the token through the per-page loop — a replacement reloads even an
             // unchanged layer's font, since its objects are rebuilt too.
@@ -2297,7 +2438,7 @@ impl PdfiumEngine {
                 None => None,
             };
 
-            let plans = Self::plan_owned_content(
+            let Some(plans) = Self::plan_owned_content(
                 entry,
                 watermark
                     .as_ref()
@@ -2306,7 +2447,11 @@ impl PdfiumEngine {
                     .as_ref()
                     .map(|resources| (&resources.config, page_number_font.unwrap())),
                 on_progress,
-            )?;
+                operation,
+            )?
+            else {
+                return Ok(None);
+            };
 
             // A scratch page receives every retired object; created only when
             // there is a prior tail to pop, and deleted before the transaction
@@ -2328,6 +2473,13 @@ impl PdfiumEngine {
             let mut per_page = HashMap::with_capacity(planned_pages);
 
             for (index, plan) in plans.into_iter().enumerate() {
+                // Between pages, never inside one: a page is left with a whole
+                // tail or none of one, and the snapshot puts back the pages
+                // already rebuilt.
+                if operation.is_cancelled() {
+                    return Ok(None);
+                }
+
                 let page_id = entry.page_id(plan.page_number)?;
 
                 // Build the watermark objects up front — a font or placement
@@ -2565,17 +2717,28 @@ impl PdfiumEngine {
                     })?;
             }
 
-            Ok(OwnedContentState {
+            Ok(Some(OwnedContentState {
                 watermark: watermark.as_ref().map(|resources| resources.config.clone()),
                 page_numbers: page_numbers
                     .as_ref()
                     .map(|resources| resources.config.clone()),
                 per_page,
-            })
+            }))
         })();
 
         let state = match rebuilt {
-            Ok(state) => state,
+            Ok(Some(state)) => state,
+            // A stop is not a failure, so it is reported as one only when the
+            // rollback itself fails — which is the one case where the reader is
+            // left with a document neither they nor this session asked for.
+            Ok(None) => {
+                return match self.load_document_snapshot(entry, snapshot) {
+                    Ok(()) => Ok(false),
+                    Err(error) => Err(format!(
+                        "the operation was stopped, but PDFium could not roll the document back to its previous bytes: {error}"
+                    )),
+                };
+            }
             Err(error) => {
                 return Err(self.restore_document_snapshot(entry, snapshot, error));
             }
@@ -2592,7 +2755,7 @@ impl PdfiumEngine {
         entry.invalidate_all_page_revisions();
         on_progress(total, total);
 
-        Ok(())
+        Ok(true)
     }
 
     /// The watermark layer's rebuild inputs from a stored config: its resolved
@@ -2671,8 +2834,13 @@ impl PdfiumEngine {
         document_id: u64,
         config: WatermarkConfig,
         mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let config = config.validated()?;
+
+        // Listed before *either* wait for the lock — the no-op check below takes
+        // it too, and behind another document's rebuild that check is already a
+        // wait a reader can give up on.
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
 
         // Avoid a 17 MB read and subset for an exact no-op, while still checking
         // again under the commit lock in case another direct IPC raced this one.
@@ -2685,8 +2853,12 @@ impl PdfiumEngine {
                 .as_ref()
                 .is_some_and(|state| state.watermark.as_ref() == Some(&config))
             {
-                return Ok(());
+                return Ok(true);
             }
+        }
+
+        if operation.is_cancelled() {
+            return Ok(false);
         }
 
         // Prepared without the PDFium lock because cutting the face is
@@ -2694,6 +2866,11 @@ impl PdfiumEngine {
         let watermark = self.watermark_resources(&config)?;
 
         let mut documents = self.lock_documents()?;
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
         let entry = open_entry_mut(&mut documents, document_id)?;
 
         if entry
@@ -2701,7 +2878,7 @@ impl PdfiumEngine {
             .as_ref()
             .is_some_and(|state| state.watermark.as_ref() == Some(&config))
         {
-            return Ok(());
+            return Ok(true);
         }
         if let Some(state) = &entry.owned_content {
             Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
@@ -2709,7 +2886,13 @@ impl PdfiumEngine {
 
         let page_numbers = self.existing_page_numbers(entry)?;
 
-        self.rebuild_owned_content(entry, Some(watermark), page_numbers, &mut on_progress)
+        self.rebuild_owned_content(
+            entry,
+            Some(watermark),
+            page_numbers,
+            &mut on_progress,
+            &operation,
+        )
     }
 
     #[cfg(test)]
@@ -2717,7 +2900,7 @@ impl PdfiumEngine {
         &self,
         document_id: u64,
         config: WatermarkConfig,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         self.apply_watermark_with_progress(document_id, config, |_, _| {})
     }
 
@@ -2727,8 +2910,14 @@ impl PdfiumEngine {
         &self,
         document_id: u64,
         mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
         let entry = open_entry_mut(&mut documents, document_id)?;
 
         if !entry
@@ -2744,11 +2933,11 @@ impl PdfiumEngine {
 
         let page_numbers = self.existing_page_numbers(entry)?;
 
-        self.rebuild_owned_content(entry, None, page_numbers, &mut on_progress)
+        self.rebuild_owned_content(entry, None, page_numbers, &mut on_progress, &operation)
     }
 
     #[cfg(test)]
-    pub(super) fn remove_watermark(&self, document_id: u64) -> Result<(), String> {
+    pub(super) fn remove_watermark(&self, document_id: u64) -> Result<bool, String> {
         self.remove_watermark_with_progress(document_id, |_, _| {})
     }
 
@@ -2760,8 +2949,17 @@ impl PdfiumEngine {
         document_id: u64,
         config: PageNumbersConfig,
         mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
+        // Listed before the wait for the lock, so a reader who gives up while
+        // this is still queued behind another document's rebuild stops it here
+        // rather than after it has run.
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
         let entry = open_entry_mut(&mut documents, document_id)?;
         let config = config.validated(entry.page_ids.len() as i32)?;
 
@@ -2773,7 +2971,7 @@ impl PdfiumEngine {
             .as_ref()
             .is_some_and(|state| state.page_numbers.as_ref() == Some(&config))
         {
-            return Ok(());
+            return Ok(true);
         }
         if let Some(state) = &entry.owned_content {
             Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
@@ -2785,7 +2983,13 @@ impl PdfiumEngine {
         let watermark = self.existing_watermark(entry)?;
         let page_numbers = self.page_numbers_resources(&config)?;
 
-        self.rebuild_owned_content(entry, watermark, Some(page_numbers), &mut on_progress)
+        self.rebuild_owned_content(
+            entry,
+            watermark,
+            Some(page_numbers),
+            &mut on_progress,
+            &operation,
+        )
     }
 
     #[cfg(test)]
@@ -2793,7 +2997,7 @@ impl PdfiumEngine {
         &self,
         document_id: u64,
         config: PageNumbersConfig,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         self.apply_page_numbers_with_progress(document_id, config, |_, _| {})
     }
 
@@ -2803,8 +3007,14 @@ impl PdfiumEngine {
         &self,
         document_id: u64,
         mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
         let entry = open_entry_mut(&mut documents, document_id)?;
 
         if !entry
@@ -2820,11 +3030,11 @@ impl PdfiumEngine {
 
         let watermark = self.existing_watermark(entry)?;
 
-        self.rebuild_owned_content(entry, watermark, None, &mut on_progress)
+        self.rebuild_owned_content(entry, watermark, None, &mut on_progress, &operation)
     }
 
     #[cfg(test)]
-    pub(super) fn remove_page_numbers(&self, document_id: u64) -> Result<(), String> {
+    pub(super) fn remove_page_numbers(&self, document_id: u64) -> Result<bool, String> {
         self.remove_page_numbers_with_progress(document_id, |_, _| {})
     }
 
@@ -3470,7 +3680,7 @@ impl PdfiumEngine {
         smart_padding: bool,
         bookmarks: MergeBookmarks,
         mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<PdfDocumentInfo, String> {
+    ) -> Result<Option<PdfDocumentInfo>, String> {
         if paths.len() < 2 {
             return Err("a merge needs at least two files".into());
         }
@@ -3478,6 +3688,13 @@ impl PdfiumEngine {
         if paths.len() > MAX_MERGE_FILES {
             return Err(merge_file_limit_error());
         }
+
+        // Stoppable like an owned-layer rebuild, and for the same reason: the
+        // copying loop holds the one PDFium lock for the length of the whole
+        // pile of files. Nothing needs rolling back — the merged document is
+        // built off to the side and only reaches the store on the last step —
+        // so a stopped run simply hands back nothing.
+        let operation = self.begin_operation(OperationTarget::Merge);
 
         // One unit per source, followed by serialization, outline writing, and
         // opening the completed bytes into the document store.
@@ -3497,6 +3714,12 @@ impl PdfiumEngine {
             let mut nodes = Vec::new();
 
             for path in &paths {
+                // Between files, which is this loop's page: a source is copied
+                // whole or not at all.
+                if operation.is_cancelled() {
+                    return Ok(None);
+                }
+
                 // Each source is opened only to be copied from and dropped at the
                 // end of this loop; none of them ever enters the document store.
                 // The error wording matches `open`'s, so an encrypted file is
@@ -3558,6 +3781,12 @@ impl PdfiumEngine {
                 on_progress(completed, total);
             }
 
+            // The three steps below each walk the whole merge, so each is
+            // worth not starting once the reader has left.
+            if operation.is_cancelled() {
+                return Ok(None);
+            }
+
             let bytes = merged
                 .save_to_bytes()
                 .map_err(|error| format!("PDFium could not build the merged document: {error}"))?;
@@ -3566,6 +3795,11 @@ impl PdfiumEngine {
 
             (bytes, nodes)
         };
+
+        if operation.is_cancelled() {
+            return Ok(None);
+        }
+
         // Writing the outline is byte work rather than PDFium work, so it
         // happens with the store's lock given back — a long merge must not park
         // every render behind it.
@@ -3579,12 +3813,18 @@ impl PdfiumEngine {
         if bytes.len() > MAX_PDF_BYTES {
             return Err(size_limit_error());
         }
+        // The last chance to leave with nothing in the store: opening reads
+        // every page of the merge, and what it opens is a document the reader
+        // would then have to close.
+        if operation.is_cancelled() {
+            return Ok(None);
+        }
 
         let document = self.open_with_source(bytes, None)?;
         completed += 1;
         on_progress(completed, total);
 
-        Ok(document)
+        Ok(Some(document))
     }
 
     #[cfg(test)]
@@ -3594,7 +3834,8 @@ impl PdfiumEngine {
         smart_padding: bool,
         bookmarks: MergeBookmarks,
     ) -> Result<PdfDocumentInfo, String> {
-        self.merge_files_with_progress(paths, smart_padding, bookmarks, |_, _| {})
+        self.merge_files_with_progress(paths, smart_padding, bookmarks, |_, _| {})?
+            .ok_or_else(|| "the merge was stopped".to_string())
     }
 
     /// Writes the document back over the file it was opened from.

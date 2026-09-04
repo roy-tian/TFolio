@@ -105,6 +105,8 @@ fn test_engine() -> &'static PdfiumEngine {
         // the app resolves it.
         page_number_font: OnceLock::new(),
         approved_paths: Mutex::new(HashSet::new()),
+        operations: Mutex::new(HashMap::new()),
+        next_operation_id: AtomicU64::new(1),
     })
 }
 
@@ -3014,6 +3016,8 @@ fn font_engine(system_face: Option<(Vec<u8>, usize)>, fallback: Vec<PathBuf>) ->
         system_face: OnceLock::from(system_face),
         page_number_font: OnceLock::new(),
         approved_paths: Mutex::new(HashSet::new()),
+        operations: Mutex::new(HashMap::new()),
+        next_operation_id: AtomicU64::new(1),
     }
 }
 
@@ -4631,6 +4635,87 @@ fn numbers_every_page_and_extracts_the_label() {
 
 #[test]
 #[ignore = "requires `bun run fonts:download`"]
+fn a_stopped_run_leaves_the_document_bare() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    // Stopped from the run's own progress, which puts the flag where the
+    // reader's cancel puts it: set while the rebuild holds the document lock.
+    let applied = engine
+        .apply_page_numbers_with_progress(document.id, page_numbers_config(), |completed, _| {
+            if completed > 0 {
+                engine.cancel_operation(OperationTarget::Document(document.id));
+            }
+        })
+        .expect("a stopped run is not a failure");
+
+    assert!(!applied, "a stopped run reports that nothing landed");
+    assert!(
+        !engine.cancel_operation(OperationTarget::Document(document.id)),
+        "the operation is off the list once it has returned"
+    );
+
+    let band = (150, 460, 250, 520);
+
+    for page_number in [1, 2] {
+        let (inside, _) = ink_inside_and_outside(engine, document.id, page_number, band);
+        assert_eq!(inside, 0, "page {page_number} should carry no number");
+    }
+
+    // The document is not just bare but usable: the reader's next attempt runs
+    // against a store that owns nothing, exactly as the first one did.
+    assert!(engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number the document on a second attempt"));
+
+    let (inside, _) = ink_inside_and_outside(engine, document.id, 1, band);
+    assert!(inside > 0, "the second attempt should number page one");
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn a_stopped_replacement_keeps_the_numbers_it_had() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number every page");
+
+    let mut replacement = page_numbers_config();
+    replacement.start = Some(10);
+
+    let applied = engine
+        .apply_page_numbers_with_progress(document.id, replacement, |completed, _| {
+            if completed > 0 {
+                engine.cancel_operation(OperationTarget::Document(document.id));
+            }
+        })
+        .expect("a stopped replacement is not a failure");
+
+    assert!(
+        !applied,
+        "a stopped replacement reports that nothing landed"
+    );
+
+    let text = extracted_text(engine, document.id, 1);
+    assert!(
+        text.contains('1') && !text.contains("10"),
+        "page one should still carry the numbering it had, got {text:?}"
+    );
+    // The rollback has to put back the tail record as well as the bytes: a
+    // remove is refused outright unless the two still describe each other.
+    assert!(engine
+        .remove_page_numbers(document.id)
+        .expect("the numbers it kept are still this session's to remove"));
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
 fn numbers_only_the_selected_range() {
     let engine = test_engine();
     let document = engine
@@ -5232,6 +5317,20 @@ fn wide_single_page_pdf() -> Vec<u8> {
     ])
 }
 
+/// Held for the length of every test that runs a merge.
+///
+/// `OperationTarget::Merge` names no document — the app only ever has the one
+/// wizard — so the stopped-merge test's cancel reaches *any* merge listed on the
+/// shared engine, including one another test has begun and is still waiting on
+/// the store's lock to start. Serialised, there is never a second one to reach.
+fn merge_test_guard() -> MutexGuard<'static, ()> {
+    static GUARD: Mutex<()> = Mutex::new(());
+
+    GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Writes each fixture into its own file in `directory`, named `<stem>.pdf`,
 /// and hands back the paths in order — the shape `merge_files` takes.
 fn merge_sources(directory: &Path, files: &[(&str, Vec<u8>)]) -> Vec<PathBuf> {
@@ -5293,6 +5392,7 @@ fn a_bookmark_with_no_destination_falls_back_to_its_own_file() {
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn merge_files_appends_every_file_in_order() {
+    let _merges = merge_test_guard();
     let engine = test_engine();
     let directory = scratch_directory("merge-files-order");
     let first = banded_pdf(&[20, 60]);
@@ -5324,7 +5424,8 @@ fn merge_files_appends_every_file_in_order() {
         .merge_files_with_progress(paths, false, MergeBookmarks::None, |completed, total| {
             progress.push((completed, total))
         })
-        .expect("PDFium should merge the files");
+        .expect("PDFium should merge the files")
+        .expect("a merge nobody stopped hands back its document");
 
     assert_eq!(progress, [(0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]);
     assert_eq!(merged.num_pages, 5);
@@ -5344,7 +5445,45 @@ fn merge_files_appends_every_file_in_order() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn a_stopped_merge_hands_back_nothing() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-stopped");
+    let paths = merge_sources(
+        &directory,
+        &[
+            ("first", banded_pdf(&[20, 60])),
+            ("second", banded_pdf(&[110, 150])),
+            ("third", banded_pdf(&[30, 90])),
+        ],
+    );
+    // Stopped from the run's own progress, where the reader's cancel lands:
+    // while the merge holds the document lock.
+    let merged = engine
+        .merge_files_with_progress(paths, false, MergeBookmarks::None, |completed, _| {
+            if completed > 0 {
+                engine.cancel_operation(OperationTarget::Merge);
+            }
+        })
+        .expect("a stopped merge is not a failure");
+
+    // Nothing to check in the store beyond this: handing back no document is
+    // exactly how a stopped merge leaves nothing in it, since the store is
+    // reached only by the open on the very last step. (The engine is shared
+    // with every other test here, so its size is not this test's to read.)
+    assert!(merged.is_none(), "a stopped merge produces no document");
+    assert!(
+        !engine.cancel_operation(OperationTarget::Merge),
+        "the merge is off the list once it has returned"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn merge_files_pads_only_the_files_that_would_open_on_an_even_page() {
+    let _merges = merge_test_guard();
     let engine = test_engine();
     let directory = scratch_directory("merge-files-parity");
     let paths = merge_sources(
@@ -5382,6 +5521,7 @@ fn merge_files_pads_only_the_files_that_would_open_on_an_even_page() {
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn merge_files_writes_one_bookmark_per_file() {
+    let _merges = merge_test_guard();
     let engine = test_engine();
     let directory = scratch_directory("merge-files-per-file");
     let paths = merge_sources(
@@ -5410,6 +5550,7 @@ fn merge_files_writes_one_bookmark_per_file() {
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn merge_files_keeps_each_source_outline_at_its_merged_position() {
+    let _merges = merge_test_guard();
     let engine = test_engine();
     let directory = scratch_directory("merge-files-keep");
     let paths = merge_sources(
@@ -5436,6 +5577,7 @@ fn merge_files_keeps_each_source_outline_at_its_merged_position() {
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn merge_files_nests_a_source_outline_under_its_own_file() {
+    let _merges = merge_test_guard();
     let engine = test_engine();
     let directory = scratch_directory("merge-files-nested");
     let paths = merge_sources(
@@ -5515,6 +5657,7 @@ fn inspecting_files_reports_page_counts_and_leaves_unreadable_ones_in_place() {
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn writing_the_outline_leaves_the_pages_as_pdfium_saved_them() {
+    let _merges = merge_test_guard();
     let engine = test_engine();
     let directory = scratch_directory("merge-files-roundtrip");
     let first = banded_pdf(&[20, 60]);

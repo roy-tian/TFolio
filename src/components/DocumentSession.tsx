@@ -331,12 +331,14 @@ function DocumentSession(
     activeConfig: annotations.watermarkConfig,
     defaultText: t("watermark.defaultText"),
     documentId: pdfDocument?.id,
+    onCancel: annotations.cancelOperation,
     onSet: annotations.setWatermark,
     pageCount: pdfDocument?.numPages ?? 0,
   })
   const pageNumbers = usePageNumbers({
     activeConfig: annotations.pageNumbersConfig,
     documentId: pdfDocument?.id,
+    onCancel: annotations.cancelOperation,
     onSet: annotations.setPageNumbers,
     pageCount: pdfDocument?.numPages ?? 0,
   })
@@ -463,11 +465,17 @@ function DocumentSession(
 
       try {
         if (pageNumbers) {
-          await annotations.setPageNumbers(
+          const outcome = await annotations.setPageNumbers(
             pageNumbers,
             pageCount,
             (progress) => onInitialLayerProgress?.("pageNumbers", progress),
           )
+
+          // One stop ends the whole opening sequence: the reader asked to be
+          // out of it, not to sit through the layer after it.
+          if (outcome === "cancelled") {
+            return
+          }
         }
         if (watermark) {
           await annotations.setWatermark(
@@ -1250,10 +1258,12 @@ function DocumentSession(
         draft={watermark.draft}
         hasWatermark={watermark.hasWatermark}
         isApplying={watermark.isApplying}
+        isStopping={watermark.isStopping}
         onApply={() => void watermark.apply()}
         onDraftChange={watermark.setDraft}
         onOpenChange={watermark.onOpenChange}
         onRemove={() => void watermark.remove()}
+        onStop={watermark.stop}
         open={active && watermark.open}
         progress={watermark.progress}
         validationError={watermark.validationError}
@@ -1263,10 +1273,12 @@ function DocumentSession(
         draft={pageNumbers.draft}
         hasPageNumbers={pageNumbers.hasPageNumbers}
         isApplying={pageNumbers.isApplying}
+        isStopping={pageNumbers.isStopping}
         onApply={() => void pageNumbers.apply()}
         onDraftChange={pageNumbers.setDraft}
         onOpenChange={pageNumbers.onOpenChange}
         onRemove={() => void pageNumbers.remove()}
+        onStop={pageNumbers.stop}
         open={active && pageNumbers.open}
         pageCount={pdfDocument?.numPages ?? 0}
         progress={pageNumbers.progress}

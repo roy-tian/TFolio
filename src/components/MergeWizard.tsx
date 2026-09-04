@@ -180,6 +180,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     files,
     finish,
     isBusy,
+    isStopping,
     mergePhase,
     mergeProgress,
     next,
@@ -199,6 +200,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     smartPadding,
     step,
     stepBlocked,
+    stop,
     totalPages,
     watermarkDraft,
     watermarkError,
@@ -530,38 +532,52 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             })}
           </ol>
 
-          <div className="flex gap-2">
-            <DialogClose render={<Button disabled={isBusy} variant="outline" />}>
-              {t("mergeWizard.cancel")}
-            </DialogClose>
+          {/* While the run holds the backend, every control here but one would
+              be a control that does nothing — so the row becomes that one. */}
+          {mergeProgress ? (
             <Button
-              disabled={step === 1 || isBusy}
-              onClick={back}
+              data-testid="merge-wizard-stop"
+              disabled={isStopping}
+              onClick={stop}
               type="button"
               variant="outline"
             >
-              {t("mergeWizard.back")}
+              {isStopping ? t("mergeWizard.stopping") : t("mergeWizard.stop")}
             </Button>
-            {step < MERGE_WIZARD_STEPS ? (
+          ) : (
+            <div className="flex gap-2">
+              <DialogClose render={<Button disabled={isBusy} variant="outline" />}>
+                {t("mergeWizard.cancel")}
+              </DialogClose>
               <Button
-                data-testid="merge-wizard-next"
-                disabled={stepBlocked || isBusy}
-                onClick={next}
+                disabled={step === 1 || isBusy}
+                onClick={back}
                 type="button"
+                variant="outline"
               >
-                {t("mergeWizard.next")}
+                {t("mergeWizard.back")}
               </Button>
-            ) : (
-              <Button
-                data-testid="merge-wizard-merge"
-                disabled={stepBlocked || isBusy}
-                onClick={() => void finish()}
-                type="button"
-              >
-                {isBusy ? progressLabel : t("mergeWizard.merge")}
-              </Button>
-            )}
-          </div>
+              {step < MERGE_WIZARD_STEPS ? (
+                <Button
+                  data-testid="merge-wizard-next"
+                  disabled={stepBlocked || isBusy}
+                  onClick={next}
+                  type="button"
+                >
+                  {t("mergeWizard.next")}
+                </Button>
+              ) : (
+                <Button
+                  data-testid="merge-wizard-merge"
+                  disabled={stepBlocked || isBusy}
+                  onClick={() => void finish()}
+                  type="button"
+                >
+                  {isBusy ? progressLabel : t("mergeWizard.merge")}
+                </Button>
+              )}
+            </div>
+          )}
         </DialogFooter>
 
         {drag && draggedFile ? (

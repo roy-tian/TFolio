@@ -101,6 +101,13 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
     settings must not become a way to name a file to open and save over.
   - `insert_pdf_from_path` validates its position in the engine, not the command,
     so the e2e build checks it too: an out-of-range index is refused, not clamped.
+  - `cancel_pdf_operation` and `cancel_pdf_merge` are the two commands that must
+    **not** run their work in `spawn_blocking`: every blocking thread is parked
+    on the PDFium lock the run they have to reach is holding, so a cancel queued
+    behind them would arrive with nothing left to cancel. They take the engine's
+    small `operations` lock alone, and a document id — none at all, for a merge
+    that has yet to make one — is all they need: the worst either can do is stop
+    work the same page asked for.
   - `tauri-plugin-fs` is transitive and deliberately never registered.
 - `download_pdf_note_font` is the app's only outbound request. It takes no
   argument the WebView could shape — host, pinned commit, size, SHA-256 and
@@ -123,6 +130,17 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
   what let the eraser take a mark out of the middle of a page's own stack while
   every other entry's undo still finds its own; `pdf_annotation_at_point` does the
   hit test, over that same session tail alone.
+- A watermark or page-number rebuild walks every page under the documents lock,
+  which is the app's one PDFium lock: while it runs, nothing else — an open of
+  the next file included — can move. So it is interruptible. The flag is read
+  between pages, never inside one, and the byte snapshot the transaction already
+  keeps rolls a stopped run back exactly as it rolls a failed one back; the
+  reader's stop reaches it through `cancel_pdf_operation`, and closing the
+  document sends the same stop. A merge is stoppable the same way, between
+  files, and needs no rollback at all — it builds off to the side and reaches
+  the store only on its last step, so a stopped one hands back `None` and leaves
+  nothing to close. A new long loop under that lock needs the same check, and a
+  command that reports one needs its "did it land" answer.
 - Watermarks are appended page content objects, not annotations. The app owns
   only the tail it appended this session — after save + reopen they are input
   content, so never call them redaction or tamper-proofing. A watermarked

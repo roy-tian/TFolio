@@ -23,10 +23,12 @@ type WatermarkDialogProps = {
   draft: WatermarkConfig
   hasWatermark: boolean
   isApplying: boolean
+  isStopping: boolean
   onApply: () => void
   onDraftChange: (draft: WatermarkConfig) => void
   onOpenChange: (open: boolean) => void
   onRemove: () => void
+  onStop: () => void
   open: boolean
   progress: PdfProgress | null
   validationError: WatermarkValidationError | null
@@ -36,10 +38,12 @@ export function WatermarkDialog({
   draft,
   hasWatermark,
   isApplying,
+  isStopping,
   onApply,
   onDraftChange,
   onOpenChange,
   onRemove,
+  onStop,
   open,
   progress,
   validationError,
@@ -70,6 +74,17 @@ export function WatermarkDialog({
             <p className="text-center text-xs text-muted-foreground">
               {t("watermark.progressHint")}
             </p>
+            {/* The one control that reaches work already running — see the
+                page-number dialog, which stops its own the same way. */}
+            <Button
+              data-testid="watermark-stop"
+              disabled={isStopping}
+              onClick={onStop}
+              type="button"
+              variant="outline"
+            >
+              {isStopping ? t("watermark.stopping") : t("watermark.stop")}
+            </Button>
           </div>
         ) : (
           /* The body scrolls as a whole, so the columns keep their natural
