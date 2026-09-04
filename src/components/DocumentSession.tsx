@@ -471,6 +471,12 @@ function DocumentSession(
     style: textNoteStyle,
     viewerRef,
   })
+
+  // Which pointer the viewer hovers a page with — one per tool, keyed to the
+  // `[data-tool-cursor]` rules in `index.css`. Null wherever a tool would not
+  // draw, so the reader gets the plain pointer back.
+  const toolCursor = drawingApplies ? activeTool : null
+
   const draftDirty = isNoteWorthKeeping(textNote.draft?.text ?? "")
   const hasUnsavedWorkNow = useCallback(
     () =>
@@ -1560,17 +1566,8 @@ function DocumentSession(
             drift off the middle of the screen. This box holds still around it. */}
         <div className="relative min-w-0 flex-1">
           <main
-            className={cn(
-              "relative size-full overflow-auto bg-zinc-200/70 dark:bg-zinc-950",
-              // Only while the tool can actually draw: the thumbnail grid hides
-              // the toggle that would turn it back off, so a crosshair left over
-              // it would promise a drag that does nothing.
-              drawingRect && "cursor-crosshair",
-              drawingTextNote && "cursor-text",
-              // The eraser aims at a mark rather than at a point of the page,
-              // so it takes the same aiming pointer the rectangle draws with.
-              erasing && "cursor-crosshair",
-            )}
+            className="relative size-full overflow-auto bg-zinc-200/70 dark:bg-zinc-950"
+            data-tool-cursor={toolCursor}
             ref={viewerRef}
           >
             <PdfViewerLayout

@@ -176,3 +176,46 @@ body {
 .pdf-text-layer ::selection {
   background: rgb(56 132 255 / 0.35);
 }
+
+/*
+ * A pointer of its own for each drawing tool, so which tool is on — and where
+ * it will act — is legible without looking back at the toolbar. Three carry
+ * that tool's toolbar glyph, hotspotted on the point it works from: the
+ * highlighter's nib, the top-left of the note a click starts, the eraser's
+ * rubbing face. Each glyph is drawn twice in its file, a white halo under a
+ * black stroke, so it reads on a page and on the dark ground around one; the
+ * keyword after each image is what an engine that will not take an SVG cursor
+ * falls back to.
+ *
+ * The rectangle is the exception, and takes the system crosshair: it is the one
+ * tool whose gesture is a drag from an exact point, and the platform's own
+ * pointer is thinner and sharper at that point than any glyph.
+ *
+ * Each glyph file holds nothing but that lucide icon — a pointer that carries a
+ * second mark, an I-beam beside the tool say, reads as two cursors at once.
+ *
+ * Set on the viewer, and only while the tool can actually draw — the thumbnail
+ * grid hides the toggle that would turn the tool back off, so a tool's pointer
+ * left over it would promise a gesture that does nothing.
+ */
+[data-tool-cursor="highlight"] {
+  cursor: url("./assets/cursors/highlight.svg") 5 20, text;
+}
+
+[data-tool-cursor="rect"] {
+  cursor: crosshair;
+}
+
+[data-tool-cursor="textNote"] {
+  cursor: url("./assets/cursors/text-note.svg") 4 4, text;
+}
+
+[data-tool-cursor="eraser"] {
+  cursor: url("./assets/cursors/eraser.svg") 5 19, crosshair;
+}
+
+/* The text layer covers the whole page and asks for an I-beam of its own, which
+   would otherwise be the only pointer a reader ever saw over a page. */
+[data-tool-cursor] .pdf-text-layer {
+  cursor: inherit;
+}

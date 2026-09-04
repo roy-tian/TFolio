@@ -194,4 +194,58 @@ describe("TFolio annotations", () => {
       timeoutMsg: "the evicted selection start was not highlighted",
     })
   })
+
+  // The pointer is what says which tool is on. The text layer covers the whole
+  // page and asks for an I-beam of its own, so it has to hand the tool's
+  // through — otherwise the only pointer a reader ever sees over a page is the
+  // I-beam, whichever tool is on.
+  it("gives every drawing tool a pointer of its own over the page", async () => {
+    // The rectangle takes the system crosshair; the other three carry a glyph
+    // of their own, which reaches the page as an inlined image.
+    const tools = [
+      ["highlight", "Highlight text", "data:image/svg+xml"],
+      ["rect", "Draw a rectangle", "crosshair"],
+      ["textNote", "Add a note", "data:image/svg+xml"],
+      ["eraser", "Erase a mark", "data:image/svg+xml"],
+    ] as const
+    const seen: string[] = []
+
+    for (const [tool, label, pointer] of tools) {
+      const toggle = $(`button[aria-label='${label}']`)
+
+      await toggle.click()
+      // The pointer follows the tool's state, so read it only once the toggle
+      // says the press landed.
+      await expect(toggle).toHaveAttribute("aria-pressed", "true")
+
+      const cursors = await browser.execute(() => {
+        const layer = document.querySelector(".pdf-text-layer")!
+        const viewer = layer.closest("main")!
+
+        return {
+          layer: getComputedStyle(layer).cursor,
+          tool: viewer.getAttribute("data-tool-cursor"),
+          viewer: getComputedStyle(viewer).cursor,
+        }
+      })
+
+      expect(cursors.tool).toBe(tool)
+      expect(cursors.viewer).toContain(pointer)
+      expect(cursors.layer).toBe(cursors.viewer)
+      seen.push(cursors.viewer)
+
+      await toggle.click()
+      await expect(toggle).toHaveAttribute("aria-pressed", "false")
+    }
+
+    // Four tools, four pointers: one shared with another would say nothing.
+    expect(new Set(seen).size).toBe(tools.length)
+
+    // With every tool off the page reads as text again.
+    const idle = await browser.execute(
+      () => getComputedStyle(document.querySelector(".pdf-text-layer")!).cursor,
+    )
+
+    expect(idle).toBe("text")
+  })
 })
