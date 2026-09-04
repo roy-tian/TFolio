@@ -604,6 +604,33 @@ export default function App() {
     )
   }, [])
 
+  // Replace the WebView's page-wide find bar with the active document's own.
+  // Even on Home the shortcut is consumed: searching the interface or a file
+  // tab would contradict find-in-current-PDF, and there is no current PDF there.
+  useEffect(() => {
+    const openDocumentSearch = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.key.toLowerCase() !== "f" ||
+        (!event.ctrlKey && !event.metaKey)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+
+      const tabId = activeIdRef.current
+      if (tabId !== HOME_TAB_ID) {
+        sessionRefs.current.get(tabId)?.openSearch()
+      }
+    }
+
+    document.addEventListener("keydown", openDocumentSearch)
+
+    return () => document.removeEventListener("keydown", openDocumentSearch)
+  }, [])
+
   // Nothing here is dragged with the browser's own drag and drop — the
   // thumbnail grid reorders from pointer events — so a drag starting inside the
   // window is only ever a text selection or the page-number field's digits,
@@ -786,8 +813,8 @@ export default function App() {
           className="fixed inset-x-0 top-0 z-50 flex h-12 items-center justify-between border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
           data-tauri-drag-region="deep"
         >
-          {/* Left, as in a document's header: the menu is the window's, so it
-              keeps one place whichever tab is showing. */}
+          {/* The window menu stays at the left end here just as it does before
+              the bookmark button in a document header. */}
           <div className={cn("flex items-center", macOS && "pl-[72px]")}>
             <AppMenu {...menuActions} />
           </div>

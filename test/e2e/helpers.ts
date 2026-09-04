@@ -157,6 +157,26 @@ export function textPdf(pageCount = 1) {
   ])
 }
 
+/** Two searchable pages: the first occurrence wraps between text lines and
+ * the second uses different case on one line. */
+export function wrappedSearchPdf() {
+  const first =
+    "BT\n/F1 24 Tf\n40 250 Td\n(Wrapped) Tj\n0 -30 Td\n(phrase) Tj\nET\n"
+  const second = "BT\n/F1 24 Tf\n40 200 Td\n(WRAPPED PHRASE) Tj\nET\n"
+
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
+      "/Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
+      "/Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>\nendobj\n",
+    `5 0 obj\n<< /Length ${first.length} >>\nstream\n${first}endstream\nendobj\n`,
+    `6 0 obj\n<< /Length ${second.length} >>\nstream\n${second}endstream\nendobj\n`,
+    "7 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  ])
+}
+
 function buildPdf(objects: string[]) {
   const chunks = ["%PDF-1.4\n"]
   const offsets: number[] = []

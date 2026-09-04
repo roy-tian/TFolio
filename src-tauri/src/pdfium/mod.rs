@@ -12,12 +12,12 @@ use serde::{Deserialize, Serialize};
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
-    cancel_pdf_operation, close_pdf, create_pdf, delete_pdf_annotations, delete_pdf_pages,
-    download_pdf_note_font, export_pdf, extract_pdf_page_text, insert_pdf_blank_page,
-    insert_pdf_from_path, inspect_pdf_files, merge_pdf_files, open_pdf, open_pdf_from_path,
-    pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths, remove_pdf_page_numbers,
-    remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, reorder_pdf_pages,
-    restore_pdf_pages, save_pdf,
+    cancel_pdf_operation, cancel_pdf_search, close_pdf, create_pdf, delete_pdf_annotations,
+    delete_pdf_pages, download_pdf_note_font, export_pdf, extract_pdf_page_text,
+    insert_pdf_blank_page, insert_pdf_from_path, inspect_pdf_files, merge_pdf_files, open_pdf,
+    open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
+    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
+    reorder_pdf_pages, restore_pdf_pages, save_pdf, search_pdf_text,
 };
 pub use engine::PdfiumState;
 pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};
@@ -160,13 +160,36 @@ pub struct PdfTextSpan {
 /// A rectangle in the same space `PdfTextSpan` reports text in: *unrotated* page
 /// points with a top-left origin. Every annotation is placed in these terms, so
 /// a caller never has to know which way PDFium counts its own axes.
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PagePointsRect {
     left: f32,
     top: f32,
     width: f32,
     height: f32,
+}
+
+/// One occurrence of a search term on a page. A wrapped occurrence has one
+/// rectangle per line; keeping those rectangles together is what makes the
+/// result counter advance by occurrences rather than by the lines they cross.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfSearchMatch {
+    page_number: i32,
+    rects: Vec<PagePointsRect>,
+}
+
+/// A document search can be stopped when its term changes. Partial matches are
+/// never returned as a result for the new term; `cancelled` lets the frontend
+/// quietly discard the interrupted run.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfSearchOutcome {
+    cancelled: bool,
+    /// True when the bounded IPC result has more occurrences than it can safely
+    /// retain. The returned prefix remains navigable and is labelled as such.
+    limit_reached: bool,
+    matches: Vec<PdfSearchMatch>,
 }
 
 /// How a rectangle annotation is drawn: a block of `color` with `opacity` on

@@ -4,11 +4,12 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { Bookmark, RotateCw } from "lucide-react"
+import { Bookmark, RotateCw, Search } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
@@ -17,6 +18,7 @@ import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
+import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
@@ -64,8 +66,14 @@ import {
   isPdfPath,
   type PdfDocumentInfo,
   type PdfExportOutcome,
+  type PdfSearchMatch,
+  type PdfSearchOutcome,
   type PdfStructureUpdate,
 } from "@/lib/pdf"
+import {
+  firstSearchMatchFromPage,
+  stepSearchMatch,
+} from "@/lib/pdfSearch"
 import {
   rotationForPage,
   rotationsAfterRotate,
@@ -123,6 +131,8 @@ export type FileDragEvent =
 
 export type DocumentSessionHandle = {
   hasUnsavedWorkNow: () => boolean
+  /** Opens the app-owned find bar for this document. */
+  openSearch: () => void
   /** Captures and durably queues the latest reading view before a close. */
   rememberViewNow: () => Promise<void>
   /** Whether this session takes the drag: true only over its thumbnail grid,
@@ -207,6 +217,13 @@ function DocumentSession(
     openedDocument.pages.map(() => 0),
   )
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchMatches, setSearchMatches] = useState<PdfSearchMatch[]>([])
+  const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [searchFailed, setSearchFailed] = useState(false)
+  const [searchLimitReached, setSearchLimitReached] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
   const [viewerErrorVersion, setViewerErrorVersion] = useState(0)
   /**
@@ -277,6 +294,8 @@ function DocumentSession(
   // The last geometry the viewer really had, which a hidden tab keeps.
   const committedSizeRef = useRef({ height: 0, width: 0 })
   const mountedRef = useRef(false)
+  const searchGenerationRef = useRef(0)
+  const searchCancellationRef = useRef<Promise<void>>(Promise.resolve())
   const dismissViewerError = useCallback(() => {
     setViewerError(null)
     setUnfontedEdit(null)
@@ -489,6 +508,150 @@ function DocumentSession(
   useEffect(() => {
     onDirtyChange(openedDocument.id, annotations.isDirty || draftDirty)
   }, [annotations.isDirty, draftDirty, onDirtyChange, openedDocument.id])
+
+  const focusSearchInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLInputElement>(
+        `[data-document-search="${openedDocument.id}"] input`,
+      )
+
+      input?.focus()
+      input?.select()
+    })
+  }, [openedDocument.id])
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true)
+    focusSearchInput()
+  }, [focusSearchInput])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLButtonElement>(
+          `[data-document-session="${openedDocument.id}"] [data-slot="pdf-search-trigger"]`,
+        )
+        ?.focus()
+    })
+  }, [openedDocument.id])
+
+  // Search PDFium's page text rather than the WebView's DOM. Besides excluding
+  // the toolbar and file tabs, this reaches virtualized pages whose text layer
+  // is not mounted. A short debounce avoids launching a whole-document pass for
+  // every intermediate IME composition or rapid keystroke.
+  useEffect(() => {
+    const generation = searchGenerationRef.current + 1
+    searchGenerationRef.current = generation
+    let running = false
+
+    setSearchFailed(false)
+    setSearchLimitReached(false)
+    setSearchMatches([])
+    setActiveSearchIndex(null)
+
+    const query = searchQuery.trim()
+
+    if (!active || !searchOpen || query.length === 0) {
+      setSearching(false)
+
+      return
+    }
+
+    setSearching(true)
+    const timer = setTimeout(() => {
+      void (async () => {
+        // A term replacing one still in flight first waits for its direct
+        // cancellation command to set the old run's flag. The search itself
+        // will release the PDFium lock at the next page boundary.
+        await searchCancellationRef.current
+
+        if (searchGenerationRef.current !== generation) {
+          return
+        }
+
+        running = true
+
+        try {
+          const outcome = await invoke<PdfSearchOutcome>("search_pdf_text", {
+            documentId: pdfDocument.id,
+            query,
+          })
+
+          if (
+            searchGenerationRef.current !== generation ||
+            outcome.cancelled
+          ) {
+            return
+          }
+
+          setSearchLimitReached(outcome.limitReached)
+          setSearchMatches(outcome.matches)
+          setActiveSearchIndex(
+            firstSearchMatchFromPage(outcome.matches, currentPageRef.current),
+          )
+        } catch {
+          if (searchGenerationRef.current === generation) {
+            setSearchFailed(true)
+          }
+        } finally {
+          running = false
+
+          if (searchGenerationRef.current === generation) {
+            setSearching(false)
+          }
+        }
+      })()
+    }, 180)
+
+    return () => {
+      clearTimeout(timer)
+
+      if (searchGenerationRef.current === generation) {
+        searchGenerationRef.current += 1
+      }
+
+      if (running) {
+        searchCancellationRef.current = invoke<boolean>("cancel_pdf_search", {
+          documentId: pdfDocument.id,
+        }).then(
+          () => undefined,
+          () => undefined,
+        )
+      }
+    }
+  }, [
+    active,
+    annotations.textEpochs,
+    pdfDocument.id,
+    pdfDocument.pages,
+    searchOpen,
+    searchQuery,
+  ])
+
+  const searchMatchesByPage = useMemo(() => {
+    const byPage = new Map<
+      number,
+      Array<{ index: number; match: PdfSearchMatch }>
+    >()
+
+    searchMatches.forEach((match, index) => {
+      const pageMatches = byPage.get(match.pageNumber) ?? []
+      pageMatches.push({ index, match })
+      byPage.set(match.pageNumber, pageMatches)
+    })
+
+    return byPage
+  }, [searchMatches])
+
+  const stepSearch = useCallback(
+    (direction: -1 | 1) => {
+      setActiveSearchIndex((current) =>
+        stepSearchMatch(current, searchMatches.length, direction),
+      )
+    },
+    [searchMatches.length],
+  )
 
   const changeHighlightColor = useCallback((color: HexColor) => {
     setHighlightColor(color)
@@ -852,6 +1015,66 @@ function DocumentSession(
     },
     [],
   )
+
+  useEffect(() => {
+    if (!active || !searchOpen || activeSearchIndex === null) {
+      return
+    }
+
+    const match = searchMatches[activeSearchIndex]
+    const viewer = viewerRef.current
+
+    if (!match || !viewer) {
+      return
+    }
+
+    currentPageRef.current = match.pageNumber
+    setCurrentPage(match.pageNumber)
+
+    // Search results are page text, so a thumbnail has nowhere to draw one.
+    // Move back to the ordinary page view and let its existing pending seek put
+    // the result's page on screen before the rectangle-level seek below.
+    if (viewMode === "thumbnail") {
+      pendingScrollPageRef.current = match.pageNumber
+      setBookmarksOpen(false)
+      setPreferredViewMode("single")
+
+      return
+    }
+
+    viewer
+      .querySelector<HTMLElement>(`[data-page-number="${match.pageNumber}"]`)
+      ?.scrollIntoView({ behavior: "auto", block: "center", inline: "center" })
+
+    let frame = 0
+    let attempts = 0
+    const revealRectangle = () => {
+      const rectangle = viewer.querySelector<HTMLElement>(
+        `[data-search-match="${activeSearchIndex}"]`,
+      )
+
+      if (rectangle) {
+        rectangle.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "center",
+        })
+        return
+      }
+
+      // The page wrapper is always mounted, but its bitmap/text/highlight
+      // surface is virtualized. Give the near-viewport observer a few frames to
+      // attach it after the page-level seek.
+      attempts += 1
+      if (attempts < 30) {
+        frame = requestAnimationFrame(revealRectangle)
+      }
+    }
+
+    frame = requestAnimationFrame(revealRectangle)
+
+    return () => cancelAnimationFrame(frame)
+  }, [active, activeSearchIndex, searchMatches, searchOpen, viewMode])
 
   useEffect(() => {
     if (!active || viewMode === "thumbnail") {
@@ -1268,9 +1491,10 @@ function DocumentSession(
     () => ({
       hasUnsavedWorkNow,
       onFileDrag: handleFileDrag,
+      openSearch,
       rememberViewNow,
     }),
-    [handleFileDrag, hasUnsavedWorkNow, rememberViewNow],
+    [handleFileDrag, hasUnsavedWorkNow, openSearch, rememberViewNow],
   )
 
   useEffect(() => {
@@ -1406,9 +1630,8 @@ function DocumentSession(
             macOS && "pl-[72px]",
           )}
         >
-          {/* First in the header, ahead of the document tools: the menu is the
-              window's, not this document's, and it sits in the same place on
-              the home tab. */}
+          {/* The window menu leads the left-hand controls, immediately before
+              this document's bookmark and search actions. */}
           {active ? (
             <AppMenu
               {...menu}
@@ -1428,6 +1651,25 @@ function DocumentSession(
               variant="outline"
             >
               <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
+            </Toggle>
+          </ToolbarTooltip>
+          <ToolbarTooltip label={t("search.open")}>
+            <Toggle
+              aria-label={t("search.open")}
+              className="size-8"
+              data-slot="pdf-search-trigger"
+              disabled={!pdfDocument}
+              onPressedChange={(pressed) => {
+                if (pressed) {
+                  openSearch()
+                } else {
+                  closeSearch()
+                }
+              }}
+              pressed={searchOpen}
+              variant="outline"
+            >
+              <Search />
             </Toggle>
           </ToolbarTooltip>
           <HistoryControls
@@ -1553,6 +1795,23 @@ function DocumentSession(
         </div>
       </header>
 
+      {active && searchOpen ? (
+        <div data-document-search={openedDocument.id}>
+          <PdfSearch
+            activeIndex={activeSearchIndex}
+            failed={searchFailed}
+            limitReached={searchLimitReached}
+            matchCount={searchMatches.length}
+            onClose={closeSearch}
+            onNext={() => stepSearch(1)}
+            onPrevious={() => stepSearch(-1)}
+            onQueryChange={setSearchQuery}
+            query={searchQuery}
+            searching={searching}
+          />
+        </div>
+      ) : null}
+
       <div className="flex h-full pt-21">
         {pdfDocument && bookmarksOpen ? (
           <BookmarkSidebar
@@ -1591,6 +1850,8 @@ function DocumentSession(
               renderEpochs={annotations.renderEpochs}
               rotations={pageRotations}
               scale={zoom.scale}
+              searchMatchesByPage={searchMatchesByPage}
+              activeSearchIndex={activeSearchIndex}
               textEpochs={annotations.textEpochs}
               textSelectionDragging={textSelectionDragging}
               viewMode={viewMode}

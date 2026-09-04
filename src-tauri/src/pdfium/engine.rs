@@ -39,8 +39,9 @@ use super::{
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
     ExportOutcome, InsertOutcome, MergeBookmarks, PagePoint, PagePointsRect, PdfDocumentInfo,
-    PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfStructureUpdate, PdfTextSpan, RectEffect,
-    RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
+    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
+    MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -52,6 +53,14 @@ const MAX_THUMBNAIL_WIDTH: i32 = 512;
 // Each quad is a PDFium call made under the lock every render waits on, and no
 // page has this many runs of text.
 const MAX_HIGHLIGHT_QUADS: usize = 8192;
+// A search term arrives from the WebView and is converted to UTF-16 by PDFium.
+// Bound it before that allocation; a phrase this long is already far beyond a
+// useful find-in-document query.
+const MAX_SEARCH_CHARS: usize = 256;
+// Bound what one IPC response and the WebView's highlight map can retain. The
+// separate rectangle ceiling covers pathological wrapped occurrences too.
+const MAX_SEARCH_MATCHES: usize = 10_000;
+const MAX_SEARCH_RECTS: usize = 50_000;
 // A guided merge holds every source in memory at once, each under the same MiB
 // ceiling as an open, so the count is what bounds the whole run. Far past any
 // stack of files a reader assembles by hand.
@@ -634,6 +643,7 @@ fn owned_tail_base(
 pub(super) enum OperationTarget {
     Document(u64),
     Merge,
+    Search(u64),
 }
 
 /// One long operation, listed while it runs so the reader's cancel can find it.
@@ -1003,6 +1013,109 @@ impl PdfiumEngine {
             .map_err(|error| format!("could not encode page {page_number} thumbnail: {error}"))?;
 
         Ok(webp.into_inner())
+    }
+
+    pub(super) fn search_text(
+        &self,
+        document_id: u64,
+        query: &str,
+    ) -> Result<PdfSearchOutcome, String> {
+        // Reject an oversized WebView argument before normalization allocates a
+        // second string. The field has a matching maxlength, but commands are
+        // callable directly and must enforce their own bound.
+        if query.chars().nth(MAX_SEARCH_CHARS).is_some() {
+            return Err(format!(
+                "a PDF search term may contain at most {MAX_SEARCH_CHARS} characters"
+            ));
+        }
+
+        // Collapsing the field's whitespace makes a phrase pasted with a line
+        // break behave like one typed with a space. PDFium applies the same
+        // consecutive matching to generated page line breaks, so a phrase can
+        // also cross a visual wrap in the document.
+        let query = query.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        if query.is_empty() {
+            return Err("a PDF search needs some text".into());
+        }
+
+        // Register before taking the one PDFium lock. A replacement search can
+        // therefore stop this one even while it is queued behind another job.
+        let operation = self.begin_operation(OperationTarget::Search(document_id));
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+        let options = PdfSearchOptions::new();
+        let mut matches = Vec::new();
+        let mut rectangle_count = 0usize;
+
+        for page_index in 0..entry.page_ids.len() {
+            if operation.is_cancelled() {
+                return Ok(PdfSearchOutcome {
+                    cancelled: true,
+                    limit_reached: false,
+                    matches: Vec::new(),
+                });
+            }
+
+            let page_number = page_index as i32 + 1;
+            let page = entry
+                .document
+                .pages()
+                .get(page_index as i32)
+                .map_err(|error| {
+                    format!("PDFium could not load page {page_number} for search: {error}")
+                })?;
+            let unrotated_height = unrotated_page_height(&page);
+            let text = page.text().map_err(|error| {
+                format!("PDFium could not read text on page {page_number}: {error}")
+            })?;
+            let search = text
+                .search(&query, &options)
+                .map_err(|error| format!("PDFium could not search page {page_number}: {error}"))?;
+
+            for result in search.iter(PdfSearchDirection::SearchForward) {
+                let rects = result
+                    .iter()
+                    .filter_map(|segment| {
+                        let bounds = segment.bounds();
+                        let left = bounds.left().value;
+                        let top = bounds.top().value;
+                        let width = bounds.right().value - left;
+                        let height = top - bounds.bottom().value;
+
+                        (width > 0.0 && height > 0.0).then_some(PagePointsRect {
+                            left,
+                            top: unrotated_height - top,
+                            width,
+                            height,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                if rects.is_empty() {
+                    continue;
+                }
+
+                if matches.len() >= MAX_SEARCH_MATCHES
+                    || rectangle_count.saturating_add(rects.len()) > MAX_SEARCH_RECTS
+                {
+                    return Ok(PdfSearchOutcome {
+                        cancelled: false,
+                        limit_reached: true,
+                        matches,
+                    });
+                }
+
+                rectangle_count += rects.len();
+                matches.push(PdfSearchMatch { page_number, rects });
+            }
+        }
+
+        Ok(PdfSearchOutcome {
+            cancelled: false,
+            limit_reached: false,
+            matches,
+        })
     }
 
     pub(super) fn extract_text(

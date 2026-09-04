@@ -6,12 +6,12 @@ mod store;
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
-    cancel_pdf_operation, close_pdf, create_pdf, delete_pdf_annotations, delete_pdf_pages,
-    download_pdf_note_font, export_pdf, extract_pdf_page_text, insert_pdf_blank_page,
-    insert_pdf_from_path, inspect_pdf_files, merge_pdf_files, open_pdf, open_pdf_from_path,
-    pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths, remove_pdf_page_numbers,
-    remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, reorder_pdf_pages,
-    restore_pdf_pages, save_pdf, PdfiumState,
+    cancel_pdf_operation, cancel_pdf_search, close_pdf, create_pdf, delete_pdf_annotations,
+    delete_pdf_pages, download_pdf_note_font, export_pdf, extract_pdf_page_text,
+    insert_pdf_blank_page, insert_pdf_from_path, inspect_pdf_files, merge_pdf_files, open_pdf,
+    open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
+    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
+    reorder_pdf_pages, restore_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
 };
 use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
@@ -66,6 +66,8 @@ pub fn run() {
             render_pdf_page,
             render_pdf_page_thumbnail,
             extract_pdf_page_text,
+            search_pdf_text,
+            cancel_pdf_search,
             add_pdf_highlight_annotation,
             add_pdf_rect_annotation,
             add_pdf_rect_effect_annotation,

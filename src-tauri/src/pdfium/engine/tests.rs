@@ -57,6 +57,30 @@ fn rotated_text_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
+// Two pages for document search: the first occurrence crosses a visual line
+// break, while the second sits on one line and differs in case.
+fn wrapped_search_pdf() -> Vec<u8> {
+    let first = "BT\n/F1 24 Tf\n40 250 Td\n(Wrapped) Tj\n0 -30 Td\n(phrase) Tj\nET\n";
+    let second = "BT\n/F1 24 Tf\n40 200 Td\n(WRAPPED PHRASE) Tj\nET\n";
+    let objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>\nendobj\n".to_string(),
+        format!(
+            "5 0 obj\n<< /Length {} >>\nstream\n{first}endstream\nendobj\n",
+            first.len()
+        ),
+        format!(
+            "6 0 obj\n<< /Length {} >>\nstream\n{second}endstream\nendobj\n",
+            second.len()
+        ),
+        "7 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_string(),
+    ];
+
+    build_pdf(&objects)
+}
+
 // PDFium can only be bound once per process, so share a single leaked
 // instance across the (otherwise independent) test engines.
 fn test_pdfium() -> &'static Pdfium {
@@ -189,6 +213,39 @@ fn extracts_text_in_unrotated_space_for_rotated_page() {
     assert!((50.0..55.0).contains(&span.left), "left was {}", span.left);
     assert!((30.0..36.0).contains(&span.top), "top was {}", span.top);
     assert!(span.width > 0.0 && span.top > 0.0);
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn searches_only_page_text_across_visual_line_breaks() {
+    let engine = test_engine();
+    let document = engine
+        .open(wrapped_search_pdf())
+        .expect("PDFium should open the search fixture");
+    let outcome = engine
+        .search_text(document.id, "  wrapped\nphrase  ")
+        .expect("PDFium should search the whole document");
+
+    assert!(!outcome.cancelled);
+    assert!(!outcome.limit_reached);
+    assert_eq!(outcome.matches.len(), 2);
+    assert_eq!(outcome.matches[0].page_number, 1);
+    assert_eq!(
+        outcome.matches[0].rects.len(),
+        2,
+        "the wrapped occurrence should keep one highlight rectangle per line"
+    );
+    assert_eq!(outcome.matches[1].page_number, 2);
+    assert_eq!(outcome.matches[1].rects.len(), 1);
+    assert!(outcome
+        .matches
+        .iter()
+        .flat_map(|result| &result.rects)
+        .all(|rect| rect.width > 0.0 && rect.height > 0.0));
+
+    engine
+        .close(document.id)
+        .expect("the search fixture should close");
 }
 
 fn minimal_pdf() -> Vec<u8> {

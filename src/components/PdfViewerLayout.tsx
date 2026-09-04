@@ -20,7 +20,11 @@ import {
   rotationForPage,
   type PageRotations,
 } from "@/lib/pageRotation"
-import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
+import {
+  dimensionsForRotation,
+  type PdfPageInfo,
+  type PdfSearchMatch,
+} from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import {
@@ -58,7 +62,15 @@ export type PageEditProps = {
   selectedPages: ReadonlySet<number>
 }
 
+export type IndexedPdfSearchMatch = {
+  index: number
+  match: PdfSearchMatch
+}
+
+const NO_SEARCH_MATCHES: IndexedPdfSearchMatch[] = []
+
 type LayoutProps = {
+  activeSearchIndex: number | null
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
@@ -73,6 +85,7 @@ type LayoutProps = {
   rotations: PageRotations
   /** Resolved zoom; the fit modes have already been worked out against it. */
   scale: number
+  searchMatchesByPage: ReadonlyMap<number, IndexedPdfSearchMatch[]>
   /** How many times each page's extracted text has changed. */
   textEpochs: RenderEpochs
   /** Freeze the current heavy-page window during compositor-only zoom. */
@@ -82,6 +95,7 @@ type LayoutProps = {
 }
 
 function SingleLayout({
+  activeSearchIndex,
   documentId,
   draft,
   pages,
@@ -89,6 +103,7 @@ function SingleLayout({
   renderScale,
   rotations,
   scale,
+  searchMatchesByPage,
   textEpochs,
   virtualizationPaused,
   virtualizationRetainExited,
@@ -104,6 +119,8 @@ function SingleLayout({
       renderScale={renderScale}
       rotation={rotationForPage(rotations, index + 1)}
       scale={scale}
+      searchMatches={searchMatchesByPage.get(index + 1) ?? NO_SEARCH_MATCHES}
+      activeSearchIndex={activeSearchIndex}
       textEpoch={textEpochs[index + 1] ?? 0}
       virtualizationPaused={virtualizationPaused}
       virtualizationRetainExited={virtualizationRetainExited}
@@ -112,6 +129,7 @@ function SingleLayout({
 }
 
 function BookLayout({
+  activeSearchIndex,
   documentId,
   draft,
   pages,
@@ -120,6 +138,7 @@ function BookLayout({
   renderScale,
   rotations,
   scale,
+  searchMatchesByPage,
   textEpochs,
   virtualizationPaused,
   virtualizationRetainExited,
@@ -151,6 +170,8 @@ function BookLayout({
           renderWidth={renderColumnWidth}
           rotation={rotationForPage(rotations, pageNumber)}
           scale={scale}
+          searchMatches={searchMatchesByPage.get(pageNumber) ?? NO_SEARCH_MATCHES}
+          activeSearchIndex={activeSearchIndex}
           textEpoch={textEpochs[pageNumber] ?? 0}
           virtualizationPaused={virtualizationPaused}
           virtualizationRetainExited={virtualizationRetainExited}
@@ -707,6 +728,7 @@ function ThumbnailLayout({
 }
 
 type PdfViewerLayoutProps = {
+  activeSearchIndex: number | null
   currentPage: number
   documentId: number
   draft?: RectDraft
@@ -717,6 +739,7 @@ type PdfViewerLayoutProps = {
   renderEpochs: RenderEpochs
   rotations: PageRotations
   scale: number
+  searchMatchesByPage: ReadonlyMap<number, IndexedPdfSearchMatch[]>
   textEpochs: RenderEpochs
   viewMode: ViewMode
   viewerWidth: number
@@ -730,6 +753,7 @@ type PdfViewerLayoutProps = {
  * input, and bookmark navigation stay layout agnostic.
  */
 export function PdfViewerLayout({
+  activeSearchIndex,
   currentPage,
   documentId,
   draft,
@@ -740,6 +764,7 @@ export function PdfViewerLayout({
   renderEpochs,
   rotations,
   scale,
+  searchMatchesByPage,
   textEpochs,
   viewMode,
   viewerWidth,
@@ -749,6 +774,7 @@ export function PdfViewerLayout({
   const contentWidth = Math.max(0, viewerWidth - CONTENT_PADDING_X)
   const renderScale = useDebouncedValue(scale, RENDER_SETTLE_MS)
   const layoutProps = {
+    activeSearchIndex,
     contentWidth,
     documentId,
     draft,
@@ -758,6 +784,7 @@ export function PdfViewerLayout({
     renderScale,
     rotations,
     scale,
+    searchMatchesByPage,
     textEpochs,
     virtualizationPaused: zoomPreviewing,
     virtualizationRetainExited: textSelectionDragging,

@@ -177,6 +177,28 @@ body {
   background: rgb(56 132 255 / 0.35);
 }
 
+/* Search results are geometry from PDFium, not text rendered again in a proxy
+   font. That keeps the PDF's own glyphs visible and highlights a wrapped match
+   with one rectangle on each line. */
+.pdf-search-layer {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pdf-search-layer span {
+  position: absolute;
+  border-radius: 2px;
+  background: rgb(250 204 21 / 0.42);
+  box-shadow: inset 0 0 0 1px rgb(202 138 4 / 0.4);
+  mix-blend-mode: multiply;
+}
+
+.pdf-search-layer span[data-active="true"] {
+  background: rgb(251 146 60 / 0.58);
+  box-shadow: inset 0 0 0 2px rgb(234 88 12 / 0.72);
+}
+
 /*
  * A pointer of its own for each drawing tool, so which tool is on — and where
  * it will act — is legible without looking back at the toolbar. Three carry

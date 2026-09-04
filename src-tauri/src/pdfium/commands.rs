@@ -15,8 +15,9 @@ use super::engine::OperationTarget;
 use super::font::{download_fallback_font, fallback_font_destination};
 use super::{
     size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks, PageNumbersConfig, PagePoint,
-    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfProgress, PdfStructureUpdate, PdfTextSpan,
-    PdfiumState, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
+    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfProgress, PdfSearchOutcome,
+    PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle, TextNoteStyle,
+    WatermarkConfig, MAX_PDF_BYTES,
 };
 
 // Only the check below reaches into the engine's own type, and the e2e build
@@ -138,6 +139,32 @@ pub async fn extract_pdf_page_text(
     tauri::async_runtime::spawn_blocking(move || engine.extract_text(document_id, page_number))
         .await
         .map_err(|error| format!("PDFium text extraction task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn search_pdf_text(
+    document_id: u64,
+    query: String,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfSearchOutcome, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.search_text(document_id, &query))
+        .await
+        .map_err(|error| format!("PDFium search task failed: {error}"))?
+}
+
+/// Stops a read-only document search when its field closes or its term changes.
+/// Like the owned-content cancel command, this must not wait behind the PDFium
+/// lock held by the work it is trying to stop.
+#[tauri::command]
+pub async fn cancel_pdf_search(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<bool, String> {
+    Ok(state
+        .0
+        .cancel_operation(OperationTarget::Search(document_id)))
 }
 
 #[tauri::command]
@@ -671,6 +698,7 @@ pub async fn close_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Resul
     // file included — would wait out a whole rebuild of a document that is no
     // longer on screen.
     engine.cancel_operation(OperationTarget::Document(document_id));
+    engine.cancel_operation(OperationTarget::Search(document_id));
 
     tauri::async_runtime::spawn_blocking(move || engine.close(document_id))
         .await

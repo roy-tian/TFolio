@@ -24,6 +24,26 @@ export type PdfTextSpan = {
   width: number
 }
 
+export type PdfSearchRect = {
+  height: number
+  left: number
+  top: number
+  width: number
+}
+
+/** One occurrence in document order. A phrase wrapped across lines remains one
+    result and carries one highlight rectangle for each line it touches. */
+export type PdfSearchMatch = {
+  pageNumber: number
+  rects: PdfSearchRect[]
+}
+
+export type PdfSearchOutcome = {
+  cancelled: boolean
+  limitReached: boolean
+  matches: PdfSearchMatch[]
+}
+
 export type PdfDocumentInfo = {
   id: number
   numPages: number

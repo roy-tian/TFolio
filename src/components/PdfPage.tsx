@@ -14,6 +14,7 @@ import {
   MIN_PAGE_OUTPUT_SCALE,
   MIN_PAGE_RENDER_WIDTH,
   type PdfPageInfo,
+  type PdfSearchMatch,
   type PdfTextSpan,
 } from "@/lib/pdf"
 import { POINT_TO_PX } from "@/lib/zoom"
@@ -42,7 +43,13 @@ function measureTextWidth(text: string, fontSize: number) {
   return measureContext.measureText(text).width
 }
 
+type IndexedSearchMatch = {
+  index: number
+  match: PdfSearchMatch
+}
+
 type PdfPageProps = {
+  activeSearchIndex: number | null
   documentId: number
   /** The rectangle being dragged out on this page, if any. */
   draft?: RectDraft
@@ -52,6 +59,7 @@ type PdfPageProps = {
   renderEpoch: number
   /** Viewer-level settled zoom used only to choose the bitmap resolution. */
   renderScale: number
+  searchMatches: IndexedSearchMatch[]
   /** Bumped only when page content text changes. */
   textEpoch: number
   rotation: number
@@ -72,6 +80,7 @@ type PdfPageProps = {
 }
 
 type PdfPageSurfaceProps = {
+  activeSearchIndex: number | null
   documentId: number
   draft?: RectDraft
   footprintHeight: number
@@ -81,6 +90,7 @@ type PdfPageSurfaceProps = {
   renderEpoch: number
   renderWidth: number
   rotation: number
+  searchMatches: IndexedSearchMatch[]
   textEpoch: number
 }
 
@@ -90,6 +100,7 @@ type PdfPageSurfaceProps = {
  * preview instead of letting a long reading session retain all of them.
  */
 function PdfPageSurface({
+  activeSearchIndex,
   documentId,
   draft,
   footprintHeight,
@@ -99,6 +110,7 @@ function PdfPageSurface({
   renderEpoch,
   renderWidth,
   rotation,
+  searchMatches,
   textEpoch,
 }: PdfPageSurfaceProps) {
   const { t } = useTranslation()
@@ -181,6 +193,27 @@ function PdfPageSurface({
       }),
     [layoutHeight, layoutWidth, textSpans],
   )
+  const pageLayerStyle = {
+    height: `${(layoutHeight / page.height) * 100}%`,
+    left: "50%",
+    top: "50%",
+    transform: `translate(-50%, -50%) rotate(${page.rotation}deg)`,
+    width: `${(layoutWidth / page.width) * 100}%`,
+  }
+  const positionedSearchRects = useMemo(
+    () =>
+      searchMatches.flatMap(({ index, match }) =>
+        match.rects.map((rect, rectIndex) => ({
+          height: `${(rect.height / layoutHeight) * 100}%`,
+          index,
+          key: `${index}-${rectIndex}`,
+          left: `${(rect.left / layoutWidth) * 100}%`,
+          top: `${(rect.top / layoutHeight) * 100}%`,
+          width: `${(rect.width / layoutWidth) * 100}%`,
+        })),
+      ),
+    [layoutHeight, layoutWidth, searchMatches],
+  )
 
   return (
     <>
@@ -200,16 +233,29 @@ function PdfPageSurface({
           ref={canvasRef}
           width={Math.max(1, Math.round(page.width))}
         />
-        {hasRendered && positionedSpans.length > 0 ? (
-          <PageTextMenu
-            style={{
-              height: `${(layoutHeight / page.height) * 100}%`,
-              left: "50%",
-              top: "50%",
-              transform: `translate(-50%, -50%) rotate(${page.rotation}deg)`,
-              width: `${(layoutWidth / page.width) * 100}%`,
-            }}
+        {hasRendered && positionedSearchRects.length > 0 ? (
+          <div
+            aria-hidden
+            className="pdf-search-layer"
+            style={pageLayerStyle}
           >
+            {positionedSearchRects.map((rect) => (
+              <span
+                data-active={rect.index === activeSearchIndex}
+                data-search-match={rect.index}
+                key={rect.key}
+                style={{
+                  height: rect.height,
+                  left: rect.left,
+                  top: rect.top,
+                  width: rect.width,
+                }}
+              />
+            ))}
+          </div>
+        ) : null}
+        {hasRendered && positionedSpans.length > 0 ? (
+          <PageTextMenu style={pageLayerStyle}>
             {positionedSpans.map((span, index) => (
               <span
                 key={index}
@@ -253,6 +299,7 @@ function PdfPageSurface({
 }
 
 export function PdfPage({
+  activeSearchIndex,
   documentId,
   draft,
   page,
@@ -262,6 +309,7 @@ export function PdfPage({
   renderWidth,
   rotation,
   scale,
+  searchMatches,
   textEpoch,
   virtualizationPaused,
   virtualizationRetainExited,
@@ -299,6 +347,7 @@ export function PdfPage({
     >
       {isNearViewport ? (
         <PdfPageSurface
+          activeSearchIndex={activeSearchIndex}
           documentId={documentId}
           draft={draft}
           footprintHeight={footprintHeight}
@@ -308,6 +357,7 @@ export function PdfPage({
           renderEpoch={renderEpoch}
           renderWidth={targetRenderWidth}
           rotation={rotation}
+          searchMatches={searchMatches}
           textEpoch={textEpoch}
         />
       ) : null}
