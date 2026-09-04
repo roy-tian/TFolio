@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react"
+import { useEffect, useState, type RefObject } from "react"
 
 import {
   clampFraction,
@@ -7,6 +7,7 @@ import {
   type PagePointsRect,
 } from "@/lib/annotationGeometry"
 import type { HighlightCommand, HighlightTarget } from "@/lib/annotations"
+import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 
 type UseHighlightToolOptions = {
@@ -15,7 +16,9 @@ type UseHighlightToolOptions = {
   onCommit: (command: HighlightCommand) => void
   opacity: number
   pages: PdfPageInfo[]
-  rotation: number
+  rotations: PageRotations
+  /** Whether native text selection is available, even without the highlighter. */
+  selectable: boolean
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -98,11 +101,15 @@ export function useHighlightTool({
   onCommit,
   opacity,
   pages,
-  rotation,
+  rotations,
+  selectable,
   viewerRef,
 }: UseHighlightToolOptions) {
+  const [selectionDragging, setSelectionDragging] = useState(false)
+
   useEffect(() => {
-    if (!active) {
+    if (!selectable) {
+      setSelectionDragging(false)
       return
     }
 
@@ -116,15 +123,22 @@ export function useHighlightTool({
 
       startedOnText =
         target instanceof Element && target.closest(".pdf-text-layer") !== null
+      setSelectionDragging(startedOnText)
     }
 
     // Bound on the document: a drag that runs off the page still ends there.
     const handlePointerUp = () => {
       if (!startedOnText) {
+        setSelectionDragging(false)
         return
       }
 
       startedOnText = false
+      setSelectionDragging(false)
+
+      if (!active) {
+        return
+      }
 
       const viewer = viewerRef.current
       const selection = window.getSelection()
@@ -147,7 +161,12 @@ export function useHighlightTool({
           continue
         }
 
-        const quads = quadsOnPage(selection, pageElement, page, rotation)
+        const quads = quadsOnPage(
+          selection,
+          pageElement,
+          page,
+          rotationForPage(rotations, pageNumber),
+        )
 
         if (quads.length > 0) {
           targets.push({ pageNumber, quads })
@@ -164,12 +183,21 @@ export function useHighlightTool({
       selection.removeAllRanges()
     }
 
+    const handlePointerCancel = () => {
+      startedOnText = false
+      setSelectionDragging(false)
+    }
+
     document.addEventListener("pointerdown", handlePointerDown)
+    document.addEventListener("pointercancel", handlePointerCancel)
     document.addEventListener("pointerup", handlePointerUp)
 
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown)
+      document.removeEventListener("pointercancel", handlePointerCancel)
       document.removeEventListener("pointerup", handlePointerUp)
     }
-  }, [active, color, onCommit, opacity, pages, rotation, viewerRef])
+  }, [active, color, onCommit, opacity, pages, rotations, selectable, viewerRef])
+
+  return selectionDragging
 }

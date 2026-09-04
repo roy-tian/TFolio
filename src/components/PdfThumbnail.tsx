@@ -4,13 +4,10 @@ import { useTranslation } from "react-i18next"
 
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
-import {
-  dimensionsForRotation,
-  MAX_THUMBNAIL_RENDER_WIDTH,
-  type PdfPageInfo,
-} from "@/lib/pdf"
+import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
+import { THUMBNAIL_CAPTION_HEIGHT } from "@/lib/viewMode"
 
 // A thumbnail cell is a fraction of a page's height, so the page-sized prefetch
 // margin would reach several rows past the viewport and burst dozens of renders
@@ -29,8 +26,12 @@ type PdfThumbnailProps = {
   onOpen: (pageNumber: number) => void
   /** Single click, with its modifiers, is selection. */
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
-  page: PdfPageInfo
+  /** The page's displayed size in points, taken apart rather than as a
+      `PdfPageInfo`: every structure edit replaces the whole page list, and a
+      cell whose own page did not change must still compare equal. */
+  pageHeight: number
   pageNumber: number
+  pageWidth: number
   /** Bumped when the page is drawn on, so the bitmap is fetched again. */
   renderEpoch: number
   rotation: number
@@ -55,8 +56,9 @@ export function PdfThumbnail({
   onDelete,
   onOpen,
   onSelect,
-  page,
+  pageHeight,
   pageNumber,
+  pageWidth,
   renderEpoch,
   rotation,
   selectedCount,
@@ -74,8 +76,9 @@ export function PdfThumbnail({
     isNearViewport,
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
-    page,
+    pageHeight,
     pageNumber,
+    pageWidth,
     renderEpoch,
     rotation,
     targetWidth: width,
@@ -84,7 +87,7 @@ export function PdfThumbnail({
   // The user rotation spins the preview clockwise, swapping the footprint a
   // quarter turn leaves behind.
   const { height: footprintHeight, width: footprintWidth } =
-    dimensionsForRotation(rotation, page.width, page.height)
+    dimensionsForRotation(rotation, pageWidth, pageHeight)
   const label = t("viewer.thumbnailLabel", { pageNumber })
   const deletesSelection = isSelected && selectedCount > 1
   const deleteLabel = deletesSelection
@@ -92,7 +95,7 @@ export function PdfThumbnail({
     : t("pageEdit.deletePage", { pageNumber })
 
   return (
-    <div className="group/thumb relative flex flex-col items-center gap-1.5">
+    <div className="group/thumb relative flex flex-col items-center">
       <button
         aria-current={isCurrent ? "page" : undefined}
         aria-label={label}
@@ -108,6 +111,7 @@ export function PdfThumbnail({
             "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary dark:ring-offset-zinc-950",
         )}
         data-page-number={pageNumber}
+        data-rotation={rotation}
         onClick={(event) =>
           onSelect(pageNumber, {
             range: event.shiftKey,
@@ -123,18 +127,18 @@ export function PdfThumbnail({
         <div
           className="absolute"
           style={{
-            height: `${(page.height / footprintHeight) * 100}%`,
+            height: `${(pageHeight / footprintHeight) * 100}%`,
             left: "50%",
             top: "50%",
             transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-            width: `${(page.width / footprintWidth) * 100}%`,
+            width: `${(pageWidth / footprintWidth) * 100}%`,
           }}
         >
           <canvas
             className="block h-full w-full"
-            height={Math.max(1, Math.round(page.height))}
+            height={Math.max(1, Math.round(pageHeight))}
             ref={canvasRef}
-            width={Math.max(1, Math.round(page.width))}
+            width={Math.max(1, Math.round(pageWidth))}
           />
         </div>
         {!hasRendered && !renderFailed ? (
@@ -170,11 +174,16 @@ export function PdfThumbnail({
       >
         <X className="size-3.5" />
       </button>
+      {/* The space over the number is the caption's own box rather than the
+          column's gap, so what the number costs the cell is one known height —
+          which is what lets the insertion line beside the cell find the paper
+          in a row taller than it. */}
       <span
         className={cn(
-          "font-mono text-xs tabular-nums",
+          "flex items-end font-mono text-xs tabular-nums",
           isCurrent ? "font-semibold text-foreground" : "text-muted-foreground",
         )}
+        style={{ height: THUMBNAIL_CAPTION_HEIGHT }}
       >
         {pageNumber}
       </span>

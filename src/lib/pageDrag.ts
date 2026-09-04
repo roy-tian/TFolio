@@ -71,6 +71,40 @@ export function dropGapForPoint(
 }
 
 /**
+ * The gap a pointer at `y` indicates in a single-column list: 0 above the first
+ * row, `rows.length` below the last. Each row's own midpoint is the boundary,
+ * which is what a stack of rows wants — `dropGapForPoint` answers with the
+ * *horizontal* midpoint, right for a cell in a grid row and meaningless here.
+ *
+ * `y` and the rows are in the scroll container's content space, so a list the
+ * reader scrolls mid-drag still answers about the row under the pointer.
+ */
+export function dropGapForRow(
+  y: number,
+  rows: Pick<CellBox, "height" | "top">[],
+): number {
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!
+
+    if (y < row.top + row.height / 2) {
+      return index
+    }
+  }
+
+  return rows.length
+}
+
+/**
+ * Where the item at `from` lands when dropped into `gap`, both 0-based. The gap
+ * counts the positions between the items as they stand, so one past the dragged
+ * item's own place is where it already is — every gap beyond that shifts down by
+ * the hole the item leaves behind.
+ */
+export function indexAfterMove(from: number, gap: number): number {
+  return gap > from ? gap - 1 : gap
+}
+
+/**
  * The 1-based page order after dropping `dragged` into `gap`. The dragged
  * pages land as one block, keeping their relative order; everything else keeps
  * its own. A drop that reproduces the current order comes back as the
@@ -100,4 +134,41 @@ export function orderAfterMove(
     ...block,
     ...remaining.slice(insertAt),
   ]
+}
+
+/**
+ * How far each page has to slide for the grid to read as `order`: the page
+ * standing in slot i moves to the box of the slot `order` gives it, which is
+ * what opens a hole where the drop would land. Keyed by 1-based page number.
+ *
+ * The boxes are the ones measured at drag start, so a page lands exactly on a
+ * slot that is really there — a preview that re-measured mid-gesture would
+ * chase its own movement. Pages already in place, and any page in `lifted` —
+ * travelling with the pointer, so it has no slot to slide to — are left out.
+ */
+export function slotOffsets(
+  order: number[],
+  cells: CellBox[],
+  lifted: ReadonlySet<number>,
+): Map<number, { x: number; y: number }> {
+  const offsets = new Map<number, { x: number; y: number }>()
+
+  for (let slot = 0; slot < order.length; slot += 1) {
+    const pageNumber = order[slot]!
+    const from = cells[pageNumber - 1]
+    const to = cells[slot]
+
+    if (!from || !to || lifted.has(pageNumber)) {
+      continue
+    }
+
+    const x = to.left - from.left
+    const y = to.top - from.top
+
+    if (x !== 0 || y !== 0) {
+      offsets.set(pageNumber, { x, y })
+    }
+  }
+
+  return offsets
 }

@@ -1,0 +1,107 @@
+name: Bundle dry-run
+
+# Builds every release target's installers WITHOUT publishing, so a cross-
+# platform bundling failure (e.g. the Windows WiX MSI needing an explicit
+# .ico, or a Windows cross-volume rename) is caught before a tag is pushed
+# rather than halfway through a real release.
+#
+# Trigger it manually from the Actions tab after `bun run preflight` is green:
+# Actions -> "Bundle dry-run" -> Run workflow. When all four jobs pass, it is
+# safe to tag and let the Release workflow publish for real.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bundle-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-version:
+    name: Validate version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      # No RELEASE_TAG here, so this only checks that package.json, bun.lock,
+      # Cargo.toml, and Cargo.lock agree on a version — it does not compare
+      # against a tag (there is none yet).
+      - name: Check synchronized version
+        run: bun run version:check
+
+  bundle:
+    name: Bundle ${{ matrix.name }}
+    needs: validate-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+            pdfium_target: aarch64-apple-darwin
+          - name: macOS (Intel)
+            platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
+            pdfium_target: x86_64-apple-darwin
+          - name: Linux (x64)
+            platform: ubuntu-22.04
+            args: ""
+            rust_targets: ""
+            pdfium_target: x86_64-unknown-linux-gnu
+          - name: Windows (x64)
+            platform: windows-latest
+            args: ""
+            rust_targets: ""
+            pdfium_target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun ci
+
+      # tauri-action drives the Tauri CLI directly, so the pretauri:* hooks
+      # never fire here. PDFium is the only runtime asset a bundle ships; the
+      # CJK face is fetched by the app itself, if a reader ever asks for it.
+      - name: Download PDFium runtime
+        run: bun run pdfium:download --target ${{ matrix.pdfium_target }}
+
+      # Build the bundles but DO NOT publish: omitting tagName/releaseName tells
+      # tauri-action to run the bundlers and stop there, exercising exactly the
+      # same matrix and args as the Release workflow without touching releases.
+      - name: Build bundles (no publish)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.args }}

@@ -176,3 +176,68 @@ body {
 .pdf-text-layer ::selection {
   background: rgb(56 132 255 / 0.35);
 }
+
+/* Search results are geometry from PDFium, not text rendered again in a proxy
+   font. That keeps the PDF's own glyphs visible and highlights a wrapped match
+   with one rectangle on each line. */
+.pdf-search-layer {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pdf-search-layer span {
+  position: absolute;
+  border-radius: 2px;
+  background: rgb(250 204 21 / 0.42);
+  box-shadow: inset 0 0 0 1px rgb(202 138 4 / 0.4);
+  mix-blend-mode: multiply;
+}
+
+.pdf-search-layer span[data-active="true"] {
+  background: rgb(251 146 60 / 0.58);
+  box-shadow: inset 0 0 0 2px rgb(234 88 12 / 0.72);
+}
+
+/*
+ * A pointer of its own for each drawing tool, so which tool is on — and where
+ * it will act — is legible without looking back at the toolbar. Three carry
+ * that tool's toolbar glyph, hotspotted on the point it works from: the
+ * highlighter's nib, the top-left of the note a click starts, the eraser's
+ * rubbing face. Each glyph is drawn twice in its file, a white halo under a
+ * black stroke, so it reads on a page and on the dark ground around one; the
+ * keyword after each image is what an engine that will not take an SVG cursor
+ * falls back to.
+ *
+ * The rectangle is the exception, and takes the system crosshair: it is the one
+ * tool whose gesture is a drag from an exact point, and the platform's own
+ * pointer is thinner and sharper at that point than any glyph.
+ *
+ * Each glyph file holds nothing but that lucide icon — a pointer that carries a
+ * second mark, an I-beam beside the tool say, reads as two cursors at once.
+ *
+ * Set on the viewer, and only while the tool can actually draw — the thumbnail
+ * grid hides the toggle that would turn the tool back off, so a tool's pointer
+ * left over it would promise a gesture that does nothing.
+ */
+[data-tool-cursor="highlight"] {
+  cursor: url("./assets/cursors/highlight.svg") 5 20, text;
+}
+
+[data-tool-cursor="rect"] {
+  cursor: crosshair;
+}
+
+[data-tool-cursor="textNote"] {
+  cursor: url("./assets/cursors/text-note.svg") 4 4, text;
+}
+
+[data-tool-cursor="eraser"] {
+  cursor: url("./assets/cursors/eraser.svg") 5 19, crosshair;
+}
+
+/* The text layer covers the whole page and asks for an I-beam of its own, which
+   would otherwise be the only pointer a reader ever saw over a page. */
+[data-tool-cursor] .pdf-text-layer {
+  cursor: inherit;
+}

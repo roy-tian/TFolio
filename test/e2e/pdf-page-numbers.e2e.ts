@@ -3,17 +3,16 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { pageNumbersPreferencesStorageKey } from "../../src/lib/pageNumbers"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { watermarkPreferencesStorageKey } from "../../src/lib/watermark"
 import {
+  appMenuItem,
   blankPdf,
+  closeAppMenu,
   dropZoneButton,
   minimalPdf,
   openPdfFromDisk,
   pagePixelFingerprint,
   renderedPage,
+  seedSettings,
 } from "./helpers"
 
 async function openPageNumbersDialog() {
@@ -42,20 +41,9 @@ async function extractedText() {
 
 describe("TFolio page numbers", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-        window.localStorage.removeItem(keys.pageNumbersPreferences)
-        window.localStorage.removeItem(keys.watermarkPreferences)
-      },
-      {
-        language: languageStorageKey,
-        viewMode: viewModeStorageKey,
-        pageNumbersPreferences: pageNumbersPreferencesStorageKey,
-        watermarkPreferences: watermarkPreferencesStorageKey,
-      },
-    )
+    // Everything else unset, the stored page-number style included: it outlives
+    // the suite, and would otherwise carry one spec's choices into the next.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("page-numbers.pdf", blankPdf())
@@ -95,29 +83,68 @@ describe("TFolio page numbers", () => {
     })
   })
 
-  it("hides the position control in double-sided mode and validates a range", async () => {
+  it("picks the placement from one control and validates a range", async () => {
     await openPageNumbersDialog()
 
-    // Single-sided offers a position; double-sided mirrors by binding instead.
-    await expect($("//button[normalize-space()='Bottom centre']")).toBeDisplayed()
-    await $("//button[normalize-space()='Double-sided']").click()
-    await expect(
-      $("//button[normalize-space()='Bottom centre']"),
-    ).not.toBeDisplayed()
+    // One control over both fixed places and the mirrored one, so the preview
+    // is what says which of them the reader has landed on: a single sheet for
+    // a fixed place, an odd and an even one for the mirrored choice.
+    const preview = $("[data-testid='page-numbers-preview']")
+    await $("//button[normalize-space()='Automatic']").click()
+    await browser.waitUntil(
+      async () => (await preview.getText()).includes("Even pages"),
+      { timeout: 15_000, timeoutMsg: "the mirrored choice never showed a pair" },
+    )
 
-    // Turning off "number every page" reveals the range, and a backwards range
-    // holds the apply button until it is valid. The fixture is one page, so a
-    // valid range is 1–1.
-    await $("[data-testid='page-numbers-all']").click()
+    await $("//button[normalize-space()='Fixed centre']").click()
+    await browser.waitUntil(
+      async () => (await preview.getText()).includes("Every page"),
+      { timeout: 15_000, timeoutMsg: "the fixed place never went back to one sheet" },
+    )
+
+    // A backwards range holds the apply button until it is valid. The fixture
+    // is one page, so a valid range is 1–1.
     const from = $("[data-testid='page-numbers-from']")
     const to = $("[data-testid='page-numbers-to']")
-    await from.waitForDisplayed()
     await from.setValue("5")
     await to.setValue("1")
     await expect($("[data-testid='page-numbers-apply']")).toBeDisabled()
 
     await from.setValue("1")
     await expect($("[data-testid='page-numbers-apply']")).toBeEnabled()
+  })
+
+  it("remembers the style for the next document", async () => {
+    await openPageNumbersDialog()
+    // The seeded settings name no style, so the dialog opens on its defaults —
+    // and the placement applied below is the *other* one, which is what makes
+    // the reopened dialog's answer the file's rather than the default's.
+    const centre = $("//button[normalize-space()='Fixed centre']")
+    const wanted =
+      (await centre.getAttribute("aria-pressed")) === "true"
+        ? "Automatic"
+        : "Fixed centre"
+
+    await $(`//button[normalize-space()='${wanted}']`).click()
+    await $("[data-testid='page-numbers-apply']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 30_000,
+    })
+
+    // A reload drops everything this WebView held, so what the next document's
+    // dialog opens on can only have come from the user-level file the backend
+    // keeps. A second document also has no numbers of its own to read instead.
+    await browser.refresh()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("page-numbers-style.pdf", blankPdf())
+    await renderedPage()
+    await openPageNumbersDialog()
+
+    await expect($(`//button[normalize-space()='${wanted}']`)).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
   })
 
   it("replaces and explicitly removes as single history steps", async () => {
@@ -131,7 +158,7 @@ describe("TFolio page numbers", () => {
 
     // Replace the position; the page changes but stays one owned object.
     await openPageNumbersDialog()
-    await $("//button[normalize-space()='Bottom right']").click()
+    await $("//button[normalize-space()='Fixed right']").click()
     await $("[data-testid='page-numbers-apply']").click()
     await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
       reverse: true,
@@ -156,6 +183,44 @@ describe("TFolio page numbers", () => {
       timeout: 30_000,
       timeoutMsg: "explicit removal did not restore the clean page",
     })
+  })
+
+  it("stops a long run, rolling the document back and freeing the app", async () => {
+    await browser.refresh()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    // Long enough that the stop always lands mid-run: this build spends about
+    // ten seconds on 600 pages, and the click comes inside the first one.
+    await openPdfFromDisk("page-numbers-long.pdf", minimalPdf(600))
+    await renderedPage()
+    const clean = await pagePixelFingerprint()
+
+    await openPageNumbersDialog()
+    await $("[data-testid='page-numbers-apply']").click()
+    await $("[data-testid='page-numbers-stop']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 60_000,
+    })
+
+    // Back at the bytes it started from: the page is the one it opened as, and
+    // the session owns nothing — a dialog with numbers to remove would offer to.
+    expect(await pagePixelFingerprint()).toBe(clean)
+    await openPageNumbersDialog()
+    await expect(
+      $("//button[normalize-space()='Remove page numbers']"),
+    ).not.toBeExisting()
+    await $("//button[normalize-space()='Cancel']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 15_000,
+    })
+
+    // And the app is free at once: the next document opens rather than queueing
+    // behind a rebuild the reader has left.
+    await openPdfFromDisk("page-numbers-after-stop.pdf", blankPdf())
+    await $(
+      "button[role='tab'][title='page-numbers-after-stop.pdf']",
+    ).waitForExist({ timeout: 15_000 })
   })
 
   it("coexists with a watermark, disables save, and leaves the file alone", async () => {
@@ -188,17 +253,18 @@ describe("TFolio page numbers", () => {
     )
 
     // Capture both layers with the whole page in view — the number sits at the
-    // bottom, out of frame at the default fit-width zoom.
+    // bottom, out of frame at the zoom a document opens at.
     mkdirSync("artifacts/e2e", { recursive: true })
-    await $("button[aria-label='Actual size']").click()
+    await $("button[aria-label='Fit page']").click()
     await browser.pause(1500)
     await browser.saveScreenshot("artifacts/e2e/page-numbers-both.png")
 
     // Owned page content leaves the document export-only, and the reason is on
-    // the disabled save button.
-    const save = $("button[aria-label='Save']")
-    await expect(save).toBeDisabled()
+    // the menu's disabled save item.
+    const save = await appMenuItem("save")
+    expect(await save.getAttribute("data-disabled")).not.toBe(null)
     expect(await save.getAttribute("title")).toContain("exported as a copy")
+    await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 
     // Removing the page numbers leaves the watermark exactly in place.

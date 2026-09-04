@@ -10,8 +10,6 @@ import {
 type RectDraftOverlayProps = {
   draft: RectDraft
   pageWidth: number
-  /** On-screen pixels per page point, to size the border and corners to match. */
-  pxPerPoint: number
   rotation: number
   sourceCanvasRef: RefObject<HTMLCanvasElement | null>
   /** Incremented after fresh pixels have actually landed on the source canvas. */
@@ -20,14 +18,13 @@ type RectDraftOverlayProps = {
 
 /**
  * The live preview of the rectangle being dragged. It sits in the page's own
- * axis-aligned box and is positioned as fractions of it. Ordinary rectangles
- * use CSS; effects copy the already-rendered page canvas into a local preview,
- * so pointer movement never crosses the IPC boundary.
+ * axis-aligned box and is positioned as fractions of it. A translucent block is
+ * CSS; a blur or a mosaic copies the already-rendered page canvas into a local
+ * preview, so pointer movement never crosses the IPC boundary.
  */
 export function RectDraftOverlay({
   draft,
   pageWidth,
-  pxPerPoint,
   rotation,
   sourceCanvasRef,
   sourceRevision,
@@ -35,12 +32,11 @@ export function RectDraftOverlay({
   const { rect, style } = draft
   const previewRef = useRef<HTMLCanvasElement>(null)
   const buffersRef = useRef<RectEffectPreviewBuffers | null>(null)
-  const strokePx = style.strokeColor ? style.strokeWidth * pxPerPoint : 0
-  const radiusPx = style.cornerRadius * pxPerPoint
-  const effectActive = style.effect.kind !== "none"
+  const effect = style.effect
+  const treatsPixels = effect !== "translucent"
 
   useEffect(() => {
-    if (!effectActive || pageWidth <= 0 || sourceRevision <= 0) {
+    if (effect === "translucent" || pageWidth <= 0 || sourceRevision <= 0) {
       return
     }
 
@@ -57,7 +53,7 @@ export function RectDraftOverlay({
         preview,
         source,
         rect,
-        style.effect,
+        { kind: effect, strength: style.strength },
         rotation,
         source.width / pageWidth,
         buffersRef.current,
@@ -66,34 +62,29 @@ export function RectDraftOverlay({
 
     return () => cancelAnimationFrame(frame)
   }, [
-    effectActive,
+    effect,
     pageWidth,
     rect,
     rotation,
     sourceCanvasRef,
     sourceRevision,
-    style.effect,
+    style.strength,
   ])
 
   return (
     <div
       className="pointer-events-none absolute"
       style={{
-        backgroundColor: effectActive ? undefined : (style.fillColor ?? undefined),
-        border: !effectActive && style.strokeColor
-          ? `${strokePx}px solid ${style.strokeColor}`
-          : undefined,
-        borderRadius: !effectActive && radiusPx > 0 ? `${radiusPx}px` : undefined,
-        boxSizing: "border-box",
+        backgroundColor: treatsPixels ? undefined : style.color,
         height: `${rect.height * 100}%`,
         left: `${rect.left * 100}%`,
-        opacity: effectActive ? 1 : style.opacity,
+        opacity: treatsPixels ? 1 : style.opacity,
         overflow: "hidden",
         top: `${rect.top * 100}%`,
         width: `${rect.width * 100}%`,
       }}
     >
-      {effectActive ? (
+      {treatsPixels ? (
         <canvas
           className="block size-full"
           data-slot="rect-effect-preview"

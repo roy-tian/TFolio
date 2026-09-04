@@ -1,10 +1,11 @@
+import { rememberSettings, storedSettings } from "@/lib/settings"
+
 export const supportedLanguages = ["zh-CN", "en"] as const
 
 export type SupportedLanguage = (typeof supportedLanguages)[number]
 
 export const defaultLanguage: SupportedLanguage = "zh-CN"
 export const fallbackLanguage: SupportedLanguage = "en"
-export const languageStorageKey = "tfolio.ui.language"
 
 export function resolveSupportedLanguage(
   language: string | null | undefined,
@@ -27,11 +28,9 @@ export function resolveSupportedLanguage(
 }
 
 function readStoredLanguage(): string | null {
-  try {
-    return window.localStorage.getItem(languageStorageKey)
-  } catch {
-    return null
-  }
+  const stored = storedSettings().ui?.language
+
+  return typeof stored === "string" ? stored : null
 }
 
 export function selectPreferredLanguage(
@@ -64,9 +63,5 @@ export function detectPreferredLanguage(): SupportedLanguage {
 }
 
 export function storeLanguage(language: SupportedLanguage) {
-  try {
-    window.localStorage.setItem(languageStorageKey, language)
-  } catch {
-    // A restricted WebView can disable storage. The active session still works.
-  }
+  rememberSettings({ ui: { language } })
 }

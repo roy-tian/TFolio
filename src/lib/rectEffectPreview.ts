@@ -1,4 +1,4 @@
-import type { RectEffect } from "@/lib/annotations"
+import type { RectPixelEffect } from "@/lib/annotations"
 import type { FractionRect } from "@/lib/rectDraft"
 
 type PixelSize = {
@@ -127,7 +127,7 @@ export const MAX_RECT_EFFECT_PREVIEW_PIXELS = 1_000_000
  */
 export function rectEffectPreviewScale(
   crop: PixelSize,
-  effect: RectEffect,
+  effect: RectPixelEffect,
   sourcePixelsPerPoint: number,
 ) {
   const blurExtent =
@@ -291,7 +291,7 @@ export function drawRectEffectPreview(
   target: HTMLCanvasElement,
   source: HTMLCanvasElement,
   rect: FractionRect,
-  effect: RectEffect,
+  effect: RectPixelEffect,
   rotation: number,
   sourcePixelsPerPoint: number,
   buffers: RectEffectPreviewBuffers = createRectEffectPreviewBuffers(),

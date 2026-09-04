@@ -7,7 +7,8 @@ import {
   bookColumnWidth,
   BOOK_GAP,
   clampZoom,
-  fitHeightScale,
+  fitDimensions,
+  fitPageScale,
   fitWidthScale,
   isFitActive,
   MAX_ZOOM,
@@ -60,7 +61,7 @@ describe("POINT_TO_PX", () => {
 
 describe("referenceDimensions", () => {
   test("is exact for the ordinary uniform document", () => {
-    expect(referenceDimensions([a4, a4, a4], 0)).toEqual({
+    expect(referenceDimensions([a4, a4, a4], [0, 0, 0])).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(595),
@@ -75,7 +76,7 @@ describe("referenceDimensions", () => {
       ...Array.from({ length: 3 }, () => page(842, 595)),
     ]
 
-    expect(referenceDimensions(pages, 0)).toEqual({
+    expect(referenceDimensions(pages, pages.map(() => 0))).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(842),
@@ -83,7 +84,7 @@ describe("referenceDimensions", () => {
   })
 
   test("takes the larger page when a document is split evenly", () => {
-    expect(referenceDimensions([page(595, 842), page(300, 400)], 0)).toEqual({
+    expect(referenceDimensions([page(595, 842), page(300, 400)], [0, 0])).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(595),
@@ -92,17 +93,17 @@ describe("referenceDimensions", () => {
 
   // Rotating the document swaps what a page spans, so a fit has to follow it.
   test("applies the user rotation", () => {
-    expect(referenceDimensions([a4], 90)).toEqual({
+    expect(referenceDimensions([a4], [90])).toEqual({
       referenceHeight: px(595),
       referenceWidth: px(842),
       widestWidth: px(842),
     })
-    expect(referenceDimensions([a4], 180)).toEqual({
+    expect(referenceDimensions([a4], [180])).toEqual({
       referenceHeight: px(842),
       referenceWidth: px(595),
       widestWidth: px(595),
     })
-    expect(referenceDimensions([a4], 270)).toEqual({
+    expect(referenceDimensions([a4], [270])).toEqual({
       referenceHeight: px(595),
       referenceWidth: px(842),
       widestWidth: px(842),
@@ -110,7 +111,7 @@ describe("referenceDimensions", () => {
   })
 
   test("survives a document with no pages", () => {
-    expect(referenceDimensions([], 0)).toEqual({
+    expect(referenceDimensions([], [])).toEqual({
       referenceHeight: 0,
       referenceWidth: 0,
       widestWidth: 0,
@@ -175,28 +176,84 @@ describe("fitWidthScale", () => {
   })
 })
 
-describe("fitHeightScale", () => {
-  test("fits the tallest page to the viewport", () => {
-    expect(fitHeightScale(800, 842)).toBeCloseTo(800 / 842)
+describe("fitDimensions", () => {
+  const reference = {
+    referenceHeight: 842 * POINT_TO_PX,
+    referenceWidth: 595 * POINT_TO_PX,
+  }
+  // A portrait document with one landscape page in it.
+  const mixed = [a4, page(842, 595)]
+
+  test("measures the page the fit was asked from, in CSS pixels", () => {
+    expect(fitDimensions(mixed, [2], [0, 0], reference, false)).toEqual({
+      height: 595 * POINT_TO_PX,
+      width: 842 * POINT_TO_PX,
+    })
+  })
+
+  test("takes the rotation with it", () => {
+    expect(fitDimensions(mixed, [2], [0, 90], reference, false)).toEqual({
+      height: 842 * POINT_TO_PX,
+      width: 595 * POINT_TO_PX,
+    })
+  })
+
+  // A spread lays both halves out in the reference page's column, so an odd
+  // page's own width never reaches the screen — only its aspect does.
+  test("keeps only the aspect of a page in a spread", () => {
+    const spread = fitDimensions(mixed, [2], [0, 0], reference, true)
+
+    expect(spread.width).toBe(reference.referenceWidth)
+    expect(spread.height).toBeCloseTo((reference.referenceWidth * 595) / 842)
+  })
+
+  // Both halves are on screen, so the fit is of the taller one — here the
+  // portrait page beside the landscape one.
+  test("measures the taller half of a spread", () => {
+    const spread = fitDimensions(mixed, [1, 2], [0, 0], reference, true)
+
+    expect(spread.height).toBeCloseTo(reference.referenceHeight)
+  })
+
+  test("falls back to the reference page for a number out of range", () => {
+    expect(fitDimensions(mixed, [9], [0, 0], reference, false)).toEqual({
+      height: reference.referenceHeight,
+      width: reference.referenceWidth,
+    })
+    expect(fitDimensions(mixed, [9, 10], [0, 0], reference, true)).toEqual({
+      height: reference.referenceHeight,
+      width: reference.referenceWidth,
+    })
+  })
+})
+
+describe("fitPageScale", () => {
+  test("takes the tighter of the two dimensions", () => {
+    expect(fitPageScale(1000, 800, 595, 842)).toBeCloseTo(800 / 842)
+    expect(fitPageScale(400, 2000, 595, 842)).toBeCloseTo(400 / 595)
   })
 
   test("falls back to actual size before a document is measured", () => {
-    expect(fitHeightScale(800, 0)).toBe(1)
+    expect(fitPageScale(1000, 800, 0, 0)).toBe(1)
+  })
+
+  test("stays inside the supported range", () => {
+    expect(fitPageScale(100000, 100000, 595, 842)).toBe(MAX_ZOOM)
   })
 })
 
 describe("resolveZoomScale", () => {
-  const fits = { auto: 1.5, fitHeight: 0.95, fitWidth: 3.1 }
+  const fits = { auto: 1.5, fitPage: 0.95, fitWidth: 3.1 }
 
   test("reads the scale its mode names", () => {
-    expect(resolveZoomScale({ customScale: 2, mode: "auto" }, fits)).toBe(1.5)
-    expect(resolveZoomScale({ customScale: 2, mode: "fit-width" }, fits)).toBe(3.1)
-    expect(resolveZoomScale({ customScale: 2, mode: "fit-height" }, fits)).toBe(0.95)
-    expect(resolveZoomScale({ customScale: 2, mode: "custom" }, fits)).toBe(2)
+    expect(resolveZoomScale({ customScale: 2, fitPage: 1, mode: "auto" }, fits)).toBe(1.5)
+    expect(resolveZoomScale({ customScale: 2, fitPage: 1, mode: "fit-width" }, fits)).toBe(3.1)
+    expect(resolveZoomScale({ customScale: 2, fitPage: 1, mode: "fit-page" }, fits)).toBe(0.95)
+    expect(resolveZoomScale({ customScale: 2, fitPage: 1, mode: "custom" }, fits)).toBe(2)
   })
 
   test("clamps whatever it is handed", () => {
-    expect(resolveZoomScale({ customScale: 50, mode: "custom" }, fits)).toBe(MAX_ZOOM)
+    expect(resolveZoomScale({ customScale: 50, fitPage: 1, mode: "custom" }, fits)).toBe(MAX_ZOOM)
   })
 })
 
@@ -257,11 +314,11 @@ describe("applyWheelZoom", () => {
 })
 
 describe("nextFitMode", () => {
-  test("toggles out of fit-width and into it from anywhere else", () => {
-    expect(nextFitMode("fit-width")).toBe("fit-height")
-    expect(nextFitMode("fit-height")).toBe("fit-width")
-    expect(nextFitMode("custom")).toBe("fit-width")
-    expect(nextFitMode("auto")).toBe("fit-width")
+  test("offers fit-page from anywhere but fit-page itself", () => {
+    expect(nextFitMode("fit-page")).toBe("fit-width")
+    expect(nextFitMode("fit-width")).toBe("fit-page")
+    expect(nextFitMode("custom")).toBe("fit-page")
+    expect(nextFitMode("auto")).toBe("fit-page")
   })
 })
 
@@ -269,7 +326,7 @@ describe("isFitActive", () => {
   // `auto` is the opening sizing, not a fit the reader chose, so it reads as off.
   test("counts only the two fit modes", () => {
     expect(isFitActive("fit-width")).toBe(true)
-    expect(isFitActive("fit-height")).toBe(true)
+    expect(isFitActive("fit-page")).toBe(true)
     expect(isFitActive("auto")).toBe(false)
     expect(isFitActive("custom")).toBe(false)
   })

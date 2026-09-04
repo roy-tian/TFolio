@@ -4,7 +4,9 @@ import {
   dimensionsForRotation,
   fileNameFromPath,
   isPdfPath,
+  MIN_PAGE_OUTPUT_SCALE,
   pickCurrentPage,
+  resolveOutputScale,
 } from "./pdf"
 
 describe("isPdfPath", () => {
@@ -96,5 +98,36 @@ describe("pickCurrentPage", () => {
 
     expect(pick(spread)).toBe(3)
     expect(pick([...spread].reverse())).toBe(3)
+  })
+})
+
+describe("resolveOutputScale", () => {
+  test("the page minimum is 1.25", () => {
+    expect(MIN_PAGE_OUTPUT_SCALE).toBe(1.25)
+  })
+
+  test("floors a low-DPI surface up to the page minimum", () => {
+    expect(resolveOutputScale(1, 1.25)).toBe(1.25)
+    expect(resolveOutputScale(1.1, 1.25)).toBe(1.25)
+  })
+
+  test("leaves a ratio already at or above the floor untouched", () => {
+    expect(resolveOutputScale(1.25, 1.25)).toBe(1.25)
+    expect(resolveOutputScale(1.5, 1.25)).toBe(1.5)
+  })
+
+  test("caps a high-DPI surface at the shared 2x ceiling", () => {
+    expect(resolveOutputScale(2, 1.25)).toBe(2)
+    expect(resolveOutputScale(3, 1.25)).toBe(2)
+  })
+
+  test("treats a zero device-pixel ratio as 1", () => {
+    expect(resolveOutputScale(0, 1.25)).toBe(1.25)
+  })
+
+  test("defaults to no floor, so the device ratio alone decides", () => {
+    expect(resolveOutputScale(1)).toBe(1)
+    expect(resolveOutputScale(1.5)).toBe(1.5)
+    expect(resolveOutputScale(2.5)).toBe(2)
   })
 })

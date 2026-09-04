@@ -3,15 +3,15 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { watermarkPreferencesStorageKey } from "../../src/lib/watermark"
 import {
+  appMenuItem,
   blankPdf,
+  closeAppMenu,
   dropZoneButton,
   openPdfFromDisk,
   pagePixelFingerprint,
   renderedPage,
+  seedSettings,
 } from "./helpers"
 
 async function openWatermarkDialog() {
@@ -46,18 +46,9 @@ async function extractedText() {
 
 describe("TFolio document watermark", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-        window.localStorage.removeItem(keys.watermarkPreferences)
-      },
-      {
-        language: languageStorageKey,
-        viewMode: viewModeStorageKey,
-        watermarkPreferences: watermarkPreferencesStorageKey,
-      },
-    )
+    // Everything else unset, the stored mark included: it outlives the suite,
+    // and would otherwise carry one spec's choices into the next.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("watermark.pdf", blankPdf())
@@ -68,36 +59,42 @@ describe("TFolio document watermark", () => {
     const clean = await pagePixelFingerprint()
 
     await openWatermarkDialog()
+
+    // The field opens on this reader's own default mark, not empty.
+    await expect($("[data-testid='watermark-text']")).toHaveValue("CONFIDENTIAL")
+    await expect($("[data-testid='watermark-size']")).toHaveText(
+      expect.stringContaining("80%"),
+    )
     await $("[data-testid='watermark-text']").setValue("内部资料")
 
-    // Non-Latin text has one bundled face, so a font choice would be false.
-    await expect($("[data-testid='watermark-font']")).toBeDisabled()
-    const bold = $("[data-testid='watermark-bold']")
-    const previewWeight = () =>
+    // The preview leans the way the direction control says, so the two ends of
+    // it cannot both draw the same mark.
+    const previewTransform = () =>
       browser.execute(
         () =>
           getComputedStyle(
             document.querySelector<HTMLElement>(
               "[data-testid='watermark-preview']",
             )!,
-          ).fontWeight,
+          ).transform,
       )
+    const ascending = await previewTransform()
 
-    await expect(bold).toHaveAttribute("aria-pressed", "false")
-    expect(await previewWeight()).toBe("400")
-    await bold.click()
-    await expect(bold).toHaveAttribute("aria-pressed", "true")
-    expect(await previewWeight()).toBe("800")
-    await browser.saveScreenshot("artifacts/e2e/watermark-bold-dialog.png")
+    await $("//button[normalize-space()='Top-left to bottom-right']").click()
+    expect(await previewTransform()).not.toBe(ascending)
     await $("//button[normalize-space()='Tiled']").click()
-
-    // Exercise the angle control as a reader would. Its label and current value
-    // identify it without reaching into Base UI's generated ids.
-    const rotation = await $(
-      "[data-testid='watermark-rotation'] [data-slot='slider-thumb']",
+    await expect($("[data-testid='watermark-size']")).toHaveText(
+      expect.stringContaining("30%"),
     )
-    await rotation.click()
-    await browser.keys("ArrowRight")
+    await browser.saveScreenshot("artifacts/e2e/watermark-dialog.png")
+
+    // Exercise the size control as a reader would. Its label and current value
+    // identify it without reaching into Base UI's generated ids.
+    const size = await $(
+      "[data-testid='watermark-size'] [data-slot='slider-thumb']",
+    )
+    await size.click()
+    await browser.keys("ArrowLeft")
 
     await $("[data-testid='watermark-apply']").click()
     await $("[data-testid='watermark-dialog']").waitForDisplayed({
@@ -198,11 +195,12 @@ describe("TFolio document watermark", () => {
 
     // A watermark this app can no longer lift once the file closes never gets
     // written back over the file it came from; only an exported copy carries it.
-    // The title says which rule is holding the key, since a clean document and
-    // a document with no file of its own disable it too.
-    const save = $("button[aria-label='Save']")
-    await expect(save).toBeDisabled()
+    // The title says which rule is holding the item down, since a clean document
+    // and a document with no file of its own disable it too.
+    const save = await appMenuItem("save")
+    expect(await save.getAttribute("data-disabled")).not.toBe(null)
     expect(await save.getAttribute("title")).toContain("exported as a copy")
+    await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 
     mkdirSync("artifacts/e2e", { recursive: true })

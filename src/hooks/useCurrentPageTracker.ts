@@ -16,6 +16,7 @@ export function useCurrentPageTracker(
   documentId: number | undefined,
   viewMode: ViewMode,
   onPageChange: (pageNumber: number) => void,
+  paused = false,
 ) {
   const onPageChangeRef = useRef(onPageChange)
 
@@ -26,7 +27,10 @@ export function useCurrentPageTracker(
   useEffect(() => {
     const viewer = viewerRef.current
 
-    if (!viewer || documentId === undefined) {
+    // A zoom preview moves the document on the compositor without changing its
+    // layout boxes. Tracking that transient picture would report stale geometry
+    // and compete with the gesture; reconnect after the committed layout lands.
+    if (!viewer || documentId === undefined || paused) {
       return
     }
 
@@ -95,5 +99,5 @@ export function useCurrentPageTracker(
       visibilityObserver.disconnect()
       viewer.removeEventListener("scroll", updateCurrentPage)
     }
-  }, [documentId, viewMode, viewerRef])
+  }, [documentId, paused, viewMode, viewerRef])
 }

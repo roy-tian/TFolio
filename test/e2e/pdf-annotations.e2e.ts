@@ -1,25 +1,18 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
   renderedPage,
+  seedSettings,
   textPdf,
 } from "./helpers"
 
 describe("TFolio annotations", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("text.pdf", textPdf())
@@ -126,5 +119,133 @@ describe("TFolio annotations", () => {
 
     await expect($("button[aria-label='Undo']")).toBeDisabled()
     expect(await pageInk()).toBe(clean)
+  })
+
+  it("keeps both ends of a cross-page selection mounted until highlight commit", async () => {
+    await browser.refresh()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("cross-page-text.pdf", textPdf(6))
+    await renderedPage()
+    await $("[data-page-number='1'] .pdf-text-layer span").waitForExist({
+      timeout: 15_000,
+    })
+    const cleanFirst = await pageInk(1)
+
+    await $("button[aria-label='Highlight text']").click()
+    await browser.execute(() => {
+      const span = document.querySelector<HTMLElement>(
+        "[data-page-number='1'] .pdf-text-layer span",
+      )!
+      const text = span.firstChild!
+      const range = document.createRange()
+
+      span.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
+      range.setStart(text, 0)
+      range.collapse(true)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+    })
+    // Let the selection-drag retention reach every page shell before the
+    // programmatic scroll stands in for native selection auto-scroll.
+    await browser.pause(100)
+
+    await browser.execute(() => {
+      document
+        .querySelector("[data-page-number='6']")!
+        .scrollIntoView({ block: "center" })
+    })
+    await $("[data-page-number='6'] .pdf-text-layer span").waitForExist({
+      timeout: 15_000,
+    })
+    await expect(
+      $("[data-page-number='1'] .pdf-text-layer span"),
+    ).toBeExisting()
+    const cleanLast = await pageInk(6)
+
+    await browser.execute(() => {
+      const first = document.querySelector<HTMLElement>(
+        "[data-page-number='1'] .pdf-text-layer span",
+      )!.firstChild!
+      const last = document.querySelector<HTMLElement>(
+        "[data-page-number='6'] .pdf-text-layer span",
+      )!.firstChild!
+      const range = document.createRange()
+      range.setStart(first, 0)
+      range.setEnd(last, last.textContent!.length)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
+    })
+
+    await browser.waitUntil(async () => (await pageInk(6)) > cleanLast, {
+      timeout: 15_000,
+      timeoutMsg: "the last selected page was not highlighted",
+    })
+    await browser.execute(() => {
+      document
+        .querySelector("[data-page-number='1']")!
+        .scrollIntoView({ block: "center" })
+    })
+    await $("[data-page-number='1'] canvas").waitForExist({ timeout: 15_000 })
+    await browser.waitUntil(async () => (await pageInk(1)) > cleanFirst, {
+      timeout: 15_000,
+      timeoutMsg: "the evicted selection start was not highlighted",
+    })
+  })
+
+  // The pointer is what says which tool is on. The text layer covers the whole
+  // page and asks for an I-beam of its own, so it has to hand the tool's
+  // through — otherwise the only pointer a reader ever sees over a page is the
+  // I-beam, whichever tool is on.
+  it("gives every drawing tool a pointer of its own over the page", async () => {
+    // The rectangle takes the system crosshair; the other three carry a glyph
+    // of their own, which reaches the page as an inlined image.
+    const tools = [
+      ["highlight", "Highlight text", "data:image/svg+xml"],
+      ["rect", "Draw a rectangle", "crosshair"],
+      ["textNote", "Add a note", "data:image/svg+xml"],
+      ["eraser", "Erase a mark", "data:image/svg+xml"],
+    ] as const
+    const seen: string[] = []
+
+    for (const [tool, label, pointer] of tools) {
+      const toggle = $(`button[aria-label='${label}']`)
+
+      await toggle.click()
+      // The pointer follows the tool's state, so read it only once the toggle
+      // says the press landed.
+      await expect(toggle).toHaveAttribute("aria-pressed", "true")
+
+      const cursors = await browser.execute(() => {
+        const layer = document.querySelector(".pdf-text-layer")!
+        const viewer = layer.closest("main")!
+
+        return {
+          layer: getComputedStyle(layer).cursor,
+          tool: viewer.getAttribute("data-tool-cursor"),
+          viewer: getComputedStyle(viewer).cursor,
+        }
+      })
+
+      expect(cursors.tool).toBe(tool)
+      expect(cursors.viewer).toContain(pointer)
+      expect(cursors.layer).toBe(cursors.viewer)
+      seen.push(cursors.viewer)
+
+      await toggle.click()
+      await expect(toggle).toHaveAttribute("aria-pressed", "false")
+    }
+
+    // Four tools, four pointers: one shared with another would say nothing.
+    expect(new Set(seen).size).toBe(tools.length)
+
+    // With every tool off the page reads as text again.
+    const idle = await browser.execute(
+      () => getComputedStyle(document.querySelector(".pdf-text-layer")!).cursor,
+    )
+
+    expect(idle).toBe("text")
   })
 })

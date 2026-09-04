@@ -8,12 +8,33 @@
  * `e2e` build: everywhere else the mode check is a compile-time constant and
  * the branch — hook and all — is dropped from the bundle.
  */
+import type { PdfDocumentInfo } from "@/lib/pdf"
+import type { PdfProgress } from "@/lib/progress"
+
 export type E2eOverrides = {
   /** Stands in for the native open-file dialog: a path, or null for cancel. */
   pickPdfPath?: () => Promise<string | null>
   /** Stands in for `open_pdf_from_path`, so a spec can hand the backend bytes
       with no path at all — the state the save key's disabled case needs. */
   openPdfFromPath?: (path: string) => Promise<unknown>
+  /** Stands in for the merge wizard's multi-select dialog: the paths chosen,
+      or none for cancel. */
+  pickPdfPaths?: () => Promise<string[]>
+  /** Stands in for `inspect_pdf_files`, so a spec can put a file the backend
+      cannot read on the wizard's list without writing one. */
+  inspectPdfFiles?: (paths: string[]) => Promise<
+    { hasOutline: boolean; pageCount: number | null; path: string }[]
+  >
+  /** Stands in for `merge_pdf_files`, whose result a spec would otherwise have
+      to build a real multi-file merge to reach. */
+  mergePdfFiles?: (
+    plan: {
+      bookmarks: string
+      paths: string[]
+      smartPadding: boolean
+    },
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<PdfDocumentInfo>
 }
 
 /** Compile-time constant; every `if (isE2eBuild)` body is dead code outside

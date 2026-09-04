@@ -30,31 +30,32 @@ export type HighlightCommand = {
 }
 
 /**
- * The rectangle tool's persisted settings. A colour left `null` is that vector
- * part left off, and `opacity` applies to whichever are present. The effect is
- * separate in a command because an image treatment does not draw those vector
- * parts. Sizes and effect strength are page points.
+ * The rectangle tool's persisted settings. One drag draws one block, and the
+ * effect decides what fills it: a translucent wash of `color` at `opacity`, or
+ * the page's own pixels blurred or squared off at `strength` page points. The
+ * settings the showing effect does not use are kept rather than dropped, so
+ * switching back returns the reader to what they had.
  */
 export type RectStyle = {
-  cornerRadius: number
-  effect: RectEffect
-  fillColor: HexColor | null
+  color: HexColor
+  effect: RectEffectKind
+  /** 0..1, kept apart from the colour so the picker can stay a plain hex. */
   opacity: number
-  strokeColor: HexColor | null
-  strokeWidth: number
-}
-
-export type RectEffectKind = "none" | "mosaic" | "blur"
-
-/** An image treatment applied to the rectangle's source pixels. */
-export type RectEffect = {
-  kind: RectEffectKind
-  /** Mosaic block size or blur sigma, in page points. */
+  /** Blur sigma or mosaic block size, in page points. */
   strength: number
 }
 
-/** The vector appearance sent only for an ordinary, effect-free rectangle. */
-export type RectAppearance = Omit<RectStyle, "effect">
+export type RectEffectKind = "translucent" | "blur" | "mosaic"
+
+/**
+ * The effects that rebuild the rectangle from the pixels under it. They read
+ * the page rather than paint over it, which is why the colour has nothing to
+ * say about them, and why they take a different path into the backend.
+ */
+export type RectPixelEffect = {
+  kind: Exclude<RectEffectKind, "translucent">
+  strength: number
+}
 
 /**
  * A rectangle is drawn on one page in one drag, so unlike a highlight it never
@@ -62,26 +63,22 @@ export type RectAppearance = Omit<RectStyle, "effect">
  */
 export type RectCommand = {
   bounds: PagePointsRect
-  effect: RectEffect
   kind: "rect"
   pageNumber: number
-  style: RectAppearance
+  style: RectStyle
 }
 
 /**
- * How a note's text is drawn. `fontFamily` picks one of the PDF's standard
- * fonts, none of which can draw Chinese — text that needs the bundled face is
- * drawn in it whatever this says, which is why the control is disabled for it.
+ * How a note's text is drawn. There is no family to pick: Latin text is drawn
+ * in Helvetica, and anything else in whichever face the machine can embed, so
+ * a control here would offer a choice a note might not be given.
  */
 export type TextNoteStyle = {
   color: HexColor
-  fontFamily: TextNoteFontFamily
   /** Point size, as a PDF measures type. */
   fontSize: number
   opacity: number
 }
-
-export type TextNoteFontFamily = "sans" | "serif" | "mono"
 
 /**
  * A note is typed at one point on one page, so like a rectangle it is one
@@ -144,38 +141,58 @@ export type InsertBlankPageCommand = {
   index: number
   /** Pages in the document after the insertion. */
   pageCount: number
-  /** Whether this is a smart-parity pad — a blank page inserted before a file
-      whose first page would otherwise land on an even position. Accounting
-      only; the backend inserts an ordinary blank page either way. */
-  pad?: boolean
   /** The history entry's own id; the undo's delete stashes under it, and a
       redo's delete replaces that stash rather than colliding with it. */
   stashId: number
 }
 
 /**
- * Appends another PDF's pages to the end of the document, as one merge. The
- * backend holds a single merged document; a "file" is only the frontend's
- * accounting of a page range, derived from these commands (see `fileRanges`).
+ * Inserts another PDF's pages into the document at `index`, as one edit. The
+ * backend holds one document from then on: the pages are the document's own,
+ * indistinguishable from the rest except to the save guard, which keeps a
+ * document holding another file's pages export-only.
  *
- * `insertedAt` and `pageCount` are 0 until the first apply reads the file: the
- * frontend cannot know how many pages the file has, nor exactly where they
- * land, until the backend has opened it. A redo does not re-read the file — it
- * restores the pages the undo stashed — so by then both are known.
+ * `insertedCount` is 0 until the first apply reads the file — the frontend
+ * cannot know how many pages the file has until the backend has opened it — and
+ * `pageCount` grows by it then. A redo does not re-read the file (it restores
+ * the pages the undo stashed), so by then both are known.
  */
-export type MergeFileCommand = {
-  kind: "mergeFile"
-  /** The approved path the merge reads, as an undone/redone merge would. */
+export type InsertFileCommand = {
+  kind: "insertFile"
+  /** The approved path the insert reads, as an undone/redone insert would. */
   path: string
-  /** The file's display name, for its card. */
-  name: string
-  /** 1-based position the file's first page took; 0 until the first apply. */
-  insertedAt: number
+  /** 1-based position the file's first page takes, from 1 to page count + 1. */
+  index: number
   /** Pages the file brought; 0 until the first apply learns it. */
+  insertedCount: number
+  /** Pages in the document after the insertion; the count before it until the
+      first apply learns how many the file brings. */
   pageCount: number
-  /** The history entry's own id: the undo deletes the appended range under it,
+  /** The history entry's own id: the undo deletes the inserted range under it,
       and the redo restores exactly that stash. */
   stashId: number
+}
+
+/**
+ * A mark the reader rubbed out with the eraser.
+ *
+ * The entry that made it is carried whole rather than pointed at: an undo
+ * re-applies exactly that command and puts the entry back at the position it
+ * was taken from, so the history keeps reading in the order the marks were
+ * made — and every other entry's undo still finds its own annotations, which
+ * it knows by id rather than by where they sit on the page.
+ */
+export type EraseAnnotationCommand = {
+  kind: "eraseAnnotation"
+  /** Where `target` sat in the applied history, for an undo to splice it back
+      into. LIFO undo has already taken back everything above it by then, so the
+      position still means what it did. */
+  index: number
+  /** The page each of the entry's annotations was really on when it went — the
+      backend's answer, since a structure edit may have renumbered the pages the
+      command itself names. Empty until the first apply reports them. */
+  pages: number[]
+  target: AnnotationEntry
 }
 
 export type AnnotationCommand =
@@ -187,7 +204,8 @@ export type AnnotationCommand =
   | ReorderPagesCommand
   | DeletePagesCommand
   | InsertBlankPageCommand
-  | MergeFileCommand
+  | InsertFileCommand
+  | EraseAnnotationCommand
 
 /**
  * Redoing re-runs the command and gets a fresh annotation out of PDFium, but it
@@ -217,6 +235,31 @@ function everyPage(pageCount: number): number[] {
   return Array.from({ length: pageCount }, (_, index) => index + 1)
 }
 
+/** Pages `index` through `pageCount`, both 1-based; empty when the range starts
+    past the end. */
+function pagesFrom(index: number, pageCount: number): number[] {
+  return Array.from(
+    { length: Math.max(0, pageCount - index + 1) },
+    (_, offset) => index + offset,
+  )
+}
+
+/** The positions a reorder actually changes the content of: slot `i + 1` shows
+    a different page only when `order` does not leave it holding its own number.
+    A permutation and its inverse fix exactly the same slots, so this answers
+    for the undo as well as the apply. */
+function movedPositions(order: number[]): number[] {
+  const moved: number[] = []
+
+  for (let index = 0; index < order.length; index += 1) {
+    if (order[index] !== index + 1) {
+      moved.push(index + 1)
+    }
+  }
+
+  return moved
+}
+
 /** The pages a command writes to, and so the pages an undo has to take back. */
 export function commandPages(command: AnnotationCommand): number[] {
   switch (command.kind) {
@@ -229,18 +272,30 @@ export function commandPages(command: AnnotationCommand): number[] {
     case "pageNumbers":
       return everyPage(command.pageCount)
     case "reorderPages":
-      return everyPage(command.order.length)
+      return movedPositions(command.order)
     case "deletePages":
+      // From the first page taken out: every page ahead of it keeps both its
+      // number and its pixels. `pageCount` is the count before the delete — the
+      // larger shape — so the same range covers the undo's restore.
+      return pagesFrom(Math.min(...command.pages), command.pageCount)
     case "insertBlankPage":
-      // The larger of the before and after counts, so both the apply and the
-      // undo invalidate every page number either shape of the document has.
-      return everyPage(command.pageCount)
-    case "mergeFile":
-      // A merge only appends: no page number that already existed changes its
-      // pixels or its text, and the new pages get fresh components that fetch
-      // on mount. Its undo (a tail delete) and redo (a restore) touch only
-      // those same tail pages, so there is nothing to invalidate either way.
-      return []
+      // From the gap on, as an inserted file is, and against the count after
+      // the insertion — again the larger of the two shapes.
+      return pagesFrom(command.index, command.pageCount)
+    case "insertFile":
+      // Only from the gap on: a page ahead of it keeps both its number and its
+      // pixels, and a file appended at the very end therefore invalidates
+      // nothing. `pageCount` is the count before the file was read and the
+      // count after it once the apply has learned it, so the same expression
+      // covers the apply and the undo.
+      return pagesFrom(command.index, command.pageCount)
+    case "eraseAnnotation":
+      // What the backend reported, once it has: the erased entry's own page
+      // numbers are the ones it was made with, which a structure edit since may
+      // have moved.
+      return command.pages.length > 0
+        ? command.pages
+        : commandPages(command.target.command)
   }
 }
 
@@ -256,13 +311,16 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "reorderPages":
     case "deletePages":
     case "insertBlankPage":
-    case "mergeFile":
+    case "insertFile":
       return true
     case "highlight":
     case "rect":
     case "textNote":
     case "watermark":
     case "pageNumbers":
+    // Only ever a mark, which is why the eraser can take one from the middle of
+    // the history without the pages beneath it moving.
+    case "eraseAnnotation":
       return false
   }
 }
@@ -277,18 +335,103 @@ export function commandTextPages(command: AnnotationCommand): number[] {
     case "reorderPages":
     case "deletePages":
     case "insertBlankPage":
+    case "insertFile":
       return commandPages(command)
     default:
       return []
   }
 }
 
-/** The pages a merge's undo deletes, and its redo restores: the appended file's
-    range, valid at the LIFO moment the merge sits at the top of history. */
-export function mergeFilePages(command: MergeFileCommand): number[] {
+/**
+ * Plans an erase of the mark entry `entryId` made: it leaves the applied
+ * history, and an entry recording where it stood takes its place at the top.
+ *
+ * An entry no longer applied — the reader undid it between the hit test and
+ * this — is nothing to erase.
+ */
+export function planEraseAnnotation(history: AnnotationHistory, entryId: number) {
+  const index = history.past.findIndex((entry) => entry.id === entryId)
+
+  if (index < 0) {
+    return null
+  }
+
+  const command: EraseAnnotationCommand = {
+    index,
+    kind: "eraseAnnotation",
+    pages: [],
+    target: history.past[index]!,
+  }
+
+  return {
+    command,
+    history: {
+      future: [],
+      nextId: history.nextId + 1,
+      past: [
+        ...history.past.slice(0, index),
+        ...history.past.slice(index + 1),
+        { command, id: history.nextId },
+      ],
+      savedId: history.savedId,
+    } satisfies AnnotationHistory,
+  }
+}
+
+/** Records where the erased annotations actually were, which only the apply
+    learns — the counterpart of `fillInsertFileOutcome`. */
+export function fillErasedPages(
+  history: AnnotationHistory,
+  entryId: number,
+  pages: number[],
+): AnnotationHistory {
+  return {
+    ...history,
+    past: history.past.map((entry) =>
+      entry.id === entryId && entry.command.kind === "eraseAnnotation"
+        ? { ...entry, command: { ...entry.command, pages } }
+        : entry,
+    ),
+  }
+}
+
+/**
+ * `command` with its page numbers replaced by the pages its annotations were
+ * really on — one per annotation, in the order the command wrote them. What
+ * puts an erased mark back where it was rather than where it was first made,
+ * across a structure edit that renumbered the pages in between.
+ */
+export function retargetCommand(
+  command: AnnotationCommand,
+  pages: number[],
+): AnnotationCommand {
+  if (pages.length === 0) {
+    return command
+  }
+
+  switch (command.kind) {
+    case "highlight":
+      return {
+        ...command,
+        targets: command.targets.map((target, index) => ({
+          ...target,
+          pageNumber: pages[index] ?? target.pageNumber,
+        })),
+      }
+    case "rect":
+    case "textNote":
+      return { ...command, pageNumber: pages[0] ?? command.pageNumber }
+    default:
+      return command
+  }
+}
+
+/** The pages an insert's undo deletes, and its redo restores: the file's own
+    range, valid at the LIFO moment the insert sits at the top of history. */
+export function insertFilePages(command: InsertFileCommand): number[] {
   return Array.from(
-    { length: command.pageCount },
-    (_, offset) => command.insertedAt + offset,
+    { length: command.insertedCount },
+    (_, offset) => command.index + offset,
   )
 }
 
@@ -350,7 +493,6 @@ export function planInsertBlankPage(
   history: AnnotationHistory,
   index: number,
   pageCount: number,
-  pad = false,
 ) {
   if (index < 1 || index > pageCount + 1) {
     return null
@@ -360,28 +502,32 @@ export function planInsertBlankPage(
     index,
     kind: "insertBlankPage",
     pageCount: pageCount + 1,
-    // Omit the flag entirely when false, so an ordinary insert's command stays
-    // exactly what it was before parity padding existed.
-    ...(pad ? { pad: true } : {}),
     stashId: history.nextId,
   }
 
   return { command, history: commit(history, command) }
 }
 
-/** Plans a merge. `insertedAt`/`pageCount` stay 0 here: the file has not been
-    read yet, so both are filled in once the first apply learns them (see
-    `fillMergeOutcome`). A merge always happens, so this never returns null. */
-export function planMergeFile(
+/** Plans an insert. `insertedCount` stays 0 here and `pageCount` is the count
+    before the insert: the file has not been read yet, so both are settled once
+    the first apply learns how many pages it brings (see
+    `fillInsertFileOutcome`). The position is the reader's, so an out-of-range
+    one is refused here rather than clamped. */
+export function planInsertFile(
   history: AnnotationHistory,
   path: string,
-  name: string,
+  index: number,
+  pageCount: number,
 ) {
-  const command: MergeFileCommand = {
-    insertedAt: 0,
-    kind: "mergeFile",
-    name,
-    pageCount: 0,
+  if (index < 1 || index > pageCount + 1) {
+    return null
+  }
+
+  const command: InsertFileCommand = {
+    index,
+    insertedCount: 0,
+    kind: "insertFile",
+    pageCount,
     path,
     stashId: history.nextId,
   }
@@ -389,21 +535,26 @@ export function planMergeFile(
   return { command, history: commit(history, command) }
 }
 
-/** Rewrites the merge the first apply just committed with the position and page
-    count the backend reported — the two facts a merge learns only after reading
-    the file. Later replays (`fileRanges`, an undo's delete) then read them as if
-    they had been known all along. */
-export function fillMergeOutcome(
+/** Rewrites the insert the first apply just committed with the page count the
+    backend reported — the one fact an insert learns only after reading the file.
+    An undo's delete then reads the range as if it had been known all along. */
+export function fillInsertFileOutcome(
   history: AnnotationHistory,
   entryId: number,
-  insertedAt: number,
-  pageCount: number,
+  insertedCount: number,
 ): AnnotationHistory {
   return {
     ...history,
     past: history.past.map((entry) =>
-      entry.id === entryId && entry.command.kind === "mergeFile"
-        ? { ...entry, command: { ...entry.command, insertedAt, pageCount } }
+      entry.id === entryId && entry.command.kind === "insertFile"
+        ? {
+            ...entry,
+            command: {
+              ...entry.command,
+              insertedCount,
+              pageCount: entry.command.pageCount + insertedCount,
+            },
+          }
         : entry,
     ),
   }
@@ -528,12 +679,20 @@ export function undo(history: AnnotationHistory) {
     return null
   }
 
+  const past = history.past.slice(0, -1)
+
+  // Taking back an erase gives the mark's own entry its place back, so the
+  // history reads in the order the marks were made whichever way it is walked.
+  if (entry.command.kind === "eraseAnnotation") {
+    past.splice(entry.command.index, 0, entry.command.target)
+  }
+
   return {
     entry,
     history: {
       future: [...history.future, entry],
       nextId: history.nextId,
-      past: history.past.slice(0, -1),
+      past,
       savedId: history.savedId,
     },
   }
@@ -546,12 +705,20 @@ export function redo(history: AnnotationHistory) {
     return null
   }
 
+  const erased =
+    entry.command.kind === "eraseAnnotation" ? entry.command.target.id : null
+
   return {
     entry,
     history: {
       future: history.future.slice(0, -1),
       nextId: history.nextId,
-      past: [...history.past, entry],
+      past: [
+        ...(erased === null
+          ? history.past
+          : history.past.filter((applied) => applied.id !== erased)),
+        entry,
+      ],
       savedId: history.savedId,
     },
   }

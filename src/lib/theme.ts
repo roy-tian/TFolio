@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react"
 
+import { rememberSettings, storedSettings } from "@/lib/settings"
+
 export const themePreferences = ["light", "system", "dark"] as const
 
 export type ThemePreference = (typeof themePreferences)[number]
@@ -7,7 +9,6 @@ export type ThemePreference = (typeof themePreferences)[number]
 export type ResolvedTheme = "light" | "dark"
 
 export const defaultThemePreference: ThemePreference = "system"
-export const themeStorageKey = "tfolio.ui.theme"
 
 const darkModeQuery = "(prefers-color-scheme: dark)"
 
@@ -18,13 +19,10 @@ function isThemePreference(value: unknown): value is ThemePreference {
   return themePreferences.includes(value as ThemePreference)
 }
 
-function readStoredPreference(): ThemePreference | null {
-  try {
-    const stored = window.localStorage.getItem(themeStorageKey)
-    return isThemePreference(stored) ? stored : null
-  } catch {
-    return null
-  }
+function storedPreference(): ThemePreference | null {
+  const stored = storedSettings().ui?.theme
+
+  return isThemePreference(stored) ? stored : null
 }
 
 function systemPrefersDark(): boolean {
@@ -48,7 +46,7 @@ function applyResolvedTheme(themePreference: ThemePreference) {
 }
 
 export function initializeTheme() {
-  preference = readStoredPreference() ?? defaultThemePreference
+  preference = storedPreference() ?? defaultThemePreference
   applyResolvedTheme(preference)
 
   window.matchMedia(darkModeQuery).addEventListener("change", () => {
@@ -65,12 +63,7 @@ export function getThemePreference(): ThemePreference {
 export function setThemePreference(next: ThemePreference) {
   preference = next
 
-  try {
-    window.localStorage.setItem(themeStorageKey, next)
-  } catch {
-    // A restricted WebView can disable storage. The active session still works.
-  }
-
+  rememberSettings({ ui: { theme: next } })
   applyResolvedTheme(next)
   listeners.forEach((listener) => listener())
 }

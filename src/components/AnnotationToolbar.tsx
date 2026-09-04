@@ -1,28 +1,20 @@
 import {
   ChevronDown,
-  Download,
-  Hash,
+  Eraser,
+  FileScan,
   Highlighter,
-  Redo2,
-  Save,
   Square,
+  SquarePen,
   Stamp,
-  Type,
-  Undo2,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
+import { MergeWizardButton } from "@/components/MergeWizardButton"
 import { RectStylePopover } from "@/components/RectStylePopover"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Popover,
   PopoverContent,
@@ -31,43 +23,31 @@ import {
 import { Toggle } from "@/components/ui/toggle"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import { highlightSwatches } from "@/lib/annotationStyles"
+import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 
 const splitMenuButtonClassName =
   "relative w-5 border-input px-0 before:pointer-events-none before:absolute before:inset-y-1.5 before:left-0 before:w-px before:bg-border before:opacity-0 before:transition-opacity hover:before:opacity-100"
 
-/** The tool the reader is drawing with, or none. */
-export type AnnotationTool = "highlight" | "rect" | "textNote" | null
+/** The tool the reader is drawing with — or rubbing out with — or none. */
+export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
-  canRedo: boolean
-  canUndo: boolean
   disabled: boolean
-  /** Whether the document merged in other files; like a watermark, that may
-      only be exported as a copy, never saved back over the first file. */
-  hasMergedFiles: boolean
-  /** Whether the document has a file of its own for the save key to write
-      back to; one opened from bytes does not until an export gives it one. */
-  hasSourceFile: boolean
-  /** Whether this session added page numbers still on the document; like a
-      watermark, they leave the document export-only. */
-  hasPageNumbers: boolean
-  /** Whether a watermark this session added is still on the document; one may
-      only be exported as a copy, never written back over the reader's file. */
-  hasWatermark: boolean
+  /** Whether a page is on show to rub a mark off; the thumbnail grid is not. */
+  eraserApplies: boolean
   /** Whether the layout has text to mark; the grid of thumbnails does not. */
   highlightApplies: boolean
   highlightColor: HexColor
-  isDirty: boolean
-  onExport: () => void
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle) => void
+  /** Opens the merge wizard. It builds a document of its own rather than
+      touching this one, but it sits with the document tools because that is
+      where a reader looks for what acts on whole files. */
+  onMergeWizard: () => void
   onPageNumbers: () => void
-  onRedo: () => void
-  onSave: () => void
   onToolChange: (tool: AnnotationTool) => void
-  onUndo: () => void
   onWatermark: () => void
   /** Whether a page is on show to draw on; the thumbnail grid is not. */
   rectApplies: boolean
@@ -78,258 +58,210 @@ type AnnotationToolbarProps = {
 
 export function AnnotationToolbar({
   activeTool,
-  canRedo,
-  canUndo,
   disabled,
-  hasMergedFiles,
-  hasPageNumbers,
-  hasSourceFile,
-  hasWatermark,
+  eraserApplies,
   highlightApplies,
   highlightColor,
-  isDirty,
-  onExport,
   onHighlightColorChange,
+  onMergeWizard,
   onPageNumbers,
   onRectStyleChange,
-  onRedo,
-  onSave,
   onToolChange,
-  onUndo,
   onWatermark,
   rectApplies,
   rectStyle,
   textNoteApplies,
 }: AnnotationToolbarProps) {
   const { t } = useTranslation()
-  const undoLabel = t("annotate.undo")
-  const redoLabel = t("annotate.redo")
   const highlightLabel = t("annotate.highlight")
   const rectLabel = t("annotate.rect")
   const textNoteLabel = t("annotate.textNote")
+  const eraserLabel = t("annotate.eraser")
   const watermarkLabel = t("watermark.open")
   const pageNumbersLabel = t("pageNumbers.open")
-  const saveLabel = t("annotate.save")
-  const exportLabel = t("annotate.export")
-  // Only where the reason is not already in front of the reader: session page
-  // content (a watermark or page numbers) or merged files they can see, or a
-  // document with no file of its own. Owned page content is named first — it is
-  // the stricter, less recoverable reason.
-  const saveTitle =
-    hasWatermark || hasPageNumbers
-      ? t("annotate.saveOwnedContent")
-      : hasMergedFiles
-        ? t("annotate.saveMerged")
-        : hasSourceFile
-          ? saveLabel
-          : t("annotate.saveNoSource")
 
   return (
-    <>
-      <ButtonGroup>
-        <Button
-          aria-label={undoLabel}
-          disabled={disabled || !canUndo}
-          onClick={onUndo}
-          size="icon"
-          title={undoLabel}
-          variant="outline"
-        >
-          <Undo2 />
-        </Button>
-        <Button
-          aria-label={redoLabel}
-          disabled={disabled || !canRedo}
-          onClick={onRedo}
-          size="icon"
-          title={redoLabel}
-          variant="outline"
-        >
-          <Redo2 />
-        </Button>
-      </ButtonGroup>
+    <div className="flex items-center gap-1">
+      {highlightApplies || rectApplies || textNoteApplies || eraserApplies ? (
+        <ButtonGroup>
+          {highlightApplies ? (
+            <>
+              {/* A Toggle rather than a Button: unlike the fit control next to it, a
+              tool really is on or off, and pressing the active one puts it away. */}
+              <ToolbarTooltip label={highlightLabel}>
+                <Toggle
+                  aria-label={highlightLabel}
+                  className={cn(
+                    toolbarSelectionBarClassName,
+                    "size-8 border-r-transparent p-0 peer/highlight",
+                  )}
+                  disabled={disabled}
+                  onPressedChange={(pressed) =>
+                    onToolChange(pressed ? "highlight" : null)
+                  }
+                  pressed={activeTool === "highlight"}
+                  variant="outline"
+                >
+                  <Highlighter />
+                </Toggle>
+              </ToolbarTooltip>
+              <Popover>
+                <ToolbarTooltip label={t("annotate.highlightOptions")}>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        aria-label={t("annotate.highlightOptions")}
+                        className={cn(
+                          splitMenuButtonClassName,
+                          "peer-hover/highlight:before:opacity-100",
+                        )}
+                        disabled={disabled}
+                        size="icon"
+                        variant="ghost"
+                      />
+                    }
+                  >
+                    <ChevronDown />
+                  </PopoverTrigger>
+                </ToolbarTooltip>
+                <PopoverContent align="end" className="w-auto p-3">
+                  <div className="space-y-2">
+                    <p
+                      className="text-xs font-medium"
+                      id="highlight-color-label"
+                    >
+                      {t("annotate.highlightColor")}
+                    </p>
+                    <ColorSwatchPicker
+                      labelledBy="highlight-color-label"
+                      onChange={onHighlightColorChange}
+                      swatches={highlightSwatches}
+                      value={highlightColor}
+                    />
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </>
+          ) : null}
 
-      <ButtonGroup>
-        {highlightApplies ? (
-          <>
-            {/* A Toggle rather than a Button: unlike the fit control next to it, a
-                tool really is on or off, and pressing the active one puts it away. */}
-            <Toggle
-              aria-label={highlightLabel}
-              className="size-8 border-r-transparent p-0 peer/highlight"
-              disabled={disabled}
-              onPressedChange={(pressed) =>
-                onToolChange(pressed ? "highlight" : null)
-              }
-              pressed={activeTool === "highlight"}
-              title={highlightLabel}
-              variant="outline"
-            >
-              <Highlighter />
-            </Toggle>
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <Button
-                    aria-label={t("annotate.highlightOptions")}
-                    className={cn(
-                      splitMenuButtonClassName,
-                      "peer-hover/highlight:before:opacity-100",
-                    )}
-                    disabled={disabled}
-                    size="icon"
-                    title={t("annotate.highlightOptions")}
-                    variant="ghost"
+          {rectApplies ? (
+            <>
+              <ToolbarTooltip label={rectLabel}>
+                <Toggle
+                  aria-label={rectLabel}
+                  className={cn(
+                    toolbarSelectionBarClassName,
+                    "size-8 border-r-transparent p-0 peer/rect",
+                  )}
+                  disabled={disabled}
+                  onPressedChange={(pressed) =>
+                    onToolChange(pressed ? "rect" : null)
+                  }
+                  pressed={activeTool === "rect"}
+                  variant="outline"
+                >
+                  <Square />
+                </Toggle>
+              </ToolbarTooltip>
+              <Popover>
+                <ToolbarTooltip label={t("annotate.rectOptions")}>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        aria-label={t("annotate.rectOptions")}
+                        className={cn(
+                          splitMenuButtonClassName,
+                          "peer-hover/rect:before:opacity-100",
+                        )}
+                        disabled={disabled}
+                        size="icon"
+                        variant="ghost"
+                      />
+                    }
+                  >
+                    <ChevronDown />
+                  </PopoverTrigger>
+                </ToolbarTooltip>
+                <PopoverContent align="end" className="w-auto p-3">
+                  <RectStylePopover
+                    onChange={onRectStyleChange}
+                    style={rectStyle}
                   />
-                }
-              >
-                <ChevronDown />
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-auto p-3">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium" id="highlight-color-label">
-                    {t("annotate.highlightColor")}
-                  </p>
-                  <ColorSwatchPicker
-                    labelledBy="highlight-color-label"
-                    onChange={(color) => {
-                      if (color) {
-                        onHighlightColorChange(color)
-                      }
-                    }}
-                    swatches={highlightSwatches}
-                    value={highlightColor}
-                  />
-                </div>
-              </PopoverContent>
-            </Popover>
-          </>
-        ) : null}
+                </PopoverContent>
+              </Popover>
+            </>
+          ) : null}
 
-        {rectApplies ? (
-          <>
-            <Toggle
-              aria-label={rectLabel}
-              className="size-8 border-r-transparent p-0 peer/rect"
-              disabled={disabled}
-              onPressedChange={(pressed) => onToolChange(pressed ? "rect" : null)}
-              pressed={activeTool === "rect"}
-              title={rectLabel}
-              variant="outline"
-            >
-              <Square />
-            </Toggle>
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <Button
-                    aria-label={t("annotate.rectOptions")}
-                    className={cn(
-                      splitMenuButtonClassName,
-                      "peer-hover/rect:before:opacity-100",
-                    )}
-                    disabled={disabled}
-                    size="icon"
-                    title={t("annotate.rectOptions")}
-                    variant="ghost"
-                  />
-                }
-              >
-                <ChevronDown />
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-auto p-3">
-                <RectStylePopover onChange={onRectStyleChange} style={rectStyle} />
-              </PopoverContent>
-            </Popover>
-          </>
-        ) : null}
-
-        {textNoteApplies ? (
-          <Toggle
-            aria-label={textNoteLabel}
-            className="size-8 p-0"
-            disabled={disabled}
-            onPressedChange={(pressed) => onToolChange(pressed ? "textNote" : null)}
-            pressed={activeTool === "textNote"}
-            title={textNoteLabel}
-            variant="outline"
-          >
-            <Type />
-          </Toggle>
-        ) : null}
-
-        <Button
-          aria-label={watermarkLabel}
-          className="border-input"
-          disabled={disabled}
-          onClick={onWatermark}
-          size="icon"
-          title={watermarkLabel}
-          variant="ghost"
-        >
-          <Stamp />
-        </Button>
-
-        <Button
-          aria-label={pageNumbersLabel}
-          className="border-input"
-          disabled={disabled}
-          onClick={onPageNumbers}
-          size="icon"
-          title={pageNumbersLabel}
-          variant="ghost"
-        >
-          <Hash />
-        </Button>
-      </ButtonGroup>
-
-      <ButtonGroup>
-        <Button
-          aria-label={saveLabel}
-          className="border-r-transparent peer/save"
-          disabled={
-            disabled ||
-            !hasSourceFile ||
-            !isDirty ||
-            hasWatermark ||
-            hasPageNumbers ||
-            hasMergedFiles
-          }
-          onClick={onSave}
-          size="icon"
-          title={disabled ? saveLabel : saveTitle}
-          variant="outline"
-        >
-          <Save />
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label={t("annotate.saveOptions")}
-                className={cn(
-                  splitMenuButtonClassName,
-                  "peer-hover/save:before:opacity-100",
-                )}
+          {textNoteApplies ? (
+            <ToolbarTooltip label={textNoteLabel}>
+              <Toggle
+                aria-label={textNoteLabel}
+                className={cn(toolbarSelectionBarClassName, "size-8 p-0")}
                 disabled={disabled}
-                size="icon"
-                title={t("annotate.saveOptions")}
+                onPressedChange={(pressed) =>
+                  onToolChange(pressed ? "textNote" : null)
+                }
+                pressed={activeTool === "textNote"}
                 variant="outline"
-              />
-            }
+              >
+                <SquarePen />
+              </Toggle>
+            </ToolbarTooltip>
+          ) : null}
+
+          {/* Last of the drawing tools, and the one that undoes their work: it
+              takes off a mark this session made, wherever in the stack it sits,
+              which is what plain undo cannot do. */}
+          {eraserApplies ? (
+            <ToolbarTooltip label={eraserLabel}>
+              <Toggle
+                aria-label={eraserLabel}
+                className={cn(toolbarSelectionBarClassName, "size-8 p-0")}
+                disabled={disabled}
+                onPressedChange={(pressed) =>
+                  onToolChange(pressed ? "eraser" : null)
+                }
+                pressed={activeTool === "eraser"}
+                variant="outline"
+              >
+                <Eraser />
+              </Toggle>
+            </ToolbarTooltip>
+          ) : null}
+        </ButtonGroup>
+      ) : null}
+
+      <ButtonGroup>
+        <ToolbarTooltip label={watermarkLabel}>
+          <Button
+            aria-label={watermarkLabel}
+            className="border-input"
+            disabled={disabled}
+            onClick={onWatermark}
+            size="icon"
+            variant="ghost"
           >
-            <ChevronDown />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto min-w-40">
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={onExport}>
-                <Download />
-                {exportLabel}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <Stamp />
+          </Button>
+        </ToolbarTooltip>
+
+        <ToolbarTooltip label={pageNumbersLabel}>
+          <Button
+            aria-label={pageNumbersLabel}
+            className="border-input"
+            disabled={disabled}
+            onClick={onPageNumbers}
+            size="icon"
+            variant="ghost"
+          >
+            <FileScan />
+          </Button>
+        </ToolbarTooltip>
+
+        {/* Last in the group: the two before it mark the document on screen,
+            while this one leaves to build another. */}
+        <MergeWizardButton onClick={onMergeWizard} />
       </ButtonGroup>
-    </>
+    </div>
   )
 }

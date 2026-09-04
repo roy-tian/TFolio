@@ -1,13 +1,14 @@
 import {
   BookOpen,
   LayoutGrid,
-  Layers,
   RectangleVertical,
   type LucideIcon,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 const options: Array<{
@@ -16,22 +17,23 @@ const options: Array<{
     | "toolbar.viewModeSingle"
     | "toolbar.viewModeBook"
     | "toolbar.viewModeThumbnail"
-    | "toolbar.viewModeFiles"
   value: ViewMode
 }> = [
   { icon: RectangleVertical, labelKey: "toolbar.viewModeSingle", value: "single" },
   { icon: BookOpen, labelKey: "toolbar.viewModeBook", value: "book" },
   { icon: LayoutGrid, labelKey: "toolbar.viewModeThumbnail", value: "thumbnail" },
-  { icon: Layers, labelKey: "toolbar.viewModeFiles", value: "files" },
 ]
 
 type ViewModeToggleProps = {
+  /** Whether the document has a spread to show; a single page has none. */
+  bookApplies: boolean
   disabled: boolean
   onChange: (mode: ViewMode) => void
   value: ViewMode
 }
 
 export function ViewModeToggle({
+  bookApplies,
   disabled,
   onChange,
   value,
@@ -58,14 +60,16 @@ export function ViewModeToggle({
         const label = t(option.labelKey)
 
         return (
-          <ToggleGroupItem
-            aria-label={label}
-            key={option.value}
-            title={label}
-            value={option.value}
-          >
-            <Icon />
-          </ToggleGroupItem>
+          <ToolbarTooltip key={option.value} label={label}>
+            <ToggleGroupItem
+              aria-label={label}
+              className={toolbarSelectionBarClassName}
+              disabled={option.value === "book" && !bookApplies}
+              value={option.value}
+            >
+              <Icon />
+            </ToggleGroupItem>
+          </ToolbarTooltip>
         )
       })}
     </ToggleGroup>

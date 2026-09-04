@@ -2,46 +2,43 @@ use serde::{Deserialize, Serialize};
 
 pub(super) const MAX_WATERMARK_CHARS: usize = 256;
 pub(super) const MAX_WATERMARK_DOCUMENT_OBJECTS: usize = 20_000;
-pub(super) const MAX_WATERMARK_FONT_SIZE: f32 = 144.0;
 pub(super) const MAX_WATERMARK_OBJECTS_PER_PAGE: usize = 512;
-pub(super) const MAX_WATERMARK_SPACING: f32 = 240.0;
-pub(super) const MIN_WATERMARK_FONT_SIZE: f32 = 6.0;
-pub(super) const MIN_WATERMARK_OPACITY: f32 = 0.05;
-pub(super) const MIN_WATERMARK_SPACING: f32 = 12.0;
+pub(super) const MIN_WATERMARK_WIDTH_RATIO: f32 = 0.1;
+pub(super) const MAX_WATERMARK_WIDTH_RATIO: f32 = 1.0;
+
+/// The look the reader does not choose. Mirrored by `src/lib/watermark.ts`, so
+/// the dialog's preview shows the ink the page will carry.
+pub(super) const WATERMARK_COLOR: &str = "#64748b";
+pub(super) const WATERMARK_OPACITY: f32 = 0.25;
+/// The zebra gap as a share of the font size, so one density holds at any size.
+pub(super) const WATERMARK_ZEBRA_GAP_RATIO: f32 = 1.5;
+
+/// The size the mark is measured at before it is scaled to the share of the
+/// page width the reader asked for. Any size would do; a large one keeps the
+/// ratio clear of the rounding a 1pt box would carry into it.
+pub(super) const WATERMARK_REFERENCE_FONT_SIZE: f32 = 100.0;
+/// Bounds on the *derived* size — a guard against a degenerate measurement or a
+/// hostile page box, not a choice offered to the reader.
+pub(super) const MIN_WATERMARK_FONT_SIZE: f32 = 1.0;
+pub(super) const MAX_WATERMARK_FONT_SIZE: f32 = 1_000.0;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WatermarkConfig {
     pub(super) text: String,
-    pub(super) font_family: WatermarkFontFamily,
-    pub(super) font_size: f32,
-    pub(super) bold: bool,
-    pub(super) color: String,
-    pub(super) opacity: f32,
-    /// Clockwise degrees relative to the page's normal displayed direction.
-    pub(super) rotation: f32,
+    /// The mark's width as a share of the page's displayed width.
+    pub(super) width_ratio: f32,
+    pub(super) direction: WatermarkDirection,
     pub(super) layout: WatermarkLayout,
-    /// The gap between tiles on both axes; the grid steps by the text box plus
-    /// this, so the two directions read as one density to the reader.
-    pub(super) spacing: f32,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(super) enum WatermarkFontFamily {
-    Sans,
-    Serif,
-    Mono,
-}
-
-impl WatermarkFontFamily {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::Sans => "sans",
-            Self::Serif => "serif",
-            Self::Mono => "mono",
-        }
-    }
+pub(super) enum WatermarkDirection {
+    /// Reads from the page's bottom-left corner towards its top-right.
+    Ascending,
+    /// Reads from the page's top-left corner towards its bottom-right.
+    Descending,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
@@ -58,9 +55,9 @@ pub(super) struct WatermarkPlacement {
 }
 
 impl WatermarkConfig {
-    /// Validates every value that crossed the WebView boundary and returns a
-    /// canonical rotation, so equivalent directions compare equal in history
-    /// and in the backend's replace no-op.
+    /// Validates every value that crossed the WebView boundary. Angle and font
+    /// size are no longer among them — the page decides both — so what is left
+    /// is the text and the share of the width it should span.
     pub(super) fn validated(mut self) -> Result<Self, String> {
         self.text = self.text.trim().to_owned();
         if self.text.is_empty() {
@@ -74,27 +71,13 @@ impl WatermarkConfig {
                 "a watermark may contain at most {MAX_WATERMARK_CHARS} characters"
             ));
         }
-        if !is_hex_color(&self.color) {
-            return Err("a watermark colour must be a six-digit hex value".into());
-        }
         if !in_range(
-            self.font_size,
-            MIN_WATERMARK_FONT_SIZE,
-            MAX_WATERMARK_FONT_SIZE,
+            self.width_ratio,
+            MIN_WATERMARK_WIDTH_RATIO,
+            MAX_WATERMARK_WIDTH_RATIO,
         ) {
-            return Err("a watermark font size is out of range".into());
+            return Err("a watermark width is out of range".into());
         }
-        if !in_range(self.opacity, MIN_WATERMARK_OPACITY, 1.0) {
-            return Err("a watermark opacity is out of range".into());
-        }
-        if !self.rotation.is_finite() {
-            return Err("a watermark rotation must be finite".into());
-        }
-        if !in_range(self.spacing, MIN_WATERMARK_SPACING, MAX_WATERMARK_SPACING) {
-            return Err("a watermark spacing is out of range".into());
-        }
-
-        self.rotation = normalize_rotation(self.rotation);
 
         Ok(self)
     }
@@ -104,21 +87,68 @@ fn in_range(value: f32, minimum: f32, maximum: f32) -> bool {
     value.is_finite() && (minimum..=maximum).contains(&value)
 }
 
-fn is_hex_color(value: &str) -> bool {
-    value.len() == 7
-        && value.starts_with('#')
-        && value.as_bytes()[1..]
-            .iter()
-            .all(|character| character.is_ascii_hexdigit())
+fn is_usable_size(value: f32) -> bool {
+    value.is_finite() && value > 0.0
 }
 
-pub(super) fn normalize_rotation(rotation: f32) -> f32 {
-    let normalized = rotation.rem_euclid(360.0);
+/// The angle the mark reads along, in clockwise degrees from the page's normal
+/// displayed direction: the page's own diagonal, so a full-width mark runs
+/// corner to corner whatever proportions the sheet has.
+pub(super) fn watermark_rotation(
+    direction: WatermarkDirection,
+    display_width: f32,
+    display_height: f32,
+) -> Result<f32, String> {
+    if !is_usable_size(display_width) || !is_usable_size(display_height) {
+        return Err("a watermark needs a finite positive page size".into());
+    }
 
-    if normalized > 180.0 {
-        normalized - 360.0
+    let diagonal = (display_height / display_width).atan().to_degrees();
+
+    Ok(match direction {
+        // Turning clockwise drops the text's right end, which is the descending
+        // corner-to-corner direction; the ascending one is its mirror.
+        WatermarkDirection::Ascending => -diagonal,
+        WatermarkDirection::Descending => diagonal,
+    })
+}
+
+/// The font size at which the mark covers `width_ratio` of the page's displayed
+/// width. `measured_width` is the same mark's displayed width at
+/// `WATERMARK_REFERENCE_FONT_SIZE`; text bounds scale with the size, so the two
+/// are one ratio apart.
+pub(super) fn watermark_font_size(
+    width_ratio: f32,
+    display_width: f32,
+    measured_width: f32,
+) -> Result<f32, String> {
+    if !is_usable_size(display_width) || !is_usable_size(measured_width) {
+        return Err("a watermark could not be measured on this page".into());
+    }
+
+    let size = WATERMARK_REFERENCE_FONT_SIZE * width_ratio * display_width / measured_width;
+
+    if !size.is_finite() {
+        return Err("a watermark size could not be derived for this page".into());
+    }
+
+    Ok(size.clamp(MIN_WATERMARK_FONT_SIZE, MAX_WATERMARK_FONT_SIZE))
+}
+
+pub(super) fn watermark_zebra_spacing(font_size: f32) -> f32 {
+    font_size * WATERMARK_ZEBRA_GAP_RATIO
+}
+
+/// How many steps of `step` it takes to reach `distance`, as a count that keeps
+/// its meaning when the step is a hair's breadth: the per-page object limit is
+/// what actually stops a grid that fine, and it is checked as tiles are made.
+fn steps_to_cover(distance: f32, step: f32) -> i32 {
+    let steps = (distance / step).ceil();
+
+    if steps.is_finite() {
+        steps.clamp(0.0, MAX_WATERMARK_OBJECTS_PER_PAGE as f32) as i32
     } else {
-        normalized
+        MAX_WATERMARK_OBJECTS_PER_PAGE as i32
     }
 }
 
@@ -147,59 +177,58 @@ pub(super) fn watermark_placements(
     page_height: f32,
     text_width: f32,
     text_height: f32,
-    config: &WatermarkConfig,
+    spacing: f32,
+    layout: WatermarkLayout,
 ) -> Result<Vec<WatermarkPlacement>, String> {
     if ![page_width, page_height, text_width, text_height]
         .iter()
-        .all(|value| value.is_finite() && *value > 0.0)
+        .all(|value| is_usable_size(*value))
     {
         return Err("a watermark needs finite positive page and text bounds".into());
     }
 
-    if config.layout == WatermarkLayout::Single {
+    if layout == WatermarkLayout::Single {
         return Ok(vec![WatermarkPlacement {
             center_x: page_width / 2.0,
             center_y: page_height / 2.0,
         }]);
     }
 
-    let step_x = text_width + config.spacing;
-    let step_y = text_height + config.spacing;
+    let step_x = text_width + spacing;
+    let step_y = text_height + spacing;
 
-    if ![step_x, step_y]
-        .iter()
-        .all(|value| value.is_finite() && *value > 0.0)
-    {
+    if ![step_x, step_y].iter().all(|value| is_usable_size(*value)) {
         return Err("a watermark grid has an unusable step".into());
     }
 
+    // The grid is laid out from the middle of the page rather than from a
+    // corner, so a mark too big to repeat inside the page still leaves one
+    // whole copy where a single mark would have been, with the neighbours
+    // running off the edges around it.
+    let middle_x = page_width / 2.0;
+    let middle_y = page_height / 2.0;
+    let columns = steps_to_cover(middle_x + text_width, step_x);
+    let rows = steps_to_cover(middle_y + text_height, step_y);
     let mut placements = Vec::new();
-    let mut row = 0usize;
-    let mut center_y = -text_height;
 
-    while center_y <= page_height + text_height {
-        let offset = if row.is_multiple_of(2) {
-            0.0
-        } else {
-            step_x / 2.0
-        };
-        let mut center_x = -text_width + offset;
+    for row in -rows..=rows {
+        // Odd rows shift half a step to the right, which costs that half at the
+        // left edge; the extra column goes there rather than leaving a wedge
+        // uncovered — the shift itself already covers the right.
+        let offset = if row % 2 == 0 { 0.0 } else { step_x / 2.0 };
 
-        while center_x <= page_width + text_width {
+        for column in -columns - 1..=columns {
             if placements.len() == MAX_WATERMARK_OBJECTS_PER_PAGE {
                 return Err(format!(
                     "a watermark may create at most {MAX_WATERMARK_OBJECTS_PER_PAGE} objects per page"
                 ));
             }
 
-            placements.push(WatermarkPlacement { center_x, center_y });
-            center_x += step_x;
+            placements.push(WatermarkPlacement {
+                center_x: middle_x + column as f32 * step_x + offset,
+                center_y: middle_y + row as f32 * step_y,
+            });
         }
-
-        row = row
-            .checked_add(1)
-            .ok_or_else(|| "a watermark grid has too many rows".to_string())?;
-        center_y += step_y;
     }
 
     if placements.is_empty() {
@@ -216,31 +245,17 @@ mod tests {
     fn config() -> WatermarkConfig {
         WatermarkConfig {
             text: "CONFIDENTIAL".into(),
-            font_family: WatermarkFontFamily::Sans,
-            font_size: 36.0,
-            bold: false,
-            color: "#64748b".into(),
-            opacity: 0.25,
-            rotation: -30.0,
+            width_ratio: 0.8,
+            direction: WatermarkDirection::Ascending,
             layout: WatermarkLayout::Zebra,
-            spacing: 54.0,
         }
     }
 
     #[test]
     fn accepts_every_watermark_range_endpoint() {
-        for (font_size, opacity, spacing) in [
-            (
-                MIN_WATERMARK_FONT_SIZE,
-                MIN_WATERMARK_OPACITY,
-                MIN_WATERMARK_SPACING,
-            ),
-            (MAX_WATERMARK_FONT_SIZE, 1.0, MAX_WATERMARK_SPACING),
-        ] {
+        for width_ratio in [MIN_WATERMARK_WIDTH_RATIO, MAX_WATERMARK_WIDTH_RATIO] {
             let mut value = config();
-            value.font_size = font_size;
-            value.opacity = opacity;
-            value.spacing = spacing;
+            value.width_ratio = width_ratio;
 
             assert!(value.validated().is_ok());
         }
@@ -248,18 +263,15 @@ mod tests {
 
     #[test]
     fn rejects_unusable_watermark_values() {
-        let changes: Vec<Box<dyn Fn(&mut WatermarkConfig)>> = vec![
+        type Change = Box<dyn Fn(&mut WatermarkConfig)>;
+
+        let changes: Vec<Change> = vec![
             Box::new(|value| value.text = "   ".into()),
             Box::new(|value| value.text = "two\nlines".into()),
             Box::new(|value| value.text = "x".repeat(MAX_WATERMARK_CHARS + 1)),
-            Box::new(|value| value.color = "red".into()),
-            Box::new(|value| value.font_size = f32::NAN),
-            Box::new(|value| value.font_size = MIN_WATERMARK_FONT_SIZE - 0.1),
-            Box::new(|value| value.opacity = f32::INFINITY),
-            Box::new(|value| value.opacity = MIN_WATERMARK_OPACITY - 0.01),
-            Box::new(|value| value.rotation = f32::NEG_INFINITY),
-            Box::new(|value| value.spacing = MIN_WATERMARK_SPACING - 0.1),
-            Box::new(|value| value.spacing = MAX_WATERMARK_SPACING + 0.1),
+            Box::new(|value| value.width_ratio = f32::NAN),
+            Box::new(|value| value.width_ratio = MIN_WATERMARK_WIDTH_RATIO - 0.01),
+            Box::new(|value| value.width_ratio = MAX_WATERMARK_WIDTH_RATIO + 0.01),
         ];
 
         for change in changes {
@@ -270,21 +282,43 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_equivalent_rotations() {
-        assert_eq!(normalize_rotation(0.0), 0.0);
-        assert_eq!(normalize_rotation(360.0), 0.0);
-        assert_eq!(normalize_rotation(540.0), 180.0);
-        assert_eq!(normalize_rotation(181.0), -179.0);
-        assert_eq!(normalize_rotation(-181.0), 179.0);
+    fn the_two_directions_follow_the_page_diagonal() {
+        let ascending = watermark_rotation(WatermarkDirection::Ascending, 600.0, 800.0).unwrap();
+        let descending = watermark_rotation(WatermarkDirection::Descending, 600.0, 800.0).unwrap();
+
+        assert!((ascending + 53.13).abs() < 0.01);
+        assert_eq!(descending, -ascending);
+        // A landscape sheet leans by as much as it is wide, not by a fixed angle.
+        assert!(
+            watermark_rotation(WatermarkDirection::Descending, 800.0, 600.0).unwrap() < descending
+        );
+        assert!(watermark_rotation(WatermarkDirection::Ascending, 0.0, 800.0).is_err());
+    }
+
+    #[test]
+    fn the_derived_size_scales_the_measured_mark_to_the_asked_share() {
+        // A mark measuring 300pt wide at the reference size covers half a
+        // 600pt page at twice that size.
+        assert_eq!(
+            watermark_font_size(1.0, 600.0, 300.0).unwrap(),
+            WATERMARK_REFERENCE_FONT_SIZE * 2.0
+        );
+        assert_eq!(
+            watermark_font_size(0.5, 600.0, 300.0).unwrap(),
+            WATERMARK_REFERENCE_FONT_SIZE
+        );
+        assert_eq!(
+            watermark_font_size(1.0, 600.0, 0.001).unwrap(),
+            MAX_WATERMARK_FONT_SIZE
+        );
+        assert!(watermark_font_size(0.8, 600.0, 0.0).is_err());
+        assert!(watermark_font_size(0.8, f32::NAN, 300.0).is_err());
     }
 
     #[test]
     fn single_watermark_is_centered() {
-        let mut value = config();
-        value.layout = WatermarkLayout::Single;
-
         assert_eq!(
-            watermark_placements(600.0, 800.0, 180.0, 40.0, &value).unwrap(),
+            watermark_placements(600.0, 800.0, 180.0, 40.0, 54.0, WatermarkLayout::Single).unwrap(),
             vec![WatermarkPlacement {
                 center_x: 300.0,
                 center_y: 400.0,
@@ -293,18 +327,23 @@ mod tests {
     }
 
     #[test]
-    fn zebra_rows_are_staggered_by_half_a_step() {
-        let value = config();
-        let placements = watermark_placements(600.0, 800.0, 180.0, 40.0, &value).unwrap();
-        let step_x = 180.0 + value.spacing;
-        let first_y = placements[0].center_y;
-        let second_row = placements
-            .iter()
-            .find(|placement| placement.center_y > first_y)
-            .unwrap();
+    fn zebra_hangs_its_grid_on_the_page_centre() {
+        let spacing = 54.0;
+        let placements =
+            watermark_placements(600.0, 800.0, 180.0, 40.0, spacing, WatermarkLayout::Zebra)
+                .unwrap();
+        let step_x = 180.0 + spacing;
+        let middle = WatermarkPlacement {
+            center_x: 300.0,
+            center_y: 400.0,
+        };
 
-        assert_eq!(placements[0].center_x, -180.0);
-        assert_eq!(second_row.center_x, -180.0 + step_x / 2.0);
+        // Where a single mark would have gone, so switching to a repeat never
+        // moves the copy the reader was already looking at.
+        assert!(placements.contains(&middle));
+        assert!(placements.iter().any(|placement| placement.center_x
+            == middle.center_x + step_x / 2.0
+            && placement.center_y > middle.center_y));
         assert!(placements.iter().any(|placement| placement.center_x < 0.0));
         assert!(placements
             .iter()
@@ -316,12 +355,28 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_grid_over_the_per_page_object_limit() {
-        let mut value = config();
-        value.font_size = MIN_WATERMARK_FONT_SIZE;
-        value.spacing = MIN_WATERMARK_SPACING;
+    fn a_mark_too_big_to_repeat_still_leaves_one_whole_copy() {
+        let placements =
+            watermark_placements(600.0, 800.0, 900.0, 500.0, 100.0, WatermarkLayout::Zebra)
+                .unwrap();
 
-        assert!(watermark_placements(14_400.0, 14_400.0, 1.0, 1.0, &value).is_err());
+        assert!(placements.contains(&WatermarkPlacement {
+            center_x: 300.0,
+            center_y: 400.0,
+        }));
+    }
+
+    #[test]
+    fn rejects_a_grid_over_the_per_page_object_limit() {
+        assert!(watermark_placements(
+            14_400.0,
+            14_400.0,
+            1.0,
+            1.0,
+            MIN_WATERMARK_FONT_SIZE,
+            WatermarkLayout::Zebra
+        )
+        .is_err());
     }
 
     #[test]

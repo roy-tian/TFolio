@@ -1,0 +1,332 @@
+//! The reader's own settings, kept between runs — all of them, in one file.
+//!
+//! `settings.toml`, beside the recent list in the app's data directory, so it
+//! is per user and per machine. Everything here is a choice about how the app
+//! behaves, never about one document: a page-number range belongs to the PDF
+//! it numbers and is asked for again each time, while the style it is set in
+//! is the reader's and is remembered.
+//!
+//! The shapes below are the file's and the frontend's at once — one derive
+//! answers both, which is why the keys are camelCase rather than TOML's more
+//! usual kebab: a setting then has exactly one name in the file, over IPC, and
+//! in TypeScript, with nothing in between to keep in step. Rust types the
+//! structure and stops there; the palettes and slider ranges a value has to sit
+//! in are the frontend's, and it checks them on the way back in, because the
+//! file is the reader's to edit.
+
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use tauri::{AppHandle, State};
+
+use crate::{
+    pdfium::{PageNumbersPreferences, WatermarkConfig},
+    store::{Store, Stored},
+};
+
+/// What 0.1.3 and earlier kept, and all it kept: the page-number style. Read
+/// once into `settings.toml` and deleted, so the reader keeps the style they
+/// set and the directory keeps one file.
+const REPLACED_FILE_NAME: &str = "preferences.json";
+
+/// Every setting is optional, so a version that did not write one — or a reader
+/// who deleted it by hand — leaves the frontend on its own defaults rather than
+/// being handed something invented here. An unset one is absent rather than
+/// null: TOML has no null to write, and the frontend should not have to read
+/// one.
+///
+/// A setting is stored as the type the rest of the app already sends over IPC
+/// wherever one means exactly this — the watermark and the page-number style
+/// are the engine's own. The rest are spelled out below, either because the
+/// engine has no such value at all or because what the reader picks and what it
+/// is handed are not the same shape.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Settings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ui: Option<UiPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    annotate: Option<AnnotatePreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    watermark: Option<WatermarkConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    page_numbers: Option<PageNumbersPreferences>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct UiPreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    theme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    view_mode: Option<String>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct AnnotatePreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    highlight_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rect: Option<RectPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text_note: Option<TextNotePreferences>,
+}
+
+/// Not `pdfium::RectStyle`: the engine is handed the block and its effect as
+/// two arguments, while the reader picks one style with the effect inside it —
+/// and keeps the strength of the effect they are not using, so that switching
+/// back to it draws what it drew before.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RectPreferences {
+    color: String,
+    effect: String,
+    opacity: f64,
+    strength: f64,
+}
+
+/// The same fields `pdfium::TextNoteStyle` takes, but that one is command input
+/// and reads only one way; this crosses back out to the dialog that set it.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextNotePreferences {
+    color: String,
+    font_size: f64,
+    opacity: f64,
+}
+
+impl Stored for Settings {
+    const FILE_NAME: &'static str = "settings.toml";
+
+    /// One section at a time, so a value this version cannot make sense of — an
+    /// older schema, a reader's typo — costs that section and not the whole
+    /// file. A section is small and coherent enough for that to be the right
+    /// grain: losing the annotation styles must not also lose the language.
+    fn parse(contents: &str) -> Self {
+        let table = contents.parse::<toml::Table>().unwrap_or_default();
+
+        Self {
+            ui: section(&table, "ui"),
+            annotate: section(&table, "annotate"),
+            watermark: section(&table, "watermark"),
+            page_numbers: section(&table, "pageNumbers"),
+        }
+    }
+
+    fn render(&self) -> Option<String> {
+        toml::to_string_pretty(self).ok()
+    }
+}
+
+impl Settings {
+    /// `parse`'s reading, at the same grain and for the same reason, over what
+    /// the frontend sends. It carries whatever an older version of the app —
+    /// or an older schema in the storage this replaced — left in the copy it
+    /// loaded, so a section this version cannot place has to cost that section
+    /// alone. Deserialising the command's argument straight into `Settings`
+    /// would instead fail the whole call, and the write with it.
+    fn sent(document: &serde_json::Value) -> Self {
+        Self {
+            ui: sent_section(document, "ui"),
+            annotate: sent_section(document, "annotate"),
+            watermark: sent_section(document, "watermark"),
+            page_numbers: sent_section(document, "pageNumbers"),
+        }
+    }
+}
+
+fn section<T: DeserializeOwned>(table: &toml::Table, key: &str) -> Option<T> {
+    table
+        .get(key)
+        .cloned()
+        .and_then(|value| T::deserialize(value).ok())
+}
+
+fn sent_section<T: DeserializeOwned>(document: &serde_json::Value, key: &str) -> Option<T> {
+    document
+        .get(key)
+        .cloned()
+        .and_then(|value| T::deserialize(value).ok())
+}
+
+/// Opens the settings, adopting what the file this replaced still holds. A
+/// style already in `settings.toml` wins: the reader set that one later.
+pub fn load(app: &AppHandle) -> Store<Settings> {
+    let store = Store::<Settings>::load(app);
+
+    store.adopt(REPLACED_FILE_NAME, |settings, contents| {
+        settings.page_numbers = settings
+            .page_numbers
+            .or_else(|| replaced_page_numbers(contents));
+    });
+
+    store
+}
+
+fn replaced_page_numbers(contents: &str) -> Option<PageNumbersPreferences> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Replaced {
+        page_numbers: Option<PageNumbersPreferences>,
+    }
+
+    serde_json::from_str::<Replaced>(contents)
+        .ok()
+        .and_then(|replaced| replaced.page_numbers)
+}
+
+#[tauri::command]
+pub async fn settings(store: State<'_, Store<Settings>>) -> Result<Settings, String> {
+    Ok(store.read(Clone::clone))
+}
+
+/// Takes the whole document rather than a patch: the frontend loaded these at
+/// startup and keeps the loaded copy current, so what it sends is the settings
+/// entire — and a setting it drops is one the reader cleared, which no merge
+/// here could tell from one it simply did not mention.
+///
+/// The document arrives untyped and is read section by section, which is what
+/// keeps one section this version cannot place from failing the whole write.
+#[tauri::command]
+pub async fn set_settings(
+    settings: serde_json::Value,
+    store: State<'_, Store<Settings>>,
+) -> Result<(), String> {
+    let sent = Settings::sent(&settings);
+
+    store.write(|stored| *stored = sent);
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Built from the wire shape rather than the enum variants, so this also
+    /// pins the names the frontend sends.
+    fn page_numbers() -> PageNumbersPreferences {
+        serde_json::from_str(
+            r#"{"mode":"duplex","position":"bottomRight","smartColor":false,
+                "blankNumbered":false,"blankCounted":true}"#,
+        )
+        .expect("the stored shape should read back")
+    }
+
+    fn settings() -> Settings {
+        Settings {
+            ui: Some(UiPreferences {
+                theme: Some("dark".into()),
+                language: Some("en".into()),
+                view_mode: None,
+            }),
+            annotate: Some(AnnotatePreferences {
+                highlight_color: Some("#ffd54a".into()),
+                rect: None,
+                text_note: Some(TextNotePreferences {
+                    color: "#d70015".into(),
+                    font_size: 12.0,
+                    opacity: 1.0,
+                }),
+            }),
+            watermark: None,
+            page_numbers: Some(page_numbers()),
+        }
+    }
+
+    #[test]
+    fn round_trips_every_section_through_the_file() {
+        let rendered = settings().render().expect("the settings should render");
+        let read = Settings::parse(&rendered);
+
+        assert_eq!(read.ui.and_then(|ui| ui.theme).as_deref(), Some("dark"));
+        assert_eq!(
+            read.annotate
+                .and_then(|annotate| annotate.text_note)
+                .map(|note| note.font_size),
+            Some(12.0)
+        );
+        assert_eq!(read.page_numbers, Some(page_numbers()));
+    }
+
+    /// Names the keys rather than trusting the derive, because they are also
+    /// what the frontend reads.
+    #[test]
+    fn writes_the_names_the_frontend_reads() {
+        let rendered = settings().render().expect("the settings should render");
+
+        assert!(rendered.contains("[ui]"));
+        assert!(rendered.contains("[annotate.textNote]"));
+        assert!(rendered.contains("[pageNumbers]"));
+        assert!(rendered.contains("fontSize"));
+        // Nothing was set there, so nothing stands in the file for it.
+        assert!(!rendered.contains("[watermark]"));
+    }
+
+    /// The frontend's copy carries whatever the storage it replaced held, and
+    /// an older schema's watermark is the likeliest thing in it. That must cost
+    /// its own section and nothing else — read strictly, one such value would
+    /// fail the call and so lose every setting the same write was carrying.
+    #[test]
+    fn a_section_the_frontend_sends_and_this_version_cannot_place_costs_only_itself() {
+        let sent = Settings::sent(&serde_json::json!({
+            "ui": { "language": "en" },
+            "annotate": { "highlightColor": "#ffd54a" },
+            "watermark": { "fontFamily": "sans", "rotation": -30, "spacing": 54 },
+            "pageNumbers": null,
+        }));
+
+        assert_eq!(sent.ui.and_then(|ui| ui.language).as_deref(), Some("en"));
+        assert_eq!(
+            sent.annotate
+                .and_then(|annotate| annotate.highlight_color)
+                .as_deref(),
+            Some("#ffd54a")
+        );
+        assert!(sent.watermark.is_none());
+        assert!(sent.page_numbers.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_section_costs_only_itself() {
+        let settings = Settings::parse(
+            r#"
+            [ui]
+            language = "en"
+
+            [pageNumbers]
+            mode = "triple"
+            "#,
+        );
+
+        assert_eq!(
+            settings.ui.and_then(|ui| ui.language).as_deref(),
+            Some("en")
+        );
+        assert!(settings.page_numbers.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_file_reads_as_unset() {
+        let settings = Settings::parse("{ not toml");
+
+        assert!(settings.ui.is_none());
+        assert!(settings.page_numbers.is_none());
+    }
+
+    #[test]
+    fn adopts_the_style_the_replaced_file_held() {
+        assert_eq!(
+            replaced_page_numbers(
+                r#"{"pageNumbers":{"mode":"duplex","position":"bottomRight",
+                "smartColor":false,"blankNumbered":false,"blankCounted":true}}"#
+            ),
+            Some(page_numbers())
+        );
+        // Missing, malformed, and holding a value outside the schema.
+        assert!(replaced_page_numbers("{}").is_none());
+        assert!(replaced_page_numbers("{ not json").is_none());
+        assert!(replaced_page_numbers(r#"{"pageNumbers":{"mode":"triple"}}"#).is_none());
+    }
+}

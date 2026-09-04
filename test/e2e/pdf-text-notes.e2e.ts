@@ -1,15 +1,13 @@
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { textNoteStyleStorageKey } from "../../src/lib/annotationStyles"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   blankPdf,
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
   renderedPage,
+  seedSettings,
 } from "./helpers"
 
 /** Places a note by clicking the page, the way a reader opens one. */
@@ -54,18 +52,8 @@ async function pressControl(selector: string) {
 
 describe("TFolio text notes", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-        window.localStorage.removeItem(keys.textNoteStyle)
-      },
-      {
-        language: languageStorageKey,
-        textNoteStyle: textNoteStyleStorageKey,
-        viewMode: viewModeStorageKey,
-      },
-    )
+    // Type in the default style, whatever a prior run persisted.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("blank.pdf", blankPdf())
@@ -88,12 +76,6 @@ describe("TFolio text notes", () => {
     const editor = await $("textarea[aria-label='Note text']")
     await editor.waitForDisplayed({ timeout: 15_000 })
     await editor.setValue("你好")
-
-    // The font choice gives way as soon as the note leaves Latin-1, because the
-    // bundled face is the only one that can draw it, and the editor says so.
-    await expect(
-      $("p=Chinese and other non-Latin text uses the bundled font."),
-    ).toBeDisplayed()
 
     await $("button[aria-label='Add this note']").click()
 
@@ -333,9 +315,7 @@ describe("TFolio text notes", () => {
   // The zh-CN interface, since a Chinese note is the case this tool exists for
   // and its reader is the one most likely to be running the app in Chinese.
   it("adds a note through the Chinese interface", async () => {
-    await browser.execute((key) => {
-      window.localStorage.setItem(key, "zh-CN")
-    }, languageStorageKey)
+    await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("blank.pdf", blankPdf())

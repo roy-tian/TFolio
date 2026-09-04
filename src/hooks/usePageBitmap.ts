@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
-import type { PdfPageInfo } from "@/lib/pdf"
+import { resolveOutputScale } from "@/lib/pdf"
 
 type PageBitmapOptions = {
   canvasRef: RefObject<HTMLCanvasElement | null>
@@ -13,8 +13,15 @@ type PageBitmapOptions = {
   maxRenderWidth: number
   /** MIME type of the bytes `command` returns. */
   mimeType: string
-  page: PdfPageInfo
+  /** Minimum backing pixels per CSS pixel; useful for low-DPI reading surfaces. */
+  minOutputScale?: number
+  /** The page's displayed size in points. Taken apart rather than as a
+      `PdfPageInfo` so a caller whose page list is replaced wholesale — every
+      structure edit replaces it — hands this hook numbers that compare equal
+      instead of a fresh object. */
+  pageHeight: number
   pageNumber: number
+  pageWidth: number
   /**
    * Bumped when the page's content changes: the same page at the same width
    * renders differently once it has been drawn on, which nothing else about a
@@ -38,8 +45,10 @@ export function usePageBitmap({
   isNearViewport,
   maxRenderWidth,
   mimeType,
-  page,
+  minOutputScale = 1,
+  pageHeight,
   pageNumber,
+  pageWidth,
   renderEpoch,
   rotation,
   targetWidth,
@@ -61,7 +70,10 @@ export function usePageBitmap({
     }
 
     let cancelled = false
-    const outputScale = Math.min(window.devicePixelRatio || 1, 2)
+    const outputScale = resolveOutputScale(
+      window.devicePixelRatio,
+      minOutputScale,
+    )
     // A 90°/270° rotation makes the page's width span more CSS pixels for a
     // landscape page (its long side becomes the height the column caps), and
     // rotation itself does not re-render. Render at that wider target so a
@@ -69,8 +81,13 @@ export function usePageBitmap({
     // rotated, so the base target already covers them (scale stays 1).
     const rotationScale =
       rotation === 90 || rotation === 270
-        ? Math.max(1, page.width / page.height)
+        ? Math.max(1, pageWidth / pageHeight)
         : 1
+    // The output-scale floor is a render *intent*, not a guarantee: once heavy
+    // zoom pushes `targetWidth * outputScale * rotationScale` past
+    // `maxRenderWidth`, the render is clamped and the effective backing ratio
+    // drops back below the floor — at the extreme the text is a touch softer
+    // than the floor promises.
     const renderWidth = Math.round(
       Math.min(maxRenderWidth, targetWidth * outputScale * rotationScale),
     )
@@ -139,9 +156,10 @@ export function usePageBitmap({
     isNearViewport,
     maxRenderWidth,
     mimeType,
-    page.height,
-    page.width,
+    minOutputScale,
+    pageHeight,
     pageNumber,
+    pageWidth,
     renderEpoch,
     rotation,
     targetWidth,

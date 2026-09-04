@@ -7,6 +7,7 @@ import {
   fractionToPagePoint,
 } from "@/lib/annotationGeometry"
 import type { TextNoteCommand, TextNoteStyle } from "@/lib/annotations"
+import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import {
   clampNoteText,
@@ -18,8 +19,10 @@ import {
 type UseTextNoteToolOptions = {
   active: boolean
   onCommit: (command: TextNoteCommand) => void
+  /** Temporarily detach document listeners without settling the draft or tool. */
+  suspended?: boolean
   pages: PdfPageInfo[]
-  rotation: number
+  rotations: PageRotations
   style: TextNoteStyle
   viewerRef: RefObject<HTMLElement | null>
 }
@@ -46,7 +49,8 @@ export function useTextNoteTool({
   active,
   onCommit,
   pages,
-  rotation,
+  suspended = false,
+  rotations,
   style,
   viewerRef,
 }: UseTextNoteToolOptions): TextNoteTool {
@@ -98,6 +102,10 @@ export function useTextNoteTool({
   }, [])
 
   useEffect(() => {
+    if (suspended) {
+      return
+    }
+
     if (!active) {
       // Putting the tool away keeps what was typed rather than dropping it, the
       // same as clicking away from the editor does.
@@ -168,7 +176,7 @@ export function useTextNoteTool({
           ),
         ),
         page,
-        rotation,
+        rotationForPage(rotations, pageNumber),
       )
 
       // The open note is written before the new one opens, so two editors are
@@ -203,7 +211,7 @@ export function useTextNoteTool({
       document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("keydown", handleKeyDown)
     }
-  }, [active, cancel, commit, pages, rotation, viewerRef])
+  }, [active, cancel, commit, pages, rotations, suspended, viewerRef])
 
   return { cancel, commit, draft, editorRef, setText }
 }

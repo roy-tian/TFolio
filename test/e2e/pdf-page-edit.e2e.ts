@@ -1,9 +1,18 @@
-import { $, browser, expect } from "@wdio/globals"
+import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
-import { bandedPdf, openPdfFromDisk, openPathViaDialog } from "./helpers"
+import {
+  appMenuItemEnabled,
+  bandedPdf,
+  clickAppMenuItem,
+  emitDrag,
+  gapPoint,
+  openPathViaDialog,
+  openPdfFromDisk,
+  seedSettings,
+  stripedPdf,
+  writeScratchPdf,
+} from "./helpers"
 
 function thumbCount() {
   return browser.execute(
@@ -96,6 +105,18 @@ async function paintedFingerprints(pageCount: number) {
   return fingerprints
 }
 
+/** Whether the gap shows the solid line that marks where a drop would land. A
+    wrapped gap is drawn twice — at the end of one row and the start of the next
+    — so any one of them showing is the answer. */
+function dropLineShowing(index: number) {
+  return browser.execute(
+    (at: number) =>
+      document.querySelectorAll(`[data-insert-index='${at}'] .border-solid`)
+        .length > 0,
+    index,
+  )
+}
+
 /**
  * A click with modifiers, dispatched rather than driven: WebDriver's own click
  * cannot hold Ctrl or Shift down for it.
@@ -127,6 +148,15 @@ function selectedThumbs() {
       document.querySelectorAll("button[data-page-number][aria-pressed='true']"),
       (button) => Number(button.getAttribute("data-page-number")),
     ).sort((left, right) => left - right),
+  )
+}
+
+function pageRotations() {
+  return browser.execute(() =>
+    Array.from(
+      document.querySelectorAll<HTMLElement>("[data-page-number]"),
+      (page) => Number(page.dataset.rotation),
+    ),
   )
 }
 
@@ -191,13 +221,7 @@ function dragThumbToGap(from: number, target: number, pastEnd = false) {
 
 describe("TFolio page editing", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "thumbnail")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
     await browser.refresh()
   })
 
@@ -235,6 +259,43 @@ describe("TFolio page editing", () => {
       )
     })
     expect(await selectedThumbs()).toEqual([])
+  })
+
+  it("rotates the thumbnail selection and clears it from blank space", async () => {
+    await openPdfFromDisk("rotate.pdf", bandedPdf(4))
+    await paintedFingerprints(4)
+    const rotate = () => $("button[aria-label='Rotate clockwise']").click()
+
+    // A partial selection is the rotation target.
+    await clickThumb(2)
+    await rotate()
+    expect(await pageRotations()).toEqual([0, 90, 0, 0])
+
+    // Blank workspace clears the selection, so the next press turns every page.
+    await browser.execute(() => {
+      document
+        .querySelector("[data-pdf-viewer-layout]")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+    expect(await selectedThumbs()).toEqual([])
+    await rotate()
+    expect(await pageRotations()).toEqual([90, 180, 90, 90])
+
+    // A complete selection has the same all-page meaning.
+    await clickThumb(1)
+    await clickThumb(4, { shift: true })
+    expect(await selectedThumbs()).toEqual([1, 2, 3, 4])
+    await rotate()
+    expect(await pageRotations()).toEqual([180, 270, 180, 180])
+
+    // Reading views continue to rotate every page, even when the pages arrived
+    // there with different orientations from the grid.
+    await $("button[aria-label='Single page']").click()
+    await rotate()
+    expect(await pageRotations()).toEqual([270, 0, 270, 270])
+    await $("button[aria-label='Book']").click()
+    await rotate()
+    expect(await pageRotations()).toEqual([0, 90, 0, 0])
   })
 
   it("deletes pages, undoes them back, and redoes the delete", async () => {
@@ -280,6 +341,17 @@ describe("TFolio page editing", () => {
     await openPdfFromDisk("insert.pdf", bandedPdf(3))
     const [first, second] = await paintedFingerprints(3)
 
+    // The gap only shows where a page would go — the + it draws is the button
+    // — so a click that lands beside a page adds nothing. What says so is the
+    // count at the end of this test rather than one taken here: an insert is a
+    // round trip, so the grid is still three pages long either way for as long
+    // as a synchronous read can see.
+    await browser.execute(() => {
+      document
+        .querySelector("[data-insert-index='2']")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
     await $("button[aria-label='Insert a blank page before page 2']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the insert never landed",
@@ -288,6 +360,9 @@ describe("TFolio page editing", () => {
     await waitForThumb(2, 0)
     await waitForThumb(1, first!)
     await waitForThumb(3, second!)
+    // Three round trips later: the + inserted one page, the click on the gap
+    // beside it none.
+    expect(await thumbCount()).toBe(4)
 
     await $("button[aria-label='Insert a blank page at the end']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 5, {
@@ -299,6 +374,44 @@ describe("TFolio page editing", () => {
     await $("button[aria-label='Undo']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "undoing both inserts never restored the shape",
+    })
+    await waitForThumb(2, second!)
+  })
+
+  it("inserts a PDF dragged in from the desktop at the gap under it", async () => {
+    await openPdfFromDisk("drop.pdf", bandedPdf(3))
+    const [first, second, third] = await paintedFingerprints(3)
+    const filePath = writeScratchPdf("dropped.pdf", stripedPdf())
+    const point = await gapPoint(2)
+
+    await emitDrag("drag-over", point, [filePath])
+    await browser.waitUntil(async () => await dropLineShowing(2), {
+      timeoutMsg: "the insertion line never marked the gap under the pointer",
+    })
+
+    await emitDrag("drag-drop", point, [filePath])
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the dropped PDF never landed in the grid",
+    })
+
+    // The file's page opened the gap; the base's pages moved over intact.
+    await waitForThumb(1, first!)
+    await waitForThumb(3, second!)
+    await waitForThumb(4, third!)
+    const inserted = await thumbFingerprint(2)
+    expect(inserted).not.toBe(0)
+    expect([first, second, third]).not.toContain(inserted)
+
+    // The file joined this document at the gap rather than opening a tab.
+    await expect($$("button[role='tab']")).toBeElementsArrayOfSize(2)
+    // Another file's pages are in the document, so it may only be exported as a
+    // copy — never written back over the file it was opened from.
+    expect(await appMenuItemEnabled("save")).toBe(false)
+    expect(await appMenuItemEnabled("save-as")).toBe(true)
+
+    await $("button[aria-label='Undo']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the undo never took the inserted page back out",
     })
     await waitForThumb(2, second!)
   })
@@ -360,21 +473,14 @@ describe("TFolio page editing", () => {
     await dragThumbToGap(3, 1)
     await waitForThumb(1, fourth!)
 
-    await $("button[aria-label='Save']").click()
-    await browser.waitUntil(
-      async () => (await $("button[aria-label='Save']").isEnabled()) === false,
-      { timeoutMsg: "the save never completed" },
-    )
+    await clickAppMenuItem("save")
+    await browser.waitUntil(async () => !(await appMenuItemEnabled("save")), {
+      timeoutMsg: "the save never completed",
+    })
 
     // The saved file, reopened, still reads [4, 2, 3].
     await browser.refresh()
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "thumbnail")
-      },
-      { language: languageStorageKey, viewMode: viewModeStorageKey },
-    )
+    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
     await openPathViaDialog(filePath)
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "the reopened file lost its shape",

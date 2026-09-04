@@ -59,8 +59,25 @@ export TFOLIO_SHOT="$OUT"
 export TFOLIO_LANG="$LANG_UI"
 export TFOLIO_VIEW="$VIEW"
 
+# wdio talks to the app's WebDriver bridge over loopback, and undici honours a
+# proxy set in the environment even for 127.0.0.1 — the proxy then drops the
+# session request (UND_ERR_SOCKET). Exempt loopback.
+EXISTING_NO_PROXY="${NO_PROXY:-${no_proxy:-}}"
+export NO_PROXY="127.0.0.1,localhost${EXISTING_NO_PROXY:+,$EXISTING_NO_PROXY}"
+export no_proxy="$NO_PROXY"
+
+# Without a session bus, GTK waits out an xdg-desktop-portal lookup and the app
+# takes ~31s to show its window — long enough that wdio gives up on the session.
+# `dbus-run-session` provides one, and boot drops to about a second.
+if command -v dbus-run-session >/dev/null 2>&1; then
+  DBUS_WRAPPER=(dbus-run-session --)
+else
+  echo "run-app: dbus-run-session not found; startup may stall ~30s" >&2
+  DBUS_WRAPPER=()
+fi
+
 echo "run-app: launching (pdf=${PDF:-<none>}, lang=$LANG_UI, view=$VIEW) → $OUT" >&2
 xvfb-run -a --server-args="-screen 0 1280x800x24" \
-  bunx wdio run wdio.conf.ts \
+  "${DBUS_WRAPPER[@]}" bunx wdio run wdio.conf.ts \
   --spec "$SCRIPT_DIR/open-and-screenshot.e2e.ts"
 echo "run-app: saved screenshot to $OUT" >&2

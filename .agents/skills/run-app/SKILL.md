@@ -17,20 +17,34 @@ One command handles the common cases — launching, optionally opening a PDF, an
 saving a screenshot of the WebView:
 
 ```bash
-# Screenshot the empty drop-zone state
-.agents/skills/run-app/scripts/screenshot.sh --out .temp/screenshot.png
+# Screenshot the empty drop-zone state -> artifacts/run/screenshot.png
+.agents/skills/run-app/scripts/screenshot.sh
 
 # Open a PDF and screenshot page 1 (toolbar shows 1 / N)
-.agents/skills/run-app/scripts/screenshot.sh \
-  --pdf .temp/2026-109-4010.pdf --out .temp/screenshot.png
+.agents/skills/run-app/scripts/screenshot.sh --pdf .temp/2026-109-4010.pdf
 
-# UI language (default zh-CN)
-.agents/skills/run-app/scripts/screenshot.sh --lang en --out .temp/en.png
+# UI language (default zh-CN). --out only *names* the file; keep it in artifacts/run/
+.agents/skills/run-app/scripts/screenshot.sh --lang en --out artifacts/run/en.png
 
 # View mode: single (default), book, or thumbnail
 .agents/skills/run-app/scripts/screenshot.sh \
-  --pdf .temp/2026-109-4010.pdf --view thumbnail --out .temp/thumbs.png
+  --pdf .temp/2026-109-4010.pdf --view thumbnail --out artifacts/run/thumbs.png
 ```
+
+## Where output goes
+
+Fixed locations — do not invent a path per run:
+
+| what | where | why there |
+|---|---|---|
+| screenshots | `artifacts/run/*.png` (the default) | `bun run test:e2e` wipes `artifacts/e2e/` on every start; nothing wipes `run/` |
+| throwaway specs | `artifacts/run/*.e2e.ts` | outside `wdio.conf.ts`'s `specs` glob, so the suite never picks them up |
+| input PDFs | `.temp/*.pdf` | hand-placed fixtures, not tooling output |
+
+Everything this skill writes lives under `artifacts/run/`, so `rm -rf
+artifacts/run` is a clean reset that leaves your PDFs alone. A spec worth keeping
+graduates to `test/e2e/`, which `bun run test:e2e:types` typechecks and the suite
+runs — specs under `artifacts/` get neither.
 
 Then **open the PNG with the Read tool and look at it** — a screenshot you never
 inspected proves nothing, and a black or blank-white frame means a failure (see
@@ -65,7 +79,7 @@ The spec (`scripts/open-and-screenshot.e2e.ts`) is env-driven and reusable:
 
 To drive more of the UI (bookmarks, page jumps, About/Language menus,
 invalid-file handling), copy the selectors from `test/e2e/pdf-viewer.e2e.ts` into
-a spec and point `--spec` at it — same harness.
+`artifacts/run/<name>.e2e.ts` and point `--spec` at it — same harness.
 
 ## Alternative: genuine release window (no PDF)
 
@@ -85,7 +99,7 @@ export PDFIUM_LIB_PATH="$PWD/src-tauri/resources/pdfium/libpdfium.so"
 # Window is 1100x760 centered on 1280x800 => region +90,+20; multi-frame grab
 # gives the WebView time to paint, last frame wins.
 ffmpeg -y -f x11grab -video_size 1100x760 -framerate 1 -i :99+90,20 \
-  -frames:v 12 -update 1 .temp/screenshot.png
+  -frames:v 12 -update 1 artifacts/run/screenshot.png
 ```
 
 ## Gotchas
@@ -107,17 +121,29 @@ Each of these was hit during first bring-up — they're the non-obvious failures
 - **Stale UI** — the e2e binary embeds the frontend at build time. Re-run
   `bun run test:e2e:build` after editing `src/` or `src-tauri/`.
 - **The app's UI state survives across runs.** Language, theme, and view mode
-  live in `localStorage` (`tfolio.ui.*`), which WebKitGTK backs with a SQLite DB
-  under `~/.local/share/com.roytian.tfolio.e2e/localstorage/`. A run that ends in
-  thumbnail view leaves the *next* run there, so a spec that assumes single view
-  silently shoots the wrong screen — or hangs waiting on a page-sized canvas that
-  a 160px thumbnail will never produce. The spec pins language and view mode
-  before every run for exactly this reason; pin any `tfolio.ui.*` key your own
-  spec depends on. To wipe the slate, delete that directory.
+  are settings, kept in `~/.local/share/com.roytian.tfolio.e2e/settings.toml`. A
+  run that ends in thumbnail view leaves the *next* run there, so a spec that
+  assumes single view silently shoots the wrong screen — or hangs waiting on a
+  page-sized canvas that a 160px thumbnail will never produce. The spec writes
+  the whole settings document (`set_settings`, then a refresh) before every run
+  for exactly this reason; do the same for any setting your own spec depends on,
+  and note that what you leave out is *unset*, not inherited. To wipe the slate,
+  delete that file — and, until a run of the current build has migrated it,
+  the `localstorage/` directory beside it, which is where 0.1.3 and earlier kept
+  the same three and which the first run after the move still folds back in.
 - **Don't `pkill -f 'target/release/tfolio'`** — the pattern also matches the
   shell running the command and kills it (exit 144). Use the bracket trick,
   `kill $(pgrep -f '[t]arget/release/tfolio')`, or kill the exact PID. Same for
   `[X]vfb`.
+- **`Failed to create a session … UND_ERR_SOCKET` on `127.0.0.1:4445`** → an
+  `HTTP_PROXY`/`HTTPS_PROXY` in the environment. wdio's HTTP client honours it
+  even for loopback, so the session request goes to the proxy, which drops it.
+  Export `NO_PROXY=127.0.0.1,localhost` (and `no_proxy`); the wrapper does.
+- **~31 s of nothing between launch and the window** (and a session that times
+  out before it) → no session D-Bus, so GTK waits out an `xdg-desktop-portal`
+  lookup. Run the whole command under `dbus-run-session --`, which brings boot
+  back to about a second; the wrapper does. Same for `bun run test:e2e`:
+  `xvfb-run -a dbus-run-session -- bun run test:e2e:run`, with `NO_PROXY` set.
 - **PDFium not found** → set `PDFIUM_LIB_PATH`, or run `bun run pdfium:download`.
   Debug build looks in `src-tauri/target/debug/pdfium/`, release in
   `src-tauri/resources/pdfium/`.

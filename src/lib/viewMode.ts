@@ -1,52 +1,62 @@
-import { readStored, store } from "@/lib/storage"
+import { rememberSettings, storedSettings } from "@/lib/settings"
 
-export const viewModes = ["single", "book", "thumbnail", "files"] as const
+export const viewModes = ["single", "book", "thumbnail"] as const
 
 export type ViewMode = (typeof viewModes)[number]
 
 export const defaultViewMode: ViewMode = "single"
-export const viewModeStorageKey = "tfolio.ui.viewMode"
 
-/** Width of one thumbnail cell, and the gap between cells, in CSS pixels. */
+/** Width of one thumbnail cell, and the gaps around it, in CSS pixels. The
+    columns stand further apart than the rows: the space between two pages is
+    where the insertion line and its + button live, and it matches the layout's
+    own side padding so the gap after the last page is the same width. The row
+    gap is spent as each cell's bottom padding rather than the grid's `rowGap`,
+    so that no band between two rows belongs to no cell — a file dragged across
+    the grid has to name a position the whole way down. */
 export const THUMBNAIL_WIDTH = 160
-export const THUMBNAIL_GAP = 16
+export const THUMBNAIL_ROW_GAP = 16
+export const THUMBNAIL_COLUMN_GAP = 32
 
-/** Width of one file card's face, and the gap between cards, in CSS pixels. The
-    gap is wide enough to hold the leaves a multi-page card fans out behind it. */
-export const FILE_CARD_WIDTH = 176
-export const FILE_CARD_GAP = 40
-
-/** Columns of `columnWidth` with `gap` between them that fit `containerWidth`.
-    `n` columns occupy `n * columnWidth + (n - 1) * gap`, so lending the row one
-    extra gap makes the fit a plain division. */
-function columnsThatFit(
-  containerWidth: number,
-  columnWidth: number,
-  gap: number,
-): number {
-  return Math.floor((containerWidth + gap) / (columnWidth + gap))
-}
-
-/** File cards per row: as many as `containerWidth` fits, and never fewer than
-    one — unlike thumbnails, a row of cards need not stay even. */
-export function computeFileCardColumns(
-  containerWidth: number,
-  columnWidth = FILE_CARD_WIDTH,
-  gap = FILE_CARD_GAP,
-): number {
-  return Math.max(1, columnsThatFit(containerWidth, columnWidth, gap))
-}
+/** The page number under a thumbnail, the space over it included, as a CSS
+    length. A cell shorter than its row stands centred in it, so the gap beside
+    the cell can only put its insertion line beside that page's own paper by
+    knowing how much of the cell's height is spent below the paper. Said in
+    `rem` rather than pixels because the number itself is `text-xs` — one `rem`
+    of line box, plus the `0.375rem` that used to be the column's gap — so a
+    WebView whose root font size is not 16px keeps the box and the line agreed
+    instead of clipping the one and misplacing the other. */
+export const THUMBNAIL_CAPTION_HEIGHT = "1.375rem"
 
 export function isViewMode(value: unknown): value is ViewMode {
   return viewModes.includes(value as ViewMode)
 }
 
+/** Whether the document has a spread to show; a single page has none. */
+export function hasBookSpread(numPages: number): boolean {
+  return numPages > 1
+}
+
+/**
+ * The mode the viewer really lays out, which can outvote the reader's choice: a
+ * one-page document has no spread, and book view would leave that page in the
+ * left half of a double-width column (see `pairPages`). The choice itself is
+ * left standing, so inserting a page brings book view back.
+ */
+export function effectiveViewMode(
+  preferred: ViewMode,
+  numPages: number,
+): ViewMode {
+  return preferred === "book" && !hasBookSpread(numPages) ? "single" : preferred
+}
+
 export function readStoredViewMode(): ViewMode | null {
-  return readStored(viewModeStorageKey, isViewMode)
+  const stored = storedSettings().ui?.viewMode
+
+  return isViewMode(stored) ? stored : null
 }
 
 export function storeViewMode(mode: ViewMode) {
-  store(viewModeStorageKey, mode)
+  rememberSettings({ ui: { viewMode: mode } })
 }
 
 /**
@@ -58,12 +68,46 @@ export function pairPages(numPages: number): number[][] {
   const rows: number[][] = []
 
   for (let pageNumber = 1; pageNumber <= numPages; pageNumber += 2) {
-    rows.push(
-      pageNumber === numPages ? [pageNumber] : [pageNumber, pageNumber + 1],
-    )
+    rows.push(spreadPages(pageNumber, numPages))
   }
 
   return rows
+}
+
+/**
+ * The pages laid out beside `pageNumber`, itself included — the row `pairPages`
+ * puts it in, which is what the reader of a spread actually has in front of
+ * them. A trailing odd page stands alone.
+ */
+export function spreadPages(pageNumber: number, numPages: number): number[] {
+  const first = pageNumber % 2 === 1 ? pageNumber : pageNumber - 1
+
+  return first === numPages ? [first] : [first, first + 1]
+}
+
+/**
+ * The page whose top a whole-page keyboard turn lands on. A book turn advances
+ * one spread rather than one half, and always names the spread's left page so
+ * either half being current gives the same answer. Kept independent of scale:
+ * Page Up/Down turn pages, not a viewport-sized number of pixels.
+ */
+export function pageTurnTarget(
+  pageNumber: number,
+  numPages: number,
+  viewMode: Exclude<ViewMode, "thumbnail">,
+  direction: -1 | 1,
+): number {
+  const lastPage = Math.max(1, numPages)
+  const current = Math.min(lastPage, Math.max(1, pageNumber))
+
+  if (viewMode === "single") {
+    return Math.min(lastPage, Math.max(1, current + direction))
+  }
+
+  const spreadStart = current % 2 === 1 ? current : current - 1
+  const lastSpreadStart = lastPage % 2 === 1 ? lastPage : lastPage - 1
+
+  return Math.min(lastSpreadStart, Math.max(1, spreadStart + direction * 2))
 }
 
 /**
@@ -73,9 +117,11 @@ export function pairPages(numPages: number): number[][] {
 export function computeThumbnailColumns(
   containerWidth: number,
   columnWidth = THUMBNAIL_WIDTH,
-  gap = THUMBNAIL_GAP,
+  gap = THUMBNAIL_COLUMN_GAP,
 ): number {
-  const fit = columnsThatFit(containerWidth, columnWidth, gap)
+  // `n` columns occupy `n * columnWidth + (n - 1) * gap`, so lending the row one
+  // extra gap makes the fit a plain division.
+  const fit = Math.floor((containerWidth + gap) / (columnWidth + gap))
 
   return Math.max(2, Math.floor(fit / 2) * 2)
 }

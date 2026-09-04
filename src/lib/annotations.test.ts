@@ -7,21 +7,24 @@ import {
   commandTextPages,
   commit,
   emptyHistory,
-  fillMergeOutcome,
+  fillErasedPages,
+  fillInsertFileOutcome,
   historyHead,
   inversePermutation,
   isDirty,
   markSaved,
-  mergeFilePages,
+  insertFilePages,
   movesPages,
   pageNumbersConfig,
   planDeletePages,
+  planEraseAnnotation,
   planInsertBlankPage,
-  planMergeFile,
+  planInsertFile,
   planPageNumbersChange,
   planReorderPages,
   planWatermarkChange,
   redo,
+  retargetCommand,
   undo,
   watermarkConfig,
   type AnnotationCommand,
@@ -63,6 +66,8 @@ function pageNumbersConfigValue(
     range: null,
     smartColor: true,
     start: null,
+    blankNumbered: true,
+    blankCounted: true,
     ...overrides,
   }
 }
@@ -86,7 +91,7 @@ describe("commandPages", () => {
   })
 
   it("reports every page a document watermark changes", () => {
-    expect(commandPages(watermark(defaultWatermarkConfig()))).toEqual([1, 2, 3])
+    expect(commandPages(watermark(defaultWatermarkConfig("DRAFT")))).toEqual([1, 2, 3])
   })
 
   it("reports every page a page-number change covers", () => {
@@ -100,15 +105,15 @@ describe("commandPages", () => {
     expect(commandTextPages(pageNumbers(pageNumbersConfigValue()))).toEqual([
       1, 2, 3,
     ])
-    expect(commandTextPages(watermark(defaultWatermarkConfig()))).toEqual([
+    expect(commandTextPages(watermark(defaultWatermarkConfig("DRAFT")))).toEqual([
       1, 2, 3,
     ])
   })
 })
 
 describe("watermarkConfig", () => {
-  const first = { ...defaultWatermarkConfig(), text: "DRAFT" }
-  const second = { ...defaultWatermarkConfig(), text: "FINAL" }
+  const first = defaultWatermarkConfig("DRAFT")
+  const second = defaultWatermarkConfig("FINAL")
 
   it("tracks apply, replace, explicit remove, undo, and redo", () => {
     const applied = historyOf(watermark(first))
@@ -172,7 +177,7 @@ describe("pageNumbersConfig", () => {
   })
 
   it("is independent of the watermark layer in one history", () => {
-    const wm = { ...defaultWatermarkConfig(), text: "DRAFT" }
+    const wm = defaultWatermarkConfig("DRAFT")
     const history = historyOf(watermark(wm), pageNumbers(first))
 
     expect(watermarkConfig(history)).toEqual(wm)
@@ -313,16 +318,16 @@ describe("movesPages", () => {
     const reorder: AnnotationCommand = { inverse: [2, 1], kind: "reorderPages", order: [2, 1] }
     const del: AnnotationCommand = { kind: "deletePages", pageCount: 3, pages: [2], stashId: 1 }
     const insert: AnnotationCommand = { index: 2, kind: "insertBlankPage", pageCount: 3, stashId: 1 }
-    const merge: AnnotationCommand = {
-      insertedAt: 0,
-      kind: "mergeFile",
-      name: "b.pdf",
-      pageCount: 0,
+    const insertFile: AnnotationCommand = {
+      index: 2,
+      insertedCount: 0,
+      kind: "insertFile",
+      pageCount: 3,
       path: "/b.pdf",
       stashId: 1,
     }
 
-    for (const command of [reorder, del, insert, merge]) {
+    for (const command of [reorder, del, insert, insertFile]) {
       expect(movesPages(command)).toBe(true)
     }
 
@@ -404,46 +409,51 @@ describe("structure commands", () => {
     expect(planInsertBlankPage(emptyHistory, 6, 4)).toBeNull()
   })
 
-  it("invalidates every page, bitmaps and text alike", () => {
+  it("invalidates only the pages it moves, bitmaps and text alike", () => {
     const reorder = planReorderPages(emptyHistory, [2, 1, 3])!.command
-    const deletion = planDeletePages(emptyHistory, [2], 3)!.command
-    const insertion = planInsertBlankPage(emptyHistory, 1, 3)!.command
+    const deletion = planDeletePages(emptyHistory, [3], 4)!.command
+    const insertion = planInsertBlankPage(emptyHistory, 2, 3)!.command
 
-    expect(commandPages(reorder)).toEqual([1, 2, 3])
-    expect(commandTextPages(reorder)).toEqual([1, 2, 3])
-    // Delete invalidates the wider, pre-delete shape of the document.
-    expect(commandPages(deletion)).toEqual([1, 2, 3])
-    // Insert invalidates the wider, post-insert shape.
-    expect(commandPages(insertion)).toEqual([1, 2, 3, 4])
-    expect(commandTextPages(insertion)).toEqual([1, 2, 3, 4])
+    // Page 3 keeps its number, so it keeps its bitmap; a long document redrawn
+    // whole would cost a render per visible thumbnail for nothing.
+    expect(commandPages(reorder)).toEqual([1, 2])
+    expect(commandTextPages(reorder)).toEqual([1, 2])
+    // Delete invalidates from the first page taken out, against the wider,
+    // pre-delete shape of the document.
+    expect(commandPages(deletion)).toEqual([3, 4])
+    // Insert invalidates from the gap, against the wider, post-insert shape.
+    expect(commandPages(insertion)).toEqual([2, 3, 4])
+    expect(commandTextPages(insertion)).toEqual([2, 3, 4])
   })
 
-  it("marks a pad insert and leaves a plain one unflagged", () => {
-    expect(planInsertBlankPage(emptyHistory, 2, 3, true)!.command).toEqual({
-      index: 2,
-      kind: "insertBlankPage",
-      pad: true,
-      pageCount: 4,
-      stashId: emptyHistory.nextId,
-    })
-    // A plain insert carries no pad key at all, so it is byte-identical to what
-    // the page-editing grid produced before parity padding existed.
-    expect(
-      "pad" in planInsertBlankPage(emptyHistory, 2, 3)!.command,
-    ).toBe(false)
+  it("names the same pages for a reorder's undo as for its apply", () => {
+    const order = [3, 1, 2, 4]
+    const reorder = planReorderPages(emptyHistory, order)!.command as {
+      inverse: number[]
+      kind: "reorderPages"
+      order: number[]
+    }
+
+    // The undo re-enters through the same command, so one expression has to
+    // cover both directions — which it does, since a permutation and its
+    // inverse leave exactly the same positions untouched.
+    expect(commandPages(reorder)).toEqual([1, 2, 3])
+    expect(commandPages({ ...reorder, order: reorder.inverse })).toEqual([
+      1, 2, 3,
+    ])
   })
 })
 
-describe("merge commands", () => {
-  it("plans a merge with its counts unknown until the file is read", () => {
+describe("insert-file commands", () => {
+  it("plans an insert with the file's page count unknown until it is read", () => {
     const history = historyOf(highlight(1))
-    const planned = planMergeFile(history, "/b.pdf", "b.pdf")
+    const planned = planInsertFile(history, "/b.pdf", 2, 3)!
 
     expect(planned.command).toEqual({
-      insertedAt: 0,
-      kind: "mergeFile",
-      name: "b.pdf",
-      pageCount: 0,
+      index: 2,
+      insertedCount: 0,
+      kind: "insertFile",
+      pageCount: 3,
       path: "/b.pdf",
       stashId: history.nextId,
     })
@@ -452,22 +462,143 @@ describe("merge commands", () => {
     expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
   })
 
-  it("a merge never invalidates an existing page's pixels or text", () => {
-    const command = planMergeFile(emptyHistory, "/b.pdf", "b.pdf").command
-
-    expect(commandPages(command)).toEqual([])
-    expect(commandTextPages(command)).toEqual([])
+  it("refuses a position the document does not have", () => {
+    expect(planInsertFile(emptyHistory, "/b.pdf", 0, 3)).toBeNull()
+    expect(planInsertFile(emptyHistory, "/b.pdf", 5, 3)).toBeNull()
+    // One past the end is a position: the file goes after the last page.
+    expect(planInsertFile(emptyHistory, "/b.pdf", 4, 3)).not.toBeNull()
   })
 
-  it("fills the position and page count the first apply learned", () => {
-    const planned = planMergeFile(historyOf(highlight(1)), "/b.pdf", "b.pdf")
+  it("invalidates the gap and everything after it, not the pages before", () => {
+    const command = planInsertFile(emptyHistory, "/b.pdf", 2, 3)!.command
+
+    expect(commandPages(command)).toEqual([2, 3])
+    expect(commandTextPages(command)).toEqual([2, 3])
+  })
+
+  it("invalidates nothing when the file goes after the last page", () => {
+    const command = planInsertFile(emptyHistory, "/b.pdf", 4, 3)!.command
+
+    // Pages 1-3 keep their numbers and their pixels; the pages the file brings
+    // are components that mount for the first time and fetch on their own.
+    expect(commandPages(command)).toEqual([])
+  })
+
+  it("invalidates the file's own pages once the apply has counted them", () => {
+    const planned = planInsertFile(emptyHistory, "/b.pdf", 4, 3)!
     const id = planned.history.past.at(-1)!.id
-    const filled = fillMergeOutcome(planned.history, id, 3, 4)
+    const filled = fillInsertFileOutcome(planned.history, id, 2)
+
+    // What the undo takes back out, so the undo invalidates it.
+    expect(commandPages(filled.past.at(-1)!.command)).toEqual([4, 5])
+  })
+
+  it("fills the page count the first apply learned", () => {
+    const planned = planInsertFile(historyOf(highlight(1)), "/b.pdf", 3, 4)!
+    const id = planned.history.past.at(-1)!.id
+    const filled = fillInsertFileOutcome(planned.history, id, 4)
     const command = filled.past.at(-1)!.command
 
-    expect(command).toMatchObject({ insertedAt: 3, pageCount: 4 })
-    // The delete an undo runs, and the restore a redo runs, cover the appended
+    // Four pages arrived, so the document now has eight.
+    expect(command).toMatchObject({ insertedCount: 4, pageCount: 8 })
+    // The delete an undo runs, and the restore a redo runs, cover the file's own
     // range — pages 3 through 6.
-    expect(mergeFilePages(command as never)).toEqual([3, 4, 5, 6])
+    expect(insertFilePages(command as never)).toEqual([3, 4, 5, 6])
+  })
+})
+
+describe("erasing a mark", () => {
+  /** The ids of the entries the history holds, oldest first. */
+  function applied(history: AnnotationHistory) {
+    return history.past.map((entry) => entry.id)
+  }
+
+  it("takes the mark's entry out of the applied history", () => {
+    const history = historyOf(highlight(1), highlight(2), highlight(3))
+    const target = history.past[0]!.id
+    const planned = planEraseAnnotation(history, target)!
+
+    expect(applied(planned.history)).toEqual([2, 3, 4])
+    expect(planned.command).toMatchObject({ index: 0, kind: "eraseAnnotation" })
+    // The erase is an edit like any other, so a redo branch it starts from is
+    // dropped the same way.
+    expect(planned.history.future).toEqual([])
+  })
+
+  it("has nothing to erase for an entry the reader has already undone", () => {
+    const history = historyOf(highlight(1))
+    const undone = undo(history)!.history
+
+    expect(planEraseAnnotation(undone, history.past[0]!.id)).toBeNull()
+  })
+
+  it("puts the entry back where it stood when the erase is undone", () => {
+    const history = historyOf(highlight(1), highlight(2), highlight(3))
+    const erased = planEraseAnnotation(history, history.past[1]!.id)!.history
+    const restored = undo(erased)!.history
+
+    expect(applied(restored)).toEqual([1, 2, 3])
+    // …and a redo takes it back out again.
+    expect(applied(redo(restored)!.history)).toEqual([1, 3, 4])
+  })
+
+  it("leaves the document dirty until the erase is taken back", () => {
+    const history = markSaved(historyOf(highlight(1), highlight(2)))
+    const erased = planEraseAnnotation(history, history.past[0]!.id)!.history
+
+    expect(isDirty(erased)).toBe(true)
+    // Undoing it puts the document back at exactly what was saved.
+    expect(isDirty(undo(erased)!.history)).toBe(false)
+  })
+
+  it("stays dirty where the erase itself was what was saved", () => {
+    const history = historyOf(highlight(1), highlight(2))
+    const erased = markSaved(
+      planEraseAnnotation(history, history.past[0]!.id)!.history,
+    )
+
+    // The file on disk has no first highlight; putting it back is a change.
+    expect(isDirty(undo(erased)!.history)).toBe(true)
+  })
+
+  it("redraws where the marks were made until the backend says otherwise", () => {
+    const history = historyOf(highlight(1, 2))
+    const planned = planEraseAnnotation(history, history.past[0]!.id)!
+    const id = planned.history.past.at(-1)!.id
+
+    expect(commandPages(planned.command)).toEqual([1, 2])
+    expect(movesPages(planned.command)).toBe(false)
+    // An annotation is not page content, so nothing extractable moved.
+    expect(commandTextPages(planned.command)).toEqual([])
+
+    const filled = fillErasedPages(planned.history, id, [4, 5])
+
+    expect(commandPages(filled.past.at(-1)!.command)).toEqual([4, 5])
+  })
+})
+
+describe("retargetCommand", () => {
+  it("aims a highlight at the pages its marks were really on", () => {
+    expect(retargetCommand(highlight(1, 2), [5, 6])).toMatchObject({
+      targets: [{ pageNumber: 5 }, { pageNumber: 6 }],
+    })
+  })
+
+  it("aims a single-page command at the page its mark was on", () => {
+    const note: AnnotationCommand = {
+      kind: "textNote",
+      origin: { left: 10, top: 10 },
+      pageNumber: 1,
+      style: { color: "#111827", fontSize: 12, opacity: 1 },
+      text: "hi",
+    }
+
+    expect(retargetCommand(note, [7])).toMatchObject({ pageNumber: 7 })
+  })
+
+  it("leaves the command alone where the backend reported nothing", () => {
+    const command = highlight(1, 2)
+
+    expect(retargetCommand(command, [])).toBe(command)
   })
 })

@@ -1,26 +1,16 @@
-import type { HexColor } from "@/lib/annotations"
-import { isHexColor } from "@/lib/annotationStyles"
-import { readStored, store } from "@/lib/storage"
-import { usesEmbeddedFont } from "@/lib/textNoteDraft"
+import { rememberSettings, storedSettings } from "@/lib/settings"
 
-export type WatermarkFontFamily = "sans" | "serif" | "mono"
+/** Reads from the page's bottom-left corner towards its top-right, or back. */
+export type WatermarkDirection = "ascending" | "descending"
 export type WatermarkLayout = "single" | "zebra"
 
 export type WatermarkConfig = {
-  bold: boolean
-  color: HexColor
-  fontFamily: WatermarkFontFamily
-  fontSize: number
+  direction: WatermarkDirection
   layout: WatermarkLayout
-  opacity: number
-  /** Clockwise degrees relative to the page's normal displayed direction. */
-  rotation: number
-  /** The gap between tiles on both axes; the grid steps by the text box plus this. */
-  spacing: number
   text: string
+  /** The mark's width as a share of the page's displayed width. */
+  widthRatio: number
 }
-
-export type WatermarkPreferences = Omit<WatermarkConfig, "text">
 
 export type WatermarkValidationError =
   | "empty"
@@ -31,96 +21,119 @@ export type WatermarkValidationError =
 // Mirrored by `src-tauri/src/pdfium/watermark.rs`; both sides reject rather
 // than clamp, because Tauri commands remain callable outside this UI.
 export const WATERMARK_MAX_CHARS = 256
-export const WATERMARK_MIN_FONT_SIZE = 6
-export const WATERMARK_MAX_FONT_SIZE = 144
-export const WATERMARK_MIN_OPACITY = 0.05
-export const WATERMARK_MIN_SPACING = 12
-export const WATERMARK_MAX_SPACING = 240
+export const WATERMARK_MIN_WIDTH_RATIO = 0.1
+export const WATERMARK_MAX_WIDTH_RATIO = 1
 
-export const watermarkFontFamilies: readonly WatermarkFontFamily[] = [
-  "sans",
-  "serif",
-  "mono",
+// The look the reader does not choose, mirrored from the same module so this
+// preview shows the ink the page will carry.
+export const WATERMARK_COLOR = "#64748b"
+export const WATERMARK_OPACITY = 0.25
+const WATERMARK_ZEBRA_GAP_RATIO = 1.5
+export const WATERMARK_REFERENCE_FONT_SIZE = 100
+const WATERMARK_MIN_FONT_SIZE = 1
+const WATERMARK_MAX_FONT_SIZE = 1000
+
+const watermarkDirections: readonly WatermarkDirection[] = [
+  "ascending",
+  "descending",
 ]
-export const watermarkLayouts: readonly WatermarkLayout[] = ["single", "zebra"]
+const watermarkLayouts: readonly WatermarkLayout[] = ["single", "zebra"]
+const defaultWatermarkWidthRatios = {
+  single: 0.8,
+  zebra: 0.3,
+} as const satisfies Record<WatermarkLayout, number>
 
-export const defaultWatermarkPreferences: WatermarkPreferences = {
-  bold: false,
-  color: "#64748b",
-  fontFamily: "sans",
-  fontSize: 36,
+/** The useful starting size for each repeat pattern. */
+export function defaultWatermarkWidthRatio(layout: WatermarkLayout): number {
+  return defaultWatermarkWidthRatios[layout]
+}
+
+const defaultWatermarkSettings = {
+  direction: "ascending",
   layout: "single",
-  opacity: 0.25,
-  rotation: -30,
-  spacing: 54,
+  widthRatio: defaultWatermarkWidthRatio("single"),
+} as const satisfies Omit<WatermarkConfig, "text">
+
+/** `text` comes from the caller because its default is a translated one. */
+export function defaultWatermarkConfig(text: string): WatermarkConfig {
+  return { ...defaultWatermarkSettings, text }
 }
 
-export const watermarkPreferencesStorageKey = "tfolio.annotate.watermarkStyle"
+/**
+ * Whether `text` will be drawn in an embedded face rather than one of the PDF's
+ * standard fonts.
+ *
+ * The same question `needs_embedded_font` answers in
+ * `src-tauri/src/pdfium/font.rs` — can a standard PDF font encode this — and the
+ * same answer: Latin-1's printable range, and nothing else. Asked here so the
+ * preview draws the watermark in the family it will actually be given.
+ */
+export function watermarkUsesEmbeddedFont(text: string): boolean {
+  return [...text].some((character) => {
+    const code = character.codePointAt(0) ?? 0
 
-export function defaultWatermarkConfig(
-  preferences: WatermarkPreferences = defaultWatermarkPreferences,
-): WatermarkConfig {
-  return { ...preferences, text: "" }
+    // U+0020..U+007E printable ASCII, U+00A0..U+00FF the rest of Latin-1, and
+    // the two line breaks, which are structure rather than a glyph.
+    return !(
+      (code >= 0x20 && code <= 0x7e) ||
+      (code >= 0xa0 && code <= 0xff) ||
+      code === 0x0a ||
+      code === 0x0d
+    )
+  })
 }
 
-export function watermarkUsesEmbeddedFont(text: string) {
-  return usesEmbeddedFont(text)
-}
-
-export function isWatermarkFontFamily(
+export function isWatermarkDirection(
   value: unknown,
-): value is WatermarkFontFamily {
-  return watermarkFontFamilies.includes(value as WatermarkFontFamily)
-}
-
-/** The weight the preview and PDF font selected for this text can draw. */
-export function watermarkFontWeightValue(
-  bold: boolean,
-  embedded: boolean,
-) {
-  // The bundled variable face uses the requested 400/800 instances. PDF's
-  // standard Helvetica, Times and Courier faces expose Regular/Bold instead,
-  // whose matching CSS preview weights are 400/700.
-  return bold ? (embedded ? 800 : 700) : 400
+): value is WatermarkDirection {
+  return watermarkDirections.includes(value as WatermarkDirection)
 }
 
 export function isWatermarkLayout(value: unknown): value is WatermarkLayout {
   return watermarkLayouts.includes(value as WatermarkLayout)
 }
 
-function inRange(value: unknown, minimum: number, maximum: number) {
-  return (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    value >= minimum &&
-    value <= maximum
+/**
+ * Mirrors `watermark_rotation` in `src-tauri/src/pdfium/watermark.rs`: the mark
+ * leans along the page's own diagonal, so a full-width one runs corner to
+ * corner whatever proportions the sheet has. Clockwise degrees, as CSS and
+ * PDFium both read them.
+ */
+export function watermarkRotation(
+  direction: WatermarkDirection,
+  displayWidth: number,
+  displayHeight: number,
+) {
+  const diagonal = (Math.atan2(displayHeight, displayWidth) * 180) / Math.PI
+
+  return direction === "ascending" ? -diagonal : diagonal
+}
+
+/**
+ * Mirrors `watermark_font_size`: the size at which the mark covers its share of
+ * the page width, from the same mark measured at `WATERMARK_REFERENCE_FONT_SIZE`.
+ * Both arguments must be in the same unit, and the result comes back in it.
+ */
+export function watermarkFontSize(
+  widthRatio: number,
+  displayWidth: number,
+  measuredWidth: number,
+) {
+  if (!(displayWidth > 0) || !(measuredWidth > 0)) {
+    return 0
+  }
+
+  const size =
+    (WATERMARK_REFERENCE_FONT_SIZE * widthRatio * displayWidth) / measuredWidth
+
+  return Math.min(
+    Math.max(size, WATERMARK_MIN_FONT_SIZE),
+    WATERMARK_MAX_FONT_SIZE,
   )
 }
 
-export function isWatermarkPreferences(
-  value: unknown,
-): value is WatermarkPreferences {
-  if (typeof value !== "object" || value === null) {
-    return false
-  }
-
-  const preferences = value as Record<string, unknown>
-
-  return (
-    typeof preferences.bold === "boolean" &&
-    isHexColor(preferences.color) &&
-    isWatermarkFontFamily(preferences.fontFamily) &&
-    inRange(
-      preferences.fontSize,
-      WATERMARK_MIN_FONT_SIZE,
-      WATERMARK_MAX_FONT_SIZE,
-    ) &&
-    isWatermarkLayout(preferences.layout) &&
-    inRange(preferences.opacity, WATERMARK_MIN_OPACITY, 1) &&
-    typeof preferences.rotation === "number" &&
-    Number.isFinite(preferences.rotation) &&
-    inRange(preferences.spacing, WATERMARK_MIN_SPACING, WATERMARK_MAX_SPACING)
-  )
+export function watermarkZebraSpacing(fontSize: number) {
+  return fontSize * WATERMARK_ZEBRA_GAP_RATIO
 }
 
 /**
@@ -154,33 +167,15 @@ export function validateWatermarkConfig(
     return "tooLong"
   }
 
-  const { text: _text, ...preferences } = config
+  const usable =
+    isWatermarkDirection(config.direction) &&
+    isWatermarkLayout(config.layout) &&
+    typeof config.widthRatio === "number" &&
+    Number.isFinite(config.widthRatio) &&
+    config.widthRatio >= WATERMARK_MIN_WIDTH_RATIO &&
+    config.widthRatio <= WATERMARK_MAX_WIDTH_RATIO
 
-  return isWatermarkPreferences(preferences) ? null : "style"
-}
-
-/**
- * Mirrors `normalize_rotation` in `src-tauri/src/pdfium/watermark.rs`. The
- * backend canonicalises before it compares, so without the same step here the
- * two ends of the angle control — -180° and 180°, the same direction — read as
- * a change worth a history entry, and commit an undo step the page never took.
- */
-export function normalizeWatermarkRotation(rotation: number) {
-  if (!Number.isFinite(rotation)) {
-    return rotation
-  }
-
-  const normalized = ((rotation % 360) + 360) % 360
-
-  return normalized > 180 ? normalized - 360 : normalized
-}
-
-export function watermarkPreferences(
-  config: WatermarkConfig,
-): WatermarkPreferences {
-  const { text: _text, ...preferences } = config
-
-  return preferences
+  return usable ? null : "style"
 }
 
 export function sameWatermarkConfig(
@@ -193,45 +188,40 @@ export function sameWatermarkConfig(
 
   return (
     left.text === right.text &&
-    left.bold === right.bold &&
-    left.fontFamily === right.fontFamily &&
-    left.fontSize === right.fontSize &&
-    left.color === right.color &&
-    left.opacity === right.opacity &&
-    left.rotation === right.rotation &&
+    left.direction === right.direction &&
     left.layout === right.layout &&
-    left.spacing === right.spacing
+    left.widthRatio === right.widthRatio
   )
 }
 
-export function readStoredWatermarkPreferences(): WatermarkPreferences | null {
-  const raw = readStored(
-    watermarkPreferencesStorageKey,
-    (value): value is string => typeof value === "string",
-  )
+/**
+ * The reader's last applied watermark, text included — unlike the styles the
+ * annotation tools keep, this one is the whole setting, so the next document
+ * opens on the mark this reader always applies rather than an empty field.
+ */
+export function readStoredWatermarkConfig(): WatermarkConfig | null {
+  const stored = storedSettings().watermark
 
-  if (raw === null) {
+  if (typeof stored !== "object" || stored === null) {
     return null
   }
 
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    // Styles saved before weight selection existed implicitly used Regular.
-    // Keep the rest of that reader's preferences instead of dropping the
-    // entire record when upgrading.
-    const migrated =
-      typeof parsed === "object" &&
-      parsed !== null &&
-      !("bold" in parsed)
-        ? { ...parsed, bold: false }
-        : parsed
+  const config = stored as WatermarkConfig
 
-    return isWatermarkPreferences(migrated) ? migrated : null
-  } catch {
-    return null
-  }
+  // The settings file may have been written by an older version of the app, or
+  // edited by hand, so a stored mark earns its way back in through the same
+  // check the dialog applies — and comes back as its four fields alone.
+  return typeof config.text === "string" &&
+    validateWatermarkConfig(config) === null
+    ? {
+        direction: config.direction,
+        layout: config.layout,
+        text: config.text,
+        widthRatio: config.widthRatio,
+      }
+    : null
 }
 
-export function storeWatermarkPreferences(config: WatermarkConfig) {
-  store(watermarkPreferencesStorageKey, JSON.stringify(watermarkPreferences(config)))
+export function storeWatermarkConfig(config: WatermarkConfig) {
+  rememberSettings({ watermark: config })
 }

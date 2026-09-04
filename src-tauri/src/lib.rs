@@ -1,13 +1,20 @@
 mod pdfium;
+mod recent;
+mod settings;
+mod store;
 
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
-    add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, close_pdf,
-    delete_last_pdf_annotation, delete_pdf_pages, export_pdf, extract_pdf_page_text,
-    insert_pdf_blank_page, merge_pdf_from_path, open_pdf, open_pdf_from_path, pick_pdf_path,
+    add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
+    cancel_pdf_operation, cancel_pdf_search, close_pdf, create_pdf, delete_pdf_annotations,
+    delete_pdf_pages, download_pdf_note_font, export_pdf, extract_pdf_page_text,
+    insert_pdf_blank_page, insert_pdf_from_path, inspect_pdf_files, merge_pdf_files, open_pdf,
+    open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    reorder_pdf_pages, restore_pdf_pages, save_pdf, PdfiumState,
+    reorder_pdf_pages, restore_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
 };
+use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
+use settings::{set_settings, settings};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,7 +29,16 @@ pub fn run() {
     builder
         .setup(|app| {
             let pdfium = PdfiumState::new(app.handle()).map_err(std::io::Error::other)?;
+            // An earlier run's recent list is the one thing outside this
+            // process that may name a path the reader gets to reopen, and it
+            // holds only paths a dialog or a drop produced while this app
+            // watched — so approving it is approving the reader's own past
+            // gestures, not the WebView's word.
+            let recent = RecentFiles::load(app.handle());
+            pdfium.approve_paths(recent.stored().iter());
             app.manage(pdfium);
+            app.manage(recent);
+            app.manage(settings::load(app.handle()));
             Ok(())
         })
         // Recorded on the Rust side of the boundary, because this is the only
@@ -37,26 +53,41 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            create_pdf,
             open_pdf,
             open_pdf_from_path,
             pick_pdf_path,
+            pick_pdf_paths,
+            inspect_pdf_files,
+            merge_pdf_files,
+            recent_pdfs,
+            recent_pdf_view,
+            set_recent_pdf_view,
             render_pdf_page,
             render_pdf_page_thumbnail,
             extract_pdf_page_text,
+            search_pdf_text,
+            cancel_pdf_search,
             add_pdf_highlight_annotation,
             add_pdf_rect_annotation,
             add_pdf_rect_effect_annotation,
             add_pdf_text_note_annotation,
+            download_pdf_note_font,
             apply_pdf_watermark,
-            delete_last_pdf_annotation,
+            delete_pdf_annotations,
+            pdf_annotation_at_point,
             remove_pdf_watermark,
             apply_pdf_page_numbers,
             remove_pdf_page_numbers,
+            cancel_pdf_operation,
+            cancel_pdf_merge,
+            settings,
+            set_settings,
             reorder_pdf_pages,
             delete_pdf_pages,
             restore_pdf_pages,
             insert_pdf_blank_page,
-            merge_pdf_from_path,
+            insert_pdf_from_path,
             save_pdf,
             export_pdf,
             close_pdf

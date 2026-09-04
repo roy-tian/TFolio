@@ -1,15 +1,13 @@
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { languageStorageKey } from "../../src/i18n/config"
-import { rectStyleStorageKey } from "../../src/lib/annotationStyles"
-import { viewModeStorageKey } from "../../src/lib/viewMode"
 import {
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
   pagePixelFingerprint,
   renderedPage,
+  seedSettings,
   stripedPdf,
 } from "./helpers"
 
@@ -47,21 +45,39 @@ async function dragRectOnPage() {
   })
 }
 
+/**
+ * The share of page 1 the default red wash has tinted. The fixture is black bars
+ * on white, so a red-dominant pixel can only have come from the mark.
+ */
+async function washedShare() {
+  return browser.execute(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      "[data-page-number='1'] canvas",
+    )!
+    const { data } = canvas.getContext("2d")!.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    )
+    let washed = 0
+
+    for (let index = 0; index < data.length; index += 4) {
+      const red = data[index]!
+
+      if (red - data[index + 1]! > 60 && red - data[index + 2]! > 60) {
+        washed += 1
+      }
+    }
+
+    return washed / (data.length / 4)
+  })
+}
+
 describe("TFolio rectangle annotations", () => {
   beforeEach(async () => {
-    await browser.execute(
-      (keys) => {
-        window.localStorage.setItem(keys.language, "en")
-        window.localStorage.setItem(keys.viewMode, "single")
-        // Draw with the default style, whatever a prior run persisted.
-        window.localStorage.removeItem(keys.rectStyle)
-      },
-      {
-        language: languageStorageKey,
-        rectStyle: rectStyleStorageKey,
-        viewMode: viewModeStorageKey,
-      },
-    )
+    // Draw with the default style, whatever a prior run persisted.
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await browser.refresh()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("striped.pdf", stripedPdf())
@@ -69,7 +85,7 @@ describe("TFolio rectangle annotations", () => {
   })
 
   it("draws a rectangle, and undo and redo restore it exactly", async () => {
-    const clean = await pageInk()
+    const clean = await pagePixelFingerprint()
 
     await $("button[aria-label='Draw a rectangle']").click()
     await expect($("button[aria-label='Draw a rectangle']")).toHaveAttribute(
@@ -81,110 +97,74 @@ describe("TFolio rectangle annotations", () => {
 
     // The page is re-rastered by PDFium, so the mark arrives a beat after the
     // drag ends.
-    await browser.waitUntil(async () => (await pageInk()) > clean, {
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) !== clean, {
       timeout: 15_000,
       timeoutMsg: "the rectangle never reached the page",
     })
+    // Drawn, not merely stored: PDFium will accept and keep a mark it then
+    // declines to paint. The drag covers the middle two fifths of each side, so
+    // the default half-opaque red block has to tint about a sixth of the page.
+    expect(await washedShare()).toBeGreaterThan(0.1)
 
-    const drawn = await pageInk()
+    const drawn = await pagePixelFingerprint()
 
     await $("button[aria-label='Undo']").click()
-    await browser.waitUntil(async () => (await pageInk()) === clean, {
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 15_000,
       timeoutMsg: "undo did not take the rectangle back off the page",
     })
 
-    // Exact, not merely "more ink than clean": a redo that applied the command
+    // Exact, not merely "different from clean": a redo that applied the command
     // twice would stack two rectangles and still clear that lower bar.
     await $("button[aria-label='Redo']").click()
-    await browser.waitUntil(async () => (await pageInk()) === drawn, {
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the rectangle exactly",
     })
   })
 
-  it("previews and applies a mosaic, then undo removes it", async () => {
+  it("gives each effect its own settings, and applies a mosaic", async () => {
     const clean = await pagePixelFingerprint()
 
     await $("button[aria-label='Rectangle options']").click()
-    const effectStrength = await $("[data-slot='rect-effect-strength']")
-    const effectDisclosure = await $("[data-slot='rect-effect-disclosure']")
-    const effectAbout = await $("button[aria-label='About this effect']")
-    const vectorStyle = await $("[data-slot='rect-vector-style']")
-    const strokeWidth = await $("[data-slot='rect-stroke-width']")
-    const opacity = await $("[data-slot='rect-opacity']")
-    const cornerRadius = await $("[data-slot='rect-corner-radius']")
-    const borderNone = await $(
-      "[data-slot='rect-stroke-colors'] [aria-label='None']",
-    )
-    const fillNone = await $(
-      "[data-slot='rect-fill-colors'] [aria-label='None']",
-    )
-    await expect(effectStrength).not.toExist()
-    await expect(effectDisclosure).not.toExist()
-    await expect(effectAbout).not.toExist()
-    await expect(vectorStyle).toExist()
-    await expect(borderNone).toExist()
-    await expect(fillNone).toExist()
-    expect(await borderNone.getAttribute("data-disabled")).not.toBeNull()
-    await expect(strokeWidth).toExist()
-    await expect(opacity).toExist()
-    await expect(cornerRadius).toExist()
+    const amount = await $("[data-slot='rect-amount']")
+    const colors = await $("[data-slot='rect-colors']")
+    const white = await $("[data-slot='rect-colors'] [aria-label='#ffffff']")
+    const disclosure = await $("[data-slot='rect-effect-disclosure']")
+    const about = await $("button[aria-label='About this effect']")
 
-    await $("[data-slot='rect-fill-colors'] [aria-label='#ff3b30']").click()
-    await expect(opacity).toExist()
-    expect(await borderNone.getAttribute("data-disabled")).toBeNull()
+    // Translucent: the colour is the mark, so the swatches are on the panel and
+    // the one slider is its opacity. The swatches are the whole offer — no well
+    // for a colour off the row.
+    await expect(amount).toHaveText(/Opacity/)
+    await expect(white).toExist()
+    await expect($("[data-slot='rect-colors'] input[type='color']")).not.toExist()
+    await expect(about).not.toExist()
 
-    await borderNone.click()
-    await expect(strokeWidth).not.toExist()
-    await expect(opacity).toExist()
-
-    await $("[data-slot='rect-stroke-colors'] [aria-label='#ff3b30']").click()
-    await expect(strokeWidth).toExist()
-    expect(
-      await browser.execute(() =>
-        Array.from(
-          document.querySelector("[data-slot='rect-vector-style']")!.children,
-        ).map((element) => element.getAttribute("data-slot")),
-      ),
-    ).toEqual([
-      "rect-stroke-colors",
-      "rect-fill-colors",
-      "rect-stroke-width",
-      "rect-opacity",
-      "rect-corner-radius",
-    ])
-
-    await fillNone.click()
-    await expect(strokeWidth).toExist()
-    await expect(opacity).toExist()
-
+    // A mosaic is built from the pixels under the box, so the colour has
+    // nothing to tint and leaves the panel altogether.
     await $("button[aria-label='Mosaic']").click()
-    await expect(effectStrength).toExist()
-    await expect(effectAbout).toExist()
-    await expect(effectDisclosure).not.toExist()
-    await effectAbout.click()
-    await expect(effectDisclosure).toHaveText(
+    await expect(amount).toHaveText(/Mosaic size/)
+    await expect(colors).not.toExist()
+
+    await expect(disclosure).not.toExist()
+    await about.click()
+    await expect(disclosure).toHaveText(
       "Not redaction: the underlying text remains searchable and copyable. Use this visual effect for printing only.",
     )
-    await effectAbout.click()
-    await expect(effectDisclosure).not.toExist()
-    await expect(vectorStyle).not.toExist()
+    await about.click()
+    await expect(disclosure).not.toExist()
 
     await $("button[aria-label='Gaussian blur']").click()
-    await expect(effectStrength).toExist()
-    await expect(vectorStyle).not.toExist()
+    await expect(amount).toHaveText(/Blur strength/)
+    await expect(colors).not.toExist()
 
-    await $("button[aria-label='None']").click()
-    await expect(effectStrength).not.toExist()
-    await expect(effectDisclosure).not.toExist()
-    await expect(effectAbout).not.toExist()
-    await expect(vectorStyle).toExist()
+    await $("button[aria-label='Translucent']").click()
+    await expect(amount).toHaveText(/Opacity/)
+    await expect(white).toExist()
+    await expect(about).not.toExist()
 
     await $("button[aria-label='Mosaic']").click()
-    await expect(effectAbout).toExist()
-    await expect(effectDisclosure).not.toExist()
-
     await $("button[aria-label='Draw a rectangle']").click()
     await dragRectOnPage()
 
@@ -374,7 +354,14 @@ describe("TFolio rectangle annotations", () => {
       const page = document.querySelector("[data-page-number='1']")!
       const box = page.getBoundingClientRect()
 
-      document.querySelector("main")!.dispatchEvent(
+      // Every workspace panel carries a `<main>`, the home tab's included, and
+      // all but the showing one are `hidden`. The wheel has to reach this
+      // document's viewer, which is the active panel's.
+      const viewer = document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] main",
+      )!
+
+      viewer.dispatchEvent(
         new WheelEvent("wheel", {
           bubbles: true,
           cancelable: true,

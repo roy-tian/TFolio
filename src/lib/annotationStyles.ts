@@ -1,12 +1,10 @@
 import type {
   HexColor,
-  RectEffect,
   RectEffectKind,
   RectStyle,
-  TextNoteFontFamily,
   TextNoteStyle,
 } from "@/lib/annotations"
-import { readStored, store } from "@/lib/storage"
+import { rememberSettings, storedSettings } from "@/lib/settings"
 
 /**
  * A marker pen's colours rather than a palette's: each is pale enough to read
@@ -28,99 +26,74 @@ export const defaultHighlightColor: HexColor = highlightSwatches[0]!
  */
 export const HIGHLIGHT_OPACITY = 0.4
 
-export const highlightColorStorageKey = "tfolio.annotate.highlightColor"
-
 /** Whether `value` is a colour this app could have written. */
 export function isHexColor(value: unknown): value is HexColor {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
 }
 
 export function readStoredHighlightColor(): HexColor | null {
-  return readStored(highlightColorStorageKey, isHexColor)
+  const stored = storedSettings().annotate?.highlightColor
+
+  return isHexColor(stored) ? stored : null
 }
 
 export function storeHighlightColor(color: HexColor) {
-  store(highlightColorStorageKey, color)
+  rememberSettings({ annotate: { highlightColor: color } })
 }
 
-/** Full-strength ink for a border that has to read as a deliberate mark. */
-export const rectStrokeSwatches: readonly HexColor[] = [
-  "#ff3b30",
-  "#0a84ff",
-  "#34c759",
-  "#ffcc00",
+/**
+ * A mark before a cover: the hues lead in spectrum order, at one shade level so
+ * the row reads as a set rather than an assortment, and the neutrals close it,
+ * palest first. These eight are the whole choice: a colour wheel here would be
+ * a setting to get wrong rather than a mark to make.
+ */
+export const rectSwatches: readonly HexColor[] = [
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#3b82f6",
+  "#ffffff",
+  "#71717a",
   "#000000",
 ]
 
-/** A fill sits under content, so these lean pale enough to keep it readable. */
-export const rectFillSwatches: readonly HexColor[] = [
-  "#ff3b30",
-  "#0a84ff",
-  "#34c759",
-  "#ffcc00",
-  "#ffffff",
-]
-
-/** Slider ends. A radius past a small box's half-side is clamped by the backend. */
-export const RECT_MAX_CORNER_RADIUS = 40
-export const RECT_MIN_STROKE_WIDTH = 1
-export const RECT_MAX_STROKE_WIDTH = 12
+/** Slider ends, shared by the blur's sigma and the mosaic's block size. */
 export const RECT_MIN_EFFECT_STRENGTH = 2
 export const RECT_MAX_EFFECT_STRENGTH = 24
 /** A rectangle at no opacity would be invisible, so the floor stays off zero. */
 export const RECT_MIN_OPACITY = 0.1
 
 export const rectEffectKinds: readonly RectEffectKind[] = [
-  "none",
-  "mosaic",
+  "translucent",
   "blur",
+  "mosaic",
 ]
 
 export function isRectEffectKind(value: unknown): value is RectEffectKind {
   return rectEffectKinds.includes(value as RectEffectKind)
 }
 
-export function isRectEffect(value: unknown): value is RectEffect {
-  if (typeof value !== "object" || value === null) {
-    return false
-  }
-
-  const effect = value as Record<string, unknown>
-
-  return (
-    isRectEffectKind(effect.kind) &&
-    typeof effect.strength === "number" &&
-    effect.strength >= RECT_MIN_EFFECT_STRENGTH &&
-    effect.strength <= RECT_MAX_EFFECT_STRENGTH
-  )
-}
-
-/**
- * An outline, not a block: a border reads as "I've marked this" where a fill
- * reads as "I've covered this", and the first is what a rectangle tool is for.
- */
+/** A wash rather than a cover: enough to hide a face, not the whole page. */
 export const defaultRectStyle: RectStyle = {
-  cornerRadius: 0,
-  effect: { kind: "none", strength: 8 },
-  fillColor: null,
-  opacity: 1,
-  strokeColor: rectStrokeSwatches[0]!,
-  strokeWidth: 2,
-}
-
-export const rectStyleStorageKey = "tfolio.annotate.rectStyle"
-
-/** A colour, or `null` for the part of a rectangle that is left off. */
-function isNullableHexColor(value: unknown): value is HexColor | null {
-  return value === null || isHexColor(value)
+  color: rectSwatches[0]!,
+  effect: "translucent",
+  opacity: 0.5,
+  strength: 8,
 }
 
 /**
- * Whether `value` is a rectangle style this app could have written. The numeric
- * ranges are part of that: the sliders never emit a non-finite size or an
- * opacity below `RECT_MIN_OPACITY`, so a stored one is tampered or from an older
- * schema, and loading it would draw an invisible mark that still records as an
- * edit. Rejected here so the caller falls back to the visible default.
+ * Whether `value` is a rectangle style this app could have written. The ranges
+ * and the palette are part of that: the swatches are the whole colour offer and
+ * the sliders never emit a non-finite size or an opacity below
+ * `RECT_MIN_OPACITY`, so a stored style outside them is tampered or from an
+ * older schema — an off-palette colour would sit in the panel with no swatch
+ * checked, and an invisible one would draw a mark that still records as an edit.
+ * Rejected here so the caller falls back to the visible default.
+ *
+ * Both numbers are checked whichever effect is stored: the one the effect does
+ * not use is still kept, and still becomes the mark as soon as the reader
+ * switches to it.
  */
 export function isRectStyle(value: unknown): value is RectStyle {
   if (typeof value !== "object" || value === null) {
@@ -130,49 +103,27 @@ export function isRectStyle(value: unknown): value is RectStyle {
   const style = value as Record<string, unknown>
 
   return (
-    // The ranges are the sliders' own: a value outside them — a zero border
-    // width, a radius past the maximum — is not one the app wrote, and the
-    // comparisons reject a non-finite number on the way (NaN fails them all).
-    typeof style.cornerRadius === "number" &&
-    style.cornerRadius >= 0 &&
-    style.cornerRadius <= RECT_MAX_CORNER_RADIUS &&
-    isRectEffect(style.effect) &&
-    typeof style.strokeWidth === "number" &&
-    style.strokeWidth >= RECT_MIN_STROKE_WIDTH &&
-    style.strokeWidth <= RECT_MAX_STROKE_WIDTH &&
+    isHexColor(style.color) &&
+    rectSwatches.includes(style.color) &&
+    isRectEffectKind(style.effect) &&
+    // The comparisons reject a non-finite number on the way (NaN fails them all).
     typeof style.opacity === "number" &&
     style.opacity >= RECT_MIN_OPACITY &&
     style.opacity <= 1 &&
-    isNullableHexColor(style.strokeColor) &&
-    isNullableHexColor(style.fillColor) &&
-    // At least one part present, or the rectangle would draw nothing — the same
-    // both-"none" state the options panel already refuses to let a reader reach.
-    (style.strokeColor !== null || style.fillColor !== null)
+    typeof style.strength === "number" &&
+    style.strength >= RECT_MIN_EFFECT_STRENGTH &&
+    style.strength <= RECT_MAX_EFFECT_STRENGTH
   )
 }
 
 export function readStoredRectStyle(): RectStyle | null {
-  const raw = readStored(
-    rectStyleStorageKey,
-    (value): value is string => typeof value === "string",
-  )
+  const stored = storedSettings().annotate?.rect
 
-  if (raw === null) {
-    return null
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(raw)
-
-    return isRectStyle(parsed) ? parsed : null
-  } catch {
-    // An older version may have written a shape this one no longer reads.
-    return null
-  }
+  return isRectStyle(stored) ? stored : null
 }
 
 export function storeRectStyle(style: RectStyle) {
-  store(rectStyleStorageKey, JSON.stringify(style))
+  rememberSettings({ annotate: { rect: style } })
 }
 
 /** Ink a note is read as a note in, rather than mistaken for the page's text. */
@@ -193,26 +144,27 @@ export const TEXT_NOTE_MIN_FONT_SIZE = 6
 export const TEXT_NOTE_MAX_FONT_SIZE = 72
 export const TEXT_NOTE_MIN_OPACITY = 0.1
 
-export const textNoteFontFamilies: readonly TextNoteFontFamily[] = [
-  "sans",
-  "serif",
-  "mono",
-]
-
 /** Body-text size, so a note reads alongside the page rather than shouting. */
 export const defaultTextNoteStyle: TextNoteStyle = {
   color: textNoteSwatches[0]!,
-  fontFamily: "sans",
   fontSize: 12,
   opacity: 1,
 }
 
-export const textNoteStyleStorageKey = "tfolio.annotate.textNoteStyle"
+/**
+ * What the backend answers with when nothing installed can draw a note and no
+ * fallback face has been fetched. The one error the reader can act on, so it
+ * travels as a value rather than a message — kept in step with
+ * `FONT_MISSING_ERROR` in `src-tauri/src/pdfium/font.rs`.
+ */
+export const NOTE_FONT_MISSING = "tfolio:font-missing"
 
-export function isTextNoteFontFamily(
-  value: unknown,
-): value is TextNoteFontFamily {
-  return textNoteFontFamilies.includes(value as TextNoteFontFamily)
+/** Whether a failed edit failed for want of a face to draw it in. */
+export function isNoteFontMissing(error: unknown): boolean {
+  return (
+    error === NOTE_FONT_MISSING ||
+    (error instanceof Error && error.message === NOTE_FONT_MISSING)
+  )
 }
 
 /**
@@ -235,31 +187,16 @@ export function isTextNoteStyle(value: unknown): value is TextNoteStyle {
     typeof style.opacity === "number" &&
     style.opacity >= TEXT_NOTE_MIN_OPACITY &&
     style.opacity <= 1 &&
-    isHexColor(style.color) &&
-    isTextNoteFontFamily(style.fontFamily)
+    isHexColor(style.color)
   )
 }
 
 export function readStoredTextNoteStyle(): TextNoteStyle | null {
-  const raw = readStored(
-    textNoteStyleStorageKey,
-    (value): value is string => typeof value === "string",
-  )
+  const stored = storedSettings().annotate?.textNote
 
-  if (raw === null) {
-    return null
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(raw)
-
-    return isTextNoteStyle(parsed) ? parsed : null
-  } catch {
-    // An older version may have written a shape this one no longer reads.
-    return null
-  }
+  return isTextNoteStyle(stored) ? stored : null
 }
 
 export function storeTextNoteStyle(style: TextNoteStyle) {
-  store(textNoteStyleStorageKey, JSON.stringify(style))
+  rememberSettings({ annotate: { textNote: style } })
 }

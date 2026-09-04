@@ -24,6 +24,26 @@ export type PdfTextSpan = {
   width: number
 }
 
+export type PdfSearchRect = {
+  height: number
+  left: number
+  top: number
+  width: number
+}
+
+/** One occurrence in document order. A phrase wrapped across lines remains one
+    result and carries one highlight rectangle for each line it touches. */
+export type PdfSearchMatch = {
+  pageNumber: number
+  rects: PdfSearchRect[]
+}
+
+export type PdfSearchOutcome = {
+  cancelled: boolean
+  limitReached: boolean
+  matches: PdfSearchMatch[]
+}
+
 export type PdfDocumentInfo = {
   id: number
   numPages: number
@@ -46,16 +66,19 @@ export type PdfExportOutcome = {
     place: the page list and outline are replaced wholesale, because the
     backend's document is the only truth about what the pages now are. */
 export type PdfStructureUpdate = {
+  /** Whether any page another file brought in is still in the document, which
+      leaves it export-only. Answered by the backend rather than replayed from
+      history: it is the very set `save_pdf` refuses on. */
+  hasMergedPages: boolean
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
 }
 
-/** What a merge appended. `pageCount` is the one thing the frontend cannot
-    derive from history until the backend has read the file, so the merge
-    command carries it back from here. */
-export type PdfMergeOutcome = {
-  insertedAt: number
+/** What inserting a PDF brought in. `pageCount` is the one thing the frontend
+    cannot know until the backend has read the file, so the insert command
+    carries it back from here — it is what its undo takes out again. */
+export type PdfInsertOutcome = {
   pageCount: number
   update: PdfStructureUpdate
 }
@@ -93,6 +116,26 @@ export function dimensionsForRotation(
   return rotation === 90 || rotation === 270
     ? { height: width, width: height }
     : { height, width }
+}
+
+/**
+ * Minimum backing pixels per CSS pixel for a settled page bitmap. PDFium's
+ * ordinary grayscale anti-aliasing reads as visibly soft when a display gives
+ * the page just one backing pixel per CSS pixel, so the viewer raises the
+ * render-resolution floor from 1x to this modest 1.25x instead of paying for a
+ * heavier 2x supersample. Only surfaces whose `devicePixelRatio` is below 1.25
+ * are affected; a higher-DPI display already reaches the shared 2x ceiling.
+ */
+export const MIN_PAGE_OUTPUT_SCALE = 1.25
+
+/**
+ * Backing pixels to render per CSS pixel, floored at `minOutputScale` (so a
+ * low-DPI surface still supersamples) and capped at 2 (the renderer's upper
+ * bound). A zero or absent `dpr` falls back to 1, since a zero ratio never
+ * means "no pixels".
+ */
+export function resolveOutputScale(dpr: number, minOutputScale = 1) {
+  return Math.min(Math.max(dpr || 1, minOutputScale), 2)
 }
 
 export type PageCandidate = {
