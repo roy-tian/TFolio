@@ -18,6 +18,7 @@ import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
+import { PageOdometer } from "@/components/PageOdometer"
 import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
@@ -219,6 +220,10 @@ function DocumentSession(
     ),
   )
   const [pageInput, setPageInput] = useState(() => String(currentPage))
+  // Whether the reader is typing a page number. The odometer stands in for
+  // the field's own text the rest of the time, and has to stand aside while
+  // what the field holds is no longer the page being read.
+  const [pageInputFocused, setPageInputFocused] = useState(false)
   const [pageRotations, setPageRotations] = useState(() =>
     openedDocument.pages.map(() => 0),
   )
@@ -1758,26 +1763,56 @@ function DocumentSession(
           data-slot="page-status"
           role="group"
         >
-          <input
-            aria-label={t("toolbar.pageNumberInput")}
-            className="h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground"
-            disabled={!pdfDocument}
-            inputMode="numeric"
-            onBlur={() => setPageInput(String(currentPage))}
-            onChange={(event) =>
-              setPageInput(event.target.value.replaceAll(/[^0-9]/g, ""))
-            }
-            onFocus={(event) => event.currentTarget.select()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                submitPageNumber()
-                event.currentTarget.blur()
+          <div className="relative">
+            <input
+              aria-label={t("toolbar.pageNumberInput")}
+              className={cn(
+                "h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground",
+                // The field goes on holding the number — it is what a typed
+                // jump starts from, and what the field itself reads out as its
+                // value — but hands the drawing of it to the odometer, which
+                // would otherwise be read through the field's own text standing
+                // still underneath.
+                !pageInputFocused &&
+                  "text-transparent disabled:text-transparent",
+              )}
+              disabled={!pdfDocument}
+              inputMode="numeric"
+              onBlur={() => {
+                setPageInputFocused(false)
+                setPageInput(String(currentPage))
+              }}
+              onChange={(event) =>
+                setPageInput(event.target.value.replaceAll(/[^0-9]/g, ""))
               }
-            }}
-            type="text"
-            value={pageInput}
-          />
+              onFocus={(event) => {
+                setPageInputFocused(true)
+                event.currentTarget.select()
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  submitPageNumber()
+                  event.currentTarget.blur()
+                }
+              }}
+              type="text"
+              value={pageInput}
+            />
+            {/* Over the field, and deaf to the pointer, so a click still lands
+                in the field it covers. Forced colours override the field's
+                transparent text, so there the field draws its own number again
+                and this has to stand down rather than double it. */}
+            {pageInputFocused ? null : (
+              <PageOdometer
+                className={cn(
+                  "pointer-events-none absolute inset-0 justify-center forced-colors:hidden",
+                  !pdfDocument && "text-muted-foreground",
+                )}
+                value={currentPage}
+              />
+            )}
+          </div>
           <span className="text-muted-foreground">/</span>
           <span>{pdfDocument?.numPages ?? 0}</span>
           <span aria-live="polite" className="sr-only">

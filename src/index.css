@@ -241,3 +241,62 @@ body {
 [data-tool-cursor] .pdf-text-layer {
   cursor: inherit;
 }
+
+/*
+ * The toolbar's page number turns like an odometer (PageOdometer.tsx): the
+ * digit being replaced leaves the way the number is going — up as it counts up,
+ * down as it counts down — and the new one follows it in from the other side.
+ *
+ * `both` is what holds each of these where it ended: the leaving digit outside
+ * its box, and a place the number left closed. With the default fill the digit
+ * would spring back over the one that replaced it, and the place it vacated
+ * would stand open, holding the rest of the number off centre.
+ */
+@theme {
+  --animate-digit-enter-up: digit-enter-up 240ms cubic-bezier(0.32, 0.72, 0, 1)
+    both;
+  --animate-digit-enter-down: digit-enter-down 240ms
+    cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-digit-leave-up: digit-leave-up 240ms cubic-bezier(0.32, 0.72, 0, 1)
+    both;
+  --animate-digit-leave-down: digit-leave-down 240ms
+    cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-digit-open: digit-open 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-digit-close: digit-close 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+
+  @keyframes digit-enter-up {
+    from {
+      transform: translateY(100%);
+    }
+  }
+
+  @keyframes digit-enter-down {
+    from {
+      transform: translateY(-100%);
+    }
+  }
+
+  @keyframes digit-leave-up {
+    to {
+      transform: translateY(-100%);
+    }
+  }
+
+  @keyframes digit-leave-down {
+    to {
+      transform: translateY(100%);
+    }
+  }
+
+  @keyframes digit-open {
+    from {
+      width: 0;
+    }
+  }
+
+  @keyframes digit-close {
+    to {
+      width: 0;
+    }
+  }
+}

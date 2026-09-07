@@ -363,14 +363,22 @@ describe("TFolio PDF viewer", () => {
         return event.defaultPrevented
       }, key)
 
+    // The field holds the number, but what is read is the odometer over it,
+    // which draws the field's value while nobody is typing into it.
+    const odometer = $("[data-slot='page-odometer']")
+
     await focusViewerAtStart()
     await expect(pageInput).toHaveValue("1")
+    await expect(odometer).toHaveText("1")
     expect(await pressPageKey("PageDown")).toBe(true)
     await expect(pageInput).toHaveValue("2")
+    // Settles once the digit that was replaced has rolled out of its box.
+    await expect(odometer).toHaveText("2")
     expect(await pageTopInViewer(2)).toBe(20)
 
     expect(await pressPageKey("PageUp")).toBe(true)
     await expect(pageInput).toHaveValue("1")
+    await expect(odometer).toHaveText("1")
 
     await $("button[aria-label='Book']").click()
     await expect($("button[aria-label='Book']")).toHaveAttribute(
