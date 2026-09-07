@@ -58,6 +58,8 @@ function progressChannel(onProgress?: ProgressHandler) {
 type StructureChangeHandler = (
   documentId: number,
   update: PdfStructureUpdate,
+  /** New slot -> previous page number, when existing pages only moved. */
+  order?: number[],
 ) => void
 
 type UseAnnotationsOptions = {
@@ -223,6 +225,7 @@ async function applyCommand(
           documentId,
           order: command.order,
         }),
+        command.order,
       )
       return []
     case "deletePages":
@@ -357,6 +360,7 @@ async function retractCommand(
           documentId,
           order: command.inverse,
         }),
+        command.inverse,
       )
       return []
     case "deletePages":

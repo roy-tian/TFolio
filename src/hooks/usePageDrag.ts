@@ -12,6 +12,8 @@ type UsePageDragOptions = {
   columns: number
   /** The thumbnail grid element the cells are laid out in. */
   gridRef: RefObject<HTMLElement | null>
+  /** The page list snapshot: a committed structure edit ends its preview. */
+  layoutVersion: object
   /** May answer with the reorder's own promise; the make-way layout is held
       until it settles. */
   onReorder: (order: number[]) => void | Promise<unknown>
@@ -22,6 +24,7 @@ type UsePageDragOptions = {
 
 /** A drag in progress, for the ghost and the make-way preview. */
 export type PageDragState = {
+  layoutVersion: object
   /** The cell boxes as they stood when the drag began, in grid coordinates:
       the slots the grid's own pages slide between to open the drop's hole. Each
       is the whole cell, the row gap it carries as padding included. */
@@ -38,10 +41,8 @@ export type PageDragState = {
   pages: number[]
   /** Client coordinates the ghost follows. */
   pointer: { x: number; y: number }
-  /** Set once the pointer is up and the reorder is in flight. The pages only
-      change when the backend has moved them, so the made way stands until then
-      — dropping it here would snap every cell back to the old order for the
-      length of that round trip — while the ghost is already gone. */
+  /** The pointer is up: show every page in its landing slot while the backend
+      commits, then discard the offsets together with the old page list. */
   released: boolean
 }
 
@@ -60,6 +61,7 @@ export function usePageDrag({
   active,
   columns,
   gridRef,
+  layoutVersion,
   onReorder,
   pageCount,
   selectedPages,
@@ -84,11 +86,13 @@ export function usePageDrag({
   const columnsRef = useRef(columns)
   const pageCountRef = useRef(pageCount)
   const selectedPagesRef = useRef(selectedPages)
+  const layoutVersionRef = useRef(layoutVersion)
 
   onReorderRef.current = onReorder
   columnsRef.current = columns
   pageCountRef.current = pageCount
   selectedPagesRef.current = selectedPages
+  layoutVersionRef.current = layoutVersion
 
   useEffect(() => {
     if (!active) {
@@ -99,6 +103,7 @@ export function usePageDrag({
     // Bumped by every gesture that takes the grid, so a reorder resolving late
     // cannot clear a drag that started after it.
     let release = 0
+    let settling = false
     // A pointer reports faster than the display refreshes, and every report
     // re-renders a grid that can hold hundreds of cells. Hold the latest
     // position and settle it once a frame: the drop still reads the pointer's
@@ -111,6 +116,7 @@ export function usePageDrag({
       from: { x: number; y: number }
       grip: { x: number; y: number }
       cells: CellBox[]
+      layoutVersion: object
       /** Set once the threshold is passed; mirrors the `drag` state. */
       dragging: boolean
     } | null = null
@@ -162,6 +168,7 @@ export function usePageDrag({
       }
 
       setDrag({
+        layoutVersion: gesture.layoutVersion,
         cells: gesture.cells,
         gap: dropGapForPoint(point, gesture.cells, columnsRef.current),
         grip: gesture.grip,
@@ -173,6 +180,10 @@ export function usePageDrag({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
+      if (settling) {
+        return
+      }
+
       gesture = null
       release += 1
       cancelFrame()
@@ -234,6 +245,7 @@ export function usePageDrag({
       const pressed = paper.getBoundingClientRect()
 
       gesture = {
+        layoutVersion: layoutVersionRef.current,
         cells,
         dragging: false,
         from: { x: event.clientX, y: event.clientY },
@@ -283,7 +295,7 @@ export function usePageDrag({
       // still holding an older position has nothing left to say.
       cancelFrame()
 
-      if (!current.dragging) {
+      if (!current.dragging || current.layoutVersion !== layoutVersionRef.current) {
         setDrag(null)
         return
       }
@@ -301,6 +313,7 @@ export function usePageDrag({
       const gap = dropGapForPoint(point, current.cells, columnsRef.current)
 
       setDrag({
+        layoutVersion: current.layoutVersion,
         cells: current.cells,
         gap,
         grip: current.grip,
@@ -310,11 +323,13 @@ export function usePageDrag({
         released: true,
       })
 
-      // Only this release may clear what it put up: a press that starts a new
-      // gesture while the reorder is still in flight owns the grid from then on.
+      // Keep the landing layout until this operation settles. A new gesture
+      // must measure the committed grid, so presses wait for this release.
       const token = (release += 1)
+      settling = true
       const clear = () => {
         if (token === release) {
+          settling = false
           setDrag(null)
         }
       }
@@ -354,5 +369,8 @@ export function usePageDrag({
     [],
   )
 
-  return { drag, wasDragClick }
+  return {
+    drag: drag?.layoutVersion === layoutVersion ? drag : null,
+    wasDragClick,
+  }
 }

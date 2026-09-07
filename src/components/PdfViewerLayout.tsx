@@ -58,6 +58,8 @@ export type PageEditProps = {
       make-way layout until: the pages change only once the backend has moved
       them. */
   onReorderPages: (order: number[]) => void | Promise<unknown>
+  /** Stable across reorders, so painted canvases move with their pages. */
+  thumbnailKeys: number[]
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   selectedPages: ReadonlySet<number>
 }
@@ -394,10 +396,8 @@ function DragGhost({
  * in. Read straight from the drag, so the preview and the drop that follows it
  * are the same arithmetic.
  *
- * Letting go changes none of it. The pages have not moved yet — the backend
- * has still to be asked — so the way stays made and the hole stays open, held
- * for the pages the ghost was carrying, until the reorder lands and the grid
- * really holds what this was drawing.
+ * On release, the lifted pages fill their slots immediately using the canvases
+ * already painted. This layout lasts until the backend commits the page list.
  */
 function dropPreview(
   drag: PageDragState,
@@ -408,11 +408,11 @@ function dropPreview(
   offsets: Map<number, { x: number; y: number }>
 } {
   const order = orderAfterMove(drag.pages, drag.gap, pageCount)
-  const lifted = new Set(drag.pages)
+  const lifted = new Set(drag.released ? [] : drag.pages)
 
   return {
     // The block keeps its order, so its first page is where it starts.
-    landing: drag.cells[order.indexOf(drag.pages[0]!)],
+    landing: drag.released ? undefined : drag.cells[order.indexOf(drag.pages[0]!)],
     lifted,
     offsets: slotOffsets(order, drag.cells, lifted),
   }
@@ -447,6 +447,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
   pageHeight,
   pageNumber,
   pageWidth,
+  released,
   renderEpoch,
   rotation,
   selectedCount,
@@ -478,6 +479,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  released: boolean
   renderEpoch: number
   rotation: number
   selectedCount: number
@@ -501,12 +503,9 @@ const ThumbnailCell = memo(function ThumbnailCell({
         // band beside a short page has to keep naming its position for a file
         // dragged across the grid.
         "relative flex flex-col justify-center",
-        // Only while a drag runs. It outlives the pointer by the reorder's own
-        // round trip, so the transform and the transition that carries it both
-        // go in the very commit that reorders the pages: that commit is the
-        // no-op it looks like, not a slide back out of a place the page by then
-        // really holds.
-        dragging && "transition-transform duration-200 ease-out",
+        // Letting go places every canvas immediately; committing the page list
+        // then moves the same DOM nodes and removes these offsets together.
+        dragging && !released && "transition-transform duration-200 ease-out",
         // The ghost carries this page; the grid it left has to read as one page
         // short, not as a page sitting under its own ghost.
         lifted && "opacity-0",
@@ -589,6 +588,7 @@ function ThumbnailLayout({
     active: true,
     columns,
     gridRef,
+    layoutVersion: pages,
     onReorder: pageEdit.onReorderPages,
     pageCount: pages.length,
     selectedPages: pageEdit.selectedPages,
@@ -690,7 +690,7 @@ function ThumbnailLayout({
             insertActive={fileDropIndex === pageNumber}
             isCurrent={currentPage === pageNumber}
             isSelected={isSelected}
-            key={`${documentId}-${pageNumber}`}
+            key={`${documentId}-${pageEdit.thumbnailKeys[index]}`}
             lifted={preview?.lifted.has(pageNumber) ?? false}
             offsetX={offset?.x ?? 0}
             offsetY={offset?.y ?? 0}
@@ -701,6 +701,7 @@ function ThumbnailLayout({
             pageHeight={page.height}
             pageNumber={pageNumber}
             pageWidth={page.width}
+            released={drag?.released ?? false}
             renderEpoch={renderEpochs[pageNumber] ?? 0}
             rotation={rotationForPage(rotations, pageNumber)}
             // Only a page the delete would actually take the selection with

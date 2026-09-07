@@ -416,27 +416,61 @@ describe("TFolio page editing", () => {
     await waitForThumb(2, second!)
   })
 
-  it("drags pages into a new order and undoes it", async () => {
+  it("moves painted thumbnails on drop and undo without waiting for new bitmaps", async () => {
     await openPdfFromDisk("reorder.pdf", bandedPdf(4))
     const [first, second, third, fourth] = await paintedFingerprints(4)
 
-    // Page 1 dropped before page 3: [2, 1, 3, 4].
-    await dragThumbToGap(1, 3)
-    await waitForThumb(1, second!)
-    await waitForThumb(2, first!)
+    // Hold decoding, not the PDF mutation: the committed grid must carry its
+    // existing canvases into place even when no replacement bitmap can paint.
+    await browser.execute(() => {
+      const decode = window.createImageBitmap.bind(window)
+      let resume!: () => void
+      const held = new Promise<void>((resolve) => { resume = resolve })
 
-    await $("button[aria-label='Undo']").click()
-    await waitForThumb(1, first!)
-    await waitForThumb(2, second!)
+      window.createImageBitmap = (async (...args: Parameters<typeof decode>) => {
+        await held
+        return decode(...args)
+      }) as typeof window.createImageBitmap
 
-    // A shift-selected pair drags as one block, to past the end: [3, 4, 1, 2].
-    await clickThumb(1)
-    await clickThumb(2, { shift: true })
-    await dragThumbToGap(1, 4, true)
-    await waitForThumb(1, third!)
-    await waitForThumb(2, fourth!)
-    await waitForThumb(3, first!)
-    await waitForThumb(4, second!)
+      document.addEventListener("resume-thumbnail-decoding", () => {
+        window.createImageBitmap = decode
+        resume()
+      }, { once: true })
+    })
+
+    try {
+      // Page 1 dropped before page 3: [2, 1, 3, 4].
+      await dragThumbToGap(1, 3)
+      await waitForThumb(1, second!)
+      await waitForThumb(2, first!)
+
+      await $("button[aria-label='Undo']").click()
+      await waitForThumb(1, first!)
+      await waitForThumb(2, second!)
+
+      await $("button[aria-label='Redo']").click()
+      await waitForThumb(1, second!)
+      await waitForThumb(2, first!)
+      await $("button[aria-label='Undo']").click()
+      await waitForThumb(1, first!)
+
+      // A shift-selected pair drags as one block, past the end: [3, 4, 1, 2].
+      await clickThumb(1)
+      await clickThumb(2, { shift: true })
+      await dragThumbToGap(1, 4, true)
+      await waitForThumb(1, third!)
+      await waitForThumb(2, fourth!)
+      await waitForThumb(3, first!)
+      await waitForThumb(4, second!)
+      expect(await browser.execute(() =>
+        Array.from(document.querySelectorAll("[data-page-cell]"),
+          (cell) => getComputedStyle(cell).opacity),
+      )).toEqual(["1", "1", "1", "1"])
+    } finally {
+      await browser.execute(() => {
+        document.dispatchEvent(new Event("resume-thumbnail-decoding"))
+      })
+    }
   })
 
   it("double-click still leaves the grid for the page itself", async () => {

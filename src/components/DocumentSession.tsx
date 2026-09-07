@@ -197,6 +197,12 @@ function DocumentSession(
   const { t } = useTranslation()
   const macOS = isMacOS()
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo>(openedDocument)
+  // Thumbnail canvases follow their pages through a reorder, including undo.
+  // Other structure edits keep the existing position-based invalidation.
+  const [thumbnailIdentity, setThumbnailIdentity] = useState(() => ({
+    keys: openedDocument.pages.map((_, index) => index),
+    nextKey: openedDocument.numPages,
+  }))
   // Whether any page another file brought in is still here, which — like a
   // watermark — leaves the document export-only. The backend answers it with
   // every structure update, so this never has to be replayed from history: a
@@ -398,7 +404,7 @@ function DocumentSession(
     // number, so the metadata is replaced wholesale and every position-derived
     // state — the current page, the selection — is brought back into range.
     onStructureChange: useCallback(
-      (documentId: number, update: PdfStructureUpdate) => {
+      (documentId: number, update: PdfStructureUpdate, order?: number[]) => {
         const current = documentRef.current
 
         if (!current || current.id !== documentId) {
@@ -414,6 +420,14 @@ function DocumentSession(
 
         documentRef.current = next
         setPdfDocument(next)
+        setThumbnailIdentity(({ keys, nextKey }) =>
+          order
+            ? { keys: order.map((page) => keys[page - 1]!), nextKey }
+            : {
+                keys: update.pages.map((_, index) => keys[index] ?? nextKey + index),
+                nextKey: nextKey + update.numPages,
+              },
+        )
         setHasMergedPages(update.hasMergedPages)
         setCurrentPage((page) =>
           Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
@@ -1845,6 +1859,7 @@ function DocumentSession(
                 onReorderPages: reorderPages,
                 onSelectPage: selectThumbnailPage,
                 selectedPages: thumbnailSelection.selectedPages,
+                thumbnailKeys: thumbnailIdentity.keys,
               }}
               pages={pdfDocument.pages}
               referencePageWidth={zoom.referencePageWidth}
