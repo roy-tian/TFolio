@@ -5,11 +5,12 @@ use std::{
 
 use tauri::{
     ipc::{Channel, InvokeBody, Request, Response},
-    AppHandle, State,
+    AppHandle, State, WebviewWindow,
 };
 use tauri_plugin_dialog::DialogExt;
 
 use crate::recent::RecentFiles;
+use crate::windows::{record_document, DocumentOwners};
 
 use super::engine::OperationTarget;
 use super::font::{download_fallback_font, fallback_font_destination};
@@ -68,6 +69,8 @@ fn channel_progress(on_progress: Channel<PdfProgress>) -> impl FnMut(usize, usiz
 pub async fn open_pdf(
     request: Request<'_>,
     state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
 ) -> Result<PdfDocumentInfo, String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("open_pdf requires a raw PDF byte payload".into());
@@ -80,18 +83,30 @@ pub async fn open_pdf(
     let bytes = bytes.clone();
     let engine = Arc::clone(&state.0);
 
-    tauri::async_runtime::spawn_blocking(move || engine.open(bytes))
+    let document = tauri::async_runtime::spawn_blocking(move || engine.open(bytes))
         .await
-        .map_err(|error| format!("PDFium open task failed: {error}"))?
+        .map_err(|error| format!("PDFium open task failed: {error}"))??;
+
+    record_document(&owners, &window, document.id, None);
+
+    Ok(document)
 }
 
 #[tauri::command]
-pub async fn create_pdf(state: State<'_, PdfiumState>) -> Result<PdfDocumentInfo, String> {
+pub async fn create_pdf(
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfDocumentInfo, String> {
     let engine = Arc::clone(&state.0);
 
-    tauri::async_runtime::spawn_blocking(move || engine.create_blank())
+    let document = tauri::async_runtime::spawn_blocking(move || engine.create_blank())
         .await
-        .map_err(|error| format!("PDFium create task failed: {error}"))?
+        .map_err(|error| format!("PDFium create task failed: {error}"))??;
+
+    record_document(&owners, &window, document.id, None);
+
+    Ok(document)
 }
 
 #[tauri::command]
@@ -476,27 +491,33 @@ pub async fn open_pdf_from_path(
     path: String,
     state: State<'_, PdfiumState>,
     recent: State<'_, RecentFiles>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
 ) -> Result<PdfDocumentInfo, String> {
     let engine = Arc::clone(&state.0);
     let recent = recent.inner().clone();
+    let path = PathBuf::from(path);
+    let opened = path.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-
+    let document = tauri::async_runtime::spawn_blocking(move || {
         // Opening a path binds it as the file `save_pdf` will overwrite, which
         // is why an unapproved one is refused — see `ensure_approved`.
         #[cfg(not(feature = "e2e"))]
-        ensure_approved(&engine, &path)?;
+        ensure_approved(&engine, &opened)?;
 
-        let document = engine.open_from_path(path.clone())?;
+        let document = engine.open_from_path(opened.clone())?;
         // Recorded only once the file actually opened, so the list the next
         // run approves holds nothing this one could not open itself.
-        recent.record(&path);
+        recent.record(&opened);
 
-        Ok(document)
+        Ok::<_, String>(document)
     })
     .await
-    .map_err(|error| format!("PDFium open task failed: {error}"))?
+    .map_err(|error| format!("PDFium open task failed: {error}"))??;
+
+    record_document(&owners, &window, document.id, Some(path));
+
+    Ok(document)
 }
 
 #[tauri::command]
@@ -600,10 +621,12 @@ pub async fn merge_pdf_files(
     bookmarks: MergeBookmarks,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&state.0);
 
-    tauri::async_runtime::spawn_blocking(move || {
+    let merged = tauri::async_runtime::spawn_blocking(move || {
         let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
 
         // The same approval a fresh open needs, for the same reason a merge into
@@ -621,7 +644,13 @@ pub async fn merge_pdf_files(
         )
     })
     .await
-    .map_err(|error| format!("PDFium merge task failed: {error}"))?
+    .map_err(|error| format!("PDFium merge task failed: {error}"))??;
+
+    if let Some(document) = &merged {
+        record_document(&owners, &window, document.id, None);
+    }
+
+    Ok(merged)
 }
 
 #[tauri::command]
@@ -660,13 +689,14 @@ pub async fn export_pdf(
     filter_label: String,
     app: AppHandle,
     state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
 ) -> Result<Option<ExportOutcome>, String> {
     let engine = Arc::clone(&state.0);
 
     // `blocking_save_file` parks this thread on the dialog until the reader
     // answers, which would deadlock the main thread; in `spawn_blocking` it is
     // fine, and the document lock is not taken until they have chosen.
-    tauri::async_runtime::spawn_blocking(move || {
+    let exported = tauri::async_runtime::spawn_blocking(move || {
         let Some(picked) = app
             .dialog()
             .file()
@@ -683,22 +713,31 @@ pub async fn export_pdf(
         engine.export_to(document_id, &path).map(Some)
     })
     .await
-    .map_err(|error| format!("PDFium export task failed: {error}"))?
+    .map_err(|error| format!("PDFium export task failed: {error}"))??;
+
+    if let Some(outcome) = &exported {
+        if outcome.saved_to_source {
+            owners.adopt_path(document_id, PathBuf::from(&outcome.path));
+        }
+    }
+
+    Ok(exported)
 }
 
 // Async like every other command, although the close itself is a map removal:
 // it takes the documents lock, and a sync command runs on the main thread —
 // which would freeze the UI for as long as a save in flight holds that lock.
 #[tauri::command]
-pub async fn close_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result<(), String> {
+pub async fn close_pdf(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+) -> Result<(), String> {
     let engine = Arc::clone(&state.0);
 
-    // A document the reader has closed has no work worth finishing: without
-    // this the close — and everything queued behind it, an open of the next
-    // file included — would wait out a whole rebuild of a document that is no
-    // longer on screen.
-    engine.cancel_operation(OperationTarget::Document(document_id));
-    engine.cancel_operation(OperationTarget::Search(document_id));
+    engine.cancel_document_work(document_id);
+    // Release ownership before waiting for PDFium so a closed tab does not block reopening.
+    owners.release(document_id);
 
     tauri::async_runtime::spawn_blocking(move || engine.close(document_id))
         .await

@@ -33,6 +33,8 @@ const en = {
     title: "Menu",
     new: "New…",
     newFailed: "A new PDF could not be created.",
+    newWindow: "New window",
+    newWindowFailed: "A new window could not be opened.",
     untitled: "Untitled.pdf",
     openFile: "Open…",
     openRecent: "Open recent",

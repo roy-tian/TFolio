@@ -3,6 +3,7 @@ mod pdfium;
 mod recent;
 mod settings;
 mod store;
+mod windows;
 
 use launch::{take_launch_pdfs, LaunchQueue};
 use pdfium::{
@@ -18,6 +19,7 @@ use pdfium::{
 use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
 use tauri::Manager;
+use windows::{focus_pdf_path, open_new_window, AppWindows, DocumentOwners};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -38,17 +40,16 @@ pub fn run() {
     let builder = {
         let single_instance =
             tauri_plugin_single_instance::Builder::new().callback(|app, argv, cwd| {
-                launch::queue_open(
+                let target = launch::queue_open(
                     app,
                     launch::pdf_paths_from_args(
                         argv.into_iter().skip(1),
                         std::path::Path::new(&cwd),
                     ),
-                );
+                )
+                .or_else(|| windows::focus_target(app));
 
-                // The reader double-clicked a file, so the window it is going
-                // to open in is the one that has to be in front of them.
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = target {
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
@@ -86,22 +87,37 @@ pub fn run() {
             app.manage(recent);
             app.manage(settings::load(app.handle()));
             app.manage(LaunchQueue::default());
+            app.manage(AppWindows::default());
+            app.manage(DocumentOwners::default());
             // The file a double-click in the file manager launched this run
             // for. It waits here for the workspace, which takes it as soon as
             // there is one to open it in.
             launch::queue_open(app.handle(), launch::pdf_paths_from_this_launch());
             Ok(())
         })
+        // Reloading replaces the page without destroying its window, leaving its documents unreachable.
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                windows::release_window(webview.app_handle(), webview.label());
+            }
+        })
         // Recorded on the Rust side of the boundary, because this is the only
         // place a drop's paths exist before the WebView has touched them:
         // `open_pdf_from_path` only acts on paths approved here or by the
         // dialog in `pick_pdf_path`.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                 if let Some(state) = window.try_state::<PdfiumState>() {
                     state.approve_paths(paths.iter());
                 }
             }
+            tauri::WindowEvent::Focused(true) => {
+                windows::remember_focus(window.app_handle(), window.label())
+            }
+            tauri::WindowEvent::Destroyed => {
+                windows::window_gone(window.app_handle(), window.label())
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             create_pdf,
@@ -135,6 +151,8 @@ pub fn run() {
             settings,
             set_settings,
             take_launch_pdfs,
+            open_new_window,
+            focus_pdf_path,
             reorder_pdf_pages,
             delete_pdf_pages,
             restore_pdf_pages,
@@ -149,14 +167,13 @@ pub fn run() {
         // Built and run in two steps for the one event below, which no builder
         // hook reports.
         .run(|_app, _event| {
-            // macOS names a document to the app it is already running rather
-            // than launching a second one, so this is where every double-click
-            // after the first arrives — and the first one too, since Finder
-            // sends the file once the app is up rather than on its command
-            // line.
+            // Finder activates the app, which may raise a different window or leave the target minimized.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
-                launch::queue_open(_app, launch::pdf_paths_from_urls(&urls));
+                if let Some(window) = launch::queue_open(_app, launch::pdf_paths_from_urls(&urls)) {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
             }
         });
 }

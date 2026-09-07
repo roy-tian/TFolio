@@ -13,62 +13,67 @@
 //! chosen, and no page code had a say in it.
 
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
-use crate::pdfium::PdfiumState;
+use crate::{pdfium::PdfiumState, windows::focus_target};
 
 /// Says a PDF the OS named is waiting. Carries nothing: the queue below is
 /// drained by a command, so the paths cross the boundary once, by one route.
 /// Spelled again in `App.tsx`, which listens for it.
 pub const OPEN_REQUESTED_EVENT: &str = "launch://open-requested";
 
-/// The paths the OS has named and the workspace has yet to take.
-///
-/// A queue rather than a single path: `%F` puts every file the reader selected
-/// on one command line, and a second double-click can land while the first
-/// file is still opening.
+/// `%F` may supply several files; `None` holds launches before any window exists.
 #[derive(Default)]
-pub struct LaunchQueue(Mutex<Vec<PathBuf>>);
+pub struct LaunchQueue(Mutex<HashMap<Option<String>, Vec<PathBuf>>>);
 
 impl LaunchQueue {
-    fn extend(&self, paths: Vec<PathBuf>) {
+    fn extend(&self, window: Option<String>, paths: Vec<PathBuf>) {
         if let Ok(mut queued) = self.0.lock() {
-            queued.extend(paths);
+            queued.entry(window).or_default().extend(paths);
         }
     }
 
-    fn take(&self) -> Vec<PathBuf> {
-        self.0
-            .lock()
-            .map(|mut queued| std::mem::take(&mut *queued))
-            .unwrap_or_default()
+    fn take(&self, window: &str) -> Vec<PathBuf> {
+        let Ok(mut queued) = self.0.lock() else {
+            return Vec::new();
+        };
+
+        let mut taken = queued.remove(&None).unwrap_or_default();
+        taken.extend(queued.remove(&Some(window.to_string())).unwrap_or_default());
+
+        taken
     }
 }
 
-/// Approves `paths`, parks them, and tells a workspace that may already be up.
-///
-/// Silent when either state is missing: `setup` manages both before the event
-/// loop runs, so it cannot happen — and an OS event is no place to panic if it
-/// ever did.
-pub fn queue_open(app: &AppHandle, paths: Vec<PathBuf>) {
+/// Return the queued target so a focus change cannot make the caller raise another window.
+pub fn queue_open(app: &AppHandle, paths: Vec<PathBuf>) -> Option<WebviewWindow> {
     if paths.is_empty() {
-        return;
+        return None;
     }
 
     let (Some(pdfium), Some(queue)) = (
         app.try_state::<PdfiumState>(),
         app.try_state::<LaunchQueue>(),
     ) else {
-        return;
+        return None;
     };
 
     pdfium.approve_paths(paths.iter());
-    queue.extend(paths);
-    let _ = app.emit(OPEN_REQUESTED_EVENT, ());
+
+    let target = focus_target(app);
+    let label = target.as_ref().map(|window| window.label().to_string());
+    queue.extend(label.clone(), paths);
+
+    if let Some(label) = label {
+        let _ = app.emit_to(label.as_str(), OPEN_REQUESTED_EVENT, ());
+    }
+
+    target
 }
 
 /// The PDFs named among one launch's arguments — the program's own name
@@ -135,13 +140,13 @@ fn is_pdf_file(path: &Path) -> bool {
     crate::recent::is_recordable(path) && path.is_file()
 }
 
-/// The PDFs the OS has asked this run to open and the workspace has not taken
-/// yet. Draining, not reading: each path opens once, however many times a page
-/// asks.
 #[tauri::command]
-pub async fn take_launch_pdfs(state: State<'_, LaunchQueue>) -> Result<Vec<String>, String> {
+pub async fn take_launch_pdfs(
+    state: State<'_, LaunchQueue>,
+    window: WebviewWindow,
+) -> Result<Vec<String>, String> {
     Ok(state
-        .take()
+        .take(window.label())
         .into_iter()
         .map(|path| path.to_string_lossy().into_owned())
         .collect())
@@ -253,16 +258,41 @@ mod tests {
     #[test]
     fn drains_the_queue_once() {
         let queue = LaunchQueue::default();
-        queue.extend(vec![PathBuf::from("/tmp/first.pdf")]);
-        queue.extend(vec![PathBuf::from("/tmp/second.pdf")]);
+        queue.extend(Some("main".into()), vec![PathBuf::from("/tmp/first.pdf")]);
+        queue.extend(Some("main".into()), vec![PathBuf::from("/tmp/second.pdf")]);
 
         assert_eq!(
-            queue.take(),
+            queue.take("main"),
             vec![
                 PathBuf::from("/tmp/first.pdf"),
                 PathBuf::from("/tmp/second.pdf")
             ]
         );
-        assert!(queue.take().is_empty());
+        assert!(queue.take("main").is_empty());
+    }
+
+    #[test]
+    fn hands_each_window_only_what_was_queued_for_it() {
+        let queue = LaunchQueue::default();
+        queue.extend(Some("main".into()), vec![PathBuf::from("/tmp/first.pdf")]);
+        queue.extend(
+            Some("window-2".into()),
+            vec![PathBuf::from("/tmp/second.pdf")],
+        );
+
+        assert_eq!(
+            queue.take("window-2"),
+            vec![PathBuf::from("/tmp/second.pdf")]
+        );
+        assert_eq!(queue.take("main"), vec![PathBuf::from("/tmp/first.pdf")]);
+    }
+
+    #[test]
+    fn gives_what_arrived_before_any_window_to_the_first_asker() {
+        let queue = LaunchQueue::default();
+        queue.extend(None, vec![PathBuf::from("/tmp/launched.pdf")]);
+
+        assert_eq!(queue.take("main"), vec![PathBuf::from("/tmp/launched.pdf")]);
+        assert!(queue.take("window-2").is_empty());
     }
 }

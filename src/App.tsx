@@ -88,6 +88,7 @@ type WorkspaceError =
   | "createFailed"
   | "fileTooLarge"
   | "invalidFile"
+  | "newWindowFailed"
   | "openFailed"
   | null
 type PendingClose =
@@ -99,6 +100,8 @@ type PendingClose =
     double-click on a file TFolio is the handler for. Named in both places, so
     the two have to be changed together. */
 const OPEN_REQUESTED_EVENT = "launch://open-requested"
+
+const FOCUS_DOCUMENT_EVENT = "workspace://focus-document"
 
 function hasUsableFocus() {
   const focused = document.activeElement
@@ -240,6 +243,16 @@ export default function App() {
             continue
           }
 
+          // Independent edit histories over the same file would overwrite each other on save.
+          const heldElsewhere = await invoke<boolean>("focus_pdf_path", {
+            path,
+          }).catch(() => false)
+
+          if (heldElsewhere) {
+            dismissWorkspaceError()
+            continue
+          }
+
           try {
             const override = e2eOverride("openPdfFromPath")
             const document = override
@@ -361,6 +374,12 @@ export default function App() {
       t,
     ],
   )
+
+  const openNewWindow = useCallback(() => {
+    void invoke("open_new_window").catch(() =>
+      showWorkspaceError("newWindowFailed"),
+    )
+  }, [showWorkspaceError])
 
   // A merged document is the app's own, like a new one: it has no file behind
   // it, so it lives in the workspace until an export gives it one — which is
@@ -571,6 +590,7 @@ export default function App() {
       onCloseAll: requestCloseAll,
       onMergeWizard: mergeWizard.openWizard,
       onNew: () => void createDocument(),
+      onNewWindow: openNewWindow,
       onOpen: () => void chooseFile(),
       onOpenRecent: (path) => void openPaths([path]),
       onRefreshRecent: refreshRecentFiles,
@@ -580,6 +600,7 @@ export default function App() {
       chooseFile,
       createDocument,
       mergeWizard.openWizard,
+      openNewWindow,
       openPaths,
       recentFiles,
       refreshRecentFiles,
@@ -636,6 +657,28 @@ export default function App() {
 
     return () => document.removeEventListener("keydown", openDocumentSearch)
   }, [])
+
+  useEffect(() => {
+    const openAnotherWindow = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        event.altKey ||
+        !event.shiftKey ||
+        !(macOS ? event.metaKey : event.ctrlKey) ||
+        event.key.toLowerCase() !== "n"
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      openNewWindow()
+    }
+
+    document.addEventListener("keydown", openAnotherWindow)
+
+    return () => document.removeEventListener("keydown", openAnotherWindow)
+  }, [macOS, openNewWindow])
 
   // Nothing here is dragged with the browser's own drag and drop — the
   // thumbnail grid reorders from pointer events — so a drag starting inside the
@@ -792,6 +835,26 @@ export default function App() {
   }, [openPaths])
 
   useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    void listen<number>(FOCUS_DOCUMENT_EVENT, (event) =>
+      activateTab(event.payload),
+    ).then((stop) => {
+      if (cancelled) {
+        stop()
+      } else {
+        unlisten = stop
+      }
+    })
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [activateTab])
+
+  useEffect(() => {
     if (isE2eBuild) {
       return
     }
@@ -855,9 +918,11 @@ export default function App() {
         ? t("viewer.fileTooLarge")
         : workspaceError === "invalidFile"
           ? t("viewer.invalidFile")
-          : workspaceError === "openFailed"
-            ? t("viewer.openFailed")
-            : null
+          : workspaceError === "newWindowFailed"
+            ? t("menu.newWindowFailed")
+            : workspaceError === "openFailed"
+              ? t("viewer.openFailed")
+              : null
 
   return (
     <div className="h-svh overflow-hidden bg-background">

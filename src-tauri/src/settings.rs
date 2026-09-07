@@ -15,7 +15,7 @@
 //! file is the reader's to edit.
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use crate::{
     pdfium::{PageNumbersPreferences, WatermarkConfig},
@@ -26,6 +26,8 @@ use crate::{
 /// once into `settings.toml` and deleted, so the reader keeps the style they
 /// set and the directory keeps one file.
 const REPLACED_FILE_NAME: &str = "preferences.json";
+
+pub const SETTINGS_CHANGED_EVENT: &str = "settings://changed";
 
 /// Every setting is optional, so a version that did not write one — or a reader
 /// who deleted it by hand — leaves the frontend on its own defaults rather than
@@ -191,11 +193,21 @@ pub async fn settings(store: State<'_, Store<Settings>>) -> Result<Settings, Str
 #[tauri::command]
 pub async fn set_settings(
     settings: serde_json::Value,
+    app: AppHandle,
+    window: WebviewWindow,
     store: State<'_, Store<Settings>>,
 ) -> Result<(), String> {
     let sent = Settings::sent(&settings);
+    let written = sent.clone();
 
     store.write(|stored| *stored = sent);
+
+    // Other windows write whole snapshots; a stale copy would overwrite these changes.
+    for label in app.webview_windows().into_keys() {
+        if label != window.label() {
+            let _ = app.emit_to(label.as_str(), SETTINGS_CHANGED_EVENT, &written);
+        }
+    }
 
     Ok(())
 }

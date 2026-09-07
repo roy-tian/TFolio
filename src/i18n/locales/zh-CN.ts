@@ -40,6 +40,8 @@ const zhCN = {
     title: "菜单",
     new: "新建…",
     newFailed: "无法新建 PDF。",
+    newWindow: "新建窗口",
+    newWindowFailed: "无法打开新窗口。",
     untitled: "未命名.pdf",
     openFile: "打开…",
     openRecent: "打开最近文件",

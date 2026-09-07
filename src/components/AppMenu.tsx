@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
+  AppWindow,
   FilePlus2,
   FolderOpen,
   History,
@@ -45,6 +46,7 @@ export type AppMenuActions = {
       (`MergeWizardButton`), and this bag is how it reaches every header. */
   onMergeWizard: () => void
   onNew: () => void
+  onNewWindow: () => void
   onOpen: () => void
   onOpenRecent: (path: string) => void
   /** Read the recent list again as the menu opens: it is the backend's, and a
@@ -73,6 +75,7 @@ export function AppMenu({
   canSave = false,
   onCloseAll,
   onNew,
+  onNewWindow,
   onOpen,
   onOpenRecent,
   onRefreshRecent,
@@ -119,6 +122,10 @@ export function AppMenu({
             <DropdownMenuItem data-action="new" onClick={onNew}>
               <FilePlus2 />
               {t("menu.new")}
+            </DropdownMenuItem>
+            <DropdownMenuItem data-action="new-window" onClick={onNewWindow}>
+              <AppWindow />
+              {t("menu.newWindow")}
             </DropdownMenuItem>
             <DropdownMenuItem data-action="open" onClick={onOpen}>
               <FolderOpen />

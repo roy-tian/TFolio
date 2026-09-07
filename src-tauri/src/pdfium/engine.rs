@@ -770,6 +770,16 @@ impl PdfiumState {
     pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
         self.0.approve_paths(paths);
     }
+
+    /// Closing takes the PDFium lock, so it must not block the window event loop.
+    pub fn close_document_detached(&self, document_id: u64) {
+        let engine = Arc::clone(&self.0);
+        engine.cancel_document_work(document_id);
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = engine.close(document_id);
+        });
+    }
 }
 
 impl PdfiumEngine {
@@ -844,6 +854,12 @@ impl PdfiumEngine {
         }
 
         asked
+    }
+
+    /// Cancel first so closing a document does not wait for its entire rebuild.
+    pub(super) fn cancel_document_work(&self, document_id: u64) {
+        self.cancel_operation(OperationTarget::Document(document_id));
+        self.cancel_operation(OperationTarget::Search(document_id));
     }
 
     /// A new one-page A4 document, built in memory. It has no file of its own,
