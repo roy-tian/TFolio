@@ -51,8 +51,9 @@ type IndexedSearchMatch = {
 type PdfPageProps = {
   activeSearchIndex: number | null
   documentId: number
-  /** The rectangle being dragged out on this page, if any. */
-  draft?: RectDraft
+  /** Live and released rectangles awaiting this page's pixels. */
+  drafts: RectDraft[]
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   page: PdfPageInfo
   pageNumber: number
   /** Bumped when the page is drawn on, so the bitmap is fetched again. */
@@ -82,7 +83,8 @@ type PdfPageProps = {
 type PdfPageSurfaceProps = {
   activeSearchIndex: number | null
   documentId: number
-  draft?: RectDraft
+  drafts: RectDraft[]
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   footprintHeight: number
   footprintWidth: number
   page: PdfPageInfo
@@ -102,7 +104,8 @@ type PdfPageSurfaceProps = {
 function PdfPageSurface({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  onPagePaint,
   footprintHeight,
   footprintWidth,
   page,
@@ -127,6 +130,7 @@ function PdfPageSurface({
     maxRenderWidth: MAX_RENDER_WIDTH,
     mimeType: "image/png",
     minOutputScale: MIN_PAGE_OUTPUT_SCALE,
+    onPaint: onPagePaint,
     pageHeight: page.height,
     pageNumber,
     pageWidth: page.width,
@@ -285,15 +289,16 @@ function PdfPageSurface({
           </span>
         </div>
       ) : null}
-      {draft ? (
+      {drafts.map((draft) => (
         <RectDraftOverlay
           draft={draft}
+          key={draft.id}
           pageWidth={page.width}
           rotation={rotation}
           sourceCanvasRef={canvasRef}
           sourceRevision={bitmapRevision}
         />
-      ) : null}
+      ))}
     </>
   )
 }
@@ -301,7 +306,8 @@ function PdfPageSurface({
 export function PdfPage({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  onPagePaint,
   page,
   pageNumber,
   renderEpoch,
@@ -349,7 +355,8 @@ export function PdfPage({
         <PdfPageSurface
           activeSearchIndex={activeSearchIndex}
           documentId={documentId}
-          draft={draft}
+          drafts={drafts}
+          onPagePaint={onPagePaint}
           footprintHeight={footprintHeight}
           footprintWidth={footprintWidth}
           page={page}

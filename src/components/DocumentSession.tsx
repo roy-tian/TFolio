@@ -462,7 +462,7 @@ function DocumentSession(
   })
 
   const drawingRect = drawingApplies && activeTool === "rect"
-  const rectDraft = useRectTool({
+  const rectTool = useRectTool({
     active: active && drawingRect,
     onCommit: annotations.commit,
     pages: pdfDocument?.pages ?? [],
@@ -1832,7 +1832,8 @@ function DocumentSession(
             <PdfViewerLayout
               currentPage={currentPage}
               documentId={pdfDocument.id}
-              draft={rectDraft ?? undefined}
+              drafts={rectTool.drafts}
+              onPagePaint={rectTool.onPagePaint}
               fileName={fileName}
               key={pdfDocument.id}
               pageEdit={{

@@ -74,8 +74,9 @@ type LayoutProps = {
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
-  /** The rectangle being dragged out, on whichever page it started. */
-  draft?: RectDraft
+  /** Live and released rectangle previews, each tied to its starting page. */
+  drafts: RectDraft[]
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   pages: PdfPageInfo[]
   /** The document's usual page width at 100%, for a layout sharing one column. */
   referencePageWidth: number
@@ -97,7 +98,8 @@ type LayoutProps = {
 function SingleLayout({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  onPagePaint,
   pages,
   renderEpochs,
   renderScale,
@@ -111,7 +113,8 @@ function SingleLayout({
   return pages.map((page, index) => (
     <PdfPage
       documentId={documentId}
-      draft={draft?.pageNumber === index + 1 ? draft : undefined}
+      drafts={drafts.filter((draft) => draft.pageNumber === index + 1)}
+      onPagePaint={onPagePaint}
       key={`${documentId}-${index + 1}`}
       page={page}
       pageNumber={index + 1}
@@ -131,7 +134,8 @@ function SingleLayout({
 function BookLayout({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  onPagePaint,
   pages,
   referencePageWidth,
   renderEpochs,
@@ -161,7 +165,8 @@ function BookLayout({
       {row.map((pageNumber) => (
         <PdfPage
           documentId={documentId}
-          draft={draft?.pageNumber === pageNumber ? draft : undefined}
+          drafts={drafts.filter((draft) => draft.pageNumber === pageNumber)}
+          onPagePaint={onPagePaint}
           key={`${documentId}-${pageNumber}`}
           page={pages[pageNumber - 1]}
           pageNumber={pageNumber}
@@ -731,7 +736,8 @@ type PdfViewerLayoutProps = {
   activeSearchIndex: number | null
   currentPage: number
   documentId: number
-  draft?: RectDraft
+  drafts: RectDraft[]
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   fileName: string
   pageEdit: PageEditProps
   pages: PdfPageInfo[]
@@ -756,7 +762,8 @@ export function PdfViewerLayout({
   activeSearchIndex,
   currentPage,
   documentId,
-  draft,
+  drafts,
+  onPagePaint,
   fileName,
   pageEdit,
   pages,
@@ -777,7 +784,8 @@ export function PdfViewerLayout({
     activeSearchIndex,
     contentWidth,
     documentId,
-    draft,
+    drafts,
+    onPagePaint,
     pages,
     referencePageWidth,
     renderEpochs,

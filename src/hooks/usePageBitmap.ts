@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
 import { resolveOutputScale } from "@/lib/pdf"
@@ -15,6 +15,8 @@ type PageBitmapOptions = {
   mimeType: string
   /** Minimum backing pixels per CSS pixel; useful for low-DPI reading surfaces. */
   minOutputScale?: number
+  /** Runs in the same task as the canvas replacement, before browser paint. */
+  onPaint?: (pageNumber: number, renderEpoch: number) => void
   /** The page's displayed size in points. Taken apart rather than as a
       `PdfPageInfo` so a caller whose page list is replaced wholesale — every
       structure edit replaces it — hands this hook numbers that compare equal
@@ -46,6 +48,7 @@ export function usePageBitmap({
   maxRenderWidth,
   mimeType,
   minOutputScale = 1,
+  onPaint,
   pageHeight,
   pageNumber,
   pageWidth,
@@ -61,6 +64,10 @@ export function usePageBitmap({
   const [hasRendered, setHasRendered] = useState(false)
   const [renderFailed, setRenderFailed] = useState(false)
   const [bitmapRevision, setBitmapRevision] = useState(0)
+  const onPaintRef = useRef(onPaint)
+  useLayoutEffect(() => {
+    onPaintRef.current = onPaint
+  }, [onPaint])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -135,6 +142,7 @@ export function usePageBitmap({
       context.drawImage(bitmap, 0, 0)
       bitmap.close()
       lastRenderRef.current = { documentId, renderEpoch, renderWidth }
+      onPaintRef.current?.(pageNumber, renderEpoch)
       setHasRendered(true)
       setRenderFailed(false)
       setBitmapRevision((revision) => revision + 1)

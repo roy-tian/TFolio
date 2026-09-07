@@ -433,6 +433,8 @@ export function useAnnotations({
 }: UseAnnotationsOptions) {
   const [history, setHistory] = useState<AnnotationHistory>(emptyHistory)
   const [renderEpochs, setRenderEpochs] = useState<RenderEpochs>({})
+  // Commit receipts need the queue's exact epoch, before React renders it.
+  const renderEpochsRef = useRef<RenderEpochs>({})
   const [textEpochs, setTextEpochs] = useState<RenderEpochs>({})
   const [pending, setPending] = useState(0)
   // The synchronous counterpart to `pending`: guards cannot wait for React to
@@ -463,15 +465,14 @@ export function useAnnotations({
   const marksRef = useRef<MarkStore>(new Map())
 
   const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
-    setRenderEpochs((epochs) => {
-      const next = { ...epochs }
+    const next = { ...renderEpochsRef.current }
 
-      for (const pageNumber of pageNumbers) {
-        next[pageNumber] = (next[pageNumber] ?? 0) + 1
-      }
+    for (const pageNumber of pageNumbers) {
+      next[pageNumber] = (next[pageNumber] ?? 0) + 1
+    }
 
-      return next
-    })
+    renderEpochsRef.current = next
+    setRenderEpochs(next)
     if (textPages.length > 0) {
       setTextEpochs((epochs) => {
         const next = { ...epochs }
@@ -483,6 +484,7 @@ export function useAnnotations({
         return next
       })
     }
+    return next
   }, [])
 
   /**
@@ -513,6 +515,8 @@ export function useAnnotations({
             on, which a structure edit may have renumbered since the command
             that made it. Redrawn alongside `pages`. */
         touched?: () => number[]
+        /** Identifies the first bitmap request that includes this commit. */
+        onApplied?: (epochs: RenderEpochs) => void
       } | null,
       onFailure: (error: unknown) => void,
     ) => {
@@ -537,8 +541,9 @@ export function useAnnotations({
           return
         }
 
+        let happened = false
         try {
-          const happened = await step.work()
+          happened = await step.work()
 
           if (generation !== generationRef.current) {
             return
@@ -561,10 +566,13 @@ export function useAnnotations({
           // Whether or not the work succeeded: a command that failed partway
           // still changed the pages it reached.
           if (generation === generationRef.current) {
-            applyEpochs(
+            const epochs = applyEpochs(
               [...step.pages, ...(step.touched?.() ?? [])],
               step.textPages,
             )
+            if (happened) {
+              step.onApplied?.(epochs)
+            }
           }
         }
       })
@@ -578,9 +586,12 @@ export function useAnnotations({
   )
 
   const commitCommand = useCallback(
-    async (command: AnnotationCommand) => {
+    async (
+      command: AnnotationCommand,
+      onApplied?: (epochs: RenderEpochs) => void,
+    ) => {
       if (documentId === undefined) {
-        return
+        return false
       }
 
       // A drawing or note carries the page it was made on; a page-moving edit
@@ -588,11 +599,16 @@ export function useAnnotations({
       // wrong one. Dropped rather than misplaced — a rare gesture, one the
       // reader can simply repeat.
       if (structurePendingRef.current > 0) {
-        return
+        return false
       }
 
+      let applied = false
       await enqueue(
         (current) => ({
+          onApplied: (epochs) => {
+            applied = true
+            onApplied?.(epochs)
+          },
           next: commit(current, command),
           pages: commandPages(command),
           textPages: commandTextPages(command),
@@ -611,6 +627,7 @@ export function useAnnotations({
         }),
         (error) => onAnnotateError(error, command),
       )
+      return applied
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
@@ -1159,6 +1176,7 @@ export function useAnnotations({
     marksRef.current = new Map()
     setHistory(emptyHistory)
     setRenderEpochs({})
+    renderEpochsRef.current = {}
     setTextEpochs({})
   }, [])
 
