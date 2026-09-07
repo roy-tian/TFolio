@@ -13,6 +13,7 @@ Download the installer for your platform from the [Releases page](https://github
 **Reading**
 
 - Open PDFs by drag-and-drop, the file picker, or the recent-files list, with several documents open at once in tabs.
+- Make TFolio your PDF handler and a double-clicked file opens straight in it — in the window you already have open, as another tab.
 - Single page, book (two-page spread), and thumbnail views; zoom, fit to width or page, and rotate.
 - Page indicator with jump-to-page, plus a bookmark sidebar built from the document's own table of contents.
 - Select and copy text straight from the page.

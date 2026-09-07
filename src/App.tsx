@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { FileUp } from "lucide-react"
@@ -93,6 +94,11 @@ type PendingClose =
   | { kind: "all" }
   | { kind: "tab"; documentId: number }
   | { kind: "window" }
+
+/** What `launch.rs` says when the OS has a PDF for this window to open — a
+    double-click on a file TFolio is the handler for. Named in both places, so
+    the two have to be changed together. */
+const OPEN_REQUESTED_EVENT = "launch://open-requested"
 
 function hasUsableFocus() {
   const focused = document.activeElement
@@ -735,6 +741,55 @@ export default function App() {
       unlisten?.()
     }
   }, [dragToSession, openPaths])
+
+  // A PDF double-clicked in the file manager reaches the app before this
+  // workspace exists, so Rust holds it and hands it over here. Taking is what
+  // empties the queue, which is why the event carries no paths of its own: a
+  // second double-click, arriving once the window is already up, only says
+  // there is something to take.
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    const openWhatTheOsNamed = () =>
+      invoke<string[]>("take_launch_pdfs")
+        .then((paths) => {
+          // Not conditioned on `cancelled`: a take that already emptied the
+          // queue is the only chance these paths get, and `openPaths` guards
+          // its own unmounted case.
+          if (paths.length > 0) {
+            void openPaths(paths, "first")
+          }
+        })
+        .catch(() => undefined)
+
+    // Bound before the first take, so a file arriving between the two is
+    // announced to a listener that is already there rather than to nobody.
+    void listen(OPEN_REQUESTED_EVENT, () => void openWhatTheOsNamed()).then(
+      (stop) => {
+        if (cancelled) {
+          stop()
+          return
+        }
+
+        unlisten = stop
+        void openWhatTheOsNamed()
+      },
+      // A subscription that never bound leaves the queue full all the same,
+      // and taking it is the half that opens the file the reader launched
+      // this run for.
+      () => {
+        if (!cancelled) {
+          void openWhatTheOsNamed()
+        }
+      },
+    )
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [openPaths])
 
   useEffect(() => {
     if (isE2eBuild) {

@@ -1,8 +1,10 @@
+mod launch;
 mod pdfium;
 mod recent;
 mod settings;
 mod store;
 
+use launch::{take_launch_pdfs, LaunchQueue};
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
@@ -19,7 +21,51 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    let builder = tauri::Builder::default();
+
+    // Registered first, because a second instance's whole job is to hand over
+    // the file it was launched with and exit: anything set up ahead of that is
+    // work a process about to die did for nothing. Double-clicking a PDF while
+    // TFolio is open belongs in the window already showing the reader's other
+    // tabs — and two processes would keep two versions of one recent list.
+    //
+    // macOS needs none of it: Finder activates the running app and sends the
+    // file to it, which arrives below as `RunEvent::Opened`. Nor does the e2e
+    // build, which is the one binary that really is run again and again: a
+    // session outliving its spec would kill the next spec's app rather than
+    // its own.
+    #[cfg(all(not(feature = "e2e"), any(target_os = "linux", target_os = "windows")))]
+    let builder = {
+        let single_instance =
+            tauri_plugin_single_instance::Builder::new().callback(|app, argv, cwd| {
+                launch::queue_open(
+                    app,
+                    launch::pdf_paths_from_args(
+                        argv.into_iter().skip(1),
+                        std::path::Path::new(&cwd),
+                    ),
+                );
+
+                // The reader double-clicked a file, so the window it is going
+                // to open in is the one that has to be in front of them.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            });
+
+        // A name of its own for a build that is not the installed app.
+        // Otherwise `tauri dev`, started while an installed TFolio is open,
+        // hands its arguments to that copy and exits — no window, no message,
+        // and only when the other one happens to be running. Linux alone: the
+        // D-Bus name is the only one the plugin lets an app choose.
+        #[cfg(debug_assertions)]
+        let single_instance = single_instance.dbus_id("com.roytian.tfolio.dev");
+
+        builder.plugin(single_instance.build())
+    };
+
+    let builder = builder.plugin(tauri_plugin_dialog::init());
 
     #[cfg(feature = "e2e")]
     let builder = builder
@@ -39,6 +85,11 @@ pub fn run() {
             app.manage(pdfium);
             app.manage(recent);
             app.manage(settings::load(app.handle()));
+            app.manage(LaunchQueue::default());
+            // The file a double-click in the file manager launched this run
+            // for. It waits here for the workspace, which takes it as soon as
+            // there is one to open it in.
+            launch::queue_open(app.handle(), launch::pdf_paths_from_this_launch());
             Ok(())
         })
         // Recorded on the Rust side of the boundary, because this is the only
@@ -83,6 +134,7 @@ pub fn run() {
             cancel_pdf_merge,
             settings,
             set_settings,
+            take_launch_pdfs,
             reorder_pdf_pages,
             delete_pdf_pages,
             restore_pdf_pages,
@@ -92,6 +144,19 @@ pub fn run() {
             export_pdf,
             close_pdf
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running TFolio");
+        .build(tauri::generate_context!())
+        .expect("error while running TFolio")
+        // Built and run in two steps for the one event below, which no builder
+        // hook reports.
+        .run(|_app, _event| {
+            // macOS names a document to the app it is already running rather
+            // than launching a second one, so this is where every double-click
+            // after the first arrives — and the first one too, since Finder
+            // sends the file once the app is up rather than on its command
+            // line.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                launch::queue_open(_app, launch::pdf_paths_from_urls(&urls));
+            }
+        });
 }

@@ -1,0 +1,21 @@
+{{!-- Tauri's own template with one line changed: the `%F` on `Exec`, without
+which the spec says a launcher passes no file name — TFolio would be in the file
+manager's "open with" and would still start empty. `deb` and `rpm` both point
+here, and the AppImage takes the entry the deb built.
+
+A Handlebars comment rather than the entry format's own `#`, which would ship
+this note to every reader's /usr/share/applications. --}}
+[Desktop Entry]
+Categories={{categories}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} %F
+StartupWMClass={{exec}}
+Icon={{icon}}
+Name={{name}}
+Terminal=false
+Type=Application
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}

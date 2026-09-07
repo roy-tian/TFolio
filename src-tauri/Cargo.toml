@@ -47,6 +47,14 @@ tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 # not a dependency.
 toml = "1"
 
+# Where a file the reader double-clicked arrives, on the two platforms whose
+# answer to "open this with TFolio" is a second TFolio: it hands that process's
+# arguments to the one already running. macOS names the file to the running app
+# itself — `RunEvent::Opened`, no plugin — so it is left out there rather than
+# paying for zbus and a socket it would never use.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
 # pdfium-render 0.9.3 binds FPDF_MovePages but exposes no safe wrapper, and
 # same-document page reordering has no other route (rebuilding via
 # FPDF_ImportPages orphans outline destinations). The fork adds only

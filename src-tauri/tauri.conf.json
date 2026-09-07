@@ -40,6 +40,24 @@
       "icons/icon.ico"
     ],
     "copyright": "Copyright \u00a9 2026 Roy Tian",
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "name": "PDF",
+        "description": "PDF Document",
+        "mimeType": "application/pdf",
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/tfolio.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "linux/tfolio.desktop"
+      }
+    },
     "resources": {
       "resources/pdfium/": "pdfium/"
     }

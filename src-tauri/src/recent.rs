@@ -281,8 +281,9 @@ fn promote(entries: &mut Vec<PathBuf>, path: &Path) {
 
 /// The shape every recorded path has: absolute, and named as a PDF — the same
 /// two things the frontend's `isPdfPath` and the OS's own dialogs guarantee of
-/// what reaches `open_pdf_from_path`.
-fn is_recordable(path: &Path) -> bool {
+/// what reaches `open_pdf_from_path`. `launch.rs` holds the paths a launch
+/// names to this same test, so the one wording covers both.
+pub(crate) fn is_recordable(path: &Path) -> bool {
     path.is_absolute()
         && path
             .extension()

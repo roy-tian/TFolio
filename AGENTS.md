@@ -9,9 +9,11 @@ Tailwind v4, shadcn/ui, i18next), Rust backend rendering with a bundled PDFium.
 - `src/` — `components/ui/` (shadcn primitives), `hooks/`, `lib/` (framework-free
   logic, unit-tested), `i18n/locales/`.
 - `src-tauri/src/` — `pdfium/` (engine, commands, geometry, font, watermark,
-  page_numbers, outline, library), `store.rs`, `settings.rs`, `recent.rs`.
+  page_numbers, outline, library), `store.rs`, `settings.rs`, `recent.rs`,
+  `launch.rs`.
 - `src-tauri/tauri.conf.json` — config and CSP; `tauri.e2e.conf.json` overlays
-  the test-only build. `capabilities/` — Tauri permissions.
+  the test-only build. `capabilities/` — Tauri permissions;
+  `linux/tfolio.desktop` — the packaged desktop entry (see below).
 - `test/e2e/` — WebdriverIO specs; `scripts/` — asset download, version,
   preflight.
 - Tooling writes only under `artifacts/<tool>/` (`e2e/`, `run/`), so
@@ -94,11 +96,28 @@ binary decoded via `createImageBitmap`, never as a `blob:` source.
     only to the `source_path` recorded at open.
   - `open_pdf_from_path`, `insert_pdf_from_path`, `inspect_pdf_files`,
     `merge_pdf_files` accept only paths the OS produced in Rust's sight (drop
-    handler, `pick_pdf_path(s)`) — a path binds what a later save overwrites, and
-    reading one discloses its content. One check, `ensure_approved`, waived only
-    in the e2e build; `recent.rs` stores approved opens, re-approved at startup,
-    in a file of its own rather than in `settings.toml` — hand-editing the
-    settings must not become a way to name a file to open and save over.
+    handler, `pick_pdf_path(s)`, `launch.rs`) — a path binds what a later save
+    overwrites, and reading one discloses its content. One check,
+    `ensure_approved`, waived only in the e2e build; `recent.rs` stores approved
+    opens, re-approved at startup, in a file of its own rather than in
+    `settings.toml` — hand-editing the settings must not become a way to name a
+    file to open and save over.
+  - `take_launch_pdfs` hands over what `launch.rs` collected and nothing else:
+    the app is a registered PDF handler (`bundle.fileAssociations`), and a
+    double-click names the file to a *process* — arguments on Windows and Linux,
+    `RunEvent::Opened` on macOS — never to page code. It is approved on the same
+    ground a drop is, and drained rather than read, so each path opens once.
+    Linux needs `linux/tfolio.desktop` for it: Tauri's own template writes no
+    `%F`, and without a field code the launcher drops the file name. A second
+    double-click reaches the running window through `tauri-plugin-single-instance`
+    (not macOS, which has no second process; not the e2e build, whose binary is
+    launched again and again). On Linux that second path is a D-Bus endpoint on
+    the reader's own session bus, not an OS gesture — anything in that session
+    can name a path there, which is the same reach it already has through
+    `xdg-open`, and the reason `pdf_paths_from_args` insists on an absolute name:
+    a relative one would resolve against *this* process's directory. The GUI
+    suite cannot cover any of it — the harness owns the launch — so a change here
+    is checked by hand: build, then run the binary with a PDF path, twice.
   - `insert_pdf_from_path` validates its position in the engine, not the command,
     so the e2e build checks it too: an out-of-range index is refused, not clamped.
   - `cancel_pdf_operation` and `cancel_pdf_merge` are the two commands that must
