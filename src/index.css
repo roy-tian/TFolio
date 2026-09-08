@@ -142,17 +142,8 @@ body {
   }
 }
 
-/*
- * Selectable text layer overlaid on the rendered page image. Each span is
- * absolutely positioned in page-percentage units and sized with container
- * query units (cqh), so the layer stays aligned as the page scales with the
- * viewport. The text itself is transparent — only the native selection
- * highlight is visible over the rendered glyphs.
- *
- * Size, centering, and rotation are set inline per page (PdfPage.tsx): the layer
- * is laid out in the page's unrotated dimensions and rotated to match the
- * rendered bitmap, so a rotated page's glyphs and selection stay aligned.
- */
+/* Spans sit in page percentages and are sized in cqh, so the layer holds its
+   alignment as the page scales; PdfPage.tsx sets box and rotation inline. */
 .pdf-text-layer {
   position: absolute;
   overflow: hidden;
@@ -177,9 +168,8 @@ body {
   background: rgb(56 132 255 / 0.35);
 }
 
-/* Search results are geometry from PDFium, not text rendered again in a proxy
-   font. That keeps the PDF's own glyphs visible and highlights a wrapped match
-   with one rectangle on each line. */
+/* Highlights are geometry from PDFium, not text re-rendered in a proxy font:
+   the PDF's own glyphs stay visible, a wrapped match gets one box per line. */
 .pdf-search-layer {
   position: absolute;
   pointer-events: none;
@@ -199,27 +189,8 @@ body {
   box-shadow: inset 0 0 0 2px rgb(234 88 12 / 0.72);
 }
 
-/*
- * A pointer of its own for each drawing tool, so which tool is on — and where
- * it will act — is legible without looking back at the toolbar. Three carry
- * that tool's toolbar glyph, hotspotted on the point it works from: the
- * highlighter's nib, the top-left of the note a click starts, the eraser's
- * rubbing face. Each glyph is drawn twice in its file, a white halo under a
- * black stroke, so it reads on a page and on the dark ground around one; the
- * keyword after each image is what an engine that will not take an SVG cursor
- * falls back to.
- *
- * The rectangle is the exception, and takes the system crosshair: it is the one
- * tool whose gesture is a drag from an exact point, and the platform's own
- * pointer is thinner and sharper at that point than any glyph.
- *
- * Each glyph file holds nothing but that lucide icon — a pointer that carries a
- * second mark, an I-beam beside the tool say, reads as two cursors at once.
- *
- * Set on the viewer, and only while the tool can actually draw — the thumbnail
- * grid hides the toggle that would turn the tool back off, so a tool's pointer
- * left over it would promise a gesture that does nothing.
- */
+/* Each hotspot sits on the point its tool acts from, not the glyph's corner.
+   The rectangle keeps the system crosshair, sharper where a drag starts. */
 [data-tool-cursor="highlight"] {
   cursor: url("./assets/cursors/highlight.svg") 5 20, text;
 }
@@ -242,16 +213,8 @@ body {
   cursor: inherit;
 }
 
-/*
- * The toolbar's page number turns like an odometer (PageOdometer.tsx): the
- * digit being replaced leaves the way the number is going — up as it counts up,
- * down as it counts down — and the new one follows it in from the other side.
- *
- * `both` is what holds each of these where it ended: the leaving digit outside
- * its box, and a place the number left closed. With the default fill the digit
- * would spring back over the one that replaced it, and the place it vacated
- * would stand open, holding the rest of the number off centre.
- */
+/* These all need `both`: the default fill would spring a leaving digit back
+   over its replacement and reopen the gap it left, off-centring the number. */
 @theme {
   --animate-digit-enter-up: digit-enter-up 240ms cubic-bezier(0.32, 0.72, 0, 1)
     both;
