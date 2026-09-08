@@ -40,6 +40,7 @@ const en = {
     openRecent: "Open recent",
     recentEmpty: "No recent files",
     saveAs: "Save as…",
+    saveAll: "Save all",
     closeAll: "Close all files",
     exit: "Exit",
   },

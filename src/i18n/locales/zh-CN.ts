@@ -47,6 +47,7 @@ const zhCN = {
     openRecent: "打开最近文件",
     recentEmpty: "暂无最近打开的文件",
     saveAs: "另存为…",
+    saveAll: "全部保存",
     closeAll: "关闭所有文件",
     exit: "退出",
   },

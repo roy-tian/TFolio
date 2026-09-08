@@ -49,6 +49,16 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   )
 }
 
+/** Whether something modal stands over the workspace. While one does the
+    keyboard is its own, and the window's own keys stand down. */
+export function hasLayerOverWorkspace(): boolean {
+  return Boolean(
+    document.querySelector(
+      "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
+    ),
+  )
+}
+
 /**
  * Drops the WebView's own context menu, which is the browser's and not this
  * app's: it offers a reader reload, back and view source over a page of a PDF.

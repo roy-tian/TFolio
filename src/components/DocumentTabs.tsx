@@ -19,6 +19,7 @@ import {
   type TabId,
 } from "@/lib/documentTabs"
 import { TAB_SPRING_MS } from "@/lib/pageDrag"
+import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
 export type DocumentTabItem = {
@@ -221,7 +222,11 @@ export function DocumentTabs({
         </div>
       </div>
 
-      <ToolbarTooltip label={t("tabs.openFile")} side="top">
+      <ToolbarTooltip
+        label={t("tabs.openFile")}
+        shortcut={shortcuts.open}
+        side="top"
+      >
         <Button
           aria-label={t("tabs.openFile")}
           className="mb-0.5 shrink-0"

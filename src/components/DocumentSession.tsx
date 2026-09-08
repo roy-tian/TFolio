@@ -68,6 +68,7 @@ import {
   type TextNoteStyle,
 } from "@/lib/annotations"
 import { copyPlainText } from "@/lib/clipboard"
+import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
 import { dropHitAt, insertIndexForHit } from "@/lib/fileDrop"
@@ -101,6 +102,7 @@ import {
   storeRecentPdfView,
   type RecentPdfView,
 } from "@/lib/recentFiles"
+import { shortcuts } from "@/lib/shortcuts"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import {
   defaultViewMode,
@@ -176,15 +178,26 @@ export type PageDragEvent =
 
 export type DocumentSessionHandle = {
   hasUnsavedWorkNow: () => boolean
+  /** Opens this document's page-numbers dialog. */
+  openPageNumbers: () => void
   /** Opens the app-owned find bar for this document. */
   openSearch: () => void
+  /** Opens this document's watermark dialog. */
+  openWatermark: () => void
   /** Lays this document out for paper and opens the OS print dialog on it. */
   print: () => void
   /** Captures and durably queues the latest reading view before a close. */
   rememberViewNow: () => Promise<void>
+  /** Writes this document back over its own file — and refuses wherever the
+      toolbar's button is greyed out, so no key can write what it will not. */
+  save: () => void
+  /** Exports this document as a copy, through the backend's own dialog. */
+  saveAs: () => void
   /** Selects everything the visible view holds: the grid's pages, or the text
       the page views lay over them. */
   selectAll: () => void
+  /** Takes back the last edit, exactly as the toolbar's undo does. */
+  undo: () => void
   /** Whether this session takes the drag: true only over its thumbnail grid,
       where a dropped PDF is inserted at the gap under the pointer instead of
       opening as a tab of its own. */
@@ -220,6 +233,10 @@ type DocumentSessionProps = {
   /** The workspace half of the header's menu, which every tab shares. */
   menu: AppMenuActions
   onDirtyChange: (documentId: number, dirty: boolean) => void
+  /** Whether this document may now be written back over its own file. Only the
+      session can say — the workspace sees the file and the dirty flag, not the
+      session-owned page content that makes a document export-only. */
+  onSavableChange: (documentId: number, canSave: boolean) => void
   /** An export that gave a document its first file: the tab now stands for
       that file, not for the bytes it opened from. */
   onSourceChange: (documentId: number, path: string) => void
@@ -248,6 +265,7 @@ function DocumentSession(
     onInitialLayerProgress,
     onInitialLayersSettled,
     onDirtyChange,
+    onSavableChange,
     onSourceChange,
     pageHandoff,
     recentPath,
@@ -597,6 +615,10 @@ function DocumentSession(
     onSet: annotations.setPageNumbers,
     pageCount: pdfDocument?.numPages ?? 0,
   })
+  // Named apart from the hooks so the window's keys and the toolbar's buttons
+  // open the one dialog; both openers are stable.
+  const openWatermarkDialog = watermark.openDialog
+  const openPageNumbersDialog = pageNumbers.openDialog
   // Printed as the reader has it turned: the rotation is the viewer's own, and
   // the backend's render of a page knows nothing about it.
   const rotationAt = useCallback(
@@ -1164,10 +1186,21 @@ function DocumentSession(
   // out from under it, and a note the reader finishes mid-edit would be dropped
   // by the in-flight-edit guard after the editor had already cleared its text.
   // Undo and redo can move any page and can't take a note as their target, so
-  // the uncommitted draft is discarded before the step (see the toolbar); every
-  // other page edit lives in the thumbnail grid, where no note can be open. The
-  // callback is stable.
+  // the uncommitted draft is discarded before the step (`undoStep`, and the
+  // toolbar's redo); every other page edit lives in the thumbnail grid, where no
+  // note can be open. The callback is stable.
   const cancelTextNote = textNote.cancel
+
+  const undoStep = useCallback(() => {
+    // The target is the head of the queue's live history, not the rendered one.
+    const target = annotations.historyNow().past.at(-1)?.command
+
+    if (target && movesPages(target)) {
+      cancelTextNote()
+    }
+
+    void annotations.undo()
+  }, [annotations, cancelTextNote])
 
   useCurrentPageTracker(
     viewerRef,
@@ -1274,9 +1307,7 @@ function DocumentSession(
       if (
         (eventTarget instanceof Element &&
           eventTarget.closest("input, textarea, select, [contenteditable]")) ||
-        document.querySelector(
-          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
-        )
+        hasLayerOverWorkspace()
       ) {
         return
       }
@@ -1448,6 +1479,21 @@ function DocumentSession(
   // The toolbar's button has only its tooltip to carry the reason, so a
   // disabled save names it there rather than repeating the action's name.
   const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
+
+  // The window's save key runs the button's action, refusal included: a
+  // watermarked or merged document may only ever be exported as a copy.
+  const saveDocument = useCallback(() => {
+    if (canSave) {
+      void annotations.save()
+    }
+  }, [annotations, canSave])
+
+  // Only the session can answer this, so the workspace's save-all is told
+  // rather than left to guess from the file name and the dirty flag.
+  useEffect(() => {
+    onSavableChange(openedDocument.id, canSave)
+  }, [canSave, onSavableChange, openedDocument.id])
+
   // Inserts each PDF in turn at `index`, in the order they were dropped: the
   // second file goes after the first, so a multi-file drop reads down the grid
   // the way the reader arranged it. How far to advance is what the file itself
@@ -1802,21 +1848,36 @@ function DocumentSession(
       hasUnsavedWorkNow,
       onFileDrag: handleFileDrag,
       onPageDrag: handlePageDrag,
+      openPageNumbers: openPageNumbersDialog,
       openSearch,
+      openWatermark: openWatermarkDialog,
       print: () => void startPrint(),
       rememberViewNow,
+      save: saveDocument,
+      saveAs: () => void exportPdf(),
       selectAll,
       showThumbnails,
+      undo: () => {
+        if (annotations.canUndo) {
+          undoStep()
+        }
+      },
     }),
     [
+      annotations.canUndo,
+      exportPdf,
       handleFileDrag,
       handlePageDrag,
       hasUnsavedWorkNow,
+      openPageNumbersDialog,
       openSearch,
+      openWatermarkDialog,
       rememberViewNow,
+      saveDocument,
       selectAll,
       showThumbnails,
       startPrint,
+      undoStep,
     ],
   )
 
@@ -1989,7 +2050,7 @@ function DocumentSession(
             <AppMenu
               {...menu}
               canSave={canSave}
-              onSave={() => void annotations.save()}
+              onSave={saveDocument}
               onSaveAs={() => void exportPdf()}
               saveHint={saveHint}
             />
@@ -2009,7 +2070,12 @@ function DocumentSession(
           {/* The three that act on the document itself, grouped apart from
               the view controls after them, which act only on the reading. */}
           <ButtonGroup>
-            <ToolbarTooltip label={saveLabel}>
+            {/* The chord is named only when it works: a disabled save
+                spends the tooltip on why it cannot. */}
+            <ToolbarTooltip
+              label={saveLabel}
+              shortcut={canSave ? shortcuts.save : undefined}
+            >
               <Button
                 aria-label={t("annotate.save")}
                 // A disabled control takes no pointer, and the hint saying why
@@ -2017,14 +2083,14 @@ function DocumentSession(
                 className="disabled:pointer-events-auto"
                 data-slot="pdf-save-trigger"
                 disabled={!canSave}
-                onClick={() => void annotations.save()}
+                onClick={saveDocument}
                 size="icon"
                 variant="outline"
               >
                 <Save />
               </Button>
             </ToolbarTooltip>
-            <ToolbarTooltip label={t("print.open")}>
+            <ToolbarTooltip label={t("print.open")} shortcut={shortcuts.print}>
               <Button
                 aria-label={t("print.open")}
                 data-slot="pdf-print-trigger"
@@ -2036,7 +2102,7 @@ function DocumentSession(
                 <Printer />
               </Button>
             </ToolbarTooltip>
-            <ToolbarTooltip label={t("search.open")}>
+            <ToolbarTooltip label={t("search.open")} shortcut={shortcuts.search}>
               <Toggle
                 aria-label={t("search.open")}
                 className="size-8"
@@ -2183,13 +2249,7 @@ function DocumentSession(
               }
               void annotations.redo()
             }}
-            onUndo={() => {
-              const target = annotations.historyNow().past.at(-1)?.command
-              if (target && movesPages(target)) {
-                cancelTextNote()
-              }
-              void annotations.undo()
-            }}
+            onUndo={undoStep}
           />
           <AnnotationToolbar
             activeTool={activeTool}
@@ -2199,10 +2259,10 @@ function DocumentSession(
             highlightColor={highlightColor}
             onHighlightColorChange={changeHighlightColor}
             onMergeWizard={menu.onMergeWizard}
-            onPageNumbers={pageNumbers.openDialog}
+            onPageNumbers={openPageNumbersDialog}
             onRectStyleChange={changeRectStyle}
             onToolChange={setActiveTool}
-            onWatermark={watermark.openDialog}
+            onWatermark={openWatermarkDialog}
             rectApplies={drawingApplies}
             rectStyle={rectStyle}
             textNoteApplies={drawingApplies}

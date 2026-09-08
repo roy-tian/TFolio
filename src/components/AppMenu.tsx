@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   Save,
+  SaveAll,
   Settings,
   SquareX,
   Upload,
@@ -28,18 +29,22 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { RecentFile } from "@/lib/recentFiles"
+import { formatShortcut, shortcuts } from "@/lib/shortcuts"
 
 /** The entries that act on the workspace rather than on one document, so the
     home tab's menu and every document's carry the same ones. */
 export type AppMenuActions = {
   /** Whether anything is open to close. */
   canCloseAll: boolean
+  /** Whether any open document may be written back over its own file. */
+  canSaveAll: boolean
   onCloseAll: () => void
   /** Opens the merge wizard, which builds a document of its own rather than
       touching the one on screen — a workspace action like opening a file. Not
@@ -53,6 +58,10 @@ export type AppMenuActions = {
   /** Read the recent list again as the menu opens: it is the backend's, and a
       document tab's menu would otherwise show whatever the home tab last saw. */
   onRefreshRecent: () => void
+  /** Writes back every open document that may be: one keystroke for a session
+      spread over several tabs. Workspace-wide, so it is the menu's alone —
+      no document's toolbar speaks for the tabs beside it. */
+  onSaveAll: () => void
   recentFiles: RecentFile[]
 }
 
@@ -74,6 +83,7 @@ type AppMenuProps = AppMenuActions & {
 export function AppMenu({
   canCloseAll,
   canSave = false,
+  canSaveAll,
   onCloseAll,
   onNew,
   onNewWindow,
@@ -81,6 +91,7 @@ export function AppMenu({
   onOpenRecent,
   onRefreshRecent,
   onSave,
+  onSaveAll,
   onSaveAs,
   recentFiles,
   saveHint,
@@ -123,14 +134,23 @@ export function AppMenu({
             <DropdownMenuItem data-action="new" onClick={onNew}>
               <FilePlus2 />
               {t("menu.new")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.new)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem data-action="new-window" onClick={onNewWindow}>
               <AppWindow />
               {t("menu.newWindow")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.newWindow)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem data-action="open" onClick={onOpen}>
               <FolderOpen />
               {t("menu.openFile")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.open)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger data-action="open-recent">
@@ -168,6 +188,9 @@ export function AppMenu({
               >
                 <Save />
                 {t("annotate.save")}
+                <DropdownMenuShortcut>
+                  {formatShortcut(shortcuts.save)}
+                </DropdownMenuShortcut>
               </DropdownMenuItem>
             </HintTooltip>
             <DropdownMenuItem
@@ -177,6 +200,20 @@ export function AppMenu({
             >
               <Upload />
               {t("menu.saveAs")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.saveAs)}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="save-all"
+              disabled={!canSaveAll}
+              onClick={onSaveAll}
+            >
+              <SaveAll />
+              {t("menu.saveAll")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.saveAll)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem
               data-action="close-all"

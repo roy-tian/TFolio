@@ -44,6 +44,8 @@ Download the installer for your platform from the [Releases page](https://github
 
 **The app itself**
 
+- Keyboard shortcuts for the everyday actions — new Ctrl+N, open Ctrl+O, save Ctrl+S, save as Ctrl+Shift+S, save all Ctrl+Alt+S, print Ctrl+P, search Ctrl+F, undo Ctrl+Z, watermark Ctrl+Alt+W, page numbers Ctrl+Alt+P (⌘ in place of Ctrl on macOS). The menu and the tooltips name them, and they answer only while a TFolio window has the keyboard.
+- Save all writes back every open document that has changes of its own to save.
 - English and Simplified Chinese, following your saved preference and otherwise the system language.
 - Light and dark themes, following the system by default.
 - Settings and the recent-files list are remembered between runs.

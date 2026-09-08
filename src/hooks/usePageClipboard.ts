@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { isTypingTarget } from "@/lib/contextMenu"
+import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import {
   clipboardAfterPaste,
   pageClipboardOf,
@@ -99,9 +99,7 @@ export function usePageClipboard({
       if (
         event.defaultPrevented ||
         isTypingTarget(event.target) ||
-        document.querySelector(
-          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
-        )
+        hasLayerOverWorkspace()
       ) {
         return
       }

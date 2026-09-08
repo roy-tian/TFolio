@@ -23,6 +23,7 @@ import {
 import { Toggle } from "@/components/ui/toggle"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import { highlightSwatches } from "@/lib/annotationStyles"
+import { shortcuts } from "@/lib/shortcuts"
 import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 
@@ -232,7 +233,7 @@ export function AnnotationToolbar({
       ) : null}
 
       <ButtonGroup>
-        <ToolbarTooltip label={watermarkLabel}>
+        <ToolbarTooltip label={watermarkLabel} shortcut={shortcuts.watermark}>
           <Button
             aria-label={watermarkLabel}
             className="border-input"
@@ -245,7 +246,10 @@ export function AnnotationToolbar({
           </Button>
         </ToolbarTooltip>
 
-        <ToolbarTooltip label={pageNumbersLabel}>
+        <ToolbarTooltip
+          label={pageNumbersLabel}
+          shortcut={shortcuts.pageNumbers}
+        >
           <Button
             aria-label={pageNumbersLabel}
             className="border-input"

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { shortcuts } from "@/lib/shortcuts"
 
 type HistoryControlsProps = {
   canRedo: boolean
@@ -28,7 +29,7 @@ export function HistoryControls({
 
   return (
     <ButtonGroup>
-      <ToolbarTooltip label={undoLabel}>
+      <ToolbarTooltip label={undoLabel} shortcut={shortcuts.undo}>
         <Button
           aria-label={undoLabel}
           disabled={disabled || !canUndo}

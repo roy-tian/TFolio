@@ -34,7 +34,7 @@ import {
   type MergeWizardResult,
 } from "@/hooks/useMergeWizard"
 import { usePageHandoff } from "@/hooks/usePageHandoff"
-import { isTypingTarget } from "@/lib/contextMenu"
+import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
@@ -57,6 +57,7 @@ import {
   type RecentFile,
   type RecentPdfView,
 } from "@/lib/recentFiles"
+import { matchesShortcut, shortcuts, type Shortcut } from "@/lib/shortcuts"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { cn } from "@/lib/utils"
 import type { ViewMode } from "@/lib/viewMode"
@@ -68,6 +69,9 @@ type OpenTab = {
   id: number
   name: string
   path: string
+  /** What the session says: a file behind it, changes to write, and no
+      session-owned page content that makes it export-only. */
+  savable: boolean
   /** The path whose successful Rust-side open put it in the recent list.
       Unlike `path`, this stays absent when an app-created document adopts its
       first export destination. */
@@ -303,6 +307,7 @@ export default function App() {
               path,
               recentPath: path,
               recentView: recentView ?? undefined,
+              savable: false,
             }
             replaceTabs((current) => [...current, tab])
             openedIds.push(tab.id)
@@ -367,6 +372,7 @@ export default function App() {
             id: document.id,
             name: t("menu.untitled"),
             path: "",
+            savable: false,
           }
           replaceTabs((current) => [...current, tab])
           activateTab(tab.id)
@@ -433,6 +439,7 @@ export default function App() {
           watermark,
         },
         path: "",
+        savable: false,
       }
 
       replaceTabs((current) => [...current, tab])
@@ -594,9 +601,38 @@ export default function App() {
     [replaceTabs],
   )
 
+  const updateSavable = useCallback(
+    (documentId: number, savable: boolean) => {
+      replaceTabs((current) => {
+        const tab = current.find((item) => item.id === documentId)
+
+        if (!tab || tab.savable === savable) {
+          return current
+        }
+
+        return current.map((item) =>
+          item.id === documentId ? { ...item, savable } : item,
+        )
+      })
+    },
+    [replaceTabs],
+  )
+
+  // In tab order, and only where a document may be written back at all: one
+  // holding a watermark or another file's pages is export-only, and an export
+  // wants a destination chosen for it rather than one taken in a batch.
+  const saveAllDocuments = useCallback(() => {
+    for (const tab of tabsRef.current) {
+      sessionRefs.current.get(tab.id)?.save()
+    }
+  }, [])
+
+  const canSaveAll = tabs.some((tab) => tab.savable)
+
   const menuActions: AppMenuActions = useMemo(
     () => ({
       canCloseAll: tabs.length > 0,
+      canSaveAll,
       onCloseAll: requestCloseAll,
       onMergeWizard: mergeWizard.openWizard,
       onNew: () => void createDocument(),
@@ -604,9 +640,11 @@ export default function App() {
       onOpen: () => void chooseFile(),
       onOpenRecent: (path) => void openPaths([path]),
       onRefreshRecent: refreshRecentFiles,
+      onSaveAll: saveAllDocuments,
       recentFiles,
     }),
     [
+      canSaveAll,
       chooseFile,
       createDocument,
       mergeWizard.openWizard,
@@ -615,6 +653,7 @@ export default function App() {
       recentFiles,
       refreshRecentFiles,
       requestCloseAll,
+      saveAllDocuments,
       tabs.length,
     ],
   )
@@ -648,9 +687,7 @@ export default function App() {
     const openDocumentSearch = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
-        event.altKey ||
-        event.key.toLowerCase() !== "f" ||
-        (!event.ctrlKey && !event.metaKey)
+        !matchesShortcut(event, shortcuts.search, macOS)
       ) {
         return
       }
@@ -666,7 +703,7 @@ export default function App() {
     document.addEventListener("keydown", openDocumentSearch)
 
     return () => document.removeEventListener("keydown", openDocumentSearch)
-  }, [])
+  }, [macOS])
 
   // The WebView's own print would put the interface on paper, so the key is
   // consumed everywhere and answered only where there is a document to print.
@@ -674,10 +711,7 @@ export default function App() {
     const printDocument = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
-        event.altKey ||
-        event.shiftKey ||
-        event.key.toLowerCase() !== "p" ||
-        (!event.ctrlKey && !event.metaKey)
+        !matchesShortcut(event, shortcuts.print, macOS)
       ) {
         return
       }
@@ -692,11 +726,7 @@ export default function App() {
 
       // A dialog or popup in front of the document owns the screen — this one
       // included, while it counts out the pages.
-      if (
-        document.querySelector(
-          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
-        )
-      ) {
+      if (hasLayerOverWorkspace()) {
         return
       }
 
@@ -709,7 +739,7 @@ export default function App() {
     document.addEventListener("keydown", printDocument)
 
     return () => document.removeEventListener("keydown", printDocument)
-  }, [])
+  }, [macOS])
 
   // The WebView's select-all takes the whole interface — tab strip, toolbar and
   // all — which is never what a reader means by it. It is consumed everywhere,
@@ -719,10 +749,7 @@ export default function App() {
     const selectAllInDocument = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
-        event.altKey ||
-        event.shiftKey ||
-        event.key.toLowerCase() !== "a" ||
-        (!event.ctrlKey && !event.metaKey) ||
+        !matchesShortcut(event, shortcuts.selectAll, macOS) ||
         isTypingTarget(event.target)
       ) {
         return
@@ -742,11 +769,7 @@ export default function App() {
 
       // A dialog or popup in front of the document owns the screen; the key is
       // still consumed there, since the interface behind it is not selectable.
-      if (
-        document.querySelector(
-          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
-        )
-      ) {
+      if (hasLayerOverWorkspace()) {
         return
       }
 
@@ -759,22 +782,25 @@ export default function App() {
     document.addEventListener("keydown", selectAllInDocument)
 
     return () => document.removeEventListener("keydown", selectAllInDocument)
-  }, [])
+  }, [macOS])
 
   useEffect(() => {
     const openAnotherWindow = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
-        event.repeat ||
-        event.altKey ||
-        !event.shiftKey ||
-        !(macOS ? event.metaKey : event.ctrlKey) ||
-        event.key.toLowerCase() !== "n"
+        !matchesShortcut(event, shortcuts.newWindow, macOS)
       ) {
         return
       }
 
+      // Consumed before the repeat is weighed, so a held chord never leaks the
+      // WebView's own answer to it on the second press onwards.
       event.preventDefault()
+
+      if (event.repeat) {
+        return
+      }
+
       openNewWindow()
     }
 
@@ -782,6 +808,75 @@ export default function App() {
 
     return () => document.removeEventListener("keydown", openAnotherWindow)
   }, [macOS, openNewWindow])
+
+  // The file and edit keys the window answers wherever it has the keyboard,
+  // whichever tab leads it. Bound to this document rather than registered with
+  // the OS: they are the window's while it is focused and take nothing from the
+  // desktop around it.
+  useEffect(() => {
+    const activeSession = () => {
+      const tabId = activeIdRef.current
+
+      return tabId === HOME_TAB_ID ? undefined : sessionRefs.current.get(tabId)
+    }
+
+    const actions: Array<{
+      /** Whether a field being typed in keeps the chord for its own editing. */
+      fieldFirst?: boolean
+      run: () => void
+      shortcut: Shortcut
+    }> = [
+      { run: () => void createDocument(), shortcut: shortcuts.new },
+      { run: () => void chooseFile(), shortcut: shortcuts.open },
+      { run: () => activeSession()?.save(), shortcut: shortcuts.save },
+      { run: () => activeSession()?.saveAs(), shortcut: shortcuts.saveAs },
+      { run: saveAllDocuments, shortcut: shortcuts.saveAll },
+      {
+        run: () => activeSession()?.openWatermark(),
+        shortcut: shortcuts.watermark,
+      },
+      {
+        run: () => activeSession()?.openPageNumbers(),
+        shortcut: shortcuts.pageNumbers,
+      },
+      // A field's own undo is the one the reader means while typing in it.
+      {
+        fieldFirst: true,
+        run: () => activeSession()?.undo(),
+        shortcut: shortcuts.undo,
+      },
+    ]
+
+    const runShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return
+      }
+
+      const action = actions.find((candidate) =>
+        matchesShortcut(event, candidate.shortcut, macOS),
+      )
+
+      if (!action || (action.fieldFirst && isTypingTarget(event.target))) {
+        return
+      }
+
+      // Consumed wherever the app holds the keyboard: the WebView's own answers
+      // to these keys act on the interface, which is never what is meant here.
+      event.preventDefault()
+
+      // Answered once for a held key, and never under a dialog or popup: while
+      // one stands, the screen — and the keyboard with it — is its own.
+      if (event.repeat || hasLayerOverWorkspace()) {
+        return
+      }
+
+      action.run()
+    }
+
+    document.addEventListener("keydown", runShortcut)
+
+    return () => document.removeEventListener("keydown", runShortcut)
+  }, [chooseFile, createDocument, macOS, saveAllDocuments])
 
   // Nothing here is dragged with the browser's own drag and drop — the
   // thumbnail grid reorders from pointer events — so a drag starting inside the
@@ -1080,6 +1175,7 @@ export default function App() {
           onDirtyChange={updateDirty}
           onInitialLayerProgress={tab.opensWith?.onLayerProgress}
           onInitialLayersSettled={tab.opensWith?.onLayersSettled}
+          onSavableChange={updateSavable}
           onSourceChange={updateSource}
           pageHandoff={handoff}
           ref={(handle) => {

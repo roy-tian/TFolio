@@ -117,7 +117,7 @@ describe("TFolio save", () => {
     // Saving a copy stays on offer — for this document it is the only way to
     // a file at all.
     const saveAs = await appMenuItem("save-as")
-    await expect(saveAs).toHaveText("Save as…")
+    await expect(saveAs).toHaveText(expect.stringContaining("Save as…"))
     expect(await saveAs.getAttribute("data-disabled")).toBe(null)
     await closeAppMenu(saveAs)
   })
