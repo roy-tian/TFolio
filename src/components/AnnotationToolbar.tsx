@@ -3,7 +3,6 @@ import {
   Eraser,
   FileScan,
   Highlighter,
-  Square,
   SquarePen,
   Stamp,
 } from "lucide-react"
@@ -11,6 +10,7 @@ import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { MergeWizardButton } from "@/components/MergeWizardButton"
+import { RectEffectIcon } from "@/components/RectEffectIcon"
 import { RectStylePopover } from "@/components/RectStylePopover"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
@@ -160,7 +160,7 @@ export function AnnotationToolbar({
                   pressed={activeTool === "rect"}
                   variant="outline"
                 >
-                  <Square />
+                  <RectEffectIcon effect={rectStyle.effect} />
                 </Toggle>
               </ToolbarTooltip>
               <Popover>

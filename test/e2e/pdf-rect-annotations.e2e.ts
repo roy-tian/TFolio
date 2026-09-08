@@ -184,6 +184,41 @@ describe("TFolio rectangle annotations", () => {
     })
   }
 
+  // The tool's own button says what a drag would leave on the page, so the three
+  // effects have to be three icons rather than one box.
+  it("draws the armed effect on the rectangle tool", async () => {
+    const toolIcon = () => $("button[aria-label='Draw a rectangle'] svg")
+
+    for (const [effect, icon] of [
+      ["Gaussian blur", "lucide-rect-blur"],
+      ["Mosaic", "lucide-rect-mosaic"],
+      ["Translucent", "lucide-square"],
+    ] as const) {
+      await $("button[aria-label='Rectangle options']").click()
+      await $(`button[aria-label='${effect}']`).click()
+      await browser.keys("Escape")
+      await expect(toolIcon()).toHaveElementClass(icon, { containing: true })
+    }
+  })
+
+  it("boots the rectangle tool on the effect the settings hold", async () => {
+    await seedSettings({
+      annotate: {
+        rect: { color: "#ef4444", effect: "mosaic", opacity: 0.5, strength: 8 },
+      },
+      ui: { language: "en", viewMode: "single" },
+    })
+    await browser.refresh()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("striped.pdf", stripedPdf())
+    await renderedPage()
+
+    await expect($("button[aria-label='Draw a rectangle'] svg")).toHaveElementClass(
+      "lucide-rect-mosaic",
+      { containing: true },
+    )
+  })
+
   it("keeps consecutive released rectangles when another tool is selected", async () => {
     const clean = await pagePixelFingerprint()
     await $("button[aria-label='Draw a rectangle']").click()
