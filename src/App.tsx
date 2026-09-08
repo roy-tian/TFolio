@@ -34,6 +34,7 @@ import {
   type MergeWizardResult,
 } from "@/hooks/useMergeWizard"
 import { usePageHandoff } from "@/hooks/usePageHandoff"
+import { isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
@@ -665,6 +666,56 @@ export default function App() {
     document.addEventListener("keydown", openDocumentSearch)
 
     return () => document.removeEventListener("keydown", openDocumentSearch)
+  }, [])
+
+  // The WebView's select-all takes the whole interface — tab strip, toolbar and
+  // all — which is never what a reader means by it. It is consumed everywhere,
+  // and only a document tab has something to answer it with: its pages in the
+  // grid, or its text in the page views. A field being typed in keeps its own.
+  useEffect(() => {
+    const selectAllInDocument = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.shiftKey ||
+        event.key.toLowerCase() !== "a" ||
+        (!event.ctrlKey && !event.metaKey) ||
+        isTypingTarget(event.target)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+
+      // A select-all replaces what was selected, so the range a drag left goes
+      // too — on the next frame, after any default action this did not stop.
+      requestAnimationFrame(() => window.getSelection()?.removeAllRanges())
+
+      // Consumed on every repeat, but answered once: a held key would rebuild
+      // the grid's selection set at the repeat rate for nothing.
+      if (event.repeat) {
+        return
+      }
+
+      // A dialog or popup in front of the document owns the screen; the key is
+      // still consumed there, since the interface behind it is not selectable.
+      if (
+        document.querySelector(
+          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
+        )
+      ) {
+        return
+      }
+
+      const tabId = activeIdRef.current
+      if (tabId !== HOME_TAB_ID) {
+        sessionRefs.current.get(tabId)?.selectAll()
+      }
+    }
+
+    document.addEventListener("keydown", selectAllInDocument)
+
+    return () => document.removeEventListener("keydown", selectAllInDocument)
   }, [])
 
   useEffect(() => {

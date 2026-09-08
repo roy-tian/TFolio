@@ -156,6 +156,24 @@ pub async fn extract_pdf_page_text(
         .map_err(|error| format!("PDFium text extraction task failed: {error}"))?
 }
 
+/// The whole of one page's text, for a select-all the viewer cannot answer
+/// from the DOM: only the pages near the reader hold a text layer, and a copy
+/// has to carry the pages between them too.
+#[tauri::command]
+pub async fn extract_pdf_page_plain_text(
+    document_id: u64,
+    page_number: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<String, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.extract_plain_text(document_id, page_number)
+    })
+    .await
+    .map_err(|error| format!("PDFium text extraction task failed: {error}"))?
+}
+
 #[tauri::command]
 pub async fn search_pdf_text(
     document_id: u64,

@@ -89,6 +89,9 @@ type LayoutProps = {
   documentId: number
   /** Live and released rectangle previews, each tied to its starting page. */
   drafts: RectDraft[]
+  /** Copies the whole document, and stands for a select-all being in force:
+      absent, a page's menu falls back to whatever the reader dragged over. */
+  onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   pages: PdfPageInfo[]
   /** The document's usual page width at 100%, for a layout sharing one column. */
@@ -112,6 +115,7 @@ function SingleLayout({
   activeSearchIndex,
   documentId,
   drafts,
+  onCopyAllText,
   onPagePaint,
   pages,
   renderEpochs,
@@ -127,6 +131,7 @@ function SingleLayout({
     <PdfPage
       documentId={documentId}
       drafts={drafts.filter((draft) => draft.pageNumber === index + 1)}
+      onCopyAllText={onCopyAllText}
       onPagePaint={onPagePaint}
       key={`${documentId}-${index + 1}`}
       page={page}
@@ -148,6 +153,7 @@ function BookLayout({
   activeSearchIndex,
   documentId,
   drafts,
+  onCopyAllText,
   onPagePaint,
   pages,
   referencePageWidth,
@@ -179,6 +185,7 @@ function BookLayout({
         <PdfPage
           documentId={documentId}
           drafts={drafts.filter((draft) => draft.pageNumber === pageNumber)}
+          onCopyAllText={onCopyAllText}
           onPagePaint={onPagePaint}
           key={`${documentId}-${pageNumber}`}
           page={pages[pageNumber - 1]}
@@ -784,6 +791,10 @@ type PdfViewerLayoutProps = {
   scale: number
   searchMatchesByPage: ReadonlyMap<number, IndexedPdfSearchMatch[]>
   textEpochs: RenderEpochs
+  /** Whether the whole document's text stands selected; the highlight over the
+      runs is drawn from the attribute this sets, not by the WebView. */
+  textSelectAll: boolean
+  onCopyAllText: () => void
   viewMode: ViewMode
   viewerWidth: number
   textSelectionDragging: boolean
@@ -800,6 +811,7 @@ export function PdfViewerLayout({
   currentPage,
   documentId,
   drafts,
+  onCopyAllText,
   onPagePaint,
   fileName,
   pageEdit,
@@ -810,6 +822,7 @@ export function PdfViewerLayout({
   scale,
   searchMatchesByPage,
   textEpochs,
+  textSelectAll,
   viewMode,
   viewerWidth,
   textSelectionDragging,
@@ -822,6 +835,7 @@ export function PdfViewerLayout({
     contentWidth,
     documentId,
     drafts,
+    onCopyAllText: textSelectAll ? onCopyAllText : undefined,
     onPagePaint,
     pages,
     referencePageWidth,
@@ -839,6 +853,7 @@ export function PdfViewerLayout({
     <div
       aria-label={fileName}
       data-pdf-viewer-layout
+      data-select-all={textSelectAll}
       onClick={(event) => {
         if (viewMode !== "thumbnail") {
           return

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react"
 import {
   emptySelection,
   selectionAfterClick,
+  selectionOfAllPages,
   type SelectionModifiers,
   type ThumbnailSelection,
 } from "@/lib/thumbnailSelection"
@@ -10,6 +11,8 @@ import {
 type UseThumbnailSelectionOptions = {
   /** Selection only lives in the thumbnail grid; leaving it clears it. */
   active: boolean
+  /** What a select-all takes, so the grid's shortcut needs no page list. */
+  numPages: number
 }
 
 /**
@@ -18,12 +21,19 @@ type UseThumbnailSelectionOptions = {
  * follows from events no click carries — Esc, leaving the grid, and the
  * structure changes the owner reports.
  */
-export function useThumbnailSelection({ active }: UseThumbnailSelectionOptions) {
+export function useThumbnailSelection({
+  active,
+  numPages,
+}: UseThumbnailSelectionOptions) {
   const [selection, setSelection] = useState<ThumbnailSelection>(emptySelection)
 
   const clear = useCallback(() => {
     setSelection(emptySelection)
   }, [])
+
+  const selectAll = useCallback(() => {
+    setSelection(selectionOfAllPages(numPages))
+  }, [numPages])
 
   const select = useCallback(
     (pageNumber: number, modifiers: SelectionModifiers) => {
@@ -53,5 +63,5 @@ export function useThumbnailSelection({ active }: UseThumbnailSelectionOptions) 
     }
   }, [active])
 
-  return { clear, select, selectedPages: selection.pages }
+  return { clear, select, selectAll, selectedPages: selection.pages }
 }

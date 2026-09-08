@@ -27,6 +27,9 @@ function selectedPageText(): string {
 
 type PageTextMenuProps = {
   children: ReactNode
+  /** Present only while the whole document's text stands selected, in which
+      case it is that — not a drag over this page — the menu offers. */
+  onCopyAll?: () => void
   style: CSSProperties
 }
 
@@ -37,9 +40,14 @@ type PageTextMenuProps = {
  *
  * This *is* the text layer rather than a wrapper around it, so the spans keep
  * the geometry `PdfPage` lays them out in. With nothing selected the menu has
- * no entry worth showing, so the right-click opens nothing at all.
+ * no entry worth showing, so the right-click opens nothing at all — while a
+ * select-all is standing there always is, and it is the whole document.
  */
-export function PageTextMenu({ children, style }: PageTextMenuProps) {
+export function PageTextMenu({
+  children,
+  onCopyAll,
+  style,
+}: PageTextMenuProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   // Taken as the menu opens, not as the item is clicked: pressing in the popup
@@ -56,8 +64,8 @@ export function PageTextMenu({ children, style }: PageTextMenuProps) {
           return
         }
 
-        selected.current = selectedPageText()
-        setOpen(selected.current !== "")
+        selected.current = onCopyAll ? "" : selectedPageText()
+        setOpen(Boolean(onCopyAll) || selected.current !== "")
       }}
     >
       <ContextMenuTrigger className="pdf-text-layer select-text" style={style}>
@@ -66,7 +74,9 @@ export function PageTextMenu({ children, style }: PageTextMenuProps) {
       <ContextMenuContent>
         <ContextMenuItem
           data-action="copy-text"
-          onClick={() => copyPlainText(selected.current)}
+          onClick={() =>
+            onCopyAll ? onCopyAll() : copyPlainText(selected.current)
+          }
         >
           <Copy />
           {t("viewer.copyText")}

@@ -168,6 +168,12 @@ body {
   background: rgb(56 132 255 / 0.35);
 }
 
+/* The app's own select-all, which a range in the document could not stand for:
+   only the pages near the reader hold a text layer to put a range over. */
+[data-select-all="true"] .pdf-text-layer span {
+  background: rgb(56 132 255 / 0.35);
+}
+
 /* Highlights are geometry from PDFium, not text re-rendered in a proxy font:
    the PDF's own glyphs stay visible, a wrapped match gets one box per line. */
 .pdf-search-layer {

@@ -39,6 +39,7 @@ import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useTextNoteTool } from "@/hooks/useTextNoteTool"
+import { useTextSelectAll } from "@/hooks/useTextSelectAll"
 import { useWatermark } from "@/hooks/useWatermark"
 import { useZoom } from "@/hooks/useZoom"
 import {
@@ -61,7 +62,9 @@ import {
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
+import { copyPlainText } from "@/lib/clipboard"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
+import { documentPlainText } from "@/lib/documentText"
 import { dropHitAt, insertIndexForHit } from "@/lib/fileDrop"
 import type { PageHandoff } from "@/lib/pageDrag"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
@@ -154,6 +157,9 @@ export type DocumentSessionHandle = {
   openSearch: () => void
   /** Captures and durably queues the latest reading view before a close. */
   rememberViewNow: () => Promise<void>
+  /** Selects everything the visible view holds: the grid's pages, or the text
+      the page views lay over them. */
+  selectAll: () => void
   /** Whether this session takes the drag: true only over its thumbnail grid,
       where a dropped PDF is inserted at the gap under the pointer instead of
       opening as a tab of its own. */
@@ -386,8 +392,44 @@ function DocumentSession(
   // page-editing surface; leaving it clears what was chosen.
   const thumbnailSelection = useThumbnailSelection({
     active: active && viewMode === "thumbnail",
+    numPages: pdfDocument.numPages,
   })
   const clearThumbnailSelection = thumbnailSelection.clear
+  // Fetched as the selection is made, not when the copy asks for it: the
+  // clipboard takes a write only from inside the keypress that asked, and a
+  // long document's text is hundreds of round trips away from one.
+  const selectedText = useRef<Promise<string> | null>(null)
+  const copyDocumentText = useCallback(() => {
+    const pending =
+      selectedText.current ??
+      documentPlainText(pdfDocument.id, pdfDocument.numPages)
+
+    selectedText.current = pending
+    void pending.then(copyPlainText)
+  }, [pdfDocument.id, pdfDocument.numPages])
+  // The page views' half of a select-all; the grid's half is the selection
+  // above, and the view in front decides which of the two answers.
+  const textSelectAll = useTextSelectAll({
+    active: active && viewMode !== "thumbnail",
+    onCopy: copyDocumentText,
+  })
+
+  useEffect(() => {
+    selectedText.current = textSelectAll.selectedAll
+      ? documentPlainText(pdfDocument.id, pdfDocument.numPages)
+      : null
+  }, [pdfDocument.id, pdfDocument.numPages, textSelectAll.selectedAll])
+  const selectAllPages = thumbnailSelection.selectAll
+  const selectAllText = textSelectAll.selectAll
+  // Where the workspace's select-all shortcut lands: the grid holds pages, and
+  // the page views hold the text laid over them.
+  const selectAll = useCallback(() => {
+    if (viewMode === "thumbnail") {
+      selectAllPages()
+    } else {
+      selectAllText()
+    }
+  }, [selectAllPages, selectAllText, viewMode])
   const annotations = useAnnotations({
     documentId: pdfDocument?.id,
     onAnnotateError: useCallback(
@@ -1619,6 +1661,7 @@ function DocumentSession(
       onPageDrag: handlePageDrag,
       openSearch,
       rememberViewNow,
+      selectAll,
       showThumbnails,
     }),
     [
@@ -1627,6 +1670,7 @@ function DocumentSession(
       hasUnsavedWorkNow,
       openSearch,
       rememberViewNow,
+      selectAll,
       showThumbnails,
     ],
   )
@@ -2019,7 +2063,9 @@ function DocumentSession(
               scale={zoom.scale}
               searchMatchesByPage={searchMatchesByPage}
               activeSearchIndex={activeSearchIndex}
+              onCopyAllText={copyDocumentText}
               textEpochs={annotations.textEpochs}
+              textSelectAll={textSelectAll.selectedAll}
               textSelectionDragging={textSelectionDragging}
               viewMode={viewMode}
               viewerWidth={viewerWidth}

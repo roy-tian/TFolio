@@ -217,6 +217,38 @@ fn extracts_text_in_unrotated_space_for_rotated_page() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn extracts_plain_page_text_with_its_line_breaks() {
+    let engine = test_engine();
+    let document = engine
+        .open(wrapped_search_pdf())
+        .expect("PDFium should open the search fixture");
+
+    let first = engine
+        .extract_plain_text(document.id, 1)
+        .expect("PDFium should extract the page's text");
+    let lines: Vec<&str> = first
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    // The two runs sit on lines of their own, and a copy has to keep them
+    // apart: the positioned spans the text layer is built from carry no breaks.
+    assert_eq!(lines, ["Wrapped", "phrase"], "got {first:?}");
+
+    let second = engine
+        .extract_plain_text(document.id, 2)
+        .expect("PDFium should extract the second page's text");
+    assert_eq!(second.trim(), "WRAPPED PHRASE");
+
+    assert!(
+        engine.extract_plain_text(document.id, 3).is_err(),
+        "a page past the end names nothing to extract"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn searches_only_page_text_across_visual_line_breaks() {
     let engine = test_engine();
     let document = engine

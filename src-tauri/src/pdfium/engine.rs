@@ -1195,6 +1195,31 @@ impl PdfiumEngine {
         })
     }
 
+    /// The page's text as PDFium reconstructs it, line breaks included. The
+    /// spans above carry the same characters cut into positioned runs, which is
+    /// a layout and not something a reader would want on the clipboard.
+    pub(super) fn extract_plain_text(
+        &self,
+        document_id: u64,
+        page_number: i32,
+    ) -> Result<String, String> {
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+
+        entry.page_id(page_number)?;
+
+        let page = entry
+            .document
+            .pages()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        let text = page.text().map_err(|error| {
+            format!("PDFium could not read text on page {page_number}: {error}")
+        })?;
+
+        Ok(text.all())
+    }
+
     pub(super) fn extract_text(
         &self,
         document_id: u64,

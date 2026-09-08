@@ -53,6 +53,9 @@ type PdfPageProps = {
   documentId: number
   /** Live and released rectangles awaiting this page's pixels. */
   drafts: RectDraft[]
+  /** Present only while a select-all stands: the page's menu then offers the
+      whole document, which is what is selected, and not this page alone. */
+  onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   page: PdfPageInfo
   pageNumber: number
@@ -84,6 +87,7 @@ type PdfPageSurfaceProps = {
   activeSearchIndex: number | null
   documentId: number
   drafts: RectDraft[]
+  onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   footprintHeight: number
   footprintWidth: number
@@ -105,6 +109,7 @@ function PdfPageSurface({
   activeSearchIndex,
   documentId,
   drafts,
+  onCopyAllText,
   onPagePaint,
   footprintHeight,
   footprintWidth,
@@ -259,7 +264,7 @@ function PdfPageSurface({
           </div>
         ) : null}
         {hasRendered && positionedSpans.length > 0 ? (
-          <PageTextMenu style={pageLayerStyle}>
+          <PageTextMenu onCopyAll={onCopyAllText} style={pageLayerStyle}>
             {positionedSpans.map((span, index) => (
               <span
                 key={index}
@@ -307,6 +312,7 @@ export function PdfPage({
   activeSearchIndex,
   documentId,
   drafts,
+  onCopyAllText,
   onPagePaint,
   page,
   pageNumber,
@@ -356,6 +362,7 @@ export function PdfPage({
           activeSearchIndex={activeSearchIndex}
           documentId={documentId}
           drafts={drafts}
+          onCopyAllText={onCopyAllText}
           onPagePaint={onPagePaint}
           footprintHeight={footprintHeight}
           footprintWidth={footprintWidth}
