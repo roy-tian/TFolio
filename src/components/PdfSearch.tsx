@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -118,35 +119,38 @@ export function PdfSearch({
         {searching ? <span className="sr-only">{status}</span> : null}
       </span>
 
-      <Button
-        aria-label={t("search.previous")}
-        disabled={!canNavigate}
-        onClick={onPrevious}
-        size="icon-sm"
-        title={t("search.previous")}
-        variant="ghost"
-      >
-        <ChevronUp />
-      </Button>
-      <Button
-        aria-label={t("search.next")}
-        disabled={!canNavigate}
-        onClick={onNext}
-        size="icon-sm"
-        title={t("search.next")}
-        variant="ghost"
-      >
-        <ChevronDown />
-      </Button>
-      <Button
-        aria-label={t("search.close")}
-        onClick={onClose}
-        size="icon-sm"
-        title={t("search.close")}
-        variant="ghost"
-      >
-        <X />
-      </Button>
+      <ToolbarTooltip label={t("search.previous")}>
+        <Button
+          aria-label={t("search.previous")}
+          disabled={!canNavigate}
+          onClick={onPrevious}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <ChevronUp />
+        </Button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={t("search.next")}>
+        <Button
+          aria-label={t("search.next")}
+          disabled={!canNavigate}
+          onClick={onNext}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <ChevronDown />
+        </Button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={t("search.close")}>
+        <Button
+          aria-label={t("search.close")}
+          onClick={onClose}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <X />
+        </Button>
+      </ToolbarTooltip>
     </div>
   )
 }

@@ -289,6 +289,72 @@ export function openFileButton() {
 }
 
 /**
+ * Hovers `selector`.
+ *
+ * WebKitGTK's embedded WebDriver moves the pointer without the WebView ever
+ * seeing a hover, so the events Base UI listens for are dispatched in the page.
+ */
+export async function hoverElement(selector: string) {
+  await $(selector).waitForExist({ timeout: 15_000 })
+  await browser.execute((css: string) => {
+    const node = document.querySelector(css)!
+    const box = node.getBoundingClientRect()
+    const init = {
+      bubbles: true,
+      clientX: box.left + box.width / 2,
+      clientY: box.top + box.height / 2,
+      pointerType: "mouse",
+    }
+
+    // A pointer that never leaves would leave the last hint standing, and hints
+    // outside one delay group do not close each other. Take the hover back
+    // first, so the popup read below is the one this hover opened.
+    for (const open of document.querySelectorAll(
+      "[data-base-ui-tooltip-trigger][data-popup-open]",
+    )) {
+      if (open !== node) {
+        open.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }))
+        open.dispatchEvent(new MouseEvent("mouseleave"))
+      }
+    }
+
+    node.dispatchEvent(new PointerEvent("pointerover", init))
+    node.dispatchEvent(new PointerEvent("pointerenter", { ...init, bubbles: false }))
+    node.dispatchEvent(new MouseEvent("mouseover", init))
+    node.dispatchEvent(new MouseEvent("mouseenter", { ...init, bubbles: false }))
+    node.dispatchEvent(new MouseEvent("mousemove", init))
+  }, selector)
+}
+
+/** Whether the tooltip this trigger owns is up; others may be open too. */
+export function tooltipOpen(selector: string) {
+  return browser.execute(
+    (css: string) =>
+      document.querySelector(css)?.hasAttribute("data-popup-open") ?? false,
+    selector,
+  )
+}
+
+/** Hovers `selector` and answers with the text of the tooltip that opens. */
+export async function tooltipOn(selector: string) {
+  await hoverElement(selector)
+  await browser.waitUntil(async () => tooltipOpen(selector), {
+    timeout: 15_000,
+    timeoutMsg: `no tooltip opened on ${selector}`,
+  })
+
+  // The newest popup is this one: portals are appended as they open, and every
+  // hint hovered before this one has been let go of above.
+  return browser.execute(() => {
+    const open = document.querySelectorAll(
+      "[data-slot='tooltip-content'][data-open]",
+    )
+
+    return open[open.length - 1]?.textContent?.trim() ?? ""
+  })
+}
+
+/**
  * Opens the header's menu — where the file commands live, the toolbar having
  * no save key of its own — and hands back the item for `action`. The caller
  * either clicks it or reads it and presses Escape; `data-action` rather than

@@ -3,6 +3,7 @@ import { Copy, Minus, Square, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { cn } from "@/lib/utils"
 
 export function WindowControls() {
@@ -56,42 +57,45 @@ export function WindowControls() {
       className="-my-px -mr-2 flex h-12 items-stretch"
       data-slot="window-controls"
     >
-      <button
-        aria-label={t("window.minimize")}
-        className="grid w-11 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
-        onClick={() => void getCurrentWindow().minimize()}
-        title={t("window.minimize")}
-        type="button"
-      >
-        <Minus className="size-4" />
-      </button>
-      <button
-        aria-label={maximizeLabel}
-        className="grid w-11 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
-        onClick={() => void getCurrentWindow().toggleMaximize()}
-        title={maximizeLabel}
-        type="button"
-      >
-        {maximized ? (
-          <Copy className="size-3.5" />
-        ) : (
-          <Square className="size-3.5" />
-        )}
-      </button>
-      <button
-        aria-label={t("window.close")}
-        className={cn(
-          "grid w-11 place-items-center text-muted-foreground transition-colors",
-          "hover:bg-red-600 hover:text-white focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none",
-        )}
-        // `close`, unlike `destroy`, emits close-requested so App's dirty-document
-        // guard can stop the close and ask for confirmation.
-        onClick={() => void getCurrentWindow().close()}
-        title={t("window.close")}
-        type="button"
-      >
-        <X className="size-4" />
-      </button>
+      <ToolbarTooltip label={t("window.minimize")}>
+        <button
+          aria-label={t("window.minimize")}
+          className="grid w-11 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+          onClick={() => void getCurrentWindow().minimize()}
+          type="button"
+        >
+          <Minus className="size-4" />
+        </button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={maximizeLabel}>
+        <button
+          aria-label={maximizeLabel}
+          className="grid w-11 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+          onClick={() => void getCurrentWindow().toggleMaximize()}
+          type="button"
+        >
+          {maximized ? (
+            <Copy className="size-3.5" />
+          ) : (
+            <Square className="size-3.5" />
+          )}
+        </button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={t("window.close")}>
+        <button
+          aria-label={t("window.close")}
+          className={cn(
+            "grid w-11 place-items-center text-muted-foreground transition-colors",
+            "hover:bg-red-600 hover:text-white focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none",
+          )}
+          // `close`, unlike `destroy`, emits close-requested so App's
+          // dirty-document guard can stop the close and ask for confirmation.
+          onClick={() => void getCurrentWindow().close()}
+          type="button"
+        >
+          <X className="size-4" />
+        </button>
+      </ToolbarTooltip>
     </div>
   )
 }

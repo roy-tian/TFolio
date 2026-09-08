@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import {
   SettingsDialog,
   type SettingsSection,
@@ -143,31 +144,32 @@ export function AppMenu({
                   </DropdownMenuItem>
                 ) : (
                   recentFiles.map((file) => (
-                    <DropdownMenuItem
-                      data-action="recent"
-                      key={file.path}
-                      onClick={() => onOpenRecent(file.path)}
-                      title={file.path}
-                    >
-                      <span className="truncate">{file.name}</span>
-                    </DropdownMenuItem>
+                    <HintTooltip key={file.path} label={file.path} side="right">
+                      <DropdownMenuItem
+                        data-action="recent"
+                        onClick={() => onOpenRecent(file.path)}
+                      >
+                        <span className="truncate">{file.name}</span>
+                      </DropdownMenuItem>
+                    </HintTooltip>
                   ))
                 )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuItem
-              // The hint is only ever set while the item is disabled, and a
-              // disabled item is `pointer-events: none` — which would leave the
-              // browser with no hover to hang the tooltip on.
-              className="data-disabled:pointer-events-auto"
-              data-action="save"
-              disabled={!canSave}
-              onClick={onSave}
-              title={saveHint}
-            >
-              <Save />
-              {t("annotate.save")}
-            </DropdownMenuItem>
+            <HintTooltip label={saveHint} side="right">
+              <DropdownMenuItem
+                // The hint is only ever set while the item is disabled, and a
+                // disabled item is `pointer-events: none` — which would leave
+                // the tooltip with no hover to open on.
+                className="data-disabled:pointer-events-auto"
+                data-action="save"
+                disabled={!canSave}
+                onClick={onSave}
+              >
+                <Save />
+                {t("annotate.save")}
+              </DropdownMenuItem>
+            </HintTooltip>
             <DropdownMenuItem
               data-action="save-as"
               disabled={!onSaveAs}

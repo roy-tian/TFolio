@@ -9,6 +9,7 @@ import {
 import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -263,30 +264,31 @@ function InsertZone({
           )}
           style={{ height: paperHeight }}
         />
-        <button
-          aria-label={label}
-          // The button is the whole target and nothing else in the gap is, so
-          // the circle it fades in is the only place a page can be added from.
-          // It keeps its own hit area rather than borrowing the gap's: the
-          // pointer that made it appear is already on it.
-          className="absolute left-0 grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none"
-          onClick={() => onInsert(index)}
-          // A press here is a press on the button, not on the grid under it.
-          onPointerDown={(event) => event.stopPropagation()}
-          style={{ top: paperHeight / 2 }}
-          title={label}
-          type="button"
-        >
-          <span
-            className={cn(
-              "grid size-5 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
-              !dragging && ZONE_SHOWN,
-              active && "opacity-100",
-            )}
+        <HintTooltip label={label}>
+          <button
+            aria-label={label}
+            // The button is the whole target and nothing else in the gap is, so
+            // the circle it fades in is the only place a page can be added
+            // from. It keeps its own hit area rather than borrowing the gap's:
+            // the pointer that made it appear is already on it.
+            className="absolute left-0 grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none"
+            onClick={() => onInsert(index)}
+            // A press here is a press on the button, not on the grid under it.
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{ top: paperHeight / 2 }}
+            type="button"
           >
-            <Plus className="size-3" />
-          </span>
-        </button>
+            <span
+              className={cn(
+                "grid size-5 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
+                !dragging && ZONE_SHOWN,
+                active && "opacity-100",
+              )}
+            >
+              <Plus className="size-3" />
+            </span>
+          </button>
+        </HintTooltip>
       </div>
     </div>
   )

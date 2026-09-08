@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { ChevronDown, FolderOpen, House, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,7 +121,6 @@ export function DocumentTabs({
           onKeyDown={(event) => handleKeyDown(event, HOME_TAB_ID)}
           role="tab"
           tabIndex={homeSelected ? 0 : -1}
-          title={t("tabs.home")}
           type="button"
         >
           <House className="size-4" />
@@ -155,71 +156,77 @@ export function DocumentTabs({
                 )}
                 key={tab.id}
               >
-                <button
-                  aria-controls={panelElementId(tab.id)}
-                  aria-selected={selected}
-                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                  id={tabElementId(tab.id)}
-                  onClick={() => onActivate(tab.id)}
-                  onKeyDown={(event) => handleKeyDown(event, tab.id)}
-                  role="tab"
-                  tabIndex={selected ? 0 : -1}
-                  title={tab.name}
-                  type="button"
-                >
-                  {tab.dirty ? (
-                    <span
-                      aria-label={t("tabs.unsaved")}
-                      className="size-2 shrink-0 rounded-full bg-primary"
-                    />
-                  ) : null}
-                  <span className="truncate">{tab.name}</span>
-                </button>
-                <button
-                  aria-label={t("tabs.close", { name: tab.name })}
-                  className="mr-1 grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => onClose(tab.id)}
-                  tabIndex={selected ? 0 : -1}
-                  title={t("tabs.close", { name: tab.name })}
-                  type="button"
-                >
-                  <X className="size-3.5" />
-                </button>
+                {/* The workspace puts focus on this button after every open,
+                    and a hint opened by that would stand over the strip. */}
+                <HintTooltip label={tab.name} openOnFocus={false}>
+                  <button
+                    aria-controls={panelElementId(tab.id)}
+                    aria-selected={selected}
+                    className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    id={tabElementId(tab.id)}
+                    onClick={() => onActivate(tab.id)}
+                    onKeyDown={(event) => handleKeyDown(event, tab.id)}
+                    role="tab"
+                    tabIndex={selected ? 0 : -1}
+                    type="button"
+                  >
+                    {tab.dirty ? (
+                      <span
+                        aria-label={t("tabs.unsaved")}
+                        className="size-2 shrink-0 rounded-full bg-primary"
+                      />
+                    ) : null}
+                    <span className="truncate">{tab.name}</span>
+                  </button>
+                </HintTooltip>
+                <HintTooltip label={t("tabs.close", { name: tab.name })}>
+                  <button
+                    aria-label={t("tabs.close", { name: tab.name })}
+                    className="mr-1 grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => onClose(tab.id)}
+                    tabIndex={selected ? 0 : -1}
+                    type="button"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </HintTooltip>
               </div>
             )
           })}
         </div>
       </div>
 
-      <Button
-        aria-label={t("tabs.openFile")}
-        className="mb-0.5 shrink-0"
-        data-slot="tab-open-file"
-        disabled={opening}
-        onClick={onOpenFile}
-        size="icon-sm"
-        title={t("tabs.openFile")}
-        variant="ghost"
-      >
-        {opening ? <LoaderCircle className="animate-spin" /> : <FolderOpen />}
-      </Button>
+      <ToolbarTooltip label={t("tabs.openFile")} side="top">
+        <Button
+          aria-label={t("tabs.openFile")}
+          className="mb-0.5 shrink-0"
+          data-slot="tab-open-file"
+          disabled={opening}
+          onClick={onOpenFile}
+          size="icon-sm"
+          variant="ghost"
+        >
+          {opening ? <LoaderCircle className="animate-spin" /> : <FolderOpen />}
+        </Button>
+      </ToolbarTooltip>
 
       {scrolls ? (
         <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label={t("tabs.listAll")}
-                className="mb-0.5 shrink-0"
-                data-slot="tab-overflow-menu"
-                size="icon-sm"
-                title={t("tabs.listAll")}
-                variant="ghost"
-              />
-            }
-          >
-            <ChevronDown />
-          </DropdownMenuTrigger>
+          <ToolbarTooltip label={t("tabs.listAll")} side="top">
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  aria-label={t("tabs.listAll")}
+                  className="mb-0.5 shrink-0"
+                  data-slot="tab-overflow-menu"
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <ChevronDown />
+            </DropdownMenuTrigger>
+          </ToolbarTooltip>
           <DropdownMenuContent align="end" className="w-64">
             {tabs.map((tab) => (
               <DropdownMenuItem

@@ -156,7 +156,9 @@ function releaseRow() {
 function listedNames() {
   return browser.execute(() =>
     [...document.querySelectorAll("[data-slot='merge-file']")].map(
-      (row) => row.querySelector("span[title]")?.textContent?.trim() ?? "",
+      (row) =>
+        row.querySelector("[data-slot='merge-file-name']")?.textContent?.trim() ??
+        "",
     ),
   )
 }

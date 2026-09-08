@@ -3,6 +3,7 @@ import { createPortal } from "react-dom"
 import { Check, FilePlus2, FileWarning, GripVertical, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import { OperationProgress } from "@/components/OperationProgress"
 import { PageNumbersSettings } from "@/components/PageNumbersSettings"
 import { WatermarkSettings } from "@/components/WatermarkSettings"
@@ -96,9 +97,14 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
       {usable ? null : (
         <FileWarning className="size-4 shrink-0 text-destructive" />
       )}
-      <span className="min-w-0 flex-1 truncate text-sm" title={file.path}>
-        {file.name}
-      </span>
+      <HintTooltip label={file.path}>
+        <span
+          className="min-w-0 flex-1 truncate text-sm"
+          data-slot="merge-file-name"
+        >
+          {file.name}
+        </span>
+      </HintTooltip>
       <span
         className={cn(
           "shrink-0 text-xs",
@@ -110,15 +116,16 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
           : t("mergeWizard.unreadable")}
       </span>
       {onRemove ? (
-        <Button
-          aria-label={t("mergeWizard.remove", { name: file.name })}
-          onClick={() => onRemove(file.path)}
-          size="icon-sm"
-          title={t("mergeWizard.remove", { name: file.name })}
-          variant="ghost"
-        >
-          <X />
-        </Button>
+        <HintTooltip label={t("mergeWizard.remove", { name: file.name })}>
+          <Button
+            aria-label={t("mergeWizard.remove", { name: file.name })}
+            onClick={() => onRemove(file.path)}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <X />
+          </Button>
+        </HintTooltip>
       ) : (
         // Keep the ghost the same width as the real row without putting a
         // second interactive control under the pointer.

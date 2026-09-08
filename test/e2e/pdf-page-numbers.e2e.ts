@@ -13,6 +13,7 @@ import {
   pagePixelFingerprint,
   renderedPage,
   seedSettings,
+  tooltipOn,
 } from "./helpers"
 
 async function openPageNumbersDialog() {
@@ -219,7 +220,7 @@ describe("TFolio page numbers", () => {
     // behind a rebuild the reader has left.
     await openPdfFromDisk("page-numbers-after-stop.pdf", blankPdf())
     await $(
-      "button[role='tab'][title='page-numbers-after-stop.pdf']",
+      "//button[@role='tab'][normalize-space()='page-numbers-after-stop.pdf']",
     ).waitForExist({ timeout: 15_000 })
   })
 
@@ -263,7 +264,9 @@ describe("TFolio page numbers", () => {
     // the menu's disabled save item.
     const save = await appMenuItem("save")
     expect(await save.getAttribute("data-disabled")).not.toBe(null)
-    expect(await save.getAttribute("title")).toContain("exported as a copy")
+    expect(await tooltipOn("[data-action='save']")).toContain(
+      "exported as a copy",
+    )
     await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 

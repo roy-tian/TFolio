@@ -59,4 +59,16 @@ describe("TFolio toolbar tooltips", () => {
     await highlightOptions.click()
     await expect($("#highlight-color-label")).toHaveText("高亮颜色")
   })
+
+  it("leaves no native tooltip in the workspace", async () => {
+    // Every hint the app shows is a shadcn tooltip, so nothing on screen may
+    // still carry the attribute the WebView would draw its own from.
+    const natives = await browser.execute(() =>
+      [...document.querySelectorAll("[title]")].map(
+        (node) => `${node.tagName.toLowerCase()}: ${node.getAttribute("title")}`,
+      ),
+    )
+
+    expect(natives).toEqual([])
+  })
 })

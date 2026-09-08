@@ -3,6 +3,7 @@ import { RadioGroup } from "@base-ui/react/radio-group"
 import { Check } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import type { HexColor } from "@/lib/annotations"
 import { isHexColor } from "@/lib/annotationStyles"
 
@@ -46,45 +47,46 @@ export function ColorSwatchPicker({
         value={isCustom ? null : value}
       >
         {swatches.map((swatch) => (
-          <Radio.Root
-            aria-label={swatch}
-            className="flex size-6 items-center justify-center rounded-md border border-black/10 outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50 dark:border-white/15"
-            key={swatch}
-            style={{ backgroundColor: swatch }}
-            title={swatch}
-            value={swatch}
-          >
-            <Radio.Indicator>
-              {/* Mixed against the swatch: a tick has to stay visible on both a
-                  pale yellow and a deep blue. */}
-              <Check className="size-3.5 mix-blend-difference text-white" />
-            </Radio.Indicator>
-          </Radio.Root>
+          <HintTooltip key={swatch} label={swatch}>
+            <Radio.Root
+              aria-label={swatch}
+              className="flex size-6 items-center justify-center rounded-md border border-black/10 outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50 dark:border-white/15"
+              style={{ backgroundColor: swatch }}
+              value={swatch}
+            >
+              <Radio.Indicator>
+                {/* Mixed against the swatch: a tick has to stay visible on both
+                    a pale yellow and a deep blue. */}
+                <Check className="size-3.5 mix-blend-difference text-white" />
+              </Radio.Indicator>
+            </Radio.Root>
+          </HintTooltip>
         ))}
       </RadioGroup>
       {allowCustom ? (
-        <label
-          className="relative flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed border-input transition-colors hover:border-foreground/40 focus-within:ring-3 focus-within:ring-ring/50"
-          data-checked={isCustom || undefined}
-          title={t("annotate.customColor")}
-        >
-          <input
-            aria-label={t("annotate.customColor")}
-            className="absolute inset-0 size-full cursor-pointer opacity-0"
-            onChange={(event) => onChange(event.target.value)}
-            type="color"
-            value={value}
-          />
-          <span
-            aria-hidden
-            className="size-full"
-            style={{
-              background: isCustom
-                ? value
-                : "conic-gradient(#f87171, #fbbf24, #4ade80, #38bdf8, #a78bfa, #f87171)",
-            }}
-          />
-        </label>
+        <HintTooltip label={t("annotate.customColor")}>
+          <label
+            className="relative flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed border-input transition-colors hover:border-foreground/40 focus-within:ring-3 focus-within:ring-ring/50"
+            data-checked={isCustom || undefined}
+          >
+            <input
+              aria-label={t("annotate.customColor")}
+              className="absolute inset-0 size-full cursor-pointer opacity-0"
+              onChange={(event) => onChange(event.target.value)}
+              type="color"
+              value={value}
+            />
+            <span
+              aria-hidden
+              className="size-full"
+              style={{
+                background: isCustom
+                  ? value
+                  : "conic-gradient(#f87171, #fbbf24, #4ade80, #38bdf8, #a78bfa, #f87171)",
+              }}
+            />
+          </label>
+        </HintTooltip>
       ) : null}
     </div>
   )

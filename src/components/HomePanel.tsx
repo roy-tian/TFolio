@@ -2,6 +2,7 @@ import { Clock, FileText, FileUp, LoaderCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { DismissibleAlert } from "@/components/DismissibleAlert"
+import { HintTooltip } from "@/components/HintTooltip"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -103,24 +104,25 @@ export function HomePanel({
                 <ul className="mt-2 flex flex-col">
                   {recentFiles.map((file) => (
                     <li key={file.path}>
-                      <button
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
-                        data-slot="recent-file"
-                        disabled={opening}
-                        onClick={() => onOpenRecent(file.path)}
-                        title={file.path}
-                        type="button"
-                      >
-                        <FileText className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm">
-                            {file.name}
+                      <HintTooltip label={file.path}>
+                        <button
+                          className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
+                          data-slot="recent-file"
+                          disabled={opening}
+                          onClick={() => onOpenRecent(file.path)}
+                          type="button"
+                        >
+                          <FileText className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm">
+                              {file.name}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {file.directory}
+                            </span>
                           </span>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {file.directory}
-                          </span>
-                        </span>
-                      </button>
+                        </button>
+                      </HintTooltip>
                     </li>
                   ))}
                 </ul>

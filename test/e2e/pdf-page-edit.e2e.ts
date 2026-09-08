@@ -7,10 +7,13 @@ import {
   clickAppMenuItem,
   emitDrag,
   gapPoint,
+  hoverElement,
   openPathViaDialog,
   openPdfFromDisk,
   seedSettings,
   stripedPdf,
+  tooltipOn,
+  tooltipOpen,
   writeScratchPdf,
 } from "./helpers"
 
@@ -376,6 +379,27 @@ describe("TFolio page editing", () => {
       timeoutMsg: "undoing both inserts never restored the shape",
     })
     await waitForThumb(2, second!)
+  })
+
+  it("labels the grid's controls with shadcn tooltips, not native ones", async () => {
+    await openPdfFromDisk("tooltips.pdf", bandedPdf(2))
+    await $("button[aria-label='Select page 2']").waitForExist()
+
+    // A pointer crossing the grid must not set one off: unlike a bar's label,
+    // the hint waits out a hover that means it.
+    await hoverElement("button[aria-label='Select page 2']")
+    await browser.pause(250)
+    expect(await tooltipOpen("button[aria-label='Select page 2']")).toBe(false)
+
+    for (const label of [
+      "Select page 2",
+      "Delete page 2",
+      "Insert a blank page before page 2",
+    ]) {
+      const selector = `button[aria-label='${label}']`
+      expect(await $(selector).getAttribute("title")).toBeNull()
+      expect(await tooltipOn(selector)).toContain(label)
+    }
   })
 
   it("inserts a PDF dragged in from the desktop at the gap under it", async () => {

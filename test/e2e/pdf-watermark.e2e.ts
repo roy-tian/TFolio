@@ -12,6 +12,7 @@ import {
   pagePixelFingerprint,
   renderedPage,
   seedSettings,
+  tooltipOn,
 } from "./helpers"
 
 async function openWatermarkDialog() {
@@ -199,7 +200,9 @@ describe("TFolio document watermark", () => {
     // and a document with no file of its own disable it too.
     const save = await appMenuItem("save")
     expect(await save.getAttribute("data-disabled")).not.toBe(null)
-    expect(await save.getAttribute("title")).toContain("exported as a copy")
+    expect(await tooltipOn("[data-action='save']")).toContain(
+      "exported as a copy",
+    )
     await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 

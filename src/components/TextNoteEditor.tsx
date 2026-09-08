@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { SliderRow } from "@/components/SliderRow"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -264,24 +265,26 @@ export function TextNoteEditor({
           value={draft.text}
         />
         <div className="flex justify-end gap-1">
-          <Button
-            aria-label={t("annotate.textNoteCancel")}
-            onClick={onCancel}
-            size="icon"
-            title={t("annotate.textNoteCancel")}
-            variant="ghost"
-          >
-            <X />
-          </Button>
-          <Button
-            aria-label={t("annotate.textNoteConfirm")}
-            onClick={onCommit}
-            size="icon"
-            title={t("annotate.textNoteConfirm")}
-            variant="outline"
-          >
-            <Check />
-          </Button>
+          <ToolbarTooltip label={t("annotate.textNoteCancel")}>
+            <Button
+              aria-label={t("annotate.textNoteCancel")}
+              onClick={onCancel}
+              size="icon"
+              variant="ghost"
+            >
+              <X />
+            </Button>
+          </ToolbarTooltip>
+          <ToolbarTooltip label={t("annotate.textNoteConfirm")}>
+            <Button
+              aria-label={t("annotate.textNoteConfirm")}
+              onClick={onCommit}
+              size="icon"
+              variant="outline"
+            >
+              <Check />
+            </Button>
+          </ToolbarTooltip>
         </div>
       </div>
     </div>

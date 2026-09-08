@@ -3,6 +3,7 @@ import { useId, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { PageNumbersPreview } from "@/components/PageNumbersPreview"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -96,18 +97,13 @@ function SettingLabel({
       </FieldLabel>
       {hint ? (
         <Popover>
-          <PopoverTrigger
-            render={
-              <Button
-                aria-label={about}
-                size="icon-xs"
-                title={about}
-                variant="ghost"
-              />
-            }
-          >
-            {smart ? <SmartIcon /> : <Info />}
-          </PopoverTrigger>
+          <ToolbarTooltip label={about} side="top">
+            <PopoverTrigger
+              render={<Button aria-label={about} size="icon-xs" variant="ghost" />}
+            >
+              {smart ? <SmartIcon /> : <Info />}
+            </PopoverTrigger>
+          </ToolbarTooltip>
           <PopoverContent align="start" className="w-64">
             <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>
           </PopoverContent>
