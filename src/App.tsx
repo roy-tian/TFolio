@@ -33,6 +33,7 @@ import {
   useMergeWizard,
   type MergeWizardResult,
 } from "@/hooks/useMergeWizard"
+import { usePageHandoff } from "@/hooks/usePageHandoff"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
@@ -193,6 +194,14 @@ export default function App() {
     setActiveId(tabId)
     focusWorkspaceTarget(tabId)
   }, [])
+
+  // A page drag that leaves the grid it started in becomes the workspace's:
+  // resting on a tab opens it, and the document revealed takes the drop.
+  const { armedTabId, handoff } = usePageHandoff({
+    activeIdRef,
+    onActivate: activateTab,
+    sessions: sessionRefs,
+  })
 
   // Every way a document reaches the workspace runs through here: they queue
   // behind one another rather than racing over which tab ends up active, and
@@ -978,6 +987,7 @@ export default function App() {
           onInitialLayerProgress={tab.opensWith?.onLayerProgress}
           onInitialLayersSettled={tab.opensWith?.onLayersSettled}
           onSourceChange={updateSource}
+          pageHandoff={handoff}
           ref={(handle) => {
             if (handle) {
               sessionRefs.current.set(tab.id, handle)
@@ -991,6 +1001,7 @@ export default function App() {
 
       <DocumentTabs
         activeId={activeId}
+        armedTabId={armedTabId}
         onActivate={activateTab}
         onClose={requestCloseTab}
         onOpenFile={() => void chooseFile()}

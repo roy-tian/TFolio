@@ -127,7 +127,7 @@ const en = {
     exportFailed: "This PDF could not be exported.",
     failed: "That edit could not be applied.",
     dropWhileEditing:
-      "Another page edit is still running — drop the PDF again in a moment.",
+      "Another page edit is still running — try the drop again in a moment.",
   },
   watermark: {
     open: "Watermark",

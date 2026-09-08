@@ -543,6 +543,36 @@ pub async fn insert_pdf_from_path(
     .map_err(|error| format!("PDFium insert task failed: {error}"))?
 }
 
+/// Copies pages from one open document into another — the thumbnail drag that
+/// crosses tabs. Nothing is read from disk, so there is no path to approve; what
+/// is checked instead is that this window holds both documents, and the engine
+/// answers for the page numbers and the position it is handed.
+#[tauri::command]
+pub async fn insert_pdf_pages_from_document(
+    document_id: u64,
+    source_document_id: u64,
+    page_numbers: Vec<i32>,
+    index: i32,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfStructureUpdate, String> {
+    // The drag crosses two tabs of one window, and documents are owned per
+    // window: neither end may be a document this window does not hold.
+    if !owners.owns(document_id, window.label()) || !owners.owns(source_document_id, window.label())
+    {
+        return Err("both documents must be open in this window".into());
+    }
+
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.insert_pages_from_document(document_id, source_document_id, &page_numbers, index)
+    })
+    .await
+    .map_err(|error| format!("PDFium insert task failed: {error}"))?
+}
+
 /// Shows the native open dialog in multi-select mode, for the merge wizard's
 /// file list. Every chosen path is recorded as approved, exactly as the
 /// single-file pick does — see `pick_pdf_path`.

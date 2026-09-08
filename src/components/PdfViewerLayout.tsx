@@ -6,6 +6,7 @@ import {
   useRef,
   type RefObject,
 } from "react"
+import { createPortal } from "react-dom"
 import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -16,7 +17,12 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { RenderEpochs } from "@/lib/annotations"
-import { orderAfterMove, slotOffsets, type CellBox } from "@/lib/pageDrag"
+import {
+  orderAfterMove,
+  slotOffsets,
+  type CellBox,
+  type PageHandoff,
+} from "@/lib/pageDrag"
 import {
   rotationForPage,
   type PageRotations,
@@ -46,10 +52,14 @@ const RENDER_SETTLE_MS = 150
 
 /** Everything the thumbnail grid's page editing needs from its owner. */
 export type PageEditProps = {
-  /** Where a PDF dragged in from the desktop would land: the 1-based position
-      its first page would take, or null while nothing is being dragged over the
-      grid. The owner reads the drop; the grid only draws where it points. */
-  fileDropIndex: number | null
+  /** Where pages dragged over the grid would land: the 1-based position the
+      first of them would take, or null while nothing is over it. A PDF from the
+      desktop and another document's pages both point here. The owner reads the
+      drop; the grid only draws where it points. */
+  dropIndex: number | null
+  /** Where a drag that leaves this grid goes: the workspace, which carries it
+      to another document's tab. */
+  handoff: PageHandoff
   onClearSelection: () => void
   onDeletePage: (pageNumber: number) => void
   onInsertBlankPage: (index: number) => void
@@ -344,15 +354,25 @@ function DragGhost({
 
   const footprint = dimensionsForRotation(rotation, page.width, page.height)
   const height = (THUMBNAIL_WIDTH * footprint.height) / footprint.width
+  const carried = drag.away === "carried"
 
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed z-50"
+      className={cn(
+        "pointer-events-none fixed z-50 transition-[transform,opacity] duration-150 ease-out",
+        // Carried rather than placed: no grid is offering these pages a slot,
+        // so the card stands aside for the tab it is about to open.
+        carried && "opacity-70",
+      )}
       style={{
         height,
         left: drag.pointer.x + drag.grip.x,
         top: drag.pointer.y + drag.grip.y,
+        transform: carried ? "scale(0.4)" : undefined,
+        // The grip's own point, so the card shrinks towards the pointer rather
+        // than away from it and comes back to the same spot of itself.
+        transformOrigin: `${-drag.grip.x}px ${-drag.grip.y}px`,
         width: THUMBNAIL_WIDTH,
       }}
     >
@@ -409,8 +429,15 @@ function dropPreview(
   lifted: ReadonlySet<number>
   offsets: Map<number, { x: number; y: number }>
 } {
-  const order = orderAfterMove(drag.pages, drag.gap, pageCount)
   const lifted = new Set(drag.released ? [] : drag.pages)
+
+  // A drag the workspace has taken is on its way to another document: these
+  // pages are in hand, but nothing here has anywhere to make way for.
+  if (drag.away) {
+    return { landing: undefined, lifted, offsets: new Map() }
+  }
+
+  const order = orderAfterMove(drag.pages, drag.gap, pageCount)
 
   return {
     // The block keeps its order, so its first page is where it starts.
@@ -590,6 +617,7 @@ function ThumbnailLayout({
     active: true,
     columns,
     gridRef,
+    handoff: pageEdit.handoff,
     layoutVersion: pages,
     onReorder: pageEdit.onReorderPages,
     pageCount: pages.length,
@@ -633,7 +661,7 @@ function ThumbnailLayout({
   )
   const ghostPage = drag ? pages[drag.lead - 1] : undefined
   const dragging = Boolean(drag)
-  const { fileDropIndex, selectedPages } = pageEdit
+  const { dropIndex, selectedPages } = pageEdit
 
   return (
     <div
@@ -689,7 +717,7 @@ function ThumbnailLayout({
             }
             documentId={documentId}
             dragging={dragging}
-            insertActive={fileDropIndex === pageNumber}
+            insertActive={dropIndex === pageNumber}
             isCurrent={currentPage === pageNumber}
             isSelected={isSelected}
             key={`${documentId}-${pageEdit.thumbnailKeys[index]}`}
@@ -713,7 +741,7 @@ function ThumbnailLayout({
             // Only where that gap is actually drawn: a cell with none of its
             // own must not re-render for a drop it cannot show.
             trailingInsertActive={
-              trailingZone !== "none" && fileDropIndex === pageNumber + 1
+              trailingZone !== "none" && dropIndex === pageNumber + 1
             }
             trailingZone={trailingZone}
           />
@@ -722,15 +750,21 @@ function ThumbnailLayout({
       {/* Gone the moment the pointer is up, though the made way stands until
           the reorder lands. The page it names may already be out of range —
           the grid can be handed a shorter document mid-gesture — and a ghost
-          is not worth taking the viewer down for. */}
-      {drag && !drag.released && ghostPage ? (
-        <DragGhost
-          drag={drag}
-          gridRef={gridRef}
-          page={ghostPage}
-          rotation={rotationForPage(rotations, drag.lead)}
-        />
-      ) : null}
+          is not worth taking the viewer down for.
+
+          In the body because this grid is hidden the moment the workspace opens
+          another tab under the drag, and the pages are still in hand. */}
+      {drag && !drag.released && ghostPage
+        ? createPortal(
+            <DragGhost
+              drag={drag}
+              gridRef={gridRef}
+              page={ghostPage}
+              rotation={rotationForPage(rotations, drag.lead)}
+            />,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

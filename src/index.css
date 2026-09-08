@@ -263,3 +263,15 @@ body {
     }
   }
 }
+
+/* The bar that counts out a page drag's dwell on a tab. DocumentTabs.tsx sets
+   the real duration from TAB_SPRING_MS; the one here is only a fallback. */
+@theme {
+  --animate-tab-spring: tab-spring 600ms linear both;
+
+  @keyframes tab-spring {
+    from {
+      transform: scaleX(0);
+    }
+  }
+}

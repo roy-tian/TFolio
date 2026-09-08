@@ -33,6 +33,7 @@ import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
+import type { PageHandoffTarget } from "@/hooks/usePageHandoff"
 import { useEraserTool } from "@/hooks/useEraserTool"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
@@ -62,6 +63,7 @@ import {
 } from "@/lib/annotations"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { dropHitAt, insertIndexForHit } from "@/lib/fileDrop"
+import type { PageHandoff } from "@/lib/pageDrag"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
   isPdfPath,
@@ -130,6 +132,22 @@ export type FileDragEvent =
   | { kind: "drop"; paths: string[]; point: { x: number; y: number } }
   | { kind: "leave" }
 
+/**
+ * Pages dragged out of another document's grid, as the workspace passes them
+ * down (see `usePageHandoff`). Positions are in CSS pixels, like a file drag's;
+ * only the drop names the pages, since only then is there anything to do with
+ * them.
+ */
+export type PageDragEvent =
+  | { kind: "over"; point: { x: number; y: number } }
+  | {
+      kind: "drop"
+      pages: number[]
+      point: { x: number; y: number }
+      sourceDocumentId: number
+    }
+  | { kind: "leave" }
+
 export type DocumentSessionHandle = {
   hasUnsavedWorkNow: () => boolean
   /** Opens the app-owned find bar for this document. */
@@ -140,6 +158,12 @@ export type DocumentSessionHandle = {
       where a dropped PDF is inserted at the gap under the pointer instead of
       opening as a tab of its own. */
   onFileDrag: (event: FileDragEvent) => boolean
+  /** The same answer for pages dragged from another document's grid, which land
+      in the gap under the pointer as copies. */
+  onPageDrag: (event: PageDragEvent) => boolean
+  /** Shows this document's pages, for a drag the workspace has just brought
+      here: the grid is the one view a page can be dropped into. */
+  showThumbnails: () => void
 }
 
 type DocumentSessionProps = {
@@ -168,6 +192,9 @@ type DocumentSessionProps = {
   /** An export that gave a document its first file: the tab now stands for
       that file, not for the bytes it opened from. */
   onSourceChange: (documentId: number, path: string) => void
+  /** The workspace's answer for a page drag that has left this document's grid,
+      and the way another document's pages reach it. */
+  pageHandoff: PageHandoffTarget
   /** Present only when Rust recorded this opened path as recent. */
   recentPath?: string
 }
@@ -191,6 +218,7 @@ function DocumentSession(
     onInitialLayersSettled,
     onDirtyChange,
     onSourceChange,
+    pageHandoff,
     recentPath,
   },
   ref,
@@ -209,10 +237,10 @@ function DocumentSession(
   // every structure update, so this never has to be replayed from history: a
   // freshly opened document holds none of them.
   const [hasMergedPages, setHasMergedPages] = useState(false)
-  // Where a PDF dragged in from the desktop would land, while one is over the
-  // grid. Only the insertion line reads it; the drop itself resolves the point
-  // again, so a stale index can never place a file.
-  const [fileDropIndex, setFileDropIndex] = useState<number | null>(null)
+  // Where pages dragged over the grid would land — a PDF from the desktop, or
+  // another document's pages. Only the insertion line reads it; every drop
+  // resolves the point again, so a stale index can never place anything.
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState(() =>
     Math.min(
       Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
@@ -1270,7 +1298,7 @@ function DocumentSession(
         !viewer ||
         viewMode !== "thumbnail"
       ) {
-        setFileDropIndex(null)
+        setDropIndex(null)
         return false
       }
 
@@ -1279,7 +1307,7 @@ function DocumentSession(
       // an insertion line drawn for a folder promises a place it will refuse.
       // Null paths mean the window never heard them, not that there are none.
       if (!(event.paths?.some(isPdfPath) ?? true)) {
-        setFileDropIndex(null)
+        setDropIndex(null)
         return false
       }
 
@@ -1291,7 +1319,7 @@ function DocumentSession(
         event.point.x,
       )
 
-      setFileDropIndex(event.kind === "over" ? index : null)
+      setDropIndex(event.kind === "over" ? index : null)
 
       if (index === null) {
         return false
@@ -1316,12 +1344,90 @@ function DocumentSession(
     [active, annotations, insertFiles, showViewerError, viewMode],
   )
 
+  /**
+   * Pages dragged out of another document's grid, brought here by the workspace
+   * once its tab was sprung open. They land where a dropped file would, by the
+   * same hit test — and as copies: the document they came from keeps them.
+   */
+  const handlePageDrag = useCallback(
+    (event: PageDragEvent): boolean => {
+      const viewer = viewerRef.current
+
+      if (
+        event.kind === "leave" ||
+        !active ||
+        !viewer ||
+        viewMode !== "thumbnail"
+      ) {
+        setDropIndex(null)
+        return false
+      }
+
+      const index = insertIndexForHit(
+        dropHitAt(event.point, viewer),
+        event.point.x,
+      )
+
+      setDropIndex(event.kind === "over" ? index : null)
+
+      if (index === null) {
+        return false
+      }
+
+      if (event.kind === "over") {
+        return true
+      }
+
+      // Claimed either way, as a file drop over this grid is: the one case it
+      // cannot act on is an edit already renumbering the gap it was read off.
+      if (annotations.isStructureBusyNow()) {
+        showViewerError("editInFlight")
+      } else {
+        void annotations.insertPages(
+          event.sourceDocumentId,
+          event.pages,
+          index,
+          // Off the ref, as an inserted file's bound is: a structure change
+          // writes it before the render that would refresh a captured value.
+          documentRef.current?.numPages ?? 0,
+        )
+      }
+
+      return true
+    },
+    [active, annotations, showViewerError, viewMode],
+  )
+
+  // The workspace springs this tab open under a drag that is made of pages, so
+  // the view it opens on has to be the one with gaps between them. Opened for
+  // that drag rather than pressed, so it is not stored as a preference either.
+  const showThumbnails = useCallback(() => {
+    if (preferredViewMode === "thumbnail") {
+      return
+    }
+
+    viewModeChosen.current = false
+    setPreferredViewMode("thumbnail")
+  }, [preferredViewMode])
+
+  // The workspace's handoff with this document's own id filled in: its grid
+  // asks whether a drag has left for somewhere the workspace answers for, and
+  // gives up the release when it has.
+  const handoff = useMemo<PageHandoff>(
+    () => ({
+      cancel: pageHandoff.cancel,
+      claim: (point) => pageHandoff.claim(openedDocument.id, point),
+      drop: (point, pages) => pageHandoff.drop(openedDocument.id, point, pages),
+    }),
+    [openedDocument.id, pageHandoff],
+  )
+
   // A drag the reader started here but finished elsewhere — they switched tabs
   // while a file was in the air, or the wizard took the drop — never sends this
   // session a `leave`, so the line it drew would outlive the drag.
   useEffect(() => {
     if (!active) {
-      setFileDropIndex(null)
+      setDropIndex(null)
     }
   }, [active])
 
@@ -1510,10 +1616,19 @@ function DocumentSession(
     () => ({
       hasUnsavedWorkNow,
       onFileDrag: handleFileDrag,
+      onPageDrag: handlePageDrag,
       openSearch,
       rememberViewNow,
+      showThumbnails,
     }),
-    [handleFileDrag, hasUnsavedWorkNow, openSearch, rememberViewNow],
+    [
+      handleFileDrag,
+      handlePageDrag,
+      hasUnsavedWorkNow,
+      openSearch,
+      rememberViewNow,
+      showThumbnails,
+    ],
   )
 
   useEffect(() => {
@@ -1886,7 +2001,8 @@ function DocumentSession(
               fileName={fileName}
               key={pdfDocument.id}
               pageEdit={{
-                fileDropIndex,
+                dropIndex,
+                handoff,
                 onClearSelection: clearThumbnailSelection,
                 onDeletePage: deleteThumbnailPage,
                 onInsertBlankPage: insertBlankPage,

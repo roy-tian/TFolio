@@ -5,6 +5,8 @@ import {
   exceedsDragThreshold,
   orderAfterMove,
   type CellBox,
+  type PageHandoff,
+  type PageHandoffPlace,
 } from "@/lib/pageDrag"
 
 type UsePageDragOptions = {
@@ -12,6 +14,9 @@ type UsePageDragOptions = {
   columns: number
   /** The thumbnail grid element the cells are laid out in. */
   gridRef: RefObject<HTMLElement | null>
+  /** Where a drag that has left this grid goes — another document's tab, and
+      the grid behind it. Absent where there is nowhere to hand one to. */
+  handoff?: PageHandoff
   /** The page list snapshot: a committed structure edit ends its preview. */
   layoutVersion: object
   /** May answer with the reorder's own promise; the make-way layout is held
@@ -25,6 +30,11 @@ type UsePageDragOptions = {
 /** A drag in progress, for the ghost and the make-way preview. */
 export type PageDragState = {
   layoutVersion: object
+  /** The workspace has taken the drag — the pointer has left this grid for the
+      tab strip or for another document. This one then shows no landing place
+      and commits no reorder; it only keeps the pages in hand, and the ghost on
+      the pointer. Null while the drag is still its own. */
+  away: PageHandoffPlace | null
   /** The cell boxes as they stood when the drag began, in grid coordinates:
       the slots the grid's own pages slide between to open the drop's hole. Each
       is the whole cell, the row gap it carries as padding included. */
@@ -61,6 +71,7 @@ export function usePageDrag({
   active,
   columns,
   gridRef,
+  handoff,
   layoutVersion,
   onReorder,
   pageCount,
@@ -83,12 +94,14 @@ export function usePageDrag({
   // a resolving edit bumping `pending` — cannot resubscribe them and discard
   // the in-flight `gesture` the closure holds.
   const onReorderRef = useRef(onReorder)
+  const handoffRef = useRef(handoff)
   const columnsRef = useRef(columns)
   const pageCountRef = useRef(pageCount)
   const selectedPagesRef = useRef(selectedPages)
   const layoutVersionRef = useRef(layoutVersion)
 
   onReorderRef.current = onReorder
+  handoffRef.current = handoff
   columnsRef.current = columns
   pageCountRef.current = pageCount
   selectedPagesRef.current = selectedPages
@@ -117,6 +130,10 @@ export function usePageDrag({
       grip: { x: number; y: number }
       cells: CellBox[]
       layoutVersion: object
+      /** The pages in hand, read once at the press: the grid the drag started
+          in clears its selection the moment the workspace shows another
+          document, and the block must not shrink on its way there. */
+      pages: number[]
       /** Set once the threshold is passed; mirrors the `drag` state. */
       dragging: boolean
     } | null = null
@@ -142,8 +159,8 @@ export function usePageDrag({
       latest = null
     }
 
-    /** The pages travelling with the pointer: a grabbed page that is part of
-        the selection brings the whole selection with it, any other goes alone. */
+    /** The pages a press takes: a grabbed page that is part of the selection
+        brings the whole selection with it, any other goes alone. */
     const draggedPages = (pageNumber: number) => {
       const selectedPages = selectedPagesRef.current
 
@@ -169,11 +186,12 @@ export function usePageDrag({
 
       setDrag({
         layoutVersion: gesture.layoutVersion,
+        away: handoffRef.current?.claim(pointer) ?? null,
         cells: gesture.cells,
         gap: dropGapForPoint(point, gesture.cells, columnsRef.current),
         grip: gesture.grip,
         lead: gesture.pageNumber,
-        pages: draggedPages(gesture.pageNumber),
+        pages: gesture.pages,
         pointer,
         released: false,
       })
@@ -187,6 +205,9 @@ export function usePageDrag({
       gesture = null
       release += 1
       cancelFrame()
+      // A second press abandons whatever was in hand — a right-click mid-drag
+      // is one — so a tab armed under it must not spring open behind it.
+      handoffRef.current?.cancel()
       dragEndedAtRef.current = Number.NEGATIVE_INFINITY
       setDrag(null)
 
@@ -254,6 +275,7 @@ export function usePageDrag({
           y: pressed.top - event.clientY,
         },
         pageNumber,
+        pages: draggedPages(pageNumber),
         pointerId: event.pointerId,
       }
     }
@@ -296,30 +318,47 @@ export function usePageDrag({
       cancelFrame()
 
       if (!current.dragging || current.layoutVersion !== layoutVersionRef.current) {
+        // Including a gesture the grid has outlived: a tab armed under it must
+        // not spring open once the pages are no longer in hand.
+        handoffRef.current?.cancel()
         setDrag(null)
         return
       }
 
       dragEndedAtRef.current = performance.now()
 
-      const point = gridPointAt({ x: event.clientX, y: event.clientY })
+      const pointer = { x: event.clientX, y: event.clientY }
+      const pages = current.pages
+      const handoff = handoffRef.current
+
+      // Asked again where it was actually let go of, as the gap below is: a
+      // release the workspace has is its drop, not a reorder here.
+      if (handoff?.claim(pointer)) {
+        setDrag(null)
+        handoff.drop(pointer, pages)
+        return
+      }
+
+      handoff?.cancel()
+
+      const point = gridPointAt(pointer)
 
       if (!point) {
         setDrag(null)
         return
       }
 
-      const pages = draggedPages(current.pageNumber)
       const gap = dropGapForPoint(point, current.cells, columnsRef.current)
 
       setDrag({
         layoutVersion: current.layoutVersion,
+        away: null,
         cells: current.cells,
         gap,
         grip: current.grip,
         lead: current.pageNumber,
         pages,
-        pointer: { x: event.clientX, y: event.clientY },
+        pointer,
         released: true,
       })
 
@@ -347,6 +386,7 @@ export function usePageDrag({
       gesture = null
       release += 1
       cancelFrame()
+      handoffRef.current?.cancel()
       setDrag(null)
     }
 
@@ -357,6 +397,8 @@ export function usePageDrag({
 
     return () => {
       cancelFrame()
+      // The grid a drag started in is gone; nothing is left to hand over.
+      handoffRef.current?.cancel()
       document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("pointermove", handlePointerMove)
       document.removeEventListener("pointerup", handlePointerUp)

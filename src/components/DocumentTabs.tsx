@@ -18,6 +18,7 @@ import {
   tabIdForKey,
   type TabId,
 } from "@/lib/documentTabs"
+import { TAB_SPRING_MS } from "@/lib/pageDrag"
 import { cn } from "@/lib/utils"
 
 export type DocumentTabItem = {
@@ -28,6 +29,10 @@ export type DocumentTabItem = {
 
 type DocumentTabsProps = {
   activeId: TabId
+  /** The tab a page drag is resting on, which the workspace is about to open
+      under it — see `usePageHandoff`. The bar underneath counts that rest out,
+      so the reader can see the wait is going somewhere. */
+  armedTabId: number | null
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
   onOpenFile: () => void
@@ -40,6 +45,7 @@ const tabClassName =
 
 export function DocumentTabs({
   activeId,
+  armedTabId,
   onActivate,
   onClose,
   onOpenFile,
@@ -98,7 +104,12 @@ export function DocumentTabs({
   const homeSelected = activeId === HOME_TAB_ID
 
   return (
-    <div className="fixed inset-x-0 top-12 z-40 flex h-9 items-end gap-1 border-b bg-muted/70 px-2 backdrop-blur">
+    // The whole strip is the workspace's, which `data-tab-strip` is what a page
+    // drag hit-tests for: a release on it lands nothing rather than reordering.
+    <div
+      className="fixed inset-x-0 top-12 z-40 flex h-9 items-end gap-1 border-b bg-muted/70 px-2 backdrop-blur"
+      data-tab-strip
+    >
       {/* The open and list actions sit outside the tablist: they are not tabs,
           and arrow-key tab navigation must not land on them. */}
       <div
@@ -138,6 +149,7 @@ export function DocumentTabs({
         >
           {tabs.map((tab, index) => {
             const selected = tab.id === activeId
+            const armed = tab.id === armedTabId
             // A selected tab is parted from its neighbours by its own border;
             // between two unselected ones nothing marks where one ends.
             const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
@@ -153,7 +165,11 @@ export function DocumentTabs({
                     : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
                   divided &&
                     "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
+                  // Held pages are over this tab: it reads as the one they are
+                  // about to be taken to, ahead of it actually opening.
+                  armed && "border-primary bg-background text-foreground",
                 )}
+                data-document-tab={tab.id}
                 key={tab.id}
               >
                 {/* The workspace puts focus on this button after every open,
@@ -179,6 +195,15 @@ export function DocumentTabs({
                     <span className="truncate">{tab.name}</span>
                   </button>
                 </HintTooltip>
+                {/* Runs the length of the wait the tab is about to end: the
+                    dwell itself, so the bar cannot promise a different one. */}
+                {armed ? (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-1 bottom-1 h-1 origin-left rounded-full animate-tab-spring bg-primary"
+                    style={{ animationDuration: `${TAB_SPRING_MS}ms` }}
+                  />
+                ) : null}
                 <HintTooltip label={t("tabs.close", { name: tab.name })}>
                   <button
                     aria-label={t("tabs.close", { name: tab.name })}

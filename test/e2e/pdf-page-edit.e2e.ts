@@ -17,9 +17,16 @@ import {
   writeScratchPdf,
 } from "./helpers"
 
-function thumbCount() {
+/** The panel on screen. Only its cells have a layout, and only its document is
+    the one a gesture means — an unscoped query would find a hidden tab's grid
+    first, since it is still in the tree. */
+const ACTIVE_GRID = "[data-document-session][data-active='true']"
+
+function thumbCount(scope = "") {
   return browser.execute(
-    () => document.querySelectorAll("button[data-page-number]").length,
+    (within: string) =>
+      document.querySelectorAll(`${within} button[data-page-number]`).length,
+    scope,
   )
 }
 
@@ -29,10 +36,10 @@ function thumbCount() {
  * missing cell; -2 a canvas not painted yet, which reads back as solid black
  * and would otherwise pass for a heavily inked page; 0 a painted blank page.
  */
-function thumbFingerprint(pageNumber: number) {
-  return browser.execute((page: number) => {
+function thumbFingerprint(pageNumber: number, scope = "") {
+  return browser.execute((page: number, within: string) => {
     const canvas = document.querySelector<HTMLCanvasElement>(
-      `button[data-page-number='${page}'] canvas`,
+      `${within} button[data-page-number='${page}'] canvas`,
     )
 
     if (!canvas) {
@@ -62,13 +69,17 @@ function thumbFingerprint(pageNumber: number) {
     }
 
     return ink > 0 ? hash : 0
-  }, pageNumber)
+  }, pageNumber, scope)
 }
 
-async function waitForThumb(pageNumber: number, fingerprint: number) {
+async function waitForThumb(
+  pageNumber: number,
+  fingerprint: number,
+  scope = "",
+) {
   try {
     await browser.waitUntil(
-      async () => (await thumbFingerprint(pageNumber)) === fingerprint,
+      async () => (await thumbFingerprint(pageNumber, scope)) === fingerprint,
       {
         timeout: 15_000,
         timeoutMsg: `cell ${pageNumber} never showed the expected page`,
@@ -78,7 +89,7 @@ async function waitForThumb(pageNumber: number, fingerprint: number) {
     const cells = []
 
     for (let cell = 1; cell <= 8; cell += 1) {
-      cells.push(await thumbFingerprint(cell))
+      cells.push(await thumbFingerprint(cell, scope))
     }
 
     console.log(
@@ -89,18 +100,33 @@ async function waitForThumb(pageNumber: number, fingerprint: number) {
 }
 
 /** Every cell painted and distinct, handed back as position -> fingerprint. */
-async function paintedFingerprints(pageCount: number) {
+async function paintedFingerprints(pageCount: number, scope = "") {
   const fingerprints: number[] = []
 
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    // Assigning a canvas its size clears it, so a cell read the instant it
+    // first paints can come back blank the moment after. Two equal readings
+    // are what say the bitmap has settled — and the reading kept is one of
+    // them, rather than a third taken after the wait.
+    let previous = -1
+    let settled = -1
+
     await browser.waitUntil(
-      async () => (await thumbFingerprint(pageNumber)) > 0,
+      async () => {
+        const current = await thumbFingerprint(pageNumber, scope)
+        const painted = current > 0 && current === previous
+
+        previous = current
+        settled = current
+
+        return painted
+      },
       {
         timeout: 15_000,
         timeoutMsg: `cell ${pageNumber} never painted`,
       },
     )
-    fingerprints.push(await thumbFingerprint(pageNumber))
+    fingerprints.push(settled)
   }
 
   expect(new Set(fingerprints).size).toBe(pageCount)
@@ -111,12 +137,14 @@ async function paintedFingerprints(pageCount: number) {
 /** Whether the gap shows the solid line that marks where a drop would land. A
     wrapped gap is drawn twice — at the end of one row and the start of the next
     — so any one of them showing is the answer. */
-function dropLineShowing(index: number) {
+function dropLineShowing(index: number, scope = "") {
   return browser.execute(
-    (at: number) =>
-      document.querySelectorAll(`[data-insert-index='${at}'] .border-solid`)
-        .length > 0,
+    (at: number, within: string) =>
+      document.querySelectorAll(
+        `${within} [data-insert-index='${at}'] .border-solid`,
+      ).length > 0,
     index,
+    scope,
   )
 }
 
@@ -127,11 +155,12 @@ function dropLineShowing(index: number) {
 function clickThumb(
   pageNumber: number,
   modifiers: { ctrl?: boolean; shift?: boolean } = {},
+  scope = "",
 ) {
   return browser.execute(
-    (page: number, mods: { ctrl?: boolean; shift?: boolean }) => {
+    (page: number, mods: { ctrl?: boolean; shift?: boolean }, within: string) => {
       document
-        .querySelector(`button[data-page-number='${page}']`)!
+        .querySelector(`${within} button[data-page-number='${page}']`)!
         .dispatchEvent(
           new MouseEvent("click", {
             bubbles: true,
@@ -142,6 +171,7 @@ function clickThumb(
     },
     pageNumber,
     modifiers,
+    scope,
   )
 }
 
@@ -219,6 +249,90 @@ function dragThumbToGap(from: number, target: number, pastEnd = false) {
     from,
     target,
     pastEnd,
+  )
+}
+
+/** Presses the active grid's page `from` and takes it past the drag threshold,
+    which is where a press becomes a drag rather than a click. */
+function pressThumb(from: number) {
+  return browser.execute((page: number, within: string) => {
+    const paper = document.querySelector(
+      `${within} button[data-page-number='${page}']`,
+    )!
+    const box = paper.getBoundingClientRect()
+    const start = { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+
+    paper.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: start.x,
+        clientY: start.y,
+        isPrimary: true,
+      }),
+    )
+    document.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: start.x + 20,
+        clientY: start.y + 8,
+      }),
+    )
+  }, from, ACTIVE_GRID)
+}
+
+function movePointer(
+  kind: "pointermove" | "pointerup",
+  point: { x: number; y: number },
+) {
+  return browser.execute(
+    (name: string, x: number, y: number) => {
+      document.dispatchEvent(
+        new PointerEvent(name, { bubbles: true, clientX: x, clientY: y }),
+      )
+    },
+    kind,
+    point.x,
+    point.y,
+  )
+}
+
+/** The middle of the tab of the document that is not on screen. */
+function otherTabPoint() {
+  return browser.execute(() => {
+    const active = document
+      .querySelector("[data-document-session][data-active='true']")!
+      .getAttribute("data-document-session")
+    const tab = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-document-tab]"),
+    ).find((candidate) => candidate.dataset.documentTab !== active)!
+    const box = tab.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  })
+}
+
+/** The middle of an insert zone in the grid on screen — `gapPoint`'s answer for
+    a workspace holding more than one document. */
+function activeGapPoint(index: number) {
+  return browser.execute(
+    (at: number, within: string) => {
+      const box = document
+        .querySelector(`${within} [data-insert-index='${at}']`)!
+        .getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+    },
+    index,
+    ACTIVE_GRID,
+  )
+}
+
+function activeDocumentId() {
+  return browser.execute(() =>
+    document
+      .querySelector("[data-document-session][data-active='true']")
+      ?.getAttribute("data-document-session"),
   )
 }
 
@@ -515,6 +629,120 @@ describe("TFolio page editing", () => {
       async () =>
         (await $("input[aria-label='Page number']").getValue()) === "3",
       { timeoutMsg: "the double-clicked page never became current" },
+    )
+  })
+
+  it("carries pages to another document through its tab", async () => {
+    await openPdfFromDisk("into.pdf", bandedPdf(2))
+    const [first, second] = await paintedFingerprints(2, ACTIVE_GRID)
+
+    // The newly opened document is the one on screen, so the drag starts here.
+    await openPdfFromDisk("from.pdf", stripedPdf())
+    const [striped] = await paintedFingerprints(1, ACTIVE_GRID)
+    const source = await activeDocumentId()
+
+    // Lift the striped page and rest it on the other document's tab, which is
+    // what takes the drag across: one document is on screen at a time.
+    await pressThumb(1)
+    await movePointer("pointermove", await otherTabPoint())
+    await browser.waitUntil(async () => (await activeDocumentId()) !== source, {
+      timeout: 5000,
+      timeoutMsg: "resting on the other tab never opened it",
+    })
+
+    // The grid it opened marks the gap under the pointer, exactly as it would
+    // for a PDF dragged in from the desktop.
+    const gap = await activeGapPoint(2)
+    await movePointer("pointermove", gap)
+    await browser.waitUntil(async () => await dropLineShowing(2, ACTIVE_GRID), {
+      timeoutMsg: "the insertion line never marked the gap under the pointer",
+    })
+
+    await movePointer("pointerup", gap)
+    await browser.waitUntil(
+      async () => (await thumbCount(ACTIVE_GRID)) === 3,
+      { timeoutMsg: "the carried page never landed in the other document" },
+    )
+
+    // It opened the gap it was dropped into, and arrived as itself.
+    await waitForThumb(1, first!, ACTIVE_GRID)
+    await waitForThumb(2, striped!, ACTIVE_GRID)
+    await waitForThumb(3, second!, ACTIVE_GRID)
+
+    // Another document's page is in this one, so it may only be exported as a
+    // copy — the same guard an inserted file's pages raise.
+    expect(await appMenuItemEnabled("save")).toBe(false)
+    expect(await appMenuItemEnabled("save-as")).toBe(true)
+
+    await $(`${ACTIVE_GRID} button[aria-label='Undo']`).click()
+    await browser.waitUntil(
+      async () => (await thumbCount(ACTIVE_GRID)) === 2,
+      { timeoutMsg: "the undo never took the carried page back out" },
+    )
+
+    // The pages were copied, not moved: the document they came from still has
+    // its own, whatever this one does with them.
+    await $(`#workspace-tab-${source}`).click()
+    await browser.waitUntil(async () => (await activeDocumentId()) === source, {
+      timeoutMsg: "the source document never came back",
+    })
+    expect(await thumbCount(ACTIVE_GRID)).toBe(1)
+    await waitForThumb(1, striped!, ACTIVE_GRID)
+  })
+
+  it("carries a whole selected block across, one undo deep", async () => {
+    await openPdfFromDisk("into-block.pdf", stripedPdf())
+    const [striped] = await paintedFingerprints(1, ACTIVE_GRID)
+
+    // Left on a view with no gaps to drop into: the drag has to bring the
+    // document it opens to its grid, or the pages would arrive nowhere. The
+    // press is the reader's, so it also becomes what the next open starts in —
+    // which is why the document dragged from asks for its own grid back.
+    await $(`${ACTIVE_GRID} button[aria-label='Single page']`).click()
+
+    await openPdfFromDisk("from-block.pdf", bandedPdf(3))
+    await $(`${ACTIVE_GRID} button[aria-label='Thumbnails']`).click()
+    const [first, second] = await paintedFingerprints(3, ACTIVE_GRID)
+    const source = await activeDocumentId()
+
+    // The pages in hand are the ones the press took: opening the other tab
+    // clears this grid's selection, which must not shrink the block in flight.
+    await clickThumb(1, {}, ACTIVE_GRID)
+    await clickThumb(2, { shift: true }, ACTIVE_GRID)
+    await pressThumb(2)
+    await movePointer("pointermove", await otherTabPoint())
+    await browser.waitUntil(async () => (await activeDocumentId()) !== source, {
+      timeout: 5000,
+      timeoutMsg: "resting on the other tab never opened it",
+    })
+
+    // It opened on its pages, whatever view it was left in.
+    await expect(
+      $(`${ACTIVE_GRID} button[aria-label='Thumbnails']`),
+    ).toHaveAttribute("aria-pressed", "true")
+    await browser.waitUntil(
+      async () => (await thumbCount(ACTIVE_GRID)) === 1,
+      { timeoutMsg: "the document the drag opened never showed its grid" },
+    )
+
+    const gap = await activeGapPoint(2)
+    await movePointer("pointermove", gap)
+    await movePointer("pointerup", gap)
+    await browser.waitUntil(
+      async () => (await thumbCount(ACTIVE_GRID)) === 3,
+      { timeoutMsg: "the carried block never landed whole" },
+    )
+
+    // Both pages landed after the page that was already there, in their order.
+    await waitForThumb(1, striped!, ACTIVE_GRID)
+    await waitForThumb(2, first!, ACTIVE_GRID)
+    await waitForThumb(3, second!, ACTIVE_GRID)
+
+    // One edit, however many pages it brought.
+    await $(`${ACTIVE_GRID} button[aria-label='Undo']`).click()
+    await browser.waitUntil(
+      async () => (await thumbCount(ACTIVE_GRID)) === 1,
+      { timeoutMsg: "the undo never took the whole block back out" },
     )
   })
 

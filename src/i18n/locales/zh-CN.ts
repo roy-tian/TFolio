@@ -131,7 +131,7 @@ const zhCN = {
     exportDefaultName: "已批注.pdf",
     exportFailed: "无法导出此 PDF。",
     failed: "无法应用该修改。",
-    dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖入此 PDF。",
+    dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖放一次。",
   },
   watermark: {
     open: "水印",

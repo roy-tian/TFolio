@@ -171,6 +171,17 @@ impl DocumentOwners {
         }
     }
 
+    /// Whether `window` is the one that opened `document_id`. Ownership is per
+    /// window, so a command acting on two documents at once — a page drag from
+    /// one grid into another — has to find both in the window that asked.
+    pub fn owns(&self, document_id: u64, window: &str) -> bool {
+        self.0.lock().is_ok_and(|owners| {
+            owners
+                .get(&document_id)
+                .is_some_and(|owner| owner.window == window)
+        })
+    }
+
     /// The caller already checked its tabs; its own match may be a close still in flight.
     fn holder_of(&self, path: &Path, asking: &str) -> Option<(String, u64)> {
         let owners = self.0.lock().ok()?;
@@ -281,6 +292,22 @@ mod tests {
         owners.record(1, "main", Some(PathBuf::from("/tmp/a.pdf")));
 
         assert_eq!(owners.holder_of(Path::new("/tmp/a.pdf"), "main"), None);
+    }
+
+    #[test]
+    fn owns_only_this_window_own_documents() {
+        let owners = DocumentOwners::default();
+        owners.record(1, "main", None);
+
+        assert!(owners.owns(1, "main"));
+        assert!(!owners.owns(1, "window-2"));
+        assert!(
+            !owners.owns(2, "main"),
+            "a document nobody opened is nobody's"
+        );
+
+        owners.release(1);
+        assert!(!owners.owns(1, "main"), "a closed document is nobody's");
     }
 
     #[test]

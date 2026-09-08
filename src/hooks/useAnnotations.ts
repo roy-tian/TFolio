@@ -11,6 +11,7 @@ import {
   fillErasedPages,
   fillInsertFileOutcome,
   insertFilePages,
+  insertPagesRange,
   isDirty,
   markSaved,
   pageNumbersConfig as currentPageNumbersConfig,
@@ -18,6 +19,7 @@ import {
   planEraseAnnotation,
   planInsertBlankPage,
   planInsertFile,
+  planInsertPages,
   planPageNumbersChange,
   planReorderPages,
   planWatermarkChange,
@@ -248,9 +250,10 @@ async function applyCommand(
       )
       return []
     case "insertFile":
-      // Only ever a redo here — the first apply reads the file through
-      // `insertFile` below. A redo restores the pages the undo stashed rather
-      // than re-reading the file, which may have changed on disk since.
+    case "insertPages":
+      // Only ever a redo here — the first apply reads the pages across through
+      // `insertFile`/`insertPages` below. A redo restores what the undo stashed
+      // rather than re-reading a file, or a document, that may have moved on.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("restore_pdf_pages", {
@@ -394,6 +397,17 @@ async function retractCommand(
         await invoke<PdfStructureUpdate>("delete_pdf_pages", {
           documentId,
           pageNumbers: insertFilePages(command),
+          stashId: command.stashId,
+        }),
+      )
+      return []
+    case "insertPages":
+      // The same undo, over the block the drag brought across.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("delete_pdf_pages", {
+          documentId,
+          pageNumbers: insertPagesRange(command),
           stashId: command.stashId,
         }),
       )
@@ -777,6 +791,82 @@ export function useAnnotations({
       }
 
       return inserted
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  /**
+   * Copies `sourcePages` out of another open document into this one at `index`
+   * — a thumbnail drag that crossed to this document's tab. Like `insertFile`
+   * it cannot go through `commitStructure`, whose apply path is the redo's:
+   * the first apply reads the pages across, and only a redo restores the stash.
+   *
+   * The pages are the source grid's own numbers and the position is this grid's,
+   * both read off the screen — which is why the caller, like every other grid
+   * gesture, declines a drop while a page-shifting edit is in flight.
+   */
+  const insertPages = useCallback(
+    async (
+      sourceDocumentId: number,
+      sourcePages: number[],
+      index: number,
+      pageCount: number,
+    ) => {
+      if (documentId === undefined) {
+        return false
+      }
+
+      let landed = false
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planInsertPages(
+            current,
+            sourceDocumentId,
+            sourcePages,
+            index,
+            pageCount,
+          )
+
+          if (!planned) {
+            // A position this document does not have — the grid the gap was
+            // read off has since been renumbered. A null plan reaches neither
+            // the success nor the failure path, so it is said here.
+            onAnnotateError()
+            return null
+          }
+
+          return {
+            next: planned.history,
+            pages: commandPages(planned.command),
+            textPages: commandTextPages(planned.command),
+            work: async () => {
+              onStructureChange(
+                documentId,
+                await invoke<PdfStructureUpdate>(
+                  "insert_pdf_pages_from_document",
+                  {
+                    documentId,
+                    index,
+                    // The plan's own block: sorted and deduplicated, so the
+                    // range the undo deletes is the one the backend copied.
+                    pageNumbers: planned.command.sourcePages,
+                    sourceDocumentId,
+                  },
+                ),
+              )
+              landed = true
+              return true
+            },
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+      }
+
+      return landed
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
@@ -1199,6 +1289,7 @@ export function useAnnotations({
       historyNow,
       insertBlankPage,
       insertFile,
+      insertPages,
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,
@@ -1225,6 +1316,7 @@ export function useAnnotations({
       historyNow,
       insertBlankPage,
       insertFile,
+      insertPages,
       isBusy,
       isDirtyNow,
       isStructureBusyNow,

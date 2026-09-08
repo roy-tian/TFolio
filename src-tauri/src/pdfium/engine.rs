@@ -601,6 +601,67 @@ fn validate_pages_to_delete(page_numbers: &[i32], page_count: usize) -> Result<V
         .collect())
 }
 
+/// Checks the pages a cross-document insert names exist and are distinct; hands
+/// back their zero-based indices in ascending order. Nothing is left behind, so
+/// unlike a deletion the whole source may travel.
+fn validate_pages_to_copy(page_numbers: &[i32], page_count: usize) -> Result<Vec<usize>, String> {
+    if page_numbers.is_empty() {
+        return Err("an insert needs at least one page".into());
+    }
+
+    let mut seen = vec![false; page_count];
+
+    for &page_number in page_numbers {
+        let Some(index) = page_index(page_number, page_count) else {
+            return Err(format!("page {page_number} does not exist"));
+        };
+
+        if seen[index] {
+            return Err(format!("page {page_number} appears twice in the insert"));
+        }
+
+        seen[index] = true;
+    }
+
+    Ok(seen
+        .iter()
+        .enumerate()
+        .filter_map(|(index, selected)| selected.then_some(index))
+        .collect())
+}
+
+/// PDFium's own page-range syntax for an import: 1-based numbers and runs, as
+/// in "1,3,5-7". Built from ascending indices, so the copied pages land in the
+/// order the grid shows them however the reader picked them out.
+fn page_range_argument(indices: &[usize]) -> String {
+    let run = |start: usize, end: usize| {
+        if start == end {
+            format!("{}", start + 1)
+        } else {
+            format!("{}-{}", start + 1, end + 1)
+        }
+    };
+    let mut ranges = Vec::new();
+    let mut open: Option<(usize, usize)> = None;
+
+    for &index in indices {
+        open = match open {
+            Some((start, end)) if index == end + 1 => Some((start, index)),
+            Some((start, end)) => {
+                ranges.push(run(start, end));
+                Some((index, index))
+            }
+            None => Some((index, index)),
+        };
+    }
+
+    if let Some((start, end)) = open {
+        ranges.push(run(start, end));
+    }
+
+    ranges.join(",")
+}
+
 /// The entry for `document_id`, with the one wording for a closed document.
 fn open_entry(
     documents: &HashMap<u64, OpenDocument>,
@@ -3676,58 +3737,79 @@ impl PdfiumEngine {
             ));
         }
 
-        // An inserted page carries its source's own content objects. When this
+        if let Err(error) = Self::record_imported_pages(entry, slot, added_count as usize) {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        // Nothing was removed, so no compaction is owed; but every page's
+        // content now sits in a longer document, and an M5 effect captured
+        // before the insert must fail its revision check after it.
+        entry.invalidate_all_page_revisions();
+
+        Ok(InsertOutcome {
+            page_count: added_count,
+            update: structure_update(entry),
+        })
+    }
+
+    /// Takes `count` pages an import has just put at `slot` into the entry's own
+    /// bookkeeping: fresh page ids, the guard that keeps a document holding
+    /// another file's pages export-only, and — for a session that owns a layer —
+    /// an owned-but-bare record per page.
+    ///
+    /// Everything that can fail is measured before anything is recorded, so an
+    /// error leaves the entry as it was and the caller has only the document
+    /// itself to roll back.
+    fn record_imported_pages(
+        entry: &mut OpenDocument,
+        slot: usize,
+        count: usize,
+    ) -> Result<(), String> {
+        // What the document really grew by, rather than what was asked for:
+        // `page_ids` is the list every later command trusts against.
+        let grown_by = (entry.document.pages().len() as usize).saturating_sub(entry.page_ids.len());
+
+        if grown_by != count {
+            return Err(format!(
+                "PDFium added {grown_by} pages where {count} were asked for"
+            ));
+        }
+
+        // An imported page carries its source's own content objects. When this
         // session owns any layer, each new page takes an owned-but-bare record
         // whose base is that content and whose tail is empty — no active layer
-        // covers a page it never marked. Measured before the recording loop,
-        // which needs a mutable borrow of the same entry.
-        //
-        // A read failure here rolls the import back like the import itself does:
-        // the pages are already on the document, so a bare `?` would leave them
-        // there while `page_ids` never learned of them — a desync every later
-        // command trusts against.
+        // covers a page it never marked.
         let mut new_base_objects = match &entry.owned_content {
-            Some(_) => {
-                let measured = (0..added_count)
-                    .map(|offset| {
-                        let index = slot as i32 + offset;
-                        entry
-                            .document
-                            .pages()
-                            .get(index)
-                            .map(|page| page.objects().len())
-                            .map_err(|error| {
-                                format!(
-                                    "PDFium could not inspect inserted page {}: {error}",
-                                    index + 1
-                                )
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>();
-
-                match measured {
-                    Ok(values) => values,
-                    Err(error) => {
-                        return Err(self.restore_document_snapshot(entry, snapshot, error));
-                    }
-                }
-            }
+            Some(_) => (0..count)
+                .map(|offset| {
+                    let index = (slot + offset) as i32;
+                    entry
+                        .document
+                        .pages()
+                        .get(index)
+                        .map(|page| page.objects().len())
+                        .map_err(|error| {
+                            format!(
+                                "PDFium could not inspect inserted page {}: {error}",
+                                index + 1
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             None => Vec::new(),
         }
         .into_iter();
 
-        for offset in 0..added_count as usize {
+        for offset in 0..count {
             let page_id = entry.next_page_id;
 
             entry.next_page_id += 1;
             entry.page_ids.insert(slot + offset, page_id);
-            // This page is another file's content: while it stays, the document
+            // This page is another document's content: while it stays, this one
             // may only be exported as a copy, not saved over its own file.
             entry.merged_page_ids.insert(page_id);
 
             if let Some(state) = entry.owned_content.as_mut() {
-                // Owned but bare: its base is the source file's own content, and
-                // no active layer covers a page it never marked.
                 state.per_page.insert(
                     page_id,
                     OwnedTailState {
@@ -3740,15 +3822,74 @@ impl PdfiumEngine {
             }
         }
 
-        // Nothing was removed, so no compaction is owed; but every page's
-        // content now sits in a longer document, and an M5 effect captured
-        // before the insert must fail its revision check after it.
+        Ok(())
+    }
+
+    /// Copies `page_numbers` out of another open document into this one at
+    /// 1-based `index` — the thumbnail drag that crosses tabs. The pages are
+    /// copied, never moved, and they are read from the document as the reader
+    /// has it rather than from any file, so whatever that session has made of
+    /// them travels with them.
+    ///
+    /// Like an inserted file's, the pages become this document's own and leave
+    /// it export-only; unlike one, they name no path, so there is nothing here
+    /// for the approval check to answer for.
+    pub(super) fn insert_pages_from_document(
+        &self,
+        document_id: u64,
+        source_document_id: u64,
+        page_numbers: &[i32],
+        index: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        // Both a real refusal and what makes the two entries below disjoint.
+        // Within one document a drag reorders, which is a different command.
+        if document_id == source_document_id {
+            return Err("a document cannot take pages from itself".into());
+        }
+
+        let mut documents = self.lock_documents()?;
+        let source_count = open_entry(&documents, source_document_id)?.page_ids.len();
+        let source_pages = validate_pages_to_copy(page_numbers, source_count)?;
+        let page_count = open_entry(&documents, document_id)?.page_ids.len();
+        // One past the end is a position too, exactly as a blank page's is.
+        let Some(slot) = page_index(index, page_count + 1) else {
+            return Err(format!("a page cannot go to position {index}"));
+        };
+
+        let [Some(entry), Some(source)] =
+            documents.get_disjoint_mut([&document_id, &source_document_id])
+        else {
+            return Err("PDF document is no longer open".into());
+        };
+
+        // The import may fail partway; snapshot first so a failure rolls the
+        // document back whole, as every multi-page structure change does.
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        if let Err(error) = entry.document.pages_mut().copy_pages_from_document(
+            &source.document,
+            &page_range_argument(&source_pages),
+            slot as i32,
+        ) {
+            return Err(self.restore_document_snapshot(
+                entry,
+                snapshot,
+                format!("PDFium could not insert the pages: {error}"),
+            ));
+        }
+
+        if let Err(error) = Self::record_imported_pages(entry, slot, source_pages.len()) {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        // Every page's content now sits in a longer document, so an M5 effect
+        // captured before this must fail its revision check after it.
         entry.invalidate_all_page_revisions();
 
-        Ok(InsertOutcome {
-            page_count: added_count,
-            update: structure_update(entry),
-        })
+        Ok(structure_update(entry))
     }
 
     /// Reads each candidate file of a guided merge just far enough to report

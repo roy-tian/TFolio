@@ -21,6 +21,8 @@ Download the installer for your platform from the [Releases page](https://github
 **Pages**
 
 - Reorder pages by dragging them in the thumbnail grid.
+- Copy pages into another open document: drag them onto its tab, hold until it
+  opens, and drop them into its grid.
 - Delete pages, insert blank ones, or start a new blank PDF.
 - Drop another PDF onto the document to add its pages.
 
