@@ -24,12 +24,27 @@ describe("TFolio PDF search", () => {
       ).map((button) => button.getAttribute("aria-label")),
     )
     expect(toolbarOrder).toEqual(
-      expect.arrayContaining(["Menu", "Show bookmarks", "Search this PDF", "Undo"]),
+      expect.arrayContaining([
+        "Menu",
+        "Show bookmarks",
+        "Save",
+        "Print…",
+        "Search this PDF",
+        "Undo",
+      ]),
     )
     expect(toolbarOrder.indexOf("Menu")).toBeLessThan(
       toolbarOrder.indexOf("Show bookmarks"),
     )
+    // Search closes the group that saves and prints, and the whole group comes
+    // before the history keys, which lead the tools at the other end.
     expect(toolbarOrder.indexOf("Show bookmarks")).toBeLessThan(
+      toolbarOrder.indexOf("Save"),
+    )
+    expect(toolbarOrder.indexOf("Save")).toBeLessThan(
+      toolbarOrder.indexOf("Print…"),
+    )
+    expect(toolbarOrder.indexOf("Print…")).toBeLessThan(
       toolbarOrder.indexOf("Search this PDF"),
     )
     expect(toolbarOrder.indexOf("Search this PDF")).toBeLessThan(

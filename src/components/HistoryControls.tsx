@@ -14,7 +14,7 @@ type HistoryControlsProps = {
 }
 
 /** Undo and redo for the document's whole edit history — pages included, so
-    they belong beside the view controls rather than among the drawing tools. */
+    they lead the editing tools rather than sitting among the drawing ones. */
 export function HistoryControls({
   canRedo,
   canUndo,

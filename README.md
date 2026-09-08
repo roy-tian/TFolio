@@ -17,6 +17,7 @@ Download the installer for your platform from the [Releases page](https://github
 - Single page, book (two-page spread), and thumbnail views; zoom, fit to width or page, and rotate.
 - Page indicator with jump-to-page, plus a bookmark sidebar built from the document's own table of contents.
 - Select and copy text straight from the page.
+- Print through your system's own print dialog, every page as it stands — marks, watermark, and the way you have it turned.
 
 **Pages**
 

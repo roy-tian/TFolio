@@ -142,6 +142,63 @@ body {
   }
 }
 
+/* Off screen, where the app itself is the document; print media below is the
+   one place these page images are ever shown. */
+[data-print-sheet] {
+  display: none;
+}
+
+@media print {
+  /* The page area, not the window: the sheet takes its height from here. */
+  html,
+  body {
+    height: 100%;
+    overflow: visible;
+    background: #fff;
+  }
+
+  /* The interface never prints — only the sheet the print button built. */
+  body > *:not([data-print-sheet]) {
+    display: none !important;
+  }
+
+  [data-print-sheet] {
+    display: block;
+    height: 100%;
+  }
+
+  /* Tighter than the 0.5in a WebView would otherwise take, and still clear of
+     the margin no printer can reach. */
+  @page {
+    margin: 5mm;
+  }
+
+  /* One page per sheet. The query container is what lets a quarter-turned page
+     be fitted into the sheet's own height before it is turned back. */
+  .pdf-print-page {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+    container-type: size;
+    break-after: page;
+  }
+
+  .pdf-print-page:last-child {
+    break-after: auto;
+  }
+
+  /* Centred by the transform PrintSheet.tsx completes: a turned page's box
+     outgrows the sheet, and every box centring falls back to one edge. */
+  .pdf-print-page img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
 /* Spans sit in page percentages and are sized in cqh, so the layer holds its
    alignment as the page scales; PdfPage.tsx sets box and rotation inline. */
 .pdf-text-layer {

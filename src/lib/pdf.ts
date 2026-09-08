@@ -86,8 +86,10 @@ export type PdfInsertOutcome = {
 /** Widest a single page may render on screen, in CSS pixels. */
 export const MAX_PAGE_WIDTH = 896
 
-// Ceilings for a render request, mirroring MAX_RENDER_WIDTH and
-// MAX_THUMBNAIL_WIDTH in src-tauri/src/pdfium.rs; the backend rejects wider.
+// Bounds for a render request, mirroring MIN_RENDER_WIDTH, MAX_RENDER_WIDTH
+// and MAX_THUMBNAIL_WIDTH in src-tauri/src/pdfium/engine.rs; the backend
+// rejects anything outside them.
+export const MIN_RENDER_WIDTH = 64
 export const MAX_RENDER_WIDTH = 4096
 export const MAX_THUMBNAIL_RENDER_WIDTH = 512
 

@@ -20,7 +20,7 @@ use pdfium::{
 use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
 use tauri::Manager;
-use windows::{focus_pdf_path, open_new_window, AppWindows, DocumentOwners};
+use windows::{focus_pdf_path, open_new_window, print_window, AppWindows, DocumentOwners};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -154,6 +154,7 @@ pub fn run() {
             set_settings,
             take_launch_pdfs,
             open_new_window,
+            print_window,
             focus_pdf_path,
             reorder_pdf_pages,
             delete_pdf_pages,

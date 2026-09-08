@@ -80,6 +80,15 @@ const en = {
     next: "Next result",
     close: "Close search",
   },
+  print: {
+    open: "Print…",
+    title: "Print",
+    description: "Preparing every page for the system print dialog.",
+    preparing: "Preparing pages…",
+    progressHint: "Long documents may take a moment.",
+    stop: "Cancel",
+    failed: "This PDF could not be prepared for printing.",
+  },
   annotate: {
     undo: "Undo",
     redo: "Redo",

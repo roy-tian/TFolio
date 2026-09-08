@@ -355,8 +355,8 @@ export async function tooltipOn(selector: string) {
 }
 
 /**
- * Opens the header's menu — where the file commands live, the toolbar having
- * no save key of its own — and hands back the item for `action`. The caller
+ * Opens the header's menu — where the file commands the toolbar has no key
+ * for live — and hands back the item for `action`. The caller
  * either clicks it or reads it and presses Escape; `data-action` rather than
  * the label, which changes with the language.
  */

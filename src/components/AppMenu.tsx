@@ -67,8 +67,8 @@ type AppMenuProps = AppMenuActions & {
 }
 
 /**
- * The window's one menu, at the left end of every header: the file actions the
- * toolbar no longer carries, the recent list the home tab shows, and the
+ * The window's one menu, at the left end of every header: the file actions
+ * with no key of their own, the recent list the home tab shows, and the
  * app-level entries under them.
  */
 export function AppMenu({

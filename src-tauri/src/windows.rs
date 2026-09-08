@@ -270,6 +270,17 @@ pub async fn focus_pdf_path(
     Ok(true)
 }
 
+/// Opens the OS print dialog on this window's own webview, which prints the
+/// sheet of page images the frontend lays out for print media. Async so the
+/// dialog's nested loop runs on the event loop, not inside a main-thread
+/// command; it outlives this call, and no signal reports the job's end.
+#[tauri::command]
+pub async fn print_window(window: WebviewWindow) -> Result<(), String> {
+    window
+        .print()
+        .map_err(|error| format!("the print dialog could not be opened: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

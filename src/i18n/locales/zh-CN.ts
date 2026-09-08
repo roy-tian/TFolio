@@ -87,6 +87,15 @@ const zhCN = {
     next: "下一个结果",
     close: "关闭搜索",
   },
+  print: {
+    open: "打印…",
+    title: "打印",
+    description: "正在为系统打印对话框准备每一页。",
+    preparing: "正在准备页面…",
+    progressHint: "文档较长时可能需要稍等片刻。",
+    stop: "取消",
+    failed: "无法为打印准备此 PDF。",
+  },
   annotate: {
     undo: "撤销",
     redo: "重做",

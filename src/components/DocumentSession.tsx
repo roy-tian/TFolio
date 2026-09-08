@@ -9,7 +9,7 @@ import {
   useState,
 } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { Bookmark, RotateCw, Search } from "lucide-react"
+import { Bookmark, Printer, RotateCw, Save, Search } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
@@ -21,6 +21,8 @@ import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PageOdometer } from "@/components/PageOdometer"
 import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
+import { PrintDialog } from "@/components/PrintDialog"
+import { PrintSheet } from "@/components/PrintSheet"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
@@ -29,10 +31,12 @@ import { WindowControls } from "@/components/WindowControls"
 import { ZoomControls } from "@/components/ZoomControls"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { usePageClipboard } from "@/hooks/usePageClipboard"
+import { usePrint } from "@/hooks/usePrint"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import type { PageHandoffTarget } from "@/hooks/usePageHandoff"
 import { useEraserTool } from "@/hooks/useEraserTool"
@@ -129,6 +133,7 @@ type ViewerError =
   | "noteFontFailed"
   | "noteFontMissing"
   | "openFailed"
+  | "printFailed"
   | "saveFailed"
   | null
 
@@ -173,6 +178,8 @@ export type DocumentSessionHandle = {
   hasUnsavedWorkNow: () => boolean
   /** Opens the app-owned find bar for this document. */
   openSearch: () => void
+  /** Lays this document out for paper and opens the OS print dialog on it. */
+  print: () => void
   /** Captures and durably queues the latest reading view before a close. */
   rememberViewNow: () => Promise<void>
   /** Selects everything the visible view holds: the grid's pages, or the text
@@ -590,6 +597,28 @@ function DocumentSession(
     onSet: annotations.setPageNumbers,
     pageCount: pdfDocument?.numPages ?? 0,
   })
+  // Printed as the reader has it turned: the rotation is the viewer's own, and
+  // the backend's render of a page knows nothing about it.
+  const rotationAt = useCallback(
+    (pageNumber: number) => rotationForPage(pageRotations, pageNumber),
+    [pageRotations],
+  )
+  const print = usePrint({
+    documentId: pdfDocument?.id,
+    onError: () => showViewerError("printFailed"),
+    pages: pdfDocument?.pages ?? [],
+    rotationAt,
+  })
+  const discardPrint = print.discard
+  const startPrint = print.start
+
+  // Only the tab on screen keeps a sheet: print media would otherwise run
+  // every open document's pages together, and each holds its pages as images.
+  useEffect(() => {
+    if (!active) {
+      discardPrint()
+    }
+  }, [active, discardPrint])
 
   const textSelectionDragging = useHighlightTool({
     active: active && drawingApplies && activeTool === "highlight",
@@ -1416,6 +1445,9 @@ function DocumentSession(
       : hasSourceFile
         ? undefined
         : t("annotate.saveNoSource")
+  // The toolbar's button has only its tooltip to carry the reason, so a
+  // disabled save names it there rather than repeating the action's name.
+  const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
   // Inserts each PDF in turn at `index`, in the order they were dropped: the
   // second file goes after the first, so a multi-file drop reads down the grid
   // the way the reader arranged it. How far to advance is what the file itself
@@ -1771,6 +1803,7 @@ function DocumentSession(
       onFileDrag: handleFileDrag,
       onPageDrag: handlePageDrag,
       openSearch,
+      print: () => void startPrint(),
       rememberViewNow,
       selectAll,
       showThumbnails,
@@ -1783,6 +1816,7 @@ function DocumentSession(
       rememberViewNow,
       selectAll,
       showThumbnails,
+      startPrint,
     ],
   )
 
@@ -1884,15 +1918,17 @@ function DocumentSession(
             ? t("annotate.exportFailed")
             : viewerError === "saveFailed"
               ? t("annotate.saveFailed")
-              : viewerError === "annotateFailed"
-                ? t("annotate.failed")
-                : viewerError === "editInFlight"
-                  ? t("annotate.dropWhileEditing")
-                  : viewerError === "noteFontMissing"
-                    ? t("annotate.noteFontMissing")
-                    : viewerError === "noteFontFailed"
-                      ? t("annotate.noteFontFailed")
-                      : null
+              : viewerError === "printFailed"
+                ? t("print.failed")
+                : viewerError === "annotateFailed"
+                  ? t("annotate.failed")
+                  : viewerError === "editInFlight"
+                    ? t("annotate.dropWhileEditing")
+                    : viewerError === "noteFontMissing"
+                      ? t("annotate.noteFontMissing")
+                      : viewerError === "noteFontFailed"
+                        ? t("annotate.noteFontFailed")
+                        : null
   const pageNoticeMessage = () => {
     if (!pageNotice) {
       return null
@@ -1970,49 +2006,56 @@ function DocumentSession(
               <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
             </Toggle>
           </ToolbarTooltip>
-          <ToolbarTooltip label={t("search.open")}>
-            <Toggle
-              aria-label={t("search.open")}
-              className="size-8"
-              data-slot="pdf-search-trigger"
-              disabled={!pdfDocument}
-              onPressedChange={(pressed) => {
-                if (pressed) {
-                  openSearch()
-                } else {
-                  closeSearch()
-                }
-              }}
-              pressed={searchOpen}
-              variant="outline"
-            >
-              <Search />
-            </Toggle>
-          </ToolbarTooltip>
-          <HistoryControls
-            canRedo={annotations.canRedo}
-            canUndo={annotations.canUndo}
-            disabled={!pdfDocument}
-            onRedo={() => {
-              // Only a page-moving step would strand the note on a page that has
-              // shifted or gone, and undo/redo cannot take the uncommitted note
-              // as their target; so the draft is discarded before such a step,
-              // but an annotation step (a highlight, say) leaves it to finish.
-              // The target is the head of the queue's live history.
-              const target = annotations.historyNow().future.at(-1)?.command
-              if (target && movesPages(target)) {
-                cancelTextNote()
-              }
-              void annotations.redo()
-            }}
-            onUndo={() => {
-              const target = annotations.historyNow().past.at(-1)?.command
-              if (target && movesPages(target)) {
-                cancelTextNote()
-              }
-              void annotations.undo()
-            }}
-          />
+          {/* The three that act on the document itself, grouped apart from
+              the view controls after them, which act only on the reading. */}
+          <ButtonGroup>
+            <ToolbarTooltip label={saveLabel}>
+              <Button
+                aria-label={t("annotate.save")}
+                // A disabled control takes no pointer, and the hint saying why
+                // saving is unavailable has to have a hover to open on.
+                className="disabled:pointer-events-auto"
+                data-slot="pdf-save-trigger"
+                disabled={!canSave}
+                onClick={() => void annotations.save()}
+                size="icon"
+                variant="outline"
+              >
+                <Save />
+              </Button>
+            </ToolbarTooltip>
+            <ToolbarTooltip label={t("print.open")}>
+              <Button
+                aria-label={t("print.open")}
+                data-slot="pdf-print-trigger"
+                disabled={!pdfDocument || print.preparing}
+                onClick={() => void print.start()}
+                size="icon"
+                variant="outline"
+              >
+                <Printer />
+              </Button>
+            </ToolbarTooltip>
+            <ToolbarTooltip label={t("search.open")}>
+              <Toggle
+                aria-label={t("search.open")}
+                className="size-8"
+                data-slot="pdf-search-trigger"
+                disabled={!pdfDocument}
+                onPressedChange={(pressed) => {
+                  if (pressed) {
+                    openSearch()
+                  } else {
+                    closeSearch()
+                  }
+                }}
+                pressed={searchOpen}
+                variant="outline"
+              >
+                <Search />
+              </Toggle>
+            </ToolbarTooltip>
+          </ButtonGroup>
           <ViewModeToggle
             bookApplies={bookApplies}
             disabled={!pdfDocument}
@@ -2122,6 +2165,32 @@ function DocumentSession(
         </div>
 
         <div className="flex items-center gap-1 justify-self-end">
+          {/* Leading the right-hand tools: undo and redo answer every mark and
+              page edit made with them, not the view controls opposite. */}
+          <HistoryControls
+            canRedo={annotations.canRedo}
+            canUndo={annotations.canUndo}
+            disabled={!pdfDocument}
+            onRedo={() => {
+              // Only a page-moving step would strand the note on a page that has
+              // shifted or gone, and undo/redo cannot take the uncommitted note
+              // as their target; so the draft is discarded before such a step,
+              // but an annotation step (a highlight, say) leaves it to finish.
+              // The target is the head of the queue's live history.
+              const target = annotations.historyNow().future.at(-1)?.command
+              if (target && movesPages(target)) {
+                cancelTextNote()
+              }
+              void annotations.redo()
+            }}
+            onUndo={() => {
+              const target = annotations.historyNow().past.at(-1)?.command
+              if (target && movesPages(target)) {
+                cancelTextNote()
+              }
+              void annotations.undo()
+            }}
+          />
           <AnnotationToolbar
             activeTool={activeTool}
             disabled={!pdfDocument}
@@ -2271,6 +2340,14 @@ function DocumentSession(
         progress={pageNumbers.progress}
         validationError={pageNumbers.validationError}
       />
+
+      <PrintDialog
+        onStop={discardPrint}
+        open={active && print.preparing}
+        progress={print.progress}
+      />
+
+      {active && print.sheet ? <PrintSheet pages={print.sheet} /> : null}
 
       {/* One corner, stacked: a refusal and a clipboard notice can stand at the
           same moment, and neither may be hidden under the other. */}

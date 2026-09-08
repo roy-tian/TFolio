@@ -668,6 +668,49 @@ export default function App() {
     return () => document.removeEventListener("keydown", openDocumentSearch)
   }, [])
 
+  // The WebView's own print would put the interface on paper, so the key is
+  // consumed everywhere and answered only where there is a document to print.
+  useEffect(() => {
+    const printDocument = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.shiftKey ||
+        event.key.toLowerCase() !== "p" ||
+        (!event.ctrlKey && !event.metaKey)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+
+      // Consumed on every repeat, but answered once: a held key must not let
+      // the WebView's own print through, nor lay the pages out again.
+      if (event.repeat) {
+        return
+      }
+
+      // A dialog or popup in front of the document owns the screen — this one
+      // included, while it counts out the pages.
+      if (
+        document.querySelector(
+          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
+        )
+      ) {
+        return
+      }
+
+      const tabId = activeIdRef.current
+      if (tabId !== HOME_TAB_ID) {
+        sessionRefs.current.get(tabId)?.print()
+      }
+    }
+
+    document.addEventListener("keydown", printDocument)
+
+    return () => document.removeEventListener("keydown", printDocument)
+  }, [])
+
   // The WebView's select-all takes the whole interface — tab strip, toolbar and
   // all — which is never what a reader means by it. It is consumed everywhere,
   // and only a document tab has something to answer it with: its pages in the

@@ -20,6 +20,9 @@ export type E2eOverrides = {
   /** Stands in for the merge wizard's multi-select dialog: the paths chosen,
       or none for cancel. */
   pickPdfPaths?: () => Promise<string[]>
+  /** Stands in for the OS print dialog, which no driver can answer: the real
+      one blocks the window until a person closes it. */
+  printWindow?: () => Promise<void>
   /** Stands in for `inspect_pdf_files`, so a spec can put a file the backend
       cannot read on the wizard's list without writing one. */
   inspectPdfFiles?: (paths: string[]) => Promise<
