@@ -21,6 +21,9 @@ Download the installer for your platform from the [Releases page](https://github
 **Pages**
 
 - Reorder pages by dragging them in the thumbnail grid.
+- Cut or copy the selected pages — right-click, or Ctrl+X / Ctrl+C — and
+  paste them into any gap: its button, or Ctrl+V in front of the page you
+  have chosen.
 - Copy pages into another open document: drag them onto its tab, hold until it
   opens, and drop them into its grid.
 - Delete pages, insert blank ones, or start a new blank PDF.

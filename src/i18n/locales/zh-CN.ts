@@ -254,6 +254,27 @@ const zhCN = {
     deleteSelected: "删除选中的 {{count}} 页",
     insertBefore: "在第 {{pageNumber}} 页前插入空白页",
     insertAtEnd: "在末尾插入空白页",
+    /** The right-click menu on a page, which acts on the whole selection.
+        Chinese has one plural form, so `_one` never renders: keep it identical. */
+    cut_one: "剪切 {{count}} 页",
+    cut_other: "剪切 {{count}} 页",
+    copy_one: "复制 {{count}} 页",
+    copy_other: "复制 {{count}} 页",
+    pasteBefore: "粘贴到第 {{pageNumber}} 页前",
+    pasteAtEnd: "粘贴到末尾",
+    /** The notices: what was taken, and where a paste put it. */
+    cutNotice_one: "已剪切 {{count}} 页（第 {{pages}} 页）",
+    cutNotice_other: "已剪切 {{count}} 页（第 {{pages}} 页）",
+    copiedNotice_one: "已复制 {{count}} 页（第 {{pages}} 页）",
+    copiedNotice_other: "已复制 {{count}} 页（第 {{pages}} 页）",
+    pastedNotice_one: "已粘贴 {{count}} 页到第 {{at}} 页前",
+    pastedNotice_other: "已粘贴 {{count}} 页到第 {{at}} 页前",
+    pastedAtEndNotice_one: "已粘贴 {{count}} 页到末尾",
+    pastedAtEndNotice_other: "已粘贴 {{count}} 页到末尾",
+    movedNotice_one: "已移动 {{count}} 页到第 {{at}} 页前",
+    movedNotice_other: "已移动 {{count}} 页到第 {{at}} 页前",
+    movedAtEndNotice_one: "已移动 {{count}} 页到末尾",
+    movedAtEndNotice_other: "已移动 {{count}} 页到末尾",
   },
   mergeWizard: {
     open: "合并向导",

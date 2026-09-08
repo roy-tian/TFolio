@@ -199,6 +199,29 @@ export type InsertPagesCommand = {
 }
 
 /**
+ * Copies pages of this document back into it at `index`, as one edit — the
+ * grid's copy-and-paste. The copies are the document's own content, so unlike
+ * an inserted file's pages they leave it saveable, and the backend needs no
+ * second document to read them from.
+ *
+ * `sourcePages` are the numbers the pages had before the copies landed. A redo
+ * restores the pages the undo stashed rather than copying them again, so they
+ * never have to mean anything at a later moment.
+ */
+export type DuplicatePagesCommand = {
+  kind: "duplicatePages"
+  /** 1-based position the first copy takes, from 1 to page count + 1. */
+  index: number
+  /** Pages in the document after the copies landed. */
+  pageCount: number
+  /** Ascending 1-based page numbers, as the document stood before the paste. */
+  sourcePages: number[]
+  /** The history entry's own id: the undo deletes the copied range under it,
+      and the redo restores exactly that stash. */
+  stashId: number
+}
+
+/**
  * A mark the reader rubbed out with the eraser.
  *
  * The entry that made it is carried whole rather than pointed at: an undo
@@ -231,6 +254,7 @@ export type AnnotationCommand =
   | InsertBlankPageCommand
   | InsertFileCommand
   | InsertPagesCommand
+  | DuplicatePagesCommand
   | EraseAnnotationCommand
 
 /**
@@ -310,6 +334,7 @@ export function commandPages(command: AnnotationCommand): number[] {
       return pagesFrom(command.index, command.pageCount)
     case "insertFile":
     case "insertPages":
+    case "duplicatePages":
       // Only from the gap on: a page ahead of it keeps both its number and its
       // pixels, so a block appended at the very end invalidates nothing. A
       // file's `pageCount` is the count before it was read and the count after
@@ -340,6 +365,7 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "insertBlankPage":
     case "insertFile":
     case "insertPages":
+    case "duplicatePages":
       return true
     case "highlight":
     case "rect":
@@ -365,6 +391,7 @@ export function commandTextPages(command: AnnotationCommand): number[] {
     case "insertBlankPage":
     case "insertFile":
     case "insertPages":
+    case "duplicatePages":
       return commandPages(command)
     default:
       return []
@@ -455,13 +482,15 @@ export function retargetCommand(
   }
 }
 
+/** `count` consecutive page numbers from `index`. */
+function pageRange(index: number, count: number): number[] {
+  return Array.from({ length: count }, (_, offset) => index + offset)
+}
+
 /** The pages an insert's undo deletes, and its redo restores: the file's own
     range, valid at the LIFO moment the insert sits at the top of history. */
 export function insertFilePages(command: InsertFileCommand): number[] {
-  return Array.from(
-    { length: command.insertedCount },
-    (_, offset) => command.index + offset,
-  )
+  return pageRange(command.index, command.insertedCount)
 }
 
 /** The permutation that undoes `order`; both are 1-based page sequences. */
@@ -589,14 +618,13 @@ export function fillInsertFileOutcome(
   }
 }
 
-/** The pages a cross-document insert's undo deletes, and its redo restores:
-    the copied block's own range, valid at the LIFO moment the insert sits at
-    the top of history. */
-export function insertPagesRange(command: InsertPagesCommand): number[] {
-  return Array.from(
-    { length: command.sourcePages.length },
-    (_, offset) => command.index + offset,
-  )
+/** The pages a copied block's undo deletes, and its redo restores — a drag from
+    another tab or a paste of this document's own pages — valid at the LIFO
+    moment that insert sits at the top of history. */
+export function insertPagesRange(
+  command: InsertPagesCommand | DuplicatePagesCommand,
+): number[] {
+  return pageRange(command.index, command.sourcePages.length)
 }
 
 /** Plans a cross-document insert. The position is the reader's, so an
@@ -620,6 +648,32 @@ export function planInsertPages(
     kind: "insertPages",
     pageCount: pageCount + pages.length,
     sourceDocumentId,
+    sourcePages: pages,
+    stashId: history.nextId,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+/** Plans a paste of the document's own pages. The position is the reader's, so
+    an out-of-range one is refused here rather than clamped; the pages are the
+    grid's, and the backend checks them against the document they name. */
+export function planDuplicatePages(
+  history: AnnotationHistory,
+  sourcePages: number[],
+  index: number,
+  pageCount: number,
+) {
+  const pages = [...new Set(sourcePages)].sort((left, right) => left - right)
+
+  if (pages.length === 0 || index < 1 || index > pageCount + 1) {
+    return null
+  }
+
+  const command: DuplicatePagesCommand = {
+    index,
+    kind: "duplicatePages",
+    pageCount: pageCount + pages.length,
     sourcePages: pages,
     stashId: history.nextId,
   }

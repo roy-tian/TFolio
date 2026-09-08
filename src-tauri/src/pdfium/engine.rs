@@ -3762,7 +3762,9 @@ impl PdfiumEngine {
             ));
         }
 
-        if let Err(error) = Self::record_imported_pages(entry, slot, added_count as usize) {
+        if let Err(error) =
+            Self::record_inserted_pages(entry, slot, &vec![true; added_count as usize])
+        {
             return Err(self.restore_document_snapshot(entry, snapshot, error));
         }
 
@@ -3777,19 +3779,22 @@ impl PdfiumEngine {
         })
     }
 
-    /// Takes `count` pages an import has just put at `slot` into the entry's own
+    /// Takes the pages a copy has just put at `slot` into the entry's own
     /// bookkeeping: fresh page ids, the guard that keeps a document holding
     /// another file's pages export-only, and — for a session that owns a layer —
-    /// an owned-but-bare record per page.
+    /// an owned-but-bare record per page. `merged` says which of them carry
+    /// content this document may not be saved over, one flag per page: every
+    /// page of an import does, only a duplicate of such a page does.
     ///
     /// Everything that can fail is measured before anything is recorded, so an
     /// error leaves the entry as it was and the caller has only the document
     /// itself to roll back.
-    fn record_imported_pages(
+    fn record_inserted_pages(
         entry: &mut OpenDocument,
         slot: usize,
-        count: usize,
+        merged: &[bool],
     ) -> Result<(), String> {
+        let count = merged.len();
         // What the document really grew by, rather than what was asked for:
         // `page_ids` is the list every later command trusts against.
         let grown_by = (entry.document.pages().len() as usize).saturating_sub(entry.page_ids.len());
@@ -3800,7 +3805,7 @@ impl PdfiumEngine {
             ));
         }
 
-        // An imported page carries its source's own content objects. When this
+        // A copied page carries its source's own content objects. When this
         // session owns any layer, each new page takes an owned-but-bare record
         // whose base is that content and whose tail is empty — no active layer
         // covers a page it never marked.
@@ -3825,14 +3830,17 @@ impl PdfiumEngine {
         }
         .into_iter();
 
-        for offset in 0..count {
+        for (offset, &from_elsewhere) in merged.iter().enumerate() {
             let page_id = entry.next_page_id;
 
             entry.next_page_id += 1;
             entry.page_ids.insert(slot + offset, page_id);
-            // This page is another document's content: while it stays, this one
-            // may only be exported as a copy, not saved over its own file.
-            entry.merged_page_ids.insert(page_id);
+
+            // This page holds content from outside this document's own file:
+            // while it stays, that file may only be exported to, never saved.
+            if from_elsewhere {
+                entry.merged_page_ids.insert(page_id);
+            }
 
             if let Some(state) = entry.owned_content.as_mut() {
                 state.per_page.insert(
@@ -3906,7 +3914,93 @@ impl PdfiumEngine {
             ));
         }
 
-        if let Err(error) = Self::record_imported_pages(entry, slot, source_pages.len()) {
+        if let Err(error) =
+            Self::record_inserted_pages(entry, slot, &vec![true; source_pages.len()])
+        {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        // Every page's content now sits in a longer document, so an M5 effect
+        // captured before this must fail its revision check after it.
+        entry.invalidate_all_page_revisions();
+
+        Ok(structure_update(entry))
+    }
+
+    /// Copies this document's own `page_numbers` back into it at 1-based
+    /// `index` — the grid's copy-and-paste. PDFium cannot import a document
+    /// into itself, so the pages go by way of a scratch document, exactly as a
+    /// delete's stash does.
+    ///
+    /// The copies are the document's own content, so they leave it saveable —
+    /// unless the page copied is itself another file's, or carries this
+    /// session's owned layer, which travels baked into the copy.
+    pub(super) fn duplicate_pages(
+        &self,
+        document_id: u64,
+        page_numbers: &[i32],
+        index: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let page_count = entry.page_ids.len();
+        let sources = validate_pages_to_copy(page_numbers, page_count)?;
+        // One past the end is a position too, exactly as a blank page's is.
+        let Some(slot) = page_index(index, page_count + 1) else {
+            return Err(format!("a page cannot go to position {index}"));
+        };
+
+        // The copy may fail partway; snapshot first so a failure rolls the
+        // document back whole, as every multi-page structure change does.
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        let copied = (|| -> Result<(), String> {
+            let mut scratch = self
+                .pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not prepare the copies: {error}"))?;
+
+            scratch
+                .pages_mut()
+                .copy_pages_from_document(&entry.document, &page_range_argument(&sources), 0)
+                .map_err(|error| format!("PDFium could not copy the pages aside: {error}"))?;
+
+            entry
+                .document
+                .pages_mut()
+                .copy_page_range_from_document(
+                    &scratch,
+                    0..=(sources.len() - 1) as i32,
+                    slot as i32,
+                )
+                .map_err(|error| format!("PDFium could not insert the copies: {error}"))
+        })();
+
+        if let Err(error) = copied {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        // Read while `page_ids` still stands as the sources were named: a copy
+        // of a page this document may not be saved over is one too.
+        let merged: Vec<bool> = sources
+            .iter()
+            .map(|source| {
+                let page_id = entry.page_ids[*source];
+
+                entry.merged_page_ids.contains(&page_id)
+                    || entry.owned_content.as_ref().is_some_and(|state| {
+                        state
+                            .per_page
+                            .get(&page_id)
+                            .is_some_and(|tail| !tail.segments.is_empty())
+                    })
+            })
+            .collect();
+
+        if let Err(error) = Self::record_inserted_pages(entry, slot, &merged) {
             return Err(self.restore_document_snapshot(entry, snapshot, error));
         }
 

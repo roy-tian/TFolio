@@ -18,6 +18,7 @@ import {
   movesPages,
   pageNumbersConfig,
   planDeletePages,
+  planDuplicatePages,
   planEraseAnnotation,
   planInsertBlankPage,
   planInsertFile,
@@ -547,6 +548,46 @@ describe("cross-document insert commands", () => {
     const command = planInsertPages(emptyHistory, 7, [1, 3, 4], 3, 5)!.command
 
     expect(insertPagesRange(command as never)).toEqual([3, 4, 5])
+  })
+})
+
+describe("pasting the document's own pages", () => {
+  it("plans a copy of the pages the reader took, in the grid's order", () => {
+    const history = historyOf(highlight(1))
+    const planned = planDuplicatePages(history, [3, 1, 3], 2, 3)!
+
+    expect(planned.command).toEqual({
+      index: 2,
+      kind: "duplicatePages",
+      pageCount: 5,
+      // Sorted and deduplicated, as a dragged block is: what the undo deletes
+      // has to be the range the backend copied.
+      sourcePages: [1, 3],
+      stashId: history.nextId,
+    })
+    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
+  })
+
+  it("refuses a position the document does not have, and an empty block", () => {
+    expect(planDuplicatePages(emptyHistory, [1], 0, 3)).toBeNull()
+    expect(planDuplicatePages(emptyHistory, [1], 5, 3)).toBeNull()
+    expect(planDuplicatePages(emptyHistory, [], 2, 3)).toBeNull()
+    // One past the end is a position: the copies go after the last page.
+    expect(planDuplicatePages(emptyHistory, [1], 4, 3)).not.toBeNull()
+  })
+
+  it("invalidates the gap and everything after it, and moves the pages", () => {
+    const command = planDuplicatePages(emptyHistory, [1, 2], 2, 3)!.command
+
+    expect(commandPages(command)).toEqual([2, 3, 4, 5])
+    expect(commandTextPages(command)).toEqual([2, 3, 4, 5])
+    expect(movesPages(command)).toBe(true)
+  })
+
+  it("names the block its undo deletes and its redo restores", () => {
+    const command = planDuplicatePages(emptyHistory, [1, 3, 4], 3, 5)!.command
+
+    expect(insertPagesRange(command)).toEqual([3, 4, 5])
   })
 })
 

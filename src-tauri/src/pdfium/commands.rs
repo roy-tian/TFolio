@@ -459,6 +459,26 @@ pub async fn restore_pdf_pages(
         .map_err(|error| format!("PDFium page restore task failed: {error}"))?
 }
 
+/// Copies pages of one document back into itself at 1-based `index` — the
+/// thumbnail grid's copy-and-paste. One document, so — like every other
+/// single-document structure command — the engine's own page and position
+/// checks are what answer for the numbers the WebView named.
+#[tauri::command]
+pub async fn duplicate_pdf_pages(
+    document_id: u64,
+    page_numbers: Vec<i32>,
+    index: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.duplicate_pages(document_id, &page_numbers, index)
+    })
+    .await
+    .map_err(|error| format!("PDFium page duplication task failed: {error}"))?
+}
+
 #[tauri::command]
 pub async fn insert_pdf_blank_page(
     document_id: u64,

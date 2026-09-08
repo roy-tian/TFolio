@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
+import { usePageClipboard } from "@/hooks/usePageClipboard"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import type { PageHandoffTarget } from "@/hooks/usePageHandoff"
 import { useEraserTool } from "@/hooks/useEraserTool"
@@ -66,6 +67,11 @@ import { copyPlainText } from "@/lib/clipboard"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
 import { dropHitAt, insertIndexForHit } from "@/lib/fileDrop"
+import {
+  formatPageRanges,
+  pastePlan,
+  type PageClipboard,
+} from "@/lib/pageClipboard"
 import type { PageHandoff } from "@/lib/pageDrag"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
@@ -124,6 +130,18 @@ type ViewerError =
   | "noteFontMissing"
   | "openFailed"
   | "saveFailed"
+  | null
+
+/**
+ * What the thumbnail grid's clipboard just did, as the corner notice says it:
+ * which pages a cut or a copy took, and — for a paste — how many landed and
+ * the page they went in front of, absent when they went to the end.
+ */
+type PageNotice =
+  | { count: number; kind: "copied"; pages: string }
+  | { count: number; kind: "cut"; pages: string }
+  | { at?: number; count: number; kind: "moved" }
+  | { at?: number; count: number; kind: "pasted" }
   | null
 
 /** A file dragged in from the desktop, as the window's own handler sees it —
@@ -271,6 +289,10 @@ function DocumentSession(
   const [searchLimitReached, setSearchLimitReached] = useState(false)
   const [viewerError, setViewerError] = useState<ViewerError>(null)
   const [viewerErrorVersion, setViewerErrorVersion] = useState(0)
+  // What the grid's last cut, copy or paste did, for the notice in the corner.
+  // Versioned like the error beside it: the same notice twice is still two.
+  const [pageNotice, setPageNotice] = useState<PageNotice>(null)
+  const [pageNoticeVersion, setPageNoticeVersion] = useState(0)
   /**
    * The edit that failed for want of a face to draw it in, kept so accepting
    * the download can re-run it. A note's text lives nowhere else by then — the
@@ -349,6 +371,11 @@ function DocumentSession(
     setViewerError(error)
     setViewerErrorVersion((version) => version + 1)
   }, [])
+  const dismissPageNotice = useCallback(() => setPageNotice(null), [])
+  const showPageNotice = useCallback((notice: NonNullable<PageNotice>) => {
+    setPageNotice(notice)
+    setPageNoticeVersion((version) => version + 1)
+  }, [])
 
   const bookApplies = hasBookSpread(pdfDocument.numPages)
   const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
@@ -395,6 +422,31 @@ function DocumentSession(
     numPages: pdfDocument.numPages,
   })
   const clearThumbnailSelection = thumbnailSelection.clear
+  // The paste's own work needs the history below, which is set up after this;
+  // the hook only ever calls it from a keypress, by which time it is here.
+  const pastePagesRef = useRef<(index: number) => void>(() => {})
+  const pageClipboard = usePageClipboard({
+    active: active && viewMode === "thumbnail",
+    onPaste: useCallback((index: number) => pastePagesRef.current(index), []),
+    onTaken: useCallback(
+      (taken: PageClipboard) =>
+        showPageNotice({
+          count: taken.pages.length,
+          kind: taken.mode === "cut" ? "cut" : "copied",
+          pages: formatPageRanges(taken.pages),
+        }),
+      [showPageNotice],
+    ),
+    selectedPages: thumbnailSelection.selectedPages,
+  })
+  const pageClipboardStructureChanged = pageClipboard.structureChanged
+  const { clipboard } = pageClipboard
+  // Only a cut marks its pages in the grid: a copy takes nothing away, so the
+  // pages it named go on reading as the pages they are.
+  const cutThumbnailPages = useMemo(
+    () => new Set(clipboard?.mode === "cut" ? clipboard.pages : []),
+    [clipboard],
+  )
   // Fetched as the selection is made, not when the copy asks for it: the
   // clipboard takes a write only from inside the keypress that asked, and a
   // long document's text is hundreds of round trips away from one.
@@ -508,11 +560,14 @@ function DocumentSession(
           Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
         )
         clearThumbnailSelection()
+        // The page numbers on the clipboard now name other pages — unless this
+        // is the paste's own insert, which says how far they slid.
+        pageClipboardStructureChanged(update.numPages)
         setPageRotations((rotations) =>
           rotationsForPageCount(rotations, update.numPages),
         )
       },
-      [clearThumbnailSelection],
+      [clearThumbnailSelection, pageClipboardStructureChanged],
     ),
     // A toast that outlives what it describes would sit over every mark the
     // reader went on to make successfully. The edit held for a retry goes with
@@ -1246,6 +1301,14 @@ function DocumentSession(
     thumbnailSelection.select(pageNumber, modifiers)
   }
 
+  // A right-click on a page the selection does not hold takes the selection to
+  // it, as every file manager does: the menu then acts on what is on screen.
+  const menuThumbnailPage = (pageNumber: number) => {
+    if (!thumbnailSelection.selectedPages.has(pageNumber)) {
+      thumbnailSelection.select(pageNumber, { range: false, toggle: false })
+    }
+  }
+
   // Every page-editing gesture carries page numbers read off the screen, so it
   // must not be queued behind a *page-shifting* edit, or it would land on the
   // wrong page. The gesture is dropped while such an edit is in flight; the
@@ -1277,6 +1340,54 @@ function DocumentSession(
 
     void annotations.insertBlankPage(index, pdfDocument.numPages)
   }
+
+  /**
+   * Puts the clipboard into the gap before `index`. A cut is a move, which the
+   * reorder command already makes one undo step of; a copy is the document
+   * taking its own pages in again, and stays on the clipboard afterwards —
+   * following the pages its own insert pushed down.
+   */
+  const pastePages = (index: number) => {
+    if (!pdfDocument || editingBusy()) {
+      return
+    }
+
+    const plan = pastePlan(pageClipboard.clipboard, index, pdfDocument.numPages)
+
+    if (!plan) {
+      return
+    }
+
+    const count = plan.pages.length
+    const at = index <= pdfDocument.numPages ? index : undefined
+
+    // Said once the edit has landed rather than when it was asked for: a
+    // refusal has its own notice, and two would be one too many.
+    if (plan.kind === "move") {
+      void annotations.reorderPages(plan.order).then((landed) => {
+        if (landed) {
+          showPageNotice({ at, count, kind: "moved" })
+        }
+      })
+
+      return
+    }
+
+    // Armed before the work, because the insert's own structure change is what
+    // reaches the clipboard first — and disarmed if that insert never lands.
+    pageClipboard.armPaste(index, count, pdfDocument.numPages)
+    void annotations
+      .duplicatePages(plan.pages, index, pdfDocument.numPages)
+      .then((landed) => {
+        if (landed) {
+          showPageNotice({ at, count, kind: "pasted" })
+        } else {
+          pageClipboard.disarmPaste()
+        }
+      })
+  }
+
+  pastePagesRef.current = pastePages
 
   // Answered with, rather than voided: the grid holds the pages where the drop
   // put them until this settles, since nothing moves before the backend has.
@@ -1782,6 +1893,34 @@ function DocumentSession(
                     : viewerError === "noteFontFailed"
                       ? t("annotate.noteFontFailed")
                       : null
+  const pageNoticeMessage = () => {
+    if (!pageNotice) {
+      return null
+    }
+
+    if (pageNotice.kind === "cut" || pageNotice.kind === "copied") {
+      const { count, pages } = pageNotice
+
+      return pageNotice.kind === "cut"
+        ? t("pageEdit.cutNotice", { count, pages })
+        : t("pageEdit.copiedNotice", { count, pages })
+    }
+
+    // No page to name is the end of the document, where a paste lands after
+    // every page there is.
+    const { at, count, kind } = pageNotice
+
+    if (at === undefined) {
+      return kind === "moved"
+        ? t("pageEdit.movedAtEndNotice", { count })
+        : t("pageEdit.pastedAtEndNotice", { count })
+    }
+
+    return kind === "moved"
+      ? t("pageEdit.movedNotice", { at, count })
+      : t("pageEdit.pastedNotice", { at, count })
+  }
+  const pageMessage = pageNoticeMessage()
 
   return (
     <div
@@ -2045,12 +2184,18 @@ function DocumentSession(
               fileName={fileName}
               key={pdfDocument.id}
               pageEdit={{
+                canPaste: pageClipboard.clipboard !== null,
+                cutPages: cutThumbnailPages,
                 dropIndex,
                 handoff,
                 onClearSelection: clearThumbnailSelection,
+                onCopyPages: pageClipboard.copy,
+                onCutPages: pageClipboard.cut,
                 onDeletePage: deleteThumbnailPage,
                 onInsertBlankPage: insertBlankPage,
+                onMenuPage: menuThumbnailPage,
                 onOpenPage: openThumbnailPage,
+                onPastePages: pastePages,
                 onReorderPages: reorderPages,
                 onSelectPage: selectThumbnailPage,
                 selectedPages: thumbnailSelection.selectedPages,
@@ -2127,36 +2272,51 @@ function DocumentSession(
         validationError={pageNumbers.validationError}
       />
 
-      {errorMessage ? (
-        <DismissibleAlert
-          // A hidden tab has not shown its warning yet, and the font notices
-          // hold the reader's otherwise-lost note until they answer the offer.
-          autoDismiss={active && errorAutoDismisses}
-          className="fixed top-25 right-4 z-40 max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-          dismissKey={viewerErrorVersion}
-          onDismiss={dismissViewerError}
-        >
-          <div className="flex items-center gap-3">
-            <span>{errorMessage}</span>
-            {/* The only refusals the reader can answer from here, so the only
-                ones that carry a button — a fetch that failed included, since
-                the edit waiting on it is still held. */}
-            {viewerError === "noteFontMissing" ||
-            viewerError === "noteFontFailed" ? (
-              <Button
-                className="shrink-0"
-                disabled={fetchingNoteFont}
-                onClick={() => void fetchNoteFont()}
-                size="sm"
-                variant="outline"
-              >
-                {fetchingNoteFont
-                  ? t("annotate.noteFontFetching")
-                  : t("annotate.noteFontFetch")}
-              </Button>
-            ) : null}
-          </div>
-        </DismissibleAlert>
+      {/* One corner, stacked: a refusal and a clipboard notice can stand at the
+          same moment, and neither may be hidden under the other. */}
+      {errorMessage || pageMessage ? (
+        <div className="fixed top-25 right-4 z-40 flex w-80 flex-col gap-2">
+          {errorMessage ? (
+            <DismissibleAlert
+              // A hidden tab has not shown its warning yet, and the font notices
+              // hold the reader's otherwise-lost note until they answer the offer.
+              autoDismiss={active && errorAutoDismisses}
+              className="rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+              dismissKey={viewerErrorVersion}
+              onDismiss={dismissViewerError}
+            >
+              <div className="flex items-center gap-3">
+                <span>{errorMessage}</span>
+                {/* The only refusals the reader can answer from here, so the only
+                    ones that carry a button — a fetch that failed included, since
+                    the edit waiting on it is still held. */}
+                {viewerError === "noteFontMissing" ||
+                viewerError === "noteFontFailed" ? (
+                  <Button
+                    className="shrink-0"
+                    disabled={fetchingNoteFont}
+                    onClick={() => void fetchNoteFont()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {fetchingNoteFont
+                      ? t("annotate.noteFontFetching")
+                      : t("annotate.noteFontFetch")}
+                  </Button>
+                ) : null}
+              </div>
+            </DismissibleAlert>
+          ) : null}
+          {pageMessage ? (
+            <DismissibleAlert
+              className="rounded-lg border border-border bg-background px-4 py-2 text-sm shadow-lg"
+              dismissKey={pageNoticeVersion}
+              onDismiss={dismissPageNotice}
+            >
+              <span data-page-notice>{pageMessage}</span>
+            </DismissibleAlert>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )

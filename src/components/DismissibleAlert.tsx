@@ -42,7 +42,9 @@ export function DismissibleAlert({
       <div className="min-w-0 flex-1">{children}</div>
       <Button
         aria-label={t("notification.dismiss")}
-        className="-my-1 -mr-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        // The alert's own colour, so a refusal keeps its red and a plain notice
+        // does not borrow one.
+        className="-my-1 -mr-2 text-current hover:bg-current/10 hover:text-current"
         onClick={onDismiss}
         size="icon-sm"
         type="button"

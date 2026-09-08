@@ -175,6 +175,38 @@ function clickThumb(
   )
 }
 
+/** The grid's own editing keys. Dispatched rather than typed: this driver
+    cannot hold Ctrl down, and the grid listens on the document either way. */
+function pressEditKey(key: string) {
+  return browser.execute((pressed: string) => {
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        ctrlKey: true,
+        key: pressed,
+      }),
+    )
+  }, key)
+}
+
+/** The right-click a page answers with its cut-and-copy menu. */
+async function openThumbMenu(pageNumber: number) {
+  await browser.execute((page: number) => {
+    const thumb = document.querySelector(`button[data-page-number='${page}']`)!
+    const box = thumb.getBoundingClientRect()
+
+    thumb.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        clientX: box.left + 20,
+        clientY: box.top + 20,
+      }),
+    )
+  }, pageNumber)
+  await $("[data-action='cut-pages']").waitForDisplayed({ timeout: 5_000 })
+}
+
 function selectedThumbs() {
   return browser.execute(() =>
     Array.from(
@@ -493,6 +525,89 @@ describe("TFolio page editing", () => {
       timeoutMsg: "undoing both inserts never restored the shape",
     })
     await waitForThumb(2, second!)
+  })
+
+  it("cuts a selection and pastes it into a gap as one move", async () => {
+    await openPdfFromDisk("cut.pdf", bandedPdf(4))
+    const [first, second, third, fourth] = await paintedFingerprints(4)
+
+    await clickThumb(2)
+    await clickThumb(3, { ctrl: true })
+    expect(await selectedThumbs()).toEqual([2, 3])
+
+    await openThumbMenu(2)
+    await $("[data-action='cut-pages']").click()
+    await expect($("[data-page-notice]")).toHaveText("2 pages cut (2–3)")
+
+    // A cut takes nothing away by itself: the pages are still there, waiting
+    // for somewhere to go.
+    expect(await thumbCount()).toBe(4)
+    await waitForThumb(2, second!)
+
+    await $("button[aria-label='Paste at the end']").click()
+    await browser.waitUntil(async () => (await thumbFingerprint(2)) === fourth, {
+      timeoutMsg: "the paste never moved the pages",
+    })
+    await waitForThumb(3, second!)
+    await waitForThumb(4, third!)
+    expect(await thumbCount()).toBe(4)
+    await expect($("[data-page-notice]")).toHaveText("2 pages moved to the end")
+
+    // One undo: the move is one edit, whatever the reader spent on it.
+    await $("button[aria-label='Undo']").click()
+    await waitForThumb(1, first!)
+    await waitForThumb(2, second!)
+    await waitForThumb(4, fourth!)
+
+    // The cut is spent, so no gap offers a paste any more.
+    expect(await $$("button[aria-label='Paste at the end']").length).toBe(0)
+  })
+
+  it("copies pages with the keyboard and pastes them again and again", async () => {
+    await openPdfFromDisk("copy.pdf", bandedPdf(3))
+    const [first, second, third] = await paintedFingerprints(3)
+
+    await clickThumb(3)
+    expect(await selectedThumbs()).toEqual([3])
+    await pressEditKey("c")
+    await expect($("[data-page-notice]")).toHaveText("Page 3 copied")
+
+    // Ctrl+V lands in front of the page the reader has chosen.
+    await clickThumb(1)
+    expect(await selectedThumbs()).toEqual([1])
+    await pressEditKey("v")
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the paste never landed",
+    })
+    await waitForThumb(1, third!)
+    await waitForThumb(2, first!)
+    await expect($("[data-page-notice]")).toHaveText(
+      "1 page pasted before page 1",
+    )
+
+    // The copy stands, and it follows the page its own paste pushed down: the
+    // second paste brings the same page over again.
+    await $("button[aria-label='Paste at the end']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 5, {
+      timeoutMsg: "the second paste never landed",
+    })
+    await waitForThumb(5, third!)
+
+    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label='Undo']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "undoing both pastes never restored the shape",
+    })
+    await waitForThumb(1, first!)
+    await waitForThumb(2, second!)
+
+    // Every other edit voids the clipboard: its page numbers would now name
+    // pages the reader never chose.
+    await $("button[aria-label='Insert a blank page at the end']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the insert never landed",
+    })
+    expect(await $$("button[aria-label='Paste at the end']").length).toBe(0)
   })
 
   it("labels the grid's controls with shadcn tooltips, not native ones", async () => {

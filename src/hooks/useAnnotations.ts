@@ -16,6 +16,7 @@ import {
   markSaved,
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
+  planDuplicatePages,
   planEraseAnnotation,
   planInsertBlankPage,
   planInsertFile,
@@ -251,6 +252,7 @@ async function applyCommand(
       return []
     case "insertFile":
     case "insertPages":
+    case "duplicatePages":
       // Only ever a redo here — the first apply reads the pages across through
       // `insertFile`/`insertPages` below. A redo restores what the undo stashed
       // rather than re-reading a file, or a document, that may have moved on.
@@ -402,7 +404,8 @@ async function retractCommand(
       )
       return []
     case "insertPages":
-      // The same undo, over the block the drag brought across.
+    case "duplicatePages":
+      // The same undo, over the block the drag or the paste brought in.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("delete_pdf_pages", {
@@ -872,6 +875,68 @@ export function useAnnotations({
   )
 
   /**
+   * Copies this document's own `sourcePages` back into it at `index` — the
+   * grid's paste. It takes `insertPages`' path rather than `commitStructure`'s
+   * for the same reason: there the apply *is* the redo, and a redo of a paste
+   * restores the pages its undo stashed instead of copying them a second time.
+   */
+  const duplicatePages = useCallback(
+    async (sourcePages: number[], index: number, pageCount: number) => {
+      if (documentId === undefined) {
+        return false
+      }
+
+      let landed = false
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planDuplicatePages(
+            current,
+            sourcePages,
+            index,
+            pageCount,
+          )
+
+          if (!planned) {
+            // A page or a position this document no longer has: the grid both
+            // were read off has since been renumbered. A null plan reaches
+            // neither the success nor the failure path, so it is said here.
+            onAnnotateError()
+            return null
+          }
+
+          return {
+            next: planned.history,
+            pages: commandPages(planned.command),
+            textPages: commandTextPages(planned.command),
+            work: async () => {
+              onStructureChange(
+                documentId,
+                await invoke<PdfStructureUpdate>("duplicate_pdf_pages", {
+                  documentId,
+                  index,
+                  // The plan's own block: sorted and deduplicated, so the range
+                  // the undo deletes is the one the backend copied.
+                  pageNumbers: planned.command.sourcePages,
+                }),
+              )
+              landed = true
+              return true
+            },
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+      }
+
+      return landed
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  /**
    * Rubs out whichever of this session's marks lies under `point` on
    * `pageNumber`; a point on nothing of the reader's own leaves the document
    * alone, and so leaves the history alone too.
@@ -1283,6 +1348,7 @@ export function useAnnotations({
       cancelOperation,
       commit: commitCommand,
       deletePages,
+      duplicatePages,
       eraseAt,
       exportCopy,
       hasPendingWorkNow,
@@ -1309,6 +1375,7 @@ export function useAnnotations({
       cancelOperation,
       commitCommand,
       deletePages,
+      duplicatePages,
       eraseAt,
       exportCopy,
       hasPendingWorkNow,

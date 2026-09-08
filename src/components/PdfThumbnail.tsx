@@ -21,6 +21,9 @@ type PdfThumbnailProps = {
   deleteDisabled: boolean
   documentId: number
   isCurrent: boolean
+  /** Whether a cut is standing over this page: it is still here, and a paste
+      is what would move it. */
+  isCut: boolean
   isSelected: boolean
   onDelete: (pageNumber: number) => void
   /** Double-click: leave the grid for the page itself. */
@@ -47,12 +50,14 @@ type PdfThumbnailProps = {
  * deliberately carries no selectable text layer, so a grid of them stays cheap
  * even on a long document. A click selects, a double-click opens the page, and
  * the corner button deletes — the current selection when this page is in it,
- * this page alone otherwise.
+ * this page alone otherwise. The right-click that cuts or copies belongs to the
+ * grid rather than to each cell: see `ThumbnailLayout`.
  */
 export function PdfThumbnail({
   deleteDisabled,
   documentId,
   isCurrent,
+  isCut,
   isSelected,
   onDelete,
   onOpen,
@@ -96,7 +101,14 @@ export function PdfThumbnail({
     : t("pageEdit.deletePage", { pageNumber })
 
   return (
-    <div className="group/thumb relative flex flex-col items-center">
+    <div
+      className={cn(
+        "group/thumb relative flex flex-col items-center transition-opacity",
+        // Faded, the way a file manager marks a cut: the page is still here,
+        // and a paste is what moves it.
+        isCut && "opacity-45",
+      )}
+    >
       {/* A page that could not be drawn says so instead: the cell is a white
           card with a warning in it, and the reason is what a hover owes it. */}
       <HintTooltip
