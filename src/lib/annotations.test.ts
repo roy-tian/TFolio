@@ -27,6 +27,7 @@ import {
   planInsertPages,
   planPageNumbersChange,
   planReorderPages,
+  planRotatePages,
   planWatermarkChange,
   redo,
   retargetCommand,
@@ -353,12 +354,13 @@ describe("movesPages", () => {
       expect(movesPages(command)).toBe(true)
     }
 
-    // An annotation, watermark, or page number leaves every page where it was,
-    // so undoing one must not discard a note the reader is still typing.
+    // An annotation, watermark, page number or turn leaves every page where it
+    // was, so undoing one must not discard a note the reader is still typing.
     for (const command of [
       highlight(1),
       watermark(null),
       pageNumbers(pageNumbersConfigValue()),
+      planRotatePages(emptyHistory, [1], 90)!.command,
     ]) {
       expect(movesPages(command)).toBe(false)
     }
@@ -567,6 +569,41 @@ describe("cross-document insert commands", () => {
     const command = planInsertPages(emptyHistory, 7, [1, 3, 4], 3, 5)!.command
 
     expect(insertPagesRange(command as never)).toEqual([3, 4, 5])
+  })
+})
+
+describe("turning pages", () => {
+  it("plans one turn of the pages the grid chose", () => {
+    const history = historyOf(highlight(1))
+    const planned = planRotatePages(history, [3, 1, 3], 90)!
+
+    expect(planned.command).toEqual({
+      degrees: 90,
+      kind: "rotatePages",
+      // Sorted and deduplicated: the undo turns back exactly what turned.
+      pages: [1, 3],
+    })
+    expect(planned.history.past).toHaveLength(2)
+  })
+
+  it("refuses an empty selection and a turn that comes to nothing", () => {
+    expect(planRotatePages(emptyHistory, [], 90)).toBeNull()
+    expect(planRotatePages(emptyHistory, [1], 0)).toBeNull()
+    expect(planRotatePages(emptyHistory, [1], 360)).toBeNull()
+  })
+
+  it("keeps the turn inside one clockwise circle", () => {
+    expect(planRotatePages(emptyHistory, [1], 450)!.command.degrees).toBe(90)
+    expect(planRotatePages(emptyHistory, [1], -90)!.command.degrees).toBe(270)
+  })
+
+  it("redraws the pages that turned and no others, text included", () => {
+    const command = planRotatePages(emptyHistory, [2, 4], 90)!.command
+
+    expect(commandPages(command)).toEqual([2, 4])
+    // The spans keep their places in the page's own space; only the layer
+    // drawn over them turns, so nothing has to be extracted again.
+    expect(commandTextPages(command)).toEqual([])
   })
 })
 

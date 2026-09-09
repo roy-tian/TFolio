@@ -430,6 +430,26 @@ pub async fn reorder_pdf_pages(
         .map_err(|error| format!("PDFium reorder task failed: {error}"))?
 }
 
+/// Turns pages of one document clockwise by `degrees` — the thumbnail grid's
+/// rotate button, which unlike the reading views' turns the document rather
+/// than the view. One document, so the engine's own page and turn checks are
+/// what answer for the numbers the WebView named.
+#[tauri::command]
+pub async fn rotate_pdf_pages(
+    document_id: u64,
+    page_numbers: Vec<i32>,
+    degrees: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.rotate_pages(document_id, &page_numbers, degrees)
+    })
+    .await
+    .map_err(|error| format!("PDFium page rotation task failed: {error}"))?
+}
+
 #[tauri::command]
 pub async fn delete_pdf_pages(
     document_id: u64,

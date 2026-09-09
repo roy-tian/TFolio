@@ -216,6 +216,23 @@ function selectedThumbs() {
   )
 }
 
+/** Each cell's shape as the grid draws it: a page turned a quarter of the way
+    round stands in a landscape box where an upright one is portrait. */
+function thumbShapes(scope = "") {
+  return browser.execute(
+    (within: string) =>
+      Array.from(
+        document.querySelectorAll(`${within} button[data-page-number]`),
+        (cell) => {
+          const box = cell.getBoundingClientRect()
+
+          return box.width > box.height ? "landscape" : "portrait"
+        },
+      ),
+    scope,
+  )
+}
+
 function pageRotations() {
   return browser.execute(() =>
     Array.from(
@@ -410,15 +427,64 @@ describe("TFolio page editing", () => {
     expect(await selectedThumbs()).toEqual([])
   })
 
-  it("rotates the thumbnail selection and clears it from blank space", async () => {
+  it("turns the grid's chosen pages in the document, undoably", async () => {
     await openPdfFromDisk("rotate.pdf", bandedPdf(4))
-    await paintedFingerprints(4)
+    const [, upright] = await paintedFingerprints(4)
     const rotate = () => $("button[aria-label='Rotate clockwise']").click()
 
-    // A partial selection is the rotation target.
+    // A partial selection is the target, and what turns is the page rather than
+    // the way it is being looked at: the cell takes a landscape box while the
+    // viewer's own rotation stays where it was.
     await clickThumb(2)
     await rotate()
-    expect(await pageRotations()).toEqual([0, 90, 0, 0])
+    await browser.waitUntil(
+      async () => (await thumbShapes())[1] === "landscape",
+      { timeoutMsg: "the page never turned" },
+    )
+    expect(await thumbShapes()).toEqual([
+      "portrait",
+      "landscape",
+      "portrait",
+      "portrait",
+    ])
+    expect(await pageRotations()).toEqual([0, 0, 0, 0])
+    // Turned in the document, so the bitmap the backend draws is a turned one
+    // rather than the same picture in a box on its side.
+    await browser.waitUntil(
+      async () => {
+        const print = await thumbFingerprint(2)
+
+        return print > 0 && print !== upright
+      },
+      { timeoutMsg: "the turned page never painted again" },
+    )
+    // The page turned where it stands, so the selection still names it — and
+    // the history is holding the turn, named for what it did.
+    expect(await selectedThumbs()).toEqual([2])
+    await expect(
+      $("button[aria-label='Undo turning a page']"),
+    ).toBeExisting()
+
+    await $("button[aria-label^='Undo']").click()
+    await browser.waitUntil(
+      async () => (await thumbShapes())[1] === "portrait",
+      { timeoutMsg: "the undo never turned the page back" },
+    )
+
+    // The page's own menu makes the same edit, and takes an unselected page to
+    // the selection first, as cut and copy do.
+    await openThumbMenu(3)
+    await $("[data-action='rotate-pages']").click()
+    await browser.waitUntil(
+      async () => (await thumbShapes())[2] === "landscape",
+      { timeoutMsg: "the menu never turned the page" },
+    )
+    expect(await selectedThumbs()).toEqual([3])
+    await $("button[aria-label^='Undo']").click()
+    await browser.waitUntil(
+      async () => (await thumbShapes())[2] === "portrait",
+      { timeoutMsg: "the undo never turned the menu's page back" },
+    )
 
     // Blank workspace clears the selection, so the next press turns every page.
     await browser.execute(() => {
@@ -428,23 +494,19 @@ describe("TFolio page editing", () => {
     })
     expect(await selectedThumbs()).toEqual([])
     await rotate()
-    expect(await pageRotations()).toEqual([90, 180, 90, 90])
+    await browser.waitUntil(
+      async () => (await thumbShapes()).every((shape) => shape === "landscape"),
+      { timeoutMsg: "the whole document never turned" },
+    )
+    await expect(
+      $("button[aria-label='Undo turning 4 pages']"),
+    ).toBeExisting()
 
-    // A complete selection has the same all-page meaning.
-    await clickThumb(1)
-    await clickThumb(4, { shift: true })
-    expect(await selectedThumbs()).toEqual([1, 2, 3, 4])
-    await rotate()
-    expect(await pageRotations()).toEqual([180, 270, 180, 180])
-
-    // Reading views continue to rotate every page, even when the pages arrived
-    // there with different orientations from the grid.
+    // Reading views go on turning the view alone, on top of whatever the pages
+    // now carry of their own.
     await $("button[aria-label='Single page']").click()
     await rotate()
-    expect(await pageRotations()).toEqual([270, 0, 270, 270])
-    await $("button[aria-label='Book']").click()
-    await rotate()
-    expect(await pageRotations()).toEqual([0, 90, 0, 0])
+    expect(await pageRotations()).toEqual([90, 90, 90, 90])
   })
 
   it("deletes pages, undoes them back, and redoes the delete", async () => {

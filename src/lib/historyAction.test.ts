@@ -65,6 +65,12 @@ describe("historyAction", () => {
     ).toEqual({ count: 1, key: "annotate.actionDuplicatePages" })
   })
 
+  it("counts the pages a turn took", () => {
+    expect(
+      historyAction({ degrees: 90, kind: "rotatePages", pages: [2, 3, 4] }),
+    ).toEqual({ count: 3, key: "annotate.actionRotatePages" })
+  })
+
   it("tells adding, changing and removing a watermark apart", () => {
     expect(
       historyAction({

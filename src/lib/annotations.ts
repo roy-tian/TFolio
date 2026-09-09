@@ -124,6 +124,23 @@ export type ReorderPagesCommand = {
   inverse: number[]
 }
 
+/**
+ * Turns pages clockwise inside the document itself — the thumbnail grid's
+ * rotate, which unlike a reading view's turns the file rather than the view.
+ *
+ * The turn is a step rather than a destination, so the undo is simply the turn
+ * that completes the circle: neither side has to know what each page carried
+ * before, which is what lets one entry cover pages that started out differently
+ * rotated. The page numbers speak of this moment, as a reorder's do.
+ */
+export type RotatePagesCommand = {
+  kind: "rotatePages"
+  /** Ascending 1-based page numbers. */
+  pages: number[]
+  /** The clockwise turn to add, in degrees: 90, 180 or 270. */
+  degrees: number
+}
+
 export type DeletePagesCommand = {
   kind: "deletePages"
   /** Ascending 1-based page numbers, as the document stood before deleting. */
@@ -250,6 +267,7 @@ export type AnnotationCommand =
   | WatermarkCommand
   | PageNumbersCommand
   | ReorderPagesCommand
+  | RotatePagesCommand
   | DeletePagesCommand
   | InsertBlankPageCommand
   | InsertFileCommand
@@ -323,6 +341,8 @@ export function commandPages(command: AnnotationCommand): number[] {
       return everyPage(command.pageCount)
     case "reorderPages":
       return movedPositions(command.order)
+    case "rotatePages":
+      return command.pages
     case "deletePages":
       // From the first page taken out: every page ahead of it keeps both its
       // number and its pixels. `pageCount` is the count before the delete — the
@@ -372,6 +392,9 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "textNote":
     case "watermark":
     case "pageNumbers":
+    // A page turns where it stands: the numbers around it still name what they
+    // did, and a draft anchored to one is still on the page it was made on.
+    case "rotatePages":
     // Only ever a mark, which is why the eraser can take one from the middle of
     // the history without the pages beneath it moving.
     case "eraseAnnotation":
@@ -393,6 +416,8 @@ export function commandTextPages(command: AnnotationCommand): number[] {
     case "insertPages":
     case "duplicatePages":
       return commandPages(command)
+    // A rotation moves no text: the spans keep their places in the page's own
+    // space, and it is the layer drawn over them that turns.
     default:
       return []
   }
@@ -519,6 +544,29 @@ export function planReorderPages(history: AnnotationHistory, order: number[]) {
     inverse: inversePermutation(order),
     kind: "reorderPages",
     order,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+/** Plans a turn of the pages the grid chose. A turn that would come to
+    nothing — no pages, or a whole circle — never occupies an undo step. */
+export function planRotatePages(
+  history: AnnotationHistory,
+  pages: number[],
+  degrees: number,
+) {
+  const sorted = [...new Set(pages)].sort((left, right) => left - right)
+  const turn = ((degrees % 360) + 360) % 360
+
+  if (sorted.length === 0 || turn === 0) {
+    return null
+  }
+
+  const command: RotatePagesCommand = {
+    degrees: turn,
+    kind: "rotatePages",
+    pages: sorted,
   }
 
   return { command, history: commit(history, command) }

@@ -25,6 +25,7 @@ import {
   planInsertPages,
   planPageNumbersChange,
   planReorderPages,
+  planRotatePages,
   planWatermarkChange,
   redo,
   retargetCommand,
@@ -59,12 +60,19 @@ function progressChannel(onProgress?: ProgressHandler) {
   return channel
 }
 
+/**
+ * How a structure command left the page list: an array is new slot -> previous
+ * page number, for existing pages that only moved; `"inPlace"` is an edit that
+ * moved nothing at all, and so leaves everything held by page number — the
+ * selection, the clipboard, the grid's own identities — still true.
+ */
+type PageMovement = number[] | "inPlace"
+
 /** Where a structure command's fresh metadata lands, applied or undone. */
 type StructureChangeHandler = (
   documentId: number,
   update: PdfStructureUpdate,
-  /** New slot -> previous page number, when existing pages only moved. */
-  order?: number[],
+  movement?: PageMovement,
 ) => void
 
 type UseAnnotationsOptions = {
@@ -233,6 +241,17 @@ async function applyCommand(
         command.order,
       )
       return []
+    case "rotatePages":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rotate_pdf_pages", {
+          degrees: command.degrees,
+          documentId,
+          pageNumbers: command.pages,
+        }),
+        "inPlace",
+      )
+      return []
     case "deletePages":
       onStructureChange(
         documentId,
@@ -368,6 +387,19 @@ async function retractCommand(
           order: command.inverse,
         }),
         command.inverse,
+      )
+      return []
+    case "rotatePages":
+      // The rest of the way round, which is what puts each page back however
+      // far it was turned to begin with.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rotate_pdf_pages", {
+          degrees: 360 - command.degrees,
+          documentId,
+          pageNumbers: command.pages,
+        }),
+        "inPlace",
       )
       return []
     case "deletePages":
@@ -716,6 +748,12 @@ export function useAnnotations({
 
   const reorderPages = useCallback(
     (order: number[]) => commitStructure((current) => planReorderPages(current, order)),
+    [commitStructure],
+  )
+
+  const rotatePages = useCallback(
+    (pages: number[], degrees: number) =>
+      commitStructure((current) => planRotatePages(current, pages, degrees)),
     [commitStructure],
   )
 
@@ -1368,6 +1406,7 @@ export function useAnnotations({
       reorderPages,
       renderEpochs,
       reset,
+      rotatePages,
       save,
       setPageNumbers,
       setWatermark,
@@ -1395,6 +1434,7 @@ export function useAnnotations({
       renderEpochs,
       reorderPages,
       reset,
+      rotatePages,
       save,
       setPageNumbers,
       setWatermark,

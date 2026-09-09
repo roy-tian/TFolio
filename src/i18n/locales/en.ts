@@ -108,6 +108,8 @@ const en = {
     actionPageNumbersChange: "changing page numbers",
     actionPageNumbersRemove: "removing page numbers",
     actionReorderPages: "moving pages",
+    actionRotatePages_one: "turning a page",
+    actionRotatePages_other: "turning {{count}} pages",
     actionDeletePages_one: "deleting a page",
     actionDeletePages_other: "deleting {{count}} pages",
     actionInsertBlankPage: "inserting a blank page",
@@ -292,6 +294,8 @@ const en = {
     cut_other: "Cut {{count}} pages",
     copy_one: "Copy page",
     copy_other: "Copy {{count}} pages",
+    rotate_one: "Rotate page",
+    rotate_other: "Rotate {{count}} pages",
     pasteBefore: "Paste before page {{pageNumber}}",
     pasteAtEnd: "Paste at the end",
     /** The notices: what was taken, and where a paste put it. */

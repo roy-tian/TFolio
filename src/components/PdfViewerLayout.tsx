@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from "react"
 import { createPortal } from "react-dom"
-import { ClipboardPaste, Copy, Plus, Scissors } from "lucide-react"
+import { ClipboardPaste, Copy, Plus, RotateCw, Scissors } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
@@ -18,6 +18,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -89,6 +90,9 @@ export type PageEditProps = {
       make-way layout until: the pages change only once the backend has moved
       them. */
   onReorderPages: (order: number[]) => void | Promise<unknown>
+  /** Turns the pages the menu acts on a quarter further, in the document
+      itself: the same edit the toolbar's rotate makes over this grid. */
+  onRotatePages: () => void
   /** Stable across reorders, so painted canvases move with their pages. */
   thumbnailKeys: number[]
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
@@ -730,6 +734,7 @@ function ThumbnailLayout({
   )
   const cutPages = useCallback(() => pageEditRef.current.onCutPages(), [])
   const copyPages = useCallback(() => pageEditRef.current.onCopyPages(), [])
+  const rotatePages = useCallback(() => pageEditRef.current.onRotatePages(), [])
   // The page the menu is open on, and the page the press that would open it
   // landed on. One menu for the whole grid rather than one per cell: a document
   // of several hundred pages would otherwise mount as many popup roots, each
@@ -899,8 +904,9 @@ function ThumbnailLayout({
             )
           : null}
       </ContextMenuTrigger>
-      {/* Only the two the grid has anywhere to put: a paste is a position
-          rather than a page, so it belongs to the gaps and their + button. */}
+      {/* Everything the menu can aim at a page: the two that take pages away
+          with them, and the turn that leaves them where they are. A paste is a
+          position rather than a page, so it stays with the gaps and their +. */}
       <ContextMenuContent>
         <ContextMenuItem data-action="cut-pages" onClick={cutPages}>
           <Scissors />
@@ -909,6 +915,11 @@ function ThumbnailLayout({
         <ContextMenuItem data-action="copy-pages" onClick={copyPages}>
           <Copy />
           {t("pageEdit.copy", { count: menuCount })}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem data-action="rotate-pages" onClick={rotatePages}>
+          <RotateCw />
+          {t("pageEdit.rotate", { count: menuCount })}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -1000,9 +1011,15 @@ export function PdfViewerLayout({
 
         const target = event.target
 
-        // A page or editing control owns its click. Everything else in this
-        // layout is blank grid or workspace and clears the thumbnail choice.
-        if (!(target instanceof Element) || !target.closest("button")) {
+        // A page or editing control owns its click, and so does the page menu:
+        // its items are portalled out of the layout but still bubble here
+        // through the React tree, and choosing one of them is not a press on
+        // blank space. Everything else here is blank grid or workspace and
+        // clears the thumbnail choice.
+        if (
+          !(target instanceof Element) ||
+          !target.closest("button, [data-slot='context-menu-content']")
+        ) {
           pageEdit.onClearSelection()
         }
       }}

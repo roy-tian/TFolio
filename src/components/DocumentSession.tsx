@@ -92,6 +92,8 @@ import {
   stepSearchMatch,
 } from "@/lib/pdfSearch"
 import {
+  pagesToRotate,
+  QUARTER_TURN,
   rotationForPage,
   rotationsAfterRotate,
   rotationsForPageCount,
@@ -552,11 +554,15 @@ function DocumentSession(
       () => showViewerError("saveFailed"),
       [showViewerError],
     ),
-    // A structure command moved the page list under everything keyed by page
-    // number, so the metadata is replaced wholesale and every position-derived
-    // state — the current page, the selection — is brought back into range.
+    // A structure command replaces the page list wholesale — nothing here
+    // mirrors it — and, where it moved the pages under everything keyed by
+    // page number, brings each position-derived state back into range.
     onStructureChange: useCallback(
-      (documentId: number, update: PdfStructureUpdate, order?: number[]) => {
+      (
+        documentId: number,
+        update: PdfStructureUpdate,
+        movement?: number[] | "inPlace",
+      ) => {
         const current = documentRef.current
 
         if (!current || current.id !== documentId) {
@@ -572,15 +578,23 @@ function DocumentSession(
 
         documentRef.current = next
         setPdfDocument(next)
+        setHasMergedPages(update.hasMergedPages)
+
+        // A page turned where it stands: every position still holds the page it
+        // held, so the selection the reader is turning survives the edit — and
+        // must, or a second press would find nothing chosen and turn the lot.
+        if (movement === "inPlace") {
+          return
+        }
+
         setThumbnailIdentity(({ keys, nextKey }) =>
-          order
-            ? { keys: order.map((page) => keys[page - 1]!), nextKey }
+          movement
+            ? { keys: movement.map((page) => keys[page - 1]!), nextKey }
             : {
                 keys: update.pages.map((_, index) => keys[index] ?? nextKey + index),
                 nextKey: nextKey + update.numPages,
               },
         )
-        setHasMergedPages(update.hasMergedPages)
         setCurrentPage((page) =>
           Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
         )
@@ -1402,6 +1416,23 @@ function DocumentSession(
   }
 
   /**
+   * The rotate button pressed over the grid, where turning a page is an edit of
+   * the document — undone, saved and carried into the file like any other —
+   * rather than the reading views' way of looking at it. It takes the
+   * selection, or the whole document when there is none.
+   */
+  const rotateThumbnailPages = () => {
+    if (!pdfDocument || editingBusy()) {
+      return
+    }
+
+    void annotations.rotatePages(
+      pagesToRotate(pdfDocument.numPages, thumbnailSelection.selectedPages),
+      QUARTER_TURN,
+    )
+  }
+
+  /**
    * Puts the clipboard into the gap before `index`. A cut is a move, which the
    * reorder command already makes one undo step of; a copy is the document
    * taking its own pages in again, and stays on the clipboard afterwards —
@@ -2144,15 +2175,13 @@ function DocumentSession(
             <Button
               aria-label={t("toolbar.rotate")}
               disabled={!pdfDocument}
-              onClick={() =>
-                setPageRotations((rotations) =>
-                  rotationsAfterRotate(
-                    rotations,
-                    viewMode,
-                    thumbnailSelection.selectedPages,
-                  ),
-                )
-              }
+              onClick={() => {
+                if (viewMode === "thumbnail") {
+                  rotateThumbnailPages()
+                } else {
+                  setPageRotations(rotationsAfterRotate)
+                }
+              }}
               size="icon"
               variant="outline"
             >
@@ -2328,6 +2357,7 @@ function DocumentSession(
                 onOpenPage: openThumbnailPage,
                 onPastePages: pastePages,
                 onReorderPages: reorderPages,
+                onRotatePages: rotateThumbnailPages,
                 onSelectPage: selectThumbnailPage,
                 selectedPages: thumbnailSelection.selectedPages,
                 thumbnailKeys: thumbnailIdentity.keys,

@@ -438,10 +438,10 @@ struct OpenDocument {
     /// every structure command reports the whole page list back, and measuring
     /// it costs one `FPDF_LoadPage` per page — more than the edit itself once a
     /// document runs to hundreds of pages, and paid again on every later edit.
-    /// Nothing in a session resizes or re-rotates a page, so an entry is
-    /// written the first time that page is measured and only read afterwards;
-    /// an id is never reused, so a deleted page's entry is still its own if the
-    /// undo brings it back.
+    /// An entry is written the first time that page is measured and only read
+    /// afterwards; a rotation — the one edit that changes a page's own shape —
+    /// retires it, so the page is measured afresh. An id is never reused, so a
+    /// deleted page's entry is still its own if the undo brings it back.
     page_geometry: HashMap<u64, PdfPageInfo>,
     /// Deleted pages awaiting a possible undo, keyed by the history entry that
     /// deleted them. A delete under an occupied key replaces the stash: the key
@@ -620,12 +620,18 @@ fn validate_pages_to_delete(page_numbers: &[i32], page_count: usize) -> Result<V
         .collect())
 }
 
-/// Checks the pages a cross-document insert names exist and are distinct; hands
-/// back their zero-based indices in ascending order. Nothing is left behind, so
-/// unlike a deletion the whole source may travel.
-fn validate_pages_to_copy(page_numbers: &[i32], page_count: usize) -> Result<Vec<usize>, String> {
+/// Checks the pages a command names exist and are distinct; hands back their
+/// zero-based indices in ascending order. `action` names the command in the
+/// refusals ("an insert", "a rotation"), which is all its callers differ by:
+/// neither an insert nor a rotation leaves a page behind, so unlike a deletion
+/// they may take the whole document at once.
+fn validate_distinct_pages(
+    page_numbers: &[i32],
+    page_count: usize,
+    action: &str,
+) -> Result<Vec<usize>, String> {
     if page_numbers.is_empty() {
-        return Err("an insert needs at least one page".into());
+        return Err(format!("{action} needs at least one page"));
     }
 
     let mut seen = vec![false; page_count];
@@ -636,7 +642,7 @@ fn validate_pages_to_copy(page_numbers: &[i32], page_count: usize) -> Result<Vec
         };
 
         if seen[index] {
-            return Err(format!("page {page_number} appears twice in the insert"));
+            return Err(format!("page {page_number} appears twice in {action}"));
         }
 
         seen[index] = true;
@@ -647,6 +653,30 @@ fn validate_pages_to_copy(page_numbers: &[i32], page_count: usize) -> Result<Vec
         .enumerate()
         .filter_map(|(index, selected)| selected.then_some(index))
         .collect())
+}
+
+/// The clockwise turn a rotation asks for, as degrees in `0..360`. A page's
+/// `/Rotate` holds quarter turns and nothing else, so anything else is refused
+/// rather than rounded to one: the number is the WebView's.
+fn quarter_turn(degrees: i32) -> Result<i32, String> {
+    let turn = degrees.rem_euclid(360);
+
+    if turn % 90 != 0 {
+        return Err(format!("{degrees} is not a quarter turn"));
+    }
+
+    Ok(turn)
+}
+
+/// The `/Rotate` value for a clockwise turn in degrees, which `quarter_turn`
+/// has already established is one of the four.
+fn quarter_turn_rotation(degrees: i32) -> PdfPageRenderRotation {
+    match degrees.rem_euclid(360) {
+        90 => PdfPageRenderRotation::Degrees90,
+        180 => PdfPageRenderRotation::Degrees180,
+        270 => PdfPageRenderRotation::Degrees270,
+        _ => PdfPageRenderRotation::None,
+    }
 }
 
 /// PDFium's own page-range syntax for an import: 1-based numbers and runs, as
@@ -3462,6 +3492,74 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
+    /// Turns the given pages clockwise by `degrees`, on top of whatever each
+    /// one already carries. Alone among the structure commands this moves no
+    /// page: it rewrites each one's `/Rotate`, which is what makes the turn
+    /// part of the document — saved with it, and undone by turning back.
+    pub(super) fn rotate_pages(
+        &self,
+        document_id: u64,
+        page_numbers: &[i32],
+        degrees: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        let turn = quarter_turn(degrees)?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let indices = validate_distinct_pages(page_numbers, entry.page_ids.len(), "a rotation")?;
+
+        if turn == 0 {
+            return Ok(structure_update(entry));
+        }
+
+        // Every page is read before any is turned. `FPDFPage_SetRotation`
+        // cannot fail once the page is in hand, so a page PDFium will not load
+        // refuses the whole edit here rather than leaving half of it applied —
+        // which no history entry would then be holding.
+        let mut turned = Vec::with_capacity(indices.len());
+
+        for index in &indices {
+            let page =
+                entry.document.pages().get(*index as i32).map_err(|error| {
+                    format!("PDFium could not load page {}: {error}", index + 1)
+                })?;
+
+            turned.push(quarter_turn_rotation(
+                page_rotation_degrees(&page) as i32 + turn,
+            ));
+        }
+
+        for (index, rotation) in indices.iter().zip(turned) {
+            let measured = {
+                let mut page = entry
+                    .document
+                    .pages_mut()
+                    .get(*index as i32)
+                    .map_err(|error| {
+                        format!("PDFium could not load page {}: {error}", index + 1)
+                    })?;
+
+                page.set_rotation(rotation);
+                // PDFium updates the page's dimensions as it sets the rotation,
+                // so the new shape is already there to read off the page in
+                // hand — and reading it here is what spares `page_infos` a
+                // second load of every page the reader turned.
+                measure_page(&page)
+            };
+            let page_id = entry.page_ids[*index];
+
+            // The one thing in a session that re-shapes a page, so the one
+            // thing that has to write a geometry memo rather than only fill it.
+            // An effect holding pixels captured before the turn must fail its
+            // check, as it would after any other edit to the page. Both go page
+            // by page, so a turn that gives out partway still leaves the pages
+            // it reached describing themselves.
+            entry.page_geometry.insert(page_id, measured);
+            *entry.revisions.entry(page_id).or_insert(0) += 1;
+        }
+
+        Ok(structure_update(entry))
+    }
+
     /// Deletes the given pages, first copying them — and the session state
     /// riding with them — into a stash under `stash_id` for a later restore.
     /// An occupied `stash_id` is replaced: the key names one history entry,
@@ -3901,7 +3999,7 @@ impl PdfiumEngine {
 
         let mut documents = self.lock_documents()?;
         let source_count = open_entry(&documents, source_document_id)?.page_ids.len();
-        let source_pages = validate_pages_to_copy(page_numbers, source_count)?;
+        let source_pages = validate_distinct_pages(page_numbers, source_count, "an insert")?;
         let page_count = open_entry(&documents, document_id)?.page_ids.len();
         // One past the end is a position too, exactly as a blank page's is.
         let Some(slot) = page_index(index, page_count + 1) else {
@@ -3963,7 +4061,7 @@ impl PdfiumEngine {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
         let page_count = entry.page_ids.len();
-        let sources = validate_pages_to_copy(page_numbers, page_count)?;
+        let sources = validate_distinct_pages(page_numbers, page_count, "an insert")?;
         // One past the end is a position too, exactly as a blank page's is.
         let Some(slot) = page_index(index, page_count + 1) else {
             return Err(format!("a page cannot go to position {index}"));
@@ -5185,6 +5283,16 @@ struct DocumentLayout {
     outline: Vec<PdfOutlineItem>,
 }
 
+/// One page's geometry as the frontend receives it: the displayed size, the
+/// page's own `/Rotate` already applied, and that rotation.
+fn measure_page(page: &PdfPage<'_>) -> PdfPageInfo {
+    PdfPageInfo {
+        width: page.width().value,
+        height: page.height().value,
+        rotation: page_rotation_degrees(page),
+    }
+}
+
 /// The page list and outline as they stand, measured out of PDFium page by
 /// page. What an open reports; every later structure command answers from
 /// `page_infos` instead, which is the same list read off a memo. The frontend
@@ -5194,14 +5302,7 @@ fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
 
     DocumentLayout {
         num_pages: pages.len(),
-        pages: pages
-            .iter()
-            .map(|page| PdfPageInfo {
-                width: page.width().value,
-                height: page.height().value,
-                rotation: page_rotation_degrees(&page),
-            })
-            .collect(),
+        pages: pages.iter().map(|page| measure_page(&page)).collect(),
         outline: collect_bookmark_siblings(document.bookmarks().root()),
     }
 }
@@ -5240,14 +5341,7 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
             .filter_map(|(index, page_id)| {
                 let page = pages.get(index).ok()?;
 
-                Some((
-                    page_id,
-                    PdfPageInfo {
-                        width: page.width().value,
-                        height: page.height().value,
-                        rotation: page_rotation_degrees(&page),
-                    },
-                ))
+                Some((page_id, measure_page(&page)))
             })
             .collect::<Vec<_>>()
     };

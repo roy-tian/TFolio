@@ -16,7 +16,7 @@ use pdfium::{
     insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_pdf,
     open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    reorder_pdf_pages, restore_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
+    reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
 };
 use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
@@ -158,6 +158,7 @@ pub fn run() {
             print_window,
             focus_pdf_path,
             reorder_pdf_pages,
+            rotate_pdf_pages,
             delete_pdf_pages,
             restore_pdf_pages,
             insert_pdf_blank_page,

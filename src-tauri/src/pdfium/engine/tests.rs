@@ -3663,6 +3663,155 @@ fn reported_page_geometry_follows_the_pages_through_every_structure_edit() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn turns_the_named_pages_and_reports_their_new_shape() {
+    let engine = test_engine();
+    let document = engine
+        .open(three_size_pdf())
+        .expect("PDFium should open the three-size PDF");
+    let original = vec![
+        (200.0, 300.0, 0.0),
+        // Displayed through its own /Rotate 90, so its sides are swapped.
+        (500.0, 400.0, 90.0),
+        (600.0, 700.0, 0.0),
+    ];
+    let turned = engine
+        .rotate_pages(document.id, &[1, 2], 90)
+        .expect("PDFium should turn the pages");
+
+    assert_eq!(
+        reported_geometry(&turned),
+        vec![
+            // A quarter turn on top of what each page already carried, and the
+            // memo that would have answered with the old shape retired for it.
+            (300.0, 200.0, 90.0),
+            (400.0, 500.0, 180.0),
+            original[2],
+        ],
+    );
+
+    let back = engine
+        .rotate_pages(document.id, &[1, 2], 270)
+        .expect("PDFium should turn the pages the rest of the way");
+
+    assert_eq!(
+        reported_geometry(&back),
+        original,
+        "the rest of the circle is what an undo turns, whatever each page started at",
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_turned_page_renders_turned_and_reopens_turned() {
+    let engine = test_engine();
+    let document = engine
+        .open(four_page_banded_pdf())
+        .expect("PDFium should open the banded PDF");
+    let upright = page_fingerprints(engine, document.id, 4);
+
+    engine
+        .rotate_pages(document.id, &[2], 180)
+        .expect("PDFium should turn the page");
+
+    let turned = page_fingerprints(engine, document.id, 4);
+
+    assert_ne!(
+        turned[1], upright[1],
+        "the turned page should render turned"
+    );
+    assert_eq!(
+        (turned[0].clone(), turned[2].clone(), turned[3].clone()),
+        (upright[0].clone(), upright[2].clone(), upright[3].clone()),
+        "no other page should have moved",
+    );
+
+    let directory = scratch_directory("rotate-save");
+    let destination = directory.join("turned.pdf");
+
+    engine
+        .save_to(document.id, &destination)
+        .expect("the turn should reach the file");
+
+    let reopened = engine
+        .open(fs::read(&destination).expect("the saved file should be readable"))
+        .expect("PDFium should reopen the saved file");
+
+    assert_eq!(
+        reopened
+            .pages
+            .iter()
+            .map(|page| page.rotation)
+            .collect::<Vec<_>>(),
+        vec![0.0, 180.0, 0.0, 0.0],
+        "the turn is the document's own now, not the session's",
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn refuses_a_turn_it_cannot_make() {
+    let engine = test_engine();
+    let document = engine
+        .open(four_page_banded_pdf())
+        .expect("PDFium should open the banded PDF");
+    let before = page_fingerprints(engine, document.id, 4);
+
+    for (case, pages, degrees) in [
+        ("a page the document does not have", vec![5], 90),
+        ("a page named twice", vec![2, 2], 90),
+        ("no page at all", vec![], 90),
+        ("a turn that is not a quarter", vec![1], 45),
+    ] {
+        assert!(
+            engine.rotate_pages(document.id, &pages, degrees).is_err(),
+            "{case} should be refused",
+        );
+    }
+
+    assert_eq!(
+        page_fingerprints(engine, document.id, 4),
+        before,
+        "a refused turn should leave every page as it was",
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_whole_circle_turns_nothing_and_invalidates_nothing() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the PDF");
+    let revision = || {
+        let documents = engine
+            .documents
+            .lock()
+            .expect("the document store should be usable");
+        let entry = &documents[&document.id];
+
+        entry
+            .revisions
+            .get(&entry.page_ids[0])
+            .copied()
+            .unwrap_or(0)
+    };
+    let captured = revision();
+    let update = engine
+        .rotate_pages(document.id, &[1], 360)
+        .expect("a full circle is accepted");
+
+    assert_eq!(update.num_pages, 2);
+    assert_eq!(
+        revision(),
+        captured,
+        "a turn that comes to nothing should invalidate nothing",
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn reorder_is_a_no_op_for_the_identity_order() {
     let engine = test_engine();
     let document = engine

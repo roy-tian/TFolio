@@ -113,6 +113,8 @@ const zhCN = {
     actionPageNumbersChange: "更改页码",
     actionPageNumbersRemove: "移除页码",
     actionReorderPages: "移动页面",
+    actionRotatePages_one: "旋转页面",
+    actionRotatePages_other: "旋转 {{count}} 页",
     actionDeletePages_one: "删除页面",
     actionDeletePages_other: "删除 {{count}} 页",
     actionInsertBlankPage: "插入空白页",
@@ -291,6 +293,8 @@ const zhCN = {
     cut_other: "剪切 {{count}} 页",
     copy_one: "复制 {{count}} 页",
     copy_other: "复制 {{count}} 页",
+    rotate_one: "旋转 {{count}} 页",
+    rotate_other: "旋转 {{count}} 页",
     pasteBefore: "粘贴到第 {{pageNumber}} 页前",
     pasteAtEnd: "粘贴到末尾",
     /** The notices: what was taken, and where a paste put it. */

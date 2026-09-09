@@ -12,6 +12,7 @@ type HistoryActionKey =
   | "annotate.actionPageNumbersChange"
   | "annotate.actionPageNumbersRemove"
   | "annotate.actionReorderPages"
+  | "annotate.actionRotatePages"
   | "annotate.actionDeletePages"
   | "annotate.actionInsertBlankPage"
   | "annotate.actionInsertFile"
@@ -59,6 +60,8 @@ export function historyAction(command: AnnotationCommand): HistoryAction {
       }
     case "reorderPages":
       return { key: "annotate.actionReorderPages" }
+    case "rotatePages":
+      return { count: command.pages.length, key: "annotate.actionRotatePages" }
     case "deletePages":
       return { count: command.pages.length, key: "annotate.actionDeletePages" }
     case "insertBlankPage":
