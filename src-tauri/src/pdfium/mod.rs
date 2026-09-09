@@ -14,9 +14,10 @@ pub use commands::{
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
     cancel_pdf_operation, cancel_pdf_search, close_pdf, create_pdf, delete_pdf_annotations,
     delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages, export_pdf,
-    extract_pdf_page_plain_text, extract_pdf_page_text, insert_pdf_blank_page,
-    insert_pdf_from_path, insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files,
-    open_pdf, open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
+    export_pdf_page_images, export_watermarked_pdf_copies, extract_pdf_page_plain_text,
+    extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
+    insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_pdf,
+    open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
     reorder_pdf_pages, restore_pdf_pages, save_pdf, search_pdf_text,
 };
@@ -109,12 +110,49 @@ pub enum MergeBookmarks {
     PerFileWithExisting,
 }
 
+/// Everything a guided merge is asked for besides its progress channel, in one
+/// argument: the command takes more settings than a signature comfortably holds,
+/// and they are one answer from one wizard rather than four unrelated ones.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergePlan {
+    paths: Vec<String>,
+    /// A blank before any file that would otherwise open on an even page.
+    smart_padding: bool,
+    /// Every page laid on an A4 sheet of its own instead of keeping the size its
+    /// source gave it.
+    normalize_a4: bool,
+    bookmarks: MergeBookmarks,
+}
+
+/// The same, for the export that watermarks each file rather than merging them:
+/// there is no order to keep and no outline to build, so it asks for less.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatermarkCopiesPlan {
+    paths: Vec<String>,
+    normalize_a4: bool,
+    /// `None` writes the copies unmarked, which is what the export comes to when
+    /// the reader turns the watermark off.
+    watermark: Option<WatermarkConfig>,
+}
+
+/// What a merge reads one of its sources as. An image has no pages of its own:
+/// it is laid on a sheet, which is what the wizard's row says it will become.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeSourceKind {
+    Pdf,
+    Image,
+}
+
 /// What one candidate file of a guided merge holds, read before anything is
 /// merged so the wizard can show page counts and total up the result.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfFileSummary {
     path: String,
+    kind: MergeSourceKind,
     /// `None` when the file could not be read as a PDF, so the row shows as
     /// unusable rather than silently going missing from the list.
     page_count: Option<i32>,

@@ -12,13 +12,13 @@ use tauri_plugin_dialog::DialogExt;
 use crate::recent::RecentFiles;
 use crate::windows::{record_document, DocumentOwners};
 
-use super::engine::OperationTarget;
+use super::engine::{OperationTarget, MERGE_IMAGE_EXTENSIONS};
 use super::font::{download_fallback_font, fallback_font_destination};
 use super::{
-    size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks, PageNumbersConfig, PagePoint,
+    size_limit_error, ExportOutcome, InsertOutcome, MergePlan, PageNumbersConfig, PagePoint,
     PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfProgress, PdfSearchOutcome,
     PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle, TextNoteStyle,
-    WatermarkConfig, MAX_PDF_BYTES,
+    WatermarkConfig, WatermarkCopiesPlan, MAX_PDF_BYTES,
 };
 
 // Only the check below reaches into the engine's own type, and the e2e build
@@ -623,10 +623,16 @@ pub async fn pick_pdf_paths(
     let engine = Arc::clone(&state.0);
 
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
+        // One filter covering everything a merge can take: a reader adding a
+        // scan should not have to know it is offered under a second heading.
+        let mut extensions = vec!["pdf"];
+
+        extensions.extend_from_slice(&MERGE_IMAGE_EXTENSIONS);
+
         let Some(picked) = app
             .dialog()
             .file()
-            .add_filter(filter_label, &["pdf"])
+            .add_filter(filter_label, &extensions)
             .blocking_pick_files()
         else {
             return Ok(Vec::new());
@@ -684,9 +690,7 @@ pub async fn inspect_pdf_files(
 /// the side, so a stopped one leaves nothing behind to close or clean up.
 #[tauri::command]
 pub async fn merge_pdf_files(
-    paths: Vec<String>,
-    smart_padding: bool,
-    bookmarks: MergeBookmarks,
+    plan: MergePlan,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
@@ -695,7 +699,7 @@ pub async fn merge_pdf_files(
     let engine = Arc::clone(&state.0);
 
     let merged = tauri::async_runtime::spawn_blocking(move || {
-        let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+        let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
 
         // The same approval a fresh open needs, for the same reason a merge into
         // an open document needs it: a merge reads files the WebView named.
@@ -706,8 +710,9 @@ pub async fn merge_pdf_files(
 
         engine.merge_files_with_progress(
             paths,
-            smart_padding,
-            bookmarks,
+            plan.smart_padding,
+            plan.normalize_a4,
+            plan.bookmarks,
             channel_progress(on_progress),
         )
     })
@@ -790,6 +795,94 @@ pub async fn export_pdf(
     }
 
     Ok(exported)
+}
+
+/// Asks the reader where to put the archive, then writes it there. `None` is a
+/// dialog they dismissed or a run they stopped.
+///
+/// The dialog is this command's own, for the reason `export_pdf` states: a path
+/// argument here would be an arbitrary-file write for anything that got into the
+/// page. The WebView only says *that* an export happens.
+async fn export_archive<F>(
+    suggested_name: String,
+    filter_label: String,
+    app: AppHandle,
+    write: F,
+) -> Result<Option<String>, String>
+where
+    F: FnOnce(&Path) -> Result<bool, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(picked) = app
+            .dialog()
+            .file()
+            .add_filter(filter_label, &["zip"])
+            .set_file_name(suggested_file_name(&suggested_name))
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = picked
+            .into_path()
+            .map_err(|error| format!("the chosen destination is unusable: {error}"))?;
+
+        write(&path).map(|written| written.then(|| path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|error| format!("PDFium archive task failed: {error}"))?
+}
+
+/// Writes every page of a merged document into a zip as its own PNG — the merge
+/// wizard's second export. The document is the merge's own result, so this only
+/// ever reads something this app just made.
+#[tauri::command]
+pub async fn export_pdf_page_images(
+    document_id: u64,
+    suggested_name: String,
+    filter_label: String,
+    on_progress: Channel<PdfProgress>,
+    app: AppHandle,
+    state: State<'_, PdfiumState>,
+) -> Result<Option<String>, String> {
+    let engine = Arc::clone(&state.0);
+
+    export_archive(suggested_name, filter_label, app, move |path| {
+        engine.export_page_images(document_id, path, channel_progress(on_progress))
+    })
+    .await
+}
+
+/// Writes one watermarked copy of each named file into a zip — the merge
+/// wizard's third export, which merges nothing. Every source is approved the way
+/// a merge's are, since these are files the WebView named.
+#[tauri::command]
+pub async fn export_watermarked_pdf_copies(
+    plan: WatermarkCopiesPlan,
+    suggested_name: String,
+    filter_label: String,
+    on_progress: Channel<PdfProgress>,
+    app: AppHandle,
+    state: State<'_, PdfiumState>,
+) -> Result<Option<String>, String> {
+    let engine = Arc::clone(&state.0);
+
+    export_archive(suggested_name, filter_label, app, move |path| {
+        let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
+
+        #[cfg(not(feature = "e2e"))]
+        for source in &paths {
+            ensure_approved(&engine, source)?;
+        }
+
+        engine.export_watermarked_copies(
+            paths,
+            plan.normalize_a4,
+            plan.watermark,
+            path,
+            channel_progress(on_progress),
+        )
+    })
+    .await
 }
 
 // Async like every other command, although the close itself is a map removal:

@@ -20,7 +20,10 @@ tauri-build = { version = "2", features = [] }
 allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
 fontdb = "0.24.0"
 getrandom = "0.4"
-image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+# The formats a merge may bring in as pages, plus the two the app already
+# renders with. Every decoder here is pure Rust: an image the reader picked is
+# parsed in this process, and `MAX_IMAGE_PIXELS` bounds what one may expand to.
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
 # PDFium reads outlines but cannot write one, so the merge wizard hands the
 # bytes PDFium just produced to lopdf to have their /Outlines written. It
 # only ever parses this app's own fresh output — a reader's file still
@@ -46,6 +49,11 @@ tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 # `tauri.conf.json`'s Cargo side with it — so naming it here adds a name,
 # not a dependency.
 toml = "1"
+# The merge wizard's two archive exports. Only the flate2 deflate backend is
+# turned on: `lopdf` already brings flate2 in, so this adds a writer rather
+# than a second compression stack, and none of the encrypted or exotic codec
+# features are wanted for an archive this app writes itself.
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 
 # Where a file the reader double-clicked arrives, on the two platforms whose
 # answer to "open this with TFolio" is a second TFolio: it hands that process's

@@ -317,9 +317,14 @@ const en = {
     stepPageNumbers: "Page numbers",
     stepWatermark: "Watermark",
     filesDescription:
-      "Choose the PDFs to merge, in the order they should appear.",
-    addFiles: "Add PDFs",
-    empty: "No files yet. Add at least two PDFs to merge.",
+      "PDFs and images join the wizard\u2019s list, in the order you drop them.",
+    addFiles: "Add files",
+    sourceFilter: "PDFs and images",
+    empty:
+      "No files yet. Add at least two PDFs \u2014 images come in as pages of their own.",
+    emptyCopies:
+      "No files yet. Add the PDFs to copy \u2014 images come in as pages of their own.",
+    imageSource: "Image",
     pageCount_one: "{{count}} page",
     pageCount_other: "{{count}} pages",
     unreadable: "Unreadable",
@@ -330,6 +335,19 @@ const en = {
     total: "{{files}}, {{pages}}",
     smartPadding:
       "Keep blank pages so that every file starts on an odd page",
+    smartPaddingUnavailable:
+      "Blank pages only have a place where the files become one document.",
+    normalizeA4: "Fit every page to A4",
+    normalizeA4Hint:
+      "A page that already fits keeps its size in the middle of the sheet; a larger one is scaled down to fit. Images are always fitted to a sheet. Only the page\u2019s content makes the trip, so annotations and links are left behind.",
+    normalizeA4Warning:
+      "Fitting to A4 carries each page\u2019s content alone: annotations and links on the source pages are not kept.",
+    exportMode: "Export as",
+    exportOnePdf: "One merged PDF",
+    exportPagePngZip: "One PNG per page, as a ZIP",
+    exportWatermarkOnlyZip: "Watermarked copies, as a ZIP",
+    exportWatermarkOnlyHint:
+      "The files are not merged: each one is watermarked and written into the archive on its own, so there are no page numbers to add.",
     bookmarksNone: "No bookmarks",
     bookmarksNoneHint:
       "The merged PDF gets no outline at all — which is also what happens to the files\u2019 own bookmarks if you do not keep them here.",
@@ -350,15 +368,23 @@ const en = {
     back: "Back",
     next: "Next",
     merge: "Merge",
+    export: "Export",
     merging: "Merging\u2026",
     addingPageNumbers: "Adding page numbers…",
     addingWatermark: "Adding watermark…",
-    progressHint: "Preparing the merged PDF. Large files may take a moment.",
+    writingArchive: "Writing the archive…",
+    progressHint: "Large files may take a moment.",
     stop: "Stop",
     stopping: "Stopping…",
     cancel: "Cancel",
     mergedName: "Merged.pdf",
-    errorMerge: "These PDFs could not be merged.",
+    pagesArchiveName: "Pages.zip",
+    copiesArchiveName: "Watermarked.zip",
+    /** The same export with the watermark switched off: copies, and nothing a
+        name should call watermarked. */
+    copiesArchiveNamePlain: "Copies.zip",
+    archiveFilter: "ZIP archive",
+    errorMerge: "These files could not be merged.",
     errorTooMany_one: "At most {{count}} file can be merged at once.",
     errorTooMany_other: "At most {{count}} files can be merged at once.",
   },

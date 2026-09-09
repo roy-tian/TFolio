@@ -6,6 +6,7 @@ use allsorts::{
     font_data::FontData,
 };
 
+use crate::pdfium::geometry::{A4_LONG_POINTS, A4_SHORT_POINTS};
 use crate::pdfium::library::PDFIUM_LIBRARY_NAME;
 use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 use crate::pdfium::watermark::{WatermarkDirection, WatermarkLayout};
@@ -5661,6 +5662,82 @@ fn wide_single_page_pdf() -> Vec<u8> {
     ])
 }
 
+/// A 200x300 page carrying one square annotation and one link — the two kinds
+/// of annotation a source file brings to a merge, and what tells an import that
+/// keeps them apart from one that does not.
+fn annotated_pdf() -> Vec<u8> {
+    let content = "0 0 0 rg\n20 100 30 120 re f\n".to_string();
+    let objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Annots [5 0 R 6 0 R] >>\nendobj\n"
+            .to_string(),
+        format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        ),
+        "5 0 obj\n<< /Type /Annot /Subtype /Square /Rect [20 100 50 220] /F 4 /C [1 0 0] >>\nendobj\n"
+            .to_string(),
+        "6 0 obj\n<< /Type /Annot /Subtype /Link /Rect [20 20 180 40] /Border [0 0 0] /A << /Type /Action /S /URI /URI (https://example.com) >> >>\nendobj\n"
+            .to_string(),
+    ];
+
+    build_pdf(&objects)
+}
+
+/// A single landscape page, 700x500, with a black bar in its lower left — wider
+/// than A4 upright, so normalizing it has to turn the sheet on its side.
+fn landscape_banded_pdf() -> Vec<u8> {
+    let content = "0 0 0 rg\n40 60 120 80 re f\n".to_string();
+    let objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 700 500] /Contents 4 0 R >>\nendobj\n"
+            .to_string(),
+        format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        ),
+    ];
+
+    build_pdf(&objects)
+}
+
+/// The smallest box holding every pixel that is not the page's white ground,
+/// as fractions of the rendered page. Fractions rather than pixels so a render
+/// of an A4 sheet and one of the page it carries can be compared directly.
+fn rendered_ink_box(image: &image::RgbImage) -> (f32, f32, f32, f32) {
+    let mut left = u32::MAX;
+    let mut top = u32::MAX;
+    let mut right = 0u32;
+    let mut bottom = 0u32;
+
+    for (x, y, pixel) in image.enumerate_pixels() {
+        // Anti-aliasing leaves a grey fringe around the bar; only ink well clear
+        // of the ground counts, so the box is the mark rather than its halo.
+        if pixel.0.iter().all(|channel| *channel > 200) {
+            continue;
+        }
+
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x + 1);
+        bottom = bottom.max(y + 1);
+    }
+
+    assert!(left < right && top < bottom, "the page should carry ink");
+
+    let width = image.width() as f32;
+    let height = image.height() as f32;
+
+    (
+        left as f32 / width,
+        top as f32 / height,
+        right as f32 / width,
+        bottom as f32 / height,
+    )
+}
+
 /// Held for the length of every test that runs a merge.
 ///
 /// `OperationTarget::Merge` names no document — the app only ever has the one
@@ -5765,9 +5842,13 @@ fn merge_files_appends_every_file_in_order() {
 
     let mut progress = Vec::new();
     let merged = engine
-        .merge_files_with_progress(paths, false, MergeBookmarks::None, |completed, total| {
-            progress.push((completed, total))
-        })
+        .merge_files_with_progress(
+            paths,
+            false,
+            false,
+            MergeBookmarks::None,
+            |completed, total| progress.push((completed, total)),
+        )
         .expect("PDFium should merge the files")
         .expect("a merge nobody stopped hands back its document");
 
@@ -5804,7 +5885,7 @@ fn a_stopped_merge_hands_back_nothing() {
     // Stopped from the run's own progress, where the reader's cancel lands:
     // while the merge holds the document lock.
     let merged = engine
-        .merge_files_with_progress(paths, false, MergeBookmarks::None, |completed, _| {
+        .merge_files_with_progress(paths, false, false, MergeBookmarks::None, |completed, _| {
             if completed > 0 {
                 engine.cancel_operation(OperationTarget::Merge);
             }
@@ -5822,6 +5903,539 @@ fn a_stopped_merge_hands_back_nothing() {
     );
 
     fs::remove_dir_all(directory).ok();
+}
+
+/// Writes a solid `width` x `height` PNG into `directory` and hands back its
+/// path — the shape an image source of a merge takes.
+fn image_source(directory: &Path, name: &str, width: u32, height: u32) -> PathBuf {
+    let path = directory.join(name);
+    let image = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        width,
+        height,
+        image::Rgb([20, 40, 160]),
+    ));
+
+    image
+        .save_with_format(&path, ImageFormat::Png)
+        .expect("the image should write to disk");
+    path
+}
+
+/// Writes a `width` x `height` JPEG carrying EXIF orientation 6 — "rotate a
+/// quarter turn clockwise to display" — which is what a phone records rather
+/// than rotating the pixels it stores.
+///
+/// Built by hand because the `image` crate writes no metadata: a minimal APP1
+/// segment holding a one-entry IFD0 is spliced in behind the JPEG's own SOI.
+fn rotated_image_source(directory: &Path, name: &str, width: u32, height: u32) -> PathBuf {
+    let mut jpeg = Cursor::new(Vec::new());
+
+    DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        width,
+        height,
+        image::Rgb([20, 40, 160]),
+    ))
+    .write_to(&mut jpeg, ImageFormat::Jpeg)
+    .expect("the fixture should encode");
+
+    let jpeg = jpeg.into_inner();
+    let mut exif = b"Exif\0\0".to_vec();
+
+    // Little-endian TIFF header, IFD0 at offset 8.
+    exif.extend_from_slice(b"II\x2a\x00\x08\x00\x00\x00");
+    // One entry: tag 0x0112 (Orientation), SHORT, count 1, value 6.
+    exif.extend_from_slice(b"\x01\x00");
+    exif.extend_from_slice(b"\x12\x01\x03\x00\x01\x00\x00\x00\x06\x00\x00\x00");
+    // No IFD after this one.
+    exif.extend_from_slice(b"\x00\x00\x00\x00");
+
+    let mut bytes = jpeg[..2].to_vec();
+    let segment_length = (exif.len() + 2) as u16;
+
+    bytes.extend_from_slice(b"\xff\xe1");
+    bytes.extend_from_slice(&segment_length.to_be_bytes());
+    bytes.extend_from_slice(&exif);
+    bytes.extend_from_slice(&jpeg[2..]);
+
+    let path = directory.join(name);
+
+    fs::write(&path, bytes).expect("the image should write to disk");
+    path
+}
+
+/// Every entry in the archive at `path`, in the order it was written.
+fn archive_entries(path: &Path) -> Vec<(String, Vec<u8>)> {
+    let file = fs::File::open(path).expect("the archive should be readable");
+    let mut archive = zip::ZipArchive::new(file).expect("the archive should be a zip");
+
+    (0..archive.len())
+        .map(|index| {
+            let mut entry = archive.by_index(index).expect("the entry should be listed");
+            let name = entry.name().to_string();
+            let mut bytes = Vec::new();
+
+            std::io::Read::read_to_end(&mut entry, &mut bytes)
+                .expect("the entry should be readable");
+            (name, bytes)
+        })
+        .collect()
+}
+
+#[test]
+fn an_archive_entry_is_named_after_its_file_and_never_repeats() {
+    let mut used = HashSet::new();
+
+    assert_eq!(
+        archive_pdf_name(Path::new("/tmp/report.pdf"), &mut used),
+        "report.pdf"
+    );
+    // A photo comes out as the page it was laid on, so it keeps its stem alone.
+    assert_eq!(
+        archive_pdf_name(Path::new("/tmp/scan.JPG"), &mut used),
+        "scan.pdf"
+    );
+    // Two directories, one name: the second is numbered rather than lost.
+    assert_eq!(
+        archive_pdf_name(Path::new("/elsewhere/report.pdf"), &mut used),
+        "report (2).pdf"
+    );
+    assert_eq!(
+        archive_pdf_name(Path::new("/third/report.pdf"), &mut used),
+        "report (3).pdf"
+    );
+    // A path that ends in no name of its own still has to say something.
+    assert_eq!(archive_pdf_name(Path::new("/"), &mut used), "document.pdf");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_merge_lays_an_image_on_a_sheet_of_its_own() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-image");
+    let pdf = directory.join("first.pdf");
+
+    fs::write(&pdf, banded_pdf(&[20])).expect("the source should write to disk");
+
+    let wide = image_source(&directory, "wide.png", 1600, 900);
+    let tall = image_source(&directory, "tall.jpg", 900, 1600);
+
+    // Each image is read the way the merge will read it, so the row the wizard
+    // shows and the pages it gets cannot disagree.
+    let summaries = engine
+        .inspect_files(vec![pdf.clone(), wide.clone(), tall.clone()])
+        .expect("the files should inspect");
+
+    assert!(matches!(summaries[0].kind, MergeSourceKind::Pdf));
+    assert!(matches!(summaries[1].kind, MergeSourceKind::Image));
+    assert_eq!(summaries[1].page_count, Some(1));
+    assert!(!summaries[1].has_outline);
+
+    let merged = engine
+        .merge_files(vec![pdf, wide, tall], false, MergeBookmarks::None)
+        .expect("PDFium should merge the image in");
+
+    assert_eq!(merged.num_pages, 3);
+
+    // An image has no page size of its own, so it is always fitted to a sheet —
+    // turned the way the image is, whatever the merge's own A4 option says.
+    let landscape = &merged.pages[1];
+
+    assert!(
+        (landscape.width - A4_LONG_POINTS).abs() < 1.0,
+        "{landscape:?}"
+    );
+    assert!(
+        (landscape.height - A4_SHORT_POINTS).abs() < 1.0,
+        "{landscape:?}"
+    );
+
+    let portrait = &merged.pages[2];
+
+    assert!(
+        (portrait.width - A4_SHORT_POINTS).abs() < 1.0,
+        "{portrait:?}"
+    );
+    assert!(
+        (portrait.height - A4_LONG_POINTS).abs() < 1.0,
+        "{portrait:?}"
+    );
+
+    // The image really landed: a blank sheet would carry no ink at all.
+    let (left, top, right, bottom) = rendered_ink_box(
+        &engine
+            .render_bitmap(merged.id, 2, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+            .expect("PDFium should render the image's sheet")
+            .into_rgb8(),
+    );
+
+    assert!(
+        left < 0.01 && right > 0.99,
+        "the image should fill the width"
+    );
+    assert!(
+        top > 0.05 && bottom < 0.95,
+        "the image should be letterboxed"
+    );
+
+    engine.close(merged.id).expect("the merge should close");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_image_is_laid_the_way_its_metadata_says_it_was_held() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-image-orientation");
+    let pdf = directory.join("first.pdf");
+
+    fs::write(&pdf, banded_pdf(&[20])).expect("the source should write to disk");
+
+    // Stored 1600x900 — landscape pixels — but recorded as a quarter turn from
+    // upright, which is how a phone stores a portrait photograph.
+    let upright = rotated_image_source(&directory, "portrait.jpg", 1600, 900);
+    let merged = engine
+        .merge_files(vec![pdf, upright], false, MergeBookmarks::None)
+        .expect("PDFium should merge the image in");
+    let sheet = &merged.pages[1];
+
+    assert!(
+        (sheet.width - A4_SHORT_POINTS).abs() < 1.0,
+        "the sheet should stand upright, not follow the stored pixels: {sheet:?}"
+    );
+    assert!((sheet.height - A4_LONG_POINTS).abs() < 1.0, "{sheet:?}");
+
+    engine.close(merged.id).expect("the merge should close");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_file_that_is_no_image_is_reported_unusable_rather_than_dropped() {
+    let engine = test_engine();
+    let directory = scratch_directory("merge-bad-image");
+    let path = directory.join("broken.png");
+
+    fs::write(&path, b"not a PNG at all").expect("the file should write to disk");
+
+    let summaries = engine
+        .inspect_files(vec![path.clone()])
+        .expect("the inspection should still answer");
+
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].page_count, None);
+    assert!(matches!(summaries[0].kind, MergeSourceKind::Image));
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_merge_exported_as_images_holds_one_png_per_page() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-png-zip");
+    let paths = merge_sources(
+        &directory,
+        &[
+            ("first", banded_pdf(&[20, 60])),
+            ("second", banded_pdf(&[110])),
+        ],
+    );
+    let merged = engine
+        .merge_files(paths, false, MergeBookmarks::None)
+        .expect("PDFium should merge the files");
+    let archive = directory.join("pages.zip");
+
+    let mut progress = Vec::new();
+    let written = engine
+        .export_page_images(merged.id, &archive, |completed, total| {
+            progress.push((completed, total))
+        })
+        .expect("the pages should export");
+
+    assert!(written);
+    assert_eq!(progress.last(), Some(&(3, 3)));
+
+    let entries = archive_entries(&archive);
+
+    assert_eq!(
+        entries
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["page-1.png", "page-2.png", "page-3.png"]
+    );
+
+    for (name, bytes) in &entries {
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "{name} should be a PNG");
+    }
+
+    engine.close(merged.id).expect("the merge should close");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn watermarked_copies_are_written_one_per_source() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-watermark-zip");
+    let paths = merge_sources(
+        &directory,
+        &[("first", banded_pdf(&[20])), ("second", banded_pdf(&[110]))],
+    );
+    let archive = directory.join("marked.zip");
+    let watermark = watermark_config("DRAFT");
+
+    let written = engine
+        .export_watermarked_copies(paths.clone(), true, Some(watermark), &archive, |_, _| {})
+        .expect("the copies should export");
+
+    assert!(written);
+
+    let entries = archive_entries(&archive);
+
+    assert_eq!(
+        entries
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["first.pdf", "second.pdf"]
+    );
+
+    // Each copy is a document of its own, normalized and marked — and the
+    // sources it was built from are untouched.
+    for (name, bytes) in &entries {
+        assert_eq!(&bytes[..5], b"%PDF-", "{name} should be a PDF");
+
+        let opened = engine
+            .open(bytes.clone())
+            .expect("the copy should open as a PDF");
+
+        assert_eq!(opened.num_pages, 1);
+        assert!((opened.pages[0].width - A4_SHORT_POINTS).abs() < 1.0);
+        assert!(
+            opened.path.is_none(),
+            "a copy has no source to be written to"
+        );
+
+        engine.close(opened.id).expect("the copy should close");
+    }
+
+    for path in &paths {
+        assert_eq!(
+            fs::read(path).expect("the source should still be readable")[..5],
+            *b"%PDF-"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_watermark_export_refuses_to_replace_one_of_its_own_sources() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-watermark-onto-source");
+    let paths = merge_sources(
+        &directory,
+        &[("first", banded_pdf(&[20])), ("second", banded_pdf(&[110]))],
+    );
+    let destination = paths[1].clone();
+
+    let refused = engine
+        .export_watermarked_copies(paths.clone(), false, None, &destination, |_, _| {})
+        .expect_err("an archive must not land on a file it reads");
+
+    assert!(refused.contains("built from"), "{refused}");
+    assert_eq!(
+        fs::read(&destination).expect("the source should still be readable"),
+        banded_pdf(&[110])
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_normalized_merge_sizes_every_sheet_a4() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-a4-sizes");
+    let paths = merge_sources(
+        &directory,
+        &[
+            ("upright", banded_pdf(&[20, 60])),
+            ("sideways", landscape_banded_pdf()),
+        ],
+    );
+
+    let merged = engine
+        .merge_files_onto_a4(paths, false)
+        .expect("PDFium should merge onto A4");
+
+    assert_eq!(merged.num_pages, 3);
+
+    // The two 200x300 pages already fit upright and keep that orientation; the
+    // 700x500 one is wider than A4 stands, so its sheet lies down.
+    for page in &merged.pages[..2] {
+        assert!((page.width - A4_SHORT_POINTS).abs() < 1.0, "{page:?}");
+        assert!((page.height - A4_LONG_POINTS).abs() < 1.0, "{page:?}");
+    }
+
+    let sideways = &merged.pages[2];
+
+    assert!(
+        (sideways.width - A4_LONG_POINTS).abs() < 1.0,
+        "{sideways:?}"
+    );
+    assert!(
+        (sideways.height - A4_SHORT_POINTS).abs() < 1.0,
+        "{sideways:?}"
+    );
+
+    engine.close(merged.id).expect("the merge should close");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_normalized_page_leaves_its_source_s_annotations_behind() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-a4-annotations");
+    let source = annotated_pdf();
+    let paths = merge_sources(
+        &directory,
+        &[("first", source.clone()), ("second", source.clone())],
+    );
+
+    // An ordinary merge imports whole pages, annotations and all.
+    let plain = engine
+        .merge_files(paths.clone(), false, MergeBookmarks::None)
+        .expect("PDFium should merge the files");
+
+    assert_eq!(
+        with_page(engine, plain.id, 1, |page| page.annotations().len()),
+        2
+    );
+
+    engine.close(plain.id).expect("the merge should close");
+
+    // Fitting to A4 sends the page's *content* through a form XObject, which
+    // carries no annotations — the square and the link both stay behind. This
+    // is what `mergeWizard.normalizeA4Warning` tells the reader; keep the two
+    // in step.
+    let fitted = engine
+        .merge_files_onto_a4(paths, false)
+        .expect("PDFium should merge onto A4");
+
+    assert_eq!(
+        with_page(engine, fitted.id, 1, |page| page.annotations().len()),
+        0,
+        "an A4 sheet carries the page's content alone"
+    );
+    // The ink itself still arrives, so this is a loss of annotations rather
+    // than of the page.
+    let (left, _, right, _) = rendered_ink_box(&rendered_rgb(engine, fitted.id));
+
+    assert!(left < right, "the page's own content should still be drawn");
+
+    engine.close(fitted.id).expect("the merge should close");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_normalized_page_keeps_its_own_size_in_the_middle_of_the_sheet() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-a4-centre");
+    let source = banded_pdf(&[20]);
+    let paths = merge_sources(
+        &directory,
+        &[("first", source.clone()), ("second", source.clone())],
+    );
+
+    let alone = engine.open(source).expect("PDFium should open the source");
+    let (left, top, right, bottom) = rendered_ink_box(&rendered_rgb(engine, alone.id));
+
+    engine.close(alone.id).expect("the source should close");
+
+    let merged = engine
+        .merge_files_onto_a4(paths, false)
+        .expect("PDFium should merge onto A4");
+    let sheet = rendered_ink_box(&rendered_rgb(engine, merged.id));
+
+    // The 200x300 page fits A4 whole, so its bar keeps its size in points; on
+    // the larger sheet that is a smaller fraction, offset by the centring
+    // margin. Both are computed from the placement rather than from the render.
+    let scale_x = 200.0 / A4_SHORT_POINTS;
+    let scale_y = 300.0 / A4_LONG_POINTS;
+    let margin_x = (1.0 - scale_x) / 2.0;
+    let margin_y = (1.0 - scale_y) / 2.0;
+    let expected = (
+        margin_x + left * scale_x,
+        margin_y + top * scale_y,
+        margin_x + right * scale_x,
+        margin_y + bottom * scale_y,
+    );
+
+    for (found, want) in [
+        (sheet.0, expected.0),
+        (sheet.1, expected.1),
+        (sheet.2, expected.2),
+        (sheet.3, expected.3),
+    ] {
+        assert!(
+            (found - want).abs() < 0.01,
+            "the bar should land at {want}, not {found} (whole box {sheet:?})"
+        );
+    }
+
+    engine.close(merged.id).expect("the merge should close");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_normalized_merge_carries_a_rotated_page_the_way_it_reads() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-a4-rotation");
+    let source = rotated_text_pdf();
+    let paths = merge_sources(
+        &directory,
+        &[("first", source.clone()), ("second", source.clone())],
+    );
+
+    // `/Rotate 90` makes a 200x300 page read as 300x200, and that is the shape
+    // the sheet has to carry — the rotation itself cannot survive, since the
+    // sheet has one of its own.
+    let alone = engine.open(source).expect("PDFium should open the source");
+    let (left, top, right, bottom) = rendered_ink_box(&rendered_rgb(engine, alone.id));
+
+    engine.close(alone.id).expect("the source should close");
+
+    let merged = engine
+        .merge_files_onto_a4(paths, false)
+        .expect("PDFium should merge onto A4");
+    let sheet = rendered_ink_box(&rendered_rgb(engine, merged.id));
+    let scale_x = 300.0 / A4_SHORT_POINTS;
+    let scale_y = 200.0 / A4_LONG_POINTS;
+    let margin_x = (1.0 - scale_x) / 2.0;
+    let margin_y = (1.0 - scale_y) / 2.0;
+    let expected = (
+        margin_x + left * scale_x,
+        margin_y + top * scale_y,
+        margin_x + right * scale_x,
+        margin_y + bottom * scale_y,
+    );
+
+    for (found, want) in [
+        (sheet.0, expected.0),
+        (sheet.1, expected.1),
+        (sheet.2, expected.2),
+        (sheet.3, expected.3),
+    ] {
+        assert!(
+            (found - want).abs() < 0.02,
+            "the rotated text should land at {want}, not {found} (whole box {sheet:?})"
+        );
+    }
+
+    engine.close(merged.id).expect("the merge should close");
 }
 
 #[test]

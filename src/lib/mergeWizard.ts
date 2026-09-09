@@ -3,6 +3,93 @@ import { invoke } from "@tauri-apps/api/core"
 import { e2eOverride } from "@/lib/e2e"
 import { fileNameFromPath, isPdfPath } from "@/lib/pdf"
 
+/** What a merge reads one of its sources as. Mirrors `MergeSourceKind` in
+    `src-tauri/src/pdfium/mod.rs`. */
+export type MergeSourceKind = "pdf" | "image"
+
+/** The image formats a merge can bring in as pages, mirroring
+    `MERGE_IMAGE_EXTENSIONS` in `engine.rs`. Both sides have to agree: this one
+    decides what the wizard offers to inspect, that one what it can read. */
+export const mergeImageExtensions = [
+  "bmp",
+  "gif",
+  "jpeg",
+  "jpg",
+  "png",
+  "tif",
+  "tiff",
+  "webp",
+] as const
+
+export function isMergeImagePath(path: string) {
+  const lowered = path.toLowerCase()
+
+  return mergeImageExtensions.some((extension) =>
+    lowered.endsWith(`.${extension}`),
+  )
+}
+
+/** Whether a merge can take this file at all — a PDF, or an image it lays on a
+    page of its own. */
+export function isMergeSourcePath(path: string) {
+  return isPdfPath(path) || isMergeImagePath(path)
+}
+
+/**
+ * What the wizard produces, which decides both the backend route it takes and
+ * the questions worth asking on the way.
+ *
+ * `onePdf` is the merge proper. The two archives are written to a file the
+ * reader picks rather than opened as a tab: neither a folder of images nor a
+ * pile of separate documents is a thing this app can hold open.
+ */
+export type MergeExportMode = "onePdf" | "pagePngZip" | "watermarkOnlyZip"
+
+export const mergeExportModes: readonly MergeExportMode[] = [
+  "onePdf",
+  "pagePngZip",
+  "watermarkOnlyZip",
+]
+
+export function isMergeExportMode(value: unknown): value is MergeExportMode {
+  return mergeExportModes.includes(value as MergeExportMode)
+}
+
+/** The steps a merge can ask about, named rather than numbered: which of them
+    it actually asks depends on what it is producing. */
+export type MergeWizardStep =
+  | "files"
+  | "bookmarks"
+  | "pageNumbers"
+  | "watermark"
+
+/**
+ * The steps `mode` asks, in order.
+ *
+ * A step is left out where its answer could not reach the result: an archive of
+ * images carries no outline, and copies that were never merged have neither an
+ * outline to build nor a page sequence to number — which is also the one
+ * omission the wizard was asked for by name.
+ */
+export function mergeWizardSteps(
+  mode: MergeExportMode,
+): readonly MergeWizardStep[] {
+  switch (mode) {
+    case "pagePngZip":
+      return ["files", "pageNumbers", "watermark"]
+    case "watermarkOnlyZip":
+      return ["files", "watermark"]
+    default:
+      return ["files", "bookmarks", "pageNumbers", "watermark"]
+  }
+}
+
+/** Whether `mode` merges its sources into one page sequence — which is what
+    makes the blank-page rule, and an outline, mean anything. */
+export function mergesIntoOneDocument(mode: MergeExportMode) {
+  return mode !== "watermarkOnlyZip"
+}
+
 /** How the merged document's outline is built from its sources'. Mirrored by
     `MergeBookmarks` in `src-tauri/src/pdfium/mod.rs`. */
 export type MergeBookmarksMode =
@@ -29,6 +116,7 @@ export function isMergeBookmarksMode(
     than vanishing from a list the reader built. */
 export type MergeFile = {
   hasOutline: boolean
+  kind: MergeSourceKind
   name: string
   pageCount: number | null
   path: string
@@ -37,6 +125,7 @@ export type MergeFile = {
 /** What the backend reports for one candidate file. */
 type PdfFileSummary = {
   hasOutline: boolean
+  kind: MergeSourceKind
   pageCount: number | null
   path: string
 }
@@ -152,28 +241,38 @@ export function moveFile(files: MergeFile[], from: number, to: number) {
   return next
 }
 
-/** Whether the first step is answered: at least two files the backend can
-    actually merge. */
-export function canMerge(files: MergeFile[]) {
-  return usableFiles(files).length >= 2
+/**
+ * Whether the first step is answered: enough files the backend can actually
+ * read.
+ *
+ * Two, because a merge of one file is not a merge — except for the mode that
+ * merges nothing, where watermarking a single file is a whole answer and
+ * demanding a second one would be a rule with no reason behind it.
+ */
+export function canMerge(files: MergeFile[], mode: MergeExportMode) {
+  return usableFiles(files).length >= (mergesIntoOneDocument(mode) ? 2 : 1)
 }
 
-/** Reads each path's page count and whether it brings bookmarks. Paths that are
-    not PDFs never reach the backend; the rest come back in the order given. */
+/** Reads each path's page count and whether it brings bookmarks. Paths of a
+    kind no merge can take never reach the backend; the rest come back in the
+    order given. */
 export async function inspectFiles(paths: string[]): Promise<MergeFile[]> {
-  const pdfPaths = paths.filter(isPdfPath)
+  const sourcePaths = paths.filter(isMergeSourcePath)
 
-  if (pdfPaths.length === 0) {
+  if (sourcePaths.length === 0) {
     return []
   }
 
   const stub = e2eOverride("inspectPdfFiles")
   const summaries = stub
-    ? await stub(pdfPaths)
-    : await invoke<PdfFileSummary[]>("inspect_pdf_files", { paths: pdfPaths })
+    ? await stub(sourcePaths)
+    : await invoke<PdfFileSummary[]>("inspect_pdf_files", {
+        paths: sourcePaths,
+      })
 
   return summaries.map((summary) => ({
     hasOutline: summary.hasOutline,
+    kind: summary.kind,
     name: fileNameFromPath(summary.path),
     pageCount: summary.pageCount,
     path: summary.path,

@@ -1,6 +1,14 @@
-import { memo, useRef } from "react"
+import { memo, useRef, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { Check, FilePlus2, FileWarning, GripVertical, X } from "lucide-react"
+import {
+  Check,
+  FilePlus2,
+  FileWarning,
+  GripVertical,
+  Image as ImageIcon,
+  TriangleAlert,
+  X,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
@@ -28,25 +36,35 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import type { useMergeWizard } from "@/hooks/useMergeWizard"
-import { MERGE_WIZARD_STEPS } from "@/hooks/useMergeWizard"
 import {
   hasExistingBookmarks,
   isMergeBookmarksMode,
+  isMergeExportMode,
   isUsableFile,
   MAX_MERGE_FILES,
   mergeBookmarksModes,
+  mergeExportModes,
+  mergesIntoOneDocument,
   usableFiles,
   type MergeBookmarksMode,
+  type MergeExportMode,
   type MergeFile,
+  type MergeWizardStep,
 } from "@/lib/mergeWizard"
 import { cn } from "@/lib/utils"
 
-const stepTitleKey = [
-  "mergeWizard.stepFiles",
-  "mergeWizard.stepBookmarks",
-  "mergeWizard.stepPageNumbers",
-  "mergeWizard.stepWatermark",
-] as const
+const stepTitleKey = {
+  files: "mergeWizard.stepFiles",
+  bookmarks: "mergeWizard.stepBookmarks",
+  pageNumbers: "mergeWizard.stepPageNumbers",
+  watermark: "mergeWizard.stepWatermark",
+} as const satisfies Record<MergeWizardStep, string>
+
+const exportModeLabelKey = {
+  onePdf: "mergeWizard.exportOnePdf",
+  pagePngZip: "mergeWizard.exportPagePngZip",
+  watermarkOnlyZip: "mergeWizard.exportWatermarkOnlyZip",
+} as const satisfies Record<MergeExportMode, string>
 
 const bookmarksLabelKey = {
   none: "mergeWizard.bookmarksNone",
@@ -94,7 +112,18 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
       <span className="w-4 shrink-0 text-center font-mono text-xs tabular-nums text-muted-foreground">
         {index + 1}
       </span>
-      {usable ? null : (
+      {usable ? (
+        // An image is not a document: saying so on the row is what makes its
+        // single page, and the sheet it will be laid on, read as intended.
+        file.kind === "image" ? (
+          <HintTooltip label={t("mergeWizard.imageSource")}>
+            <ImageIcon
+              aria-label={t("mergeWizard.imageSource")}
+              className="size-4 shrink-0 text-muted-foreground"
+            />
+          </HintTooltip>
+        ) : null
+      ) : (
         <FileWarning className="size-4 shrink-0 text-destructive" />
       )}
       <HintTooltip label={file.path}>
@@ -137,6 +166,27 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
   )
 })
 
+/** One caution under the settings that raised it. Both notes the step can show
+    carry the same mark and the same colour: neither is an error, and one
+    reading as louder than the other would say something neither means. */
+function SettingNote({
+  children,
+  testId,
+}: {
+  children: ReactNode
+  testId?: string
+}) {
+  return (
+    <p
+      className="flex items-start gap-1.5 text-xs text-warning"
+      data-testid={testId}
+    >
+      <TriangleAlert className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  )
+}
+
 /** The row in hand lives at the document root, outside both of the dialog's
     clipped scroll boxes. It can therefore follow the pointer beyond either
     edge instead of losing whichever half crossed the boundary. */
@@ -170,9 +220,12 @@ function MergeFileDragGhost({
 }
 
 /**
- * The four questions a merge answers, one step at a time: which files and in
- * what order, what the outline becomes, and whether the result carries page
- * numbers and a watermark.
+ * The questions a merge answers, one step at a time: which files and in what
+ * order, what comes out of them, and — where the answer can reach the result —
+ * what the outline becomes and whether it carries page numbers and a watermark.
+ *
+ * Which steps are asked follows the export the first step names, so the trail
+ * along the footer is the export's own rather than a fixed four.
  *
  * The whole state lives in `useMergeWizard`; this is its face.
  */
@@ -184,13 +237,16 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     bookmarks,
     chooseFiles,
     error,
+    exportMode,
     files,
     finish,
     isBusy,
+    isLastStep,
     isStopping,
     mergePhase,
     mergeProgress,
     next,
+    normalizeA4,
     onOpenChange,
     open,
     pageNumbersDraft,
@@ -199,6 +255,8 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     removeFile,
     reorderFile,
     setBookmarks,
+    setExportMode,
+    setNormalizeA4,
     setPageNumbersDraft,
     setPageNumbersOn,
     setSmartPadding,
@@ -207,6 +265,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     smartPadding,
     step,
     stepBlocked,
+    steps,
     stop,
     totalPages,
     watermarkDraft,
@@ -217,10 +276,12 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
   // Only on the step that shows the list, so no gesture is watched for while
   // the settings steps are on screen.
   const { drag } = useListDrag({
-    active: open && step === 1 && files.length > 1,
+    active: open && step === "files" && files.length > 1,
     listRef,
     onReorder: reorderFile,
   })
+  // Nothing between the files to pad where they never become one document.
+  const merges = mergesIntoOneDocument(exportMode)
   // The files that will actually be merged — the count the summary reports, so
   // a row the backend could not read is not counted into the total beside it.
   const usableCount = usableFiles(files).length
@@ -230,7 +291,9 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
       ? t("mergeWizard.addingPageNumbers")
       : mergePhase === "watermark"
         ? t("mergeWizard.addingWatermark")
-        : t("mergeWizard.merging")
+        : mergePhase === "archive"
+          ? t("mergeWizard.writingArchive")
+          : t("mergeWizard.merging")
   const errorMessage =
     error === "fileTooLarge"
       ? t("viewer.fileTooLarge")
@@ -246,7 +309,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         aria-busy={mergeProgress !== null}
-        className="flex max-h-[calc(100svh-2rem)] w-[46rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[46rem]"
+        className="flex max-h-[calc(100svh-2rem)] w-[52rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[52rem]"
         data-testid="merge-wizard"
         showCloseButton={!isBusy}
       >
@@ -256,7 +319,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
         <DialogHeader className="flex-row items-center justify-between gap-3 border-b py-4 pr-12 pl-5">
           <DialogTitle>{t("mergeWizard.title")}</DialogTitle>
 
-          {step === 1 ? (
+          {step === "files" ? (
             <Button
               data-testid="merge-wizard-add"
               disabled={isBusy}
@@ -270,7 +333,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             </Button>
           ) : null}
 
-          {step === 3 ? (
+          {step === "pageNumbers" ? (
             <div className="flex items-center gap-2">
               <FieldLabel htmlFor="merge-wizard-page-numbers">
                 {t("mergeWizard.pageNumbersEnable")}
@@ -284,7 +347,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             </div>
           ) : null}
 
-          {step === 4 && !mergeProgress ? (
+          {step === "watermark" && !mergeProgress ? (
             <div className="flex items-center gap-2">
               <FieldLabel htmlFor="merge-wizard-watermark">
                 {t("mergeWizard.watermarkEnable")}
@@ -314,106 +377,196 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             </div>
           ) : null}
 
-          {!mergeProgress && step === 1 ? (
-            <div className="flex flex-col gap-4" data-testid="merge-wizard-files">
-              {files.length === 0 ? (
-                <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-                  {t("mergeWizard.empty")}
-                </p>
-              ) : (
-                // A box of its own rather than the dialog's: a long list scrolls
-                // here, leaving the add button, the padding option and total
-                // where the reader left them. The right padding keeps the
-                // overlay scrollbar off the rows' own border.
-                <ol
-                  className="flex max-h-64 select-none flex-col gap-1.5 overflow-y-auto pr-2"
-                  ref={listRef}
-                >
-                  {files.map((file, index) => {
-                    const rowOffset = drag?.rowOffsets[index] ?? 0
+          {!mergeProgress && step === "files" ? (
+            // What goes in on the left, what is done to it on the right. The
+            // step asks enough questions now that a single column put the file
+            // list and the settings in one queue, where neither read as a group.
+            <div
+              className="grid grid-cols-[minmax(0,1fr)_19rem] gap-5"
+              data-testid="merge-wizard-files"
+            >
+              <div className="flex min-w-0 flex-col gap-3">
+                {files.length === 0 ? (
+                  // Stretched to the settings beside it, with its message in
+                  // the middle: an empty list is a target to drop onto, and a
+                  // box that ends above them would not read as one.
+                  <p className="grid flex-1 place-content-center rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+                    {t(merges ? "mergeWizard.empty" : "mergeWizard.emptyCopies")}
+                  </p>
+                ) : (
+                  // A box of its own rather than the dialog's: a long list
+                  // scrolls here, leaving the add button and the total where
+                  // the reader left them. The right padding keeps the overlay
+                  // scrollbar off the rows' own border.
+                  <ol
+                    className="flex max-h-64 select-none flex-col gap-1.5 overflow-y-auto pr-2"
+                    ref={listRef}
+                  >
+                    {files.map((file, index) => {
+                      const rowOffset = drag?.rowOffsets[index] ?? 0
 
-                    return (
-                      <li
-                        className={cn(
-                          "relative flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 select-none",
-                          files.length > 1 && "cursor-grab",
-                          drag &&
-                            drag.index !== index &&
-                            "transition-transform duration-200 ease-out",
-                          // The portal ghost carries this file; its real row
-                          // stays in the layout as the hole the others move
-                          // around, but must not show beneath the copy.
-                          drag?.index === index && "opacity-0",
-                        )}
-                        data-list-index={index}
-                        data-slot="merge-file"
-                        key={file.path}
-                        style={{
-                          transform:
-                            rowOffset === 0
-                              ? undefined
-                              : `translateY(${rowOffset}px)`,
-                        }}
-                      >
-                        {/* Keep the landing line in the list's original
-                            coordinate space while its host row animates aside.
-                            The equal, opposite transform cancels the row's. */}
-                        {drag &&
-                        (drag.gap === index ||
-                          (drag.gap === files.length &&
-                            index === files.length - 1)) ? (
-                          <span
-                            className={cn(
-                              "pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-primary",
-                              drag.gap === index ? "-top-1" : "-bottom-1",
+                      return (
+                        <li
+                          className={cn(
+                            "relative flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 select-none",
+                            files.length > 1 && "cursor-grab",
+                            drag &&
                               drag.index !== index &&
-                                "transition-transform duration-200 ease-out",
-                            )}
-                            style={{
-                              transform:
-                                rowOffset === 0
-                                  ? undefined
-                                  : `translateY(${-rowOffset}px)`,
-                            }}
+                              "transition-transform duration-200 ease-out",
+                            // The portal ghost carries this file; its real row
+                            // stays in the layout as the hole the others move
+                            // around, but must not show beneath the copy.
+                            drag?.index === index && "opacity-0",
+                          )}
+                          data-list-index={index}
+                          data-slot="merge-file"
+                          key={file.path}
+                          style={{
+                            transform:
+                              rowOffset === 0
+                                ? undefined
+                                : `translateY(${rowOffset}px)`,
+                          }}
+                        >
+                          {/* Keep the landing line in the list's original
+                              coordinate space while its host row animates aside.
+                              The equal, opposite transform cancels the row's. */}
+                          {drag &&
+                          (drag.gap === index ||
+                            (drag.gap === files.length &&
+                              index === files.length - 1)) ? (
+                            <span
+                              className={cn(
+                                "pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-primary",
+                                drag.gap === index ? "-top-1" : "-bottom-1",
+                                drag.index !== index &&
+                                  "transition-transform duration-200 ease-out",
+                              )}
+                              style={{
+                                transform:
+                                  rowOffset === 0
+                                    ? undefined
+                                    : `translateY(${-rowOffset}px)`,
+                              }}
+                            />
+                          ) : null}
+                          <MergeFileRowContent
+                            file={file}
+                            index={index}
+                            onRemove={removeFile}
+                            showHandle={files.length > 1}
                           />
-                        ) : null}
-                        <MergeFileRowContent
-                          file={file}
-                          index={index}
-                          onRemove={removeFile}
-                          showHandle={files.length > 1}
-                        />
-                      </li>
-                    )
-                  })}
-                </ol>
-              )}
+                        </li>
+                      )
+                    })}
+                  </ol>
+                )}
 
-              <div className="flex items-center gap-4">
-                <FieldLabel className="min-w-0" htmlFor="merge-wizard-padding">
+                {/* Pushed to the foot of the column, so the count of what goes
+                    in sits under the list however short the list is. */}
+                {files.length > 0 ? (
+                  <p
+                    className="mt-auto text-xs text-muted-foreground"
+                    data-testid="merge-wizard-total"
+                  >
+                    {t("mergeWizard.total", {
+                      files: t("mergeWizard.fileCount", { count: usableCount }),
+                      pages: t("mergeWizard.pageCount", { count: totalPages }),
+                    })}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col gap-4 border-l pl-5">
+                <FieldLabel className="min-w-0 items-start" htmlFor="merge-wizard-a4">
                   <Checkbox
-                    checked={smartPadding}
+                    checked={normalizeA4}
+                    data-testid="merge-wizard-a4"
+                    id="merge-wizard-a4"
+                    onCheckedChange={setNormalizeA4}
+                  />
+                  <HintTooltip label={t("mergeWizard.normalizeA4Hint")}>
+                    <span>{t("mergeWizard.normalizeA4")}</span>
+                  </HintTooltip>
+                </FieldLabel>
+
+                {/* Off and unreachable where the files stay separate: there is
+                    no sequence between them for a blank page to land in. */}
+                <FieldLabel
+                  className={cn("min-w-0 items-start", !merges && "opacity-60")}
+                  htmlFor="merge-wizard-padding"
+                >
+                  <Checkbox
+                    checked={merges && smartPadding}
                     data-testid="merge-wizard-padding"
+                    disabled={!merges}
                     id="merge-wizard-padding"
                     onCheckedChange={setSmartPadding}
                   />
-                  <span>{t("mergeWizard.smartPadding")}</span>
+                  {merges ? (
+                    <span>{t("mergeWizard.smartPadding")}</span>
+                  ) : (
+                    <HintTooltip label={t("mergeWizard.smartPaddingUnavailable")}>
+                      <span>{t("mergeWizard.smartPadding")}</span>
+                    </HintTooltip>
+                  )}
                 </FieldLabel>
 
-                <p
-                  className="ml-auto shrink-0 text-sm text-muted-foreground"
-                  data-testid="merge-wizard-total"
-                >
-                  {t("mergeWizard.total", {
-                    files: t("mergeWizard.fileCount", { count: usableCount }),
-                    pages: t("mergeWizard.pageCount", { count: totalPages }),
-                  })}
-                </p>
+                {/* All three on the page rather than behind a trigger: which
+                    export is chosen decides which steps the wizard even asks,
+                    so it is worth reading the alternatives before committing to
+                    one. `FieldTitle` rather than `FieldLabel` — this names a
+                    group, not a control. */}
+                <div className="flex flex-col gap-2">
+                  <FieldTitle>{t("mergeWizard.exportMode")}</FieldTitle>
+                  <RadioGroup
+                    aria-label={t("mergeWizard.exportMode")}
+                    className="pl-4"
+                    onValueChange={(value) => {
+                      if (isMergeExportMode(value)) {
+                        setExportMode(value)
+                      }
+                    }}
+                    value={exportMode}
+                  >
+                    {mergeExportModes.map((mode) => (
+                      <FieldLabel
+                        className="min-w-0 items-start"
+                        htmlFor={`merge-wizard-export-${mode}`}
+                        key={mode}
+                      >
+                        <RadioGroupItem
+                          data-testid={`merge-wizard-export-${mode}`}
+                          id={`merge-wizard-export-${mode}`}
+                          value={mode}
+                        />
+                        <span>{t(exportModeLabelKey[mode])}</span>
+                      </FieldLabel>
+                    ))}
+                  </RadioGroup>
+                </div>
+
+                {/* At the foot of the settings, where what they cost is read
+                    after what they are — and only where a choice costs
+                    something. */}
+                <div className="mt-auto flex flex-col gap-2 empty:hidden">
+                  {normalizeA4 ? (
+                    <SettingNote testId="merge-wizard-a4-warning">
+                      {t("mergeWizard.normalizeA4Warning")}
+                    </SettingNote>
+                  ) : null}
+
+                  {!merges ? (
+                    <SettingNote>
+                      {t("mergeWizard.exportWatermarkOnlyHint")}
+                    </SettingNote>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : null}
 
-          {!mergeProgress && step === 2 ? (
+          {!mergeProgress && step === "bookmarks" ? (
             <div className="flex flex-col gap-3">
               {/* Four exclusive answers, each carrying its own explanation —
                   which is what a reader compares here, so it belongs on the
@@ -457,7 +610,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             </div>
           ) : null}
 
-          {!mergeProgress && step === 3 ? (
+          {!mergeProgress && step === "pageNumbers" ? (
             pageNumbersOn ? (
               <PageNumbersSettings
                 draft={pageNumbersDraft}
@@ -476,7 +629,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             )
           ) : null}
 
-          {!mergeProgress && step === 4 ? (
+          {!mergeProgress && step === "watermark" ? (
             watermarkOn ? (
               <WatermarkSettings
                 draft={watermarkDraft}
@@ -512,10 +665,11 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
             aria-label={t("mergeWizard.steps")}
             className="mr-auto flex items-center gap-1 text-xs"
           >
-            {stepTitleKey.map((key, index) => {
+            {steps.map((named, index) => {
               const position = index + 1
-              const done = position < step || mergeProgress !== null
-              const current = position === step && mergeProgress === null
+              const done =
+                index < steps.indexOf(step) || mergeProgress !== null
+              const current = named === step && mergeProgress === null
 
               return (
                 <li
@@ -526,14 +680,14 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
                       ? "bg-primary/10 font-medium text-foreground"
                       : "text-muted-foreground",
                   )}
-                  key={key}
+                  key={named}
                 >
                   {done ? (
                     <Check className="size-3.5 text-primary" />
                   ) : (
                     <span className="font-mono tabular-nums">{position}</span>
                   )}
-                  <span>{t(key)}</span>
+                  <span>{t(stepTitleKey[named])}</span>
                 </li>
               )
             })}
@@ -557,14 +711,27 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
                 {t("mergeWizard.cancel")}
               </DialogClose>
               <Button
-                disabled={step === 1 || isBusy}
+                disabled={step === "files" || isBusy}
                 onClick={back}
                 type="button"
                 variant="outline"
               >
                 {t("mergeWizard.back")}
               </Button>
-              {step < MERGE_WIZARD_STEPS ? (
+              {isLastStep ? (
+                <Button
+                  data-testid="merge-wizard-merge"
+                  disabled={stepBlocked || isBusy}
+                  onClick={() => void finish()}
+                  type="button"
+                >
+                  {isBusy
+                    ? progressLabel
+                    : exportMode === "onePdf"
+                      ? t("mergeWizard.merge")
+                      : t("mergeWizard.export")}
+                </Button>
+              ) : (
                 <Button
                   data-testid="merge-wizard-next"
                   disabled={stepBlocked || isBusy}
@@ -572,15 +739,6 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
                   type="button"
                 >
                   {t("mergeWizard.next")}
-                </Button>
-              ) : (
-                <Button
-                  data-testid="merge-wizard-merge"
-                  disabled={stepBlocked || isBusy}
-                  onClick={() => void finish()}
-                  type="button"
-                >
-                  {isBusy ? progressLabel : t("mergeWizard.merge")}
                 </Button>
               )}
             </div>

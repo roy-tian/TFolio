@@ -40,7 +40,9 @@ Download the installer for your platform from the [Releases page](https://github
 
 - A text watermark across every page — once or tiled, either diagonal, at the size you set.
 - Page numbers along the bottom: fixed position or mirrored for double-sided binding, over the page range you pick, starting at any number, with a colour that turns white over dark areas and your choice of how blank pages count.
-- A merge wizard that combines several PDFs in the order you set, carries over or rebuilds their bookmarks, optionally pads so each file starts on an odd page, and can add page numbers and a watermark to the result.
+- A merge wizard that combines several PDFs in the order you set, carries over or rebuilds their bookmarks, optionally pads so each file starts on an odd page, and can add page numbers and a watermark to the result. Images (JPEG, PNG, WebP, BMP, GIF, TIFF) come in as pages of their own.
+- One page size for the whole merge: every page fitted to A4, keeping its own size in the middle of the sheet where it already fits and scaling down where it does not, on a sheet turned to whichever way holds it better.
+- Three ways out of the wizard: one merged PDF, one PNG per page as a ZIP, or a ZIP of watermarked copies with nothing merged at all.
 
 **The app itself**
 

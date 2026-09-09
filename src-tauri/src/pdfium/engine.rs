@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::Cursor,
+    io::{Cursor, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -9,9 +9,10 @@ use std::{
     },
 };
 
-use image::{imageops, DynamicImage, ImageFormat};
+use image::{imageops, metadata::Orientation, DynamicImage, ImageDecoder, ImageFormat};
 use pdfium_render::prelude::*;
 use tauri::AppHandle;
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
 use super::{
     font::{
@@ -19,9 +20,10 @@ use super::{
         system_embedded_face, EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR, PAGE_NUMBER_GLYPHS,
     },
     geometry::{
-        annotation_color, annotation_covers, page_rect_to_pdfium, page_rotation_degrees,
-        quad_points_from_rect, union_rect, unrotated_page_height, unrotated_page_size,
-        within_page_range, MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
+        a4_placement, annotation_color, annotation_covers, page_rect_to_pdfium,
+        page_rotation_degrees, quad_points_from_rect, union_rect, unrotated_page_height,
+        unrotated_page_size, within_page_range, A4_LONG_POINTS, A4_SHORT_POINTS,
+        MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
         MAX_TEXT_NOTE_LINES, MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_TEXT_NOTE_FONT_SIZE,
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
@@ -38,8 +40,8 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, InsertOutcome, MergeBookmarks, PagePoint, PagePointsRect, PdfDocumentInfo,
-    PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
+    ExportOutcome, InsertOutcome, MergeBookmarks, MergeSourceKind, PagePoint, PagePointsRect,
+    PdfDocumentInfo, PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
     PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
     MAX_PDF_BYTES,
 };
@@ -65,10 +67,27 @@ const MAX_SEARCH_RECTS: usize = 50_000;
 // ceiling as an open, so the count is what bounds the whole run. Far past any
 // stack of files a reader assembles by hand.
 const MAX_MERGE_FILES: usize = 64;
+// What a merge accepts besides PDFs, matched on the extension because the
+// wizard has to sort a dropped file before anything reads it. The bytes are
+// still identified by their own header when they are decoded.
+pub(super) const MERGE_IMAGE_EXTENSIONS: [&str; 8] =
+    ["bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"];
+// An image file is read whole before it is decoded, and a photograph is nothing
+// like a document in size, so it gets a ceiling of its own well under the PDF
+// one.
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+// What one image may expand to once decoded. An A4 page scanned at 600dpi is
+// about 35 megapixels, so this leaves generous room above real input while
+// refusing a header that claims a bitmap no machine could hold.
+const MAX_IMAGE_PIXELS: u64 = 80_000_000;
 // Image effects capture page pixels at a print-like resolution, capped at the
 // same dimensions as an ordinary page render so one drag cannot allocate an
 // unbounded bitmap or inflate the saved file without limit.
 const RECT_EFFECT_DPI: f32 = 150.0;
+// What one page becomes when a merge is exported as images rather than as a
+// document: enough to print and to read on screen, and the same resolution the
+// rectangle effects already capture at.
+const PAGE_IMAGE_DPI: f32 = 150.0;
 const POINTS_PER_INCH: f32 = 72.0;
 // Smart colour only needs an average luminance under one small label, so it
 // samples at a fraction of a print-resolution capture — a few pixels across the
@@ -4021,16 +4040,35 @@ impl PdfiumEngine {
             return Err(merge_file_limit_error());
         }
 
+        // An image is decoded the same way the merge itself will decode it, so a
+        // row the wizard shows as usable is one the merge can actually lay on a
+        // page — but only decoded, never laid: the sheet it becomes is one page
+        // and carries no outline, so building it here would answer nothing
+        // already known. Done before the lock, because a decode is pure Rust
+        // work that PDFium neither performs nor has to be serialized against.
+        let images: Vec<Option<bool>> = paths
+            .iter()
+            .map(|path| is_merge_image(path).then(|| read_image(path).is_ok()))
+            .collect();
+
         // Loading a PDF is PDFium work like any other, so the whole sweep runs
         // under the store's lock even though it inserts nothing into the store.
         let _documents = self.lock_documents()?;
 
         Ok(paths
             .into_iter()
-            .map(|path| {
-                let opened = read_pdf_bytes(&path)
-                    .ok()
-                    .and_then(|bytes| self.pdfium.load_pdf_from_byte_vec(bytes, None).ok());
+            .zip(images)
+            .map(|(path, image)| {
+                if let Some(readable) = image {
+                    return PdfFileSummary {
+                        path: path.to_string_lossy().into_owned(),
+                        kind: MergeSourceKind::Image,
+                        page_count: readable.then_some(1),
+                        has_outline: false,
+                    };
+                }
+
+                let opened = load_merge_source(self.pdfium, &path).ok();
                 let path = path.to_string_lossy().into_owned();
 
                 match opened {
@@ -4039,12 +4077,14 @@ impl PdfiumEngine {
 
                         PdfFileSummary {
                             path,
+                            kind: MergeSourceKind::Pdf,
                             page_count: (page_count >= 1).then_some(page_count),
                             has_outline: document.bookmarks().root().is_some(),
                         }
                     }
                     None => PdfFileSummary {
                         path,
+                        kind: MergeSourceKind::Pdf,
                         page_count: None,
                         has_outline: false,
                     },
@@ -4063,10 +4103,15 @@ impl PdfiumEngine {
     /// `smart_padding` inserts a blank before any file that would otherwise open
     /// on an even page — the rule the files view's toggle already follows, so
     /// that each file begins on a right-hand leaf when printed double-sided.
+    ///
+    /// `normalize_a4` fits every page onto an A4 sheet of its own instead of
+    /// carrying the source's page sizes through — see `append_page_fitted_to_a4`
+    /// for what that costs.
     pub(super) fn merge_files_with_progress(
         &self,
         paths: Vec<PathBuf>,
         smart_padding: bool,
+        normalize_a4: bool,
         bookmarks: MergeBookmarks,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<Option<PdfDocumentInfo>, String> {
@@ -4111,12 +4156,7 @@ impl PdfiumEngine {
 
                 // Each source is opened only to be copied from and dropped at the
                 // end of this loop; none of them ever enters the document store.
-                // The error wording matches `open`'s, so an encrypted file is
-                // refused the same way whichever door it comes through.
-                let source = self
-                    .pdfium
-                    .load_pdf_from_byte_vec(read_pdf_bytes(path)?, None)
-                    .map_err(|error| format!("PDFium could not open the document: {error}"))?;
+                let source = load_merge_source(self.pdfium, path)?;
 
                 if source.pages().is_empty() {
                     return Err(format!("{} has no pages", path.display()));
@@ -4124,7 +4164,9 @@ impl PdfiumEngine {
 
                 if smart_padding && merged.pages().len() % 2 == 1 {
                     // Sized like the file it precedes, so the blank reads as that
-                    // file's own leading sheet rather than the last file's tail.
+                    // file's own leading sheet rather than the last file's tail —
+                    // or like the sheet that file's first page is about to be
+                    // fitted onto, where every page is being normalized.
                     let (width, height) = {
                         let first = source.pages().get(0).map_err(|error| {
                             format!(
@@ -4133,7 +4175,13 @@ impl PdfiumEngine {
                             )
                         })?;
 
-                        unrotated_page_size(&first)
+                        if normalize_a4 {
+                            let placement = a4_placement(first.width().value, first.height().value);
+
+                            (placement.sheet_width, placement.sheet_height)
+                        } else {
+                            unrotated_page_size(&first)
+                        }
                     };
                     let page = merged
                         .pages_mut()
@@ -4156,9 +4204,24 @@ impl PdfiumEngine {
                 // the merged one has to be written by hand afterwards.
                 let outline = collect_bookmark_siblings(source.bookmarks().root());
 
-                merged.pages_mut().append(&source).map_err(|error| {
-                    format!("PDFium could not merge {}: {error}", path.display())
-                })?;
+                if normalize_a4 {
+                    // Page by page rather than in one call: each sheet is sized
+                    // and its content placed on its own terms.
+                    for index in 0..source.pages().len() {
+                        // A long file's pages are this loop's own unit, and it
+                        // holds the one PDFium lock throughout — so the stop is
+                        // read here too, not only between files.
+                        if operation.is_cancelled() {
+                            return Ok(None);
+                        }
+
+                        append_page_fitted_to_a4(&mut merged, &source, index, path)?;
+                    }
+                } else {
+                    merged.pages_mut().append(&source).map_err(|error| {
+                        format!("PDFium could not merge {}: {error}", path.display())
+                    })?;
+                }
 
                 nodes.extend(merge_bookmark_nodes(
                     bookmarks,
@@ -4216,6 +4279,248 @@ impl PdfiumEngine {
         Ok(Some(document))
     }
 
+    /// One page of `document_id`, rendered at `dpi` and encoded as a PNG.
+    ///
+    /// The lock is taken and given back per page, so a whole document's worth of
+    /// these leaves room between them for the renders a viewer is asking for.
+    fn page_png(&self, document_id: u64, page_number: i32, dpi: f32) -> Result<Vec<u8>, String> {
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+        let page = entry
+            .document
+            .pages()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        let width = page.width().value;
+        let height = page.height().value;
+
+        // The contract `render_page_sample` states: a page whose size is not a
+        // usable number would scale to one that is not either.
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return Err(format!("page {page_number} has no usable size"));
+        }
+
+        let image = Self::render_page_sample(&page, dpi)
+            .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))?;
+
+        drop(page);
+        drop(documents);
+
+        let mut png = Cursor::new(Vec::new());
+
+        image
+            .write_to(&mut png, ImageFormat::Png)
+            .map_err(|error| format!("could not encode page {page_number}: {error}"))?;
+
+        Ok(png.into_inner())
+    }
+
+    /// Writes every page of `document_id` into a zip at `destination`, one PNG
+    /// per page. `false` is the reader's stop, which leaves `destination` alone.
+    ///
+    /// The document is the merge's own result, layers and all — this only reads
+    /// it — so nothing here can reach one of the files the merge was built from.
+    pub(super) fn export_page_images(
+        &self,
+        document_id: u64,
+        destination: &Path,
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<bool, String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
+        let page_count = {
+            let documents = self.lock_documents()?;
+
+            open_entry(&documents, document_id)?.page_ids.len()
+        };
+
+        if page_count == 0 {
+            return Err("this document has no pages to export".into());
+        }
+
+        on_progress(0, page_count);
+
+        // Already deflated: a PNG put through the archive's own compressor
+        // costs a second pass over every pixel and gives back nothing.
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        let digits = page_count.to_string().len();
+
+        write_file_atomically(destination, |file| {
+            let mut archive = ZipWriter::new(file);
+
+            for page_number in 1..=page_count {
+                // Between pages, which is this loop's unit: a page is written
+                // whole or not at all, and an abandoned archive is removed.
+                if operation.is_cancelled() {
+                    return Ok(false);
+                }
+
+                let png = self.page_png(document_id, page_number as i32, PAGE_IMAGE_DPI)?;
+
+                archive
+                    .start_file(format!("page-{page_number:0digits$}.png"), options)
+                    .map_err(|error| format!("could not start page {page_number}: {error}"))?;
+                archive
+                    .write_all(&png)
+                    .map_err(|error| format!("could not write page {page_number}: {error}"))?;
+                on_progress(page_number, page_count);
+            }
+
+            archive
+                .finish()
+                .map_err(|error| format!("could not finish the archive: {error}"))?;
+
+            Ok(true)
+        })
+    }
+
+    /// Writes one watermarked copy of each of `paths` into a zip at
+    /// `destination` — the merge wizard's third export, which merges nothing.
+    ///
+    /// Each source is built, watermarked and written on its own, and never
+    /// through its own path: the copies are documents of this app's making with
+    /// no source behind them, so nothing here can be written back over a file
+    /// the reader named. `false` is their stop.
+    pub(super) fn export_watermarked_copies(
+        &self,
+        paths: Vec<PathBuf>,
+        normalize_a4: bool,
+        watermark: Option<WatermarkConfig>,
+        destination: &Path,
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<bool, String> {
+        if paths.is_empty() {
+            return Err("an export needs at least one file".into());
+        }
+
+        if paths.len() > MAX_MERGE_FILES {
+            return Err(merge_file_limit_error());
+        }
+
+        // A destination that resolves onto one of the sources would replace a
+        // reader's own PDF with an archive. The dialog offers `.zip`, but the
+        // name it comes back with is theirs to type.
+        for path in &paths {
+            if same_file(path, destination) {
+                return Err("the archive would replace one of the files it is built from".into());
+            }
+        }
+
+        let operation = self.begin_operation(OperationTarget::Merge);
+        let total = paths.len();
+
+        on_progress(0, total);
+
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let mut used = HashSet::new();
+
+        write_file_atomically(destination, |file| {
+            let mut archive = ZipWriter::new(file);
+
+            for (index, path) in paths.iter().enumerate() {
+                // Between files, which is this loop's unit — the same place the
+                // merge itself stops.
+                if operation.is_cancelled() {
+                    return Ok(false);
+                }
+
+                let bytes = self.watermarked_copy(path, normalize_a4, &watermark, &operation)?;
+                let Some(bytes) = bytes else {
+                    return Ok(false);
+                };
+
+                archive
+                    .start_file(archive_pdf_name(path, &mut used), options)
+                    .map_err(|error| format!("could not start {}: {error}", path.display()))?;
+                archive
+                    .write_all(&bytes)
+                    .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+                on_progress(index + 1, total);
+            }
+
+            archive
+                .finish()
+                .map_err(|error| format!("could not finish the archive: {error}"))?;
+
+            Ok(true)
+        })
+    }
+
+    /// One source built as its own document, watermarked if the reader asked for
+    /// one, and handed back as bytes. `None` is their stop.
+    ///
+    /// The document lives in the store only for as long as the watermark takes:
+    /// that is the one machinery that can apply a mark, and it works on an entry.
+    /// It is closed on every path out, including a failure, so a stopped run
+    /// leaves nothing behind for a window to own.
+    fn watermarked_copy(
+        &self,
+        path: &Path,
+        normalize_a4: bool,
+        watermark: &Option<WatermarkConfig>,
+        operation: &OperationGuard<'_>,
+    ) -> Result<Option<Vec<u8>>, String> {
+        let bytes = {
+            let _documents = self.lock_documents()?;
+            let source = load_merge_source(self.pdfium, path)?;
+
+            if source.pages().is_empty() {
+                return Err(format!("{} has no pages", path.display()));
+            }
+
+            if normalize_a4 {
+                let mut sheets = self
+                    .pdfium
+                    .create_new_pdf()
+                    .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+
+                for index in 0..source.pages().len() {
+                    if operation.is_cancelled() {
+                        return Ok(None);
+                    }
+
+                    append_page_fitted_to_a4(&mut sheets, &source, index, path)?;
+                }
+
+                sheets.save_to_bytes()
+            } else {
+                source.save_to_bytes()
+            }
+            .map_err(|error| format!("PDFium could not build {}: {error}", path.display()))?
+        };
+
+        let Some(config) = watermark.clone() else {
+            return Ok(Some(bytes));
+        };
+
+        // Opened with no source path, so the copy can never be written back over
+        // the file it was built from.
+        let document = self.open_with_source(bytes, None)?;
+        let marked = (|| -> Result<Option<Vec<u8>>, String> {
+            // The reader's stop reaches the merge, not this document; passing it
+            // on is what keeps a long mark from running past their asking.
+            let applied = self.apply_watermark_with_progress(document.id, config, |_, _| {
+                if operation.is_cancelled() {
+                    self.cancel_document_work(document.id);
+                }
+            })?;
+
+            if !applied || operation.is_cancelled() {
+                return Ok(None);
+            }
+
+            let documents = self.lock_documents()?;
+
+            open_entry(&documents, document.id)?
+                .document
+                .save_to_bytes()
+                .map(Some)
+                .map_err(|error| format!("PDFium could not write {}: {error}", path.display()))
+        })();
+
+        self.close(document.id)?;
+        marked
+    }
+
     #[cfg(test)]
     pub(super) fn merge_files(
         &self,
@@ -4223,7 +4528,17 @@ impl PdfiumEngine {
         smart_padding: bool,
         bookmarks: MergeBookmarks,
     ) -> Result<PdfDocumentInfo, String> {
-        self.merge_files_with_progress(paths, smart_padding, bookmarks, |_, _| {})?
+        self.merge_files_with_progress(paths, smart_padding, false, bookmarks, |_, _| {})?
+            .ok_or_else(|| "the merge was stopped".to_string())
+    }
+
+    #[cfg(test)]
+    pub(super) fn merge_files_onto_a4(
+        &self,
+        paths: Vec<PathBuf>,
+        smart_padding: bool,
+    ) -> Result<PdfDocumentInfo, String> {
+        self.merge_files_with_progress(paths, smart_padding, true, MergeBookmarks::None, |_, _| {})?
             .ok_or_else(|| "the merge was stopped".to_string())
     }
 
@@ -4380,80 +4695,14 @@ impl PdfiumEngine {
     fn write_document(&self, entry: &mut OpenDocument, path: &Path) -> Result<(), String> {
         self.collect_orphans(entry)?;
 
-        // A fresh export has nothing to canonicalize; the given path is it.
-        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let path = path.as_path();
-        // A bare name has `""` for a parent, which would put the temporary file
-        // in whatever directory the process started from — losing the atomic
-        // rename, which needs one filesystem.
-        let directory = match path.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent,
-            _ => return Err(format!("{} is not a usable destination", path.display())),
-        };
-        // Random, and created only if absent: a name someone can guess, in a
-        // directory anyone can write to, could be waiting as a symlink, and the
-        // document would be written through to whatever it points at. Random
-        // rather than a counter, which would restart at 1 every launch — a
-        // temporary file a crash left behind would then collide with, and
-        // permanently block, every later save of the same document.
-        let suffix = getrandom::u64()
-            .map_err(|error| format!("could not name a temporary file: {error}"))?;
-        let temporary = directory.join(format!(
-            ".{}.{suffix:016x}.tfolio-save",
-            bounded_file_name(
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("document.pdf")
-            ),
-        ));
-
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|error| format!("could not write beside {}: {error}", path.display()))?;
-
-        // Written through the handle `create_new` just proved was ours, never by
-        // handing the name back to be opened a second time: in that gap the file
-        // could be swapped for a symlink, and PDFium's own `save_to_file` opens
-        // by path.
-        let saved = entry
-            .document
-            .save_to_writer(&mut file)
-            .map_err(|error| format!("PDFium could not write the document: {error}"))
-            // The rename orders the replacement; only a flush makes it real. A
-            // crash between an unsynced rename and the writeback would leave
-            // the name pointing at a hollow file — exactly the loss the
-            // temporary file exists to prevent.
-            .and_then(|()| {
-                file.sync_all()
-                    .map_err(|error| format!("could not flush the document: {error}"))
-            });
-
-        drop(file);
-
-        // The temporary was born with default permissions; the file it is about
-        // to become may be tighter (a 0600 document must not come back 0644).
-        // Best effort — a failure here still saves, with default permissions.
-        if let Ok(metadata) = fs::metadata(path) {
-            let _ = fs::set_permissions(&temporary, metadata.permissions());
-        }
-
-        let written = saved.and_then(|()| {
-            fs::rename(&temporary, path)
-                .map_err(|error| format!("could not write to {}: {error}", path.display()))
-        });
-
-        if written.is_err() {
-            // Hidden, so one left behind is one the reader would never find.
-            let _ = fs::remove_file(&temporary);
-        } else if let Ok(handle) = fs::File::open(directory) {
-            // The rename itself lives in the directory; flush that too, best
-            // effort, so the replacement survives a crash.
-            let _ = handle.sync_all();
-        }
-
-        written
+        write_file_atomically(path, |file| {
+            entry
+                .document
+                .save_to_writer(file)
+                .map_err(|error| format!("PDFium could not write the document: {error}"))
+                .map(|()| true)
+        })
+        .map(|_| ())
     }
 
     pub(super) fn close(&self, document_id: u64) -> Result<(), String> {
@@ -4461,6 +4710,126 @@ impl PdfiumEngine {
 
         Ok(())
     }
+}
+
+/// Writes `path` through a temporary file beside it, renamed into place only
+/// once every byte is on disk. `write` returning `false` abandons the write:
+/// the temporary goes and `path` is left as it was, which is how a stopped
+/// export leaves nothing half-written behind.
+///
+/// Shared by every write this app makes — a saved document and the wizard's
+/// archives — so the reasoning in it is stated once rather than per call site.
+fn write_file_atomically(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> Result<bool, String>,
+) -> Result<bool, String> {
+    // A fresh export has nothing to canonicalize; the given path is it.
+    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = path.as_path();
+    // A bare name has `""` for a parent, which would put the temporary file
+    // in whatever directory the process started from — losing the atomic
+    // rename, which needs one filesystem.
+    let directory = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => return Err(format!("{} is not a usable destination", path.display())),
+    };
+    // Random, and created only if absent: a name someone can guess, in a
+    // directory anyone can write to, could be waiting as a symlink, and the
+    // document would be written through to whatever it points at. Random
+    // rather than a counter, which would restart at 1 every launch — a
+    // temporary file a crash left behind would then collide with, and
+    // permanently block, every later save of the same document.
+    let suffix =
+        getrandom::u64().map_err(|error| format!("could not name a temporary file: {error}"))?;
+    let temporary = directory.join(format!(
+        ".{}.{suffix:016x}.tfolio-save",
+        bounded_file_name(
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("document.pdf")
+        ),
+    ));
+
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| format!("could not write beside {}: {error}", path.display()))?;
+
+    // Written through the handle `create_new` just proved was ours, never by
+    // handing the name back to be opened a second time: in that gap the file
+    // could be swapped for a symlink, and PDFium's own `save_to_file` opens
+    // by path.
+    let written = write(&mut file).and_then(|keep| {
+        if !keep {
+            return Ok(false);
+        }
+
+        // The rename orders the replacement; only a flush makes it real. A
+        // crash between an unsynced rename and the writeback would leave
+        // the name pointing at a hollow file — exactly the loss the
+        // temporary file exists to prevent.
+        file.sync_all()
+            .map_err(|error| format!("could not flush the document: {error}"))
+            .map(|()| true)
+    });
+
+    drop(file);
+
+    // The temporary was born with default permissions; the file it is about
+    // to become may be tighter (a 0600 document must not come back 0644).
+    // Best effort — a failure here still saves, with default permissions.
+    if let Ok(metadata) = fs::metadata(path) {
+        let _ = fs::set_permissions(&temporary, metadata.permissions());
+    }
+
+    let renamed = written.and_then(|keep| {
+        if !keep {
+            return Ok(false);
+        }
+
+        fs::rename(&temporary, path)
+            .map_err(|error| format!("could not write to {}: {error}", path.display()))
+            .map(|()| true)
+    });
+
+    if !matches!(renamed, Ok(true)) {
+        // Hidden, so one left behind is one the reader would never find.
+        let _ = fs::remove_file(&temporary);
+    } else if let Ok(handle) = fs::File::open(directory) {
+        // The rename itself lives in the directory; flush that too, best
+        // effort, so the replacement survives a crash.
+        let _ = handle.sync_all();
+    }
+
+    renamed
+}
+
+/// What one source is called inside a watermark-only archive: its own name with
+/// a `.pdf` extension, since an image comes out as the page it was laid on.
+///
+/// Two sources from different directories can share a name, so a name already
+/// taken gains a number — an archive with one entry silently missing would be
+/// worse than one with an odd name in it. The stem is reduced to its last path
+/// component first, so nothing a path carries can name a directory in the
+/// archive.
+fn archive_pdf_name(path: &Path, used: &mut HashSet<String>) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.replace(['/', '\\'], "_"))
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "document".to_string());
+    let stem = bounded_file_name(&stem).to_string();
+    let mut name = format!("{stem}.pdf");
+    let mut ordinal = 1;
+
+    while !used.insert(name.clone()) {
+        ordinal += 1;
+        name = format!("{stem} ({ordinal}).pdf");
+    }
+
+    name
 }
 
 /// At most 200 bytes of `name`, cut on a character boundary: the temporary
@@ -4536,6 +4905,220 @@ fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
     }
 
     Ok(bytes)
+}
+
+/// Whether `path` names one of the image formats a merge can bring in as a page.
+pub(super) fn is_merge_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            MERGE_IMAGE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
+}
+
+/// Decodes `path` as an image, under both of the ceilings above.
+///
+/// The format comes from the bytes rather than the extension: a file the reader
+/// named `.png` is still whatever it actually is, and every decoder here is
+/// pure Rust, so a mislabelled one is a decode error rather than a hazard.
+fn read_image(path: &Path) -> Result<DynamicImage, String> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+
+    if metadata.len() > MAX_IMAGE_BYTES {
+        return Err(image_limit_error());
+    }
+
+    let mut limits = image::Limits::default();
+
+    limits.max_alloc = Some(MAX_IMAGE_PIXELS * 4);
+
+    let mut reader = image::ImageReader::open(path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?
+        .with_guessed_format()
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+
+    reader.limits(limits);
+
+    let unusable =
+        |error: image::ImageError| format!("{} is not a usable image: {error}", path.display());
+    let mut decoder = reader.into_decoder().map_err(unusable)?;
+    let (width, height) = decoder.dimensions();
+
+    // Read off the header, before a pixel is allocated: `max_alloc` above is a
+    // limit the crate documents as non-strict, so the size a file *claims* is
+    // what refuses a bitmap no machine could hold — both as a pixel count and
+    // as the bytes those pixels take at this file's own channel depth.
+    if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS
+        || decoder.total_bytes() > MAX_IMAGE_PIXELS * 4
+    {
+        return Err(image_limit_error());
+    }
+
+    // Cameras and scanners record the way a sheet was held in the metadata
+    // rather than in the pixels, and decoding leaves it there: without this a
+    // portrait photograph arrives 4032 wide and is laid sideways on a landscape
+    // sheet.
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut image = DynamicImage::from_decoder(decoder).map_err(unusable)?;
+
+    image.apply_orientation(orientation);
+
+    Ok(image)
+}
+
+/// A one-page document holding `path`'s image, laid on an A4 sheet turned the
+/// way the image is and scaled to fill it.
+///
+/// An image has no page size of its own — its pixels are not points — so unlike
+/// a PDF page it is always fitted to the sheet, enlarged as readily as shrunk.
+/// That makes the merge's own A4 option a no-op for images, which is the only
+/// answer that reads the same whether the option is on or off.
+fn image_page_document<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<'a>, String> {
+    let image = read_image(path)?;
+    let pixel_width = image.width() as f32;
+    let pixel_height = image.height() as f32;
+
+    if pixel_width < 1.0 || pixel_height < 1.0 {
+        return Err(format!("{} has no pixels", path.display()));
+    }
+
+    let (sheet_width, sheet_height) = if pixel_width > pixel_height {
+        (A4_LONG_POINTS, A4_SHORT_POINTS)
+    } else {
+        (A4_SHORT_POINTS, A4_LONG_POINTS)
+    };
+    let scale = (sheet_width / pixel_width).min(sheet_height / pixel_height);
+    let width = pixel_width * scale;
+    let height = pixel_height * scale;
+    let mut document = pdfium
+        .create_new_pdf()
+        .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+    let mut object = PdfPageImageObject::new_with_size(
+        &document,
+        &image,
+        PdfPoints::new(width),
+        PdfPoints::new(height),
+    )
+    .map_err(|error| format!("PDFium could not place {}: {error}", path.display()))?;
+
+    object
+        .translate(
+            PdfPoints::new((sheet_width - width) / 2.0),
+            PdfPoints::new((sheet_height - height) / 2.0),
+        )
+        .map_err(|error| format!("PDFium could not centre {}: {error}", path.display()))?;
+
+    let mut page = document
+        .pages_mut()
+        .create_page_at_end(PdfPagePaperSize::Custom(
+            PdfPoints::new(sheet_width),
+            PdfPoints::new(sheet_height),
+        ))
+        .map_err(|error| format!("PDFium could not create the image's sheet: {error}"))?;
+
+    page.objects_mut()
+        .add_image_object(object)
+        .map_err(|error| format!("PDFium rejected {}: {error}", path.display()))?;
+    page.regenerate_content()
+        .map_err(|error| format!("PDFium could not finish the image's sheet: {error}"))?;
+    drop(page);
+
+    Ok(document)
+}
+
+/// One file of a merge, opened as the pages it contributes — a PDF read by
+/// PDFium, or an image laid on a sheet of its own.
+fn load_merge_source<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<'a>, String> {
+    if is_merge_image(path) {
+        return image_page_document(pdfium, path);
+    }
+
+    // The error wording matches `open`'s, so an encrypted file is refused the
+    // same way whichever door it comes through.
+    pdfium
+        .load_pdf_from_byte_vec(read_pdf_bytes(path)?, None)
+        .map_err(|error| format!("PDFium could not open the document: {error}"))
+}
+
+/// Copies page `index` of `source` onto a fresh A4 sheet at the end of `merged`,
+/// centred there and shrunk only as far as the sheet makes necessary.
+///
+/// The page travels as a form XObject rather than as a page of its own: PDFium
+/// can place and scale an object, but has no way to resize a page it has already
+/// imported. A form carries the source page's content alone, so annotations are
+/// left behind — which is why this route is taken only when the reader asks for
+/// one page size, and an ordinary merge still appends whole pages.
+fn append_page_fitted_to_a4<'a>(
+    merged: &mut PdfDocument<'a>,
+    source: &PdfDocument<'a>,
+    index: PdfPageIndex,
+    path: &Path,
+) -> Result<(), String> {
+    let failed = |what: &str, error: PdfiumError| {
+        format!(
+            "PDFium could not {what} page {} of {}: {error}",
+            index + 1,
+            path.display()
+        )
+    };
+    // Taken through `objects_mut`, which is the accessor that keeps the
+    // document's own lifetime — `objects` borrows the page, and the form object
+    // has to outlive it to reach the sheet built below.
+    let mut page = source
+        .pages()
+        .get(index)
+        .map_err(|error| failed("load", error))?;
+    // The *displayed* size, `/Rotate` already applied — which is the space the
+    // form arrives in too, since PDFium builds it through the page's own
+    // display matrix.
+    let placement = a4_placement(page.width().value, page.height().value);
+    let mut form = page
+        .objects_mut()
+        .copy_into_x_object_form_object(merged)
+        .map_err(|error| failed("copy", error))?;
+
+    // One matrix rather than a scale and a translate: PDFium composes each call
+    // onto what the object already carries, and these offsets are measured on
+    // the sheet rather than on the page.
+    form.transform(
+        placement.scale as PdfMatrixValue,
+        0.0,
+        0.0,
+        placement.scale as PdfMatrixValue,
+        placement.left as PdfMatrixValue,
+        placement.bottom as PdfMatrixValue,
+    )
+    .map_err(|error| failed("place", error))?;
+
+    let mut sheet = merged
+        .pages_mut()
+        .create_page_at_end(PdfPagePaperSize::Custom(
+            PdfPoints::new(placement.sheet_width),
+            PdfPoints::new(placement.sheet_height),
+        ))
+        .map_err(|error| format!("PDFium could not create the A4 sheet: {error}"))?;
+
+    sheet
+        .objects_mut()
+        .add_object(form)
+        .map_err(|error| failed("add", error))?;
+    sheet
+        .regenerate_content()
+        .map_err(|error| failed("finish the sheet for", error))?;
+
+    Ok(())
+}
+
+fn image_limit_error() -> String {
+    format!(
+        "image file exceeds the {} MiB limit",
+        MAX_IMAGE_BYTES / 1024 / 1024
+    )
 }
 
 fn merge_file_limit_error() -> String {

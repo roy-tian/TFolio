@@ -31,6 +31,71 @@ pub(super) fn unrotated_page_size(page: &PdfPage<'_>) -> (f32, f32) {
     }
 }
 
+/// A4 at 72 points to the inch: 210 x 297 mm, the sheet a normalized merge
+/// fits every page onto. Held here rather than taken from
+/// `PdfPagePaperSize::a4()` because the placement arithmetic below is pure and
+/// must be testable without PDFium loaded.
+pub(super) const A4_SHORT_POINTS: f32 = 595.276;
+pub(super) const A4_LONG_POINTS: f32 = 841.89;
+
+/// Where one page lands once it is fitted to an A4 sheet: the sheet's own size,
+/// the factor the page is drawn at, and the offset that centres it there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct A4Placement {
+    pub(super) sheet_width: f32,
+    pub(super) sheet_height: f32,
+    pub(super) scale: f32,
+    pub(super) left: f32,
+    pub(super) bottom: f32,
+}
+
+/// Fits a page of `width` x `height` *displayed* points onto an A4 sheet.
+///
+/// A page that already fits is never enlarged — it keeps its own size in the
+/// middle of the sheet — and one that does not is shrunk on both axes by the
+/// same factor. The sheet turns landscape only where that is the orientation
+/// the page fits better in, so portrait wins every tie: a small page fits both
+/// ways at full size, and portrait is the one a reader expects.
+///
+/// Sizes that are not finite and positive cannot be fitted to anything; they
+/// come back as an unscaled portrait sheet, which leaves the page where PDFium
+/// put it rather than moving it by a nonsense offset.
+pub(super) fn a4_placement(width: f32, height: f32) -> A4Placement {
+    let portrait = |scale: f32| A4Placement {
+        sheet_width: A4_SHORT_POINTS,
+        sheet_height: A4_LONG_POINTS,
+        scale,
+        left: (A4_SHORT_POINTS - width * scale) / 2.0,
+        bottom: (A4_LONG_POINTS - height * scale) / 2.0,
+    };
+
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return A4Placement {
+            left: 0.0,
+            bottom: 0.0,
+            ..portrait(1.0)
+        };
+    }
+
+    let fit = |sheet_width: f32, sheet_height: f32| {
+        (sheet_width / width).min(sheet_height / height).min(1.0)
+    };
+    let upright = fit(A4_SHORT_POINTS, A4_LONG_POINTS);
+    let sideways = fit(A4_LONG_POINTS, A4_SHORT_POINTS);
+
+    if sideways > upright {
+        A4Placement {
+            sheet_width: A4_LONG_POINTS,
+            sheet_height: A4_SHORT_POINTS,
+            scale: sideways,
+            left: (A4_LONG_POINTS - width * sideways) / 2.0,
+            bottom: (A4_SHORT_POINTS - height * sideways) / 2.0,
+        }
+    } else {
+        portrait(upright)
+    }
+}
+
 /// The exact inverse of the flip `extract_text` applies on the way out.
 pub(super) fn page_rect_to_pdfium(rect: &PagePointsRect, unrotated_height: f32) -> PdfRect {
     PdfRect::new_from_values(
@@ -162,6 +227,61 @@ mod tests {
         assert!(!within_page_range(f32::INFINITY));
         assert!(!within_page_range(f32::MAX));
         assert!(!within_page_range(1.0e30));
+    }
+
+    #[test]
+    fn leaves_a_page_that_already_fits_a4_at_its_own_size() {
+        let placement = a4_placement(200.0, 300.0);
+
+        assert_eq!(placement.scale, 1.0);
+        assert_eq!(placement.sheet_width, A4_SHORT_POINTS);
+        assert_eq!(placement.sheet_height, A4_LONG_POINTS);
+        assert!((placement.left - (A4_SHORT_POINTS - 200.0) / 2.0).abs() < 0.001);
+        assert!((placement.bottom - (A4_LONG_POINTS - 300.0) / 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn turns_the_sheet_sideways_only_where_upright_would_not_hold_the_page() {
+        // 700pt across is wider than A4 upright but fits it lying down, so the
+        // page keeps its own size on a landscape sheet.
+        let wide = a4_placement(700.0, 500.0);
+
+        assert_eq!(wide.scale, 1.0);
+        assert_eq!(wide.sheet_width, A4_LONG_POINTS);
+        assert_eq!(wide.sheet_height, A4_SHORT_POINTS);
+
+        // A square fits both ways at full size; portrait is the tie's answer.
+        assert_eq!(a4_placement(400.0, 400.0).sheet_width, A4_SHORT_POINTS);
+    }
+
+    #[test]
+    fn shrinks_an_oversized_page_onto_the_orientation_that_holds_more_of_it() {
+        let tall = a4_placement(900.0, 1000.0);
+
+        assert_eq!(tall.sheet_width, A4_SHORT_POINTS);
+        assert!((tall.scale - A4_SHORT_POINTS / 900.0).abs() < 0.001);
+        // Shrunk on both axes by the one factor, and centred on what is left.
+        assert!(tall.left.abs() < 0.001);
+        assert!((tall.bottom - (A4_LONG_POINTS - 1000.0 * tall.scale) / 2.0).abs() < 0.001);
+
+        let broad = a4_placement(2000.0, 1000.0);
+
+        assert_eq!(broad.sheet_width, A4_LONG_POINTS);
+        assert!((broad.scale - A4_LONG_POINTS / 2000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn refuses_to_place_a_page_of_no_usable_size() {
+        for placement in [
+            a4_placement(0.0, 300.0),
+            a4_placement(f32::NAN, 300.0),
+            a4_placement(200.0, f32::INFINITY),
+            a4_placement(-10.0, 300.0),
+        ] {
+            assert_eq!(placement.scale, 1.0);
+            assert_eq!(placement.left, 0.0);
+            assert_eq!(placement.bottom, 0.0);
+        }
     }
 
     #[test]

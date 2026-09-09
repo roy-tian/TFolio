@@ -5,9 +5,14 @@ import {
   canMerge,
   hasExistingBookmarks,
   isMergeBookmarksMode,
+  isMergeExportMode,
+  isMergeImagePath,
+  isMergeSourcePath,
   MAX_MERGE_FILES,
   mergeLayout,
   mergedPageCount,
+  mergesIntoOneDocument,
+  mergeWizardSteps,
   moveFile,
   padPageCount,
   usableFiles,
@@ -15,7 +20,13 @@ import {
 } from "@/lib/mergeWizard"
 
 function file(name: string, pageCount: number | null, hasOutline = false): MergeFile {
-  return { hasOutline, name: `${name}.pdf`, pageCount, path: `/tmp/${name}.pdf` }
+  return {
+    hasOutline,
+    kind: "pdf",
+    name: `${name}.pdf`,
+    pageCount,
+    path: `/tmp/${name}.pdf`,
+  }
 }
 
 describe("isMergeBookmarksMode", () => {
@@ -139,8 +150,67 @@ describe("moveFile", () => {
 
 describe("canMerge", () => {
   it("needs two files the backend can actually read", () => {
-    expect(canMerge([file("a", 1)])).toBe(false)
-    expect(canMerge([file("a", 1), file("broken", null)])).toBe(false)
-    expect(canMerge([file("a", 1), file("b", 1)])).toBe(true)
+    expect(canMerge([file("a", 1)], "onePdf")).toBe(false)
+    expect(canMerge([file("a", 1), file("broken", null)], "onePdf")).toBe(false)
+    expect(canMerge([file("a", 1), file("b", 1)], "onePdf")).toBe(true)
+    expect(canMerge([file("a", 1), file("b", 1)], "pagePngZip")).toBe(true)
+  })
+
+  it("takes a single file for the export that merges nothing", () => {
+    expect(canMerge([file("a", 1)], "watermarkOnlyZip")).toBe(true)
+    expect(canMerge([file("broken", null)], "watermarkOnlyZip")).toBe(false)
+    expect(canMerge([], "watermarkOnlyZip")).toBe(false)
+  })
+})
+
+describe("isMergeExportMode", () => {
+  it("accepts the three modes and nothing else", () => {
+    expect(isMergeExportMode("onePdf")).toBe(true)
+    expect(isMergeExportMode("watermarkOnlyZip")).toBe(true)
+    expect(isMergeExportMode("pageJpgZip")).toBe(false)
+    expect(isMergeExportMode(null)).toBe(false)
+  })
+})
+
+describe("mergeWizardSteps", () => {
+  it("asks every step for a merge into one document", () => {
+    expect(mergeWizardSteps("onePdf")).toEqual([
+      "files",
+      "bookmarks",
+      "pageNumbers",
+      "watermark",
+    ])
+  })
+
+  it("leaves out the steps whose answer could not reach the result", () => {
+    // A PNG carries no outline; copies that were never merged have neither an
+    // outline to build nor a page sequence to number.
+    expect(mergeWizardSteps("pagePngZip")).toEqual([
+      "files",
+      "pageNumbers",
+      "watermark",
+    ])
+    expect(mergeWizardSteps("watermarkOnlyZip")).toEqual(["files", "watermark"])
+  })
+
+  it("knows which modes make one page sequence out of the files", () => {
+    expect(mergesIntoOneDocument("onePdf")).toBe(true)
+    expect(mergesIntoOneDocument("pagePngZip")).toBe(true)
+    expect(mergesIntoOneDocument("watermarkOnlyZip")).toBe(false)
+  })
+})
+
+describe("isMergeSourcePath", () => {
+  it("takes PDFs and the image formats a merge can lay on a page", () => {
+    expect(isMergeSourcePath("/tmp/report.pdf")).toBe(true)
+    expect(isMergeSourcePath("/tmp/scan.JPG")).toBe(true)
+    expect(isMergeSourcePath("C:\\Files\\photo.webp")).toBe(true)
+    expect(isMergeSourcePath("/tmp/notes.txt")).toBe(false)
+    expect(isMergeSourcePath("/tmp/png")).toBe(false)
+  })
+
+  it("tells an image apart from a PDF", () => {
+    expect(isMergeImagePath("/tmp/scan.tiff")).toBe(true)
+    expect(isMergeImagePath("/tmp/report.pdf")).toBe(false)
   })
 })

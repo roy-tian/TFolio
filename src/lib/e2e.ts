@@ -26,18 +26,31 @@ export type E2eOverrides = {
   /** Stands in for `inspect_pdf_files`, so a spec can put a file the backend
       cannot read on the wizard's list without writing one. */
   inspectPdfFiles?: (paths: string[]) => Promise<
-    { hasOutline: boolean; pageCount: number | null; path: string }[]
+    {
+      hasOutline: boolean
+      kind: "pdf" | "image"
+      pageCount: number | null
+      path: string
+    }[]
   >
   /** Stands in for `merge_pdf_files`, whose result a spec would otherwise have
       to build a real multi-file merge to reach. */
   mergePdfFiles?: (
     plan: {
       bookmarks: string
+      normalizeA4: boolean
       paths: string[]
       smartPadding: boolean
     },
     onProgress: (progress: PdfProgress) => void,
   ) => Promise<PdfDocumentInfo>
+  /** Stands in for both archive exports, which put up a native save dialog no
+      driver can answer. The path written, or null for a dismissed dialog. */
+  exportPdfArchive?: (
+    command: string,
+    args: Record<string, unknown>,
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<string | null>
 }
 
 /** Compile-time constant; every `if (isE2eBuild)` body is dead code outside

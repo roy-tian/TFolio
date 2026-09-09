@@ -66,6 +66,20 @@ function nextStep() {
   return $("[data-testid='merge-wizard-next']").click()
 }
 
+function chooseExportMode(mode: string) {
+  return $(`[data-testid='merge-wizard-export-${mode}']`).click()
+}
+
+/** The steps the footer's trail is showing, in order. */
+function trailSteps() {
+  return browser.execute(() =>
+    Array.from(
+      document.querySelectorAll("[aria-label='Merge steps'] li"),
+      (step) => step.textContent?.replace(/^\d+/, "").trim() ?? "",
+    ),
+  )
+}
+
 /**
  * Drags the row at `from` to rest above or below the row at `to`, both 0-based
  * — press, move past the threshold, drop — with dispatched pointer events,
@@ -365,6 +379,134 @@ describe("merge wizard", () => {
       timeout: 30_000,
       timeoutMsg: "the blank page never joined the merged document",
     })
+  })
+
+  it("hands the A4 option to the merge it starts", async () => {
+    const first = writeScratchPdf("a4-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("a4-second.pdf", minimalPdf(1))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+
+    // What the option costs is said only once it has been chosen.
+    const warning = $("[data-testid='merge-wizard-a4-warning']")
+    await expect(warning).not.toBeExisting()
+
+    await $("[data-testid='merge-wizard-a4']").click()
+    await expect(warning).toHaveText(
+      expect.stringContaining("annotations and links"),
+    )
+
+    // The plan is read off the seam rather than the result: what each option
+    // does to the pages is settled by the engine's own tests, and what this
+    // suite can say is that the checkbox reaches the call.
+    await browser.execute(() => {
+      const seam = window as unknown as {
+        __tfolioE2E?: Record<string, unknown>
+        __tfolioMergePlan?: unknown
+      }
+
+      seam.__tfolioE2E = {
+        ...seam.__tfolioE2E,
+        mergePdfFiles: (plan: unknown) => {
+          seam.__tfolioMergePlan = plan
+          return Promise.reject(new Error("expected plan-test failure"))
+        },
+      }
+    })
+
+    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks-none']").click()
+    await nextStep()
+    await nextStep()
+    await $("[data-testid='merge-wizard-merge']").click()
+
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(
+          () =>
+            (window as unknown as { __tfolioMergePlan?: { normalizeA4?: boolean } })
+              .__tfolioMergePlan?.normalizeA4,
+        )) === true,
+      { timeout: 15_000, timeoutMsg: "the A4 option never reached the merge" },
+    )
+  })
+
+  it("asks only the steps the chosen export can answer", async () => {
+    const first = writeScratchPdf("mode-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("mode-second.pdf", minimalPdf(1))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+    await expect(await trailSteps()).toEqual([
+      "Files",
+      "Bookmarks",
+      "Page numbers",
+      "Watermark",
+    ])
+
+    // An archive of images carries no outline, so the outline step goes.
+    await chooseExportMode("pagePngZip")
+    await expect(await trailSteps()).toEqual([
+      "Files",
+      "Page numbers",
+      "Watermark",
+    ])
+
+    // Copies that were never merged have no page sequence at all: no numbers
+    // to add, and no gap between files for a blank page to fill.
+    await chooseExportMode("watermarkOnlyZip")
+    await expect(await trailSteps()).toEqual(["Files", "Watermark"])
+    // Base UI renders a checkbox as a span with a role, so the disabled state
+    // is on `aria-disabled` rather than on a native attribute.
+    await expect(
+      $("[data-testid='merge-wizard-padding']"),
+    ).toHaveAttribute("aria-disabled", "true")
+
+    // One step on from the list is the last one, so the button commits.
+    await nextStep()
+    await expect($("[data-testid='merge-wizard-merge']")).toBeDisplayed()
+    await expect($("[data-testid='merge-wizard-watermark']")).toBeDisplayed()
+  })
+
+  it("writes an archive and closes, rather than opening a tab", async () => {
+    const first = writeScratchPdf("zip-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("zip-second.pdf", minimalPdf(1))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+
+    // The save dialog is the OS's own, which no driver can answer.
+    await browser.execute(() => {
+      const seam = window as unknown as {
+        __tfolioE2E?: Record<string, unknown>
+        __tfolioArchive?: string
+      }
+
+      seam.__tfolioE2E = {
+        ...seam.__tfolioE2E,
+        exportPdfArchive: (command: string) => {
+          seam.__tfolioArchive = command
+          return Promise.resolve("/tmp/exported.zip")
+        },
+      }
+    })
+
+    await chooseExportMode("watermarkOnlyZip")
+    await nextStep()
+    await $("[data-testid='merge-wizard-merge']").click()
+
+    await $("[data-testid='merge-wizard']").waitForDisplayed({
+      reverse: true,
+      timeout: 30_000,
+    })
+    await expect(
+      await browser.execute(
+        () => (window as unknown as { __tfolioArchive?: string }).__tfolioArchive,
+      ),
+    ).toBe("export_watermarked_pdf_copies")
+    // No tab: an archive is a file on disk, not a document to hold open.
+    await expect(dropZoneButton()).toBeDisplayed()
   })
 
   it("uses the repeat pattern's starting watermark size", async () => {
