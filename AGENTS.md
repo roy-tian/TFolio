@@ -63,6 +63,22 @@
   completion result. Rebuilds must roll back snapshots on cancellation; merges publish only on completion.
 - Font downloads accept no caller-controlled URL or destination. Pin host, commit, size and SHA-256;
   verify bytes before writing and write the compiled-in OFL license before the font.
+- The update check is Rust-side and process-wide: one per run, none in e2e builds, and no command takes
+  a URL. Endpoint and verifying key live in `tauri.conf.json`; leave the updater plugin's own commands
+  out of the capability file so the WebView can name neither.
+- `createUpdaterArtifacts` signs every bundle, so anything that bundles needs `TAURI_SIGNING_PRIVATE_KEY`
+  and its password: the two workflows as repository secrets, and `tauri:bundle` from the environment —
+  it fails without them. Regenerating the key strands every installed copy on its current version.
+- Installing an update restarts the process, discarding unsaved work in every window, not just the asking
+  one. Confirm before installing, and refuse outright in a debug build: nothing in `target/` carries a
+  bundle type, so the plugin falls back to replacing the running binary itself.
+- The downloaded installer lives in the cache directory, never beside `settings.toml`, with the release's
+  signature saved next to it so it outlives the run. The plugin's own check is private, so those bytes are
+  used only after that signature verifies against the compiled-in key — before the notice offers them, and
+  again before the install, because `.deb` and `.rpm` hand the file to a root installer.
+- Match a saved installer by comparing its signature against the one this run's own fetch of the feed
+  names, never by a version read off disk: that would let a genuinely signed older release be passed off
+  as the new one.
 - Embedded fonts need TrueType outlines, subset permission and glyph coverage. Resolve variable fonts
   to Regular before subsetting because PDFium does not select axis positions; skip unsuitable faces.
 - Annotation deletion and hit testing must target only this session's mark IDs, never existing annotations

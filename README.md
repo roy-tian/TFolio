@@ -51,13 +51,15 @@ Download the installer for your platform from the [Releases page](https://github
 - English and Simplified Chinese, following your saved preference and otherwise the system language.
 - Light and dark themes, following the system by default.
 - Settings and the recent-files list are remembered between runs.
+- Checks for a new release at startup, quietly. If one exists, a notice in the corner names the version and offers to download it, with progress, and then to install it and restart; if none does, it says nothing at all.
 
 ## Good to know
 
 - PDFs up to 512 MiB can be opened.
-- Pages are parsed and drawn by a PDF engine bundled inside the app, so a document's content is never handed to a web view or a server. The only time TFolio reaches the network is when you accept its offer to download a CJK font for a note or watermark that your system's own fonts cannot draw.
+- Pages are parsed and drawn by a PDF engine bundled inside the app, so a document's content is never handed to a web view or a server. TFolio reaches the network twice at most, and never with your document: once at startup, to ask GitHub whether a newer release exists, and once if you accept its offer to download a CJK font for a note or watermark that your system's own fonts cannot draw.
 - Watermarks, mosaic, and blur are visual only. The text underneath is still there and still searchable — they are not redaction, and a determined PDF editor can undo them.
 - Once you add a watermark, page numbers, or another file's pages, that document can only be exported as a copy; the file you opened is left untouched.
+- An update is installed only from a package signed with TFolio's own release key, which the app carries and checks before it runs anything. Installing restarts the app, so it asks first.
 
 ## License
 

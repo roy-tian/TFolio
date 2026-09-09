@@ -18,6 +18,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
+# The one transform between a signed release and the two strings that check
+# it: both the key and the signature reach this app base64-wrapped. Already
+# in the tree under the updater plugin, so this names it rather than adds it.
+base64 = "0.22"
 fontdb = "0.24.0"
 getrandom = "0.4"
 # The formats a merge may bring in as pages, plus the two the app already
@@ -30,6 +34,11 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 # reaches PDFium alone. Default features are off: they are only date and
 # parallelism helpers this use has no need of.
 lopdf = { version = "0.44", default-features = false }
+# What lets a downloaded installer outlive the run that fetched it. The
+# updater plugin checks the signature over bytes it never writes down and
+# keeps that check private, so a saved package is checked again here — with
+# the same crate the plugin itself verifies with.
+minisign-verify = "0.2"
 pdfium-render = { version = "=0.9.3", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
 # The fallback face is fetched at runtime rather than bundled, so the app needs
 # an HTTPS client of its own. `tauri` already depends on reqwest, but with no
@@ -43,6 +52,11 @@ serde_json = "1"
 sha2 = "0.11"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# The release check. Its network call, its signature check and its install are
+# all Rust-side: the WebView is granted none of the plugin's own commands, so
+# the endpoint and the key its bytes must match stay compiled-in rather than
+# nameable from the page. `rustls` again, so this adds no second TLS backend.
+tauri-plugin-updater = "2"
 tauri-plugin-wdio = { version = "1", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 # The settings file's format. Already in the tree — `tauri-build` reads

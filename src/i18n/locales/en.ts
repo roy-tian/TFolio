@@ -11,6 +11,21 @@ const en = {
   notification: {
     dismiss: "Dismiss notification",
   },
+  update: {
+    available: "Update available — version {{version}}",
+    download: "Update",
+    downloading: "Downloading version {{version}}",
+    ready: "Version {{version}} is ready to install",
+    install: "Install",
+    installTitle: "Install the update?",
+    installDescription:
+      "Installing restarts TFolio, and every change not saved — in this window or another — is lost. The download is kept either way, so a later launch can offer it again.",
+    installDiscard: "Discard all changes and restart to install",
+    installCancel: "Not now",
+    installFailed: "The update could not be installed.",
+    failed: "The update could not be downloaded.",
+    retry: "Try again",
+  },
   tabs: {
     home: "Home",
     openFile: "Open PDF in a new tab",

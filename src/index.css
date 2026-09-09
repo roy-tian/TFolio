@@ -39,6 +39,7 @@ body {
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-warning: var(--warning);
+  --color-success: var(--success);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -82,6 +83,9 @@ body {
      red in hue to be told apart, and dark enough to read as small text on the
      light ground. */
   --warning: oklch(0.554 0.135 66.442);
+  /* Good news rather than a caution: green, and dark enough that the notice it
+     tints can still be read as small text over it. */
+  --success: oklch(0.548 0.128 152.1);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -118,6 +122,7 @@ body {
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --warning: oklch(0.852 0.199 91.936);
+  --success: oklch(0.792 0.169 151.7);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);

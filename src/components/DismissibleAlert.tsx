@@ -15,6 +15,9 @@ type DismissibleAlertProps = {
   /** Changes when a new message replaces the current one, restarting expiry. */
   dismissKey?: string | number | null
   onDismiss: () => void
+  /** "status" for a notice that keeps changing while it stands: an assertive
+      alert would interrupt a screen reader on every step of a download. */
+  role?: "alert" | "status"
 }
 
 /** A transient alert that can also be dismissed immediately without waiting. */
@@ -24,6 +27,7 @@ export function DismissibleAlert({
   className,
   dismissKey,
   onDismiss,
+  role = "alert",
 }: DismissibleAlertProps) {
   const { t } = useTranslation()
 
@@ -38,7 +42,7 @@ export function DismissibleAlert({
   }, [autoDismiss, dismissKey, onDismiss])
 
   return (
-    <div className={cn("flex items-center gap-2", className)} role="alert">
+    <div className={cn("flex items-center gap-2", className)} role={role}>
       <div className="min-w-0 flex-1">{children}</div>
       <Button
         aria-label={t("notification.dismiss")}

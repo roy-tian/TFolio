@@ -19,6 +19,21 @@ const zhCN = {
   notification: {
     dismiss: "关闭通知",
   },
+  update: {
+    available: "发现更新 - 版本号 {{version}}",
+    download: "更新",
+    downloading: "正在下载版本 {{version}}",
+    ready: "版本 {{version}} 已下载完成",
+    install: "安装",
+    installTitle: "安装此更新?",
+    installDescription:
+      "安装会重启 TFolio，所有窗口中尚未保存的修改都将丢失。安装包已下载并保留在本机，稍后启动时仍可安装。",
+    installDiscard: "放弃所有修改后重启安装",
+    installCancel: "暂不安装",
+    installFailed: "更新安装失败。",
+    failed: "更新下载失败。",
+    retry: "重试",
+  },
   tabs: {
     home: "主页",
     openFile: "在新标签页中打开 PDF",

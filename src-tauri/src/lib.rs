@@ -3,6 +3,7 @@ mod pdfium;
 mod recent;
 mod settings;
 mod store;
+mod update;
 mod windows;
 
 use launch::{take_launch_pdfs, LaunchQueue};
@@ -21,6 +22,7 @@ use pdfium::{
 use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
 use tauri::Manager;
+use update::{download_update, install_update, update_status, UpdateState};
 use windows::{focus_pdf_path, open_new_window, print_window, AppWindows, DocumentOwners};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -68,7 +70,9 @@ pub fn run() {
         builder.plugin(single_instance.build())
     };
 
-    let builder = builder.plugin(tauri_plugin_dialog::init());
+    let builder = builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
 
     #[cfg(feature = "e2e")]
     let builder = builder
@@ -91,6 +95,11 @@ pub fn run() {
             app.manage(LaunchQueue::default());
             app.manage(AppWindows::default());
             app.manage(DocumentOwners::default());
+            app.manage(UpdateState::default());
+            // Not in the GUI suite: a spec may not reach the network, and
+            // nothing a spec drives may install anything over this build.
+            #[cfg(not(feature = "e2e"))]
+            update::check_in_background(app.handle());
             // The file a double-click in the file manager launched this run
             // for. It waits here for the workspace, which takes it as soon as
             // there is one to open it in.
@@ -153,6 +162,9 @@ pub fn run() {
             cancel_pdf_merge,
             settings,
             set_settings,
+            update_status,
+            download_update,
+            install_update,
             take_launch_pdfs,
             open_new_window,
             print_window,

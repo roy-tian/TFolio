@@ -17,6 +17,7 @@ import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { MergeWizard } from "@/components/MergeWizard"
 import { MergeWizardButton } from "@/components/MergeWizardButton"
+import { UpdateToast } from "@/components/UpdateToast"
 import { WindowControls } from "@/components/WindowControls"
 import {
   AlertDialog,
@@ -29,6 +30,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { useAppUpdate } from "@/hooks/useAppUpdate"
 import {
   useMergeWizard,
   type MergeWizardResult,
@@ -451,6 +453,7 @@ export default function App() {
     [activateTab, dismissWorkspaceError, replaceTabs, t],
   )
   const mergeWizard = useMergeWizard({ onMerged: openMergeResult })
+  const appUpdate = useAppUpdate()
 
   const chooseFile = useCallback(async () => {
     if (choosingFileRef.current) {
@@ -1215,15 +1218,21 @@ export default function App() {
         </div>
       ) : null}
 
-      {!homeActive && errorMessage ? (
-        <DismissibleAlert
-          className="fixed top-25 right-4 z-60 max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-          dismissKey={workspaceErrorVersion}
-          onDismiss={dismissWorkspaceError}
-        >
-          {errorMessage}
-        </DismissibleAlert>
-      ) : null}
+      {/* The workspace's own corner, above the one each document keeps at the
+          same anchor: these two outrank a page notice and stack with each
+          other, so neither of them hides the other. */}
+      <div className="pointer-events-none fixed top-25 right-4 z-60 flex flex-col items-end gap-2">
+        {!homeActive && errorMessage ? (
+          <DismissibleAlert
+            className="pointer-events-auto max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+            dismissKey={workspaceErrorVersion}
+            onDismiss={dismissWorkspaceError}
+          >
+            {errorMessage}
+          </DismissibleAlert>
+        ) : null}
+        <UpdateToast className="pointer-events-auto w-80" update={appUpdate} />
+      </div>
 
       <MergeWizard wizard={mergeWizard} />
 

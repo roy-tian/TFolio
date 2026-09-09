@@ -11,18 +11,21 @@ import { cn } from "@/lib/utils"
 type OperationProgressProps = {
   className?: string
   label: string
-  progress: PdfProgress
+  /** Null while the work has no announced length: an indeterminate bar says
+      that better than a determinate one stuck at nought. */
+  progress: PdfProgress | null
   testId?: string
 }
 
-/** One accessible, determinate progress treatment for long PDF operations. */
+/** One accessible, determinate progress treatment for the app's long
+    operations — a PDF the engine is working through, or an update arriving. */
 export function OperationProgress({
   className,
   label,
   progress,
   testId,
 }: OperationProgressProps) {
-  const percent = progressPercent(progress)
+  const percent = progress ? progressPercent(progress) : null
 
   return (
     <Progress

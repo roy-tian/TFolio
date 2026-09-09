@@ -31,6 +31,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -60,6 +61,14 @@
     },
     "resources": {
       "resources/pdfium/": "pdfium/"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE5RkU3Q0IwMkFBMUJFMzcKUldRM3ZxRXFzSHorcVZXYXc1SFYxbDNDNnhqL3ZHcDlQZVhlSUUrUHQ2VDM3ZDk2aHlQc2MwRSsK",
+      "endpoints": [
+        "https://github.com/roy-tian/TFolio/releases/latest/download/latest.json"
+      ]
     }
   }
 }
