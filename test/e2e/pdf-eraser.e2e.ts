@@ -134,18 +134,18 @@ describe("TFolio eraser", () => {
 
     // Exact, not merely "different": the second rectangle has to come back
     // where it was, and only the erased one has to reappear.
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await settledAt(both, "undo did not put the erased rectangle back")
 
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await settledAt(erased, "redo did not take the rectangle off again")
 
     // And the marks either side of it still answer to their own undo.
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await settledAt(both, "undo did not put the erased rectangle back a second time")
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await changedFrom(both, "undo did not take the second rectangle back")
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await settledAt(clean, "undo did not take the first rectangle back")
   })
 

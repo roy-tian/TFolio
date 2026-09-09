@@ -122,7 +122,7 @@ describe("TFolio keyboard shortcuts", () => {
     expect(await tooltipOn(`${visible} button[aria-label='Watermark']`)).toContain(
       "Ctrl+Alt+W",
     )
-    expect(await tooltipOn(`${visible} button[aria-label='Undo']`)).toContain(
+    expect(await tooltipOn(`${visible} button[aria-label^='Undo']`)).toContain(
       "Ctrl+Z",
     )
 

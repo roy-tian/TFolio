@@ -162,11 +162,11 @@ describe("independent document tabs", () => {
 
     await tabButton("second.pdf").click()
     await expect(
-      $("[data-active='true'] button[aria-label='Undo']"),
+      $("[data-active='true'] button[aria-label^='Undo']"),
     ).toBeDisabled()
     await tabButton("first.pdf").click()
     await expect(
-      $("[data-active='true'] button[aria-label='Undo']"),
+      $("[data-active='true'] button[aria-label^='Undo']"),
     ).toBeEnabled()
 
     await $("button[aria-label='Close first.pdf']").click()

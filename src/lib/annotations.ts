@@ -771,6 +771,16 @@ export function canRedo(history: AnnotationHistory) {
   return history.future.length > 0
 }
 
+/** The command the next undo would take back; null when there is none. */
+export function nextUndoCommand(history: AnnotationHistory) {
+  return history.past.at(-1)?.command ?? null
+}
+
+/** The command the next redo would apply again; null when there is none. */
+export function nextRedoCommand(history: AnnotationHistory) {
+  return history.future.at(-1)?.command ?? null
+}
+
 /**
  * Identity of the topmost entry rather than a count of edits: undoing back to
  * exactly what was saved leaves nothing to write, which a counter — only ever

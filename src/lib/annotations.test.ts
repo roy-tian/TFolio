@@ -16,6 +16,8 @@ import {
   insertFilePages,
   insertPagesRange,
   movesPages,
+  nextRedoCommand,
+  nextUndoCommand,
   pageNumbersConfig,
   planDeletePages,
   planDuplicatePages,
@@ -210,6 +212,23 @@ describe("commit", () => {
 
     expect(canRedo(undone)).toBe(true)
     expect(canRedo(commit(undone, highlight(2)))).toBe(false)
+  })
+})
+
+describe("nextUndoCommand and nextRedoCommand", () => {
+  it("names the step each direction would take", () => {
+    const history = historyOf(highlight(1), highlight(2))
+    const undone = undo(history)!.history
+
+    expect(nextUndoCommand(history)).toBe(history.past[1]!.command)
+    expect(nextRedoCommand(history)).toBeNull()
+    expect(nextUndoCommand(undone)).toBe(history.past[0]!.command)
+    expect(nextRedoCommand(undone)).toBe(history.past[1]!.command)
+  })
+
+  it("names nothing on an untouched document", () => {
+    expect(nextUndoCommand(emptyHistory)).toBeNull()
+    expect(nextRedoCommand(emptyHistory)).toBeNull()
   })
 })
 

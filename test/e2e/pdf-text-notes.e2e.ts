@@ -86,7 +86,7 @@ describe("TFolio text notes", () => {
 
     const drawn = await pageInk()
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pageInk()) === clean, {
       timeout: 15_000,
       timeoutMsg: "undo did not take the note back off the page",
@@ -94,7 +94,7 @@ describe("TFolio text notes", () => {
 
     // Exact, so a redo that ran the command twice would fail rather than pass
     // for carrying "more ink than clean".
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pageInk()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the note exactly",
@@ -116,7 +116,7 @@ describe("TFolio text notes", () => {
 
       const ink = await pageInk()
 
-      await $("button[aria-label='Undo']").click()
+      await $("button[aria-label^='Undo']").click()
       await browser.pause(2000)
 
       return ink
@@ -143,7 +143,7 @@ describe("TFolio text notes", () => {
     await $("button[aria-label='Discard this note']").click()
     await browser.pause(2500)
 
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
     expect(await pageInk()).toBe(clean)
   })
 
@@ -162,7 +162,7 @@ describe("TFolio text notes", () => {
     await $("button[aria-label='Add this note']").click()
     // Landed in history before the second note opens, so the undo below has a
     // deterministic target rather than racing the first note's commit.
-    await $("button[aria-label='Undo']").waitForEnabled({ timeout: 15_000 })
+    await $("button[aria-label^='Undo']").waitForEnabled({ timeout: 15_000 })
 
     // Second note: placed and typed, left open.
     await clickOnPage(0.3, 0.6)
@@ -171,12 +171,12 @@ describe("TFolio text notes", () => {
 
     // A real press, so the note tool's own listener runs (it leaves an off-page
     // press alone); then undo takes back the first note.
-    await pressControl("button[aria-label='Undo']")
+    await pressControl("button[aria-label^='Undo']")
 
     // The draft is still open on the second note…
     await expect(editor()).toBeDisplayed()
     // …and the undone edit was the first note: nothing is left to undo.
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
   })
 
   // Placing a note while one is open swaps the draft inside a single render

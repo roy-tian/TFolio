@@ -459,14 +459,14 @@ describe("TFolio page editing", () => {
     })
     await waitForThumb(2, third!)
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the undo never restored the page",
     })
     await waitForThumb(2, second!)
     await waitForThumb(4, fourth!)
 
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "the redo never deleted again",
     })
@@ -519,8 +519,8 @@ describe("TFolio page editing", () => {
     })
     await waitForThumb(5, 0)
 
-    await $("button[aria-label='Undo']").click()
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "undoing both inserts never restored the shape",
     })
@@ -554,7 +554,7 @@ describe("TFolio page editing", () => {
     await expect($("[data-page-notice]")).toHaveText("2 pages moved to the end")
 
     // One undo: the move is one edit, whatever the reader spent on it.
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await waitForThumb(1, first!)
     await waitForThumb(2, second!)
     await waitForThumb(4, fourth!)
@@ -593,8 +593,8 @@ describe("TFolio page editing", () => {
     })
     await waitForThumb(5, third!)
 
-    await $("button[aria-label='Undo']").click()
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "undoing both pastes never restored the shape",
     })
@@ -662,7 +662,7 @@ describe("TFolio page editing", () => {
     expect(await appMenuItemEnabled("save")).toBe(false)
     expect(await appMenuItemEnabled("save-as")).toBe(true)
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "the undo never took the inserted page back out",
     })
@@ -697,14 +697,14 @@ describe("TFolio page editing", () => {
       await waitForThumb(1, second!)
       await waitForThumb(2, first!)
 
-      await $("button[aria-label='Undo']").click()
+      await $("button[aria-label^='Undo']").click()
       await waitForThumb(1, first!)
       await waitForThumb(2, second!)
 
-      await $("button[aria-label='Redo']").click()
+      await $("button[aria-label^='Redo']").click()
       await waitForThumb(1, second!)
       await waitForThumb(2, first!)
-      await $("button[aria-label='Undo']").click()
+      await $("button[aria-label^='Undo']").click()
       await waitForThumb(1, first!)
 
       // A shift-selected pair drags as one block, past the end: [3, 4, 1, 2].
@@ -789,7 +789,7 @@ describe("TFolio page editing", () => {
     expect(await appMenuItemEnabled("save")).toBe(false)
     expect(await appMenuItemEnabled("save-as")).toBe(true)
 
-    await $(`${ACTIVE_GRID} button[aria-label='Undo']`).click()
+    await $(`${ACTIVE_GRID} button[aria-label^='Undo']`).click()
     await browser.waitUntil(
       async () => (await thumbCount(ACTIVE_GRID)) === 2,
       { timeoutMsg: "the undo never took the carried page back out" },
@@ -854,7 +854,7 @@ describe("TFolio page editing", () => {
     await waitForThumb(3, second!, ACTIVE_GRID)
 
     // One edit, however many pages it brought.
-    await $(`${ACTIVE_GRID} button[aria-label='Undo']`).click()
+    await $(`${ACTIVE_GRID} button[aria-label^='Undo']`).click()
     await browser.waitUntil(
       async () => (await thumbCount(ACTIVE_GRID)) === 1,
       { timeoutMsg: "the undo never took the whole block back out" },

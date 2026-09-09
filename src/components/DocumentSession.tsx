@@ -2237,6 +2237,8 @@ function DocumentSession(
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
             disabled={!pdfDocument}
+            nextRedo={annotations.nextRedo}
+            nextUndo={annotations.nextUndo}
             onRedo={() => {
               // Only a page-moving step would strand the note on a page that has
               // shifted or gone, and undo/redo cannot take the uncommitted note

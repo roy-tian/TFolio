@@ -114,13 +114,13 @@ describe("TFolio document watermark", () => {
       timeoutMsg: "the page text layer never picked up the watermark",
     })
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 30_000,
       timeoutMsg: "undo did not restore the clean page",
     })
 
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 30_000,
       timeoutMsg: "redo did not restore the same watermark",
@@ -133,7 +133,7 @@ describe("TFolio document watermark", () => {
     await openWatermarkDialog()
     await $("[data-testid='watermark-text']").setValue("CANCELLED")
     await $("//button[normalize-space()='Cancel']").click()
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
     expect(await pagePixelFingerprint()).toBe(clean)
 
     await applyWatermark("ALPHA")
@@ -148,13 +148,13 @@ describe("TFolio document watermark", () => {
     expect(await extractedText()).not.toContain("ALPHA")
 
     // One undo returns to A, rather than removing the watermark altogether.
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await extractedText()).includes("ALPHA"), {
       timeout: 20_000,
       timeoutMsg: "undo did not restore the replaced watermark",
     })
 
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
       timeout: 20_000,
     })
@@ -166,7 +166,7 @@ describe("TFolio document watermark", () => {
       timeoutMsg: "explicit removal did not restore the clean page",
     })
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
       timeout: 20_000,
       timeoutMsg: "undo did not restore the explicitly removed watermark",

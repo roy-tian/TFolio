@@ -71,13 +71,13 @@ describe("TFolio page numbers", () => {
       { timeout: 20_000, timeoutMsg: "the text layer never picked up the number" },
     )
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 30_000,
       timeoutMsg: "undo did not restore the clean page",
     })
 
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 30_000,
       timeoutMsg: "redo did not restore the same page number",
@@ -171,7 +171,7 @@ describe("TFolio page numbers", () => {
     )
 
     // One undo returns to the centred numbers rather than removing them.
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === centred, {
       timeout: 30_000,
       timeoutMsg: "undo did not restore the replaced position",

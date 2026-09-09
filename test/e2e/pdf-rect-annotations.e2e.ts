@@ -291,9 +291,9 @@ describe("TFolio rectangle annotations", () => {
       !(await $("[data-slot='rect-draft-preview']").isExisting()),
     )
     const both = await pagePixelFingerprint()
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) !== both)
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean)
   })
 
@@ -321,7 +321,7 @@ describe("TFolio rectangle annotations", () => {
 
     const drawn = await pagePixelFingerprint()
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 15_000,
       timeoutMsg: "undo did not take the rectangle back off the page",
@@ -329,7 +329,7 @@ describe("TFolio rectangle annotations", () => {
 
     // Exact, not merely "different from clean": a redo that applied the command
     // twice would stack two rectangles and still clear that lower bar.
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the rectangle exactly",
@@ -386,7 +386,7 @@ describe("TFolio rectangle annotations", () => {
       timeoutMsg: "the mosaic never reached the page",
     })
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 15_000,
       timeoutMsg: "undo did not take the mosaic back off the page",
@@ -636,7 +636,7 @@ describe("TFolio rectangle annotations", () => {
 
     await browser.pause(2500)
 
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
     expect(await pageInk()).toBe(clean)
   })
 
@@ -678,7 +678,7 @@ describe("TFolio rectangle annotations", () => {
 
       await browser.pause(2500)
 
-      await expect($("button[aria-label='Undo']")).toBeDisabled()
+      await expect($("button[aria-label^='Undo']")).toBeDisabled()
       expect(await pageInk()).toBe(clean)
     })
   }
