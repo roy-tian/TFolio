@@ -18,6 +18,8 @@
 - `pdfium-render` is pinned behind a Cargo patch; read its manifest note before updating.
   CI's Bun version comes from `packageManager`, not the locally installed toolchain.
 - Release tags must match `package.json`; use `version:bump` to keep all four version files aligned.
+  A release's notes are `changelog` grouping the tag's conventional commit subjects,
+  so those subjects are public text; `chore(release)` commits are left out.
 
 ## Persistence and windows
 
