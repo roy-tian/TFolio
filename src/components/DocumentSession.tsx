@@ -90,6 +90,7 @@ import {
 } from "@/lib/pdf"
 import {
   firstSearchMatchFromPage,
+  searchRevealOffset,
   stepSearchMatch,
 } from "@/lib/pdfSearch"
 import {
@@ -128,6 +129,9 @@ import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 const RECENT_VIEW_WRITE_INTERVAL_MS = 250
+
+/** How long a seek waits for the result's highlight layer to be drawn. */
+const SEARCH_REVEAL_TIMEOUT_MS = 3000
 
 /** A file dragged in from the desktop, as the window's own handler sees it —
     positions in CSS pixels, not the OS's physical ones. `over` carries the
@@ -1261,39 +1265,98 @@ function DocumentSession(
       return
     }
 
-    viewer
-      .querySelector<HTMLElement>(`[data-page-number="${match.pageNumber}"]`)
-      ?.scrollIntoView({ behavior: "auto", block: "center", inline: "center" })
+    const interruptScroll = () => viewer.scrollTo({
+      behavior: "instant",
+      left: viewer.scrollLeft,
+      top: viewer.scrollTop,
+    })
+    interruptScroll()
 
-    let frame = 0
-    let attempts = 0
-    const revealRectangle = () => {
-      const rectangle = viewer.querySelector<HTMLElement>(
-        `[data-search-match="${activeSearchIndex}"]`,
+    const activeMatchRects = () =>
+      Array.from(
+        viewer.querySelectorAll<HTMLElement>(
+          `[data-search-match="${activeSearchIndex}"]`,
+        ),
+        (rectangle) => rectangle.getBoundingClientRect(),
       )
 
-      if (rectangle) {
-        rectangle.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-          inline: "center",
-        })
+    const page = viewer.querySelector<HTMLElement>(
+      `[data-page-number="${match.pageNumber}"]`,
+    )
+    const pageBox = page?.getBoundingClientRect()
+    const viewerBox = viewer.getBoundingClientRect()
+
+    // A page off screen, sideways included, is virtualized with no highlight to
+    // measure: bring it over first so the near-viewport observer attaches one.
+    if (
+      activeMatchRects().length === 0 &&
+      (!pageBox ||
+        pageBox.bottom <= viewerBox.top ||
+        pageBox.top >= viewerBox.bottom ||
+        pageBox.right <= viewerBox.left ||
+        pageBox.left >= viewerBox.right)
+    ) {
+      page?.scrollIntoView({
+        behavior: "auto",
+        block: "center",
+        inline: "center",
+      })
+    }
+
+    let frame = 0
+    const deadline = performance.now() + SEARCH_REVEAL_TIMEOUT_MS
+    const revealMatch = () => {
+      const rects = activeMatchRects()
+
+      if (rects.length > 0) {
+        const offset = searchRevealOffset(
+          rects,
+          viewer.getBoundingClientRect(),
+          document
+            .querySelector<HTMLElement>(
+              `[data-document-search="${openedDocument.id}"] [data-slot="pdf-search"]`,
+            )
+            ?.getBoundingClientRect() ?? null,
+          {
+            minLeft: -viewer.scrollLeft,
+            maxLeft: viewer.scrollWidth - viewer.clientWidth - viewer.scrollLeft,
+            minTop: -viewer.scrollTop,
+            maxTop: viewer.scrollHeight - viewer.clientHeight - viewer.scrollTop,
+          },
+        )
+
+        if (offset) {
+          viewer.scrollTo({
+            behavior: "smooth",
+            left: viewer.scrollLeft + offset.left,
+            top: viewer.scrollTop + offset.top,
+          })
+        }
+
         return
       }
 
-      // The page wrapper is always mounted, but its bitmap/text/highlight
-      // surface is virtualized. Give the near-viewport observer a few frames to
-      // attach it after the page-level seek.
-      attempts += 1
-      if (attempts < 30) {
-        frame = requestAnimationFrame(revealRectangle)
+      // The layer is drawn once PDFium has the page back, which the seek above
+      // only starts; a heavy page can take a good part of a second.
+      if (performance.now() < deadline) {
+        frame = requestAnimationFrame(revealMatch)
       }
     }
 
-    frame = requestAnimationFrame(revealRectangle)
+    frame = requestAnimationFrame(revealMatch)
 
-    return () => cancelAnimationFrame(frame)
-  }, [active, activeSearchIndex, searchMatches, searchOpen, viewMode])
+    return () => {
+      cancelAnimationFrame(frame)
+      interruptScroll()
+    }
+  }, [
+    active,
+    activeSearchIndex,
+    openedDocument.id,
+    searchMatches,
+    searchOpen,
+    viewMode,
+  ])
 
   useEffect(() => {
     if (!active || viewMode === "thumbnail") {
