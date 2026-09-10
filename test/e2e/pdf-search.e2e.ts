@@ -219,7 +219,8 @@ describe("TFolio PDF search", () => {
           reject(new Error("Next did not start a smooth reveal"))
         }, 5000)
 
-        // Forward to the native animation, but reverse before it hides the old hit.
+        // Forward to the native animation, but reverse in the same task: that
+        // scroll is time-based, so a loaded first frame can pass the old hit.
         Object.defineProperty(viewer, "scrollTo", {
           configurable: true,
           value: (options: ScrollToOptions) => {
@@ -227,23 +228,21 @@ describe("TFolio PDF search", () => {
             if (options.behavior !== "smooth" || ++smoothCalls !== 1) {
               return
             }
-            requestAnimationFrame(() => {
-              const oldBox = first.getBoundingClientRect()
-              const previousIsVisible = oldBox.top >= view.top && oldBox.bottom <= view.bottom
-              const reversedAt = viewer.scrollTop
-              document.querySelector<HTMLButtonElement>("button[aria-label='Previous result']")!.click()
-              setTimeout(() => {
-                clearTimeout(timeout)
-                delete (viewer as Partial<HTMLElement>).scrollTo
-                resolve({
-                  nextIsOffscreen,
-                  previousIsVisible,
-                  reversedAt,
-                  finishedAt: viewer.scrollTop,
-                  smoothCalls,
-                })
-              }, 800)
-            })
+            const oldBox = first.getBoundingClientRect()
+            const previousIsVisible = oldBox.top >= view.top && oldBox.bottom <= view.bottom
+            const reversedAt = viewer.scrollTop
+            document.querySelector<HTMLButtonElement>("button[aria-label='Previous result']")!.click()
+            setTimeout(() => {
+              clearTimeout(timeout)
+              delete (viewer as Partial<HTMLElement>).scrollTo
+              resolve({
+                nextIsOffscreen,
+                previousIsVisible,
+                reversedAt,
+                finishedAt: viewer.scrollTop,
+                smoothCalls,
+              })
+            }, 800)
           },
         })
         document.querySelector<HTMLButtonElement>("button[aria-label='Next result']")!.click()
