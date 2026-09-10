@@ -12,12 +12,12 @@ import {
   type DocumentSessionHandle,
   type FileDragEvent,
 } from "@/components/DocumentSession"
-import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { MergeWizard } from "@/components/MergeWizard"
 import { MergeWizardButton } from "@/components/MergeWizardButton"
-import { UpdateToast } from "@/components/UpdateToast"
+import { NoticeCenter } from "@/components/NoticeCenter"
+import { UpdateInstallDialog } from "@/components/UpdateInstallDialog"
 import { WindowControls } from "@/components/WindowControls"
 import {
   AlertDialog,
@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { useAppUpdate } from "@/hooks/useAppUpdate"
+import { useNotices } from "@/hooks/useNotices"
 import {
   useMergeWizard,
   type MergeWizardResult,
@@ -46,6 +47,14 @@ import {
   tabIdForPath,
   type TabId,
 } from "@/lib/documentTabs"
+import {
+  noticeEntry,
+  openRefusals,
+  updateNotice,
+  workspaceOwner,
+  type Notice,
+  type NoticeKind,
+} from "@/lib/notices"
 import {
   fileNameFromPath,
   isPdfPath,
@@ -92,13 +101,6 @@ type OpenTab = {
   }
 }
 
-type WorkspaceError =
-  | "createFailed"
-  | "fileTooLarge"
-  | "invalidFile"
-  | "newWindowFailed"
-  | "openFailed"
-  | null
 type PendingClose =
   | { kind: "all" }
   | { kind: "tab"; documentId: number }
@@ -142,19 +144,9 @@ export default function App() {
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [workspaceError, setWorkspaceError] = useState<WorkspaceError>(null)
-  const [workspaceErrorVersion, setWorkspaceErrorVersion] = useState(0)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
-  const dismissWorkspaceError = useCallback(() => setWorkspaceError(null), [])
-  const showWorkspaceError = useCallback(
-    (error: NonNullable<WorkspaceError>) => {
-      setWorkspaceError(error)
-      // The same refusal can happen twice before the first notice expires. Its
-      // identity still changes so the second occurrence gets a full lifetime.
-      setWorkspaceErrorVersion((version) => version + 1)
-    },
-    [],
-  )
+  const [confirmingInstall, setConfirmingInstall] = useState(false)
+  const { channel: notices, notices: raisedNotices } = useNotices()
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -243,13 +235,13 @@ export default function App() {
       const pdfPaths = paths.filter(isPdfPath)
 
       if (pdfPaths.length === 0) {
-        showWorkspaceError("invalidFile")
+        notices.raise({ kind: "invalidFile", owner: workspaceOwner })
         return Promise.resolve()
       }
 
       return runOpenBatch(async () => {
         const openedIds: number[] = []
-        let firstError: WorkspaceError = null
+        let firstError: NoticeKind | null = null
 
         for (const path of pdfPaths) {
           const existingId = tabIdForPath(tabsRef.current, path)
@@ -265,7 +257,7 @@ export default function App() {
           }).catch(() => false)
 
           if (heldElsewhere) {
-            dismissWorkspaceError()
+            notices.retract(workspaceOwner, openRefusals)
             continue
           }
 
@@ -334,22 +326,16 @@ export default function App() {
           activateTab(selectedId)
 
           if (firstError) {
-            showWorkspaceError(firstError)
+            notices.raise({ kind: firstError, owner: workspaceOwner })
           } else {
-            dismissWorkspaceError()
+            notices.retract(workspaceOwner, openRefusals)
           }
         } else if (firstError) {
-          showWorkspaceError(firstError)
+          notices.raise({ kind: firstError, owner: workspaceOwner })
         }
       })
     },
-    [
-      activateTab,
-      dismissWorkspaceError,
-      replaceTabs,
-      runOpenBatch,
-      showWorkspaceError,
-    ],
+    [activateTab, notices, replaceTabs, runOpenBatch],
   )
 
   // A new document is the app's own rather than a file's: with no path it
@@ -378,26 +364,19 @@ export default function App() {
           }
           replaceTabs((current) => [...current, tab])
           activateTab(tab.id)
-          dismissWorkspaceError()
+          notices.retract(workspaceOwner, openRefusals)
         } catch {
-          showWorkspaceError("createFailed")
+          notices.raise({ kind: "createFailed", owner: workspaceOwner })
         }
       }),
-    [
-      activateTab,
-      dismissWorkspaceError,
-      replaceTabs,
-      runOpenBatch,
-      showWorkspaceError,
-      t,
-    ],
+    [activateTab, notices, replaceTabs, runOpenBatch, t],
   )
 
   const openNewWindow = useCallback(() => {
     void invoke("open_new_window").catch(() =>
-      showWorkspaceError("newWindowFailed"),
+      notices.raise({ kind: "newWindowFailed", owner: workspaceOwner }),
     )
-  }, [showWorkspaceError])
+  }, [notices])
 
   // A merged document is the app's own, like a new one: it has no file behind
   // it, so it lives in the workspace until an export gives it one — which is
@@ -446,14 +425,69 @@ export default function App() {
 
       replaceTabs((current) => [...current, tab])
       activateTab(tab.id)
-      dismissWorkspaceError()
+      notices.retract(workspaceOwner, openRefusals)
 
       return layersSettled
     },
-    [activateTab, dismissWorkspaceError, replaceTabs, t],
+    [activateTab, notices, replaceTabs, t],
   )
   const mergeWizard = useMergeWizard({ onMerged: openMergeResult })
   const appUpdate = useAppUpdate()
+  const { installFailed, status, visible } = appUpdate
+  const update = useMemo(
+    () => updateNotice({ installFailed, status, visible }),
+    [installFailed, status, visible],
+  )
+
+  // Mirrored rather than raised: the check belongs to the backend and is shared
+  // by every window, so the corner follows it instead of remembering it.
+  useEffect(() => {
+    if (update) {
+      notices.raise(update)
+    } else {
+      // Any one of the update's kinds names the whole slot they share.
+      notices.retract(workspaceOwner, ["updateAvailable"])
+    }
+
+    // A confirmation outliving the offer behind it would install what is no
+    // longer ready, and spring open by itself the next time one is shown.
+    if (update?.action?.kind !== "updateInstall") {
+      setConfirmingInstall(false)
+    }
+  }, [notices, update])
+
+  const runNoticeAction = useCallback(
+    (notice: Notice) => {
+      const kind = notice.action?.kind
+
+      if (kind === "updateDownload" || kind === "updateRetry") {
+        appUpdate.download()
+      } else if (kind === "updateInstall") {
+        setConfirmingInstall(true)
+      } else if (kind === "noteFont" && notice.owner.scope === "document") {
+        sessionRefs.current.get(notice.owner.documentId)?.fetchNoteFont()
+      }
+    },
+    [appUpdate],
+  )
+
+  // Two notices answer for their own dismissal: the update, whose reader waved
+  // it away for as long as it says the same thing, and the font offer, which
+  // takes the edit it was holding with it.
+  const dismissNotice = useCallback(
+    (notice: Notice) => {
+      const slot = noticeEntry(notice.kind).slot
+
+      if (slot === "update") {
+        appUpdate.dismiss()
+      } else if (slot === "noteFont" && notice.owner.scope === "document") {
+        sessionRefs.current.get(notice.owner.documentId)?.dismissNoteFont()
+      }
+
+      notices.dismiss(notice.id)
+    },
+    [appUpdate, notices],
+  )
 
   const chooseFile = useCallback(async () => {
     if (choosingFileRef.current) {
@@ -474,11 +508,11 @@ export default function App() {
         await openPaths([path])
       }
     } catch {
-      showWorkspaceError("openFailed")
+      notices.raise({ kind: "openFailed", owner: workspaceOwner })
     } finally {
       choosingFileRef.current = false
     }
-  }, [openPaths, showWorkspaceError, t])
+  }, [notices, openPaths, t])
 
   const rememberAllViews = useCallback(
     () =>
@@ -510,6 +544,9 @@ export default function App() {
       const next = replaceTabs((existing) =>
         existing.filter((tab) => tab.id !== documentId),
       )
+      // Taken back here rather than on the session's own unmount, which
+      // StrictMode runs twice for every mount it makes.
+      notices.retract({ documentId, scope: "document" })
       const nextActiveId =
         candidateId === HOME_TAB_ID ||
         next.some((tab) => tab.id === candidateId)
@@ -525,7 +562,7 @@ export default function App() {
 
       return remembered
     },
-    [replaceTabs],
+    [notices, replaceTabs],
   )
 
   const requestCloseTab = useCallback(
@@ -544,13 +581,18 @@ export default function App() {
     // promise. Remove the sessions now, so no edit can slip between the dirty
     // check (or discard confirmation) and the close.
     const remembered = rememberAllViews()
+
+    for (const tab of tabsRef.current) {
+      notices.retract({ documentId: tab.id, scope: "document" })
+    }
+
     replaceTabs(() => [])
     activeIdRef.current = HOME_TAB_ID
     setActiveId(HOME_TAB_ID)
     focusWorkspaceTarget(HOME_TAB_ID, true)
 
     return remembered
-  }, [rememberAllViews, replaceTabs])
+  }, [notices, rememberAllViews, replaceTabs])
 
   // One question for the lot, rather than a dialog per dirty document: the
   // reader asked to close everything, and answering the same prompt five times
@@ -1112,19 +1154,6 @@ export default function App() {
     }
   }, [homeActive, refreshRecentFiles])
 
-  const errorMessage =
-    workspaceError === "createFailed"
-      ? t("menu.newFailed")
-      : workspaceError === "fileTooLarge"
-        ? t("viewer.fileTooLarge")
-        : workspaceError === "invalidFile"
-          ? t("viewer.invalidFile")
-          : workspaceError === "newWindowFailed"
-            ? t("menu.newWindowFailed")
-            : workspaceError === "openFailed"
-              ? t("viewer.openFailed")
-              : null
-
   return (
     <div className="h-svh overflow-hidden bg-background">
       {homeActive ? (
@@ -1153,11 +1182,6 @@ export default function App() {
 
       <HomePanel
         active={homeActive}
-        // Only the showing panel carries the message: two live `role="alert"`
-        // nodes for one error is one too many for a screen reader to reach.
-        errorKey={workspaceErrorVersion}
-        errorMessage={homeActive ? errorMessage : null}
-        onDismissError={dismissWorkspaceError}
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
         opening={isOpening}
@@ -1175,6 +1199,7 @@ export default function App() {
           initialWatermark={tab.opensWith?.watermark}
           key={tab.id}
           menu={menuActions}
+          notices={notices}
           onDirtyChange={updateDirty}
           onInitialLayerProgress={tab.opensWith?.onLayerProgress}
           onInitialLayersSettled={tab.opensWith?.onLayersSettled}
@@ -1218,21 +1243,22 @@ export default function App() {
         </div>
       ) : null}
 
-      {/* The workspace's own corner, above the one each document keeps at the
-          same anchor: these two outrank a page notice and stack with each
-          other, so neither of them hides the other. */}
-      <div className="pointer-events-none fixed top-25 right-4 z-60 flex flex-col items-end gap-2">
-        {!homeActive && errorMessage ? (
-          <DismissibleAlert
-            className="pointer-events-auto max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-            dismissKey={workspaceErrorVersion}
-            onDismiss={dismissWorkspaceError}
-          >
-            {errorMessage}
-          </DismissibleAlert>
-        ) : null}
-        <UpdateToast className="pointer-events-auto w-80" update={appUpdate} />
-      </div>
+      <NoticeCenter
+        activeDocumentId={activeId === HOME_TAB_ID ? null : activeId}
+        notices={raisedNotices}
+        onAction={runNoticeAction}
+        onDismiss={dismissNotice}
+        onExpire={notices.dismiss}
+      />
+
+      <UpdateInstallDialog
+        onConfirm={() => {
+          setConfirmingInstall(false)
+          appUpdate.install()
+        }}
+        onOpenChange={setConfirmingInstall}
+        open={confirmingInstall}
+      />
 
       <MergeWizard wizard={mergeWizard} />
 

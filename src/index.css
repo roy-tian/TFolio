@@ -287,6 +287,12 @@ body {
   cursor: inherit;
 }
 
+/* The corner shares the find bar's band and outranks it, so it steps below the
+   bar: `top-22` plus `h-10` is 8rem, and 0.5rem more is the gap after it. */
+:root:has([data-slot="pdf-search"]) [data-slot="notice-center"] {
+  top: 8.5rem;
+}
+
 /* These all need `both`: the default fill would spring a leaving digit back
    over its replacement and reopen the gap it left, off-centring the number. */
 @theme {

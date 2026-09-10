@@ -15,7 +15,6 @@ import { useTranslation } from "react-i18next"
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
-import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PageOdometer } from "@/components/PageOdometer"
@@ -35,6 +34,7 @@ import { ButtonGroup } from "@/components/ui/button-group"
 import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
+import { useDocumentNotices, type NoticeChannel } from "@/hooks/useNotices"
 import { usePageClipboard } from "@/hooks/usePageClipboard"
 import { usePrint } from "@/hooks/usePrint"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
@@ -72,6 +72,7 @@ import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
 import { dropHitAt, insertIndexForHit } from "@/lib/fileDrop"
+import { documentRefusals } from "@/lib/notices"
 import {
   formatPageRanges,
   pastePlan,
@@ -128,31 +129,6 @@ import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 const RECENT_VIEW_WRITE_INTERVAL_MS = 250
 
-type ViewerError =
-  | "annotateFailed"
-  | "editInFlight"
-  | "exportFailed"
-  | "fileTooLarge"
-  | "invalidFile"
-  | "noteFontFailed"
-  | "noteFontMissing"
-  | "openFailed"
-  | "printFailed"
-  | "saveFailed"
-  | null
-
-/**
- * What the thumbnail grid's clipboard just did, as the corner notice says it:
- * which pages a cut or a copy took, and — for a paste — how many landed and
- * the page they went in front of, absent when they went to the end.
- */
-type PageNotice =
-  | { count: number; kind: "copied"; pages: string }
-  | { count: number; kind: "cut"; pages: string }
-  | { at?: number; count: number; kind: "moved" }
-  | { at?: number; count: number; kind: "pasted" }
-  | null
-
 /** A file dragged in from the desktop, as the window's own handler sees it —
     positions in CSS pixels, not the OS's physical ones. `over` carries the
     paths the drag announced on entry, or null when the window never heard
@@ -179,6 +155,12 @@ export type PageDragEvent =
   | { kind: "leave" }
 
 export type DocumentSessionHandle = {
+  /** The reader turning down the fallback face, which lets go of the edit that
+      was waiting on it — the note's text lives nowhere else by then. */
+  dismissNoteFont: () => void
+  /** The reader taking the fallback face, from the notice the workspace draws
+      on this session's behalf. */
+  fetchNoteFont: () => void
   hasUnsavedWorkNow: () => boolean
   /** Opens this document's page-numbers dialog. */
   openPageNumbers: () => void
@@ -234,6 +216,9 @@ type DocumentSessionProps = {
   initialWatermark?: WatermarkConfig | null
   /** The workspace half of the header's menu, which every tab shares. */
   menu: AppMenuActions
+  /** Where this session says what happened. Write-only, and bound to this
+      document below, so a session cannot speak for another's tab. */
+  notices: NoticeChannel
   onDirtyChange: (documentId: number, dirty: boolean) => void
   /** Whether this document may now be written back over its own file. Only the
       session can say — the workspace sees the file and the dirty flag, not the
@@ -264,6 +249,7 @@ function DocumentSession(
     initialViewMode,
     initialWatermark,
     menu,
+    notices,
     onInitialLayerProgress,
     onInitialLayersSettled,
     onDirtyChange,
@@ -314,12 +300,11 @@ function DocumentSession(
   const [searching, setSearching] = useState(false)
   const [searchFailed, setSearchFailed] = useState(false)
   const [searchLimitReached, setSearchLimitReached] = useState(false)
-  const [viewerError, setViewerError] = useState<ViewerError>(null)
-  const [viewerErrorVersion, setViewerErrorVersion] = useState(0)
-  // What the grid's last cut, copy or paste did, for the notice in the corner.
-  // Versioned like the error beside it: the same notice twice is still two.
-  const [pageNotice, setPageNotice] = useState<PageNotice>(null)
-  const [pageNoticeVersion, setPageNoticeVersion] = useState(0)
+  // The one notice this session holds rather than raises: it stands until the
+  // reader answers it, and the held edit below is what the answer is for.
+  const [noteFontOffer, setNoteFontOffer] = useState<
+    "noteFontFailed" | "noteFontMissing" | null
+  >(null)
   /**
    * The edit that failed for want of a face to draw it in, kept so accepting
    * the download can re-run it. A note's text lives nowhere else by then — the
@@ -390,19 +375,24 @@ function DocumentSession(
   const mountedRef = useRef(false)
   const searchGenerationRef = useRef(0)
   const searchCancellationRef = useRef<Promise<void>>(Promise.resolve())
-  const dismissViewerError = useCallback(() => {
-    setViewerError(null)
+  const notice = useDocumentNotices(notices, openedDocument.id)
+  // Which offer a fetch in flight belongs to. A download cannot be called back,
+  // so what it returns to is checked against this instead.
+  const noteFontOfferRef = useRef(0)
+  // The offer and the edit it is holding go together: once it is off the
+  // screen there is no way back to it, and a kept edit would only be re-run by
+  // the next offer.
+  const clearNoteFontOffer = useCallback(() => {
+    noteFontOfferRef.current += 1
+    setNoteFontOffer(null)
     setUnfontedEdit(null)
   }, [])
-  const showViewerError = useCallback((error: NonNullable<ViewerError>) => {
-    setViewerError(error)
-    setViewerErrorVersion((version) => version + 1)
-  }, [])
-  const dismissPageNotice = useCallback(() => setPageNotice(null), [])
-  const showPageNotice = useCallback((notice: NonNullable<PageNotice>) => {
-    setPageNotice(notice)
-    setPageNoticeVersion((version) => version + 1)
-  }, [])
+  // A refusal that outlived what it described would sit over every mark the
+  // reader went on to make successfully.
+  const clearEditRefusals = useCallback(() => {
+    clearNoteFontOffer()
+    notice.retract(documentRefusals)
+  }, [clearNoteFontOffer, notice])
 
   const bookApplies = hasBookSpread(pdfDocument.numPages)
   const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
@@ -457,12 +447,13 @@ function DocumentSession(
     onPaste: useCallback((index: number) => pastePagesRef.current(index), []),
     onTaken: useCallback(
       (taken: PageClipboard) =>
-        showPageNotice({
-          count: taken.pages.length,
-          kind: taken.mode === "cut" ? "cut" : "copied",
-          pages: formatPageRanges(taken.pages),
+        notice.raise(taken.mode === "cut" ? "pagesCut" : "pagesCopied", {
+          values: {
+            count: taken.pages.length,
+            pages: formatPageRanges(taken.pages),
+          },
         }),
-      [showPageNotice],
+      [notice],
     ),
     selectedPages: thumbnailSelection.selectedPages,
   })
@@ -517,17 +508,17 @@ function DocumentSession(
         // and the reader can fetch something that will.
         if (isNoteFontMissing(error)) {
           setUnfontedEdit(command ?? null)
-          showViewerError("noteFontMissing")
+          setNoteFontOffer("noteFontMissing")
           return
         }
 
-        showViewerError("annotateFailed")
+        notice.raise("annotateFailed")
       },
-      [showViewerError],
+      [notice],
     ),
     onExportError: useCallback(
-      () => showViewerError("exportFailed"),
-      [showViewerError],
+      () => notice.raise("exportFailed"),
+      [notice],
     ),
     // A byte-opened document adopts its first export's destination as its
     // source, which is when `path` appears and the save key comes alive.
@@ -551,8 +542,8 @@ function DocumentSession(
       [onSourceChange],
     ),
     onSaveError: useCallback(
-      () => showViewerError("saveFailed"),
-      [showViewerError],
+      () => notice.raise("saveFailed"),
+      [notice],
     ),
     // A structure command replaces the page list wholesale — nothing here
     // mirrors it — and, where it moved the pages under everything keyed by
@@ -608,11 +599,7 @@ function DocumentSession(
       },
       [clearThumbnailSelection, pageClipboardStructureChanged],
     ),
-    // A toast that outlives what it describes would sit over every mark the
-    // reader went on to make successfully. The edit held for a retry goes with
-    // it: once the offer is off the screen there is no way back to it, so
-    // keeping the edit would only leave it to be re-run by the next offer.
-    onSuccess: dismissViewerError,
+    onSuccess: clearEditRefusals,
   })
   const watermark = useWatermark({
     activeConfig: annotations.watermarkConfig,
@@ -641,7 +628,7 @@ function DocumentSession(
   )
   const print = usePrint({
     documentId: pdfDocument?.id,
-    onError: () => showViewerError("printFailed"),
+    onError: () => notice.raise("printFailed"),
     pages: pdfDocument?.pages ?? [],
     rotationAt,
   })
@@ -1457,7 +1444,10 @@ function DocumentSession(
     if (plan.kind === "move") {
       void annotations.reorderPages(plan.order).then((landed) => {
         if (landed) {
-          showPageNotice({ at, count, kind: "moved" })
+          notice.raise(
+            at === undefined ? "pagesMovedToEnd" : "pagesMoved",
+            { values: at === undefined ? { count } : { at, count } },
+          )
         }
       })
 
@@ -1471,7 +1461,10 @@ function DocumentSession(
       .duplicatePages(plan.pages, index, pdfDocument.numPages)
       .then((landed) => {
         if (landed) {
-          showPageNotice({ at, count, kind: "pasted" })
+          notice.raise(
+            at === undefined ? "pagesPastedToEnd" : "pagesPasted",
+            { values: at === undefined ? { count } : { at, count } },
+          )
         } else {
           pageClipboard.disarmPaste()
         }
@@ -1596,14 +1589,14 @@ function DocumentSession(
       // reader's back. A page-shifting edit in flight is the one such case —
       // the gap was read off a grid that edit is about to renumber.
       if (annotations.isStructureBusyNow()) {
-        showViewerError("editInFlight")
+        notice.raise("editInFlight")
       } else {
         void insertFiles(event.paths.filter(isPdfPath), index)
       }
 
       return true
     },
-    [active, annotations, insertFiles, showViewerError, viewMode],
+    [active, annotations, insertFiles, notice, viewMode],
   )
 
   /**
@@ -1643,7 +1636,7 @@ function DocumentSession(
       // Claimed either way, as a file drop over this grid is: the one case it
       // cannot act on is an edit already renumbering the gap it was read off.
       if (annotations.isStructureBusyNow()) {
-        showViewerError("editInFlight")
+        notice.raise("editInFlight")
       } else {
         void annotations.insertPages(
           event.sourceDocumentId,
@@ -1657,7 +1650,7 @@ function DocumentSession(
 
       return true
     },
-    [active, annotations, showViewerError, viewMode],
+    [active, annotations, notice, viewMode],
   )
 
   // The workspace springs this tab open under a drag that is made of pages, so
@@ -1873,9 +1866,55 @@ function DocumentSession(
     return recentViewWriteChainRef.current
   }, [flushRecentView, rememberCurrentView])
 
+  /**
+   * Fetches the fallback face, then re-runs the edit that wanted it.
+   *
+   * The retry is the whole point: by now the note's text is in `unfontedEdit`
+   * and nowhere else. A failed fetch leaves it there and keeps the offer on
+   * screen, so it can be taken again rather than costing the reader what they
+   * typed.
+   */
+  const fetchNoteFont = useCallback(async () => {
+    const offer = noteFontOfferRef.current
+
+    setFetchingNoteFont(true)
+
+    // Only the fetch is caught here: an edit that fails after it reports
+    // through `onAnnotateError`, and reading that as a download failure would
+    // send the reader to check a connection that had just worked.
+    try {
+      await invoke("download_pdf_note_font")
+    } catch {
+      // Silent where the offer is gone: it took the held edit with it, so
+      // saying the fetch failed would put back an offer with nothing to retry.
+      if (offer === noteFontOfferRef.current) {
+        setNoteFontOffer("noteFontFailed")
+      }
+
+      return
+    } finally {
+      setFetchingNoteFont(false)
+    }
+
+    if (offer !== noteFontOfferRef.current) {
+      return
+    }
+
+    setNoteFontOffer(null)
+
+    // Let go before the retry rather than after: an edit that wants a face
+    // again comes back through `onAnnotateError`, which is what puts it back.
+    if (unfontedEdit) {
+      setUnfontedEdit(null)
+      await annotations.commit(unfontedEdit)
+    }
+  }, [annotations, unfontedEdit])
+
   useImperativeHandle(
     ref,
     () => ({
+      dismissNoteFont: clearNoteFontOffer,
+      fetchNoteFont: () => void fetchNoteFont(),
       hasUnsavedWorkNow,
       onFileDrag: handleFileDrag,
       onPageDrag: handlePageDrag,
@@ -1896,7 +1935,9 @@ function DocumentSession(
     }),
     [
       annotations.canUndo,
+      clearNoteFontOffer,
       exportPdf,
+      fetchNoteFont,
       handleFileDrag,
       handlePageDrag,
       hasUnsavedWorkNow,
@@ -1963,92 +2004,17 @@ function DocumentSession(
     ? t("toolbar.hideBookmarks")
     : t("toolbar.showBookmarks")
 
-  /**
-   * Fetches the fallback face, then re-runs the edit that wanted it.
-   *
-   * The retry is the whole point: by now the note's text is in `unfontedEdit`
-   * and nowhere else. A failed fetch leaves it there and keeps the offer on
-   * screen, so it can be taken again rather than costing the reader what they
-   * typed.
-   */
-  const fetchNoteFont = useCallback(async () => {
-    setFetchingNoteFont(true)
-
-    // Only the fetch is caught here: an edit that fails after it reports
-    // through `onAnnotateError`, and reading that as a download failure would
-    // send the reader to check a connection that had just worked.
-    try {
-      await invoke("download_pdf_note_font")
-    } catch {
-      showViewerError("noteFontFailed")
-
-      return
-    } finally {
-      setFetchingNoteFont(false)
+  // The offer is a condition rather than an event, so it is put back whenever
+  // its button changes: raising a standing notice again only updates it.
+  useEffect(() => {
+    if (noteFontOffer) {
+      notice.raise(noteFontOffer, {
+        action: { busy: fetchingNoteFont, kind: "noteFont" },
+      })
+    } else {
+      notice.retract(["noteFontMissing"])
     }
-
-    setViewerError(null)
-
-    // Let go before the retry rather than after: an edit that wants a face
-    // again comes back through `onAnnotateError`, which is what puts it back.
-    if (unfontedEdit) {
-      setUnfontedEdit(null)
-      await annotations.commit(unfontedEdit)
-    }
-  }, [annotations, showViewerError, unfontedEdit])
-
-  const errorAutoDismisses =
-    viewerError !== "noteFontMissing" && viewerError !== "noteFontFailed"
-  const errorMessage =
-    viewerError === "fileTooLarge"
-      ? t("viewer.fileTooLarge")
-      : viewerError === "invalidFile"
-        ? t("viewer.invalidFile")
-        : viewerError === "openFailed"
-          ? t("viewer.openFailed")
-          : viewerError === "exportFailed"
-            ? t("annotate.exportFailed")
-            : viewerError === "saveFailed"
-              ? t("annotate.saveFailed")
-              : viewerError === "printFailed"
-                ? t("print.failed")
-                : viewerError === "annotateFailed"
-                  ? t("annotate.failed")
-                  : viewerError === "editInFlight"
-                    ? t("annotate.dropWhileEditing")
-                    : viewerError === "noteFontMissing"
-                      ? t("annotate.noteFontMissing")
-                      : viewerError === "noteFontFailed"
-                        ? t("annotate.noteFontFailed")
-                        : null
-  const pageNoticeMessage = () => {
-    if (!pageNotice) {
-      return null
-    }
-
-    if (pageNotice.kind === "cut" || pageNotice.kind === "copied") {
-      const { count, pages } = pageNotice
-
-      return pageNotice.kind === "cut"
-        ? t("pageEdit.cutNotice", { count, pages })
-        : t("pageEdit.copiedNotice", { count, pages })
-    }
-
-    // No page to name is the end of the document, where a paste lands after
-    // every page there is.
-    const { at, count, kind } = pageNotice
-
-    if (at === undefined) {
-      return kind === "moved"
-        ? t("pageEdit.movedAtEndNotice", { count })
-        : t("pageEdit.pastedAtEndNotice", { count })
-    }
-
-    return kind === "moved"
-      ? t("pageEdit.movedNotice", { at, count })
-      : t("pageEdit.pastedNotice", { at, count })
-  }
-  const pageMessage = pageNoticeMessage()
+  }, [fetchingNoteFont, notice, noteFontOffer])
 
   return (
     <div
@@ -2440,53 +2406,6 @@ function DocumentSession(
       />
 
       {active && print.sheet ? <PrintSheet pages={print.sheet} /> : null}
-
-      {/* One corner, stacked: a refusal and a clipboard notice can stand at the
-          same moment, and neither may be hidden under the other. */}
-      {errorMessage || pageMessage ? (
-        <div className="fixed top-25 right-4 z-40 flex w-80 flex-col gap-2">
-          {errorMessage ? (
-            <DismissibleAlert
-              // A hidden tab has not shown its warning yet, and the font notices
-              // hold the reader's otherwise-lost note until they answer the offer.
-              autoDismiss={active && errorAutoDismisses}
-              className="rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-              dismissKey={viewerErrorVersion}
-              onDismiss={dismissViewerError}
-            >
-              <div className="flex items-center gap-3">
-                <span>{errorMessage}</span>
-                {/* The only refusals the reader can answer from here, so the only
-                    ones that carry a button — a fetch that failed included, since
-                    the edit waiting on it is still held. */}
-                {viewerError === "noteFontMissing" ||
-                viewerError === "noteFontFailed" ? (
-                  <Button
-                    className="shrink-0"
-                    disabled={fetchingNoteFont}
-                    onClick={() => void fetchNoteFont()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {fetchingNoteFont
-                      ? t("annotate.noteFontFetching")
-                      : t("annotate.noteFontFetch")}
-                  </Button>
-                ) : null}
-              </div>
-            </DismissibleAlert>
-          ) : null}
-          {pageMessage ? (
-            <DismissibleAlert
-              className="rounded-lg border border-border bg-background px-4 py-2 text-sm shadow-lg"
-              dismissKey={pageNoticeVersion}
-              onDismiss={dismissPageNotice}
-            >
-              <span data-page-notice>{pageMessage}</span>
-            </DismissibleAlert>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   )
 })

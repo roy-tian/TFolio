@@ -1,7 +1,6 @@
 import { Clock, FileText, FileUp, LoaderCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { HintTooltip } from "@/components/HintTooltip"
 import {
   HOME_TAB_ID,
@@ -12,9 +11,6 @@ import type { RecentFile } from "@/lib/recentFiles"
 
 type HomePanelProps = {
   active: boolean
-  errorKey: number
-  errorMessage: string | null
-  onDismissError: () => void
   onOpenFile: () => void
   onOpenRecent: (path: string) => void
   opening: boolean
@@ -23,9 +19,6 @@ type HomePanelProps = {
 
 export function HomePanel({
   active,
-  errorKey,
-  errorMessage,
-  onDismissError,
   onOpenFile,
   onOpenRecent,
   opening,
@@ -51,41 +44,28 @@ export function HomePanel({
           </p>
 
           <div className="mt-8 grid w-full gap-6 sm:grid-cols-2 sm:items-start">
-            <div className="flex flex-col">
-              {/* A height of its own, rather than the grid row's: otherwise the
-                  drop target grows with the recent list beside it and shrinks
-                  again when an error message appears under it. */}
-              <button
-                aria-label={t("viewer.chooseFile")}
-                className="group flex min-h-72 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-12 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
-                data-slot="drop-zone"
-                disabled={opening}
-                onClick={onOpenFile}
-                type="button"
-              >
-                {opening ? (
-                  <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
-                ) : (
-                  <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
-                )}
-                <span className="text-lg font-semibold">
-                  {opening ? t("viewer.loading") : t("viewer.dropTitle")}
-                </span>
-                <span className="mt-2 text-sm text-muted-foreground">
-                  {t("viewer.dropDescription")}
-                </span>
-              </button>
-
-              {errorMessage ? (
-                <DismissibleAlert
-                  className="mt-4 self-center text-sm text-destructive"
-                  dismissKey={errorKey}
-                  onDismiss={onDismissError}
-                >
-                  {errorMessage}
-                </DismissibleAlert>
-              ) : null}
-            </div>
+            {/* A height of its own, rather than the grid row's: otherwise the
+                drop target grows with the recent list beside it. */}
+            <button
+              aria-label={t("viewer.chooseFile")}
+              className="group flex min-h-72 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-12 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+              data-slot="drop-zone"
+              disabled={opening}
+              onClick={onOpenFile}
+              type="button"
+            >
+              {opening ? (
+                <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
+              ) : (
+                <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
+              )}
+              <span className="text-lg font-semibold">
+                {opening ? t("viewer.loading") : t("viewer.dropTitle")}
+              </span>
+              <span className="mt-2 text-sm text-muted-foreground">
+                {t("viewer.dropDescription")}
+              </span>
+            </button>
 
             <section
               aria-label={t("home.recent")}
