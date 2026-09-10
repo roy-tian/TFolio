@@ -5,6 +5,7 @@ import {
   openFileButton,
   openPdfFromDisk,
   pointPickerAt,
+  refreshApp,
   seedSettings,
   writeScratchPdf,
 } from "./helpers"
@@ -36,7 +37,7 @@ async function cutPage(pageNumber: number) {
 describe("TFolio notices", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
-    await browser.refresh()
+    await refreshApp()
   })
 
   it("stands a workspace refusal beside a document's own notice", async () => {
@@ -98,10 +99,13 @@ describe("TFolio notices", () => {
 
     await $("[data-slot='pdf-search-trigger']").click()
     await $("[data-slot='pdf-search']").waitForDisplayed()
-    await browser.pause(300)
 
     // The bar spans 88–128px, and the corner's own anchor is 100px, so the
     // stack has to step down or it lands across the field being typed in.
+    await browser.waitUntil(
+      async () => Number.parseFloat(await cornerTop()) > 128,
+      { timeout: 5_000, timeoutMsg: "the corner never stepped below the find bar" },
+    )
     const open = await cornerTop()
 
     expect(Number.parseFloat(closed)).toBe(100)

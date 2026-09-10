@@ -6,6 +6,7 @@ import {
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
+  refreshApp,
   renderedPage,
   seedSettings,
 } from "./helpers"
@@ -54,7 +55,7 @@ describe("TFolio text notes", () => {
   beforeEach(async () => {
     // Type in the default style, whatever a prior run persisted.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("blank.pdf", blankPdf())
     await renderedPage()
@@ -111,13 +112,21 @@ describe("TFolio text notes", () => {
       const editor = await $("textarea[aria-label='Note text']")
       await editor.waitForDisplayed({ timeout: 15_000 })
       await editor.setValue(text)
+      // The mark reaches the canvas as a repaint, so the ink moving off the
+      // pre-add baseline — and back to it on undo — is the commit itself.
+      const baseline = await pageInk()
       await $("button[aria-label='Add this note']").click()
-      await browser.pause(2500)
-
+      await browser.waitUntil(
+        async () => (await pageInk()) !== baseline,
+        { timeout: 15_000, timeoutMsg: "the note never reached the canvas" },
+      )
       const ink = await pageInk()
 
       await $("button[aria-label^='Undo']").click()
-      await browser.pause(2000)
+      await browser.waitUntil(
+        async () => (await pageInk()) === baseline,
+        { timeout: 15_000, timeoutMsg: "undo never restored the canvas" },
+      )
 
       return ink
     }
@@ -142,7 +151,7 @@ describe("TFolio text notes", () => {
         annotate: { textNote: { color: "#000000", fontSize: 48, opacity: 1 } },
         ui: { language: "en", viewMode: "single" },
       })
-      await browser.refresh()
+      await refreshApp()
       await dropZoneButton().waitForExist({ timeout: 30_000 })
       await openPdfFromDisk("blank.pdf", blankPdf())
       await renderedPage()
@@ -336,7 +345,13 @@ describe("TFolio text notes", () => {
     await browser.pause(500)
 
     await clickOnPage(0.3, 0.6)
-    await browser.pause(1500)
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(
+          () => document.activeElement?.getAttribute("aria-label") ?? null,
+        )) === "Note text",
+      { timeout: 5_000, timeoutMsg: "the second placement never took the caret" },
+    )
 
     const focused = await browser.execute(
       () => document.activeElement?.getAttribute("aria-label") ?? null,
@@ -375,7 +390,21 @@ describe("TFolio text notes", () => {
     await pressControl("button[aria-label='Zoom out']")
     await browser.pause(400)
     await pressControl("button[aria-label='Zoom out']")
-    await browser.pause(1800)
+    // The editor re-pins a beat after the page relays out, so the shrunk page
+    // alone is not enough: the offset has to stop moving as well.
+    await browser.waitUntil(
+      async () => {
+        const first = await offsetFromClickPoint()
+        await browser.pause(300)
+        const again = await offsetFromClickPoint()
+        return (
+          again.pageWidth < before.pageWidth &&
+          again.dx === first.dx &&
+          again.dy === first.dy
+        )
+      },
+      { timeout: 10_000, timeoutMsg: "the zoom never relaid out the page" },
+    )
 
     const after = await offsetFromClickPoint()
 
@@ -424,8 +453,21 @@ describe("TFolio text notes", () => {
     await $("textarea[aria-label='Note text']").waitForDisplayed({ timeout: 15_000 })
     await browser.pause(500)
 
+    // The rotation commits as the page box flipping to the rotated footprint;
+    // the bitmap repaints behind it at an unchanged canvas size.
+    const pageBox = () =>
+      browser.execute(() => {
+        const box = document
+          .querySelector("[data-page-number='1']")!
+          .getBoundingClientRect()
+        return `${Math.round(box.width)}x${Math.round(box.height)}`
+      })
+    const beforeRotate = await pageBox()
     await pressControl("button[aria-label='Rotate clockwise']")
-    await browser.pause(1200)
+    await browser.waitUntil(
+      async () => (await pageBox()) !== beforeRotate,
+      { timeout: 10_000, timeoutMsg: "the rotation never relaid out the page" },
+    )
 
     await expect($("textarea[aria-label='Note text']")).toBeDisplayed()
   })
@@ -461,7 +503,7 @@ describe("TFolio text notes", () => {
   // and its reader is the one most likely to be running the app in Chinese.
   it("adds a note through the Chinese interface", async () => {
     await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("blank.pdf", blankPdf())
     await renderedPage()

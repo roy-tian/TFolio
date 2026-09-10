@@ -9,6 +9,7 @@ import {
   dropZoneButton,
   openPdfFromDisk,
   pointPickerAt,
+  refreshApp,
   seedSettings,
   textPdf,
   tooltipOn,
@@ -30,7 +31,18 @@ async function renderedVisiblePage() {
     async () => Number(await canvas.getAttribute("width")) > 200,
     { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
   )
-  await browser.pause(1500)
+
+  // A settled-zoom re-render can follow the first bitmap at the same canvas
+  // size (see `renderedPage`), so the ink has to stop moving too.
+  await browser.pause(400)
+  await browser.waitUntil(
+    async () => {
+      const first = await visibleInk()
+      await browser.pause(400)
+      return (await visibleInk()) === first
+    },
+    { timeout: 15_000, timeoutMsg: "the visible page's paint never settled" },
+  )
 }
 
 function visibleInk() {
@@ -105,7 +117,7 @@ async function closeDialog() {
 describe("TFolio keyboard shortcuts", () => {
   before(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
   })
 
@@ -189,7 +201,7 @@ describe("TFolio keyboard shortcuts", () => {
 
   it("writes every savable document with ctrl+alt+s", async () => {
     // A reload closes what the tests above opened, leaving these two alone.
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
 
     const first = await openPdfFromDisk("first.pdf", textPdf())

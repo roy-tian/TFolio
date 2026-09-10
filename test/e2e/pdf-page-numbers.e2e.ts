@@ -12,6 +12,7 @@ import {
   openPdfFromDisk,
   pagePixelFingerprint,
   renderedPage,
+  refreshApp,
   seedSettings,
   tooltipOn,
 } from "./helpers"
@@ -45,7 +46,7 @@ describe("TFolio page numbers", () => {
     // Everything else unset, the stored page-number style included: it outlives
     // the suite, and would otherwise carry one spec's choices into the next.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("page-numbers.pdf", blankPdf())
     await renderedPage()
@@ -136,7 +137,7 @@ describe("TFolio page numbers", () => {
     // A reload drops everything this WebView held, so what the next document's
     // dialog opens on can only have come from the user-level file the backend
     // keeps. A second document also has no numbers of its own to read instead.
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("page-numbers-style.pdf", blankPdf())
     await renderedPage()
@@ -187,7 +188,7 @@ describe("TFolio page numbers", () => {
   })
 
   it("stops a long run, rolling the document back and freeing the app", async () => {
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     // Long enough that the stop always lands mid-run: this build spends about
     // ten seconds on 600 pages, and the click comes inside the first one.
@@ -225,7 +226,7 @@ describe("TFolio page numbers", () => {
   })
 
   it("coexists with a watermark, disables save, and leaves the file alone", async () => {
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     const sourcePath = await openPdfFromDisk(
       "page-numbers-save.pdf",
@@ -256,8 +257,16 @@ describe("TFolio page numbers", () => {
     // Capture both layers with the whole page in view — the number sits at the
     // bottom, out of frame at the zoom a document opens at.
     mkdirSync("artifacts/e2e", { recursive: true })
+    const pageCanvas = $("[data-page-number='1'] canvas")
+    const beforeFit = Number(await pageCanvas.getAttribute("width"))
     await $("button[aria-label='Fit page']").click()
-    await browser.pause(1500)
+    // The canvas is resized and painted in the same turn, so the width moving
+    // is the repaint itself.
+    await browser.waitUntil(
+      async () =>
+        Number(await pageCanvas.getAttribute("width")) !== beforeFit,
+      { timeout: 10_000, timeoutMsg: "fit page never repainted the page" },
+    )
     await browser.saveScreenshot("artifacts/e2e/page-numbers-both.png")
 
     // Owned page content leaves the document export-only, and the reason is on

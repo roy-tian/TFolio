@@ -13,6 +13,7 @@ import {
   openFileButton,
   openPathViaDialog,
   openPdfFromDisk,
+  refreshApp,
   seedSettings,
 } from "./helpers"
 
@@ -70,10 +71,10 @@ async function settledScrollTop() {
 }
 
 async function resetWorkspace() {
-  await browser.refresh()
+  await refreshApp()
   // The view mode persists, so leave it unset to start from the single view.
   await seedSettings({ ui: { language: "en" } })
-  await browser.refresh()
+  await refreshApp()
   await openFileButton().waitForExist({ timeout: 30_000 })
 }
 
@@ -241,7 +242,6 @@ describe("independent document tabs", () => {
       )!
       viewer.scrollTop += 80
     })
-    await browser.pause(400)
     const readingOffset = await activeScrollTop()
     await expect(pageInput).toHaveValue("5")
 
@@ -251,7 +251,7 @@ describe("independent document tabs", () => {
     // The global default now disagrees with this file, proving that Book comes
     // from the recent entry rather than the ordinary view-mode preference.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForDisplayed()
 
     const entry = recentEntry(filePath)
