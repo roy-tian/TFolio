@@ -5,9 +5,11 @@ import { useTranslation } from "react-i18next"
 
 import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
+import { TextNotePreview } from "@/components/TextNotePreview"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import type { RectDraft } from "@/hooks/useRectTool"
+import type { TextNotePreview as HeldNote } from "@/hooks/useTextNoteTool"
 import {
   dimensionsForRotation,
   MAX_RENDER_WIDTH,
@@ -53,6 +55,8 @@ type PdfPageProps = {
   documentId: number
   /** Live and released rectangles awaiting this page's pixels. */
   drafts: RectDraft[]
+  /** Written notes awaiting this page's pixels. */
+  notes: HeldNote[]
   /** Present only while a select-all stands: the page's menu then offers the
       whole document, which is what is selected, and not this page alone. */
   onCopyAllText?: () => void
@@ -87,6 +91,7 @@ type PdfPageSurfaceProps = {
   activeSearchIndex: number | null
   documentId: number
   drafts: RectDraft[]
+  notes: HeldNote[]
   onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   footprintHeight: number
@@ -109,6 +114,7 @@ function PdfPageSurface({
   activeSearchIndex,
   documentId,
   drafts,
+  notes,
   onCopyAllText,
   onPagePaint,
   footprintHeight,
@@ -242,6 +248,18 @@ function PdfPageSurface({
           ref={canvasRef}
           width={Math.max(1, Math.round(page.width))}
         />
+        {notes.length > 0 ? (
+          <div className="pointer-events-none absolute" style={pageLayerStyle}>
+            {notes.map((note) => (
+              <TextNotePreview
+                key={note.id}
+                layoutHeight={layoutHeight}
+                layoutWidth={layoutWidth}
+                note={note}
+              />
+            ))}
+          </div>
+        ) : null}
         {hasRendered && positionedSearchRects.length > 0 ? (
           <div
             aria-hidden
@@ -312,6 +330,7 @@ export function PdfPage({
   activeSearchIndex,
   documentId,
   drafts,
+  notes,
   onCopyAllText,
   onPagePaint,
   page,
@@ -362,6 +381,7 @@ export function PdfPage({
           activeSearchIndex={activeSearchIndex}
           documentId={documentId}
           drafts={drafts}
+          notes={notes}
           onCopyAllText={onCopyAllText}
           onPagePaint={onPagePaint}
           footprintHeight={footprintHeight}

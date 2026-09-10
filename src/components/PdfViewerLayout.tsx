@@ -24,6 +24,7 @@ import {
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
+import type { TextNotePreview } from "@/hooks/useTextNoteTool"
 import type { RenderEpochs } from "@/lib/annotations"
 import {
   orderAfterMove,
@@ -113,6 +114,8 @@ type LayoutProps = {
   documentId: number
   /** Live and released rectangle previews, each tied to its starting page. */
   drafts: RectDraft[]
+  /** Written notes awaiting the pixels of the page each was placed on. */
+  notes: TextNotePreview[]
   /** Copies the whole document, and stands for a select-all being in force:
       absent, a page's menu falls back to whatever the reader dragged over. */
   onCopyAllText?: () => void
@@ -139,6 +142,7 @@ function SingleLayout({
   activeSearchIndex,
   documentId,
   drafts,
+  notes,
   onCopyAllText,
   onPagePaint,
   pages,
@@ -155,6 +159,7 @@ function SingleLayout({
     <PdfPage
       documentId={documentId}
       drafts={drafts.filter((draft) => draft.pageNumber === index + 1)}
+      notes={notes.filter((note) => note.pageNumber === index + 1)}
       onCopyAllText={onCopyAllText}
       onPagePaint={onPagePaint}
       key={`${documentId}-${index + 1}`}
@@ -177,6 +182,7 @@ function BookLayout({
   activeSearchIndex,
   documentId,
   drafts,
+  notes,
   onCopyAllText,
   onPagePaint,
   pages,
@@ -209,6 +215,7 @@ function BookLayout({
         <PdfPage
           documentId={documentId}
           drafts={drafts.filter((draft) => draft.pageNumber === pageNumber)}
+          notes={notes.filter((note) => note.pageNumber === pageNumber)}
           onCopyAllText={onCopyAllText}
           onPagePaint={onPagePaint}
           key={`${documentId}-${pageNumber}`}
@@ -931,6 +938,7 @@ type PdfViewerLayoutProps = {
   currentPage: number
   documentId: number
   drafts: RectDraft[]
+  notes: TextNotePreview[]
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   fileName: string
   pageEdit: PageEditProps
@@ -961,6 +969,7 @@ export function PdfViewerLayout({
   currentPage,
   documentId,
   drafts,
+  notes,
   onCopyAllText,
   onPagePaint,
   fileName,
@@ -985,6 +994,7 @@ export function PdfViewerLayout({
     contentWidth,
     documentId,
     drafts,
+    notes,
     onCopyAllText: textSelectAll ? onCopyAllText : undefined,
     onPagePaint,
     pages,

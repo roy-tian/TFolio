@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { RefObject } from "react"
 
+import { useReleasedPreviews } from "@/hooks/useReleasedPreviews"
 import {
   clampFraction,
   clientPointToFraction,
   fractionToPagePoint,
+  type PagePoint,
 } from "@/lib/annotationGeometry"
-import type { TextNoteCommand, TextNoteStyle } from "@/lib/annotations"
+import type {
+  RenderEpochs,
+  TextNoteCommand,
+  TextNoteStyle,
+} from "@/lib/annotations"
 import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import {
@@ -18,7 +24,10 @@ import {
 
 type UseTextNoteToolOptions = {
   active: boolean
-  onCommit: (command: TextNoteCommand) => void
+  onCommit: (
+    command: TextNoteCommand,
+    onApplied: (epochs: RenderEpochs) => void,
+  ) => Promise<boolean>
   /** Temporarily detach document listeners without settling the draft or tool. */
   suspended?: boolean
   pages: PdfPageInfo[]
@@ -27,12 +36,25 @@ type UseTextNoteToolOptions = {
   viewerRef: RefObject<HTMLElement | null>
 }
 
+/** A written note, kept on its page until the page's own pixels carry it. */
+export type TextNotePreview = {
+  id: number
+  origin: PagePoint
+  pageNumber: number
+  style: TextNoteStyle
+  text: string
+  /** Present only once the backend has accepted this note. */
+  renderEpoch?: number
+}
+
 export type TextNoteTool = {
   /** Attach to the editor, so a click inside it is not treated as one outside. */
   editorRef: RefObject<HTMLElement | null>
   cancel: () => void
   commit: () => void
   draft: TextNoteDraft | null
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
+  previews: TextNotePreview[]
   setText: (text: string) => void
 }
 
@@ -55,6 +77,8 @@ export function useTextNoteTool({
   viewerRef,
 }: UseTextNoteToolOptions): TextNoteTool {
   const [draft, setDraft] = useState<TextNoteDraft | null>(null)
+  const { onPagePaint, previews, release, takeId } =
+    useReleasedPreviews<TextNotePreview>()
   const editorRef = useRef<HTMLElement | null>(null)
   // The listeners below are bound once per activation but must always act on the
   // draft and style as they are now, not as they were when the effect last ran.
@@ -90,10 +114,23 @@ export function useTextNoteTool({
 
     // An editor closed without a word in it is not an edit. Dropped in silence:
     // the reader has not lost anything, and the backend would refuse it anyway.
-    if (command) {
-      onCommit(command)
+    if (!command) {
+      return
     }
-  }, [onCommit])
+
+    // Closing the editor and holding the note are one update, so the text is
+    // never off the page for a frame while PDFium and a decode catch up.
+    release(
+      {
+        id: takeId(),
+        origin: command.origin,
+        pageNumber: command.pageNumber,
+        style: command.style,
+        text: command.text,
+      },
+      (onApplied) => onCommit(command, onApplied),
+    )
+  }, [onCommit, release, takeId])
 
   const setText = useCallback((text: string) => {
     setDraft((current) =>
@@ -213,5 +250,5 @@ export function useTextNoteTool({
     }
   }, [active, cancel, commit, pages, rotations, suspended, viewerRef])
 
-  return { cancel, commit, draft, editorRef, setText }
+  return { cancel, commit, draft, editorRef, onPagePaint, previews, setText }
 }

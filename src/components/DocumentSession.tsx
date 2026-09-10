@@ -692,6 +692,18 @@ function DocumentSession(
   // draw, so the reader gets the plain pointer back.
   const toolCursor = drawingApplies ? activeTool : null
 
+  // Both drawing tools hold previews that only a page's own paint may retire;
+  // each ignores a paint covering nothing of its own.
+  const retireRectPreviews = rectTool.onPagePaint
+  const retireNotePreviews = textNote.onPagePaint
+  const onPagePaint = useCallback(
+    (pageNumber: number, renderEpoch: number) => {
+      retireRectPreviews(pageNumber, renderEpoch)
+      retireNotePreviews(pageNumber, renderEpoch)
+    },
+    [retireNotePreviews, retireRectPreviews],
+  )
+
   const draftDirty = isNoteWorthKeeping(textNote.draft?.text ?? "")
   const hasUnsavedWorkNow = useCallback(
     () =>
@@ -2307,7 +2319,8 @@ function DocumentSession(
               currentPage={currentPage}
               documentId={pdfDocument.id}
               drafts={rectTool.drafts}
-              onPagePaint={rectTool.onPagePaint}
+              notes={textNote.previews}
+              onPagePaint={onPagePaint}
               fileName={fileName}
               key={pdfDocument.id}
               pageEdit={{

@@ -22,6 +22,10 @@ import {
 } from "@/lib/annotationStyles"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { TextNoteDraft } from "@/lib/textNoteDraft"
+import {
+  noteFontFamily,
+  TEXT_NOTE_LINE_HEIGHT,
+} from "@/lib/textNoteLayout"
 import { cn } from "@/lib/utils"
 
 type TextNoteEditorProps = {
@@ -45,14 +49,6 @@ const EDITOR_WIDTH = 256
 
 /** How close the editor may come to the window's edge before it is pulled in. */
 const VIEWPORT_MARGIN = 8
-
-/**
- * What the note will be drawn in, as closely as CSS can say it: Helvetica for
- * the Latin the standard fonts cover, and the system's own sans for everything
- * past it — the same pair the backend picks between, and in the same order, so
- * the browser's fallback lands where PDFium's does.
- */
-const PREVIEW_FONT_FAMILY = "Helvetica, Arial, sans-serif"
 
 /**
  * Where a note is typed, floating over the page at the point it was placed.
@@ -257,9 +253,9 @@ export function TextNoteEditor({
           rows={3}
           style={{
             color: style.color,
-            fontFamily: PREVIEW_FONT_FAMILY,
+            fontFamily: noteFontFamily(draft.text),
             fontSize: previewSize,
-            lineHeight: 1.2,
+            lineHeight: TEXT_NOTE_LINE_HEIGHT,
             opacity: style.opacity,
           }}
           value={draft.text}
