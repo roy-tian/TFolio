@@ -1,13 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type RefObject,
-} from "react"
-import { flushSync } from "react-dom"
+import { useEffect, useState, type RefObject } from "react"
 
+import { useReleasedPreviews } from "@/hooks/useReleasedPreviews"
 import {
   clampFraction,
   clientPointToFraction,
@@ -62,28 +55,8 @@ export function useRectTool({
   viewerRef,
 }: UseRectToolOptions) {
   const [draft, setDraft] = useState<RectDraft | null>(null)
-  const [pending, setPending] = useState<RectDraft[]>([])
-  const pendingRef = useRef(pending)
-  const nextId = useRef(0)
-  useLayoutEffect(() => {
-    pendingRef.current = pending
-  }, [pending])
-
-  const onPagePaint = useCallback((pageNumber: number, renderEpoch: number) => {
-    const covered = (item: RectDraft) =>
-      item.pageNumber === pageNumber &&
-      item.renderEpoch !== undefined && item.renderEpoch <= renderEpoch
-
-    if (!pendingRef.current.some(covered)) {
-      return
-    }
-
-    // The canvas is replaced in this same task. Retire its previews before the
-    // browser can show the new pixels underneath them (double opacity/blur).
-    flushSync(() => {
-      setPending((current) => current.filter((item) => !covered(item)))
-    })
-  }, [])
+  const { onPagePaint, previews, release, takeId } =
+    useReleasedPreviews<RectDraft>()
 
   useEffect(() => {
     if (!active) {
@@ -165,7 +138,7 @@ export function useRectTool({
       )
 
       gesture = {
-        id: nextId.current++,
+        id: takeId(),
         element: pageElement,
         from,
         page,
@@ -229,35 +202,24 @@ export function useRectTool({
         return
       }
 
-      const released: RectDraft = {
-        id: current.id,
-        pageNumber: current.pageNumber,
-        rect: normalizeFractionRect(current.from, to),
-        style,
-      }
-      setPending((items) => [...items, released])
-      const discard = () =>
-        setPending((items) => items.filter((item) => item.id !== released.id))
-
-      void onCommit(
+      release(
         {
-          bounds,
-          kind: "rect",
+          id: current.id,
           pageNumber: current.pageNumber,
+          rect: normalizeFractionRect(current.from, to),
           style,
         },
-        (epochs) => {
-          setPending((items) => items.map((item) =>
-            item.id === released.id
-              ? { ...item, renderEpoch: epochs[released.pageNumber] }
-              : item,
-          ))
-        },
-      ).then((applied) => {
-        if (!applied) {
-          discard()
-        }
-      }).catch(discard)
+        (onApplied) =>
+          onCommit(
+            {
+              bounds,
+              kind: "rect",
+              pageNumber: current.pageNumber,
+              style,
+            },
+            onApplied,
+          ),
+      )
     }
 
     // The pointer left for good — the OS took over a scroll or a gesture — so
@@ -282,7 +244,7 @@ export function useRectTool({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, onCommit, pages, rotations, style, viewerRef])
+  }, [active, onCommit, pages, release, rotations, style, takeId, viewerRef])
 
-  return { drafts: draft ? [...pending, draft] : pending, onPagePaint }
+  return { drafts: draft ? [...previews, draft] : previews, onPagePaint }
 }
