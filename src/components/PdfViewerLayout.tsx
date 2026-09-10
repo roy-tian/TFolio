@@ -1014,6 +1014,7 @@ export function PdfViewerLayout({
       aria-label={fileName}
       data-pdf-viewer-layout
       data-select-all={textSelectAll}
+      data-view-mode={viewMode}
       onClick={(event) => {
         if (viewMode !== "thumbnail") {
           return

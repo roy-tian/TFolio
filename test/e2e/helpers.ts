@@ -22,13 +22,15 @@ import { $, browser } from "@wdio/globals"
 import type { E2eOverrides } from "../../src/lib/e2e"
 import type { Settings } from "../../src/lib/settings"
 
-/** Where the backend keeps this build's settings: the app data directory
-    Tauri resolves for `com.roytian.tfolio.e2e` on the suite's one platform. */
-const settingsFile = path.join(
-  process.env.XDG_DATA_HOME || path.join(homedir(), ".local/share"),
-  "com.roytian.tfolio.e2e",
-  "settings.toml",
-)
+/** Where the backend keeps this build's settings: the lane's app data
+    directory, known only once the worker's session starts — read per call. */
+function settingsFile() {
+  return path.join(
+    process.env.XDG_DATA_HOME || path.join(homedir(), ".local/share"),
+    "com.roytian.tfolio.e2e",
+    "settings.toml",
+  )
+}
 
 /**
  * A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
@@ -225,7 +227,8 @@ export async function seedSettings(settings: Settings = {}) {
   // below costs this fragile bridge no round trips at all — and it checks the
   // bytes the app will actually read back. Cleared first so that its being
   // there again is the signal.
-  rmSync(settingsFile, { force: true })
+  const settingsPath = settingsFile()
+  rmSync(settingsPath, { force: true })
 
   // As a string: the old seeding passed flat strings through this bridge for a
   // year without trouble, and there is no reason to be the first to hand it
@@ -251,12 +254,12 @@ export async function seedSettings(settings: Settings = {}) {
 
   await browser.waitUntil(
     () => {
-      if (!existsSync(settingsFile)) {
+      if (!existsSync(settingsPath)) {
         return false
       }
 
       // A half-written file simply fails the check and is polled again.
-      const written = readFileSync(settingsFile, "utf8")
+      const written = readFileSync(settingsPath, "utf8")
 
       return wanted.every((value) => written.includes(value))
     },
@@ -436,6 +439,17 @@ export async function appMenuItemEnabled(action: string) {
   return disabled === null
 }
 
+/** Scratch directories this worker has created, removed when the process
+    exits: a spec's files must live until its last assertion has read them
+    back, and only a synchronous exit hook can be relied on there. */
+const scratchDirectories: string[] = []
+
+process.on("exit", () => {
+  for (const directory of scratchDirectories) {
+    rmSync(directory, { force: true, recursive: true })
+  }
+})
+
 /**
  * Writes `contents` to a scratch file and opens it through the app's real
  * choose-a-file flow — only the native dialog is stubbed, resolving with the
@@ -446,6 +460,7 @@ export async function openPdfFromDisk(
   contents: Uint8Array,
 ): Promise<string> {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
+  scratchDirectories.push(directory)
   const filePath = path.join(directory, fileName)
   writeFileSync(filePath, contents)
   await openPathViaDialog(filePath)
@@ -473,6 +488,7 @@ export async function openPathViaDialog(filePath: string) {
  */
 export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
+  scratchDirectories.push(directory)
   const filePath = path.join(directory, fileName)
 
   writeFileSync(filePath, contents)

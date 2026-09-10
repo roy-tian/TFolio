@@ -123,7 +123,9 @@ async function paintedFingerprints(pageCount: number, scope = "") {
         return painted
       },
       {
-        timeout: 15_000,
+        // Generous because a parallel run's lanes share this machine; a
+        // repaint queue can outlast the wait an idle machine never needs.
+        timeout: 30_000,
         timeoutMsg: `cell ${pageNumber} never painted`,
       },
     )

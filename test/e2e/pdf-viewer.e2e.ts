@@ -72,7 +72,19 @@ describe("TFolio PDF viewer", () => {
   // landed and a frame has passed, so a page-number assertion right after a
   // jump would pass against the stale value. Waiting for the scroll to stop
   // plus a short margin covers the revision without a fixed long sleep.
-  async function trackerSettled() {
+  async function trackerSettled(mode?: "book" | "single" | "thumbnail") {
+    // Until a switched-to layout mounts, the outgoing one's scroll reads as
+    // settled, so `mode` first waits for that layout's own container.
+    if (mode) {
+      await browser.waitUntil(
+        async () =>
+          $(
+            `[data-document-session][data-active='true'] [data-view-mode='${mode}']`,
+          ).isExisting(),
+        { timeout: 15_000, timeoutMsg: `the ${mode} layout never mounted` },
+      )
+    }
+
     const scrollTop = () =>
       browser.execute(
         () =>
@@ -86,7 +98,9 @@ describe("TFolio PDF viewer", () => {
         await browser.pause(200)
         return (await scrollTop()) === first
       },
-      { timeout: 8_000, timeoutMsg: "the viewer never stopped scrolling" },
+      // A parallel run's lanes share this machine, so settling can take longer
+      // than on an idle one; the state waited on is unchanged.
+      { timeout: 20_000, timeoutMsg: "the viewer never stopped scrolling" },
     )
     await browser.pause(400)
   }
@@ -303,7 +317,7 @@ describe("TFolio PDF viewer", () => {
     // The tracker only revises the current page once the new layout has
     // mounted, so asserting right away would pass against the stale value
     // before the layout can strand it.
-    await trackerSettled()
+    await trackerSettled("book")
     await expect(pageInput).toHaveValue("5")
 
     // Thumbnails are an image and no selectable text layer; since M7 a click
