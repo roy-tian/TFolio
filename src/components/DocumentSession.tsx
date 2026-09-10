@@ -2263,6 +2263,7 @@ function DocumentSession(
             rectApplies={drawingApplies}
             rectStyle={rectStyle}
             textNoteApplies={drawingApplies}
+            textNoteColor={textNoteStyle.color}
           />
           {active && !macOS ? <WindowControls /> : null}
         </div>
