@@ -4,6 +4,7 @@ import "@wdio/tauri-service"
 import {
   dropZoneButton,
   openPdfFromDisk,
+  refreshApp,
   renderedPage,
   seedSettings,
   textPdf,
@@ -68,7 +69,7 @@ function selectedThumbs() {
 describe("TFolio select all", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
   })
 
@@ -170,7 +171,7 @@ describe("TFolio select all", () => {
 
   it("selects every page in the thumbnail grid", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("grid-all.pdf", textPdf(4))
     await $("button[data-page-number='4']").waitForDisplayed({ timeout: 30_000 })

@@ -10,6 +10,7 @@ import {
   dropZoneButton,
   openPdfFromDisk,
   pagePixelFingerprint,
+  refreshApp,
   renderedPage,
   seedSettings,
   tooltipOn,
@@ -50,7 +51,7 @@ describe("TFolio document watermark", () => {
     // Everything else unset, the stored mark included: it outlives the suite,
     // and would otherwise carry one spec's choices into the next.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("watermark.pdf", blankPdf())
     await renderedPage()
@@ -176,7 +177,7 @@ describe("TFolio document watermark", () => {
   it("applies from thumbnails and leaves the reader's own file alone", async () => {
     // Reopen a known path: the beforeEach fixture deliberately does not expose
     // its scratch path, while the file has to be proved untouched on disk.
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     const sourcePath = await openPdfFromDisk("watermark-save.pdf", blankPdf())
     await renderedPage()

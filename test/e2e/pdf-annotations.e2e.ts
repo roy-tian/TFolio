@@ -6,6 +6,7 @@ import {
   openPdfFromDisk,
   pageInk,
   renderedPage,
+  refreshApp,
   seedSettings,
   textPdf,
 } from "./helpers"
@@ -13,7 +14,7 @@ import {
 describe("TFolio annotations", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("text.pdf", textPdf())
     await renderedPage()
@@ -122,7 +123,7 @@ describe("TFolio annotations", () => {
   })
 
   it("keeps both ends of a cross-page selection mounted until highlight commit", async () => {
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("cross-page-text.pdf", textPdf(6))
     await renderedPage()

@@ -275,6 +275,44 @@ function seededValues(settings: object): string[] {
   })
 }
 
+/**
+ * Reloads the app and waits out the reboot, which is how a settings change
+ * gets applied. A stamp planted on the dying page is what the poll tells its
+ * replacement from: a script that lands early reads the stamp back and waits
+ * again, so it cannot vouch for a page the reload is about to discard. The
+ * pause only keeps the first injection clear of the driver's teardown race —
+ * a script the handoff loses waits out a hard 30s — and the 40s budget
+ * absorbs one such hang and still comes back.
+ */
+export async function refreshApp() {
+  await browser.execute(() => {
+    const stamped = window as Window & { __tfolioReloadStamp?: boolean }
+    stamped.__tfolioReloadStamp = true
+  })
+  await browser.refresh()
+  await browser.pause(250)
+  await browser.waitUntil(
+    async () => {
+      try {
+        return await browser.execute(() => {
+          const stamped = window as Window & { __tfolioReloadStamp?: boolean }
+
+          return (
+            stamped.__tfolioReloadStamp === undefined &&
+            !!document.querySelector("[data-slot='tab-open-file']")
+          )
+        })
+      } catch {
+        return false
+      }
+    },
+    {
+      timeout: 40_000,
+      timeoutMsg: "the app never came back from its refresh",
+    },
+  )
+}
+
 /** The home tab's drop zone, its own route to the native picker. It is in the
     page whichever tab is showing, so it doubles as the signal that the app has
     booted; it is only clickable while the home tab is the one on screen.
@@ -555,7 +593,20 @@ export async function renderedPage() {
     async () => Number(await canvas.getAttribute("width")) > 200,
     { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
   )
-  await browser.pause(1500)
+
+  // The first bitmap can be followed by a re-render once the viewer's zoom
+  // settles (a 150ms debounce), often at the same canvas size — so the width
+  // alone cannot say the paint is final. Two identical fingerprints a beat
+  // apart say the repaint storm is over.
+  await browser.pause(400)
+  await browser.waitUntil(
+    async () => {
+      const first = await pagePixelFingerprint()
+      await browser.pause(400)
+      return (await pagePixelFingerprint()) === first
+    },
+    { timeout: 15_000, timeoutMsg: "page 1's paint never settled" },
+  )
 }
 
 /**

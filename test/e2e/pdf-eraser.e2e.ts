@@ -6,6 +6,7 @@ import {
   openPdfFromDisk,
   pagePixelFingerprint,
   renderedPage,
+  refreshApp,
   seedSettings,
   stripedPdf,
 } from "./helpers"
@@ -82,7 +83,7 @@ async function changedFrom(fingerprint: number, message: string) {
 describe("TFolio eraser", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("striped.pdf", stripedPdf())
     await renderedPage()

@@ -13,6 +13,7 @@ import {
   openPdfFromBytes,
   openPdfFromDisk,
   pageInk,
+  refreshApp,
   renderedPage,
   seedSettings,
   textPdf,
@@ -50,7 +51,7 @@ async function highlightTheText() {
 describe("TFolio save", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
   })
 
@@ -92,7 +93,7 @@ describe("TFolio save", () => {
     // The saved file has to hold the mark: reopened from the same path, the
     // page carries more ink than it did clean. Reloading first, because the
     // drop zone — the only way to the picker — exists only without a document.
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPathViaDialog(filePath)
     await renderedPage()

@@ -10,6 +10,7 @@ import {
   hoverElement,
   openPathViaDialog,
   openPdfFromDisk,
+  refreshApp,
   seedSettings,
   stripedPdf,
   tooltipOn,
@@ -388,7 +389,7 @@ function activeDocumentId() {
 describe("TFolio page editing", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
-    await browser.refresh()
+    await refreshApp()
   })
 
   it("selects with click, ctrl+click, and shift+click", async () => {
@@ -942,7 +943,7 @@ describe("TFolio page editing", () => {
     })
 
     // The saved file, reopened, still reads [4, 2, 3].
-    await browser.refresh()
+    await refreshApp()
     await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
     await openPathViaDialog(filePath)
     await browser.waitUntil(async () => (await thumbCount()) === 3, {

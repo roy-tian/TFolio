@@ -6,6 +6,7 @@ import {
   dropZoneButton,
   minimalPdf,
   pointMultiPickerAt,
+  refreshApp,
   seedSettings,
   writeScratchPdf,
 } from "./helpers"
@@ -188,7 +189,7 @@ describe("merge wizard", () => {
     // The merged document opens on the grid of its own accord; pinning the
     // stored preference to single view is what proves it.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
   })
 

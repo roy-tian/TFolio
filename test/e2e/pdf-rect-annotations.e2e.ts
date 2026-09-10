@@ -6,6 +6,7 @@ import {
   openPdfFromDisk,
   pageInk,
   pagePixelFingerprint,
+  refreshApp,
   renderedPage,
   seedSettings,
   stripedPdf,
@@ -78,7 +79,7 @@ describe("TFolio rectangle annotations", () => {
   beforeEach(async () => {
     // Draw with the default style, whatever a prior run persisted.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("striped.pdf", stripedPdf())
     await renderedPage()
@@ -208,7 +209,7 @@ describe("TFolio rectangle annotations", () => {
       },
       ui: { language: "en", viewMode: "single" },
     })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("striped.pdf", stripedPdf())
     await renderedPage()

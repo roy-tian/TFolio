@@ -3,6 +3,7 @@ import "@wdio/tauri-service"
 
 import {
   openPdfFromDisk,
+  refreshApp,
   seedSettings,
   wrappedSearchPdf,
 } from "./helpers"
@@ -10,7 +11,7 @@ import {
 describe("TFolio PDF search", () => {
   before(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("FilenameNeedle.pdf", wrappedSearchPdf())
     await $("[data-page-number='1'] canvas").waitForDisplayed()
   })

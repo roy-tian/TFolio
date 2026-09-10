@@ -2,7 +2,7 @@ import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
-import { minimalPdf, openPdfFromDisk, renderedPage, seedSettings } from "./helpers"
+import { minimalPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings } from "./helpers"
 
 type PrintSeam = Window & {
   __tfolioE2E?: E2eOverrides
@@ -66,7 +66,7 @@ async function printAndReadSheet(): Promise<SheetPage[]> {
 describe("TFolio printing", () => {
   before(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("print.pdf", minimalPdf(3))
     await renderedPage()
 

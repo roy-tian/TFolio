@@ -4,6 +4,7 @@ import "@wdio/tauri-service"
 import {
   minimalPdf,
   openPdfFromDisk,
+  refreshApp,
   seedSettings,
 } from "./helpers"
 
@@ -38,7 +39,7 @@ async function expectShadcnTooltip(label: string) {
 describe("TFolio toolbar tooltips", () => {
   before(async () => {
     await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("toolbar-tooltips.pdf", minimalPdf(2))
     await $("[data-page-number='1']").waitForDisplayed()
   })
