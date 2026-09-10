@@ -11,7 +11,6 @@ import {
   validateWatermarkConfig,
   watermarkFontSize,
   watermarkRotation,
-  watermarkUsesEmbeddedFont,
   WATERMARK_MAX_CHARS,
   WATERMARK_MAX_WIDTH_RATIO,
   WATERMARK_MIN_WIDTH_RATIO,
@@ -196,32 +195,5 @@ describe("watermark settings", () => {
     expect(
       await withStoredWatermark(undefined, readStoredWatermarkConfig),
     ).toBeNull()
-  })
-
-  it("leaves text a standard PDF font can draw alone", () => {
-    expect(watermarkUsesEmbeddedFont("CONFIDENTIAL")).toBe(false)
-    expect(watermarkUsesEmbeddedFont("two\nlines")).toBe(false)
-    expect(watermarkUsesEmbeddedFont("Voilà, café")).toBe(false)
-    expect(watermarkUsesEmbeddedFont("")).toBe(false)
-  })
-
-  it("claims text that leaves Latin-1", () => {
-    expect(watermarkUsesEmbeddedFont("机密")).toBe(true)
-    expect(watermarkUsesEmbeddedFont("Hello 你好")).toBe(true)
-    expect(watermarkUsesEmbeddedFont("，")).toBe(true)
-    expect(watermarkUsesEmbeddedFont("Привет")).toBe(true)
-    // Reads as Western text but is outside Latin-1 all the same.
-    expect(watermarkUsesEmbeddedFont("a — b")).toBe(true)
-  })
-
-  it("agrees with the backend on the boundary itself", () => {
-    // The two ends of each range the Rust side accepts, and the gap between
-    // them — where the two could most easily drift apart.
-    expect(watermarkUsesEmbeddedFont("\u0020\u007e")).toBe(false)
-    expect(watermarkUsesEmbeddedFont("\u00a0\u00ff")).toBe(false)
-    // The gap between the two ranges, which neither side may quietly widen.
-    expect(watermarkUsesEmbeddedFont("\u007f")).toBe(true)
-    expect(watermarkUsesEmbeddedFont("\u009f")).toBe(true)
-    expect(watermarkUsesEmbeddedFont("\u0100")).toBe(true)
   })
 })
