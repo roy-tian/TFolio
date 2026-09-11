@@ -879,6 +879,7 @@ describe("TFolio page editing", () => {
   it("carries a whole selected block across, one undo deep", async () => {
     await openPdfFromDisk("into-block.pdf", stripedPdf())
     const [striped] = await paintedFingerprints(1, ACTIVE_GRID)
+    const destination = await activeDocumentId()
 
     // Left on a view with no gaps to drop into: the drag has to bring the
     // document it opens to its grid, or the pages would arrive nowhere. The
@@ -887,6 +888,9 @@ describe("TFolio page editing", () => {
     await $(`${ACTIVE_GRID} button[aria-label='Single page']`).click()
 
     await openPdfFromDisk("from-block.pdf", bandedPdf(3))
+    await browser.waitUntil(async () => (await activeDocumentId()) !== destination, {
+      timeoutMsg: "the source document never became active",
+    })
     await $(`${ACTIVE_GRID} button[aria-label='Thumbnails']`).click()
     const [first, second] = await paintedFingerprints(3, ACTIVE_GRID)
     const source = await activeDocumentId()

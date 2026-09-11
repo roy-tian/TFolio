@@ -22,14 +22,28 @@ const visible = "[data-document-session]:not([hidden])"
 
 const tabCount = () => $$("button[role='tab']").length
 
-async function renderedVisiblePage() {
-  const page = await $(`${visible} [data-page-number='1']`)
-  await page.waitForDisplayed({ timeout: 30_000 })
-
-  const canvas = await page.$("canvas")
+async function renderedVisiblePage(fileName: string) {
   await browser.waitUntil(
-    async () => Number(await canvas.getAttribute("width")) > 200,
-    { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
+    () =>
+      browser.execute((css: string, expectedFileName: string) => {
+        const layout = document.querySelector<HTMLElement>(
+          `${css} [data-pdf-viewer-layout]`,
+        )
+        const page = layout?.querySelector<HTMLElement>(
+          "[data-page-number='1']",
+        )
+        const canvas = page?.querySelector("canvas")
+
+        return (
+          layout?.getAttribute("aria-label") === expectedFileName &&
+          Boolean(page && page.getClientRects().length > 0) &&
+          (canvas?.width ?? 0) > 200
+        )
+      }, visible, fileName),
+    {
+      timeout: 30_000,
+      timeoutMsg: `${fileName} page 1 never finished rendering`,
+    },
   )
 
   // A settled-zoom re-render can follow the first bitmap at the same canvas
@@ -123,7 +137,7 @@ describe("TFolio keyboard shortcuts", () => {
 
   it("names each chord beside the control that answers it", async () => {
     await openPdfFromDisk("shortcuts.pdf", textPdf())
-    await renderedVisiblePage()
+    await renderedVisiblePage("shortcuts.pdf")
 
     expect(await tooltipOn("[data-slot='pdf-print-trigger']")).toContain(
       "Ctrl+P",
@@ -160,7 +174,7 @@ describe("TFolio keyboard shortcuts", () => {
 
   it("undoes with ctrl+z and writes the opened file with ctrl+s", async () => {
     const filePath = await openPdfFromDisk("saved-by-key.pdf", textPdf())
-    await renderedVisiblePage()
+    await renderedVisiblePage("saved-by-key.pdf")
     const original = readFileSync(filePath)
 
     const clean = await markVisibleDocument("the highlight never reached the page")
@@ -205,12 +219,12 @@ describe("TFolio keyboard shortcuts", () => {
     await dropZoneButton().waitForExist({ timeout: 30_000 })
 
     const first = await openPdfFromDisk("first.pdf", textPdf())
-    await renderedVisiblePage()
+    await renderedVisiblePage("first.pdf")
     const firstBytes = readFileSync(first)
     await markVisibleDocument("no mark on the first document")
 
     const second = await openPdfFromDisk("second.pdf", textPdf())
-    await renderedVisiblePage()
+    await renderedVisiblePage("second.pdf")
     const secondBytes = readFileSync(second)
     await markVisibleDocument("no mark on the second document")
 
