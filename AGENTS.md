@@ -7,7 +7,8 @@
 - TypeScript has no formatter: two-space indent, double quotes, no semicolons.
 - Add UI primitives through shadcn's pinned `base-nova` registry.
 - User-facing strings need keys in every locale; `en` defines the typed schema.
-- Comments explain only non-obvious reasons, at most two lines per block.
+- Comments are WHY-only: delete any comment the code already makes obvious; keep
+  only special, counterintuitive reasons, at most two lines per comment.
 - Before a PR, run `bun run version:check`, `bun run test`, `bun run build`, and
   Cargo `fmt -- --check`, `clippy --locked -- -D warnings`, `check --locked`,
   `test --locked` against `src-tauri/Cargo.toml`. Backend or GUI changes also require `bun run test:all`.
