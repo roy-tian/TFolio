@@ -8,3 +8,8 @@ export const toolbarSelectionBarClassName = `${selectionBarShape} after:bg-blue-
 
 /** The ring keeps an ink close to the toolbar's own colour from vanishing. */
 export const toolbarInkBarClassName = `${selectionBarShape} after:bg-(--tool-ink) after:ring-1 after:ring-foreground/25`
+
+/** The groups' border merge drops every child-after-the-first's left border,
+    skewing the padding box the strip centres in — a transparent one restores it. */
+export const toolbarCenteredStripButtonClassName =
+  "not-first:border-l! not-first:border-l-transparent"

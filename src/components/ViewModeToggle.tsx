@@ -8,7 +8,11 @@ import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
+import {
+  toolbarCenteredStripButtonClassName,
+  toolbarSelectionBarClassName,
+} from "@/lib/toolbarStyles"
+import { cn } from "@/lib/utils"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 const options: Array<{
@@ -62,7 +66,10 @@ export function ViewModeToggle({
           <ToolbarTooltip key={option.value} label={label}>
             <ToggleGroupItem
               aria-label={label}
-              className={toolbarSelectionBarClassName}
+              className={cn(
+                toolbarSelectionBarClassName,
+                toolbarCenteredStripButtonClassName,
+              )}
               disabled={option.value === "book" && !bookApplies}
               value={option.value}
             >
