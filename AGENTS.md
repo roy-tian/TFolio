@@ -9,6 +9,10 @@
 - User-facing strings need keys in every locale; `en` defines the typed schema.
 - Comments are WHY-only: delete any comment the code already makes obvious; keep
   only special, counterintuitive reasons, at most two lines per comment.
+- One file, one concern. When a second domain settles into a file — another
+  feature in one `impl` or component, fixtures beside tests — extract it to a
+  submodule, hook or sibling module; ~1000 lines is the signal to look, and a
+  cohesive domain may legitimately exceed it.
 - Before a PR, run `bun run version:check`, `bun run test`, `bun run build`, and
   Cargo `fmt -- --check`, `clippy --locked -- -D warnings`, `check --locked`,
   `test --locked` against `src-tauri/Cargo.toml`. Backend or GUI changes also require `bun run test:all`.
