@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
-    cancel_pdf_operation, cancel_pdf_search, close_pdf, create_pdf, delete_pdf_annotations,
-    delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages, export_pdf,
-    export_pdf_page_images, export_watermarked_pdf_copies, extract_pdf_page_plain_text,
+    cancel_pdf_operation, cancel_pdf_search, cancel_word_conversion, close_pdf, create_pdf,
+    delete_pdf_annotations, delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages,
+    export_pdf, export_pdf_page_images, export_watermarked_pdf_copies, extract_pdf_page_plain_text,
     extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
     insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_pdf,
     open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
@@ -25,7 +25,9 @@ pub use engine::PdfiumState;
 pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};
 pub use watermark::WatermarkConfig;
 
-const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
+// The one ceiling every PDF this app reads is held to, wherever it came from
+// — also the ceiling a conversion's output must meet before it is one.
+pub(crate) const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
 
 /// The one wording for the size refusal, from all three checks: the frontend
 /// tells "too large" apart from every other open failure by the "MiB limit"
@@ -139,11 +141,25 @@ pub struct WatermarkCopiesPlan {
 
 /// What a merge reads one of its sources as. An image has no pages of its own:
 /// it is laid on a sheet, which is what the wizard's row says it will become.
+/// A Word document arrives as the PDF this machine's own office suite made of
+/// it — the only renderer its layout can be trusted to.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeSourceKind {
     Pdf,
     Image,
+    Word,
+}
+
+/// Why a Word document could not become a PDF. The wizard words these itself;
+/// the detail an engine reported stays in the error it came with.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeSourceError {
+    /// No application that can convert a Word document is installed.
+    ConverterMissing,
+    /// The installed applications could not convert this file.
+    ConversionFailed,
 }
 
 /// What one candidate file of a guided merge holds, read before anything is
@@ -153,12 +169,16 @@ pub enum MergeSourceKind {
 pub struct PdfFileSummary {
     path: String,
     kind: MergeSourceKind,
-    /// `None` when the file could not be read as a PDF, so the row shows as
+    /// `None` when the file could not be read, so the row shows as
     /// unusable rather than silently going missing from the list.
     page_count: Option<i32>,
     /// Whether the file brings bookmarks of its own — what makes the
     /// bookmark-keeping modes worth offering.
     has_outline: bool,
+    /// Set only where "unreadable" would understate the row: a Word document
+    /// that no installed application could convert, or none could be found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<MergeSourceError>,
 }
 
 /// What an export wrote and where it stands relative to the document's source.

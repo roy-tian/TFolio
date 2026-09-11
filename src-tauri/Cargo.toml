@@ -77,6 +77,14 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
+# The Windows Word-import engine's probe: whether Word's and WPS's
+# automation classes are registered, read straight from the merged HKCR
+# view. Already in the tree (the Tauri stack pulls it in), so naming it here
+# adds a direct use, not a new dependency, and this section costs the Linux
+# and macOS builds nothing.
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
+
 # pdfium-render 0.9.3 binds FPDF_MovePages but exposes no safe wrapper, and
 # same-document page reordering has no other route (rebuilding via
 # FPDF_ImportPages orphans outline destinations). The fork adds only

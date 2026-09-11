@@ -9,7 +9,10 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
+use crate::convert::WORD_EXTENSIONS;
 use crate::recent::RecentFiles;
+use crate::settings::{word_conversion_enabled, Settings};
+use crate::store::Store;
 use crate::windows::{record_document, DocumentOwners};
 
 use super::engine::{OperationTarget, MERGE_IMAGE_EXTENSIONS};
@@ -383,6 +386,15 @@ pub async fn cancel_pdf_merge(state: State<'_, PdfiumState>) -> Result<bool, Str
     Ok(state.0.cancel_operation(OperationTarget::Merge))
 }
 
+/// Stops the Word→PDF conversions behind a wizard inspection. Those are the
+/// one slow thing an inspection can be doing, and they run outside every
+/// PDFium lock — so, like the other cancels, this names no document and
+/// waits for nothing.
+#[tauri::command]
+pub async fn cancel_word_conversion(state: State<'_, PdfiumState>) -> Result<bool, String> {
+    Ok(state.0.cancel_operation(OperationTarget::Convert))
+}
+
 /// Removes marks this session made, by the ids their adds handed back — what an
 /// undo and the eraser both go through. Reports the page each was on, so the
 /// frontend can redraw exactly those.
@@ -639,8 +651,10 @@ pub async fn pick_pdf_paths(
     filter_label: String,
     app: AppHandle,
     state: State<'_, PdfiumState>,
+    settings: State<'_, Store<Settings>>,
 ) -> Result<Vec<String>, String> {
     let engine = Arc::clone(&state.0);
+    let word = word_conversion_enabled(&settings);
 
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
         // One filter covering everything a merge can take: a reader adding a
@@ -648,6 +662,12 @@ pub async fn pick_pdf_paths(
         let mut extensions = vec!["pdf"];
 
         extensions.extend_from_slice(&MERGE_IMAGE_EXTENSIONS);
+
+        // Word documents follow the reader's own setting: the dialog offering
+        // a file the backend would then refuse is a worse promise than none.
+        if word {
+            extensions.extend_from_slice(&WORD_EXTENSIONS);
+        }
 
         let Some(picked) = app
             .dialog()
@@ -683,8 +703,10 @@ pub async fn pick_pdf_paths(
 pub async fn inspect_pdf_files(
     paths: Vec<String>,
     state: State<'_, PdfiumState>,
+    settings: State<'_, Store<Settings>>,
 ) -> Result<Vec<PdfFileSummary>, String> {
     let engine = Arc::clone(&state.0);
+    let word = word_conversion_enabled(&settings);
 
     tauri::async_runtime::spawn_blocking(move || {
         let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
@@ -696,7 +718,7 @@ pub async fn inspect_pdf_files(
             ensure_approved(&engine, path)?;
         }
 
-        engine.inspect_files(paths)
+        engine.inspect_files(paths, word)
     })
     .await
     .map_err(|error| format!("PDFium inspection task failed: {error}"))?
@@ -713,10 +735,12 @@ pub async fn merge_pdf_files(
     plan: MergePlan,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
+    settings: State<'_, Store<Settings>>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&state.0);
+    let word = word_conversion_enabled(&settings);
 
     let merged = tauri::async_runtime::spawn_blocking(move || {
         let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
@@ -733,6 +757,7 @@ pub async fn merge_pdf_files(
             plan.smart_padding,
             plan.normalize_a4,
             plan.bookmarks,
+            word,
             channel_progress(on_progress),
         )
     })
@@ -883,8 +908,10 @@ pub async fn export_watermarked_pdf_copies(
     on_progress: Channel<PdfProgress>,
     app: AppHandle,
     state: State<'_, PdfiumState>,
+    settings: State<'_, Store<Settings>>,
 ) -> Result<Option<String>, String> {
     let engine = Arc::clone(&state.0);
+    let word = word_conversion_enabled(&settings);
 
     export_archive(suggested_name, filter_label, app, move |path| {
         let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
@@ -898,6 +925,7 @@ pub async fn export_watermarked_pdf_copies(
             paths,
             plan.normalize_a4,
             plan.watermark,
+            word,
             path,
             channel_progress(on_progress),
         )

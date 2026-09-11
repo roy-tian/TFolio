@@ -1,3 +1,4 @@
+mod convert;
 mod launch;
 mod pdfium;
 mod recent;
@@ -10,9 +11,9 @@ use launch::{take_launch_pdfs, LaunchQueue};
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
-    cancel_pdf_operation, cancel_pdf_search, close_pdf, create_pdf, delete_pdf_annotations,
-    delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages, export_pdf,
-    export_pdf_page_images, export_watermarked_pdf_copies, extract_pdf_page_plain_text,
+    cancel_pdf_operation, cancel_pdf_search, cancel_word_conversion, close_pdf, create_pdf,
+    delete_pdf_annotations, delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages,
+    export_pdf, export_pdf_page_images, export_watermarked_pdf_copies, extract_pdf_page_plain_text,
     extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
     insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_pdf,
     open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
@@ -160,6 +161,7 @@ pub fn run() {
             remove_pdf_page_numbers,
             cancel_pdf_operation,
             cancel_pdf_merge,
+            cancel_word_conversion,
             settings,
             set_settings,
             update_status,

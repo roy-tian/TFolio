@@ -108,6 +108,7 @@ fn test_engine() -> &'static PdfiumEngine {
     static ENGINE: std::sync::OnceLock<PdfiumEngine> = std::sync::OnceLock::new();
 
     ENGINE.get_or_init(|| PdfiumEngine {
+        word: crate::convert::WordConverter::nowhere(),
         pdfium: test_pdfium(),
         documents: Mutex::new(HashMap::new()),
         next_document_id: AtomicU64::new(1),
@@ -3098,6 +3099,7 @@ fn embeds_no_font_for_a_latin_note() {
 /// through it — alone.
 fn font_engine(system_face: Option<(Vec<u8>, usize)>, fallback: Vec<PathBuf>) -> PdfiumEngine {
     PdfiumEngine {
+        word: crate::convert::WordConverter::at_directory(std::env::temp_dir()),
         pdfium: test_pdfium(),
         documents: Mutex::new(HashMap::new()),
         next_document_id: AtomicU64::new(1),
@@ -5996,6 +5998,7 @@ fn merge_files_appends_every_file_in_order() {
             false,
             false,
             MergeBookmarks::None,
+            false,
             |completed, total| progress.push((completed, total)),
         )
         .expect("PDFium should merge the files")
@@ -6034,11 +6037,18 @@ fn a_stopped_merge_hands_back_nothing() {
     // Stopped from the run's own progress, where the reader's cancel lands:
     // while the merge holds the document lock.
     let merged = engine
-        .merge_files_with_progress(paths, false, false, MergeBookmarks::None, |completed, _| {
-            if completed > 0 {
-                engine.cancel_operation(OperationTarget::Merge);
-            }
-        })
+        .merge_files_with_progress(
+            paths,
+            false,
+            false,
+            MergeBookmarks::None,
+            false,
+            |completed, _| {
+                if completed > 0 {
+                    engine.cancel_operation(OperationTarget::Merge);
+                }
+            },
+        )
         .expect("a stopped merge is not a failure");
 
     // Nothing to check in the store beyond this: handing back no document is
@@ -6172,7 +6182,7 @@ fn a_merge_lays_an_image_on_a_sheet_of_its_own() {
     // Each image is read the way the merge will read it, so the row the wizard
     // shows and the pages it gets cannot disagree.
     let summaries = engine
-        .inspect_files(vec![pdf.clone(), wide.clone(), tall.clone()])
+        .inspect_files(vec![pdf.clone(), wide.clone(), tall.clone()], false)
         .expect("the files should inspect");
 
     assert!(matches!(summaries[0].kind, MergeSourceKind::Pdf));
@@ -6267,7 +6277,7 @@ fn a_file_that_is_no_image_is_reported_unusable_rather_than_dropped() {
     fs::write(&path, b"not a PNG at all").expect("the file should write to disk");
 
     let summaries = engine
-        .inspect_files(vec![path.clone()])
+        .inspect_files(vec![path.clone()], false)
         .expect("the inspection should still answer");
 
     assert_eq!(summaries.len(), 1);
@@ -6334,7 +6344,14 @@ fn watermarked_copies_are_written_one_per_source() {
     let watermark = watermark_config("DRAFT");
 
     let written = engine
-        .export_watermarked_copies(paths.clone(), true, Some(watermark), &archive, |_, _| {})
+        .export_watermarked_copies(
+            paths.clone(),
+            true,
+            Some(watermark),
+            false,
+            &archive,
+            |_, _| {},
+        )
         .expect("the copies should export");
 
     assert!(written);
@@ -6389,7 +6406,7 @@ fn a_watermark_export_refuses_to_replace_one_of_its_own_sources() {
     let destination = paths[1].clone();
 
     let refused = engine
-        .export_watermarked_copies(paths.clone(), false, None, &destination, |_, _| {})
+        .export_watermarked_copies(paths.clone(), false, None, false, &destination, |_, _| {})
         .expect_err("an archive must not land on a file it reads");
 
     assert!(refused.contains("built from"), "{refused}");
@@ -6745,7 +6762,7 @@ fn inspecting_files_reports_page_counts_and_leaves_unreadable_ones_in_place() {
     );
 
     let summaries = engine
-        .inspect_files(paths.clone())
+        .inspect_files(paths.clone(), false)
         .expect("the sweep should not fail over one bad file");
 
     assert_eq!(summaries.len(), 3, "every row the reader added stays");
@@ -6792,4 +6809,103 @@ fn writing_the_outline_leaves_the_pages_as_pdfium_saved_them() {
     );
 
     fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_word_document_that_cannot_convert_is_its_own_kind_of_unreadable() {
+    let engine = test_engine();
+    let directory = scratch_directory("inspect-word");
+    let pdf = directory.join("plain.pdf");
+
+    fs::write(&pdf, banded_pdf(&[20])).expect("the source should write to disk");
+
+    let word = directory.join("letter.docx");
+
+    fs::write(&word, b"not a document at all").expect("the source should write to disk");
+
+    let summaries = engine
+        .inspect_files(vec![pdf, word.clone()], true)
+        .expect("the files should inspect");
+
+    assert!(matches!(summaries[0].kind, MergeSourceKind::Pdf));
+    assert_eq!(summaries[0].page_count, Some(1));
+    // The Word row keeps its kind and says which failure it carries, rather
+    // than passing as an ordinary unreadable PDF.
+    assert!(matches!(summaries[1].kind, MergeSourceKind::Word));
+    assert_eq!(summaries[1].page_count, None);
+    assert!(matches!(
+        summaries[1].error,
+        Some(MergeSourceError::ConversionFailed)
+    ));
+
+    // With the conversions off, the same file is unreadable the plain way —
+    // the behaviour a reader who turned the setting off has chosen.
+    let off = engine
+        .inspect_files(vec![word], false)
+        .expect("the file should still inspect");
+
+    assert!(matches!(off[0].kind, MergeSourceKind::Pdf));
+    assert_eq!(off[0].page_count, None);
+    assert!(off[0].error.is_none());
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_merge_refuses_a_word_document_that_cannot_be_converted() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-word");
+    let pdf = directory.join("plain.pdf");
+
+    fs::write(&pdf, banded_pdf(&[20])).expect("the source should write to disk");
+
+    let word = directory.join("letter.docx");
+
+    fs::write(&word, b"not a document at all").expect("the source should write to disk");
+
+    let mut progress = Vec::new();
+    let error = engine
+        .merge_files_with_progress(
+            vec![word, pdf],
+            false,
+            false,
+            MergeBookmarks::None,
+            true,
+            |completed, total| progress.push((completed, total)),
+        )
+        .expect_err("the conversion refusal should fail the merge");
+
+    assert!(error.contains("could not be converted"), "{error}");
+
+    // The estimate promised one conversion; the refusal reconciles the bar
+    // back to what the run will really do.
+    assert_eq!(progress, vec![(0, 6), (0, 5)]);
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn the_copies_export_refuses_a_word_document_that_cannot_be_converted() {
+    let engine = test_engine();
+    let directory = scratch_directory("copies-word");
+    let word = directory.join("letter.docx");
+
+    fs::write(&word, b"not a document at all").expect("the source should write to disk");
+
+    let archive = directory.join("copies.zip");
+    let mut progress = Vec::new();
+    let error = engine
+        .export_watermarked_copies(
+            vec![word],
+            false,
+            None,
+            true,
+            &archive,
+            |completed, total| progress.push((completed, total)),
+        )
+        .expect_err("the conversion refusal should fail the export");
+
+    assert!(error.contains("could not be converted"), "{error}");
+    assert_eq!(progress, vec![(0, 2), (0, 1)]);
+    assert!(!archive.exists(), "a refused export writes nothing");
 }

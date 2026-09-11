@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- What macOS shows the first time the import wizard drives Word over
+	     AppleScript: the permission prompt names this app and this reason.
+	     The bundler merges this file over the Info.plist it generates. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>TFolio asks Microsoft Word to convert the Word documents you bring into the import wizard.</string>
+</dict>
+</plist>

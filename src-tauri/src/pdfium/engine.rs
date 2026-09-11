@@ -40,10 +40,10 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, InsertOutcome, MergeBookmarks, MergeSourceKind, PagePoint, PagePointsRect,
-    PdfDocumentInfo, PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
-    MAX_PDF_BYTES,
+    ExportOutcome, InsertOutcome, MergeBookmarks, MergeSourceError, MergeSourceKind, PagePoint,
+    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch,
+    PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle,
+    TextNoteStyle, MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -754,6 +754,10 @@ pub(super) enum OperationTarget {
     Document(u64),
     Merge,
     Search(u64),
+    /// The Word→PDF conversions behind a wizard inspection, which can outlast
+    /// a reader's patience on their own. A merge's conversions stay under its
+    /// own target: stopping a merge stops everything it was doing.
+    Convert,
 }
 
 /// One long operation, listed while it runs so the reader's cancel can find it.
@@ -849,6 +853,9 @@ pub(super) struct PdfiumEngine {
     /// lock could never be set in time to stop anything.
     operations: Mutex<HashMap<u64, RunningOperation>>,
     next_operation_id: AtomicU64,
+    /// The Word-import engine: which office suite to drive, where the
+    /// converted PDFs land, and what has already been converted this run.
+    word: crate::convert::WordConverter,
 }
 
 #[derive(Clone)]
@@ -872,6 +879,7 @@ impl PdfiumState {
             approved_paths: Mutex::new(HashSet::new()),
             operations: Mutex::new(HashMap::new()),
             next_operation_id: AtomicU64::new(1),
+            word: crate::convert::WordConverter::new(app),
         })))
     }
 
@@ -4133,10 +4141,23 @@ impl PdfiumEngine {
     /// it has bookmarks of its own. A file that cannot be read is reported as
     /// such rather than dropped, so the row the reader added stays on screen and
     /// says why it is unusable.
-    pub(super) fn inspect_files(&self, paths: Vec<PathBuf>) -> Result<Vec<PdfFileSummary>, String> {
+    pub(super) fn inspect_files(
+        &self,
+        paths: Vec<PathBuf>,
+        word_conversion: bool,
+    ) -> Result<Vec<PdfFileSummary>, String> {
         if paths.len() > MAX_MERGE_FILES {
             return Err(merge_file_limit_error());
         }
+
+        // A Word document has no page count to report until an office suite
+        // has made a PDF of it. Seconds of work, all of it another process's
+        // — so it runs before the lock, like the image decode below it, and
+        // under its own stop target: this is the one part of an inspection a
+        // reader might reasonably want to interrupt.
+        let operation = self.begin_operation(OperationTarget::Convert);
+        let cancelled = || operation.is_cancelled();
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
 
         // An image is decoded the same way the merge itself will decode it, so a
         // row the wizard shows as usable is one the merge can actually lay on a
@@ -4156,39 +4177,133 @@ impl PdfiumEngine {
         Ok(paths
             .into_iter()
             .zip(images)
-            .map(|(path, image)| {
+            .zip(word)
+            .map(|((path, image), word)| {
+                let path_text = path.to_string_lossy().into_owned();
+
+                // A converted Word document is read like any other PDF, under
+                // its own row's name: the row says what the file is, not what
+                // the conversion left behind.
+                if let crate::convert::Entry::Converted(pdf) = &word {
+                    let opened = load_merge_source(self.pdfium, pdf).ok();
+
+                    return match opened {
+                        Some(document) => {
+                            let page_count = document.pages().len();
+
+                            PdfFileSummary {
+                                path: path_text,
+                                kind: MergeSourceKind::Word,
+                                page_count: (page_count >= 1).then_some(page_count),
+                                has_outline: document.bookmarks().root().is_some(),
+                                error: None,
+                            }
+                        }
+                        // The conversion came back with something this app's
+                        // own reader cannot open — rarer than a refusal, and
+                        // worded the same way for the row.
+                        None => PdfFileSummary {
+                            path: path_text,
+                            kind: MergeSourceKind::Word,
+                            page_count: None,
+                            has_outline: false,
+                            error: Some(MergeSourceError::ConversionFailed),
+                        },
+                    };
+                }
+
+                if let crate::convert::Entry::Failed(error) = word {
+                    return PdfFileSummary {
+                        path: path_text,
+                        kind: MergeSourceKind::Word,
+                        page_count: None,
+                        has_outline: false,
+                        error: Some(match error {
+                            crate::convert::ConvertError::NoConverter => {
+                                MergeSourceError::ConverterMissing
+                            }
+                            crate::convert::ConvertError::Failed(_) => {
+                                MergeSourceError::ConversionFailed
+                            }
+                        }),
+                    };
+                }
+
                 if let Some(readable) = image {
                     return PdfFileSummary {
-                        path: path.to_string_lossy().into_owned(),
+                        path: path_text,
                         kind: MergeSourceKind::Image,
                         page_count: readable.then_some(1),
                         has_outline: false,
+                        error: None,
                     };
                 }
 
                 let opened = load_merge_source(self.pdfium, &path).ok();
-                let path = path.to_string_lossy().into_owned();
 
                 match opened {
                     Some(document) => {
                         let page_count = document.pages().len();
 
                         PdfFileSummary {
-                            path,
+                            path: path_text,
                             kind: MergeSourceKind::Pdf,
                             page_count: (page_count >= 1).then_some(page_count),
                             has_outline: document.bookmarks().root().is_some(),
+                            error: None,
                         }
                     }
                     None => PdfFileSummary {
-                        path,
+                        path: path_text,
                         kind: MergeSourceKind::Pdf,
                         page_count: None,
                         has_outline: false,
+                        error: None,
                     },
                 }
             })
             .collect())
+    }
+
+    /// Every Word document among `paths`, as PDFs of this run's own — or the
+    /// refusal that says why not. The stop flag is the caller's, because the
+    /// three pipelines that reach for a conversion each run under their own
+    /// operation; what a stop leaves unconverted reads here as a refusal, and
+    /// the callers that answer stops with their own "nothing was built" say
+    /// so before they ever look at these entries.
+    fn resolve_word_documents(
+        &self,
+        paths: &[PathBuf],
+        enabled: bool,
+        cancelled: &dyn Fn() -> bool,
+        on_converted: &mut dyn FnMut(),
+    ) -> Vec<crate::convert::Entry> {
+        if !enabled
+            || !paths
+                .iter()
+                .any(|path| crate::convert::is_word_document(path))
+        {
+            return paths
+                .iter()
+                .map(|_| crate::convert::Entry::NotWord)
+                .collect();
+        }
+
+        match self.word.resolve(paths, cancelled, on_converted) {
+            Ok(entries) => entries,
+            Err(_) => paths
+                .iter()
+                .map(|path| {
+                    if crate::convert::is_word_document(path) {
+                        crate::convert::Entry::Failed(crate::convert::ConvertError::Failed(
+                            "stopped by the reader".into(),
+                        ))
+                    } else {
+                        crate::convert::Entry::NotWord
+                    }
+                })
+                .collect(),
+        }
     }
 
     /// Merges `paths`, in the order given, into one new document — the guided
@@ -4211,6 +4326,7 @@ impl PdfiumEngine {
         smart_padding: bool,
         normalize_a4: bool,
         bookmarks: MergeBookmarks,
+        word_conversion: bool,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<Option<PdfDocumentInfo>, String> {
         if paths.len() < 2 {
@@ -4228,11 +4344,51 @@ impl PdfiumEngine {
         // so a stopped run simply hands back nothing.
         let operation = self.begin_operation(OperationTarget::Merge);
 
-        // One unit per source, followed by serialization, outline writing, and
-        // opening the completed bytes into the document store.
-        let total = paths.len() + 3;
-        let mut completed = 0usize;
-        on_progress(completed, total);
+        // One unit per source, plus the Word conversions this run will really
+        // do (a cache hit adds none), followed by serialization, outline
+        // writing, and opening the completed bytes into the document store.
+        let conversions = if word_conversion {
+            self.word.pending_count(&paths)
+        } else {
+            0
+        };
+        let total = paths.len() + 3 + conversions;
+
+        on_progress(0, total);
+
+        // The Word conversions run here, before the lock: an office suite's
+        // startup is seconds another process spends, and no render of the
+        // reader's should wait behind it.
+        let cancelled = || operation.is_cancelled();
+        let mut converted = 0usize;
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {
+            converted += 1;
+            on_progress(converted, total);
+        });
+
+        // The estimate above promised pending conversions; this run really
+        // did `converted` of them, and only a difference is worth saying —
+        // the bar answers to what happened, never twice to what did not.
+        let mut total = total;
+        let mut completed = converted;
+
+        if converted != conversions {
+            total = paths.len() + 3 + converted;
+            on_progress(completed.min(total), total);
+        }
+
+        if operation.is_cancelled() {
+            return Ok(None);
+        }
+
+        for (path, entry) in paths.iter().zip(&word) {
+            if let crate::convert::Entry::Failed(error) = entry {
+                return Err(format!(
+                    "{} could not be converted: {error}",
+                    path.display()
+                ));
+            }
+        }
 
         let (bytes, nodes) = {
             // Building the document is PDFium work like any other, so it is done
@@ -4245,16 +4401,24 @@ impl PdfiumEngine {
                 .map_err(|error| format!("PDFium could not create a document: {error}"))?;
             let mut nodes = Vec::new();
 
-            for path in &paths {
+            for (path, word) in paths.iter().zip(&word) {
                 // Between files, which is this loop's page: a source is copied
                 // whole or not at all.
                 if operation.is_cancelled() {
                     return Ok(None);
                 }
 
+                // A Word source is read from the PDF its conversion left,
+                // while its name — error wording, bookmark title — stays the
+                // reader's own file's.
+                let read_from = match word {
+                    crate::convert::Entry::Converted(pdf) => pdf.as_path(),
+                    _ => path,
+                };
+
                 // Each source is opened only to be copied from and dropped at the
                 // end of this loop; none of them ever enters the document store.
-                let source = load_merge_source(self.pdfium, path)?;
+                let source = load_merge_source(self.pdfium, read_from)?;
 
                 if source.pages().is_empty() {
                     return Err(format!("{} has no pages", path.display()));
@@ -4483,6 +4647,7 @@ impl PdfiumEngine {
         paths: Vec<PathBuf>,
         normalize_a4: bool,
         watermark: Option<WatermarkConfig>,
+        word_conversion: bool,
         destination: &Path,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<bool, String> {
@@ -4504,9 +4669,44 @@ impl PdfiumEngine {
         }
 
         let operation = self.begin_operation(OperationTarget::Merge);
-        let total = paths.len();
 
+        // The Word conversions happen before the archive is begun, under the
+        // export's own stop, and count in its total — like the merge's.
+        let conversions = if word_conversion {
+            self.word.pending_count(&paths)
+        } else {
+            0
+        };
+        let mut total = paths.len() + conversions;
+
+        // Before the conversions, so the first of them — a minute of an
+        // office suite's time, on a cold start — is not the first news.
         on_progress(0, total);
+
+        let cancelled = || operation.is_cancelled();
+        let mut converted = 0usize;
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {
+            converted += 1;
+            on_progress(converted, total);
+        });
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
+        if converted != conversions {
+            total = paths.len() + converted;
+            on_progress(converted.min(total), total);
+        }
+
+        for (path, entry) in paths.iter().zip(&word) {
+            if let crate::convert::Entry::Failed(error) = entry {
+                return Err(format!(
+                    "{} could not be converted: {error}",
+                    path.display()
+                ));
+            }
+        }
 
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let mut used = HashSet::new();
@@ -4514,14 +4714,21 @@ impl PdfiumEngine {
         write_file_atomically(destination, |file| {
             let mut archive = ZipWriter::new(file);
 
-            for (index, path) in paths.iter().enumerate() {
+            for (index, (path, word)) in paths.iter().zip(&word).enumerate() {
                 // Between files, which is this loop's unit — the same place the
                 // merge itself stops.
                 if operation.is_cancelled() {
                     return Ok(false);
                 }
 
-                let bytes = self.watermarked_copy(path, normalize_a4, &watermark, &operation)?;
+                // A Word source is read from the PDF its conversion left; the
+                // archive entry still wears the reader's own file's name.
+                let read_from = match word {
+                    crate::convert::Entry::Converted(pdf) => pdf.as_path(),
+                    _ => path,
+                };
+                let bytes =
+                    self.watermarked_copy(read_from, normalize_a4, &watermark, &operation)?;
                 let Some(bytes) = bytes else {
                     return Ok(false);
                 };
@@ -4532,7 +4739,7 @@ impl PdfiumEngine {
                 archive
                     .write_all(&bytes)
                     .map_err(|error| format!("could not write {}: {error}", path.display()))?;
-                on_progress(index + 1, total);
+                on_progress(converted + index + 1, total);
             }
 
             archive
@@ -4626,7 +4833,7 @@ impl PdfiumEngine {
         smart_padding: bool,
         bookmarks: MergeBookmarks,
     ) -> Result<PdfDocumentInfo, String> {
-        self.merge_files_with_progress(paths, smart_padding, false, bookmarks, |_, _| {})?
+        self.merge_files_with_progress(paths, smart_padding, false, bookmarks, false, |_, _| {})?
             .ok_or_else(|| "the merge was stopped".to_string())
     }
 
@@ -4636,8 +4843,15 @@ impl PdfiumEngine {
         paths: Vec<PathBuf>,
         smart_padding: bool,
     ) -> Result<PdfDocumentInfo, String> {
-        self.merge_files_with_progress(paths, smart_padding, true, MergeBookmarks::None, |_, _| {})?
-            .ok_or_else(|| "the merge was stopped".to_string())
+        self.merge_files_with_progress(
+            paths,
+            smart_padding,
+            true,
+            MergeBookmarks::None,
+            false,
+            |_, _| {},
+        )?
+        .ok_or_else(|| "the merge was stopped".to_string())
     }
 
     /// Writes the document back over the file it was opened from.
