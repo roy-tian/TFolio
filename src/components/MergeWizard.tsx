@@ -4,6 +4,7 @@ import {
   Check,
   FilePlus2,
   FileText,
+  FileUp,
   FileWarning,
   GripVertical,
   Image as ImageIcon,
@@ -82,6 +83,7 @@ const bookmarksHintKey = {
 } as const satisfies Record<MergeBookmarksMode, string>
 
 type MergeWizardProps = {
+  draggingFiles: boolean
   wizard: ReturnType<typeof useMergeWizard>
 }
 
@@ -243,7 +245,7 @@ function MergeFileDragGhost({
  *
  * The whole state lives in `useMergeWizard`; this is its face.
  */
-export function MergeWizard({ wizard }: MergeWizardProps) {
+export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
   const { t } = useTranslation()
   const listRef = useRef<HTMLOListElement>(null)
   const {
@@ -328,6 +330,24 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
         data-testid="merge-wizard"
         showCloseButton={!isBusy}
       >
+        {draggingFiles && !mergeProgress ? (
+          <div
+            className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-lg border-2 border-dashed border-primary/60 bg-popover/95 p-6 backdrop-blur-sm"
+            data-testid="merge-wizard-file-drop"
+            role="status"
+          >
+            <div className="flex max-w-lg flex-col items-center text-center">
+              <FileUp aria-hidden className="mb-4 size-12" />
+              <p className="text-lg font-semibold">
+                {t("viewer.dropNowMerge")}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t("mergeWizard.filesDescription")}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         {/* The step's own switch — is there anything to configure at all? —
             rides the header rather than the body, where it would read as the
             first of the settings it governs. `pr-12` clears the close button. */}

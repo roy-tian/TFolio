@@ -6,6 +6,7 @@ import {
   bandedPdf,
   clickAppMenuItem,
   dropZoneButton,
+  emitDrag,
   minimalPdf,
   pointMultiPickerAt,
   refreshApp,
@@ -270,6 +271,41 @@ describe("merge wizard", () => {
         !(await mergedTab.$("[aria-label='Unsaved changes']").isExisting()),
       { timeoutMsg: "the first save never marked the merged document saved" },
     )
+  })
+
+  it("adds desktop drops from a prompt contained by the first step", async () => {
+    const first = writeScratchPdf("dropped-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("dropped-second.pdf", minimalPdf(2))
+
+    await openWizardWith([])
+    const point = await browser.execute(() => {
+      const box = document
+        .querySelector("[data-testid='merge-wizard']")!
+        .getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+    })
+
+    await emitDrag("drag-over", point, [first, second])
+
+    const wizard = $("[data-testid='merge-wizard']")
+    await expect(
+      wizard.$("[data-testid='merge-wizard-file-drop']"),
+    ).toBeDisplayed()
+    await expect($("[data-testid='workspace-file-drop']")).not.toExist()
+
+    await emitDrag("drag-drop", point, [first, second])
+    await browser.waitUntil(
+      async () => (await $$("[data-slot='merge-file']").getElements()).length === 2,
+      { timeout: 15_000, timeoutMsg: "the dropped files never reached the list" },
+    )
+    expect(await listedNames()).toEqual([
+      "dropped-first.pdf",
+      "dropped-second.pdf",
+    ])
+    await expect(
+      wizard.$("[data-testid='merge-wizard-file-drop']"),
+    ).not.toExist()
   })
 
   it("shows determinate progress while the final merge is pending", async () => {

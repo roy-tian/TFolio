@@ -1236,17 +1236,16 @@ export default function App() {
         tabs={tabs}
       />
 
-      {isDragging ? (
-        <div className="pointer-events-none fixed inset-3 top-24 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm">
+      {isDragging && !mergeWizard.open ? (
+        <div
+          className="pointer-events-none fixed inset-3 top-24 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm"
+          data-testid="workspace-file-drop"
+        >
           <div className="flex flex-col items-center text-center">
             <FileUp className="mb-4 size-12" />
-            <p className="text-lg font-semibold">
-              {mergeWizard.open ? t("viewer.dropNowMerge") : t("tabs.dropNow")}
-            </p>
+            <p className="text-lg font-semibold">{t("tabs.dropNow")}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {mergeWizard.open
-                ? t("mergeWizard.filesDescription")
-                : t("tabs.dropHint")}
+              {t("tabs.dropHint")}
             </p>
           </div>
         </div>
@@ -1269,7 +1268,7 @@ export default function App() {
         open={confirmingInstall}
       />
 
-      <MergeWizard wizard={mergeWizard} />
+      <MergeWizard draggingFiles={isDragging} wizard={mergeWizard} />
 
       <AlertDialog
         onOpenChange={(open) => {
