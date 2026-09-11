@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -110,7 +110,7 @@ type PdfPageSurfaceProps = {
  * a page releases its canvas backing store, extracted text, and annotation
  * preview instead of letting a long reading session retain all of them.
  */
-function PdfPageSurface({
+const PdfPageSurface = memo(function PdfPageSurface({
   activeSearchIndex,
   documentId,
   drafts,
@@ -199,7 +199,7 @@ function PdfPageSurface({
         const scaleX = naturalWidth > 0 ? span.width / naturalWidth : 1
 
         return {
-          fontSize: `${(span.height / layoutHeight) * 100}cqh`,
+          fontSize: span.height,
           left: `${(span.left / layoutWidth) * 100}%`,
           text: span.text,
           top: `${(span.top / layoutHeight) * 100}%`,
@@ -324,7 +324,7 @@ function PdfPageSurface({
       ))}
     </>
   )
-}
+})
 
 export function PdfPage({
   activeSearchIndex,
@@ -366,6 +366,16 @@ export function PdfPage({
   const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
   const targetRenderWidth =
     renderWidth ?? footprintWidth * POINT_TO_PX * renderScale
+  const surfaceScale = displayWidth / footprintWidth
+  // Keep the surface's props stable while only the outer page size changes.
+  const pageDrafts = useMemo(
+    () => drafts.filter((draft) => draft.pageNumber === pageNumber),
+    [drafts, pageNumber],
+  )
+  const pageNotes = useMemo(
+    () => notes.filter((note) => note.pageNumber === pageNumber),
+    [notes, pageNumber],
+  )
 
   return (
     <div
@@ -377,23 +387,35 @@ export function PdfPage({
       style={{ aspectRatio: footprintWidth / footprintHeight, width: displayWidth }}
     >
       {isNearViewport ? (
-        <PdfPageSurface
-          activeSearchIndex={activeSearchIndex}
-          documentId={documentId}
-          drafts={drafts}
-          notes={notes}
-          onCopyAllText={onCopyAllText}
-          onPagePaint={onPagePaint}
-          footprintHeight={footprintHeight}
-          footprintWidth={footprintWidth}
-          page={page}
-          pageNumber={pageNumber}
-          renderEpoch={renderEpoch}
-          renderWidth={targetRenderWidth}
-          rotation={rotation}
-          searchMatches={searchMatches}
-          textEpoch={textEpoch}
-        />
+        <div
+          className="absolute left-0 top-0 origin-top-left"
+          data-pdf-page-surface
+          // Fixed page coordinates avoid laying out every text span on resize.
+          // Canvas, selection, search and draft marks share the same transform.
+          style={{
+            height: footprintHeight,
+            transform: `scale3d(${surfaceScale}, ${surfaceScale}, 1)`,
+            width: footprintWidth,
+          }}
+        >
+          <PdfPageSurface
+            activeSearchIndex={activeSearchIndex}
+            documentId={documentId}
+            drafts={pageDrafts}
+            notes={pageNotes}
+            onCopyAllText={onCopyAllText}
+            onPagePaint={onPagePaint}
+            footprintHeight={footprintHeight}
+            footprintWidth={footprintWidth}
+            page={page}
+            pageNumber={pageNumber}
+            renderEpoch={renderEpoch}
+            renderWidth={targetRenderWidth}
+            rotation={rotation}
+            searchMatches={searchMatches}
+            textEpoch={textEpoch}
+          />
+        </div>
       ) : null}
     </div>
   )

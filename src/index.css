@@ -210,12 +210,11 @@ body {
   }
 }
 
-/* Spans sit in page percentages and are sized in cqh, so the layer holds its
-   alignment as the page scales; PdfPage.tsx sets box and rotation inline. */
+/* The surface scales fixed page coordinates as a whole, keeping text layout
+   and hit testing aligned without resizing each span's font. */
 .pdf-text-layer {
   position: absolute;
   overflow: hidden;
-  container-type: size;
   line-height: 1;
   cursor: text;
   user-select: text;
@@ -234,6 +233,12 @@ body {
 
 .pdf-text-layer ::selection {
   background: rgb(56 132 255 / 0.35);
+}
+
+/* Only the mounted page surfaces receive a transient compositor hint while the
+   viewport is changing; keeping every page promoted would waste GPU memory. */
+[data-resize-compositing] [data-pdf-page-surface] {
+  will-change: transform;
 }
 
 /* The app's own select-all, which a range in the document could not stand for:

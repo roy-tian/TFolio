@@ -129,6 +129,7 @@ import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 const RECENT_VIEW_WRITE_INTERVAL_MS = 250
+const RESIZE_COMPOSITOR_SETTLE_MS = 150
 
 /** How long a seek waits for the result's highlight layer to be drawn. */
 const SEARCH_REVEAL_TIMEOUT_MS = 3000
@@ -1050,6 +1051,7 @@ function DocumentSession(
     }
 
     commitSize(viewer.clientWidth, viewer.clientHeight)
+    let compositorTimer: ReturnType<typeof setTimeout> | undefined
 
     // Commit every observed size straight away. Layout — the grid's column
     // count, a fit mode's page scale — tracks the window in real time, while
@@ -1059,12 +1061,21 @@ function DocumentSession(
     // Measured off the element rather than the entry's `contentRect`, so every
     // committed figure comes from the same box the activation check below reads.
     const resizeObserver = new ResizeObserver(() => {
+      if (!viewer.dataset.resizeCompositing) {
+        viewer.dataset.resizeCompositing = "true"
+      }
+      clearTimeout(compositorTimer)
+      compositorTimer = setTimeout(() => {
+        delete viewer.dataset.resizeCompositing
+      }, RESIZE_COMPOSITOR_SETTLE_MS)
       commitSize(viewer.clientWidth, viewer.clientHeight)
     })
     resizeObserver.observe(viewer)
 
     return () => {
       resizeObserver.disconnect()
+      clearTimeout(compositorTimer)
+      delete viewer.dataset.resizeCompositing
     }
   }, [])
 

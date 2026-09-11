@@ -158,8 +158,8 @@ function SingleLayout({
   return pages.map((page, index) => (
     <PdfPage
       documentId={documentId}
-      drafts={drafts.filter((draft) => draft.pageNumber === index + 1)}
-      notes={notes.filter((note) => note.pageNumber === index + 1)}
+      drafts={drafts}
+      notes={notes}
       onCopyAllText={onCopyAllText}
       onPagePaint={onPagePaint}
       key={`${documentId}-${index + 1}`}
@@ -214,8 +214,8 @@ function BookLayout({
       {row.map((pageNumber) => (
         <PdfPage
           documentId={documentId}
-          drafts={drafts.filter((draft) => draft.pageNumber === pageNumber)}
-          notes={notes.filter((note) => note.pageNumber === pageNumber)}
+          drafts={drafts}
+          notes={notes}
           onCopyAllText={onCopyAllText}
           onPagePaint={onPagePaint}
           key={`${documentId}-${pageNumber}`}
