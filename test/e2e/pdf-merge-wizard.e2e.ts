@@ -704,6 +704,56 @@ describe("merge wizard", () => {
     await expect($("[data-testid='merge-wizard-total']")).toBeDisplayed()
   })
 
+  it("holds one frame height across the steps and their switches", async () => {
+    const first = writeScratchPdf("frame-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("frame-second.pdf", minimalPdf(1))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+
+    // `offsetHeight`, not a rect: the dialog's opening zoom is a transform,
+    // and a rect read inside its 100 ms would measure the scaled frame.
+    const frameHeight = () =>
+      browser.execute(
+        () =>
+          document.querySelector<HTMLElement>("[data-testid='merge-wizard']")!
+            .offsetHeight,
+      )
+
+    // The tallest step sets the one rectangle every step and switch state is
+    // shown in, so nothing below the frame moves as the steps change. Each
+    // step's content is awaited before measuring, so the frame is read settled.
+    const heights = [await frameHeight()]
+
+    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks-none']").waitForExist({
+      timeout: 15_000,
+    })
+    heights.push(await frameHeight())
+
+    await nextStep()
+    await $("[data-testid='merge-wizard-page-numbers']").waitForExist({
+      timeout: 15_000,
+    })
+    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await $("[data-testid='page-numbers-from']").waitForExist({
+      timeout: 15_000,
+    })
+    heights.push(await frameHeight())
+
+    await nextStep()
+    await $("[data-testid='merge-wizard-watermark']").waitForExist({
+      timeout: 15_000,
+    })
+    await $("[data-testid='merge-wizard-watermark']").click()
+    await $("[data-testid='watermark-text']").waitForExist({
+      timeout: 15_000,
+    })
+    heights.push(await frameHeight())
+
+    expect(new Set(heights).size).toBe(1)
+  })
+
   it("keeps a file it cannot read out of the merge", async () => {
     const good = writeScratchPdf("good.pdf", minimalPdf(2))
     const alsoGood = writeScratchPdf("also-good.pdf", minimalPdf(1))

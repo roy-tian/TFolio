@@ -318,9 +318,11 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
+      {/* Fixed at the tallest step's needs — the watermark settings plus an
+          error line — so the frame never jumps between steps. */}
       <DialogContent
         aria-busy={mergeProgress !== null}
-        className="flex max-h-[calc(100svh-2rem)] w-[52rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[52rem]"
+        className="flex h-[34rem] max-h-[calc(100svh-2rem)] w-[52rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[52rem]"
         data-testid="merge-wizard"
         showCloseButton={!isBusy}
       >
@@ -390,9 +392,11 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           ) : null}
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        {/* A column, so each step can fill the fixed height or centre in it;
+            `my-auto`, not `justify-center`, keeps over-tall steps scrollable. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
           {mergeProgress ? (
-            <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8">
+            <div className="my-auto flex min-h-64 flex-col items-center justify-center gap-3 p-8">
               <OperationProgress
                 className="max-w-sm"
                 label={progressLabel}
@@ -409,7 +413,7 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
             // What goes in on the left, what is done to it on the right: one
             // column would queue list and settings where neither read as a group.
             <div
-              className="grid grid-cols-[minmax(0,1fr)_19rem] gap-5"
+              className="grid flex-1 grid-cols-[minmax(0,1fr)_19rem] gap-5"
               data-testid="merge-wizard-files"
             >
               <div className="flex min-w-0 flex-col gap-3">
@@ -605,7 +609,7 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           ) : null}
 
           {!mergeProgress && step === "bookmarks" ? (
-            <div className="flex flex-col gap-3">
+            <div className="my-auto flex flex-col gap-3">
               {/* Each answer carries its own explanation, which is what a
                   reader compares here — so it sits on the option. */}
               <RadioGroup
@@ -650,6 +654,7 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           {!mergeProgress && step === "pageNumbers" ? (
             pageNumbersOn ? (
               <PageNumbersSettings
+                className="my-auto"
                 draft={pageNumbersDraft}
                 idPrefix="merge-wizard-numbers"
                 onDraftChange={setPageNumbersDraft}
@@ -659,7 +664,7 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
             ) : (
               // The governing switch sits in the header, so the off state has
               // to say something here rather than read as a failed step.
-              <p className="py-6 text-center text-sm text-muted-foreground">
+              <p className="m-auto py-6 text-center text-sm text-muted-foreground">
                 {t("mergeWizard.pageNumbersSkipped")}
               </p>
             )
@@ -668,13 +673,14 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           {!mergeProgress && step === "watermark" ? (
             watermarkOn ? (
               <WatermarkSettings
+                className="my-auto"
                 draft={watermarkDraft}
                 idPrefix="merge-wizard-mark"
                 onDraftChange={setWatermarkDraft}
                 validationError={watermarkError}
               />
             ) : (
-              <p className="py-6 text-center text-sm text-muted-foreground">
+              <p className="m-auto py-6 text-center text-sm text-muted-foreground">
                 {t("mergeWizard.watermarkSkipped")}
               </p>
             )
