@@ -17,6 +17,7 @@ import {
   renderedPage,
   seedSettings,
   textPdf,
+  writeScratchPdf,
 } from "./helpers"
 
 /** Selects the page's one text run and lets go, the way the reader highlights:
@@ -121,5 +122,12 @@ describe("TFolio save", () => {
     await expect(saveAs).toHaveText(expect.stringContaining("Save as…"))
     expect(await saveAs.getAttribute("data-disabled")).toBe(null)
     await closeAppMenu(saveAs)
+
+    // The bytes open's overrides must not outlive it: a picker-driven open
+    // on this same page lands the real two-page file, not the stale payload.
+    await openPathViaDialog(writeScratchPdf("after-bytes.pdf", textPdf(2)))
+    await expect(
+      $("[data-active='true'] [data-slot='page-status']"),
+    ).toHaveAttribute("aria-label", "Page 1 of 2")
   })
 })

@@ -17,7 +17,7 @@ import {
 import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 
-import { $, browser } from "@wdio/globals"
+import { $, $$, browser } from "@wdio/globals"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
 import type { Settings } from "../../src/lib/settings"
@@ -521,25 +521,42 @@ export async function pointPickerAt(filePath: string) {
   }, filePath)
 }
 
+/** What `openPdfFromBytes` found on the two keys it takes over, held in the
+    page until its cleanup puts the values back. */
+type BytesOpenPrior = Partial<
+  Pick<E2eOverrides, "openPdfFromPath" | "pickPdfPath">
+>
+
 /**
  * Opens `contents` as a document with no path at all, pointing the seam's
  * `openPdfFromPath` at the byte-payload `open_pdf` command — the documented
  * fallback for a document that never came from a file, which is the state the
- * save key's disabled case needs. Reading `__TAURI_INTERNALS__` is fine; only
- * writing it is sealed.
+ * save key's disabled case needs. Both overrides it installs sit beside
+ * whatever else is on the seam, and once the tab they built appears the two
+ * keys go back to what they held before. Reading `__TAURI_INTERNALS__` is
+ * fine; only writing it is sealed.
  */
 export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
+  const tabsNamed = () =>
+    $$(`//button[@role='tab'][normalize-space()='${fileName}']`).length
+
   await openFileButton().waitForExist({ timeout: 30_000 })
   await browser.execute(
     ({ bytes, mockPath }: { bytes: number[]; mockPath: string }) => {
       const seam = window as unknown as Window & {
         __tfolioE2E?: E2eOverrides
+        __tfolioE2EBytesPrior?: BytesOpenPrior
         __TAURI_INTERNALS__: {
           invoke: (command: string, args?: unknown) => Promise<unknown>
         }
       }
 
+      seam.__tfolioE2EBytesPrior = {
+        openPdfFromPath: seam.__tfolioE2E?.openPdfFromPath,
+        pickPdfPath: seam.__tfolioE2E?.pickPdfPath,
+      }
       seam.__tfolioE2E = {
+        ...seam.__tfolioE2E,
         openPdfFromPath: () =>
           seam.__TAURI_INTERNALS__.invoke("open_pdf", new Uint8Array(bytes)),
         pickPdfPath: () => Promise.resolve(mockPath),
@@ -547,7 +564,41 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
     },
     { bytes: Array.from(contents), mockPath: `/e2e/${fileName}` },
   )
+
+  // Counted before the click, so a tab already carrying the name cannot
+  // pass for the new one and take the overrides off too early.
+  const existingTabs = await tabsNamed()
   await openFileButton().click()
+  await browser.waitUntil(async () => (await tabsNamed()) > existingTabs, {
+    timeout: 30_000,
+    timeoutMsg: "the byte-payload document never opened",
+  })
+
+  // The open consumed the pair. The keys go back to what they held before,
+  // or a later picker-driven open on this page runs the stale byte payload.
+  await browser.execute(() => {
+    const page = window as Window & {
+      __tfolioE2E?: E2eOverrides
+      __tfolioE2EBytesPrior?: BytesOpenPrior
+    }
+    const prior = page.__tfolioE2EBytesPrior
+
+    if (page.__tfolioE2E && prior) {
+      if (prior.openPdfFromPath) {
+        page.__tfolioE2E.openPdfFromPath = prior.openPdfFromPath
+      } else {
+        delete page.__tfolioE2E.openPdfFromPath
+      }
+
+      if (prior.pickPdfPath) {
+        page.__tfolioE2E.pickPdfPath = prior.pickPdfPath
+      } else {
+        delete page.__tfolioE2E.pickPdfPath
+      }
+    }
+
+    delete page.__tfolioE2EBytesPrior
+  })
 }
 
 /**
