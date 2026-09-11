@@ -1,5 +1,6 @@
-import { useRef, type KeyboardEvent } from "react"
+import { useRef, useSyncExternalStore, type KeyboardEvent } from "react"
 import {
+  FileDown,
   Info,
   Monitor,
   Moon,
@@ -29,8 +30,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { changeLanguage } from "@/i18n"
 import { resolveSupportedLanguage, type SupportedLanguage } from "@/i18n/config"
+import {
+  rememberSettings,
+  subscribeSettings,
+  wordConversionEnabled,
+} from "@/lib/settings"
 import { cn } from "@/lib/utils"
 import {
   setThemePreference,
@@ -40,14 +47,15 @@ import {
 } from "@/lib/theme"
 
 /** Which pane the dialog opens on; the menu names one when it opens it. */
-export type SettingsSection = "appearance" | "about"
+export type SettingsSection = "appearance" | "imports" | "about"
 
 const sections: Array<{
   value: SettingsSection
-  labelKey: "settings.appearance" | "settings.about"
+  labelKey: "settings.appearance" | "settings.imports" | "settings.about"
   icon: LucideIcon
 }> = [
   { value: "appearance", labelKey: "settings.appearance", icon: Palette },
+  { value: "imports", labelKey: "settings.imports", icon: FileDown },
   { value: "about", labelKey: "settings.about", icon: Info },
 ]
 
@@ -160,6 +168,13 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { i18n, t } = useTranslation()
   const preference = useThemePreference()
+  // The live snapshot rather than a copy taken here: the dialog stays
+  // mounted, and another window's write must show up in this switch too.
+  const wordConversion = useSyncExternalStore(
+    subscribeSettings,
+    wordConversionEnabled,
+    wordConversionEnabled,
+  )
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const activeLanguage: SupportedLanguage =
@@ -338,6 +353,41 @@ export function SettingsDialog({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
+              </section>
+            </div>
+          </div>
+
+          <div
+            aria-labelledby="settings-tab-imports"
+            className="flex-1 overflow-y-auto p-6"
+            hidden={section !== "imports"}
+            id="settings-panel-imports"
+            role="tabpanel"
+          >
+            <div className="space-y-6">
+              <section className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="settings-word-conversion">
+                    {t("settings.wordConversion")}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.wordConversionHint")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {/* The write is a convenience like every remembered
+                      setting: a failure to record it never fails the switch,
+                      which already shows what was chosen. */}
+                  <Switch
+                    checked={wordConversion}
+                    id="settings-word-conversion"
+                    onCheckedChange={(checked) => {
+                      void rememberSettings({
+                        import: { wordConversion: checked },
+                      })
+                    }}
+                  />
+                </div>
               </section>
             </div>
           </div>

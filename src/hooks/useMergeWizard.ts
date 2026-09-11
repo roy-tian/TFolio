@@ -27,6 +27,7 @@ import {
   type PageNumbersDraft,
 } from "@/lib/pageNumbers"
 import type { PdfDocumentInfo } from "@/lib/pdf"
+import { wordConversionEnabled } from "@/lib/settings"
 import type {
   PdfOwnedLayer,
   PdfOwnedLayerProgressHandler,
@@ -289,7 +290,13 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
       const paths = pick
         ? await pick()
         : await invoke<string[]>("pick_pdf_paths", {
-            filterLabel: t("mergeWizard.sourceFilter"),
+            // The label promises what the dialog behind it accepts, and the
+            // backend omits the Word extensions when the setting is off.
+            filterLabel: t(
+              wordConversionEnabled()
+                ? "mergeWizard.sourceFilter"
+                : "mergeWizard.sourceFilterPlain",
+            ),
           })
 
       await addPaths(paths)
@@ -634,6 +641,20 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   ])
 
   /**
+   * The reader's way out of an add that is still converting Word documents —
+   * the one slow thing an add can be doing, and the one the dialog's busy
+   * state would otherwise give no button to. Nothing waits for the answer:
+   * the inspection settles on its own, its rows answering for what stopped.
+   */
+  const stopAdding = useCallback(async () => {
+    try {
+      await invoke<boolean>("cancel_word_conversion")
+    } catch {
+      // Nothing to report: the run's own result closes the surface either way.
+    }
+  }, [])
+
+  /**
    * The reader's way out of a run that has already started — the wizard's whole
    * job is behind one PDFium lock, so this is the only message that reaches it
    * while it holds one.
@@ -689,6 +710,7 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     setWatermarkDraft,
     setWatermarkOn,
     smartPadding,
+    stopAdding,
     step,
     stepBlocked,
     steps,

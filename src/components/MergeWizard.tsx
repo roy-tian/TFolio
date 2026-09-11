@@ -3,6 +3,7 @@ import { createPortal } from "react-dom"
 import {
   Check,
   FilePlus2,
+  FileText,
   FileWarning,
   GripVertical,
   Image as ImageIcon,
@@ -113,12 +114,20 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
         {index + 1}
       </span>
       {usable ? (
-        // An image is not a document: saying so on the row is what makes its
-        // single page, and the sheet it will be laid on, read as intended.
+        // An image is not a document, and a Word document arrives by way of
+        // one: saying so on the row is what makes its pages, and the sheet or
+        // the conversion behind them, read as intended.
         file.kind === "image" ? (
           <HintTooltip label={t("mergeWizard.imageSource")}>
             <ImageIcon
               aria-label={t("mergeWizard.imageSource")}
+              className="size-4 shrink-0 text-muted-foreground"
+            />
+          </HintTooltip>
+        ) : file.kind === "word" ? (
+          <HintTooltip label={t("mergeWizard.wordSource")}>
+            <FileText
+              aria-label={t("mergeWizard.wordSource")}
               className="size-4 shrink-0 text-muted-foreground"
             />
           </HintTooltip>
@@ -139,10 +148,15 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
           "shrink-0 text-xs",
           usable ? "text-muted-foreground" : "text-destructive",
         )}
+        data-testid="merge-file-status"
       >
         {usable
           ? t("mergeWizard.pageCount", { count: file.pageCount })
-          : t("mergeWizard.unreadable")}
+          : file.error === "converterMissing"
+            ? t("mergeWizard.errorConverterMissing")
+            : file.error === "conversionFailed"
+              ? t("mergeWizard.errorConversionFailed")
+              : t("mergeWizard.unreadable")}
       </span>
       {onRemove ? (
         <HintTooltip label={t("mergeWizard.remove", { name: file.name })}>
@@ -267,6 +281,7 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
     stepBlocked,
     steps,
     stop,
+    stopAdding,
     totalPages,
     watermarkDraft,
     watermarkError,
@@ -386,6 +401,25 @@ export function MergeWizard({ wizard }: MergeWizardProps) {
               data-testid="merge-wizard-files"
             >
               <div className="flex min-w-0 flex-col gap-3">
+                {isBusy ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <p
+                      className="text-xs text-muted-foreground"
+                      data-testid="merge-wizard-adding"
+                    >
+                      {t("mergeWizard.addingFiles")}
+                    </p>
+                    <Button
+                      data-testid="merge-wizard-stop-adding"
+                      onClick={() => void stopAdding()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {t("mergeWizard.stop")}
+                    </Button>
+                  </div>
+                ) : null}
                 {files.length === 0 ? (
                   // Stretched to the settings beside it, with its message in
                   // the middle: an empty list is a target to drop onto, and a

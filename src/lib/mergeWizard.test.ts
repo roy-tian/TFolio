@@ -8,6 +8,7 @@ import {
   isMergeExportMode,
   isMergeImagePath,
   isMergeSourcePath,
+  isMergeWordPath,
   MAX_MERGE_FILES,
   mergeLayout,
   mergedPageCount,
@@ -21,6 +22,7 @@ import {
 
 function file(name: string, pageCount: number | null, hasOutline = false): MergeFile {
   return {
+    error: null,
     hasOutline,
     kind: "pdf",
     name: `${name}.pdf`,
@@ -200,7 +202,24 @@ describe("mergeWizardSteps", () => {
   })
 })
 
+describe("isMergeWordPath", () => {
+  it("matches both Word extensions, however they are cased", () => {
+    expect(isMergeWordPath("/tmp/letter.docx")).toBe(true)
+    expect(isMergeWordPath("/tmp/old.DOC")).toBe(true)
+    expect(isMergeWordPath("/tmp/letter.docx.bak")).toBe(false)
+    expect(isMergeWordPath("/tmp/docx")).toBe(false)
+  })
+})
+
 describe("isMergeSourcePath", () => {
+  it("takes Word documents only while the reader's setting allows it", () => {
+    expect(isMergeSourcePath("/tmp/letter.docx")).toBe(true)
+    expect(isMergeSourcePath("/tmp/letter.docx", false)).toBe(false)
+    // Everything else is untouched by the setting.
+    expect(isMergeSourcePath("/tmp/report.pdf", false)).toBe(true)
+    expect(isMergeSourcePath("/tmp/scan.png", false)).toBe(true)
+  })
+
   it("takes PDFs and the image formats a merge can lay on a page", () => {
     expect(isMergeSourcePath("/tmp/report.pdf")).toBe(true)
     expect(isMergeSourcePath("/tmp/scan.JPG")).toBe(true)

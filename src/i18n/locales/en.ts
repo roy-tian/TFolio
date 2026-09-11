@@ -262,7 +262,11 @@ const en = {
     title: "Settings",
     description: "Adjust appearance, language, and other app settings.",
     appearance: "Appearance",
+    imports: "Import",
     about: "About",
+    wordConversion: "Convert Word documents with the installed office apps",
+    wordConversionHint:
+      "The import wizard asks Microsoft Word, WPS Office, or LibreOffice to turn Word documents into PDFs as they are added. When off, the wizard takes PDFs and images only.",
     theme: "Theme",
     themeHint: "Choose a light or dark appearance.",
     themeLight: "Light",
@@ -336,17 +340,24 @@ const en = {
     stepPageNumbers: "Page numbers",
     stepWatermark: "Watermark",
     filesDescription:
-      "PDFs and images join the wizard\u2019s list, in the order you drop them.",
+      "PDFs, images, and Word documents join the wizard\u2019s list, in the order you drop them. A Word document is converted to PDF by your own Office apps as it is added.",
     addFiles: "Add files",
-    sourceFilter: "PDFs and images",
+    sourceFilter: "PDFs, images, and Word documents",
+    /** The same dialog with the Word conversions turned off in settings. */
+    sourceFilterPlain: "PDFs and images",
+    addingFiles: "Adding files\u2026 Word documents convert as they arrive.",
     empty:
       "No files yet. Add at least two PDFs \u2014 images come in as pages of their own.",
     emptyCopies:
       "No files yet. Add the PDFs to copy \u2014 images come in as pages of their own.",
     imageSource: "Image",
+    wordSource: "Word document",
     pageCount_one: "{{count}} page",
     pageCount_other: "{{count}} pages",
     unreadable: "Unreadable",
+    errorConverterMissing:
+      "Needs Word, WPS, or LibreOffice",
+    errorConversionFailed: "Could not be converted",
     remove: "Remove {{name}}",
     fileCount_one: "{{count}} file",
     fileCount_other: "{{count}} files",

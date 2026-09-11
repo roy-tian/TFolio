@@ -649,4 +649,22 @@ describe("merge wizard", () => {
     )
     await expect($("[data-testid='merge-wizard-next']")).toBeEnabled()
   })
+
+  it("names what a Word document needs when no office app can convert it", async () => {
+    const pdf = writeScratchPdf("with-word.pdf", minimalPdf(2))
+    // The e2e build finds no conversion engine by design, so whatever bytes
+    // sit under the extension answer with the same wording every time.
+    const word = writeScratchPdf("letter.docx", Buffer.from("not a docx", "ascii"))
+
+    await openWizardWith([pdf, word])
+    await addPickedFiles(2)
+
+    // The Word row stays, unusable, and says what to install rather than
+    // "unreadable" — and with one usable file left, the step is not answered.
+    const statuses = await $$("[data-testid='merge-file-status']")
+      .map((status) => status.getText())
+
+    expect(statuses[1]).toContain("Needs Word, WPS, or LibreOffice")
+    await expect($("[data-testid='merge-wizard-next']")).toBeDisabled()
+  })
 })

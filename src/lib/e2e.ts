@@ -27,8 +27,9 @@ export type E2eOverrides = {
       cannot read on the wizard's list without writing one. */
   inspectPdfFiles?: (paths: string[]) => Promise<
     {
+      error?: "converterMissing" | "conversionFailed"
       hasOutline: boolean
-      kind: "pdf" | "image"
+      kind: "pdf" | "image" | "word"
       pageCount: number | null
       path: string
     }[]

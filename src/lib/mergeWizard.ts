@@ -2,10 +2,16 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { e2eOverride } from "@/lib/e2e"
 import { fileNameFromPath, isPdfPath } from "@/lib/pdf"
+import { wordConversionEnabled } from "@/lib/settings"
 
 /** What a merge reads one of its sources as. Mirrors `MergeSourceKind` in
-    `src-tauri/src/pdfium/mod.rs`. */
-export type MergeSourceKind = "pdf" | "image"
+    `src-tauri/src/pdfium/mod.rs`. A Word document arrives as the PDF the
+    machine's own office suite made of it. */
+export type MergeSourceKind = "pdf" | "image" | "word"
+
+/** Why a Word document could not become a PDF. Mirrors `MergeSourceError`
+    in `src-tauri/src/pdfium/mod.rs`; the wizard words these itself. */
+export type MergeSourceError = "converterMissing" | "conversionFailed"
 
 /** The image formats a merge can bring in as pages, mirroring
     `MERGE_IMAGE_EXTENSIONS` in `engine.rs`. Both sides have to agree: this one
@@ -29,10 +35,26 @@ export function isMergeImagePath(path: string) {
   )
 }
 
-/** Whether a merge can take this file at all — a PDF, or an image it lays on a
-    page of its own. */
-export function isMergeSourcePath(path: string) {
-  return isPdfPath(path) || isMergeImagePath(path)
+/** The Word formats a merge brings in as converted pages, mirroring
+    `WORD_EXTENSIONS` in `src-tauri/src/convert/mod.rs`. */
+export const mergeWordExtensions = ["doc", "docx"] as const
+
+export function isMergeWordPath(path: string) {
+  const lowered = path.toLowerCase()
+
+  return mergeWordExtensions.some((extension) =>
+    lowered.endsWith(`.${extension}`),
+  )
+}
+
+/** Whether a merge can take this file at all — a PDF, an image it lays on a
+    page of its own, or a Word document the machine's own office suite turns
+    into one first. Word is behind its setting, because a reader who turned
+    the conversions off has already answered what should happen here. */
+export function isMergeSourcePath(path: string, word = true) {
+  return (
+    isPdfPath(path) || isMergeImagePath(path) || (word && isMergeWordPath(path))
+  )
 }
 
 /**
@@ -113,8 +135,10 @@ export function isMergeBookmarksMode(
 
 /** One file on the wizard's list, as the backend read it. `pageCount` is null
     for a file that could not be read — the row stays, marked unusable, rather
-    than vanishing from a list the reader built. */
+    than vanishing from a list the reader built. `error` says which of the two
+    Word failures a Word row carries, because "unreadable" undersells both. */
 export type MergeFile = {
+  error: MergeSourceError | null
   hasOutline: boolean
   kind: MergeSourceKind
   name: string
@@ -124,6 +148,7 @@ export type MergeFile = {
 
 /** What the backend reports for one candidate file. */
 type PdfFileSummary = {
+  error?: MergeSourceError
   hasOutline: boolean
   kind: MergeSourceKind
   pageCount: number | null
@@ -257,7 +282,9 @@ export function canMerge(files: MergeFile[], mode: MergeExportMode) {
     kind no merge can take never reach the backend; the rest come back in the
     order given. */
 export async function inspectFiles(paths: string[]): Promise<MergeFile[]> {
-  const sourcePaths = paths.filter(isMergeSourcePath)
+  const sourcePaths = paths.filter((path) =>
+    isMergeSourcePath(path, wordConversionEnabled()),
+  )
 
   if (sourcePaths.length === 0) {
     return []
@@ -271,6 +298,7 @@ export async function inspectFiles(paths: string[]): Promise<MergeFile[]> {
       })
 
   return summaries.map((summary) => ({
+    error: summary.error ?? null,
     hasOutline: summary.hasOutline,
     kind: summary.kind,
     name: fileNameFromPath(summary.path),

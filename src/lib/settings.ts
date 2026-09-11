@@ -23,6 +23,16 @@ export type Settings = {
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }
   watermark?: unknown
   pageNumbers?: unknown
+  import?: { wordConversion?: unknown }
+}
+
+/** Whether the import wizard may drive the machine's own office suites to
+    convert Word documents. Absent is yes: that is this version's default,
+    and the setting is the reader's way of opting out. */
+export function wordConversionEnabled(): boolean {
+  const stored = storedSettings().import?.wordConversion
+
+  return typeof stored === "boolean" ? stored : true
 }
 
 let current: Settings = {}
@@ -55,12 +65,31 @@ export function storedSettings(): Settings {
 
 const SETTINGS_CHANGED_EVENT = "settings://changed"
 
+// Every subscriber that renders a setting, woken by each snapshot swap.
+const listeners = new Set<() => void>()
+
+/** Subscribes to the loaded snapshot's changes — a local remember, or another
+    window's write arriving — with the unsubscribe function React's
+    `useSyncExternalStore` asks for. */
+export function subscribeSettings(listener: () => void): () => void {
+  listeners.add(listener)
+
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function announce() {
+  listeners.forEach((listener) => listener())
+}
+
 // Writes replace the whole document, so other windows must update this snapshot first.
 export function watchSettings() {
   void listen<unknown>(SETTINGS_CHANGED_EVENT, (event) => {
     // Pending local edits must not be replaced by an incoming snapshot.
     if (loaded && unacknowledged === 0 && isSettings(event.payload)) {
       current = event.payload
+      announce()
     }
   }).catch(() => undefined)
 }
@@ -80,6 +109,7 @@ export function rememberSettings(patch: Settings): Promise<boolean> {
   }
 
   current = merged(current, patch)
+  announce()
 
   return persist()
 }
@@ -125,6 +155,7 @@ function merged(base: Settings, patch: Settings): Settings {
     ...patch,
     ui: mergedSection(base.ui, patch.ui),
     annotate: mergedSection(base.annotate, patch.annotate),
+    import: mergedSection(base.import, patch.import),
   }
 }
 
