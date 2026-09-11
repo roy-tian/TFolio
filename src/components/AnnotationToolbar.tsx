@@ -26,6 +26,7 @@ import type { HexColor, RectStyle } from "@/lib/annotations"
 import { highlightSwatches } from "@/lib/annotationStyles"
 import { shortcuts } from "@/lib/shortcuts"
 import {
+  toolbarCenteredStripButtonClassName,
   toolbarInkBarClassName,
   toolbarSelectionBarClassName,
 } from "@/lib/toolbarStyles"
@@ -81,6 +82,9 @@ export function AnnotationToolbar({
   const eraserLabel = t("annotate.eraser")
   const watermarkLabel = t("watermark.open")
   const pageNumbersLabel = t("pageNumbers.open")
+  // A translucent wash is the colour the reader chose; a blur or a mosaic is
+  // built from the page's own pixels, so only the wash re-inks the bottom bar.
+  const rectBarFromColour = rectStyle.effect === "translucent"
 
   return (
     <div className="flex items-center gap-1">
@@ -136,6 +140,7 @@ export function AnnotationToolbar({
                       {t("annotate.highlightColor")}
                     </p>
                     <ColorSwatchPicker
+                      allowCustom={false}
                       labelledBy="highlight-color-label"
                       onChange={onHighlightColorChange}
                       swatches={highlightSwatches}
@@ -153,14 +158,22 @@ export function AnnotationToolbar({
                 <Toggle
                   aria-label={rectLabel}
                   className={cn(
-                    toolbarSelectionBarClassName,
+                    rectBarFromColour
+                      ? toolbarInkBarClassName
+                      : toolbarSelectionBarClassName,
                     "size-8 border-r-transparent p-0 peer/rect",
+                    toolbarCenteredStripButtonClassName,
                   )}
                   disabled={disabled}
                   onPressedChange={(pressed) =>
                     onToolChange(pressed ? "rect" : null)
                   }
                   pressed={activeTool === "rect"}
+                  style={
+                    rectBarFromColour
+                      ? ({ "--tool-ink": rectStyle.color } as CSSProperties)
+                      : undefined
+                  }
                   variant="outline"
                 >
                   <RectEffectIcon effect={rectStyle.effect} />
@@ -199,7 +212,11 @@ export function AnnotationToolbar({
             <ToolbarTooltip label={textNoteLabel}>
               <Toggle
                 aria-label={textNoteLabel}
-                className={cn(toolbarInkBarClassName, "size-8 p-0")}
+                className={cn(
+                  toolbarInkBarClassName,
+                  "size-8 p-0",
+                  toolbarCenteredStripButtonClassName,
+                )}
                 disabled={disabled}
                 onPressedChange={(pressed) =>
                   onToolChange(pressed ? "textNote" : null)
@@ -219,7 +236,11 @@ export function AnnotationToolbar({
             <ToolbarTooltip label={eraserLabel}>
               <Toggle
                 aria-label={eraserLabel}
-                className={cn(toolbarSelectionBarClassName, "size-8 p-0")}
+                className={cn(
+                  toolbarSelectionBarClassName,
+                  "size-8 p-0",
+                  toolbarCenteredStripButtonClassName,
+                )}
                 disabled={disabled}
                 onPressedChange={(pressed) =>
                   onToolChange(pressed ? "eraser" : null)

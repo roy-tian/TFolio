@@ -14,6 +14,7 @@ export const highlightSwatches: readonly HexColor[] = [
   "#7ecbff",
   "#ff9ff3",
   "#ff8a65",
+  "#b2bec3",
 ]
 
 export const defaultHighlightColor: HexColor = highlightSwatches[0]!
@@ -29,7 +30,11 @@ export function isHexColor(value: unknown): value is HexColor {
 export function readStoredHighlightColor(): HexColor | null {
   const stored = storedSettings().annotate?.highlightColor
 
-  return isHexColor(stored) ? stored : null
+  // Well-formed but off the row — an older schema's custom pick — has no
+  // swatch to check now that the picker offers none, so it falls back.
+  return isHexColor(stored) && highlightSwatches.includes(stored)
+    ? stored
+    : null
 }
 
 export function storeHighlightColor(color: HexColor) {

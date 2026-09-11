@@ -1,6 +1,43 @@
 import { describe, expect, it } from "bun:test"
 
-import { defaultRectStyle, isRectStyle } from "@/lib/annotationStyles"
+import {
+  defaultRectStyle,
+  isRectStyle,
+  readStoredHighlightColor,
+} from "@/lib/annotationStyles"
+import { loadSettings } from "@/lib/settings"
+
+/** `readStoredHighlightColor` answers from what the backend sent, so its test
+    loads a document through the real IPC seam with `window` stubbed out. */
+async function withStoredSettings(stored: unknown, read: () => unknown) {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: { invoke: () => Promise.resolve(stored) },
+      localStorage: {
+        length: 0,
+        key: () => null,
+        getItem: () => null,
+        removeItem: () => undefined,
+        setItem: () => undefined,
+      },
+    },
+  })
+
+  try {
+    await loadSettings()
+
+    return read()
+  } finally {
+    if (previousWindow) {
+      Object.defineProperty(globalThis, "window", previousWindow)
+    } else {
+      Reflect.deleteProperty(globalThis, "window")
+    }
+  }
+}
 
 describe("isRectStyle", () => {
   it("accepts a style the app writes", () => {
@@ -71,5 +108,36 @@ describe("isRectStyle", () => {
     // A well-formed colour the swatches no longer offer: an older schema's, and
     // one the panel could show no swatch checked for.
     expect(isRectStyle({ ...defaultRectStyle, color: "#ff3b30" })).toBe(false)
+  })
+})
+
+describe("readStoredHighlightColor", () => {
+  it("keeps a colour the swatches offer", async () => {
+    expect(
+      await withStoredSettings(
+        { annotate: { highlightColor: "#b2bec3" } },
+        readStoredHighlightColor,
+      ),
+    ).toBe("#b2bec3")
+  })
+
+  // The same contract `isRectStyle` holds its colour to: no swatch to check
+  // for an off-row colour, so the default takes over.
+  it("falls back past a well-formed colour off the row", async () => {
+    expect(
+      await withStoredSettings(
+        { annotate: { highlightColor: "#7f1d1d" } },
+        readStoredHighlightColor,
+      ),
+    ).toBe(null)
+  })
+
+  it("falls back past a malformed value", async () => {
+    expect(
+      await withStoredSettings(
+        { annotate: { highlightColor: "red" } },
+        readStoredHighlightColor,
+      ),
+    ).toBe(null)
   })
 })
