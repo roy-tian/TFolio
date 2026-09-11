@@ -15,7 +15,6 @@ import {
   stripedPdf,
   tooltipOn,
   tooltipOpen,
-  writeScratchPdf,
 } from "./helpers"
 
 /** The panel on screen. Only its cells have a layout, and only its document is
@@ -115,7 +114,9 @@ async function paintedFingerprints(pageCount: number, scope = "") {
     await browser.waitUntil(
       async () => {
         const current = await thumbFingerprint(pageNumber, scope)
-        const painted = current > 0 && current === previous
+        // 0 is a painted blank page, not a miss — only the negatives are
+        // sentinels.
+        const painted = current >= 0 && current === previous
 
         previous = current
         settled = current
@@ -697,9 +698,16 @@ describe("TFolio page editing", () => {
   })
 
   it("inserts a PDF dragged in from the desktop at the gap under it", async () => {
+    // The dropped file opens as a document of its own first, because only a
+    // painted canvas can supply the fingerprint its page must reproduce.
+    const filePath = await openPdfFromDisk("dropped.pdf", stripedPdf())
+    const [dropped] = await paintedFingerprints(1)
+    // A reload closes every document, so the drop meets a one-document
+    // workspace again — the fingerprint in hand, the extra tab gone.
+    await refreshApp()
+
     await openPdfFromDisk("drop.pdf", bandedPdf(3))
     const [first, second, third] = await paintedFingerprints(3)
-    const filePath = writeScratchPdf("dropped.pdf", stripedPdf())
     const point = await gapPoint(2)
 
     await emitDrag("drag-over", point, [filePath])
@@ -714,11 +722,9 @@ describe("TFolio page editing", () => {
 
     // The file's page opened the gap; the base's pages moved over intact.
     await waitForThumb(1, first!)
+    await waitForThumb(2, dropped!)
     await waitForThumb(3, second!)
     await waitForThumb(4, third!)
-    const inserted = await thumbFingerprint(2)
-    expect(inserted).not.toBe(0)
-    expect([first, second, third]).not.toContain(inserted)
 
     // The file joined this document at the gap rather than opening a tab.
     await expect($$("button[role='tab']")).toBeElementsArrayOfSize(2)
