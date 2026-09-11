@@ -13,21 +13,15 @@ const HINT_TOOLTIP_DELAY = 600
 
 type HintTooltipProps = {
   children: ReactElement
-  /** Absent where the hint is conditional: nothing to say, nothing to open. */
   label: string | undefined
-  /** Whether a focus opens it, as it does for a reader arriving by keyboard.
-      Off where the app moves focus itself and the hint would then stand open
-      until something else took the focus away. */
+  /** Whether a focus opens it, as for a reader arriving by keyboard. Off where
+      the app moves focus itself and the hint would then stand open. */
   openOnFocus?: boolean
-  /** Where the hint sits; above what it names unless that is off the screen. */
   side?: "top" | "bottom" | "left" | "right"
 }
 
-/**
- * What a control or a truncated line inside the app's content says when the
- * pointer rests on it — a page in the grid, a file in a list, a tab's whole
- * name. The bars' own controls answer faster: see `ToolbarTooltip`.
- */
+/** What content inside the app says under a resting pointer; the bars' own
+    controls answer faster — see `ToolbarTooltip`. */
 export function HintTooltip({
   children,
   label,
@@ -39,9 +33,8 @@ export function HintTooltip({
   }
 
   return (
-    // A delay group's own delay governs every trigger inside it, so the hint
-    // needs a group of its own: under the app's instant one a trigger `delay`
-    // is ignored and the hint would open the moment the pointer crossed it.
+    // A delay group's own delay governs every trigger inside it: under the
+    // app's instant one, a trigger `delay` is ignored and the hint opens at once.
     <TooltipProvider delay={HINT_TOOLTIP_DELAY}>
       {/* The hint stands over its neighbours, and what is under it has to stay
           clickable, so the popup takes no pointer of its own. */}

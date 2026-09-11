@@ -11,13 +11,8 @@ import {
   textPdf,
 } from "./helpers"
 
-// Every workspace panel carries a `<main>`, the home tab's included, and all but
-// the showing one are `hidden` — which measures 0x0. A viewer read for its
-// geometry, or dispatched an event, has to be the active document's; the
-// selector is repeated inline because these run in the app's own context.
-//
-// The zoom listener is bound natively and non-passively, so a wheel has to be
-// dispatched as a real event rather than through WebDriver's scroll action.
+// The zoom listener is bound natively and non-passively, so the wheel goes out
+// as a real event; hidden tabs carry a 0x0 `<main>` too, so scope to the active one.
 function wheelOverViewer(init: { ctrlKey: boolean; deltaY: number }) {
   return browser.execute((options: { ctrlKey: boolean; deltaY: number }) => {
     const viewer = document.querySelector<HTMLElement>(
@@ -38,7 +33,6 @@ function wheelOverViewer(init: { ctrlKey: boolean; deltaY: number }) {
   }, init)
 }
 
-/** Where the copy test parks the outcome of the page's real clipboard call. */
 type CopyWatch = Window & { __copied?: string }
 
 // A right-click where a reader's would land: the middle of the element, with
@@ -68,10 +62,8 @@ describe("TFolio PDF viewer", () => {
     await dropZoneButton().waitForExist()
   })
 
-  // The page tracker revises its input only once a navigation's scroll has
-  // landed and a frame has passed, so a page-number assertion right after a
-  // jump would pass against the stale value. Waiting for the scroll to stop
-  // plus a short margin covers the revision without a fixed long sleep.
+  // The page tracker revises only once a navigation's scroll has landed and a
+  // frame has passed, so an early assertion would pass against the stale value.
   async function trackerSettled(mode?: "book" | "single" | "thumbnail") {
     // Until a switched-to layout mounts, the outgoing one's scroll reads as
     // settled, so `mode` first waits for that layout's own container.
@@ -105,9 +97,8 @@ describe("TFolio PDF viewer", () => {
     await browser.pause(400)
   }
 
-  // The room a fit has to fill is measured off the layout itself rather than
-  // recomputed from the padding the code already uses, so that a fit which
-  // silently stopped filling it would fail here.
+  // The room a fit must fill is measured off the layout, not recomputed from the
+  // code's own padding, so a fit that silently stopped filling it fails here.
   const pageBox = (pageNumber = 1) =>
     browser.execute((number: number) => {
       const element = document.querySelector<HTMLElement>(
@@ -147,7 +138,6 @@ describe("TFolio PDF viewer", () => {
   })
 
   it("rejects invalid input, renders a PDF, and exercises viewer controls", async () => {
-    // A real file on disk whose path fails the PDF check at the boundary.
     await openPdfFromDisk("not-a-pdf.txt", Buffer.from("not a PDF", "utf8"))
     await expect($("[role='alert']")).toHaveText("Please choose a PDF file.")
 
@@ -187,11 +177,8 @@ describe("TFolio PDF viewer", () => {
         timeoutMsg: "PDF page did not finish rendering through PDFium",
       },
     )
-    // The viewer debounces the render scale for 150ms after the first fit, so an
-    // early bitmap renders at the boot-time MIN_ZOOM of 0.25 before the settled
-    // fit redraws it. That transient bitmap is far smaller than its CSS box, so
-    // its backing-pixel ratio would fall well outside the bounds below; wait for
-    // the ratio to settle into that band before asserting it.
+    // The viewer debounces its render scale 150ms past the first fit, so an early
+    // bitmap is far smaller than its CSS box; wait for the ratio to settle first.
     let backingPixelsPerCssPixel = 0
     await browser.waitUntil(
       async () => {
@@ -238,13 +225,11 @@ describe("TFolio PDF viewer", () => {
     await clickAppMenuItem("settings")
     await expect($("[role='dialog']")).toBeDisplayed()
 
-    // The About section preserves the existing application information.
     await $("[role='tab'][aria-controls='settings-panel-about']").click()
     await expect($("#settings-panel-about")).toBeDisplayed()
 
-    // The Appearance section switches the color theme. Selecting Light then Dark
-    // proves the toggle works regardless of the operating system's default scheme
-    // (under "follow system" the app may already be dark before the click).
+    // Light then Dark: under "follow system" the app may already be dark before
+    // the click, so the pair proves the toggle regardless of the OS scheme.
     await $("[role='tab'][aria-controls='settings-panel-appearance']").click()
     await $("//*[@role='radio' and normalize-space()='Light']").click()
     const isDarkAfterLight = await browser.execute(() =>
@@ -258,7 +243,6 @@ describe("TFolio PDF viewer", () => {
     )
     expect(isDarkAfterDark).toBe(true)
 
-    // …and the interface language.
     await $("#settings-language").click()
     await $(
       "//*[@role='option' and normalize-space()='Simplified Chinese']",
@@ -298,7 +282,6 @@ describe("TFolio PDF viewer", () => {
       return {
         pairsFirstTwo: rowOf(1) === rowOf(2),
         startsNewRowOnThird: rowOf(1) !== rowOf(3),
-        // The trailing odd page keeps the left cell, alone in its row.
         trailingRowSize: rowOf(9)?.childElementCount,
       }
     })
@@ -314,9 +297,6 @@ describe("TFolio PDF viewer", () => {
     await trackerSettled()
     await expect(pageInput).toHaveValue("5")
     await toggle("Book").click()
-    // The tracker only revises the current page once the new layout has
-    // mounted, so asserting right away would pass against the stale value
-    // before the layout can strand it.
     await trackerSettled("book")
     await expect(pageInput).toHaveValue("5")
 
@@ -330,7 +310,6 @@ describe("TFolio PDF viewer", () => {
     await thirdThumbnail.waitForDisplayed()
     await expect($$(".pdf-text-layer")).toBeElementsArrayOfSize(0)
 
-    // Double-clicking one drops back into the single view at that page.
     await browser.execute(() => {
       document
         .querySelector("button[aria-label='Select page 3']")!
@@ -348,9 +327,8 @@ describe("TFolio PDF viewer", () => {
     await openPdfFromDisk("page-turns.pdf", minimalPdf(8))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    // Put the document at a scale where the viewport contains more than one of
-    // these short pages. A native Page Down would move by the viewport height;
-    // a document turn must still land exactly at the next page's top.
+    // Scaled so the viewport holds more than one short page: a document turn must
+    // land at the next page's top exactly, not a viewport-height scroll away.
     const zoomOut = () => $("button[aria-label='Zoom out']")
 
     while (await zoomOut().isEnabled()) {
@@ -386,9 +364,8 @@ describe("TFolio PDF viewer", () => {
           page.getBoundingClientRect().top - viewer.getBoundingClientRect().top,
         )
       }, pageNumber)
-    // The embedded WebKit WebDriver passes W3C navigation-key constants through
-    // as private-use characters, so dispatch the same cancellable DOM key event
-    // a physical key produces and verify the app claims it.
+    // The embedded WebKit WebDriver passes W3C navigation-key constants through as
+    // private-use characters, so the cancellable DOM key event is dispatched here.
     const pressPageKey = (key: "PageDown" | "PageUp") =>
       browser.execute((value: "PageDown" | "PageUp") => {
         const event = new KeyboardEvent("keydown", {
@@ -461,18 +438,16 @@ describe("TFolio PDF viewer", () => {
     await openPdfFromDisk("two-pages.pdf", minimalPdf(2))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    // The toolbar no longer prints the level anywhere — it flashes over the
-    // page instead — so the group's own name is the readout that is always
-    // there to be read.
+    // The toolbar no longer prints the level — it flashes over the page — so the
+    // group's aria-label is the readout always there to be read.
     const zoomGroup = () => $("[data-slot='button-group'][aria-label^='Zoom ']")
     const zoomLevel = async () =>
       (await zoomGroup().getAttribute("aria-label")) ?? ""
     const indicator = () =>
       $("[data-document-session][data-active='true'] [data-slot='zoom-indicator']")
 
-    // The rung ladder is the only way back to a known level now that no button
-    // names one: out until `-` gives up at the 25% floor, then in along
-    // `zoomSteps` — 50, 75, 100.
+    // No button names a level now, so the ladder is the only way back: out until
+    // `-` gives up at the 25% floor, then in along the rungs to 100%.
     const zoomToActualSize = async () => {
       const zoomOut = () => $("button[aria-label='Zoom out']")
 
@@ -485,12 +460,10 @@ describe("TFolio PDF viewer", () => {
       }
     }
 
-    // A document opens sized to be read, never already scrolled sideways.
     expect((await pageBox()).scrollableX).toBe(0)
 
-    // Actual size is the page's paper size: a point is 1/72 inch against a CSS
-    // pixel's 1/96, so the 200pt media box measures 200 * 96/72 on screen. A
-    // point-for-pixel 200 here would be a quarter short of every other reader.
+    // A point is 1/72 inch against a CSS pixel's 1/96, so 200pt measures 200 *
+    // 96/72 on screen — point-for-pixel would be a quarter short of every reader.
     const actualSize = (percent: number) =>
       Math.round((200 * 96 * percent) / (72 * 100))
 
@@ -511,10 +484,8 @@ describe("TFolio PDF viewer", () => {
     // would let the poll below settle on it instead of on the press it makes.
     await expect(indicator()).toHaveAttribute("data-visible", "false")
 
-    // What the reader actually sees a press answer with. The flash is shorter
-    // than a WebDriver round trip can be relied on to be, so the press and the
-    // read happen together in the page; only the fade is slow enough to assert
-    // from out here.
+    // The flash is shorter than a WebDriver round trip, so press and read happen
+    // together in the page; only the fade is slow enough to assert from out here.
     const flashed = (await browser.executeAsync((done) => {
       const hud = document.querySelector<HTMLElement>(
         "[data-document-session][data-active='true'] [data-slot='zoom-indicator']",
@@ -537,9 +508,8 @@ describe("TFolio PDF viewer", () => {
           return
         }
 
-        // One frame after the flag turns, so the opacity read is a frame of the
-        // fade rather than its starting value — a transition queried on the very
-        // frame its class lands still reports the level it is coming from.
+        // One frame after the flag turns: a transition queried on the very frame
+        // its class lands still reports the level it is coming from.
         if (hud.dataset.visible === "true") {
           requestAnimationFrame(read)
           return
@@ -556,9 +526,8 @@ describe("TFolio PDF viewer", () => {
     expect(Number(flashed.opacity)).toBeGreaterThan(0)
     await expect(indicator()).toHaveAttribute("data-visible", "false")
 
-    // Each fit has to actually fit, padding aside — the whole point of the two.
-    // A fit page takes the tighter dimension, which for this portrait page in a
-    // landscape window is the height, and leaves the other one inside the column.
+    // A fit takes the tighter dimension — height, for a portrait page in a
+    // landscape window — and must actually fit, padding aside.
     await $("button[aria-label='Fit page']").click()
     const fittedPage = await pageBox()
     expect(fittedPage.height).toBe(Math.round(fittedPage.availableHeight))
@@ -598,7 +567,6 @@ describe("TFolio PDF viewer", () => {
       fitButtonBorder.color,
     )
 
-    // Ctrl+wheel zooms; the same wheel without it is an ordinary scroll.
     await zoomToActualSize()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
     const widthBeforePreview = (await pageBox()).width
@@ -674,12 +642,8 @@ describe("TFolio PDF viewer", () => {
     expect(committedPreview.layoutTransform).toBe("")
     expect(committedPreview.pageWidth).toBeGreaterThan(widthBeforePreview)
 
-    // A pinch answers with the level too, once it settles — the toolbar has no
-    // figure left to read it off. Latched by an observer armed before the
-    // gesture, because the flash starts at the commit and is gone again long
-    // before a round trip could go and look for it. The burst above left a
-    // flash of its own, and it has to fade first: a HUD still up when the next
-    // commit lands never changes the attribute the observer is watching.
+    // The flash starts at the commit and is gone before a round trip could look,
+    // so an observer latches it; a HUD still up never re-fires, so it fades first.
     await expect(indicator()).toHaveAttribute("data-visible", "false")
     await browser.execute(() => {
       const hud = document.querySelector<HTMLElement>(
@@ -760,9 +724,8 @@ describe("TFolio PDF viewer", () => {
           .querySelector<HTMLElement>("[data-page-number='1']")!
           .getBoundingClientRect().top,
     )
-    // The compositor also scales the fixed page gap/padding while the committed
-    // layout deliberately does not. Allow that sub-5px reconciliation, but not
-    // the ~80px snap-back this regression produced before scroll rebasing.
+    // The compositor scales the fixed gap too, which the committed layout does
+    // not; allow that sub-5px reconciliation, not the ~80px snap-back regression.
     expect(
       Math.abs(pageTopAfterCommit - scrolledPreview.pageTopAfterScroll),
     ).toBeLessThan(5)
@@ -779,15 +742,12 @@ describe("TFolio PDF viewer", () => {
     await expect($("button[aria-label='Zoom in']")).not.toBeExisting()
     await expect(zoomGroup()).not.toBeExisting()
 
-    // Leaving the grid brings them back, still at the zoom they were left at.
     await $("button[aria-label='Single page']").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", zoomed)
   })
 
-  // A fit is of *the page*, and in a document of two page sizes that means the
-  // one the reader is on. Standing on the odd landscape page and asking for a
-  // fit must measure that page, not the portrait size the document is mostly
-  // made of — which is still what the opening zoom and the spread column go on.
+  // A fit is of the page the reader is on: in a document of two page sizes, the
+  // odd landscape page must be measured as itself, not the usual portrait size.
   it("fits the page the reader is on, not the document's usual page", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
@@ -797,15 +757,10 @@ describe("TFolio PDF viewer", () => {
     )
     await $("[data-page-number='1']").waitForDisplayed()
 
-    // Page 1 is portrait in a window wider than it is tall, so its fit is the
-    // one the height gives.
     await $("button[aria-label='Fit page']").click()
     const portrait = await pageBox(1)
     expect(portrait.height).toBe(Math.round(portrait.availableHeight))
 
-    // Page 4 is the landscape one, and wide enough that its fit is the width's.
-    // Measured against the document's usual page it would come out at more than
-    // twice the column and hang out of it.
     const pageInput = await $("input[aria-label='Page number']")
     await pageInput.setValue("4")
     await browser.keys("Enter")
@@ -822,29 +777,19 @@ describe("TFolio PDF viewer", () => {
     )
   })
 
-  // A viewport dragged sideways re-fits every page, and the scroll offset the
-  // browser keeps is a count of pixels — so without an anchor the document
-  // slides vertically under a change the reader asked for horizontally.
-  //
-  // The OS window cannot be resized from here: the embedded WebDriver bridge
-  // has no window-rect command (a `setWindowRect` is accepted and does
-  // nothing). Narrowing the app's own root box instead reaches the viewer as
-  // exactly the ResizeObserver callback a window resize delivers.
+  // The OS window cannot be resized here — `setWindowRect` is accepted and does
+  // nothing — so the root box narrows instead, firing the same resize callback.
   it("holds the reading position when the viewport changes width", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await openPdfFromDisk("resized.pdf", minimalPdf(12))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    // Fit width ties the page scale to the viewer's width, so it is where the
-    // drift is worst — and it is a mode readers sit in. The button cycles, and
-    // it offers fit-page first, so reaching fit width takes both rungs.
+    // Fit width is where the drift is worst and a mode readers sit in. The button
+    // cycles fit-page first, so reaching fit width takes both rungs.
     await $("button[aria-label='Fit page']").click()
     await $("button[aria-label='Fit width']").click()
 
-    // Where the top edge of the viewer — everything above it read, everything
-    // below still to come — falls in the document, measured in pages so that it
-    // means the same thing at any scale.
     const readingLine = () =>
       browser.execute(() => {
         const viewer = document.querySelector<HTMLElement>(
@@ -881,9 +826,8 @@ describe("TFolio PDF viewer", () => {
       )!
       viewer.scrollTop = Math.round(viewer.scrollHeight * 0.35)
     })
-    // The anchor is taken on the page the tracker reports, and the report
-    // follows the scroll by a few frames — so wait for the tracker's own
-    // output (the page input) to stop moving before the resize lands.
+    // The report follows the scroll by a few frames, so wait for the tracker's
+    // own output to stop moving before the resize lands.
     const pageInput = await $("input[aria-label='Page number']")
     await browser.waitUntil(
       async () => {
@@ -970,9 +914,8 @@ describe("TFolio PDF viewer", () => {
     expect(finalSurfaces.canvases).toBeLessThan(finalSurfaces.pages)
   })
 
-  // Landscape thumbnail rows are a fraction of a page's height. Page tracking
-  // must not assume a row is tall enough to reach some fixed depth down the
-  // viewer, or navigation lands on a row and the tracker reports a later one.
+  // Landscape rows are a fraction of a page's height, so tracking must not assume
+  // a row is tall enough to reach some fixed depth — the report would run ahead.
   it("stays on the requested page in a grid of landscape pages", async () => {
     await seedSettings({ ui: { language: "en" } })
     await refreshApp()
@@ -1004,16 +947,12 @@ describe("TFolio PDF viewer", () => {
 
     await pageInput.setValue(target)
     await browser.keys("Enter")
-    // Let the tracker settle: it revises the page only after the scroll lands,
-    // so asserting straight away would pass against the pre-scroll value.
     await trackerSettled()
     await expect(pageInput).toHaveValue(target)
   })
 
-  // The WebView's own context menu is the browser's — reload, back, view
-  // source over a page of a PDF — so only a field being typed in keeps it.
-  // `dispatchEvent` reports the cancellation, so this reads the app's real
-  // listener rather than a stand-in for it.
+  // The WebView's own menu is the browser's over a page of a PDF, so only a typed
+  // field keeps it; dispatchEvent reports the app's real listener's cancellation.
   it("drops the WebView's context menu away from a text field", async () => {
     await seedSettings({ ui: { language: "en" } })
     await refreshApp()
@@ -1035,12 +974,8 @@ describe("TFolio PDF viewer", () => {
 
     expect(prevented).toEqual({ input: false, page: true, toolbar: true })
   })
-  // What stands in for the menu the last test drops: over selected page text
-  // the app opens one of its own, and its copy hands that text to the WebView's
-  // clipboard. The clipboard cannot be read back here — `readText` is refused
-  // and this driver's keys reach the page as events, not as native input, so no
-  // paste happens — so the assertion wraps the real call and waits on the real
-  // promise instead of replacing either.
+  // readText is refused and the driver's keys are events, not native input, so
+  // the clipboard cannot be read: the real writeText is wrapped and awaited instead.
   it("copies selected page text from a menu of its own", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()

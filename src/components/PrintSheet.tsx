@@ -1,8 +1,6 @@
 import { memo } from "react"
 import { createPortal } from "react-dom"
 
-/** One page as the printer will take it: the backend's render of everything
-    the document now holds, turned the way the reader has it on screen. */
 export type PrintPage = {
   pageNumber: number
   /** The viewer's own clockwise rotation, which is not in the rendered image:
@@ -15,14 +13,8 @@ type PrintSheetProps = {
   pages: PrintPage[]
 }
 
-/**
- * Everything print media shows — one page image per printed side. Portaled
- * beside `#root` so the print stylesheet can hide the whole app around it with
- * one rule, and hidden on screen, where the app itself is the document.
- *
- * Memoized: it outlives the print that built it, and a document of any length
- * would otherwise be diffed again on every scroll of the page behind it.
- */
+/** Portaled beside `#root` so the print stylesheet hides the app with one rule;
+    memoized because it outlives the print that built it. */
 export const PrintSheet = memo(function PrintSheet({ pages }: PrintSheetProps) {
   return createPortal(
     <div data-print-sheet="">

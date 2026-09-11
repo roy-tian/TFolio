@@ -1,11 +1,6 @@
 /**
- * Whether `text` will be drawn in an embedded face rather than one of the PDF's
- * standard fonts.
- *
- * The same question `needs_embedded_font` answers in
- * `src-tauri/src/pdfium/font.rs` — can a standard PDF font encode this — and the
- * same answer: Latin-1's printable range, and nothing else. Asked here so a
- * preview draws in the family, and at the metrics, it will actually be given.
+ * Mirrors `needs_embedded_font` in `src-tauri/src/pdfium/font.rs` — Latin-1's
+ * printable range, nothing else — so a preview matches the embedded metrics.
  */
 export function usesEmbeddedFont(text: string): boolean {
   return [...text].some((character) => {

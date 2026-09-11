@@ -25,7 +25,6 @@ const options: Array<{
 ]
 
 type ViewModeToggleProps = {
-  /** Whether the document has a spread to show; a single page has none. */
   bookApplies: boolean
   disabled: boolean
   onChange: (mode: ViewMode) => void

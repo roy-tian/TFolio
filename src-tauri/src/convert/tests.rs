@@ -13,7 +13,6 @@ use super::{
     Entry, WordConverter,
 };
 
-/// A scratch directory the test owns outright, removed however the test ends.
 struct Scratch(PathBuf);
 
 impl Scratch {
@@ -47,7 +46,6 @@ impl Drop for Scratch {
     }
 }
 
-/// What the fake engines did, in order — the assertions read it like a log.
 #[derive(Default)]
 struct Log {
     opened: Vec<&'static str>,
@@ -55,17 +53,13 @@ struct Log {
     finished: usize,
 }
 
-/// What one fake engine is: what it refuses, how many files it answers
-/// before giving up on the rest, or whether it never runs at all.
 #[derive(Clone)]
 struct EnginePlan {
     name: &'static str,
     /// Input contents this engine refuses, as per-file failures.
     refuses: Vec<&'static str>,
-    /// Answers this many files; the rest come back unfinished — the shape a
-    /// killed script run has, not a broken engine.
+    /// The rest come back unfinished — a killed run's shape, not a broken engine's.
     answers_before_stopping: Option<usize>,
-    /// Cannot even be started; the whole batch moves on untried.
     never_runs: bool,
 }
 
@@ -130,8 +124,6 @@ impl ConvertSession for FakeSession {
     }
 }
 
-/// One run of the chain over sessions a test describes, handing back both the
-/// per-file answers and the log of what the chain actually did.
 fn run(
     converter: &WordConverter,
     engines: &[EngineKind],
@@ -290,8 +282,6 @@ fn a_converted_file_is_cached_until_it_changes() {
         &[word_engine()],
     );
 
-    // Same file facts: one conversion, and the second answer names the very
-    // PDF the first wrote, without reaching for the engine again.
     let first_entry = converted(&first.expect("the first run converts"));
 
     assert_eq!(
@@ -301,7 +291,6 @@ fn a_converted_file_is_cached_until_it_changes() {
     assert_eq!(first_log.lock().unwrap().conversions, 1);
     assert_eq!(second_log.lock().unwrap().opened.len(), 0);
 
-    // A longer draft is different facts — the cache must not answer for it.
     fs::write(&document, "first draft, now considerably longer").unwrap();
 
     let (third, _) = run(
@@ -401,7 +390,6 @@ fn an_engine_that_never_runs_hands_the_whole_batch_on() {
     assert!(results[0].is_some());
     assert!(results[1].is_some());
 
-    // One session per engine that ran; the one that never ran finished none.
     let log = log.lock().unwrap();
 
     assert_eq!(log.opened, vec!["word", "libreoffice"]);
@@ -413,8 +401,6 @@ fn files_a_killed_run_left_unfinished_reach_the_next_engine() {
     let scratch = Scratch::new("unfinished");
     let converter = WordConverter::at_directory(scratch.path().to_path_buf());
 
-    // Word answers one file and is then killed for taking too long: the
-    // first file keeps its answer, the second rides on.
     let (entries, _) = run(
         &converter,
         &[EngineKind::Word, EngineKind::LibreOffice],
@@ -482,8 +468,7 @@ fn a_stop_between_files_stops_the_batch() {
         soffice: None,
     };
 
-    // Asked once per file while the batch is gathered: the second ask is the
-    // reader's stop arriving between two files.
+    // The second ask is the reader's stop landing between the two files.
     let asks = Cell::new(0);
 
     let stopped = converter.resolve_with(
@@ -536,8 +521,6 @@ fn a_stop_mid_batch_keeps_what_it_already_converted() {
 
     assert!(stopped.is_err(), "a stopped batch answers with the stop");
 
-    // The first file's conversion outlived the stop in the cache: a run
-    // that tries again reaches for the engine once, for the second file.
     let (retry, retry_log) = run(
         &converter,
         &[EngineKind::Word],
@@ -560,8 +543,6 @@ fn a_stop_mid_batch_keeps_what_it_already_converted() {
 fn a_written_non_pdf_is_refused_not_cached() {
     let scratch = Scratch::new("not-a-pdf");
 
-    // A session whose output is not a PDF: refused, never handed to PDFium
-    // — and the next engine still gets its chance.
     struct GarbageSession;
 
     impl ConvertSession for GarbageSession {
@@ -592,7 +573,6 @@ fn a_written_non_pdf_is_refused_not_cached() {
             &|_, _, _| {
                 opened.set(opened.get() + 1);
 
-                // The first engine writes garbage; the second converts.
                 if opened.get() == 1 {
                     Ok(Box::new(GarbageSession) as Box<dyn ConvertSession>)
                 } else {
@@ -608,8 +588,6 @@ fn a_written_non_pdf_is_refused_not_cached() {
         )
         .expect("a refusal is an answer");
 
-    // The garbage never became a cache entry, and the second engine's PDF is
-    // what the file ends up read from.
     let pdf = match &entries[0] {
         Entry::Converted(pdf) => pdf.clone(),
         other => panic!("should have converted, not {other:?}"),

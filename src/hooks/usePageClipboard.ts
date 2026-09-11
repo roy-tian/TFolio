@@ -8,27 +8,19 @@ import {
 } from "@/lib/pageClipboard"
 
 type UsePageClipboardOptions = {
-  /** The grid is on screen and this document's: only there do these keys mean
-      pages. The clipboard itself outlives that, so the reader can look at a
-      page and come back to the grid to paste it. */
+  /** True only while the grid is on screen; the clipboard itself outlives that,
+      so a paste can still happen once the reader comes back to it. */
   active: boolean
   /** Runs a paste into the gap before this 1-based page — the owner's, since
       only it can say what the paste costs the document. */
   onPaste: (index: number) => void
-  /** What a cut or a copy just took, for the notice the owner shows. */
   onTaken: (clipboard: PageClipboard) => void
   selectedPages: ReadonlySet<number>
 }
 
 /**
- * The thumbnail grid's own clipboard: the pages a cut or a copy took, and the
- * keys that take them. It holds page numbers, so every structure edit voids it
- * — the same honesty the grid's selection keeps — with one exception, the
- * paste's own insert, which says exactly how far the pages it names slid.
- *
- * The pages never leave the document they were taken from: the system
- * clipboard has nothing to say about PDF pages, and another document's grid
- * has the drag across the tab strip.
+ * Page numbers, voided by every structure edit except the paste's own insert,
+ * and never sent to the system clipboard, which cannot carry PDF pages.
  */
 export function usePageClipboard({
   active,
@@ -132,9 +124,8 @@ export function usePageClipboard({
       }
 
       if (key === "v") {
-        // Where the reader is looking, as the + between two pages is: the paste
-        // goes in front of the first page they have chosen. Folded rather than
-        // spread — a select-all hands this every page in the document.
+        // The paste lands before the first chosen page, as the + between two
+        // pages does — folded, not spread, so a select-all still pastes at the top.
         let first: number | null = null
 
         for (const pageNumber of selectedPagesRef.current) {

@@ -16,11 +16,8 @@ export type HighlightTarget = {
   quads: PagePointsRect[]
 }
 
-/**
- * A selection dragged across a page break covers several pages but is still one
- * action, so it stays one command and one undo — the backend just writes an
- * annotation per page it touches.
- */
+/** A selection dragged across a page break is still one action: one command,
+    one undo — the backend writes an annotation per page it touches. */
 export type HighlightCommand = {
   color: HexColor
   kind: "highlight"
@@ -29,13 +26,8 @@ export type HighlightCommand = {
   targets: HighlightTarget[]
 }
 
-/**
- * The rectangle tool's persisted settings. One drag draws one block, and the
- * effect decides what fills it: a translucent wash of `color` at `opacity`, or
- * the page's own pixels blurred or squared off at `strength` page points. The
- * settings the showing effect does not use are kept rather than dropped, so
- * switching back returns the reader to what they had.
- */
+/** The rectangle tool's persisted settings; those an effect does not use are
+    kept, so switching back returns the reader to what they had. */
 export type RectStyle = {
   color: HexColor
   effect: RectEffectKind
@@ -47,20 +39,15 @@ export type RectStyle = {
 
 export type RectEffectKind = "translucent" | "blur" | "mosaic"
 
-/**
- * The effects that rebuild the rectangle from the pixels under it. They read
- * the page rather than paint over it, which is why the colour has nothing to
- * say about them, and why they take a different path into the backend.
- */
+/** Rebuilds the rectangle from the pixels under it rather than painting over
+    them — hence no colour, and a different path into the backend. */
 export type RectPixelEffect = {
   kind: Exclude<RectEffectKind, "translucent">
   strength: number
 }
 
-/**
- * A rectangle is drawn on one page in one drag, so unlike a highlight it never
- * spans pages: one command, one page, one annotation.
- */
+/** Drawn on one page in one drag, so unlike a highlight it never spans pages:
+    one command, one page, one annotation. */
 export type RectCommand = {
   bounds: PagePointsRect
   kind: "rect"
@@ -68,11 +55,8 @@ export type RectCommand = {
   style: RectStyle
 }
 
-/**
- * How a note's text is drawn. There is no family to pick: Latin text is drawn
- * in Helvetica, and anything else in whichever face the machine can embed, so
- * a control here would offer a choice a note might not be given.
- */
+/** No family to pick: Latin text draws in Helvetica, anything else in whichever
+    face the machine can embed — a choice a control could not guarantee. */
 export type TextNoteStyle = {
   color: HexColor
   /** Point size, as a PDF measures type. */
@@ -80,11 +64,8 @@ export type TextNoteStyle = {
   opacity: number
 }
 
-/**
- * A note is typed at one point on one page, so like a rectangle it is one
- * command, one page, one annotation. `origin` is the top-left of the text, which
- * is where the reader clicked — not the baseline the backend draws from.
- */
+/** One command, one page, one annotation, like a rectangle. `origin` is the
+    text's top-left — where the reader clicked — not the baseline drawn from. */
 export type TextNoteCommand = {
   kind: "textNote"
   origin: PagePoint
@@ -111,28 +92,16 @@ export type PageNumbersCommand = {
   previous: PageNumbersConfig | null
 }
 
-/**
- * Rearranges the whole document: `order` holds the current 1-based page
- * numbers in their new sequence. Both permutations are recorded because the
- * page numbers they speak of are only meaningful at their own moment — which
- * LIFO undo guarantees is the moment they run.
- */
+/** `order` is the current 1-based page numbers in their new sequence. Both
+    permutations are recorded: numbers mean something only at their LIFO moment. */
 export type ReorderPagesCommand = {
   kind: "reorderPages"
   order: number[]
-  /** The permutation that puts the pages back, for undo. */
   inverse: number[]
 }
 
-/**
- * Turns pages clockwise inside the document itself — the thumbnail grid's
- * rotate, which unlike a reading view's turns the file rather than the view.
- *
- * The turn is a step rather than a destination, so the undo is simply the turn
- * that completes the circle: neither side has to know what each page carried
- * before, which is what lets one entry cover pages that started out differently
- * rotated. The page numbers speak of this moment, as a reorder's do.
- */
+/** Turns the file itself, not the view. The turn is a step, not a destination:
+    the undo simply completes the circle, so no page's prior rotation is needed. */
 export type RotatePagesCommand = {
   kind: "rotatePages"
   /** Ascending 1-based page numbers. */
@@ -163,20 +132,10 @@ export type InsertBlankPageCommand = {
   stashId: number
 }
 
-/**
- * Inserts another PDF's pages into the document at `index`, as one edit. The
- * backend holds one document from then on: the pages are the document's own,
- * indistinguishable from the rest except to the save guard, which keeps a
- * document holding another file's pages export-only.
- *
- * `insertedCount` is 0 until the first apply reads the file — the frontend
- * cannot know how many pages the file has until the backend has opened it — and
- * `pageCount` grows by it then. A redo does not re-read the file (it restores
- * the pages the undo stashed), so by then both are known.
- */
+/** The pages become the document's own, which the save guard keeps export-only.
+    Counts settle at the first apply; a redo restores the stash, never re-reads. */
 export type InsertFileCommand = {
   kind: "insertFile"
-  /** The approved path the insert reads, as an undone/redone insert would. */
   path: string
   /** 1-based position the file's first page takes, from 1 to page count + 1. */
   index: number
@@ -190,17 +149,8 @@ export type InsertFileCommand = {
   stashId: number
 }
 
-/**
- * Copies pages out of another open document at `index`, as one edit — the
- * thumbnail drag that crosses tabs. Like an inserted file's, the pages become
- * this document's own and leave it export-only; unlike one, they are read from
- * a document the reader has open rather than from a file, so they arrive with
- * whatever that session has made of them.
- *
- * The source is named for the apply alone. A redo restores the pages the undo
- * stashed rather than reading them across again, so the document they came from
- * may be closed, or moved on, by then.
- */
+/** The cross-tab thumbnail drag. The pages become this document's own and leave
+    it export-only; a redo restores the stash, so the source may be gone by then. */
 export type InsertPagesCommand = {
   kind: "insertPages"
   /** 1-based position the first copied page takes, from 1 to page count + 1. */
@@ -215,16 +165,8 @@ export type InsertPagesCommand = {
   stashId: number
 }
 
-/**
- * Copies pages of this document back into it at `index`, as one edit — the
- * grid's copy-and-paste. The copies are the document's own content, so unlike
- * an inserted file's pages they leave it saveable, and the backend needs no
- * second document to read them from.
- *
- * `sourcePages` are the numbers the pages had before the copies landed. A redo
- * restores the pages the undo stashed rather than copying them again, so they
- * never have to mean anything at a later moment.
- */
+/** The grid's copy-and-paste. The copies are the document's own content, so it
+    stays saveable; a redo restores the undo's stash rather than copying again. */
 export type DuplicatePagesCommand = {
   kind: "duplicatePages"
   /** 1-based position the first copy takes, from 1 to page count + 1. */
@@ -238,24 +180,15 @@ export type DuplicatePagesCommand = {
   stashId: number
 }
 
-/**
- * A mark the reader rubbed out with the eraser.
- *
- * The entry that made it is carried whole rather than pointed at: an undo
- * re-applies exactly that command and puts the entry back at the position it
- * was taken from, so the history keeps reading in the order the marks were
- * made — and every other entry's undo still finds its own annotations, which
- * it knows by id rather than by where they sit on the page.
- */
+/** The mark-making entry is carried whole, not pointed at: an undo re-applies
+    exactly that command, and every entry's undo knows its own marks by id. */
 export type EraseAnnotationCommand = {
   kind: "eraseAnnotation"
   /** Where `target` sat in the applied history, for an undo to splice it back
-      into. LIFO undo has already taken back everything above it by then, so the
-      position still means what it did. */
+      into — LIFO has taken back everything above by then, so it still holds. */
   index: number
-  /** The page each of the entry's annotations was really on when it went — the
-      backend's answer, since a structure edit may have renumbered the pages the
-      command itself names. Empty until the first apply reports them. */
+  /** The page each annotation was really on when it went — the backend's
+      answer, since structure edits may have renumbered the command's pages. */
   pages: number[]
   target: AnnotationEntry
 }
@@ -275,10 +208,8 @@ export type AnnotationCommand =
   | DuplicatePagesCommand
   | EraseAnnotationCommand
 
-/**
- * Redoing re-runs the command and gets a fresh annotation out of PDFium, but it
- * is still the same entry in the reader's history, so the id survives.
- */
+/** Redoing re-runs the command and gets a fresh annotation out of PDFium, but
+    it is still the same entry in the reader's history, so the id survives. */
 export type AnnotationEntry = {
   command: AnnotationCommand
   id: number
@@ -312,10 +243,8 @@ function pagesFrom(index: number, pageCount: number): number[] {
   )
 }
 
-/** The positions a reorder actually changes the content of: slot `i + 1` shows
-    a different page only when `order` does not leave it holding its own number.
-    A permutation and its inverse fix exactly the same slots, so this answers
-    for the undo as well as the apply. */
+/** The slots a reorder actually changes the content of; a permutation and its
+    inverse fix exactly the same slots, so this answers for the undo as well. */
 function movedPositions(order: number[]): number[] {
   const moved: number[] = []
 
@@ -344,9 +273,8 @@ export function commandPages(command: AnnotationCommand): number[] {
     case "rotatePages":
       return command.pages
     case "deletePages":
-      // From the first page taken out: every page ahead of it keeps both its
-      // number and its pixels. `pageCount` is the count before the delete — the
-      // larger shape — so the same range covers the undo's restore.
+      // From the first page taken out — pages ahead keep their number and
+      // pixels; `pageCount` is the larger, pre-delete shape the undo restores.
       return pagesFrom(Math.min(...command.pages), command.pageCount)
     case "insertBlankPage":
       // From the gap on, as an inserted file is, and against the count after
@@ -355,29 +283,20 @@ export function commandPages(command: AnnotationCommand): number[] {
     case "insertFile":
     case "insertPages":
     case "duplicatePages":
-      // Only from the gap on: a page ahead of it keeps both its number and its
-      // pixels, so a block appended at the very end invalidates nothing. A
-      // file's `pageCount` is the count before it was read and the count after
-      // once the apply has learned it — a dragged block knows its own from the
-      // start — so one expression covers the apply and the undo of either.
+      // Only from the gap on — an append at the very end invalidates nothing.
+      // `pageCount` spans before and after, covering the apply and the undo alike.
       return pagesFrom(command.index, command.pageCount)
     case "eraseAnnotation":
-      // What the backend reported, once it has: the erased entry's own page
-      // numbers are the ones it was made with, which a structure edit since may
-      // have moved.
+      // What the backend reported, once it has: the erased entry's own numbers
+      // are the ones it was made with, which a structure edit may have moved.
       return command.pages.length > 0
         ? command.pages
         : commandPages(command.target.command)
   }
 }
 
-/**
- * Whether applying, undoing, or redoing this command shifts the document's
- * pages — the four structure commands do; an annotation or watermark leaves
- * every page where it was. Read where a page-numbered draft (a text note being
- * typed) must be settled before a page moves out from under it, but left alone
- * when the edit cannot touch it.
- */
+/** Whether the command shifts pages: a page-numbered draft — a note being typed
+    — settles before a page moves, and is left alone when the edit cannot. */
 export function movesPages(command: AnnotationCommand): boolean {
   switch (command.kind) {
     case "reorderPages":
@@ -423,13 +342,8 @@ export function commandTextPages(command: AnnotationCommand): number[] {
   }
 }
 
-/**
- * Plans an erase of the mark entry `entryId` made: it leaves the applied
- * history, and an entry recording where it stood takes its place at the top.
- *
- * An entry no longer applied — the reader undid it between the hit test and
- * this — is nothing to erase.
- */
+/** An entry no longer applied — the reader undid it between the hit test and
+    this plan — is nothing to erase. */
 export function planEraseAnnotation(history: AnnotationHistory, entryId: number) {
   const index = history.past.findIndex((entry) => entry.id === entryId)
 
@@ -476,12 +390,8 @@ export function fillErasedPages(
   }
 }
 
-/**
- * `command` with its page numbers replaced by the pages its annotations were
- * really on — one per annotation, in the order the command wrote them. What
- * puts an erased mark back where it was rather than where it was first made,
- * across a structure edit that renumbered the pages in between.
- */
+/** Page numbers replaced by where the annotations really were, in the order the
+    command wrote them — what puts an erased mark back across a renumbering. */
 export function retargetCommand(
   command: AnnotationCommand,
   pages: number[],
@@ -507,7 +417,6 @@ export function retargetCommand(
   }
 }
 
-/** `count` consecutive page numbers from `index`. */
 function pageRange(index: number, count: number): number[] {
   return Array.from({ length: count }, (_, offset) => index + offset)
 }
@@ -518,7 +427,6 @@ export function insertFilePages(command: InsertFileCommand): number[] {
   return pageRange(command.index, command.insertedCount)
 }
 
-/** The permutation that undoes `order`; both are 1-based page sequences. */
 export function inversePermutation(order: number[]): number[] {
   const inverse = new Array<number>(order.length)
 
@@ -614,11 +522,8 @@ export function planInsertBlankPage(
   return { command, history: commit(history, command) }
 }
 
-/** Plans an insert. `insertedCount` stays 0 here and `pageCount` is the count
-    before the insert: the file has not been read yet, so both are settled once
-    the first apply learns how many pages it brings (see
-    `fillInsertFileOutcome`). The position is the reader's, so an out-of-range
-    one is refused here rather than clamped. */
+/** The file is unread at plan time: counts settle at the first apply. An
+    out-of-range position is the reader's own — refused, never clamped. */
 export function planInsertFile(
   history: AnnotationHistory,
   path: string,
@@ -641,9 +546,8 @@ export function planInsertFile(
   return { command, history: commit(history, command) }
 }
 
-/** Rewrites the insert the first apply just committed with the page count the
-    backend reported — the one fact an insert learns only after reading the file.
-    An undo's delete then reads the range as if it had been known all along. */
+/** Writes in the page count the first apply learned — the one fact an insert
+    gains only by reading the file — so an undo reads a range known all along. */
 export function fillInsertFileOutcome(
   history: AnnotationHistory,
   entryId: number,
@@ -666,18 +570,16 @@ export function fillInsertFileOutcome(
   }
 }
 
-/** The pages a copied block's undo deletes, and its redo restores — a drag from
-    another tab or a paste of this document's own pages — valid at the LIFO
-    moment that insert sits at the top of history. */
+/** The pages a copied block's undo deletes and its redo restores, valid at the
+    LIFO moment the insert sits at the top of history. */
 export function insertPagesRange(
   command: InsertPagesCommand | DuplicatePagesCommand,
 ): number[] {
   return pageRange(command.index, command.sourcePages.length)
 }
 
-/** Plans a cross-document insert. The position is the reader's, so an
-    out-of-range one is refused here rather than clamped; the pages are the
-    source grid's, and the backend checks them against the document they name. */
+/** An out-of-range position is the reader's own: refused, never clamped. The
+    backend checks the source pages against the document they name. */
 export function planInsertPages(
   history: AnnotationHistory,
   sourceDocumentId: number,
@@ -703,9 +605,8 @@ export function planInsertPages(
   return { command, history: commit(history, command) }
 }
 
-/** Plans a paste of the document's own pages. The position is the reader's, so
-    an out-of-range one is refused here rather than clamped; the pages are the
-    grid's, and the backend checks them against the document they name. */
+/** An out-of-range position is the reader's own: refused, never clamped. The
+    backend checks the pages against the document they name. */
 export function planDuplicatePages(
   history: AnnotationHistory,
   sourcePages: number[],
@@ -746,7 +647,6 @@ export function watermarkConfig(
   return null
 }
 
-/** Plans a document-level change from the history the mutation queue reached. */
 export function planWatermarkChange(
   history: AnnotationHistory,
   config: WatermarkConfig | null,
@@ -776,7 +676,6 @@ export function pageNumbersConfig(
     const command = history.past[index]!.command
 
     if (command.kind === "pageNumbers") {
-      // An explicit remove is authoritative, exactly as for a watermark.
       return command.config
     }
   }
@@ -784,7 +683,6 @@ export function pageNumbersConfig(
   return null
 }
 
-/** Plans a page-number change from the history the mutation queue reached. */
 export function planPageNumbersChange(
   history: AnnotationHistory,
   config: PageNumbersConfig | null,
@@ -806,7 +704,6 @@ export function planPageNumbersChange(
   return { command, history: commit(history, command) }
 }
 
-/** The entry the document currently ends at, or 0 when nothing is applied. */
 export function historyHead(history: AnnotationHistory) {
   return history.past.at(-1)?.id ?? 0
 }
@@ -819,21 +716,16 @@ export function canRedo(history: AnnotationHistory) {
   return history.future.length > 0
 }
 
-/** The command the next undo would take back; null when there is none. */
 export function nextUndoCommand(history: AnnotationHistory) {
   return history.past.at(-1)?.command ?? null
 }
 
-/** The command the next redo would apply again; null when there is none. */
 export function nextRedoCommand(history: AnnotationHistory) {
   return history.future.at(-1)?.command ?? null
 }
 
-/**
- * Identity of the topmost entry rather than a count of edits: undoing back to
- * exactly what was saved leaves nothing to write, which a counter — only ever
- * growing — would report as dirty forever after the first edit.
- */
+/** Identity of the topmost entry, not a count of edits: undoing back to exactly
+    what was saved leaves nothing to write, which a growing counter would miss. */
 export function isDirty(history: AnnotationHistory) {
   return historyHead(history) !== history.savedId
 }

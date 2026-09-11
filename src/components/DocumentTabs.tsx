@@ -31,8 +31,7 @@ export type DocumentTabItem = {
 type DocumentTabsProps = {
   activeId: TabId
   /** The tab a page drag is resting on, which the workspace is about to open
-      under it — see `usePageHandoff`. The bar underneath counts that rest out,
-      so the reader can see the wait is going somewhere. */
+      under it — see `usePageHandoff`. The bar beneath counts the rest out. */
   armedTabId: number | null
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
@@ -58,8 +57,6 @@ export function DocumentTabs({
   const [scrolls, setScrolls] = useState(false)
   const tabIds: TabId[] = [HOME_TAB_ID, ...tabs.map((tab) => tab.id)]
 
-  // Once the strip runs out of room the tabs stop being a complete picture of
-  // what is open, so the menu that is one takes their place as the way across.
   useEffect(() => {
     const scroller = scrollerRef.current
 
@@ -139,11 +136,8 @@ export function DocumentTabs({
           <span>{t("tabs.home")}</span>
         </button>
 
-        {/* Sized by its tabs rather than by the strip, so the open action
-            stays at their end until they fill the row — and only then at
-            its edge. The other axis has to be pinned: `overflow-x` alone
-            promotes it to `auto`, and each tab's `mb-[-1px]` is enough
-            overflow for a scrollbar (steppers and all) to appear. */}
+        {/* `overflow-x` alone promotes the other axis to `auto`, and each tab's
+            `mb-[-1px]` is then overflow enough for a scrollbar to appear. */}
         <div
           className="flex h-full min-w-0 items-end overflow-x-auto overflow-y-hidden"
           ref={scrollerRef}

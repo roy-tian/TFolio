@@ -1,11 +1,5 @@
-// Shared fixtures and the file-open flow for every e2e suite.
-//
-// The app opens PDFs by filesystem path — a native dialog or a native drop —
-// and WebDriver can drive neither. Nor can a test stub the IPC boundary:
-// Tauri seals `__TAURI_INTERNALS__.invoke` (non-writable, non-configurable).
-// Each opener below therefore fills in the app's own e2e seam
-// (`window.__tfolioE2E`, read via `src/lib/e2e.ts` in e2e builds only) and
-// then drives the real UI, so everything past the dialog really runs.
+// WebDriver drives neither native dialogs nor native drops, and Tauri seals
+// `__TAURI_INTERNALS__`, so openers stub `window.__tfolioE2E` and drive the real UI.
 
 import {
   existsSync,
@@ -32,12 +26,6 @@ function settingsFile() {
   )
 }
 
-/**
- * A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
- * otherwise — pass a function of the 0-based page index for a document whose
- * pages are not all one size. Page objects take the odd ids from 3 up, each
- * followed by its (empty) contents stream.
- */
 export function minimalPdf(
   pageCount = 1,
   mediaBox: string | ((index: number) => string) = "0 0 200 300",
@@ -65,19 +53,10 @@ export function minimalPdf(
   return buildPdf(objects)
 }
 
-/**
- * A blank one-page PDF for the drawing suites: a rectangle or a note goes over
- * the page itself, so nothing needs to be underneath.
- */
 export function blankPdf() {
   return minimalPdf(1, "0 0 300 400")
 }
 
-/**
- * `pageCount` pages, each carrying one black bar at a page-specific position,
- * so every page renders to a distinct fingerprint — which is what lets a
- * structure test say *which* page now sits where.
- */
 export function bandedPdf(pageCount: number) {
   const kids = Array.from(
     { length: pageCount },
@@ -107,7 +86,6 @@ export function bandedPdf(pageCount: number) {
   return buildPdf(objects)
 }
 
-/** A one-page drawing fixture with dense bars through its middle. */
 export function stripedPdf() {
   let content = "0 0 0 rg\n"
 
@@ -124,7 +102,6 @@ export function stripedPdf() {
   ])
 }
 
-/** Pages with one line of real text each, for selection and highlight tests. */
 export function textPdf(pageCount = 1) {
   const fontId = 3 + pageCount * 2
   const pages = Array.from({ length: pageCount }, (_, index) => {
@@ -159,8 +136,6 @@ export function textPdf(pageCount = 1) {
   ])
 }
 
-/** Two searchable pages: the first occurrence wraps between text lines and
- * the second uses different case on one line. */
 export function wrappedSearchPdf() {
   const first =
     "BT\n/F1 24 Tf\n40 250 Td\n(Wrapped) Tj\n0 -30 Td\n(phrase) Tj\nET\n"
@@ -206,34 +181,21 @@ function buildPdf(objects: string[]) {
 }
 
 /**
- * Writes the settings the app boots on, straight into the file the backend
- * keeps — which is what makes them survive the `browser.refresh()` that has to
- * follow, the app reading them once before its first render.
- *
- * The whole document, replacing what was there: settings outlive a spec and
- * outlive the suite, so a spec that cares states everything it wants and
- * inherits nothing. What it does not name is unset, which is how a spec asks
- * for a default. `__TAURI__` is the e2e build's own global (`withGlobalTauri`),
- * and reading it is fine — only `__TAURI_INTERNALS__` is sealed.
+ * Written into the backend's own settings file, so they survive the refresh
+ * that applies them; the whole document is replaced, so a spec inherits nothing.
  */
 export async function seedSettings(settings: Settings = {}) {
-  // The write goes through the backend, so it needs a page that has finished
-  // booting; one still on its way there loses it when the app replaces it.
-  // Waited for here rather than at each call site, because every call site is a
-  // `browser.refresh()` away from exactly that.
+  // The write goes through the backend and needs a booted page — one still
+  // booting loses it when the app replaces it — so the wait lives here.
   await openFileButton().waitForExist({ timeout: 30_000 })
 
-  // The file rather than the page is what says the write landed, so the wait
-  // below costs this fragile bridge no round trips at all — and it checks the
-  // bytes the app will actually read back. Cleared first so that its being
-  // there again is the signal.
+  // Cleared first: its reappearance is the signal. Polling the file costs the
+  // fragile bridge no round trips and checks what the app will actually read.
   const settingsPath = settingsFile()
   rmSync(settingsPath, { force: true })
 
-  // As a string: the old seeding passed flat strings through this bridge for a
-  // year without trouble, and there is no reason to be the first to hand it
-  // something shaped differently. The promise stays in the page too — this
-  // driver cannot serialise one back ("Unsupported result type").
+  // The promise stays in the page — this driver cannot serialise one back
+  // ("Unsupported result type") — and the payload stays a string, as always.
   await browser.execute((json: string) => {
     const tauri = (
       window as Window & {
@@ -279,13 +241,8 @@ function seededValues(settings: object): string[] {
 }
 
 /**
- * Reloads the app and waits out the reboot, which is how a settings change
- * gets applied. A stamp planted on the dying page is what the poll tells its
- * replacement from: a script that lands early reads the stamp back and waits
- * again, so it cannot vouch for a page the reload is about to discard. The
- * pause only keeps the first injection clear of the driver's teardown race —
- * a script the handoff loses waits out a hard 30s — and the 40s budget
- * absorbs one such hang and still comes back.
+ * The stamp tells the new page from the dying one, and the pause plus 40s
+ * budget ride out a teardown race that hangs a lost injection a hard 30s.
  */
 export async function refreshApp() {
   await browser.execute(() => {
@@ -316,24 +273,19 @@ export async function refreshApp() {
   )
 }
 
-/** The home tab's drop zone, its own route to the native picker. It is in the
-    page whichever tab is showing, so it doubles as the signal that the app has
-    booted; it is only clickable while the home tab is the one on screen.
-    By slot rather than label, which changes with the language. */
+/** In the page whichever tab shows, so it doubles as the booted signal; only
+    clickable while the home tab is up. By slot, not the language's label. */
 export function dropZoneButton() {
   return $("[data-slot='drop-zone']")
 }
 
-/** The tab strip's open-a-file button, which every tab shares. */
 export function openFileButton() {
   return $("[data-slot='tab-open-file']")
 }
 
 /**
- * Hovers `selector`.
- *
- * WebKitGTK's embedded WebDriver moves the pointer without the WebView ever
- * seeing a hover, so the events Base UI listens for are dispatched in the page.
+ * Hovers `selector`: WebKitGTK's embedded WebDriver moves the pointer without
+ * the WebView ever seeing a hover, so Base UI's events are dispatched in the page.
  */
 export async function hoverElement(selector: string) {
   await $(selector).waitForExist({ timeout: 15_000 })
@@ -347,9 +299,8 @@ export async function hoverElement(selector: string) {
       pointerType: "mouse",
     }
 
-    // A pointer that never leaves would leave the last hint standing, and hints
-    // outside one delay group do not close each other. Take the hover back
-    // first, so the popup read below is the one this hover opened.
+    // Hints outside one delay group do not close each other, so the hover is
+    // taken back first: the popup read below must be this hover's own.
     for (const open of document.querySelectorAll(
       "[data-base-ui-tooltip-trigger][data-popup-open]",
     )) {
@@ -367,7 +318,6 @@ export async function hoverElement(selector: string) {
   }, selector)
 }
 
-/** Whether the tooltip this trigger owns is up; others may be open too. */
 export function tooltipOpen(selector: string) {
   return browser.execute(
     (css: string) =>
@@ -376,7 +326,6 @@ export function tooltipOpen(selector: string) {
   )
 }
 
-/** Hovers `selector` and answers with the text of the tooltip that opens. */
 export async function tooltipOn(selector: string) {
   await hoverElement(selector)
   await browser.waitUntil(async () => tooltipOpen(selector), {
@@ -396,10 +345,8 @@ export async function tooltipOn(selector: string) {
 }
 
 /**
- * Opens the header's menu — where the file commands the toolbar has no key
- * for live — and hands back the item for `action`. The caller
- * either clicks it or reads it and presses Escape; `data-action` rather than
- * the label, which changes with the language.
+ * Opens the header's menu — where commands without a toolbar key live — and
+ * answers the item for `action`, by `data-action` not the language's label.
  */
 export async function appMenuItem(action: string) {
   await $("[data-slot='app-menu']").click()
@@ -415,9 +362,8 @@ export async function clickAppMenuItem(action: string) {
 }
 
 /**
- * Dismisses the menu and waits for its popup to actually leave the screen —
- * the next click would otherwise land on the closing popup, not the control
- * behind it. `item` is any element inside the menu, from `appMenuItem`.
+ * Dismisses the menu and waits for its popup to actually leave the screen — the
+ * next click would otherwise land on the closing popup, not the control behind.
  */
 export async function closeAppMenu(
   item: Awaited<ReturnType<typeof appMenuItem>>,
@@ -427,9 +373,8 @@ export async function closeAppMenu(
 }
 
 /**
- * Whether the menu currently offers `action`, leaving the menu closed again.
- * Base UI marks a disabled item with `data-disabled`, not the `disabled`
- * property WebdriverIO's `isEnabled` reads off a form control.
+ * Whether the menu currently offers `action`, closing it again — Base UI marks
+ * a disabled item with `data-disabled`, which `isEnabled` never reads.
  */
 export async function appMenuItemEnabled(action: string) {
   const item = await appMenuItem(action)
@@ -439,9 +384,8 @@ export async function appMenuItemEnabled(action: string) {
   return disabled === null
 }
 
-/** Scratch directories this worker has created, removed when the process
-    exits: a spec's files must live until its last assertion has read them
-    back, and only a synchronous exit hook can be relied on there. */
+/** Removed on process exit: a spec's files must outlive its last assertion,
+    and only a synchronous exit hook can be relied on for that. */
 const scratchDirectories: string[] = []
 
 process.on("exit", () => {
@@ -451,9 +395,8 @@ process.on("exit", () => {
 })
 
 /**
- * Writes `contents` to a scratch file and opens it through the app's real
- * choose-a-file flow — only the native dialog is stubbed, resolving with the
- * file's path — then returns that path, which is where a save will land.
+ * Writes `contents` to a scratch file and opens it through the real flow, only
+ * the dialog stubbed. The returned path is where a save will land.
  */
 export async function openPdfFromDisk(
   fileName: string,
@@ -469,9 +412,8 @@ export async function openPdfFromDisk(
 }
 
 /**
- * Points the app's picker seam at `filePath` and opens it from the tab strip,
- * which is on screen whatever is already open — so one helper serves the first
- * document and every later one alike.
+ * Points the picker seam at `filePath` and opens from the tab strip, on screen
+ * whatever is already open — one helper serves first document and later alike.
  */
 export async function openPathViaDialog(filePath: string) {
   // A refresh can resolve before the new page has booted; the strip's open
@@ -482,9 +424,8 @@ export async function openPathViaDialog(filePath: string) {
 }
 
 /**
- * Writes `contents` to a scratch file and hands back its path, without opening
- * it: the merge wizard and the grid's insert both read files they never open as
- * documents of their own.
+ * Writes `contents` to a scratch file and answers its path, unopened — the
+ * merge wizard and the grid's insert read files they never open.
  */
 export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
@@ -521,20 +462,13 @@ export async function pointPickerAt(filePath: string) {
   }, filePath)
 }
 
-/** What `openPdfFromBytes` found on the two keys it takes over, held in the
-    page until its cleanup puts the values back. */
 type BytesOpenPrior = Partial<
   Pick<E2eOverrides, "openPdfFromPath" | "pickPdfPath">
 >
 
 /**
- * Opens `contents` as a document with no path at all, pointing the seam's
- * `openPdfFromPath` at the byte-payload `open_pdf` command — the documented
- * fallback for a document that never came from a file, which is the state the
- * save key's disabled case needs. Both overrides it installs sit beside
- * whatever else is on the seam, and once the tab they built appears the two
- * keys go back to what they held before. Reading `__TAURI_INTERNALS__` is
- * fine; only writing it is sealed.
+ * Opens `contents` with no path at all — the byte-payload `open_pdf` command is
+ * the only route to the pathless state the save key's disabled case needs.
  */
 export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
   const tabsNamed = () =>
@@ -602,10 +536,8 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
 }
 
 /**
- * How much ink page 1 currently carries, read back off the canvas — the pixels
- * rather than the annotation the app thinks it added, because PDFium will
- * accept and store a mark it then declines to draw. Only the canvas can say
- * whether the reader can actually see it.
+ * How much ink page 1 carries, read off the canvas pixels — PDFium can accept
+ * and store a mark it then declines to draw, so only the canvas can vouch.
  */
 export function pageInk(pageNumber = 1) {
   return browser.execute((targetPage: number) => {
@@ -661,10 +593,8 @@ export async function renderedPage() {
     { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
   )
 
-  // The first bitmap can be followed by a re-render once the viewer's zoom
-  // settles (a 150ms debounce), often at the same canvas size — so the width
-  // alone cannot say the paint is final. Two identical fingerprints a beat
-  // apart say the repaint storm is over.
+  // A zoom-settling re-render (150ms debounce) can follow the first bitmap at
+  // the same canvas size, so width alone cannot say the paint is final.
   await browser.pause(400)
   await browser.waitUntil(
     async () => {
@@ -677,12 +607,8 @@ export async function renderedPage() {
 }
 
 /**
- * Emits the drag event the window's own handler listens for, standing in for a
- * drag from the desktop: WebDriver cannot start one, and the app hears these
- * through Tauri's event system rather than through DOM events. The position
- * goes over exactly as GTK reports one — in the window's own logical units,
- * which the suite's only platform makes the CSS pixels the page hit-tests with
- * (see the scaling note in `App.tsx`).
+ * WebDriver cannot start a desktop drag, so the event the window hears through
+ * Tauri's event system is emitted directly, in CSS pixels (GTK logical units).
  */
 export function emitDrag(
   name: "drag-over" | "drag-drop",
@@ -711,8 +637,6 @@ export function emitDrag(
   )
 }
 
-/** The middle of one thumbnail insert zone, in CSS pixels — where a dropped PDF
-    would land at that position. */
 export function gapPoint(index: number) {
   return browser.execute((at: number) => {
     const rect = document

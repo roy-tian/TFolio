@@ -48,11 +48,8 @@ type WatermarkSettingsProps = {
   validationError: WatermarkValidationError | null
 }
 
-/**
- * The watermark's own controls, beside a live preview of the mark they
- * describe. Shared by the dialog that applies one to an open document and by
- * the merge wizard's last step, so the two can never drift apart.
- */
+/** The watermark's own controls, shared by the applying dialog and the merge
+    wizard's last step, so the two can never drift apart. */
 export function WatermarkSettings({
   autoFocus = false,
   className,
@@ -71,9 +68,8 @@ export function WatermarkSettings({
   const layoutId = `${idPrefix}-layout-label`
 
   return (
-    // The columns keep their natural heights, so short content never earns a
-    // scrollbar of its own; from `sm` the sheet sticks so it stays in view
-    // while the controls pass it.
+    // From `sm` the sheet sticks, so it stays in view while the controls pass
+    // it; natural heights keep short content from earning a scrollbar.
     <div className={cn("flex flex-col gap-5 sm:flex-row", className)}>
       <Field className="sm:sticky sm:top-0 sm:w-[14rem] sm:shrink-0 sm:self-start">
         <div className="flex items-center gap-0.5">

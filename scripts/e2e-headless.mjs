@@ -1,6 +1,5 @@
 // One Xvfb per lane, so each app is its display's only — and so focused —
-// window, which `element.focus()`-driven popups need; keep the lane math in
-// step with wdio.conf.ts.
+// window, which focus()-driven popups need. Keep the lane math with wdio.conf.ts.
 import { spawn } from "node:child_process"
 
 const shardCount = Math.min(
@@ -10,9 +9,8 @@ const shardCount = Math.min(
 
 const servers = []
 
-/** Killed on every way out — after the run, on a failed setup, on an
-    interrupt during setup — or the displays and the bus would outlive the
-    wrapper that started them. */
+/** Killed on every way out — run end, failed setup, interrupt during setup —
+    or the displays and the bus would outlive the wrapper that started them. */
 function stopServers() {
   for (const server of servers) {
     server.kill("SIGTERM")

@@ -14,8 +14,6 @@ function tabNamed(name: string) {
   return $(`//button[@role='tab'][normalize-space()='${name}']`)
 }
 
-/** Cuts one page from the grid, which is the shortest way to a notice a
-    document owns rather than the workspace. */
 async function cutPage(pageNumber: number) {
   await $(`button[data-page-number='${pageNumber}']`).click()
   await browser.execute((page: number) => {
@@ -49,9 +47,8 @@ describe("TFolio notices", () => {
     await openPdfFromDisk("notices.pdf", bandedPdf(4))
     await $("button[data-page-number='2']").waitForDisplayed()
 
-    // The refusal first and the cut second. The open attempt is the slow half,
-    // and whichever notice has to wait through it is the one spending its five
-    // seconds on the harness rather than on the assertion.
+    // The refusal first and the cut second: the open attempt is the slow half,
+    // and the notice waiting through it spends its five seconds on the harness.
     await pointPickerAt(notPdf)
     await openFileButton().click()
     await expect($("[data-notice='invalidFile']")).toHaveText(
@@ -132,10 +129,8 @@ describe("TFolio notices", () => {
       }
     })
 
-    // A watermark or page-numbers apply that fails leaves its dialog open and
-    // reports to the corner, so the corner has to be readable from under one.
-    // Base UI hides everything outside a modal from a screen reader and spares
-    // only live regions, which is what the stack's `aria-live` buys.
+    // A failed apply leaves its dialog open and reports to the corner, which must
+    // stay readable under it — Base UI's aria-hidden sweep spares only live regions.
     expect(layering.hidden).toBe(false)
     expect(layering.cornerZ).toBeGreaterThan(layering.backdropZ ?? 50)
   })

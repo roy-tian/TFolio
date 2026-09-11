@@ -7,9 +7,8 @@ import { defineConfig } from "vite"
 
 const host = process.env.TAURI_DEV_HOST
 
-// `package.json` is the project's version source of truth (see AGENTS.md);
-// inject it as a build-time constant so the About panel shows it without an
-// async Tauri round-trip, identically in dev, release, and e2e builds.
+// `package.json` is the version source of truth (see AGENTS.md); injected as a
+// constant so the About panel avoids an async Tauri round-trip in every build.
 const pkg = JSON.parse(
   fs.readFileSync(path.resolve(import.meta.dirname, "package.json"), "utf8"),
 )

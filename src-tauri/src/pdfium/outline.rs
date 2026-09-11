@@ -1,20 +1,10 @@
-//! Writing a document outline — the one PDF edit PDFium cannot make.
-//!
-//! PDFium's public API reads bookmarks (`FPDFBookmark_*`) and has no call that
-//! creates one, and `FPDF_ImportPages`, which every merge goes through, leaves
-//! the source's outline behind. So the merged document's bytes, once PDFium has
-//! saved them, are reopened here with a pure-Rust parser long enough to have an
-//! `/Outlines` tree written into them.
-//!
-//! What reaches this module is only ever bytes PDFium produced moments earlier
-//! in this process: a reader's own file is still parsed by PDFium alone, which
-//! is what keeps the second parser off the untrusted path.
+//! PDFium's API reads bookmarks but cannot create one, so merged bytes are
+//! reopened with lopdf — only ever PDFium's own fresh output, never a reader's file.
 
 use lopdf::{Bookmark, Document, Object};
 
-/// One entry of the outline to write, in the tree shape it will take. `page`
-/// is a 0-based index into the merged document; an index past the last page is
-/// pulled back to the last one, since a bookmark must point somewhere.
+/// `page` is 0-based; an index past the last page is pulled back to it, since
+/// a bookmark must point somewhere.
 pub(super) struct OutlineNode {
     pub(super) title: String,
     pub(super) page: usize,
@@ -25,9 +15,8 @@ pub(super) struct OutlineNode {
 /// titles are a merged file's own text, so they are cut rather than trusted.
 const MAX_TITLE_CHARS: usize = 512;
 
-/// Writes `nodes` as `bytes`' outline, giving back the rewritten document.
-/// An empty `nodes` gives the bytes back untouched — a document with no
-/// bookmarks is the shape PDFium already produced, so there is nothing to do.
+/// An empty `nodes` gives the bytes back untouched: no bookmarks is the shape
+/// PDFium already produced.
 pub(super) fn write_outline(bytes: Vec<u8>, nodes: &[OutlineNode]) -> Result<Vec<u8>, String> {
     if nodes.is_empty() {
         return Ok(bytes);

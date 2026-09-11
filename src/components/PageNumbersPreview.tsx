@@ -14,11 +14,8 @@ const A4_WIDTH = 595.276
 const SLICE_HEIGHT = 280
 /** Teeth across the tear. Even, so it starts and ends on the paper's edge. */
 const TEAR_TEETH = 56
-/**
- * The label's size here, in pixels, against the 11 pt it is set in on the page.
- * At this width a true-to-scale label would be four pixels tall and unreadable,
- * so the preview magnifies the number and keeps only its placement honest.
- */
+/** Against the 11 pt the page sets: true to scale the label would be four
+    pixels tall, so the preview magnifies it and keeps placement honest. */
 const LABEL_SIZE = 10
 
 /** Which edge of the sheet a number is measured from, mirroring
@@ -104,19 +101,11 @@ function Sheet({ anchor, caption, printed, testId }: SheetProps) {
 }
 
 type PageNumbersPreviewProps = {
-  /** What the sheets are called: one sheet for a fixed place, an odd and an
-      even one for the mirrored one. */
   captions: { even: string; every: string; odd: string }
   placement: PageNumbersPlacement
-  /** The number the first numbered page prints, so a custom start shows. */
   printed: number
 }
 
-/**
- * The bottom of the page as the reader will get it: one sheet where the number
- * keeps its place, two where it mirrors by binding — odd pages carrying it on
- * the outer right, even pages on the outer left.
- */
 export function PageNumbersPreview({
   captions,
   placement,

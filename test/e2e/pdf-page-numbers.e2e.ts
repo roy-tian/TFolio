@@ -88,9 +88,8 @@ describe("TFolio page numbers", () => {
   it("picks the placement from one control and validates a range", async () => {
     await openPageNumbersDialog()
 
-    // One control over both fixed places and the mirrored one, so the preview
-    // is what says which of them the reader has landed on: a single sheet for
-    // a fixed place, an odd and an even one for the mirrored choice.
+    // One control covers fixed and mirrored places, so the preview says which is
+    // chosen: a single sheet for a fixed place, an odd and an even for mirrored.
     const preview = $("[data-testid='page-numbers-preview']")
     await $("//button[normalize-space()='Automatic']").click()
     await browser.waitUntil(
@@ -118,9 +117,8 @@ describe("TFolio page numbers", () => {
 
   it("remembers the style for the next document", async () => {
     await openPageNumbersDialog()
-    // The seeded settings name no style, so the dialog opens on its defaults —
-    // and the placement applied below is the *other* one, which is what makes
-    // the reopened dialog's answer the file's rather than the default's.
+    // Seeded settings name no style, so the applied placement below is the *other*
+    // one — which makes the reopened dialog's answer the file's, not the default's.
     const centre = $("//button[normalize-space()='Fixed centre']")
     const wanted =
       (await centre.getAttribute("aria-pressed")) === "true"
@@ -134,9 +132,8 @@ describe("TFolio page numbers", () => {
       timeout: 30_000,
     })
 
-    // A reload drops everything this WebView held, so what the next document's
-    // dialog opens on can only have come from the user-level file the backend
-    // keeps. A second document also has no numbers of its own to read instead.
+    // A reload drops everything the WebView held, so the next document's dialog
+    // can only open on the user-level file the backend keeps.
     await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("page-numbers-style.pdf", blankPdf())
@@ -279,7 +276,6 @@ describe("TFolio page numbers", () => {
     await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 
-    // Removing the page numbers leaves the watermark exactly in place.
     await openPageNumbersDialog()
     await $("//button[normalize-space()='Remove page numbers']").click()
     await $("[data-testid='page-numbers-dialog']").waitForDisplayed({

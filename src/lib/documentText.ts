@@ -1,10 +1,8 @@
 import { invoke } from "@tauri-apps/api/core"
 
 /**
- * The whole document's text, in page order, as a select-all hands it to the
- * clipboard. It comes from PDFium rather than from the text layer on screen:
- * only the pages near the reader carry one, so a copy taken from the DOM would
- * quietly drop every page between them.
+ * From PDFium, not the DOM text layer: only pages near the reader carry one,
+ * so a copy from the DOM would drop every page between them.
  */
 export async function documentPlainText(
   documentId: number,
@@ -12,9 +10,8 @@ export async function documentPlainText(
 ): Promise<string> {
   const pages: string[] = []
 
-  // One page at a time. Each call takes the PDFium lock for its own turn, and
-  // asking for a long document's pages at once would fill the blocking pool
-  // with tasks queued behind that lock.
+  // One page at a time: each call takes the PDFium lock for its turn, and a
+  // bulk ask would fill the blocking pool with tasks queued behind that lock.
   for (let pageNumber = 1; pageNumber <= numPages; pageNumber += 1) {
     const text = await invoke<string>("extract_pdf_page_plain_text", {
       documentId,

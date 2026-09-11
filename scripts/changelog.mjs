@@ -5,9 +5,8 @@ import { spawnSync } from "node:child_process"
 
 const root = path.resolve(import.meta.dirname, "..")
 
-// Conventional-commit types in the order their sections appear; a subject the
-// pattern cannot parse, or one whose type has no section here, falls into
-// "Other changes" rather than being dropped.
+// Sections in the order they appear; an unparseable subject or unknown type
+// falls into "Other changes" rather than being dropped.
 const sections = [
   ["feat", "Features"],
   ["fix", "Bug fixes"],

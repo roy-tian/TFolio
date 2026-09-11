@@ -1,10 +1,6 @@
 /**
- * Copies `text` from inside the click that asked for it.
- *
- * The WebView's own async clipboard is the route that needs neither a
- * selection nor focus, so it goes first; the carrier field behind it is the
- * form of copy left where that one is refused, and it has to be a real field
- * because an editing command copies a selection, not an argument.
+ * The async clipboard goes first; where it is refused, the carrier field is a
+ * real field because `execCommand` copies a selection, not an argument.
  */
 export function copyPlainText(text: string) {
   if (!text) {

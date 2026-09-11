@@ -308,7 +308,6 @@ const en = {
     deleteSelected: "Delete {{count}} selected pages",
     insertBefore: "Insert a blank page before page {{pageNumber}}",
     insertAtEnd: "Insert a blank page at the end",
-    /** The right-click menu on a page, which acts on the whole selection. */
     cut_one: "Cut page",
     cut_other: "Cut {{count}} pages",
     copy_one: "Copy page",
@@ -317,7 +316,6 @@ const en = {
     rotate_other: "Rotate {{count}} pages",
     pasteBefore: "Paste before page {{pageNumber}}",
     pasteAtEnd: "Paste at the end",
-    /** The notices: what was taken, and where a paste put it. */
     cutNotice_one: "Page {{pages}} cut",
     cutNotice_other: "{{count}} pages cut ({{pages}})",
     copiedNotice_one: "Page {{pages}} copied",

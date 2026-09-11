@@ -26,17 +26,8 @@ import {
 } from "@/lib/pageNumbers"
 import { cn } from "@/lib/utils"
 
-/**
- * The disclosure marker for the one setting that decides something for itself:
- * a spark drawn in a gradient, so a reader picks it out from the plain `Info`
- * marks around it before reading a word.
- *
- * The gradient is defined inside this very icon, under a hook-generated id, so
- * two panels on screen at once (the dialog and the wizard's step) cannot end up
- * sharing — or fighting over — one definition. `userSpaceOnUse` spans the whole
- * 24-unit viewBox rather than each path's own box, so the sweep runs across the
- * mark instead of restarting inside every stroke.
- */
+/** Gradient id is hook-generated: two panels on screen at once must not share
+    one definition. `userSpaceOnUse` spans the whole viewBox, not each stroke. */
 function SmartIcon() {
   const gradientId = useId()
 
@@ -63,24 +54,17 @@ function SmartIcon() {
 type SettingLabelProps = {
   about: string
   children: ReactNode
-  /** Absent for the one control that needs no explaining; the row keeps the
-      disclosure's height either way, so the two halves stay level. */
   hint?: string
   htmlFor?: string
   id?: string
-  /** A fact about the document the control is read against, following the name
-      rather than the field, so a wide field does not strand it. */
   note?: string
   /** Whether this setting decides something for itself, which its marker says
       before its name does. */
   smart?: boolean
 }
 
-/**
- * A control's name with its explanation folded into a disclosure beside it, so
- * a panel of eight settings stays a handful of rows tall. Only what a reader
- * has to act on — the errors below — is left on the surface.
- */
+/** A control's name with its explanation folded into a disclosure beside it,
+    so a panel of eight settings stays a handful of rows tall. */
 function SettingLabel({
   about,
   children,
@@ -124,20 +108,12 @@ type PageNumbersSettingsProps = {
   /** Prefix for the field ids, so two of these can share a page. */
   idPrefix?: string
   onDraftChange: (draft: PageNumbersDraft) => void
-  /** The pages the numbers are read against — the open document's, or, in the
-      wizard, what the merge is about to produce. */
   pageCount: number
   validationError: PageNumbersValidationError | null
 }
 
-/**
- * The page numbers' own controls, beside a preview of the sheet they describe.
- * Shared by the dialog that applies them to an open document and by the merge
- * wizard's third step, so the two can never drift apart.
- *
- * Grouped by what a reader decides together: how it prints, which pages it
- * covers, and then the plain yes/no answers as one list of boxes.
- */
+/** The page numbers' own controls, shared by the applying dialog and the merge
+    wizard's third step, so the two can never drift apart. */
 export function PageNumbersSettings({
   className,
   draft,
@@ -157,9 +133,8 @@ export function PageNumbersSettings({
   const smartColorId = `${idPrefix}-smart-color`
 
   return (
-    // The columns keep their natural heights, so short content never earns a
-    // scrollbar of its own; from `sm` the sheet sticks so it stays in view
-    // while the controls pass it.
+    // From `sm` the sheet sticks, so it stays in view while the controls pass
+    // it; natural heights keep short content from earning a scrollbar.
     <div className={cn("flex flex-col gap-5 sm:flex-row", className)}>
       <Field className="sm:sticky sm:top-0 sm:w-[12rem] sm:shrink-0 sm:self-start">
         <FieldLabel>{t("pageNumbers.preview")}</FieldLabel>
@@ -176,9 +151,8 @@ export function PageNumbersSettings({
 
       <div className="min-w-0 flex-1">
         <FieldGroup>
-          {/* One choice, not two: single-sided printing is the two fixed
-              places, and double-sided is what `auto` means, so asking for the
-              printing separately only offered a position it then took away. */}
+          {/* One choice, not two: single-sided is the two fixed places and
+              double-sided is `auto`, so a separate ask only took a choice back. */}
           <Field>
             <SettingLabel
               about={about}
@@ -289,9 +263,8 @@ export function PageNumbersSettings({
                 inputMode="numeric"
                 max={maxStart}
                 min={1}
-                // Out of range while typing is only half a number; it is
-                // leaving the field that settles it, so the snap happens
-                // there rather than under the reader's fingers.
+                // Half-typed numbers must not be snapped mid-entry; leaving the
+                // field is what settles it, so the clamp happens there.
                 onBlur={(event) => {
                   const settled = clampPageNumbersStart(
                     event.target.value,
@@ -317,10 +290,8 @@ export function PageNumbersSettings({
             </Field>
           </div>
 
-          {/* Three plain yes/no answers, as a list of boxes down the left rather
-              than switches floating at the right edge: the marks line up under
-              one another, and a long name no longer strands its control halfway
-              across the panel. */}
+          {/* Boxes down the left rather than switches at the right edge: the
+              marks line up, and a long name cannot strand its control. */}
           <div className="flex flex-col gap-3">
             <Field orientation="horizontal">
               <Checkbox
@@ -359,9 +330,8 @@ export function PageNumbersSettings({
               </SettingLabel>
             </Field>
 
-            {/* Last, so the indent has nothing after it to look misaligned
-                against: a page that takes no number has none to print, so this
-                one follows the box above rather than standing against it. */}
+            {/* The indent follows the box above rather than standing against
+                it: a page that takes no number has none to print. */}
             <Field
               className="pl-6"
               data-disabled={!draft.blankCounted}

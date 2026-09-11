@@ -11,7 +11,6 @@ import {
   stripedPdf,
 } from "./helpers"
 
-/** Drags a rectangle across a corner of page 1, in fractions of its box. */
 async function dragRect(from: [number, number], to: [number, number]) {
   await browser.execute(
     (corners: number[]) => {
@@ -40,7 +39,6 @@ async function dragRect(from: [number, number], to: [number, number]) {
   )
 }
 
-/** Presses and releases on one point of page 1 — what the eraser aims with. */
 async function clickPage(x: number, y: number) {
   await browser.execute(
     (spot: number[]) => {
@@ -115,7 +113,6 @@ describe("TFolio eraser", () => {
       "false",
     )
 
-    // A point on bare page is a point on nothing: the document is left alone.
     await clickPage(0.1, 0.1)
     await settledAt(both, "a click off every mark changed the page")
 

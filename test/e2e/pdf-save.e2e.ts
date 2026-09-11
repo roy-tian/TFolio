@@ -85,15 +85,13 @@ describe("TFolio save", () => {
     expect(saved.subarray(0, 5).toString("ascii")).toBe("%PDF-")
     expect(saved.length).toBeGreaterThan(original.length)
 
-    // …and the history is clean again, so the item goes back to waiting.
     await browser.waitUntil(
       async () => !(await appMenuItemEnabled("save")),
       { timeout: 15_000, timeoutMsg: "the save never marked the history clean" },
     )
 
-    // The saved file has to hold the mark: reopened from the same path, the
-    // page carries more ink than it did clean. Reloading first, because the
-    // drop zone — the only way to the picker — exists only without a document.
+    // Reloading first: the drop zone — the only way to the picker — exists only
+    // without a document. Reopened, the page must carry more ink than clean.
     await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPathViaDialog(filePath)

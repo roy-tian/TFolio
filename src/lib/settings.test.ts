@@ -8,15 +8,13 @@ import {
 } from "@/lib/settings"
 
 type Stub = {
-  /** Every document `set_settings` was handed, in order. */
   written: unknown[]
   storage: Map<string, string>
 }
 
 /**
- * Runs `body` against a stubbed backend and a stubbed WebView storage, then
- * puts `window` back. The settings go through the real IPC seam, so what these
- * assert is what `settings.rs` would actually be sent.
+ * The settings go through the real IPC seam, so what these assert is what
+ * `settings.rs` would actually be sent.
  */
 async function withBackend(
   stored: unknown,

@@ -34,7 +34,6 @@ describe("pastePlan", () => {
   })
 
   it("has nothing to do for a move that changes nothing", () => {
-    // Pasting a cut back in front of itself, which is where it already is.
     expect(pastePlan(pageClipboardOf("cut", [2, 3]), 2, 4)).toBeNull()
   })
 

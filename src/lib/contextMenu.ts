@@ -10,7 +10,6 @@ const textInputTypes = new Set([
   "url",
 ])
 
-/** What a right-click has to land in, given to `Element.closest`. */
 const editableSelector = "input, textarea, [contenteditable]"
 
 type EditableField = {
@@ -40,8 +39,7 @@ export function acceptsTypedText(field: EditableField | null): boolean {
   return tag === "textarea" || textInputTypes.has(field.type ?? "text")
 }
 
-/** Whether an event landed in a field the reader types into, where an editing
-    shortcut belongs to the field rather than to the app around it. */
+/** An editing shortcut here belongs to the field, not to the app around it. */
 export function isTypingTarget(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
@@ -60,14 +58,8 @@ export function hasLayerOverWorkspace(): boolean {
 }
 
 /**
- * Drops the WebView's own context menu, which is the browser's and not this
- * app's: it offers a reader reload, back and view source over a page of a PDF.
- * The one thing on that page worth a right-click — copying selected text — the
- * app puts in a menu of its own (`PageTextMenu`). A field being typed in keeps
- * the native menu, since there its cut/copy/paste is the only one there is.
- *
- * Right-click devtools go with it; a debug build still opens the inspector
- * from the keyboard.
+ * The WebView's menu is the browser's, not this app's — reload and view source
+ * over a PDF. Typed-in fields keep it: there its cut/copy/paste is the only one.
  */
 export function suppressNativeContextMenu() {
   window.addEventListener("contextmenu", (event) => {

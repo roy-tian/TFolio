@@ -1,8 +1,5 @@
-//! LibreOffice, the chain's last engine and the only one on Linux.
-//!
-//! Headless, one process per file, with a profile of this run's own: the
-//! default profile belongs to whatever LibreOffice the reader may already
-//! have open, and two soffice processes on one profile block each other.
+//! One process per file, headless, with a profile of this run's own: two
+//! soffice processes sharing the default profile would block each other.
 
 use std::{
     env,
@@ -108,7 +105,6 @@ pub(crate) fn libreoffice_args(profile: &Path, out_dir: &Path, input: &Path) -> 
         out_dir.to_path_buf().into_os_string(),
     ];
 
-    // A profile of this run's own, so a running LibreOffice cannot block it.
     // The flag and its URL are one argument, not two.
     args.push(format!("-env:UserInstallation={}", file_url(profile)).into());
     args.push(input.to_path_buf().into_os_string());
@@ -116,10 +112,8 @@ pub(crate) fn libreoffice_args(profile: &Path, out_dir: &Path, input: &Path) -> 
     args
 }
 
-/// A `file:` URL for LibreOffice's `-env:` argument, which takes a URL
-/// rather than a path. Only the URL grammar's unreserved characters and the
-/// separators go through as themselves; everything else is percent-encoded,
-/// so a path with spaces or either platform's non-ASCII names survives.
+/// A `file:` URL for `-env:`, which takes a URL, not a path: everything
+/// outside the grammar's unreserved set is percent-encoded.
 pub(crate) fn file_url(path: &Path) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
     let mut url = String::from("file://");
@@ -154,10 +148,8 @@ fn detail(output: &std::process::Output) -> String {
     }
 }
 
-/// Where LibreOffice installs, by platform. Passive: files are looked for,
-/// nothing is run. The PATH scan is last because distributions disagree
-/// about where the real binary lives and PATH may hold a wrapper. Unused in
-/// the e2e build, whose detection answers nothing at all.
+/// Passive: files are looked for, nothing is run. The PATH scan is last
+/// because PATH may hold a wrapper rather than the real binary.
 #[cfg_attr(feature = "e2e", allow(dead_code))]
 pub(crate) fn find_soffice() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -212,8 +204,6 @@ pub(crate) fn find_soffice() -> Option<PathBuf> {
         .find(|candidate| is_executable(candidate))
 }
 
-/// Every directory on the PATH, joined with `name`, in PATH order — the
-/// platform's own separator rules, which `split_paths` knows.
 fn path_lookup(name: &str) -> Vec<PathBuf> {
     let path = env::var_os("PATH").unwrap_or_default();
 
@@ -222,8 +212,6 @@ fn path_lookup(name: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// A file this process could run. The executable bit matters only where
-/// there is one; Windows answers for the extension.
 fn is_executable(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;

@@ -10,9 +10,8 @@ import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT } from "@/lib/viewMode"
 
-// A thumbnail cell is a fraction of a page's height, so the page-sized prefetch
-// margin would reach several rows past the viewport and burst dozens of renders
-// through PDFium at once. Stay closer to the reader.
+// A cell is a fraction of a page's height, so the page-sized prefetch margin
+// would burst dozens of renders through PDFium at once. Stay closer.
 const THUMBNAIL_ROOT_MARGIN = "400px 0px"
 
 type PdfThumbnailProps = {
@@ -26,33 +25,21 @@ type PdfThumbnailProps = {
   isCut: boolean
   isSelected: boolean
   onDelete: (pageNumber: number) => void
-  /** Double-click: leave the grid for the page itself. */
   onOpen: (pageNumber: number) => void
-  /** Single click, with its modifiers, is selection. */
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
-  /** The page's displayed size in points, taken apart rather than as a
-      `PdfPageInfo`: every structure edit replaces the whole page list, and a
-      cell whose own page did not change must still compare equal. */
+  /** The page's size in points, taken apart rather than as a `PdfPageInfo`:
+      every structure edit replaces the page list, and cells must compare equal. */
   pageHeight: number
   pageNumber: number
   pageWidth: number
-  /** Bumped when the page is drawn on, so the bitmap is fetched again. */
   renderEpoch: number
   rotation: number
-  /** How many pages the whole selection holds, for the delete label. */
   selectedCount: number
-  /** CSS pixels this thumbnail occupies; the grid sizes every cell alike. */
   width: number
 }
 
-/**
- * A page preview that selects rather than reads: it paints a WebP bitmap and
- * deliberately carries no selectable text layer, so a grid of them stays cheap
- * even on a long document. A click selects, a double-click opens the page, and
- * the corner button deletes — the current selection when this page is in it,
- * this page alone otherwise. The right-click that cuts or copies belongs to the
- * grid rather than to each cell: see `ThumbnailLayout`.
- */
+/** A preview that selects rather than reads — no text layer, so a grid stays
+    cheap. The cut/copy right-click belongs to the grid: see `ThumbnailLayout`. */
 export function PdfThumbnail({
   deleteDisabled,
   documentId,
@@ -190,10 +177,8 @@ export function PdfThumbnail({
           <X className="size-3.5" />
         </button>
       </HintTooltip>
-      {/* The space over the number is the caption's own box rather than the
-          column's gap, so what the number costs the cell is one known height —
-          which is what lets the insertion line beside the cell find the paper
-          in a row taller than it. */}
+      {/* The caption's height is its own box, not the column's gap — the known
+          height is what lets the insertion line find the paper in a row. */}
       <span
         className={cn(
           "flex items-end font-mono text-xs tabular-nums",

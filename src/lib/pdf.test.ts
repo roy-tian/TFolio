@@ -61,9 +61,8 @@ describe("pickCurrentPage", () => {
     expect(pick([])).toBeNull()
   })
 
-  // The regression a fixed reading line caused: landscape thumbnail rows are
-  // 107px tall, so a line sitting ~237px down landed two rows past the one
-  // navigation had just parked at the top.
+  // The regression a fixed reading line caused: a line ~237px down lands two
+  // rows past a 107px row navigation had just parked at the top.
   test("reports a short row parked at the top of the viewer", () => {
     const rows = [page(13, 20, 127), page(17, 165, 272), page(21, 310, 417)]
 
@@ -88,7 +87,6 @@ describe("pickCurrentPage", () => {
   })
 
   test("falls back to the most visible page when neither clears half", () => {
-    // The gap between two tall pages leaves both just under the bar.
     expect(pick([page(5, -865, 335), page(6, 355, 1555)])).toBe(6)
   })
 

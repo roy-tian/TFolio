@@ -50,10 +50,8 @@ export type MergeWizardError =
   | "tooManyFiles"
   | null
 
-/** What the wizard hands the workspace: the merged document, and the page
-    content the reader asked for on top of it. The two layers are applied to the
-    new tab through the ordinary annotation commands rather than baked in by the
-    backend, so each stays one undo away. */
+/** The layers are applied through the tab's ordinary annotation commands
+    rather than baked in by the backend, so each stays one undo away. */
 export type MergeWizardResult = {
   document: PdfDocumentInfo
   pageNumbers: PageNumbersConfig | null
@@ -69,7 +67,6 @@ type UseMergeWizardOptions = {
   ) => Promise<void>
 }
 
-/** Fits one backend phase's own progress into its part of the whole merge. */
 function completedPhaseUnits(progress: PdfProgress, units: number) {
   if (
     !Number.isFinite(progress.completed) ||
@@ -85,12 +82,8 @@ function completedPhaseUnits(progress: PdfProgress, units: number) {
 }
 
 /**
- * Runs one owned-layer command on the document a merge just made. `false` is
- * the reader's stop, which the backend has already rolled back — the wizard
- * only has to stop too.
- *
- * The tab route applies these through the session's own undo queue; an archive
- * has no tab, so it asks for them here.
+ * `false` is the reader's stop, already rolled back by the backend. Used only
+ * by the archive route: a tab applies its layers through its own undo queue.
  */
 async function applyOwnedLayer(
   command: string,
@@ -105,9 +98,8 @@ async function applyOwnedLayer(
 }
 
 /**
- * Runs one of the archive exports, which put up their own save dialog and
- * answer with the path they wrote. `null` is a dialog the reader dismissed or a
- * run they stopped: either way nothing was written and the wizard stays open.
+ * `null` is a dismissed dialog or a stopped run: nothing was written and the
+ * wizard stays open.
  */
 async function writeArchive(
   command: string,
@@ -127,11 +119,8 @@ async function writeArchive(
 }
 
 /**
- * The merge wizard's whole state: the file list and the three settings steps,
- * plus the one call that turns them into a document.
- *
- * Nothing here touches an open document — a merge builds a new one — so the
- * wizard lives at the workspace level rather than inside a document session.
+ * A merge builds a new document and touches no open one, so the wizard lives
+ * at the workspace level rather than inside a document session.
  */
 export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   const { t } = useTranslation()
@@ -158,9 +147,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   // The list as the handlers see it: an add reads it to decide what the ceiling
   // turned away, which a state updater cannot report from inside itself.
   const filesRef = useRef<MergeFile[]>([])
-  // Whether the reader has touched the page-number settings. Until they have,
-  // the draft follows the file list: its range covers whatever the merge now
-  // comes to, rather than a total from before the last file was added.
+  // Until the reader touches the settings, the draft follows the file list —
+  // its range covers whatever the merge now comes to.
   const pageNumbersUntouched = useRef(true)
   const choosingRef = useRef(false)
   // Which half of the run a stop has to reach: the merge itself has no document
@@ -239,9 +227,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
 
   const openWizard = useCallback(() => onOpenChange(true), [onOpenChange])
 
-  /** Reads the paths' page counts and adds them to the list. Used by the add
-      button and by a drop onto the open wizard, which is why it takes paths
-      rather than opening the dialog itself. */
+  /** Takes paths rather than opening the dialog because a drop onto the open
+      wizard uses it as well as the add button. */
   const addPaths = useCallback(
     async (paths: string[]) => {
       if (paths.length === 0) {
@@ -331,10 +318,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     [watermarkDraft],
   )
 
-  // Only the steps this export actually asks can block it, and only the ones
-  // that can be wrong: the file list is checked by `canMerge`. A page-number
-  // range left unusable is a step behind by the time the last one is reached,
-  // so the final button answers for every step the run is about to commit.
+  // Only the steps this export actually asks can block it; the final button
+  // answers for every step the run is about to commit.
   const asks = useCallback(
     (named: MergeWizardStep) => steps.includes(named),
     [steps],
@@ -353,9 +338,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     (next: MergeWizardStep) => {
       setError(null)
 
-      // Entering the page-number step re-reads the reader's stored style against
-      // the merge's own length — but only while they have not edited the draft
-      // themselves, so going back for one more file never undoes their work.
+      // Re-reads the stored style against the merge's length only while the
+      // reader has not edited the draft, so a detour never undoes their work.
       if (next === "pageNumbers" && pageNumbersUntouched.current) {
         setPageNumbersDraft(
           draftFromPreferences(storedPageNumbersPreferences(), totalPages),
@@ -383,10 +367,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     }
   }, [goToStep, step, stepBlocked, steps])
 
-  /** The export mode is answered on the first step, where every mode's own
-      steps still lie ahead — so a mode that drops the step underway can only be
-      one the reader reached by another route, and it starts again from the top
-      rather than leaving them on a step this export never asks. */
+  /** A mode that drops the step underway starts again from the top rather
+      than leaving the reader on a step this export never asks. */
   const changeExportMode = useCallback(
     (mode: MergeExportMode) => {
       setError(null)
@@ -400,10 +382,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   )
 
   /**
-   * Asks whichever half of the run is going to stop, and remembers an ask the
-   * backend had nothing listed to answer — which is what the progress handlers
-   * below repeat, since a stop is reachable before the command behind the phase
-   * they name has listed itself.
+   * Remembers an ask the backend had nothing listed to answer; the progress
+   * handlers repeat it, a stop being reachable before the command lists itself.
    */
   const ask = useCallback(async () => {
     const documentId = mergedIdRef.current
@@ -441,10 +421,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     setIsStopping(false)
     setError(null)
 
-    // Give each visible phase the same share, while its own backend events
-    // describe progress within that share. Raw page counts would otherwise pin
-    // a two-file merge near 0% until hundreds of layer pages began processing.
-    // The copies export is one backend call from end to end, so it is one phase.
+    // Each phase gets the same share: raw page counts would pin a two-file
+    // merge near 0% until hundreds of layer pages began processing.
     const merges = mergesIntoOneDocument(exportMode)
     const mergeUnits = merges ? MERGE_PROGRESS_PHASE_UNITS : 0
     const pageNumberUnits = merges && pageNumbers ? MERGE_PROGRESS_PHASE_UNITS : 0
@@ -517,9 +495,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
         })
       }
 
-      // A merge the reader stopped built nothing, so there is nothing to open,
-      // nothing to remember, and nothing to report: the wizard stays on its
-      // last step with the list and the settings they assembled still there.
+      // A stopped merge built nothing to open, remember, or report: the wizard
+      // stays on its last step with the list and settings still there.
       if (!document) {
         return
       }
@@ -555,8 +532,6 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
           layer === "pageNumbers" ? pageNumberUnits : watermarkUnits,
         )(progress)
 
-      // The merged document reaches the workspace as a tab, where its layers
-      // are applied through the ordinary undoable commands.
       if (exportMode === "onePdf") {
         await onMerged({ document, pageNumbers, watermark }, onLayerProgress)
         setOpen(false)
@@ -641,10 +616,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   ])
 
   /**
-   * The reader's way out of an add that is still converting Word documents —
-   * the one slow thing an add can be doing, and the one the dialog's busy
-   * state would otherwise give no button to. Nothing waits for the answer:
-   * the inspection settles on its own, its rows answering for what stopped.
+   * The one button an add still converting Word documents can offer; nothing
+   * waits for the answer, the inspection settles on its own.
    */
   const stopAdding = useCallback(async () => {
     try {
@@ -655,17 +628,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   }, [])
 
   /**
-   * The reader's way out of a run that has already started — the wizard's whole
-   * job is behind one PDFium lock, so this is the only message that reaches it
-   * while it holds one.
-   *
-   * Which half is running decides who is asked: the merge has no document to
-   * name, and the layers that follow run on the document it produced. Nothing
-   * waits for the answer; the run's own result closes the surface.
-   *
-   * The phase this button names flips the moment the merge lands, well before
-   * the layer command behind it exists to be stopped — so an ask that reaches
-   * nothing is repeated from the progress that follows.
+   * The whole run sits behind one PDFium lock, so this cancel is the only
+   * message that reaches it; nothing waits, the run's result closes things.
    */
   const stop = useCallback(() => {
     if (mergeProgress === null) {

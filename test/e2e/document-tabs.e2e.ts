@@ -24,24 +24,20 @@ function writePdf(name: string, pages: number) {
   return filePath
 }
 
-/** Every tab in the strip, the home tab included — it leads the list. */
 function tabButtons() {
   return $$("button[role='tab']")
 }
 
-/** The tab a document is open in, by the name it shows. */
 function tabButton(name: string) {
   return $(`//button[@role='tab'][normalize-space()='${name}']`)
 }
 
-/** A file's row in the home tab's recent list, by the name it shows. */
 function recentEntry(filePath: string) {
   return $(
     `//button[@data-slot='recent-file'][contains(., '${path.basename(filePath)}')]`,
   )
 }
 
-/** Where the active document is scrolled to, which is where its reader is. */
 function activeScrollTop() {
   return browser.execute(() => {
     const viewer = document.querySelector<HTMLElement>(
@@ -52,7 +48,6 @@ function activeScrollTop() {
   })
 }
 
-/** That offset once a smooth scroll to a page has come to rest. */
 async function settledScrollTop() {
   let previous = -1
 
@@ -147,8 +142,6 @@ describe("independent document tabs", () => {
     await expect(tabButtons()).toBeElementsArrayOfSize(2)
     await expect(tabButton("first.pdf")).toBeFocused()
 
-    // Reopen a clean neighbour, dirty the first document, and verify both
-    // branches of the tab-close guard.
     await openPathViaDialog(secondPath)
     await tabButton("first.pdf").click()
     await $("button[aria-label='Thumbnails']").click()

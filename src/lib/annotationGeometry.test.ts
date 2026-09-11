@@ -133,11 +133,8 @@ describe("fractionToPagePoint", () => {
     }
   })
 
-  // Turning a page a quarter clockwise carries its top edge to the right edge,
-  // so the page's own top-left corner is drawn at the footprint's top-right.
-  // Pinned explicitly because the corner-set test above only proves the four
-  // corners are hit once each — it would pass just as happily on a map that
-  // turned the page the wrong way.
+  // Pinned because the corner-set test above would pass just as happily on a map
+  // that turned the page the wrong way: the top-left must land at the top-right.
   it("places a quarter turn's corners where the page is actually drawn", () => {
     expect(fractionToPagePoint({ x: 1, y: 0 }, page(0), 90)).toEqual({
       left: 0,
@@ -157,8 +154,6 @@ describe("fractionsToPageRect", () => {
     ).toEqual({ height: 150, left: 20, top: 60, width: 100 })
   })
 
-  // A reader drags from whichever corner they like; the rectangle that lands is
-  // the same one either way.
   it("gives the same rectangle whichever corner the drag started from", () => {
     const forward = fractionsToPageRect(
       { x: 0.1, y: 0.2 },
@@ -246,9 +241,8 @@ describe("clampFraction", () => {
 })
 
 describe("rotateFraction", () => {
-  // The inverse of `unrotateFraction`, which is the whole of its contract: an
-  // editor placed with one and read back with the other has to land where it
-  // started, at every turn the two can be given.
+  // Inverseness is the whole of the contract: an editor placed with one and read
+  // back with the other has to land where it started, at every turn.
   it("undoes unrotateFraction at every quarter turn", () => {
     const start: BoxFraction = { x: 0.3, y: 0.8 }
 
@@ -293,9 +287,8 @@ describe("pagePointToFraction", () => {
     })
   })
 
-  // The page's top-left is drawn at the footprint's top-right through a quarter
-  // turn — the same corner `fractionToPagePoint` is pinned against, read the
-  // other way, so the two cannot drift apart.
+  // The same corner `fractionToPagePoint` is pinned against, read the other way,
+  // so the two cannot drift apart.
   it("places a quarter turn's corner where the page is actually drawn", () => {
     expect(pagePointToFraction({ left: 0, top: 0 }, page(0), 90)).toEqual({
       x: 1,

@@ -55,49 +55,39 @@ const MAX_THUMBNAIL_WIDTH: i32 = 512;
 // Each quad is a PDFium call made under the lock every render waits on, and no
 // page has this many runs of text.
 const MAX_HIGHLIGHT_QUADS: usize = 8192;
-// A search term arrives from the WebView and is converted to UTF-16 by PDFium.
-// Bound it before that allocation; a phrase this long is already far beyond a
-// useful find-in-document query.
+// A search term arrives from the WebView and becomes a UTF-16 allocation in
+// PDFium, so bound it first; this length is already far past a useful query.
 const MAX_SEARCH_CHARS: usize = 256;
 // Bound what one IPC response and the WebView's highlight map can retain. The
 // separate rectangle ceiling covers pathological wrapped occurrences too.
 const MAX_SEARCH_MATCHES: usize = 10_000;
 const MAX_SEARCH_RECTS: usize = 50_000;
-// A guided merge holds every source in memory at once, each under the same MiB
-// ceiling as an open, so the count is what bounds the whole run. Far past any
-// stack of files a reader assembles by hand.
+// A guided merge holds every source in memory at once under the same MiB
+// ceiling as an open, so the count is what bounds the whole run.
 const MAX_MERGE_FILES: usize = 64;
-// What a merge accepts besides PDFs, matched on the extension because the
-// wizard has to sort a dropped file before anything reads it. The bytes are
-// still identified by their own header when they are decoded.
+// Matched on the extension because the wizard must sort a dropped file before
+// anything reads it; the bytes are still header-checked when decoded.
 pub(super) const MERGE_IMAGE_EXTENSIONS: [&str; 8] =
     ["bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"];
-// An image file is read whole before it is decoded, and a photograph is nothing
-// like a document in size, so it gets a ceiling of its own well under the PDF
-// one.
+// An image is read whole before it is decoded, and a photograph is nothing
+// like a document in size, so its ceiling sits well under the PDF one.
 const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
-// What one image may expand to once decoded. An A4 page scanned at 600dpi is
-// about 35 megapixels, so this leaves generous room above real input while
-// refusing a header that claims a bitmap no machine could hold.
+// An A4 page scanned at 600dpi is about 35 megapixels: generous room above
+// real input while refusing a header claiming a bitmap no machine could hold.
 const MAX_IMAGE_PIXELS: u64 = 80_000_000;
-// Image effects capture page pixels at a print-like resolution, capped at the
-// same dimensions as an ordinary page render so one drag cannot allocate an
+// Capped at ordinary render dimensions so one drag cannot allocate an
 // unbounded bitmap or inflate the saved file without limit.
 const RECT_EFFECT_DPI: f32 = 150.0;
-// What one page becomes when a merge is exported as images rather than as a
-// document: enough to print and to read on screen, and the same resolution the
-// rectangle effects already capture at.
+// Print-readable, and the same resolution the rectangle effects capture at.
 const PAGE_IMAGE_DPI: f32 = 150.0;
 const POINTS_PER_INCH: f32 = 72.0;
-// Smart colour only needs an average luminance under one small label, so it
-// samples at a fraction of a print-resolution capture — a few pixels across the
-// label is enough to pick black or white.
+// Smart colour needs only an average luminance under one small label; a few
+// pixels across it are enough to pick black or white.
 const PAGE_NUMBER_SAMPLE_DPI: f32 = 24.0;
 // A little slack around the label's box, in display points, so the sample reads
 // the drop the number sits on rather than a hairline of it.
 const PAGE_NUMBER_SAMPLE_PADDING: f32 = 4.0;
-// The blank test reads a whole page rather than one label's drop, and runs on
-// every page of a document, so it renders coarser still: at this resolution a
+// Runs on every page of a document, so it renders coarser still: here a
 // hairline rule is a grey pixel, which is all the test needs to see.
 const PAGE_BLANK_SCAN_DPI: f32 = 18.0;
 
@@ -109,34 +99,23 @@ struct DisplayRect {
     width: f32,
 }
 
-/// One page-content layer's run of objects at the tail of a page, in tail
-/// order.
-///
-/// `identities` holds one string per object, read back from PDFium after the
-/// object was attached rather than the source text: an embedded font may map a
-/// character to a compatibility equivalent, so the bytes written are not always
-/// what PDFium reads, and only the read-back survives to be compared on a later
-/// guard.
+/// One page-content layer's run of objects at a page's tail; identities are
+/// read back from PDFium, not the source text, which an embedded font remaps.
 #[derive(Clone, Debug)]
 struct OwnedSegment {
     object_count: usize,
     identities: Vec<String>,
 }
 
-/// Everything this session appended to one page, past the content it found
-/// there. A page's objects are `[ base | segment 0 | segment 1 | … ]`, the
-/// segments in a fixed layer order (a watermark beneath, page numbers above),
-/// so a change to one layer leaves the other exactly where the reader saw it.
+/// Everything this session appended to one page, past the content found there.
+/// The fixed layer order is what lets a change to one leave the others alone.
 #[derive(Clone, Debug)]
 struct OwnedTailState {
-    /// Top-level page objects that existed before any owned layer covered this
-    /// page.
     base_objects: usize,
     segments: Vec<OwnedSegment>,
 }
 
 impl OwnedTailState {
-    /// The length of the owned tail — what a rebuild pops and a guard measures.
     fn owned_objects(&self) -> usize {
         self.segments
             .iter()
@@ -145,9 +124,8 @@ impl OwnedTailState {
     }
 }
 
-/// A deleted page's copy and the session state that travelled with it, held so
-/// an undo can put both back exactly. Self-contained: the copies live in their
-/// own document, released with the stash.
+/// A deleted page's copy and its session state, held so an undo can put both
+/// back exactly — self-contained, in a document of its own, released with it.
 struct PageStash {
     document: PdfDocument<'static>,
     /// One record per deleted page, ascending by original position — the order
@@ -169,11 +147,8 @@ struct StashedPage {
     merged: bool,
 }
 
-/// The page-content layers this open session owns. A layer's config is `Some`
-/// while it is active; the value as a whole is dropped to `None` once none is.
-/// Keyed by stable page id so the record survives the structure operations
-/// M7/M8 add; a page whose tail has empty `segments` was inserted or merged
-/// after a layer was applied — owned, but bare, until a re-apply covers it.
+/// The page-content layers this session owns, keyed by stable page id so the
+/// record survives structure operations; empty `segments` is owned-but-bare.
 #[derive(Clone, Debug)]
 struct OwnedContentState {
     watermark: Option<WatermarkConfig>,
@@ -182,25 +157,20 @@ struct OwnedContentState {
 }
 
 impl OwnedContentState {
-    /// Whether any layer is still active. When false the session owns nothing,
-    /// the state is dropped, and a save is no longer refused.
+    /// When false the state is dropped and a save is no longer refused.
     fn has_active_layer(&self) -> bool {
         self.watermark.is_some() || self.page_numbers.is_some()
     }
 }
 
-/// One active layer's planned objects for one page. Computed for every page
-/// before any is touched, so a measurement, object-limit, or sampling failure
-/// leaves the document untouched.
+/// One layer's planned objects for one page, computed for every page before
+/// any is touched, so a planning failure leaves the document untouched.
 struct WatermarkLayerPlan {
     object_rotation: f32,
     font_size: f32,
     placements: Vec<WatermarkPlacement>,
 }
 
-/// What one page geometry makes of a mark: the angle it reads along, the size
-/// that gives it the share of the width the reader asked for, and the box that
-/// size measures — which is what a zebra grid steps by.
 #[derive(Clone, Copy)]
 struct WatermarkMetrics {
     object_rotation: f32,
@@ -209,11 +179,8 @@ struct WatermarkMetrics {
     text_height: f32,
 }
 
-/// A single page-number object, planned: its text, the angle that cancels the
-/// page's `/Rotate`, and where its measured bounds go. The ink is chosen later,
-/// in the rebuild — for smart colour, `sample_box` says where to read the drop,
-/// which is sampled only *after* any previous tail is popped, so a replacement
-/// reads the real backdrop and not the label it is about to overwrite.
+/// A planned page-number object; its ink is chosen in the rebuild, sampled
+/// after the old tail is popped so a replacement reads the real backdrop.
 struct PageNumberLayerPlan {
     text: String,
     object_rotation: f32,
@@ -228,19 +195,16 @@ struct PageOwnedPlan {
     page_number_label: Option<PageNumberLayerPlan>,
 }
 
-/// The watermark layer's inputs to a rebuild, prepared before the document lock
-/// is taken: the config, its resolved colour, and — when the text leaves
-/// Latin-1 — the resolved face subset to embed. Its font token is loaded inside
-/// the rebuild, once, and reused for every page.
+/// The watermark layer's rebuild inputs: config, resolved colour and, past
+/// Latin-1, the face subset — cut before the lock; the font token loads inside.
 struct WatermarkResources {
     config: WatermarkConfig,
     color: PdfColor,
     embedded: Option<Vec<u8>>,
 }
 
-/// The page-number layer's inputs to a rebuild: the config and the face the
-/// system offered, already cut to the label's glyphs, so it is embedded as it
-/// stands. The font token is loaded inside the rebuild, once.
+/// The page-number layer's rebuild inputs: the config and a face already cut
+/// to the label's glyphs, embedded as it stands.
 struct PageNumbersResources {
     config: PageNumbersConfig,
     face: Vec<u8>,
@@ -323,11 +287,8 @@ fn measured_watermark_size(
     ))
 }
 
-/// Reads a page's own geometry as the mark's angle and size: it leans along the
-/// page's diagonal, and it is scaled so its displayed width is the share of the
-/// page width the reader chose. The measurement runs twice — once at the
-/// reference size to find the scale, once at the size the page will carry, so
-/// the grid steps by the box that is really drawn.
+/// Scales the mark so its displayed width is the share of the page the reader
+/// chose; measured twice, so the zebra grid steps by the box really drawn.
 fn watermark_metrics(
     document: &PdfDocument<'_>,
     font: PdfFontToken,
@@ -337,9 +298,8 @@ fn watermark_metrics(
     page_width: f32,
     page_height: f32,
 ) -> Result<WatermarkMetrics, String> {
-    // `/Rotate` 90 and 270 turn the page a quarter over, so the width the
-    // reader sees is the unrotated height — and so is the axis the mark's
-    // measured box spans it along.
+    // `/Rotate` 90 and 270 swap the axes: the width the reader sees — and the
+    // axis the mark's measured box spans — is the unrotated height.
     let quarter_turned = page_rotation == 90.0 || page_rotation == 270.0;
     let (display_width, display_height) = if quarter_turned {
         (page_height, page_width)
@@ -379,9 +339,6 @@ fn watermark_metrics(
     })
 }
 
-/// Builds the page-number label as a text object in the serif face, coloured
-/// and turned to cancel the page's `/Rotate` — the same shape as
-/// `rotated_watermark_object`, for the other owned layer.
 fn rotated_page_number_object<'a>(
     document: &PdfDocument<'a>,
     font: PdfFontToken,
@@ -403,8 +360,6 @@ fn rotated_page_number_object<'a>(
     Ok(object)
 }
 
-/// Translates a measured text object so its bounds' centre lands on a target
-/// centre in unrotated page space. Shared by both owned layers.
 fn place_text_object(
     mut object: PdfPageTextObject<'static>,
     target_x: f32,
@@ -428,79 +383,46 @@ fn place_text_object(
 
 struct OpenDocument {
     document: PdfDocument<'static>,
-    /// Position -> stable page id. Assigned `0..n` at open; every inserted page
-    /// takes a fresh id and an id is never reused within a session. Structure
-    /// operations permute or edit this vector, which is what lets every
-    /// id-keyed map below survive them.
+    /// Position -> stable page id. Ids are never reused within a session,
+    /// which is what lets every id-keyed map below survive structure operations.
     page_ids: Vec<u64>,
     next_page_id: u64,
-    /// Each page's own geometry, keyed by that stable id. A memo, not state:
-    /// every structure command reports the whole page list back, and measuring
-    /// it costs one `FPDF_LoadPage` per page — more than the edit itself once a
-    /// document runs to hundreds of pages, and paid again on every later edit.
-    /// An entry is written the first time that page is measured and only read
-    /// afterwards; a rotation — the one edit that changes a page's own shape —
-    /// retires it, so the page is measured afresh. An id is never reused, so a
-    /// deleted page's entry is still its own if the undo brings it back.
+    /// Geometry memo keyed by stable id — otherwise an `FPDF_LoadPage` per page
+    /// on every edit. Rotation retires an entry; a deleted page's survives undo.
     page_geometry: HashMap<u64, PdfPageInfo>,
-    /// Deleted pages awaiting a possible undo, keyed by the history entry that
-    /// deleted them. A delete under an occupied key replaces the stash: the key
-    /// identifies one history entry, so a redo of that delete re-stashes the
-    /// same logical pages — and an insert undone more than once reuses its key.
+    /// Deleted pages awaiting undo, keyed by their history entry; an occupied
+    /// key is replaced, a redo of that entry stashing the same logical pages.
     stashes: HashMap<u64, PageStash>,
-    /// The marks this session has added to each page, keyed by stable page id:
-    /// one id per annotation, in the order the annotations sit on the page.
-    ///
-    /// PDFium appends, so the reader's own marks are the tail of a page's
-    /// annotations and this is how long that tail is. Past it lie the document's
-    /// own — links, form fields, comments — which a removal must never reach.
-    ///
-    /// The ids, not the mere count, are what let a mark be removed from the
-    /// middle of that tail: the eraser takes whichever mark the reader points
-    /// at, so "the last one" stopped naming the mark an undo means.
+    /// Per page, this session's mark ids in annotation order. PDFium appends,
+    /// so they form the annotation tail; a removal must never reach past it.
     marks: HashMap<u64, Vec<u64>>,
     /// Ids for the marks above, never reused within a session, so an id the
     /// frontend still holds cannot come to name a different mark.
     next_mark_id: u64,
-    /// Monotonic content version per page, keyed by stable page id. Rectangle
-    /// effects release the global PDFium lock while processing owned pixels;
-    /// this detects an annotation that changed the source page before the
-    /// processed image is attached again.
+    /// Monotonic per-page version: rectangle effects release the PDFium lock
+    /// while processing pixels, and this detects a page that changed meanwhile.
     revisions: HashMap<u64, u64>,
-    /// Page ids an insert brought in from another file and that are still in the
-    /// document. While any remain, this document holds another file's pages, so
-    /// — like a watermark — it may only be exported as a copy, never written
-    /// back over the file it was opened from. Emptied when an insert is undone
-    /// (its pages deleted) and refilled when it is redone (its pages restored),
-    /// so the guard tracks what is actually present, not merely what once
-    /// happened.
+    /// Page ids inserted from another file and still present: while any remain
+    /// the document holds another file's pages, so it may only export to a copy.
     merged_page_ids: HashSet<u64>,
-    /// The file this document was opened from, and so the file a save writes
-    /// back over. `None` — opened from bytes — leaves nothing to overwrite,
-    /// and a first export adopts its destination as the source.
+    /// The file a save writes back over; `None` for opened-from-bytes, whose
+    /// first export adopts its destination as the source.
     source_path: Option<PathBuf>,
-    /// Whether this session has deleted an annotation or page object. PDFium
-    /// leaves referenced fonts, appearances, and content streams behind until a
-    /// save-and-reload collects them, so the next write takes that route.
+    /// Set by a deletion: PDFium leaves the removed content's references behind
+    /// until a save-and-reload collects them, so the next write takes that route.
     needs_compaction: bool,
-    /// The page-content layers (watermark, page numbers) this open session
-    /// owns, and where each page's owned tail sits. `None` once the session
-    /// owns nothing.
     owned_content: Option<OwnedContentState>,
 }
 
 impl OpenDocument {
-    /// Resolves a 1-based page number to the page's stable id — the key every
-    /// per-page map uses, which survives reordering, deletion, and insertion.
-    /// Doubles as the page-number validation every command needs.
+    /// Resolves a 1-based page number to its stable id; doubles as the
+    /// page-number validation every command needs.
     fn page_id(&self, page_number: i32) -> Result<u64, String> {
         page_index(page_number, self.page_ids.len())
             .map(|index| self.page_ids[index])
             .ok_or_else(|| format!("page {page_number} does not exist"))
     }
 
-    /// Records one more annotation at the end of a page's owned tail and hands
-    /// back the id that names it from here on.
     fn record_mark(&mut self, page_id: u64) -> u64 {
         let mark_id = self.next_mark_id;
 
@@ -511,11 +433,8 @@ impl OpenDocument {
         mark_id
     }
 
-    /// Where a mark sits: its page's stable id, that page's 1-based number now,
-    /// and its position in the page's owned tail.
-    ///
-    /// A mark the session never made — or has already removed — has no place,
-    /// which is what refuses an id the WebView made up.
+    /// A mark's page id, 1-based number, and tail position; an id the session
+    /// never made has no place, which refuses one the WebView made up.
     fn locate_mark(&self, mark_id: u64) -> Result<(u64, i32, usize), String> {
         self.page_ids
             .iter()
@@ -532,9 +451,8 @@ impl OpenDocument {
             .ok_or_else(|| format!("mark {mark_id} is not one of this session's"))
     }
 
-    /// Bumps every page's revision so an M5 effect captured before a structure
-    /// change fails its revision check after it: every structure command
-    /// permutes or resizes the page list, so no capture survives one.
+    /// Bumps every page's revision so an effect captured before a structure
+    /// change fails its check: no capture survives a permuted page list.
     fn invalidate_all_page_revisions(&mut self) {
         for &page_id in &self.page_ids {
             *self.revisions.entry(page_id).or_insert(0) += 1;
@@ -542,9 +460,8 @@ impl OpenDocument {
     }
 }
 
-/// A 1-based page number as a zero-based index, if it lands inside the
-/// document. Checked arithmetic throughout: the number is the WebView's, and
-/// `i32::MIN - 1` must refuse rather than overflow.
+/// A 1-based page number as a zero-based index, if in range. Checked arithmetic:
+/// the number is the WebView's, and must refuse rather than overflow.
 fn page_index(page_number: i32, page_count: usize) -> Option<usize> {
     page_number
         .checked_sub(1)
@@ -552,8 +469,6 @@ fn page_index(page_number: i32, page_count: usize) -> Option<usize> {
         .filter(|index| *index < page_count)
 }
 
-/// Checks `order` names every page exactly once, handing back the zero-based
-/// indices PDFium moves. `None` is the identity order — a no-op.
 fn validate_page_order(order: &[i32], page_count: usize) -> Result<Option<Vec<i32>>, String> {
     if order.len() != page_count {
         return Err("the page order must name every page exactly once".into());
@@ -588,8 +503,6 @@ fn validate_page_order(order: &[i32], page_count: usize) -> Result<Option<Vec<i3
     ))
 }
 
-/// Checks the pages named for deletion exist, are distinct, and leave at least
-/// one page behind; hands back their zero-based indices in ascending order.
 fn validate_pages_to_delete(page_numbers: &[i32], page_count: usize) -> Result<Vec<usize>, String> {
     if page_numbers.is_empty() {
         return Err("a deletion needs at least one page".into());
@@ -620,11 +533,8 @@ fn validate_pages_to_delete(page_numbers: &[i32], page_count: usize) -> Result<V
         .collect())
 }
 
-/// Checks the pages a command names exist and are distinct; hands back their
-/// zero-based indices in ascending order. `action` names the command in the
-/// refusals ("an insert", "a rotation"), which is all its callers differ by:
-/// neither an insert nor a rotation leaves a page behind, so unlike a deletion
-/// they may take the whole document at once.
+/// Checks the named pages exist and are distinct; hands back ascending indices.
+/// Unlike a deletion, these actions may take the whole document at once.
 fn validate_distinct_pages(
     page_numbers: &[i32],
     page_count: usize,
@@ -655,9 +565,8 @@ fn validate_distinct_pages(
         .collect())
 }
 
-/// The clockwise turn a rotation asks for, as degrees in `0..360`. A page's
-/// `/Rotate` holds quarter turns and nothing else, so anything else is refused
-/// rather than rounded to one: the number is the WebView's.
+/// A page's `/Rotate` holds quarter turns and nothing else, so anything else
+/// is refused rather than rounded to one: the number is the WebView's.
 fn quarter_turn(degrees: i32) -> Result<i32, String> {
     let turn = degrees.rem_euclid(360);
 
@@ -679,9 +588,8 @@ fn quarter_turn_rotation(degrees: i32) -> PdfPageRenderRotation {
     }
 }
 
-/// PDFium's own page-range syntax for an import: 1-based numbers and runs, as
-/// in "1,3,5-7". Built from ascending indices, so the copied pages land in the
-/// order the grid shows them however the reader picked them out.
+/// PDFium's page-range syntax for an import, as in "1,3,5-7"; built from
+/// ascending indices, so copied pages land in the order the grid shows them.
 fn page_range_argument(indices: &[usize]) -> String {
     let run = |start: usize, end: usize| {
         if start == end {
@@ -711,7 +619,6 @@ fn page_range_argument(indices: &[usize]) -> String {
     ranges.join(",")
 }
 
-/// The entry for `document_id`, with the one wording for a closed document.
 fn open_entry(
     documents: &HashMap<u64, OpenDocument>,
     document_id: u64,
@@ -730,12 +637,8 @@ fn open_entry_mut(
         .ok_or_else(|| "PDF document is no longer open".to_string())
 }
 
-/// Where this session's own marks begin among a page's annotations: PDFium
-/// appends, so they are the last `tail` of `annotation_count`, and a mark's
-/// position within the tail is measured from here.
-///
-/// A page holding fewer annotations than the session recorded is a desync, and
-/// a position measured against it would reach into the document's own.
+/// Where this session's marks begin among a page's annotations: PDFium appends,
+/// so they are the last `tail`; fewer is a desync that would reach the rest.
 fn owned_tail_base(
     page_number: i32,
     annotation_count: usize,
@@ -746,42 +649,33 @@ fn owned_tail_base(
         .ok_or_else(|| format!("page {page_number} no longer carries this session's marks"))
 }
 
-/// What a cancellable operation is working on. A merge has no document to name
-/// until it has finished building one, so it is its own target — and the
-/// wizard is modal, so there is only ever the one.
+/// What a cancellable operation works on. A merge names no document until it
+/// has built one, and the wizard is modal, so it is its own target.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum OperationTarget {
     Document(u64),
     Merge,
     Search(u64),
     /// The Word→PDF conversions behind a wizard inspection, which can outlast
-    /// a reader's patience on their own. A merge's conversions stay under its
-    /// own target: stopping a merge stops everything it was doing.
+    /// a reader's patience alone; a merge's stay under its own target.
     Convert,
 }
 
-/// One long operation, listed while it runs so the reader's cancel can find it.
 struct RunningOperation {
     cancelled: Arc<AtomicBool>,
     target: OperationTarget,
 }
 
-/// Lists an operation for as long as it runs, and takes it off the list again
-/// on every way out — an early return, an error, a panic.
-///
-/// The flag is read between pages rather than checked once, which is what makes
-/// a rebuild of a long document interruptible; `PdfiumEngine::cancel_operation`
-/// is the only thing that ever sets it.
+/// Lists an operation while it runs, retiring it on every way out. The flag is
+/// read between pages, which is what makes a long rebuild interruptible.
 struct OperationGuard<'a> {
     cancelled: Arc<AtomicBool>,
     id: u64,
     operations: &'a Mutex<HashMap<u64, RunningOperation>>,
 }
 
-/// The operations list, through a poisoning that must not be fatal: it holds
-/// bookkeeping rather than PDFium state, so a panic elsewhere leaves it
-/// perfectly usable — and refusing it would make every later run
-/// uninterruptible and leave phantom entries a cancel would answer for.
+/// Poisoning must not be fatal here: the list is bookkeeping, and refusing it
+/// would leave every later run uninterruptible.
 fn lock_operations(
     operations: &Mutex<HashMap<u64, RunningOperation>>,
 ) -> MutexGuard<'_, HashMap<u64, RunningOperation>> {
@@ -791,8 +685,6 @@ fn lock_operations(
 }
 
 impl OperationGuard<'_> {
-    /// Whether the reader has asked for this operation to stop. Read once per
-    /// page: the answer costs an atomic load, and a page is milliseconds.
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
     }
@@ -806,55 +698,27 @@ impl Drop for OperationGuard<'_> {
 
 pub(super) struct PdfiumEngine {
     pdfium: &'static Pdfium,
-    /// The open documents, and — load-bearing beyond that — the lock that
-    /// serializes PDFium itself.
-    ///
-    /// PDFium is not safe to call from two threads at once, and `pdfium-render`
-    /// does not make it so: `thread_safe` only marks the bindings `Send + Sync`,
-    /// promising the caller will serialize them. Commands run their PDFium work
-    /// in `spawn_blocking`, so without this lock two of them would corrupt the
-    /// heap. Hold it across *all* PDFium work, including opening a document —
-    /// which touches every page before there is anything to insert here.
+    /// The open documents, and the lock serializing PDFium itself: it is not
+    /// thread-safe, so hold this across *all* PDFium work, opening included.
     documents: Mutex<HashMap<u64, OpenDocument>>,
     next_document_id: AtomicU64,
-    /// Every place the downloadable fallback face may be, in the order they are
-    /// tried. Resolved at startup because that is the only point an `AppHandle`
-    /// reaches this module; the file itself may arrive later, when a reader
-    /// accepts the download.
+    /// Every place the downloadable fallback face may be, in trial order —
+    /// resolved at startup, the only point an `AppHandle` reaches this module.
     fallback_font_candidates: Vec<PathBuf>,
-    /// The fallback face's static Regular (weight 400) instance, created on the
-    /// first run of text that needs it. Most sessions never touch the ~17 MB
-    /// variable source — most never fetch it at all — so it is not read at
-    /// startup, and once resolved it is kept, because every embedded run
-    /// subsets it again.
+    /// The fallback face's static Regular instance, resolved on first use and
+    /// kept — most sessions never fetch the ~17 MB source it is cut from.
     fallback_font: OnceLock<Vec<u8>>,
-    /// The system's own sans, pinned to Regular, and the index to read it at —
-    /// the one inside its file, or 0 where pinning made a font of its own — or
-    /// `None` where this machine has nothing that can be embedded. Resolved on
-    /// the first run of text that needs it — a scan of every installed face —
-    /// and kept either way, so a machine with no candidate does not rescan for
-    /// every note.
+    /// The system's own sans pinned to Regular, or `None` where nothing on this
+    /// machine can be embedded; resolved once, a scan of every installed face.
     system_face: OnceLock<Option<(Vec<u8>, usize)>>,
-    /// The page-number face, subset to the label's glyphs. Resolved from the
-    /// system's own fonts on the first apply that needs it — a scan of every
-    /// installed face, so it is done once and kept — and embedded as it is.
     page_number_font: OnceLock<Vec<u8>>,
-    /// Paths something outside the WebView produced — a drop the window saw, a
-    /// pick a dialog returned. `open_pdf_from_path` acts only on these: a path
-    /// is a string any page code can make up, and opening one binds it as the
-    /// file a save will later overwrite. Grows only by the reader's own
-    /// gestures, so it is never cleared.
+    /// Paths something outside the WebView produced — a drop, a dialog pick. A
+    /// path is a string any page code can make up, and opening one binds a save.
     approved_paths: Mutex<HashSet<PathBuf>>,
-    /// The cancel flags of the long owned-content operations now running.
-    ///
-    /// A lock of its own, and one held only for the moment it takes to list,
-    /// find, or retire an entry. It has to be: the operation a cancel must
-    /// reach holds `documents` for its whole run, so a flag kept behind that
-    /// lock could never be set in time to stop anything.
+    /// The cancel flags of long operations now running, behind a lock of their
+    /// own: the operation a cancel must reach holds `documents` for its whole run.
     operations: Mutex<HashMap<u64, RunningOperation>>,
     next_operation_id: AtomicU64,
-    /// The Word-import engine: which office suite to drive, where the
-    /// converted PDFs land, and what has already been converted this run.
     word: crate::convert::WordConverter,
 }
 
@@ -883,8 +747,6 @@ impl PdfiumState {
         })))
     }
 
-    /// Records paths the OS itself produced — the window's drag-drop handler
-    /// calls this, from outside the `pdfium` module.
     pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
         self.0.approve_paths(paths);
     }
@@ -907,11 +769,8 @@ impl PdfiumEngine {
         }
     }
 
-    /// Whether something outside the WebView — a drop, a dialog — produced
-    /// this path. Kept rather than consumed: the reader may cancel the unsaved
-    /// guard and open the same file again.
-    // The e2e build waives the check at every call site — `open_pdf_from_path`,
-    // `insert_pdf_from_path` and the wizard's — so the whole method is dead there.
+    /// Kept rather than consumed: the reader may cancel the unsaved guard and
+    /// open the same file again; the e2e build waives the check at call sites.
     #[cfg_attr(feature = "e2e", allow(dead_code))]
     pub(super) fn is_approved(&self, path: &Path) -> bool {
         self.approved_paths
@@ -928,12 +787,8 @@ impl PdfiumEngine {
             .map_err(|_| "PDFium document store is unavailable".to_string())
     }
 
-    /// Lists a cancellable operation on `target` and hands back the guard that
-    /// both reads its flag and retires it.
-    ///
-    /// Called *before* the documents lock is taken, so a cancel that arrives
-    /// while this operation is still queued behind another one is seen the
-    /// moment it starts rather than missed.
+    /// Lists a cancellable operation and hands back its guard. Called *before*
+    /// the documents lock, so a cancel arriving while queued is still seen.
     fn begin_operation(&self, target: OperationTarget) -> OperationGuard<'_> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
@@ -953,13 +808,8 @@ impl PdfiumEngine {
         }
     }
 
-    /// Asks whatever long operation is running on `target` to stop and leave
-    /// the document as it found it, and answers whether one was listening.
-    ///
-    /// Takes no document lock — that is the whole point, since the operation it
-    /// stops is holding it — so it answers while the work is still in flight.
-    /// Every operation on the target is flagged: they cannot overlap in the
-    /// engine, but two the WebView fired at once can both be waiting to run.
+    /// Flags every operation on `target` to stop, answering whether one
+    /// listened. Takes no document lock — the operation it stops holds it.
     pub(super) fn cancel_operation(&self, target: OperationTarget) -> bool {
         let operations = lock_operations(&self.operations);
         let mut asked = false;
@@ -980,14 +830,12 @@ impl PdfiumEngine {
         self.cancel_operation(OperationTarget::Search(document_id));
     }
 
-    /// A new one-page A4 document, built in memory. It has no file of its own,
-    /// so — exactly like one opened from bytes — a save has nowhere to write
-    /// until an export adopts a destination as its source.
+    /// A new one-page A4 document, built in memory: no file of its own, so a
+    /// save has nowhere to write until an export adopts a destination.
     pub(super) fn create_blank(&self) -> Result<PdfDocumentInfo, String> {
         let bytes = {
-            // Building a document is PDFium work like any other, so it is done
-            // under the store's lock — given back before `open_with_source`
-            // takes it again.
+            // PDFium work like any other, so under the store's lock — given
+            // back before `open_with_source` takes it again.
             let _documents = self.lock_documents()?;
             let mut document = self
                 .pdfium
@@ -1012,8 +860,6 @@ impl PdfiumEngine {
         self.open_with_source(bytes, None)
     }
 
-    /// Opens the file at `path`, remembering it as the place a save writes back
-    /// to.
     pub(super) fn open_from_path(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
         let bytes = read_pdf_bytes(&path)?;
 
@@ -1077,9 +923,6 @@ impl PdfiumEngine {
         })
     }
 
-    /// Renders `page_number` to a bitmap `width` pixels wide, refusing anything
-    /// wider than `max_width`. Shared by the full-page and thumbnail paths,
-    /// which differ only in their ceiling and their encoder.
     fn render_bitmap(
         &self,
         document_id: u64,
@@ -1154,19 +997,16 @@ impl PdfiumEngine {
         document_id: u64,
         query: &str,
     ) -> Result<PdfSearchOutcome, String> {
-        // Reject an oversized WebView argument before normalization allocates a
-        // second string. The field has a matching maxlength, but commands are
-        // callable directly and must enforce their own bound.
+        // Rejected before normalization allocates a second string. The field has
+        // a maxlength, but commands are callable directly and enforce their own.
         if query.chars().nth(MAX_SEARCH_CHARS).is_some() {
             return Err(format!(
                 "a PDF search term may contain at most {MAX_SEARCH_CHARS} characters"
             ));
         }
 
-        // Collapsing the field's whitespace makes a phrase pasted with a line
-        // break behave like one typed with a space. PDFium applies the same
-        // consecutive matching to generated page line breaks, so a phrase can
-        // also cross a visual wrap in the document.
+        // Collapsed so a phrase pasted with a line break behaves like one typed
+        // with a space; PDFium matches across its own line breaks the same way.
         let query = query.split_whitespace().collect::<Vec<_>>().join(" ");
 
         if query.is_empty() {
@@ -1252,9 +1092,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// The page's text as PDFium reconstructs it, line breaks included. The
-    /// spans above carry the same characters cut into positioned runs, which is
-    /// a layout and not something a reader would want on the clipboard.
+    /// The page's text as PDFium reconstructs it, line breaks included — unlike
+    /// the spans, positioned layout runs no reader would want on a clipboard.
     pub(super) fn extract_plain_text(
         &self,
         document_id: u64,
@@ -1373,9 +1212,8 @@ impl PdfiumEngine {
         // expect `/Rect` to enclose them, so it is set from the run as a whole.
         let bounds = union_rect(&rects).ok_or_else(|| "highlight has no area".to_string())?;
 
-        // Attached the moment it is created, before it has a shape or colour, so
-        // a failure past here has to take it back off rather than return and
-        // leave the page holding a mark nothing can remove.
+        // Attached the moment it is created, so a failure past here has to take
+        // it back off rather than return and leave a mark nothing can remove.
         let mut annotation = page
             .annotations_mut()
             .create_highlight_annotation()
@@ -1384,12 +1222,8 @@ impl PdfiumEngine {
             annotation
                 .set_bounds(bounds)
                 .map_err(|error| format!("PDFium rejected the highlight's bounds: {error}"))?;
-            // `set_stroke_color` however much a highlight is a fill: the names
-            // are `pdfium-render`'s and map onto a PDF annotation's two colour
-            // entries — stroke to `/C`, fill to `/IC`. A highlight draws from
-            // `/C`; `/IC` is a square's interior, and setting it here is
-            // accepted, stored, then ignored at render time — indistinguishable
-            // from a highlight that silently did not happen.
+            // `set_stroke_color` even though a highlight is a fill: the names
+            // map onto `/C` and `/IC`, and a highlight draws from `/C`, not `/IC`.
             annotation
                 .set_stroke_color(color)
                 .map_err(|error| format!("PDFium rejected the highlight's colour: {error}"))?;
@@ -1420,9 +1254,8 @@ impl PdfiumEngine {
         Ok(entry.record_mark(page_id))
     }
 
-    /// Replaces the pixels inside `bounds` with a raster treatment carried by
-    /// one Stamp annotation. The page content under the image is untouched and
-    /// remains available to text extraction.
+    /// The pixels inside `bounds` replaced by a raster treatment on one Stamp
+    /// annotation; the page content beneath is untouched and still extractable.
     pub(super) fn add_rect_effect(
         &self,
         document_id: u64,
@@ -1443,11 +1276,8 @@ impl PdfiumEngine {
             return Err("a rectangle effect's strength is out of range".into());
         }
 
-        // Render before creating the annotation, so its image can include every
-        // earlier mark on the page but never recursively capture itself. Only
-        // this capture needs PDFium: once it is an owned DynamicImage, release
-        // the global lock so renders and text extraction can proceed during the
-        // comparatively expensive crop, treatment, rotation, and byte shuffle.
+        // Rendered before the annotation exists, so the capture includes marks
+        // but never itself; the lock yields for the pure-pixel work that follows.
         let (
             rendered,
             rotation,
@@ -1552,9 +1382,8 @@ impl PdfiumEngine {
             )),
         };
 
-        // The render includes the page's intrinsic clockwise rotation. Page
-        // objects live before that rotation, so turn the crop back before it is
-        // embedded; PDFium will apply the page rotation once when it draws.
+        // The render includes the page's intrinsic rotation; page objects live
+        // before it, so un-rotate the crop and let PDFium rotate when it draws.
         let processed = match rotation as i32 {
             90 => processed.rotate270(),
             180 => processed.rotate180(),
@@ -1567,9 +1396,8 @@ impl PdfiumEngine {
             .map_err(|_| "a rectangle effect image is too tall".to_string())?;
         let mut bgra = processed.into_rgba8().into_raw();
 
-        // `pdfium-render::set_image()` performs this RGBA -> BGRA copy after it
-        // has created a PDFium bitmap. Shuffle the owned bytes while unlocked,
-        // then hand that buffer to a PdfBitmap during the short commit phase.
+        // `set_image()` does this RGBA -> BGRA swap only after creating a
+        // PDFium bitmap, so it is done here, unlocked, ahead of the commit.
         for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
@@ -1578,10 +1406,8 @@ impl PdfiumEngine {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
-        // The commit belongs to the page the capture read, wherever that page
-        // sits now — found by id, so a page inserted at the captured number can
-        // never receive another page's pixels. A structure change also bumps
-        // every revision, so a moved page still fails the check below.
+        // Found by id: a page inserted at the captured number must never
+        // receive another page's pixels; a structure change fails the revision.
         let page_index = entry
             .page_ids
             .iter()
@@ -1661,17 +1487,8 @@ impl PdfiumEngine {
         Ok(entry.record_mark(captured_page_id))
     }
 
-    /// Draws a rectangle on `page_number` — one mark, so one step to take back.
-    ///
-    /// Carried by a Stamp annotation holding a hand-built path object, not a
-    /// Square, so it is the same kind of mark the blur and the mosaic leave and
-    /// one deletion path takes any of them back off.
-    ///
-    /// The cost is that other tools see a stamp rather than a native rectangle
-    /// they could edit — acceptable while this app only creates and undoes.
-    /// Drawing the path ourselves keeps the colour and the opacity a real,
-    /// rendered thing the CSS preview matches, rather than an `/IC` and a `/CA`
-    /// a reader's viewer may or may not honour.
+    /// A rectangle as a Stamp with a hand-built path, not a Square: the same
+    /// kind of mark the blur and mosaic leave, really rendered, not `/IC`/`/CA`.
     pub(super) fn add_rect(
         &self,
         document_id: u64,
@@ -1679,10 +1496,8 @@ impl PdfiumEngine {
         bounds: &PagePointsRect,
         style: &RectStyle,
     ) -> Result<u64, String> {
-        // The WebView can call this with any arguments. Coordinates are held to a
-        // range that covers any real page with room to spare; one outside it is
-        // refused here rather than clamped, before it can slip past the `> 0`
-        // check below or overflow a page edge to infinity.
+        // The WebView can call this with anything: an out-of-range coordinate is
+        // refused, not clamped, before it can overflow a page edge to infinity.
         if ![bounds.left, bounds.top, bounds.width, bounds.height]
             .iter()
             .all(|value| within_page_range(*value))
@@ -1690,14 +1505,8 @@ impl PdfiumEngine {
             return Err("a rectangle's coordinates are out of range".into());
         }
 
-        // The opacity slider's range (see annotationStyles.ts) is the contract,
-        // enforced on both sides of the boundary: a value the reader could never
-        // have chosen is refused rather than quietly clamped into a different
-        // mark than they drew. The floor is also what keeps a rectangle a
-        // visible one — a fully transparent block would be accepted, stored,
-        // saved, invisible, yet still recorded as an edit, which is the failure
-        // this project measures pixels to catch. `contains` rejects a non-finite
-        // opacity on the way.
+        // The slider's range (annotationStyles.ts) is the contract both sides
+        // enforce: refused, not clamped — and never an invisible recorded edit.
         if !(MIN_RECT_OPACITY..=1.0).contains(&style.opacity) {
             return Err("a rectangle's style values are out of range".into());
         }
@@ -1711,9 +1520,8 @@ impl PdfiumEngine {
         let entry = open_entry_mut(&mut documents, document_id)?;
         let page_id = entry.page_id(page_number)?;
 
-        // Loaded only to read its unrotated height, then dropped: the path is
-        // built against `&entry.document`, which cannot be borrowed while a page
-        // is out of it.
+        // Loaded only for its unrotated height, then dropped: the path below
+        // borrows `&entry.document`, which a live page would hold borrowed.
         let unrotated_height = {
             let page = entry
                 .document
@@ -1724,11 +1532,8 @@ impl PdfiumEngine {
         };
         let rect = page_rect_to_pdfium(bounds, unrotated_height);
 
-        // A free object until it is added below, so a failure while it is being
-        // drawn has nothing to take off the page. Traced along the bounds
-        // themselves: with no stroke to centre on the path, every pixel the fill
-        // puts down is inside the box the reader dragged, which is where the
-        // preview draws it.
+        // A free object until added below, so a failure leaves nothing to take
+        // off; traced on the bounds, so the fill lands where the preview drew.
         let mut path = PdfPagePathObject::new(
             &entry.document,
             rect.left(),
@@ -1789,17 +1594,12 @@ impl PdfiumEngine {
         Ok(entry.record_mark(page_id))
     }
 
-    /// The system's own sans, or `None` where this machine has none that can be
-    /// embedded. Scanned once — the answer is kept whichever way it goes, so a
-    /// machine with no candidate pays for the scan once rather than per note.
     fn system_face(&self) -> Option<&(Vec<u8>, usize)> {
         self.system_face
             .get_or_init(|| system_embedded_face(EMBEDDED_FACE_PROBE))
             .as_ref()
     }
 
-    /// The first fallback-face file that is actually there, or `None` until a
-    /// reader has accepted the download.
     fn fallback_font_file(&self) -> Option<&Path> {
         self.fallback_font_candidates
             .iter()
@@ -1807,7 +1607,6 @@ impl PdfiumEngine {
             .map(PathBuf::as_path)
     }
 
-    /// The fallback face's static Regular bytes, resolved once and kept.
     fn fallback_font_bytes(&self) -> Result<&[u8], String> {
         if let Some(bytes) = self.fallback_font.get() {
             return Ok(bytes);
@@ -1822,9 +1621,8 @@ impl PdfiumEngine {
             .map_err(|error| format!("the fallback font could not be read: {error}"))?;
         let (bytes, _) = regular_face(&source, 0)?;
 
-        // Two notes can reach here at once and both resolve the font; whichever
-        // stores first wins and the other's copy is dropped. Both then see the
-        // same Regular instance, which is all that matters.
+        // Two notes can resolve at once; whichever stores first wins, and both
+        // then see the same Regular instance.
         let _ = self.fallback_font.set(bytes);
 
         self.fallback_font
@@ -1833,14 +1631,8 @@ impl PdfiumEngine {
             .ok_or_else(|| "the fallback font could not be cached".to_string())
     }
 
-    /// The face an embedded run — a note or a watermark — is drawn in, cut to
-    /// `text`.
-    ///
-    /// The system's own sans first, so a machine that already has one fetches
-    /// nothing; the downloaded fallback second. Neither is held to covering
-    /// `text`: a face is chosen once per session and then takes what it happens
-    /// to hold, which is the trade the bundled face already made — a note in a
-    /// script the chosen face lacks draws boxes rather than refusing.
+    /// The system's sans first, then the downloaded fallback. Neither is held
+    /// to covering `text`: a missing glyph draws boxes rather than refusing.
     fn embedded_face_subset(&self, text: &str) -> Result<Vec<u8>, String> {
         if let Some((bytes, index)) = self.system_face() {
             return subset_for(bytes, *index, text);
@@ -1848,12 +1640,8 @@ impl PdfiumEngine {
 
         match self.fallback_font_bytes() {
             Ok(bytes) => subset_for(bytes, 0, text),
-            // No CJK face and nothing fetched — but "outside Latin-1" is not
-            // "Chinese", and a machine whose sans draws Cyrillic, Greek or kana
-            // can draw this run without fetching a 17 MB Chinese face for it.
-            // Asked with the text itself rather than the cached probe, so it is
-            // not cached either: it runs only where the answer would otherwise
-            // have been a refusal.
+            // "Outside Latin-1" is not "Chinese": a sans drawing Cyrillic or
+            // kana serves this run without fetching a 17 MB face; never cached.
             Err(missing) => {
                 let (bytes, index) = system_embedded_face(text).ok_or(missing)?;
 
@@ -1862,14 +1650,8 @@ impl PdfiumEngine {
         }
     }
 
-    /// The page-number face's bytes, resolved once and kept. Already cut to the
-    /// label's glyphs by the chain that found it, so nothing is subset here —
-    /// except in the fallback, where the fetched sans is cut like any note's.
-    ///
-    /// That fallback catches only a host whose every installed face refuses the
-    /// label — the chain itself already ends at the generic sans — and on a host
-    /// with neither, the page-number chain's own error survives rather than the
-    /// fallback's.
+    /// Resolved once and kept, already cut to the label's glyphs. The fallback
+    /// for a refusing host keeps the chain's own error, not the fetch's.
     fn page_number_font_bytes(&self) -> Result<&[u8], String> {
         if let Some(bytes) = self.page_number_font.get() {
             return Ok(bytes);
@@ -1883,8 +1665,6 @@ impl PdfiumEngine {
                 .map_err(|_| missing)?,
         };
 
-        // Two applies can reach here at once; whichever stores first wins and
-        // the other copy is dropped, both then seeing the same bytes.
         let _ = self.page_number_font.set(face);
 
         self.page_number_font
@@ -1893,21 +1673,8 @@ impl PdfiumEngine {
             .ok_or_else(|| "the page-number font could not be cached".to_string())
     }
 
-    /// Writes `text` at `origin` as a stamp annotation carrying one text object
-    /// per line.
-    ///
-    /// A stamp rather than the FreeText the format has for exactly this, because
-    /// PDFium generates a FreeText's appearance itself and 0.9.3 exposes neither
-    /// a font size nor a face on one — a note would come out at whatever size
-    /// PDFium chose, in a font that cannot draw Chinese. Drawing the text into a
-    /// stamp puts both under this app's control, at the cost that other readers
-    /// see a stamp rather than an editable note, which is the same trade the
-    /// rectangle tool already makes.
-    ///
-    /// The text does not wrap. A note breaks where the reader pressed return and
-    /// nowhere else: wrapping would mean measuring runs against a width this
-    /// tool does not have, and a note is a margin scribble rather than a column
-    /// of prose.
+    /// A stamp, not the FreeText the format has for this: PDFium 0.9.3 exposes
+    /// no font size or face on one. No wrapping — a note breaks at returns only.
     pub(super) fn add_text_note(
         &self,
         document_id: u64,
@@ -1920,9 +1687,8 @@ impl PdfiumEngine {
             return Err("a note's coordinates are out of range".into());
         }
 
-        // As with a rectangle's style, a value outside the controls' own ranges
-        // is refused rather than clamped: it is not one the reader could have
-        // chosen, and clamping would draw a note in a size they never picked.
+        // As with a rectangle's style, refused rather than clamped: clamping
+        // would draw a note in a size the reader never picked.
         if !(MIN_TEXT_NOTE_FONT_SIZE..=MAX_TEXT_NOTE_FONT_SIZE).contains(&style.font_size)
             || !(MIN_TEXT_NOTE_OPACITY..=1.0).contains(&style.opacity)
         {
@@ -1958,9 +1724,8 @@ impl PdfiumEngine {
             return Err("a note has too many lines".into());
         }
 
-        // Subset before the lock: reading and cutting down a face — a system
-        // one the first time, or the ~17 MB fallback — is the slow part of
-        // this, and it needs no document, so renders should not queue behind it.
+        // Subset before the lock: cutting a face is the slow part and needs no
+        // document, so renders should not queue behind it.
         let embedded = if needs_embedded_font(text) {
             Some(self.embedded_face_subset(text)?)
         } else {
@@ -1984,17 +1749,8 @@ impl PdfiumEngine {
         // Text the standard 14 cover costs no embedded bytes at all, which is
         // the common case for a Latin note; anything else carries its subset.
         let font = match &embedded {
-            // Loaded afresh each time, so a redo of a note that was just undone
-            // embeds its subset again: a font stays in the document once loaded,
-            // and deleting the annotation that used it does not take it back
-            // out. That costs roughly 3.4 KB per undo/redo cycle.
-            //
-            // Not cached, because keeping the token would need it to be `Send`,
-            // and `pdfium-render` 0.9.3 marks every other handle so but not this
-            // one — leaving only an `unsafe impl` to assert a lifetime the crate
-            // never documents. Reloading a saved document drops the orphans
-            // anyway (measured: 21034 bytes down to 4088), so collecting them
-            // belongs to the save path rather than here.
+            // Loaded afresh each time; a loaded font stays in the document, and
+            // the token cannot be cached — `pdfium-render` 0.9.3 marks it not `Send`.
             Some(bytes) => entry
                 .document
                 .fonts_mut()
@@ -2012,13 +1768,8 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not measure the note's font: {error}"))?
             .value;
 
-        // Laid out before the annotation exists, because the annotation needs its
-        // final `/Rect` up front: PDFium fits a stamp's appearance to whatever
-        // `/Rect` it has, so bounds narrowed afterwards do not crop the text —
-        // they squash it, and the whole note renders shrunk into the new box.
-        //
-        // Free objects until they are added below, so a failure while they are
-        // being laid out has nothing to take off the page.
+        // Laid out before the annotation exists: PDFium fits a stamp's appearance
+        // to its `/Rect`, so late bounds squash the text. Free objects until added.
         let mut laid_out = Vec::new();
         let mut text_bounds: Option<PdfRect> = None;
 
@@ -2041,18 +1792,8 @@ impl PdfiumEngine {
                 .set_fill_color(color)
                 .map_err(|error| format!("PDFium rejected the note's colour: {error}"))?;
 
-            // A new text object sits with its baseline on the origin, so moving
-            // it is what puts it where the reader clicked.
-            //
-            // PDFium draws a line from its baseline, but a reader clicks where
-            // they want the text to start, which is its top. The gap between the
-            // two is the font's ascent — asked of the font rather than guessed
-            // from the size, since the two differ by face and a wrong guess
-            // lands the note a line away from the click.
-            //
-            // Lines then step by the baseline, not by what each one happens to
-            // draw: spacing measured from the ink would pull a line with no
-            // ascenders up towards the one above it.
+            // PDFium draws from the baseline; a reader clicks the top where the
+            // text should start — hence the ascent, from the font, not guessed.
             let baseline =
                 origin.top + ascent + index as f32 * style.font_size * TEXT_NOTE_LINE_HEIGHT;
 
@@ -2081,9 +1822,8 @@ impl PdfiumEngine {
         // Every line was blank, so there is nothing to show — the same
         // invisible-but-recorded edit the colour check above refuses.
         let text_bounds = text_bounds.ok_or_else(|| "a note needs some text".to_string())?;
-        // A hair wider than the ink on every side. The appearance is fitted to
-        // this box, and glyphs that ended exactly on its edge would lose their
-        // outermost antialiased pixel to it.
+        // A hair wider than the ink: the appearance is fitted to this box, and
+        // a glyph ending on its edge would lose its outermost antialiased pixel.
         let bounds = PdfRect::new_from_values(
             text_bounds.bottom().value - TEXT_NOTE_BOUNDS_MARGIN,
             text_bounds.left().value - TEXT_NOTE_BOUNDS_MARGIN,
@@ -2133,9 +1873,8 @@ impl PdfiumEngine {
         Ok(entry.record_mark(page_id))
     }
 
-    /// Verifies that every page still ends with exactly the objects this
-    /// session recorded, across every owned layer. Whole-document preflight:
-    /// once a page fails, no earlier page may already have lost content.
+    /// Whole-document preflight, run before anything is touched: every page
+    /// must still end with exactly the objects this session recorded.
     fn verify_owned_tail(
         document: &PdfDocument<'static>,
         page_ids: &[u64],
@@ -2198,10 +1937,7 @@ impl PdfiumEngine {
                         format!("page {page_number}'s owned tail contains a non-text object")
                     })?;
                     // PDFium's extraction appends a separator to a run another
-                    // run follows on the same line, so tiles sharing a baseline
-                    // come back as "TEXT " except the last, "TEXT"; the identity
-                    // stored at apply was trimmed the same way, so the edges
-                    // carry nothing worth comparing.
+                    // follows on one line; apply trimmed its identities the same.
                     let actual = text_page.for_object(text_object).trim().to_owned();
 
                     if actual != segment.identities[offset] {
@@ -2218,9 +1954,8 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// Reads back the identities of a tail this rebuild just wrote, one string
-    /// per object, so a later guard can compare against what PDFium actually
-    /// holds — not the source text an embedded font may have remapped.
+    /// Reads back a just-written tail's identities, so a later guard compares
+    /// what PDFium holds, not source text an embedded font may have remapped.
     fn read_owned_tail(
         document: &PdfDocument<'static>,
         page_number: i32,
@@ -2268,10 +2003,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// Plans every page's rebuild before any is touched, so a measurement or
-    /// object-limit failure leaves the document untouched. `base_objects` is
-    /// read from the prior owned record when one exists — a replacement rebuilds
-    /// the same base — or the page's current object count on a first apply.
+    /// Plans every page's rebuild before any is touched, so a failure leaves
+    /// the document untouched; a replacement rebuilds the same base.
     fn plan_owned_content(
         entry: &OpenDocument,
         watermark: Option<(&WatermarkConfig, PdfFontToken, PdfColor)>,
@@ -2281,9 +2014,8 @@ impl PdfiumEngine {
     ) -> Result<Option<Vec<PageOwnedPlan>>, String> {
         let page_count = entry.document.pages().len();
 
-        // Without this an empty document takes an empty ownership record, which
-        // every later guard passes vacuously — leaving a session that believes
-        // it holds marks, and so refuses to save, over nothing at all.
+        // Without this an empty document takes an empty ownership record the
+        // guards pass vacuously — a session that refuses to save over nothing.
         if page_count < 1 {
             return Err("a document with no pages cannot carry page marks".into());
         }
@@ -2297,9 +2029,8 @@ impl PdfiumEngine {
         let mut numbering = page_numbers.map(|(config, _)| PageNumbering::new(config));
 
         for page_number in 1..=page_count {
-            // Read before the page is touched, so a stopped run costs the
-            // reader one page of work at most. Planning changes nothing on the
-            // document, but its blank scan is half of a long document's wait.
+            // Read before each page, so a stop costs the reader one page of work
+            // at most — the blank scan here is half of a long document's wait.
             if operation.is_cancelled() {
                 return Ok(None);
             }
@@ -2327,9 +2058,8 @@ impl PdfiumEngine {
                 Some((config, font, color)) => {
                     let page_rotation = page_rotation_degrees(&page);
                     let (page_width, page_height) = unrotated_page_size(&page);
-                    // The mark follows the page box and nothing else, so every
-                    // page of one size measures the same — and a document of
-                    // any length usually holds only a size or two.
+                    // The mark follows the page box alone, so pages of one size
+                    // measure the same, and a geometry-keyed cache holds.
                     let key = (
                         page_rotation.to_bits(),
                         page_width.to_bits(),
@@ -2377,11 +2107,8 @@ impl PdfiumEngine {
             // once per page whether or not that page ends up printing anything.
             let printed = match (page_numbers, numbering.as_mut()) {
                 (Some((config, _)), Some(numbering)) => {
-                    // A page with nothing of its own on it — no content objects
-                    // and no annotations, which render too — is blank without
-                    // being rendered. The rest are sampled only when one of the
-                    // two blank rules can change what this page gets, which a
-                    // page outside the range never is.
+                    // No objects and no annotations (which render too) is blank
+                    // without a render; sampling only where a blank rule matters.
                     let blank = config.needs_blank_scan()
                         && config.covers(page_number)
                         && ((base_objects == 0 && page.annotations().is_empty())
@@ -2395,16 +2122,14 @@ impl PdfiumEngine {
             let page_number_label = match (page_numbers, printed) {
                 (Some((config, font)), Some(text)) => {
                     let page_rotation = page_rotation_degrees(&page);
-                    // Page numbers are always upright as the reader sees them,
-                    // so the object is turned by exactly the negative of the
-                    // page's own `/Rotate`, which a render then puts back.
+                    // Page numbers stay upright as seen: the object is turned
+                    // by the negative of the page's `/Rotate`, a render puts back.
                     let object_rotation = -page_rotation;
                     let (unrotated_width, unrotated_height) = unrotated_page_size(&page);
                     let anchor = config.anchor(page_number);
 
-                    // Measure the label exactly as it will be built, so the
-                    // placement and the smart-colour drop both use real bounds
-                    // (M3/M6 lesson: measure before positioning).
+                    // Measured exactly as it will be built, so placement and
+                    // the smart-colour drop both use real bounds.
                     let measured = rotated_page_number_object(
                         &entry.document,
                         font,
@@ -2428,9 +2153,8 @@ impl PdfiumEngine {
                         anchor,
                     );
 
-                    // The drop is sampled in the rebuild, not here: a replacement
-                    // must read the page after its old label is gone, which has
-                    // not happened yet at plan time.
+                    // Sampled in the rebuild, not here: a replacement must read
+                    // the page after its old label is gone.
                     let sample_box = config.smart_color().then(|| {
                         page_number_display_box(
                             unrotated_width,
@@ -2464,11 +2188,8 @@ impl PdfiumEngine {
         Ok(Some(plans))
     }
 
-    /// A whole page rendered coarsely for sampling: `dpi` under the same
-    /// ceilings a viewer render honours. Annotations and form data are drawn
-    /// because every sampler here asks what the reader sees, not what the
-    /// content stream alone holds. The caller has already established that the
-    /// page's dimensions are finite and positive.
+    /// A coarse whole-page render under the viewer's ceilings, annotations
+    /// drawn — every sampler asks what the reader sees. Callers check dimensions.
     fn render_page_sample(page: &PdfPage<'_>, dpi: f32) -> Result<DynamicImage, PdfiumError> {
         let display_width = page.width().value;
         let display_height = page.height().value;
@@ -2489,18 +2210,8 @@ impl PdfiumEngine {
             .and_then(|bitmap| bitmap.as_image())
     }
 
-    /// Whether a page has nothing printed on it, read from a coarse render of
-    /// everything above the band its own number would sit in.
-    ///
-    /// The render is of the page as it stands, which during a replacement still
-    /// carries this session's own marks — the number band is skipped for
-    /// exactly that reason, but a watermark covers the whole page and is not.
-    /// So a blank page under a watermark reads as printed, which is the honest
-    /// answer: the reader put that mark there.
-    ///
-    /// A page too small to measure is not blank: the test exists to skip empty
-    /// separator sheets, and refusing to guess about an odd page leaves it
-    /// numbered like every other.
+    /// Scans above the band this page's own number would sit in: during a
+    /// replacement the render still carries the session's own marks.
     fn page_is_blank(page: &PdfPage<'_>) -> Result<bool, String> {
         let display_width = page.width().value;
         let display_height = page.height().value;
@@ -2527,10 +2238,8 @@ impl PdfiumEngine {
         Ok(is_blank_sample(&sample))
     }
 
-    /// Averages the relative luminance of the drop a page number will cover, at
-    /// a low sampling resolution, and returns the ink that stays legible on it —
-    /// white on a dark drop, black otherwise. A page with no usable dimensions,
-    /// or a region that falls outside the render, defaults to black.
+    /// The ink that stays legible on the drop a page number will cover; a page
+    /// with no usable dimensions, or a region off the render, defaults to black.
     fn sample_ink_color(page: &PdfPage<'_>, region: DisplayBox) -> Result<PdfColor, String> {
         let display_width = page.width().value;
         let display_height = page.height().value;
@@ -2543,8 +2252,8 @@ impl PdfiumEngine {
             return Ok(PdfColor::BLACK);
         }
 
-        // Far cheaper than M5's print-resolution capture: the decision is a
-        // single average, so a handful of pixels across the label suffices.
+        // The decision is a single average, so a handful of pixels across the
+        // label suffices — far cheaper than a print-resolution capture.
         let rendered = Self::render_page_sample(page, PAGE_NUMBER_SAMPLE_DPI)
             .map_err(|error| format!("PDFium could not sample a page for smart colour: {error}"))?;
 
@@ -2590,7 +2299,6 @@ impl PdfiumEngine {
         }
     }
 
-    /// Puts a transaction's own bytes back in place of whatever it left behind.
     fn load_document_snapshot(
         &self,
         entry: &mut OpenDocument,
@@ -2605,16 +2313,8 @@ impl PdfiumEngine {
         }
     }
 
-    /// `pdfium-render` 0.9.3's generic removed-object wrapper would destroy the
-    /// same native handle twice if simply dropped. Reattach retired objects to a
-    /// temporary page immediately; deleting that page then lets PDFium own the
-    /// cleanup. The page exists only inside an apply/remove transaction.
-    ///
-    /// Attaching is the whole job — the scratch page's content stream is never
-    /// read, and it is deleted before the transaction ends. Regenerating it here
-    /// would rewrite every object retired so far once per page, which is why the
-    /// strategy stays `Manual`: it is also what keeps `PdfPage`'s own drop from
-    /// regenerating the page behind us.
+    /// pdfium-render 0.9.3 double-destroys a dropped removed object, so retired
+    /// ones reattach to a scratch page whose delete hands cleanup to PDFium.
     fn retire_owned_objects(
         document: &mut PdfDocument<'static>,
         scratch_index: i32,
@@ -2640,17 +2340,8 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// Rebuilds every page's owned-content tail to match the given active layer
-    /// configs, replacing whatever this session previously owned. Answers
-    /// whether the change landed: `false` is the reader stopping it partway,
-    /// which the same snapshot rolls back that a failure does.
-    ///
-    /// The whole tail is popped and re-appended in the fixed layer order on
-    /// every page, so a change to one layer can never leave it stacked wrong
-    /// against another — `add_object` only appends, and this is the one path
-    /// that keeps the order canonical. A saved byte snapshot makes every
-    /// multi-page failure an exact rollback, including one after an earlier page
-    /// already regenerated.
+    /// Rebuilds every owned tail in the fixed layer order (`add_object` only
+    /// appends, so this keeps the stack canonical); `false` is a stopped rebuild.
     fn rebuild_owned_content(
         &self,
         entry: &mut OpenDocument,
@@ -2663,9 +2354,8 @@ impl PdfiumEngine {
         let total = page_count * 2;
         on_progress(0, total);
 
-        // Nothing has been touched yet, so a stop that has already arrived costs
-        // neither the snapshot below — a whole 17 MB serialization — nor a
-        // rollback.
+        // Nothing is touched yet, so an arrived stop costs neither the snapshot
+        // below — a 17 MB serialization — nor a rollback.
         if operation.is_cancelled() {
             return Ok(false);
         }
@@ -2679,9 +2369,8 @@ impl PdfiumEngine {
         // `None` is the reader's stop: the rollback below is the same one a
         // failure takes, so a stopped run leaves the document it started on.
         let rebuilt = (|| -> Result<Option<OwnedContentState>, String> {
-            // Load each active layer's font once, into the document, and thread
-            // the token through the per-page loop — a replacement reloads even an
-            // unchanged layer's font, since its objects are rebuilt too.
+            // Each layer's font loads once and threads through the loop; even
+            // an unchanged layer reloads, since its objects are rebuilt too.
             let watermark_font = match &watermark {
                 Some(resources) => Some(match &resources.embedded {
                     Some(bytes) => entry
@@ -2725,9 +2414,8 @@ impl PdfiumEngine {
                 return Ok(None);
             };
 
-            // A scratch page receives every retired object; created only when
-            // there is a prior tail to pop, and deleted before the transaction
-            // ends so PDFium collects the retired handles.
+            // The scratch page receives retired objects; created only when a
+            // prior tail exists, deleted before the end so PDFium collects them.
             let scratch_index = if previous.is_some() {
                 let index = entry.document.pages().len();
                 let scratch = entry
@@ -2745,18 +2433,16 @@ impl PdfiumEngine {
             let mut per_page = HashMap::with_capacity(planned_pages);
 
             for (index, plan) in plans.into_iter().enumerate() {
-                // Between pages, never inside one: a page is left with a whole
-                // tail or none of one, and the snapshot puts back the pages
-                // already rebuilt.
+                // Between pages, never inside one: a page keeps a whole tail or
+                // none, and the snapshot puts back the pages already rebuilt.
                 if operation.is_cancelled() {
                     return Ok(None);
                 }
 
                 let page_id = entry.page_id(plan.page_number)?;
 
-                // Build the watermark objects up front — a font or placement
-                // failure then leaves the page untouched. The page-number object
-                // is built later, once the drop it sits on can be sampled.
+                // Watermark objects built up front, so a failure leaves the page
+                // untouched; the page-number object waits until its drop is real.
                 let mut watermark_objects: Vec<PdfPageTextObject<'static>> = Vec::new();
                 if let Some(layer) = &plan.watermark {
                     let resources = watermark
@@ -2792,10 +2478,8 @@ impl PdfiumEngine {
                 let mut change_error = None;
                 let mut changed = false;
 
-                // First pass: pop the previous owned tail and lay down the
-                // watermark beneath. A smart-colour page regenerates here, so the
-                // sample below reads the real backdrop — the new watermark now
-                // under the number — and never the old label the pop just lifted.
+                // First pass: pop the old tail, lay the watermark, regenerate —
+                // the smart-colour sample reads the backdrop, not the lifted label.
                 {
                     let mut page = entry
                         .document
@@ -2847,13 +2531,8 @@ impl PdfiumEngine {
                         }
                     }
 
-                    // Regenerate before the handle closes whenever this pass
-                    // changed the page — PDFium drops objects that were inserted
-                    // but never flushed once the page is reopened for the second
-                    // pass. A first-apply page-numbers-only page pops nothing and
-                    // lays no watermark, so `changed` stays false and its flush
-                    // falls to the second pass; every other case flushes here so
-                    // the smart-colour sample below reads a persisted backdrop.
+                    // Regenerated before the handle closes: PDFium drops
+                    // inserted-but-unflushed objects when the page is reopened.
                     if changed && change_error.is_none() {
                         if let Err(error) = page.regenerate_content() {
                             change_error =
@@ -2865,9 +2544,8 @@ impl PdfiumEngine {
                     );
                 }
 
-                // Choose the page number's ink from the drop it now sits on —
-                // sampled after the pop, so a replacement never reads its own old
-                // label — then build the object.
+                // The ink is read from the drop as it now stands, after the pop,
+                // so a replacement never reads its own old label.
                 let page_number_object = if change_error.is_none() {
                     match &plan.page_number_label {
                         Some(layer) => {
@@ -2909,9 +2587,8 @@ impl PdfiumEngine {
                     None
                 };
 
-                // Second pass: lay the page number over the flushed watermark. The
-                // first pass already persisted the pop and the watermark, so a
-                // page with no number needs no second pass at all.
+                // Second pass: the number over the flushed watermark; the first
+                // persisted the rest, so a page with no number needs no second.
                 if let Some(object) = page_number_object {
                     let mut page = entry
                         .document
@@ -2952,8 +2629,6 @@ impl PdfiumEngine {
                     return Err(error);
                 }
 
-                // The tail's segments, in the order they were appended: watermark
-                // beneath, page number above.
                 let mut segment_counts = Vec::new();
                 if let Some(layer) = &plan.watermark {
                     segment_counts.push(layer.placements.len());
@@ -3000,9 +2675,8 @@ impl PdfiumEngine {
 
         let state = match rebuilt {
             Ok(Some(state)) => state,
-            // A stop is not a failure, so it is reported as one only when the
-            // rollback itself fails — which is the one case where the reader is
-            // left with a document neither they nor this session asked for.
+            // A stop is a failure only when the rollback itself fails — the one
+            // case leaving a document neither reader nor session asked for.
             Ok(None) => {
                 return match self.load_document_snapshot(entry, snapshot) {
                     Ok(()) => Ok(false),
@@ -3030,11 +2704,8 @@ impl PdfiumEngine {
         Ok(true)
     }
 
-    /// The watermark layer's rebuild inputs from a stored config: its resolved
-    /// colour and, for embedded text, the resolved face subset. The subset is the
-    /// expensive part, so a *new* watermark's resources are prepared outside the
-    /// lock; an existing layer's — rebuilt to survive a change to the other —
-    /// are prepared under it, from a config that cannot change while it is held.
+    /// The rebuild inputs from a config. A *new* watermark's subset is cut
+    /// outside the lock (pure CPU work); an existing layer's is taken under it.
     fn watermark_resources(&self, config: &WatermarkConfig) -> Result<WatermarkResources, String> {
         let color = PdfColor::from_hex(WATERMARK_COLOR)
             .map_err(|error| format!("the watermark colour is unusable: {error}"))?
@@ -3052,9 +2723,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// The page-number layer's rebuild inputs from a stored config: the face
-    /// bytes, which are kilobytes and cached after the first resolve, so this is
-    /// cheap enough to run under the lock.
+    /// The rebuild inputs from a config; the face is kilobytes and cached, so
+    /// this is cheap enough to run under the lock.
     fn page_numbers_resources(
         &self,
         config: &PageNumbersConfig,
@@ -3065,9 +2735,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// The page-number layer's resources rebuilt from the document's current
-    /// config, or `None` if it carries no page numbers — what a watermark change
-    /// passes so the other layer survives it unchanged.
+    /// The page-number layer's resources from the current config, or `None` —
+    /// what a watermark change passes so the other layer survives unchanged.
     fn existing_page_numbers(
         &self,
         entry: &OpenDocument,
@@ -3082,9 +2751,8 @@ impl PdfiumEngine {
         }
     }
 
-    /// The watermark layer's resources rebuilt from the document's current
-    /// config, or `None` — what a page-number change passes so the watermark
-    /// survives it unchanged.
+    /// The watermark layer's resources from the current config, or `None` —
+    /// what a page-number change passes so the other layer survives unchanged.
     fn existing_watermark(
         &self,
         entry: &OpenDocument,
@@ -3099,8 +2767,6 @@ impl PdfiumEngine {
         }
     }
 
-    /// Applies a new document-wide watermark, replacing the one this open
-    /// session owns and rebuilding every owned layer's tail in canonical order.
     pub(super) fn apply_watermark_with_progress(
         &self,
         document_id: u64,
@@ -3109,9 +2775,8 @@ impl PdfiumEngine {
     ) -> Result<bool, String> {
         let config = config.validated()?;
 
-        // Listed before *either* wait for the lock — the no-op check below takes
-        // it too, and behind another document's rebuild that check is already a
-        // wait a reader can give up on.
+        // Listed before either lock wait — the no-op check below takes one too,
+        // and behind another document's rebuild that is already a wait to abort.
         let operation = self.begin_operation(OperationTarget::Document(document_id));
 
         // Avoid a 17 MB read and subset for an exact no-op, while still checking
@@ -3133,8 +2798,6 @@ impl PdfiumEngine {
             return Ok(false);
         }
 
-        // Prepared without the PDFium lock because cutting the face is
-        // pure CPU work; the whole document reuses this one subset.
         let watermark = self.watermark_resources(&config)?;
 
         let mut documents = self.lock_documents()?;
@@ -3213,18 +2876,16 @@ impl PdfiumEngine {
         self.remove_watermark_with_progress(document_id, |_, _| {})
     }
 
-    /// Applies page numbers, replacing the ones this open session owns and
-    /// rebuilding every owned layer's tail in canonical order — the page numbers
-    /// on top. The range is validated against the document's current length.
+    /// Applies page numbers, rebuilding every owned layer's tail in canonical
+    /// order, numbers on top; the range validates against the current length.
     pub(super) fn apply_page_numbers_with_progress(
         &self,
         document_id: u64,
         config: PageNumbersConfig,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<bool, String> {
-        // Listed before the wait for the lock, so a reader who gives up while
-        // this is still queued behind another document's rebuild stops it here
-        // rather than after it has run.
+        // Listed before the lock wait, so a rebuild queued behind another can be
+        // stopped before it has run.
         let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
 
@@ -3235,9 +2896,8 @@ impl PdfiumEngine {
         let entry = open_entry_mut(&mut documents, document_id)?;
         let config = config.validated(entry.page_ids.len() as i32)?;
 
-        // Checked before any work, so an unchanged config never rebuilds an
-        // existing watermark's font. A single lock leaves no window for a
-        // concurrent IPC to slip between the check and the rebuild.
+        // Checked before any work, so an unchanged config never rebuilds the
+        // other layer's font; one lock, no IPC slips between check and rebuild.
         if entry
             .owned_content
             .as_ref()
@@ -3249,9 +2909,8 @@ impl PdfiumEngine {
             Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
         }
 
-        // The other layer is rebuilt from its current config; its subset is
-        // taken under the lock, which the plan accepts as the cost of stacking a
-        // second layer on a watermarked document.
+        // The other layer rebuilds from its current config, its subset taken
+        // under the lock — the accepted cost of stacking a second layer.
         let watermark = self.existing_watermark(entry)?;
         let page_numbers = self.page_numbers_resources(&config)?;
 
@@ -3310,15 +2969,8 @@ impl PdfiumEngine {
         self.remove_page_numbers_with_progress(document_id, |_, _| {})
     }
 
-    /// Removes the marks `mark_ids` names, and reports the 1-based page each of
-    /// them was on, in the order they were given.
-    ///
-    /// An id is itself the proof that the annotation behind it is the reader's
-    /// to remove: only marks this session made have one, so the document's own
-    /// links, form fields, and comments can never be named. Checked here rather
-    /// than trusted from the caller, which is a browser and can always be wrong:
-    /// deleting one of the document's own annotations would be silent,
-    /// permanent, and saved into the reader's file.
+    /// An id is itself the proof the annotation behind it is this session's to
+    /// remove; re-checked here, since the caller is a browser and can lie.
     pub(super) fn delete_marks(
         &self,
         document_id: u64,
@@ -3358,11 +3010,8 @@ impl PdfiumEngine {
             (page_id, std::cmp::Reverse(position))
         });
 
-        // Every page this touches is loaded and measured before the first
-        // annotation goes, the same way the ids are all placed first: a removal
-        // that stopped halfway would leave the document holding some of a
-        // command's marks while the history still holds them all, and neither
-        // the reader nor an undo could get back to either shape.
+        // Every page is verified before the first annotation goes: a halfway
+        // removal would leave history and document shapes no undo can reach.
         for (page_id, page_number, _) in &located {
             let tail = entry.marks.get(page_id).map_or(0, Vec::len);
             let page = entry
@@ -3374,9 +3023,8 @@ impl PdfiumEngine {
             owned_tail_base(*page_number, page.annotations().len(), tail)?;
         }
 
-        // Set before the first removal rather than after the last: a step that
-        // fails partway has still left orphans behind, and the next write has to
-        // take the collecting route either way.
+        // Set before the first removal: a step failing partway has still left
+        // orphans, and the next write collects either way.
         entry.needs_compaction = true;
 
         for index in order {
@@ -3410,13 +3058,8 @@ impl PdfiumEngine {
             .collect())
     }
 
-    /// The mark under `point` on `page_number`, or `None` where the reader
-    /// pointed at nothing of theirs.
-    ///
-    /// Topmost first, which is the one they see: PDFium draws a page's
-    /// annotations in order, so the last of this session's marks to cover the
-    /// point is the one on top of the others. Only the session's own tail is
-    /// searched — the document's own annotations are not the eraser's to find.
+    /// Topmost first — the one the reader sees, PDFium drawing in order — and
+    /// only the session's own tail, which is all the eraser may find.
     pub(super) fn mark_at_point(
         &self,
         document_id: u64,
@@ -3493,17 +3136,13 @@ impl PdfiumEngine {
             .map(|index| entry.page_ids[*index as usize])
             .collect();
 
-        // Every page's content now sits at a new position, so an effect
-        // captured before the move must fail its revision check after it.
         entry.invalidate_all_page_revisions();
 
         Ok(structure_update(entry))
     }
 
-    /// Turns the given pages clockwise by `degrees`, on top of whatever each
-    /// one already carries. Alone among the structure commands this moves no
-    /// page: it rewrites each one's `/Rotate`, which is what makes the turn
-    /// part of the document — saved with it, and undone by turning back.
+    /// Turns pages clockwise on top of what each carries. Alone among structure
+    /// commands it moves no page: the turn is each page's rewritten `/Rotate`.
     pub(super) fn rotate_pages(
         &self,
         document_id: u64,
@@ -3519,10 +3158,8 @@ impl PdfiumEngine {
             return Ok(structure_update(entry));
         }
 
-        // Every page is read before any is turned. `FPDFPage_SetRotation`
-        // cannot fail once the page is in hand, so a page PDFium will not load
-        // refuses the whole edit here rather than leaving half of it applied —
-        // which no history entry would then be holding.
+        // Every page is read before any is turned: a load failure refuses the
+        // whole edit, since SetRotation cannot fail once the page is in hand.
         let mut turned = Vec::with_capacity(indices.len());
 
         for index in &indices {
@@ -3547,20 +3184,14 @@ impl PdfiumEngine {
                     })?;
 
                 page.set_rotation(rotation);
-                // PDFium updates the page's dimensions as it sets the rotation,
-                // so the new shape is already there to read off the page in
-                // hand — and reading it here is what spares `page_infos` a
-                // second load of every page the reader turned.
+                // PDFium updates the dimensions as it sets the rotation, so
+                // reading here spares `page_infos` a second load of each page.
                 measure_page(&page)
             };
             let page_id = entry.page_ids[*index];
 
-            // The one thing in a session that re-shapes a page, so the one
-            // thing that has to write a geometry memo rather than only fill it.
-            // An effect holding pixels captured before the turn must fail its
-            // check, as it would after any other edit to the page. Both go page
-            // by page, so a turn that gives out partway still leaves the pages
-            // it reached describing themselves.
+            // The one edit that re-shapes a page: it writes the geometry memo,
+            // others only fill it, and bumps the revision, page by page.
             entry.page_geometry.insert(page_id, measured);
             *entry.revisions.entry(page_id).or_insert(0) += 1;
         }
@@ -3569,9 +3200,7 @@ impl PdfiumEngine {
     }
 
     /// Deletes the given pages, first copying them — and the session state
-    /// riding with them — into a stash under `stash_id` for a later restore.
-    /// An occupied `stash_id` is replaced: the key names one history entry,
-    /// and a redo of that entry's delete stashes the same logical pages again.
+    /// with them — into a stash under `stash_id` for a later restore.
     pub(super) fn delete_pages(
         &self,
         document_id: u64,
@@ -3623,7 +3252,6 @@ impl PdfiumEngine {
             Err(error) => return Err(self.restore_document_snapshot(entry, snapshot, error)),
         };
 
-        // PDFium is done; move each page's session state into the stash.
         let mut pages = Vec::with_capacity(indices.len());
 
         for index in indices.iter().rev() {
@@ -3658,7 +3286,6 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
-    /// Puts a stash's pages back where they were deleted from, consuming it.
     pub(super) fn restore_pages(
         &self,
         document_id: u64,
@@ -3670,9 +3297,8 @@ impl PdfiumEngine {
             return Err("there are no stashed pages under this undo entry".into());
         };
 
-        // LIFO undo has the document back in its post-delete shape, but the
-        // caller is a browser: prove every recorded position fits before
-        // touching PDFium. Ascending insertion counts the pages already back.
+        // LIFO undo should have the document back in shape, but the caller is a
+        // browser: prove every recorded position fits before touching PDFium.
         let fits = stash.pages.iter().enumerate().all(|(offset, stashed)| {
             stashed.position >= 1 && stashed.position as usize <= entry.page_ids.len() + offset + 1
         });
@@ -3720,8 +3346,7 @@ impl PdfiumEngine {
         }
 
         // The copies came back through FPDF_ImportPages; prove every owned
-        // layer's tail survived the round trip before accepting the document,
-        // as M6's compaction does after its own save-and-reload.
+        // layer's tail survived the round trip before accepting the document.
         if let Some(state) = &entry.owned_content {
             let mut prospective = state.clone();
 
@@ -3815,9 +3440,8 @@ impl PdfiumEngine {
         entry.page_ids.insert(slot, page_id);
 
         if let Some(state) = entry.owned_content.as_mut() {
-            // Owned but bare: no active layer covers a blank page inserted after
-            // it was applied, and only a re-apply will. A blank page has no
-            // content of its own, so its base is zero.
+            // Owned but bare: no layer covers a page inserted after an apply,
+            // and a blank page has no content of its own to base on.
             state.per_page.insert(
                 page_id,
                 OwnedTailState {
@@ -3832,10 +3456,8 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
-    /// Inserts every page of the PDF at `path` into the open document at
-    /// 1-based `index`, as one edit. The source is opened under the same limits
-    /// as a fresh open and never enters the document store; its pages become
-    /// this document's own, not a second document the reader could tell apart.
+    /// Inserts every page of the PDF at `path` as one edit, under the same
+    /// limits as a fresh open; its pages become this document's own.
     pub(super) fn insert_from_path(
         &self,
         document_id: u64,
@@ -3847,10 +3469,8 @@ impl PdfiumEngine {
         let bytes = read_pdf_bytes(&path)?;
 
         let mut documents = self.lock_documents()?;
-        // The source is opened inside the lock — loading a PDF is PDFium work —
-        // and dropped when this scope ends, never inserted into the store. Its
-        // error wording matches `open`'s, so an encrypted file is refused the
-        // same way whichever door it comes through.
+        // Opened inside the lock — loading is PDFium work — and dropped at
+        // scope's end, never entering the store; errors worded like `open`'s.
         let source = self
             .pdfium
             .load_pdf_from_byte_vec(bytes, None)
@@ -3893,9 +3513,8 @@ impl PdfiumEngine {
             return Err(self.restore_document_snapshot(entry, snapshot, error));
         }
 
-        // Nothing was removed, so no compaction is owed; but every page's
-        // content now sits in a longer document, and an M5 effect captured
-        // before the insert must fail its revision check after it.
+        // Nothing was removed, so no compaction is owed; but content moved, so
+        // an effect captured before the insert fails its revision check.
         entry.invalidate_all_page_revisions();
 
         Ok(InsertOutcome {
@@ -3904,16 +3523,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// Takes the pages a copy has just put at `slot` into the entry's own
-    /// bookkeeping: fresh page ids, the guard that keeps a document holding
-    /// another file's pages export-only, and — for a session that owns a layer —
-    /// an owned-but-bare record per page. `merged` says which of them carry
-    /// content this document may not be saved over, one flag per page: every
-    /// page of an import does, only a duplicate of such a page does.
-    ///
-    /// Everything that can fail is measured before anything is recorded, so an
-    /// error leaves the entry as it was and the caller has only the document
-    /// itself to roll back.
+    /// Records a copy's pages into bookkeeping; everything failable is measured
+    /// first, so an error leaves the entry as it was.
     fn record_inserted_pages(
         entry: &mut OpenDocument,
         slot: usize,
@@ -3930,10 +3541,8 @@ impl PdfiumEngine {
             ));
         }
 
-        // A copied page carries its source's own content objects. When this
-        // session owns any layer, each new page takes an owned-but-bare record
-        // whose base is that content and whose tail is empty — no active layer
-        // covers a page it never marked.
+        // A copied page carries its source's content; with a layer owned, each
+        // new page takes an owned-but-bare record based on that content.
         let mut new_base_objects = match &entry.owned_content {
             Some(_) => (0..count)
                 .map(|offset| {
@@ -3983,15 +3592,8 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// Copies `page_numbers` out of another open document into this one at
-    /// 1-based `index` — the thumbnail drag that crosses tabs. The pages are
-    /// copied, never moved, and they are read from the document as the reader
-    /// has it rather than from any file, so whatever that session has made of
-    /// them travels with them.
-    ///
-    /// Like an inserted file's, the pages become this document's own and leave
-    /// it export-only; unlike one, they name no path, so there is nothing here
-    /// for the approval check to answer for.
+    /// The cross-tab thumbnail drag: pages copied from another open document as
+    /// the reader has it, marks and all, export-only like an inserted file's.
     pub(super) fn insert_pages_from_document(
         &self,
         document_id: u64,
@@ -4052,14 +3654,8 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
-    /// Copies this document's own `page_numbers` back into it at 1-based
-    /// `index` — the grid's copy-and-paste. PDFium cannot import a document
-    /// into itself, so the pages go by way of a scratch document, exactly as a
-    /// delete's stash does.
-    ///
-    /// The copies are the document's own content, so they leave it saveable —
-    /// unless the page copied is itself another file's, or carries this
-    /// session's owned layer, which travels baked into the copy.
+    /// The grid's copy-and-paste; PDFium cannot import into itself, so the
+    /// pages detour through a scratch document, as a delete's stash does.
     pub(super) fn duplicate_pages(
         &self,
         document_id: u64,
@@ -4136,11 +3732,8 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
-    /// Reads each candidate file of a guided merge just far enough to report
-    /// what the wizard's first step shows: how many pages it brings, and whether
-    /// it has bookmarks of its own. A file that cannot be read is reported as
-    /// such rather than dropped, so the row the reader added stays on screen and
-    /// says why it is unusable.
+    /// Reads each merge candidate just far enough for the wizard's first step.
+    /// An unreadable file is reported as such, so its row stays and says why.
     pub(super) fn inspect_files(
         &self,
         paths: Vec<PathBuf>,
@@ -4150,21 +3743,14 @@ impl PdfiumEngine {
             return Err(merge_file_limit_error());
         }
 
-        // A Word document has no page count to report until an office suite
-        // has made a PDF of it. Seconds of work, all of it another process's
-        // — so it runs before the lock, like the image decode below it, and
-        // under its own stop target: this is the one part of an inspection a
-        // reader might reasonably want to interrupt.
+        // A Word file has no page count until an office suite makes a PDF of it
+        // — seconds, another process's — so it runs before the lock, stoppable.
         let operation = self.begin_operation(OperationTarget::Convert);
         let cancelled = || operation.is_cancelled();
         let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
 
-        // An image is decoded the same way the merge itself will decode it, so a
-        // row the wizard shows as usable is one the merge can actually lay on a
-        // page — but only decoded, never laid: the sheet it becomes is one page
-        // and carries no outline, so building it here would answer nothing
-        // already known. Done before the lock, because a decode is pure Rust
-        // work that PDFium neither performs nor has to be serialized against.
+        // Decoded exactly as the merge will, so a usable row is really usable;
+        // only decoded, and before the lock, since a decode is no PDFium work.
         let images: Vec<Option<bool>> = paths
             .iter()
             .map(|path| is_merge_image(path).then(|| read_image(path).is_ok()))
@@ -4181,9 +3767,8 @@ impl PdfiumEngine {
             .map(|((path, image), word)| {
                 let path_text = path.to_string_lossy().into_owned();
 
-                // A converted Word document is read like any other PDF, under
-                // its own row's name: the row says what the file is, not what
-                // the conversion left behind.
+                // A converted Word file reads like any PDF, under the row's own
+                // name: the row says what the file is, not what conversion left.
                 if let crate::convert::Entry::Converted(pdf) = &word {
                     let opened = load_merge_source(self.pdfium, pdf).ok();
 
@@ -4199,9 +3784,8 @@ impl PdfiumEngine {
                                 error: None,
                             }
                         }
-                        // The conversion came back with something this app's
-                        // own reader cannot open — rarer than a refusal, and
-                        // worded the same way for the row.
+                        // The conversion returned something this app's own
+                        // reader cannot open — rarer than a refusal, same wording.
                         None => PdfFileSummary {
                             path: path_text,
                             kind: MergeSourceKind::Word,
@@ -4265,12 +3849,8 @@ impl PdfiumEngine {
             .collect())
     }
 
-    /// Every Word document among `paths`, as PDFs of this run's own — or the
-    /// refusal that says why not. The stop flag is the caller's, because the
-    /// three pipelines that reach for a conversion each run under their own
-    /// operation; what a stop leaves unconverted reads here as a refusal, and
-    /// the callers that answer stops with their own "nothing was built" say
-    /// so before they ever look at these entries.
+    /// Every Word document among `paths` as a PDF, or the refusal saying why
+    /// not; the stop flag is the caller's, each pipeline under its own operation.
     fn resolve_word_documents(
         &self,
         paths: &[PathBuf],
@@ -4306,20 +3886,8 @@ impl PdfiumEngine {
         }
     }
 
-    /// Merges `paths`, in the order given, into one new document — the guided
-    /// merge's whole backend half.
-    ///
-    /// Nothing is merged *into* an open document: the result is a document of
-    /// this app's own making with no source path, so it can only ever be
-    /// exported to a copy and never written back over one of its sources.
-    ///
-    /// `smart_padding` inserts a blank before any file that would otherwise open
-    /// on an even page — the rule the files view's toggle already follows, so
-    /// that each file begins on a right-hand leaf when printed double-sided.
-    ///
-    /// `normalize_a4` fits every page onto an A4 sheet of its own instead of
-    /// carrying the source's page sizes through — see `append_page_fitted_to_a4`
-    /// for what that costs.
+    /// The guided merge's backend half. The result has no source path, so it can
+    /// only ever be exported to a copy, never written back over a source.
     pub(super) fn merge_files_with_progress(
         &self,
         paths: Vec<PathBuf>,
@@ -4337,16 +3905,12 @@ impl PdfiumEngine {
             return Err(merge_file_limit_error());
         }
 
-        // Stoppable like an owned-layer rebuild, and for the same reason: the
-        // copying loop holds the one PDFium lock for the length of the whole
-        // pile of files. Nothing needs rolling back — the merged document is
-        // built off to the side and only reaches the store on the last step —
-        // so a stopped run simply hands back nothing.
+        // Stoppable like an owned-layer rebuild, whose loop holds the one lock
+        // for the whole pile; nothing needs rollback — the store is joined last.
         let operation = self.begin_operation(OperationTarget::Merge);
 
-        // One unit per source, plus the Word conversions this run will really
-        // do (a cache hit adds none), followed by serialization, outline
-        // writing, and opening the completed bytes into the document store.
+        // One unit per source, plus the conversions this run will really do
+        // (a cache hit adds none), then serialization, outline, and opening.
         let conversions = if word_conversion {
             self.word.pending_count(&paths)
         } else {
@@ -4356,9 +3920,8 @@ impl PdfiumEngine {
 
         on_progress(0, total);
 
-        // The Word conversions run here, before the lock: an office suite's
-        // startup is seconds another process spends, and no render of the
-        // reader's should wait behind it.
+        // Conversions run before the lock: an office suite's startup is seconds
+        // another process spends, and no render should wait behind it.
         let cancelled = || operation.is_cancelled();
         let mut converted = 0usize;
         let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {
@@ -4366,9 +3929,8 @@ impl PdfiumEngine {
             on_progress(converted, total);
         });
 
-        // The estimate above promised pending conversions; this run really
-        // did `converted` of them, and only a difference is worth saying —
-        // the bar answers to what happened, never twice to what did not.
+        // The estimate promised pending conversions; only a difference from
+        // what this run really did is worth reporting.
         let mut total = total;
         let mut completed = converted;
 
@@ -4391,9 +3953,8 @@ impl PdfiumEngine {
         }
 
         let (bytes, nodes) = {
-            // Building the document is PDFium work like any other, so it is done
-            // under the store's lock — given back before `open_with_source`
-            // takes it again, as `create_blank` does.
+            // Building is PDFium work, so under the store's lock — given back
+            // before `open_with_source` takes it again, as `create_blank` does.
             let _documents = self.lock_documents()?;
             let mut merged = self
                 .pdfium
@@ -4408,9 +3969,8 @@ impl PdfiumEngine {
                     return Ok(None);
                 }
 
-                // A Word source is read from the PDF its conversion left,
-                // while its name — error wording, bookmark title — stays the
-                // reader's own file's.
+                // A Word source is read from the PDF its conversion left; its
+                // name — errors, bookmark title — stays the reader's own file's.
                 let read_from = match word {
                     crate::convert::Entry::Converted(pdf) => pdf.as_path(),
                     _ => path,
@@ -4425,10 +3985,8 @@ impl PdfiumEngine {
                 }
 
                 if smart_padding && merged.pages().len() % 2 == 1 {
-                    // Sized like the file it precedes, so the blank reads as that
-                    // file's own leading sheet rather than the last file's tail —
-                    // or like the sheet that file's first page is about to be
-                    // fitted onto, where every page is being normalized.
+                    // Sized like the file it precedes, so the blank reads as
+                    // that file's leading sheet — or its coming A4 sheet.
                     let (width, height) = {
                         let first = source.pages().get(0).map_err(|error| {
                             format!(
@@ -4462,17 +4020,15 @@ impl PdfiumEngine {
                 // first page rather than the blank in front of it.
                 let start = merged.pages().len().max(0) as usize;
                 // Read before the append, which imports pages alone: PDFium
-                // leaves the source's outline behind, which is the whole reason
-                // the merged one has to be written by hand afterwards.
+                // leaves the outline behind, hence the hand-written one after.
                 let outline = collect_bookmark_siblings(source.bookmarks().root());
 
                 if normalize_a4 {
                     // Page by page rather than in one call: each sheet is sized
                     // and its content placed on its own terms.
                     for index in 0..source.pages().len() {
-                        // A long file's pages are this loop's own unit, and it
-                        // holds the one PDFium lock throughout — so the stop is
-                        // read here too, not only between files.
+                        // A long file's pages are this loop's unit under the one
+                        // lock, so the stop is read here too, not only between files.
                         if operation.is_cancelled() {
                             return Ok(None);
                         }
@@ -4514,22 +4070,19 @@ impl PdfiumEngine {
             return Ok(None);
         }
 
-        // Writing the outline is byte work rather than PDFium work, so it
-        // happens with the store's lock given back — a long merge must not park
-        // every render behind it.
+        // Outline writing is byte work, not PDFium work, so the lock is given
+        // back — a long merge must not park every render behind it.
         let bytes = outline::write_outline(bytes, &nodes)?;
         completed += 1;
         on_progress(completed, total);
 
-        // The sources each passed the ceiling on their own; their sum is what
-        // this checks, and it is checked before the bytes are opened rather than
-        // after, so an oversized merge is refused rather than parked in the store.
+        // The sources passed the ceiling each on their own; their sum is what
+        // this checks, before opening, so an oversized merge is not parked.
         if bytes.len() > MAX_PDF_BYTES {
             return Err(size_limit_error());
         }
-        // The last chance to leave with nothing in the store: opening reads
-        // every page of the merge, and what it opens is a document the reader
-        // would then have to close.
+        // The last chance to leave with nothing in the store: what opens here
+        // is a document the reader would then have to close.
         if operation.is_cancelled() {
             return Ok(None);
         }
@@ -4541,10 +4094,8 @@ impl PdfiumEngine {
         Ok(Some(document))
     }
 
-    /// One page of `document_id`, rendered at `dpi` and encoded as a PNG.
-    ///
-    /// The lock is taken and given back per page, so a whole document's worth of
-    /// these leaves room between them for the renders a viewer is asking for.
+    /// One page rendered at `dpi` as a PNG. The lock is taken per page, leaving
+    /// room between pages for the renders a viewer is asking for.
     fn page_png(&self, document_id: u64, page_number: i32, dpi: f32) -> Result<Vec<u8>, String> {
         let documents = self.lock_documents()?;
         let entry = open_entry(&documents, document_id)?;
@@ -4577,11 +4128,8 @@ impl PdfiumEngine {
         Ok(png.into_inner())
     }
 
-    /// Writes every page of `document_id` into a zip at `destination`, one PNG
-    /// per page. `false` is the reader's stop, which leaves `destination` alone.
-    ///
-    /// The document is the merge's own result, layers and all — this only reads
-    /// it — so nothing here can reach one of the files the merge was built from.
+    /// Writes every page into a zip at `destination`, one PNG per page; `false`
+    /// is the reader's stop, which leaves `destination` alone.
     pub(super) fn export_page_images(
         &self,
         document_id: u64,
@@ -4635,13 +4183,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// Writes one watermarked copy of each of `paths` into a zip at
-    /// `destination` — the merge wizard's third export, which merges nothing.
-    ///
-    /// Each source is built, watermarked and written on its own, and never
-    /// through its own path: the copies are documents of this app's making with
-    /// no source behind them, so nothing here can be written back over a file
-    /// the reader named. `false` is their stop.
+    /// One watermarked copy per path into a zip — the wizard's third export,
+    /// which merges nothing; the copies carry no source path, overwriting none.
     pub(super) fn export_watermarked_copies(
         &self,
         paths: Vec<PathBuf>,
@@ -4659,9 +4202,8 @@ impl PdfiumEngine {
             return Err(merge_file_limit_error());
         }
 
-        // A destination that resolves onto one of the sources would replace a
-        // reader's own PDF with an archive. The dialog offers `.zip`, but the
-        // name it comes back with is theirs to type.
+        // A destination resolving onto a source would replace a reader's PDF
+        // with an archive; the dialog offers `.zip`, but the name is theirs.
         for path in &paths {
             if same_file(path, destination) {
                 return Err("the archive would replace one of the files it is built from".into());
@@ -4750,13 +4292,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// One source built as its own document, watermarked if the reader asked for
-    /// one, and handed back as bytes. `None` is their stop.
-    ///
-    /// The document lives in the store only for as long as the watermark takes:
-    /// that is the one machinery that can apply a mark, and it works on an entry.
-    /// It is closed on every path out, including a failure, so a stopped run
-    /// leaves nothing behind for a window to own.
+    /// One source built, watermarked if asked, returned as bytes; `None` is a
+    /// stop. The store entry lives only for the watermark, closed every way out.
     fn watermarked_copy(
         &self,
         path: &Path,
@@ -4854,16 +4391,12 @@ impl PdfiumEngine {
         .ok_or_else(|| "the merge was stopped".to_string())
     }
 
-    /// Writes the document back over the file it was opened from.
     pub(super) fn save(&self, document_id: u64) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
-        // Ownership of a page-content layer ends when the document closes, so
-        // writing one over the reader's own file leaves them a mark this app can
-        // no longer lift. A copy is the only destination it may reach. Checked
-        // here rather than trusted to the disabled key: the WebView can call the
-        // command.
+        // Layer ownership ends at close, so a saved-over file keeps a mark this
+        // app can no longer lift; checked here, the WebView can call the command.
         if entry
             .owned_content
             .as_ref()
@@ -4875,11 +4408,8 @@ impl PdfiumEngine {
             );
         }
 
-        // Pages another file brought in carry the same restriction as a
-        // watermark, for the same reason the plan modelled on it: a save here
-        // would write another file's pages over the reader's own. Enforced in
-        // the command, not trusted to the disabled key, since the WebView can
-        // call this directly.
+        // Another file's pages carry the same restriction, for the same reason:
+        // again enforced here, not trusted to the disabled key.
         if !entry.merged_page_ids.is_empty() {
             return Err(
                 "a document holding another PDF's pages may only be exported as a copy, not saved over its own file"
@@ -4894,22 +4424,14 @@ impl PdfiumEngine {
         self.write_document(entry, &path)
     }
 
-    /// Writes the document to `path`, and — for a document that had no source —
-    /// adopts `path` as one, making a byte-opened document's export a true
-    /// save-as. Reports whether the write landed on the source path, which is
-    /// what tells the frontend whether the file now matches the history.
+    /// Writes to `path`, adopting it as the source of a byte-opened document —
+    /// a true save-as. The flag tells the frontend the file matches the history.
     pub(super) fn export_to(&self, document_id: u64, path: &Path) -> Result<ExportOutcome, String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
-        // The same refusal `save` makes, at the other exit: a reader who picks
-        // their own file in the export dialog would otherwise overwrite it with
-        // content this app cannot lift — a watermark, or another file's pages,
-        // both export-only for the same reason. Unlike the
-        // `saved_to_source` comparison below, this one resolves aliases before it
-        // answers — the two run in opposite directions. Missing a symlinked twin
-        // there only leaves the history dirty; missing one here destroys the
-        // original.
+        // The same refusal `save` makes, at the other exit. Unlike the flag
+        // below, this resolves aliases: a missed twin would destroy the original.
         if (entry
             .owned_content
             .as_ref()
@@ -4928,9 +4450,8 @@ impl PdfiumEngine {
 
         self.write_document(entry, path)?;
 
-        // Compared verbatim rather than canonicalized: both paths came out of
-        // the OS's own dialogs, and mistaking a symlinked twin for a stranger
-        // only leaves the history dirty — the safe direction.
+        // Compared verbatim, not canonicalized: mistaking a symlinked twin for
+        // a stranger only dirties the history — the safe direction.
         let saved_to_source = match &entry.source_path {
             Some(source) => source.as_path() == path,
             None => {
@@ -4945,9 +4466,8 @@ impl PdfiumEngine {
         })
     }
 
-    /// Writes the document, annotations and all, to `path`. Test-only since the
-    /// dialogs moved into the commands: the app's two exits are `save` and
-    /// `export_to`, and this is the bare write they share.
+    /// The bare write `save` and `export_to` share; test-only since the dialogs
+    /// moved into the commands.
     #[cfg(test)]
     pub(super) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
@@ -4956,16 +4476,8 @@ impl PdfiumEngine {
         self.write_document(entry, path)
     }
 
-    /// Reloads the document off its own saved bytes when this session has
-    /// deleted an annotation or page object, dropping whatever the removed
-    /// content left behind — PDFium collects unreferenced objects on a load,
-    /// and only there.
-    ///
-    /// Costs a whole extra copy of the document in memory while it runs, which
-    /// is why it waits for a deletion instead of riding every save. The owned
-    /// content is checked before the replacement is accepted: annotation order
-    /// is preserved by PDFium, and every owned layer's top-level text objects
-    /// must still have the same exact count, order, type, and text.
+    /// Reloads off the document's saved bytes — the only place PDFium collects
+    /// unreferenced objects — after a deletion only, for the extra memory copy.
     fn collect_orphans(&self, entry: &mut OpenDocument) -> Result<(), String> {
         if !entry.needs_compaction {
             return Ok(());
@@ -4995,15 +4507,6 @@ impl PdfiumEngine {
 
     /// The one write path under every save and export, so their files come out
     /// identical — collected of orphans, and landed whole.
-    ///
-    /// Through a temporary file in the destination's own directory, then a
-    /// rename: a save interrupted half-written would otherwise leave the reader
-    /// with neither the document they had nor the one they asked for. Same
-    /// directory keeps the rename on one filesystem, where it is atomic. The
-    /// replacement cannot keep everything about the original — its owner and
-    /// its hard links are beyond an unprivileged process — but its mode is
-    /// carried over, and a symlinked destination is resolved so the save lands
-    /// in the file the link points at rather than replacing the link.
     fn write_document(&self, entry: &mut OpenDocument, path: &Path) -> Result<(), String> {
         self.collect_orphans(entry)?;
 
@@ -5024,13 +4527,8 @@ impl PdfiumEngine {
     }
 }
 
-/// Writes `path` through a temporary file beside it, renamed into place only
-/// once every byte is on disk. `write` returning `false` abandons the write:
-/// the temporary goes and `path` is left as it was, which is how a stopped
-/// export leaves nothing half-written behind.
-///
-/// Shared by every write this app makes — a saved document and the wizard's
-/// archives — so the reasoning in it is stated once rather than per call site.
+/// Writes `path` via a temporary file beside it, renamed into place only once
+/// every byte is on disk; `false` abandons, leaving nothing half-written.
 fn write_file_atomically(
     path: &Path,
     write: impl FnOnce(&mut fs::File) -> Result<bool, String>,
@@ -5038,19 +4536,14 @@ fn write_file_atomically(
     // A fresh export has nothing to canonicalize; the given path is it.
     let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let path = path.as_path();
-    // A bare name has `""` for a parent, which would put the temporary file
-    // in whatever directory the process started from — losing the atomic
-    // rename, which needs one filesystem.
+    // A bare name has `""` for a parent, which would put the temporary file in
+    // the start directory — losing the atomic rename, which needs one filesystem.
     let directory = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => return Err(format!("{} is not a usable destination", path.display())),
     };
-    // Random, and created only if absent: a name someone can guess, in a
-    // directory anyone can write to, could be waiting as a symlink, and the
-    // document would be written through to whatever it points at. Random
-    // rather than a counter, which would restart at 1 every launch — a
-    // temporary file a crash left behind would then collide with, and
-    // permanently block, every later save of the same document.
+    // Random, and created only if absent: a guessable name could sit as a
+    // symlink, and a launch-reset counter would hit a crash's leftover forever.
     let suffix =
         getrandom::u64().map_err(|error| format!("could not name a temporary file: {error}"))?;
     let temporary = directory.join(format!(
@@ -5068,19 +4561,15 @@ fn write_file_atomically(
         .open(&temporary)
         .map_err(|error| format!("could not write beside {}: {error}", path.display()))?;
 
-    // Written through the handle `create_new` just proved was ours, never by
-    // handing the name back to be opened a second time: in that gap the file
-    // could be swapped for a symlink, and PDFium's own `save_to_file` opens
-    // by path.
+    // Through the handle `create_new` proved ours, never by name again: in that
+    // gap the path could be swapped for a symlink, and save_to_file opens by path.
     let written = write(&mut file).and_then(|keep| {
         if !keep {
             return Ok(false);
         }
 
-        // The rename orders the replacement; only a flush makes it real. A
-        // crash between an unsynced rename and the writeback would leave
-        // the name pointing at a hollow file — exactly the loss the
-        // temporary file exists to prevent.
+        // The rename only orders the replacement; a crash between an unsynced
+        // rename and the writeback would leave a hollow file behind the name.
         file.sync_all()
             .map_err(|error| format!("could not flush the document: {error}"))
             .map(|()| true)
@@ -5088,9 +4577,8 @@ fn write_file_atomically(
 
     drop(file);
 
-    // The temporary was born with default permissions; the file it is about
-    // to become may be tighter (a 0600 document must not come back 0644).
-    // Best effort — a failure here still saves, with default permissions.
+    // The temporary was born with default permissions; the file it replaces may
+    // be tighter (a 0600 document must not come back 0644). Best effort.
     if let Ok(metadata) = fs::metadata(path) {
         let _ = fs::set_permissions(&temporary, metadata.permissions());
     }
@@ -5117,14 +4605,8 @@ fn write_file_atomically(
     renamed
 }
 
-/// What one source is called inside a watermark-only archive: its own name with
-/// a `.pdf` extension, since an image comes out as the page it was laid on.
-///
-/// Two sources from different directories can share a name, so a name already
-/// taken gains a number — an archive with one entry silently missing would be
-/// worse than one with an odd name in it. The stem is reduced to its last path
-/// component first, so nothing a path carries can name a directory in the
-/// archive.
+/// A source's own name with `.pdf`, numbered when taken — an archive silently
+/// missing an entry would be worse than an odd name in it.
 fn archive_pdf_name(path: &Path, used: &mut HashSet<String>) -> String {
     let stem = path
         .file_stem()
@@ -5144,10 +4626,8 @@ fn archive_pdf_name(path: &Path, used: &mut HashSet<String>) -> String {
     name
 }
 
-/// At most 200 bytes of `name`, cut on a character boundary: the temporary
-/// file adds a dot, sixteen hex digits, and `.tfolio-save` around it, and the
-/// whole thing has to stay under the 255-byte NAME_MAX of the usual
-/// filesystems.
+/// At most 200 bytes, cut on a character boundary: the temporary adds a dot,
+/// sixteen hex digits and `.tfolio-save`, all within the 255-byte NAME_MAX.
 fn bounded_file_name(name: &str) -> &str {
     const BUDGET: usize = 200;
 
@@ -5164,13 +4644,8 @@ fn bounded_file_name(name: &str) -> &str {
     &name[..end]
 }
 
-/// Whether two paths name one file, following symlinks and `..` as far as the
-/// filesystem will resolve them. A destination that does not exist yet — what a
-/// save dialog usually names — resolves through its parent instead, so a fresh
-/// name inside a symlinked directory still matches. An unresolvable path falls
-/// back to a literal comparison, which errs towards "different": the callers
-/// that need certainty are the ones asking whether a write would land on a file
-/// they already hold, and a path they cannot resolve is not that file.
+/// Whether two paths name one file. A fresh destination resolves through its
+/// parent; the unresolvable compare literally, erring towards "different".
 fn same_file(left: &Path, right: &Path) -> bool {
     fn resolved(path: &Path) -> PathBuf {
         if let Ok(canonical) = path.canonicalize() {
@@ -5189,10 +4664,8 @@ fn same_file(left: &Path, right: &Path) -> bool {
     resolved(left) == resolved(right)
 }
 
-/// A PDF read into memory under the app's size ceiling. Sized from its metadata
-/// before it is read, so an oversized file is refused rather than pulled
-/// wholesale into memory first, and checked again after — the file on disk may
-/// have grown between the two.
+/// A PDF read into memory under the app's ceiling, sized from metadata first so
+/// an oversized file is refused before it is read — and checked again after.
 fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
@@ -5219,7 +4692,6 @@ fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Whether `path` names one of the image formats a merge can bring in as a page.
 pub(super) fn is_merge_image(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -5228,11 +4700,8 @@ pub(super) fn is_merge_image(path: &Path) -> bool {
         })
 }
 
-/// Decodes `path` as an image, under both of the ceilings above.
-///
-/// The format comes from the bytes rather than the extension: a file the reader
-/// named `.png` is still whatever it actually is, and every decoder here is
-/// pure Rust, so a mislabelled one is a decode error rather than a hazard.
+/// Decodes `path` under both ceilings. The format comes from the bytes, not the
+/// extension: a mislabelled file is a decode error, not a hazard.
 fn read_image(path: &Path) -> Result<DynamicImage, String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
@@ -5261,20 +4730,16 @@ fn read_image(path: &Path) -> Result<DynamicImage, String> {
     let mut decoder = reader.into_decoder().map_err(unusable)?;
     let (width, height) = decoder.dimensions();
 
-    // Read off the header, before a pixel is allocated: `max_alloc` above is a
-    // limit the crate documents as non-strict, so the size a file *claims* is
-    // what refuses a bitmap no machine could hold — both as a pixel count and
-    // as the bytes those pixels take at this file's own channel depth.
+    // Off the header, before a pixel is allocated: `max_alloc` is documented as
+    // non-strict, so the size a file claims must refuse the bitmap itself.
     if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS
         || decoder.total_bytes() > MAX_IMAGE_PIXELS * 4
     {
         return Err(image_limit_error());
     }
 
-    // Cameras and scanners record the way a sheet was held in the metadata
-    // rather than in the pixels, and decoding leaves it there: without this a
-    // portrait photograph arrives 4032 wide and is laid sideways on a landscape
-    // sheet.
+    // Cameras record orientation in metadata, not pixels; without this a
+    // portrait photograph arrives landscape and lands sideways on the sheet.
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let mut image = DynamicImage::from_decoder(decoder).map_err(unusable)?;
 
@@ -5283,13 +4748,8 @@ fn read_image(path: &Path) -> Result<DynamicImage, String> {
     Ok(image)
 }
 
-/// A one-page document holding `path`'s image, laid on an A4 sheet turned the
-/// way the image is and scaled to fill it.
-///
-/// An image has no page size of its own — its pixels are not points — so unlike
-/// a PDF page it is always fitted to the sheet, enlarged as readily as shrunk.
-/// That makes the merge's own A4 option a no-op for images, which is the only
-/// answer that reads the same whether the option is on or off.
+/// The image laid on a turned A4 sheet, scaled to fill. An image has no page
+/// size of its own, so it is always fitted, whatever the merge's A4 option says.
 fn image_page_document<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<'a>, String> {
     let image = read_image(path)?;
     let pixel_width = image.width() as f32;
@@ -5343,8 +4803,6 @@ fn image_page_document<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocumen
     Ok(document)
 }
 
-/// One file of a merge, opened as the pages it contributes — a PDF read by
-/// PDFium, or an image laid on a sheet of its own.
 fn load_merge_source<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<'a>, String> {
     if is_merge_image(path) {
         return image_page_document(pdfium, path);
@@ -5357,14 +4815,8 @@ fn load_merge_source<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<
         .map_err(|error| format!("PDFium could not open the document: {error}"))
 }
 
-/// Copies page `index` of `source` onto a fresh A4 sheet at the end of `merged`,
-/// centred there and shrunk only as far as the sheet makes necessary.
-///
-/// The page travels as a form XObject rather than as a page of its own: PDFium
-/// can place and scale an object, but has no way to resize a page it has already
-/// imported. A form carries the source page's content alone, so annotations are
-/// left behind — which is why this route is taken only when the reader asks for
-/// one page size, and an ordinary merge still appends whole pages.
+/// Page `index` onto a fresh A4 sheet as a form XObject: PDFium cannot resize
+/// an imported page, and a form leaves annotations behind, hence opt-in only.
 fn append_page_fitted_to_a4<'a>(
     merged: &mut PdfDocument<'a>,
     source: &PdfDocument<'a>,
@@ -5378,25 +4830,22 @@ fn append_page_fitted_to_a4<'a>(
             path.display()
         )
     };
-    // Taken through `objects_mut`, which is the accessor that keeps the
-    // document's own lifetime — `objects` borrows the page, and the form object
-    // has to outlive it to reach the sheet built below.
+    // Through `objects_mut`, the accessor keeping the document's lifetime: the
+    // form must outlive the page borrow to reach the sheet built below.
     let mut page = source
         .pages()
         .get(index)
         .map_err(|error| failed("load", error))?;
-    // The *displayed* size, `/Rotate` already applied — which is the space the
-    // form arrives in too, since PDFium builds it through the page's own
-    // display matrix.
+    // The displayed size, `/Rotate` applied — the space the form arrives in too,
+    // since PDFium builds it through the page's display matrix.
     let placement = a4_placement(page.width().value, page.height().value);
     let mut form = page
         .objects_mut()
         .copy_into_x_object_form_object(merged)
         .map_err(|error| failed("copy", error))?;
 
-    // One matrix rather than a scale and a translate: PDFium composes each call
-    // onto what the object already carries, and these offsets are measured on
-    // the sheet rather than on the page.
+    // One matrix, not a scale then a translate: PDFium composes each call onto
+    // what the object carries, and these offsets are measured on the sheet.
     form.transform(
         placement.scale as PdfMatrixValue,
         0.0,
@@ -5437,17 +4886,14 @@ fn merge_file_limit_error() -> String {
     format!("a merge takes at most {MAX_MERGE_FILES} files")
 }
 
-/// The name a per-file bookmark carries: the file's own name without the
-/// extension, which is what a reader calls it. A path that ends in no name at
-/// all falls back to the whole path, so a bookmark is never blank.
+/// The file's name without extension; a path ending in no name falls back to
+/// the whole path, so a bookmark is never blank.
 fn bookmark_title(path: &Path) -> String {
     path.file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// What one merged file contributes to the outline under `mode`. `start` is the
-/// 0-based position its first page landed at.
 fn merge_bookmark_nodes(
     mode: MergeBookmarks,
     title: String,
@@ -5470,9 +4916,8 @@ fn merge_bookmark_nodes(
     }
 }
 
-/// A source file's own outline moved onto the pages it now occupies. An item
-/// whose destination could not be read points at the file's first page instead,
-/// so a heading never lands outside the file it came from.
+/// A source's outline moved onto the pages it now occupies; an unreadable
+/// destination points at the file's first page, never outside the file.
 fn remapped_outline(items: Vec<PdfOutlineItem>, start: usize) -> Vec<OutlineNode> {
     items
         .into_iter()
@@ -5487,10 +4932,8 @@ fn remapped_outline(items: Vec<PdfOutlineItem>, start: usize) -> Vec<OutlineNode
         .collect()
 }
 
-/// Everything about a document's shape the document itself can answer. Kept
-/// apart from `PdfStructureUpdate` because that type carries one fact a
-/// document cannot know — whether a page in it came from another file — so
-/// this deliberately cannot be handed to the frontend on its own.
+/// Kept apart from `PdfStructureUpdate`, which carries the one fact a document
+/// cannot know — whether a page came from another file.
 struct DocumentLayout {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
@@ -5507,10 +4950,8 @@ fn measure_page(page: &PdfPage<'_>) -> PdfPageInfo {
     }
 }
 
-/// The page list and outline as they stand, measured out of PDFium page by
-/// page. What an open reports; every later structure command answers from
-/// `page_infos` instead, which is the same list read off a memo. The frontend
-/// holds no mirror of the page list to patch, only this to replace.
+/// Measured out of PDFium page by page; what an open reports. Later structure
+/// commands answer from `page_infos` instead, the same list off a memo.
 fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
     let pages = document.pages();
 
@@ -5521,24 +4962,16 @@ fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
     }
 }
 
-/// What a page PDFium will not load is reported as. It cannot simply be left
-/// out: the frontend numbers pages by their place in this list, so a gap would
-/// renumber every page after it and send the reader's next delete at the wrong
-/// one. Deliberately not memoised, so a page that can be measured later still
-/// will be.
+/// What an unloadable page reports as: a gap would renumber every page after
+/// it. Not memoised, so a page measurable later still will be.
 const UNMEASURED_PAGE: PdfPageInfo = PdfPageInfo {
     width: 595.0,
     height: 842.0,
     rotation: 0.0,
 };
 
-/// Every page's geometry, in page order, measuring only the pages this session
-/// has not measured before — see `OpenDocument::page_geometry`. A reorder or a
-/// delete therefore touches PDFium not at all here; only a page new to the
-/// document is loaded, and only once.
-///
-/// One entry per page id, always, which is what keeps the count the frontend is
-/// given the same one every command validates against.
+/// Measures only pages not measured before, so a reorder or delete touches
+/// PDFium not at all here. One entry per page, always, keeping the count stable.
 fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
     let unmeasured = entry
         .page_ids
@@ -5574,12 +5007,8 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
         .collect()
 }
 
-/// The layout a structure command reports back, together with whether any page
-/// another file brought in is still present. The frontend's save key reads that
-/// flag rather than replaying its own command history: `merged_page_ids` is the
-/// same set `save` refuses on, so the key can never disagree with the command.
-/// The only way to build a `PdfStructureUpdate`, so a command that reaches for
-/// the page list alone cannot report the flag away.
+/// The layout a structure command reports, plus whether another file's pages
+/// remain — read from the same set `save` refuses on, so the key cannot lie.
 fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
     let pages = page_infos(entry);
 

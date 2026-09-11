@@ -11,8 +11,6 @@ use crate::pdfium::library::PDFIUM_LIBRARY_NAME;
 use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 use crate::pdfium::watermark::{WatermarkDirection, WatermarkLayout};
 
-/// Serialises `objects` into a PDF. Shared by the fixtures below, which
-/// differ only in the objects they describe.
 fn build_pdf(objects: &[String]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
@@ -40,8 +38,6 @@ fn build_pdf(objects: &[String]) -> Vec<u8> {
     pdf
 }
 
-// A portrait 200x300 page with `/Rotate 90` and the text "Hi" drawn at an
-// unrotated baseline of (50, 250).
 fn rotated_text_pdf() -> Vec<u8> {
     let content = "BT\n/F1 24 Tf\n50 250 Td\n(Hi) Tj\nET\n";
     let contents_obj = format!(
@@ -99,11 +95,8 @@ fn test_pdfium() -> &'static Pdfium {
     })
 }
 
-/// The one engine every test shares, mirroring the app's single
-/// `PdfiumState`.
-///
-/// An engine each would be a lock each (see `PdfiumEngine::documents`), and
-/// the harness runs tests in parallel — which corrupts the heap.
+/// The one engine every test shares, mirroring the app's single `PdfiumState`:
+/// parallel tests through separate engine locks would corrupt the heap.
 fn test_engine() -> &'static PdfiumEngine {
     static ENGINE: std::sync::OnceLock<PdfiumEngine> = std::sync::OnceLock::new();
 
@@ -118,14 +111,8 @@ fn test_engine() -> &'static PdfiumEngine {
             crate::pdfium::font::CJK_FONT_NAME,
         )],
         fallback_font: OnceLock::new(),
-        // Seeded rather than resolved, so every embedded run in the tests takes
-        // the one face the source tree pins. Left to scan, these assertions
-        // would be about whichever CJK sans the machine running them happens to
-        // have installed — and on a runner with none, about nothing at all.
-        //
-        // That pins every test here to the fetched fallback, so the branch the
-        // app takes on a machine that has its own sans is covered separately,
-        // by `font_engine` below.
+        // Seeded, not resolved: assertions pin to the source tree's face rather
+        // than whichever sans the machine has; the resolved branch is `font_engine`'s.
         system_face: OnceLock::from(None),
         // Resolved from the system's own fonts on the first apply, exactly as
         // the app resolves it.
@@ -136,8 +123,6 @@ fn test_engine() -> &'static PdfiumEngine {
     })
 }
 
-/// The id of the last mark this session put on `page_number`, or `None` where
-/// it has none of its own there.
 fn last_mark(engine: &PdfiumEngine, document_id: u64, page_number: i32) -> Option<u64> {
     let documents = engine
         .documents
@@ -153,10 +138,8 @@ fn last_mark(engine: &PdfiumEngine, document_id: u64, page_number: i32) -> Optio
         .and_then(|marks| marks.last().copied())
 }
 
-/// Takes the last mark this session made on `page_number` back off, which is
-/// what an undo of the reader's most recent mark there comes to. A page with
-/// none of its own refuses, since the ids are the only handles there are and
-/// the document's own annotations have none.
+/// Undo's backend: take the last mark this session made on a page back off.
+/// The document's own annotations have no ids, so undo can never reach them.
 fn delete_last_mark(
     engine: &PdfiumEngine,
     document_id: u64,
@@ -168,10 +151,8 @@ fn delete_last_mark(
     engine.delete_marks(document_id, &[mark_id])
 }
 
-/// Hands `inspect` a page with the store locked, which is the only way a test
-/// may look at one: loading and dropping a page is PDFium work like any
-/// other. The page drops before the guard, so nothing reaches PDFium
-/// unlocked.
+/// Hands `inspect` a page with the store locked: loading and dropping one is
+/// PDFium work like any other, and nothing here may reach PDFium unlocked.
 fn with_page<T>(
     engine: &PdfiumEngine,
     document_id: u64,
@@ -209,9 +190,8 @@ fn extracts_text_in_unrotated_space_for_rotated_page() {
 
     let span = &spans[0];
     assert_eq!(span.text, "Hi");
-    // Bounds stay in the unrotated 200x300 page space with a top-left
-    // origin: the run sits near x=52, and the top-flip uses the unrotated
-    // height (300), not the displayed height (200) — which would go negative.
+    // Bounds are unrotated, top-left origin: the flip uses the unrotated
+    // height (300), not the displayed 200 — which would go negative.
     assert!((50.0..55.0).contains(&span.left), "left was {}", span.left);
     assert!((30.0..36.0).contains(&span.top), "top was {}", span.top);
     assert!(span.width > 0.0 && span.top > 0.0);
@@ -292,9 +272,8 @@ fn minimal_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
-// Two backgrounds with very different luminance make the watermark alpha
-// spike prove source-over compositing rather than a colour pre-mixed for a
-// white page. The text added by the test spans both halves.
+// Two backgrounds with very different luminance: an alpha spike over both
+// proves source-over compositing rather than a colour pre-mixed for white.
 fn watermark_background_pdf() -> Vec<u8> {
     let content = "0.85 g\n0 0 100 300 re f\n0.2 g\n100 0 100 300 re f\n";
     let contents_obj = format!(
@@ -465,8 +444,6 @@ fn watermark_is_semi_transparent() {
     }
 }
 
-/// The bytes really carry the watermark — and the reopened document does
-/// not carry the ownership that would let this app lift it again.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_saved_watermark_reopens_as_plain_page_content() {
@@ -501,9 +478,8 @@ fn a_saved_watermark_reopens_as_plain_page_content() {
     fs::remove_dir_all(directory).ok();
 }
 
-/// A tiled row sits on one baseline, which is where PDFium's extraction
-/// starts separating runs — the case that made every near-horizontal tiled
-/// watermark fail its own ownership check.
+/// A tiled row sits on one baseline, where PDFium's extraction starts
+/// separating runs — the case that broke the tiled watermark ownership check.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn tiles_sharing_a_baseline_keep_one_identity() {
@@ -610,10 +586,8 @@ fn places_watermark_in_display_space_on_rotated_pages() {
 
         assert!(ink > 100, "rotation {rotation} rendered too little text");
 
-        // The mark leans along the diagonal of the page as displayed, so its
-        // drawn box has to keep the shape of the *displayed* sheet. A mark
-        // angled from the unrotated box instead would overshoot a quarter-turned
-        // page's edges and come back clipped to it, squarer than this.
+        // The mark leans along the displayed diagonal, so its box keeps the
+        // displayed sheet's shape; angled from the unrotated box it clips squarer.
         let drawn = f64::from(bottom - top) / f64::from(right - left);
         let displayed = f64::from(image.height()) / f64::from(image.width());
 
@@ -776,8 +750,6 @@ fn replacing_a_watermark_does_not_stack() {
     assert!(extracted.contains("FINAL"));
     assert!(!extracted.contains("DRAFT"));
 
-    // Applying the previous configuration is the backend half of undoing a
-    // replace: one object remains, now carrying A again.
     engine
         .apply_watermark(document.id, watermark_config("DRAFT"))
         .expect("PDFium should restore watermark A");
@@ -1001,7 +973,6 @@ fn renders_thumbnail_as_webp() {
     assert_eq!(&webp[..4], b"RIFF");
     assert_eq!(&webp[8..12], b"WEBP");
 
-    // Thumbnails are capped well below the full-page render ceiling.
     let error = engine
         .render_thumbnail(document.id, 1, MAX_THUMBNAIL_WIDTH + 1)
         .expect_err("thumbnails wider than the cap are rejected");
@@ -1028,8 +999,6 @@ fn rect_effect(kind: RectEffectKind, strength: f32) -> RectEffect {
     RectEffect { kind, strength }
 }
 
-// Stands in for the links, form fields, and comments a real document
-// arrives with.
 fn link_pdf() -> Vec<u8> {
     let objects = [
             "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
@@ -1042,8 +1011,7 @@ fn link_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
-// An upright 200x300 page with "Hello" drawn at a baseline of (50, 250), so
-// there is real ink for a highlight to sit over.
+// Real ink for a highlight to sit over, drawn at an upright (50, 250) baseline.
 fn text_pdf() -> Vec<u8> {
     let content = "BT\n/F1 24 Tf\n50 250 Td\n(Hello) Tj\nET\n";
     let contents_obj = format!(
@@ -1060,9 +1028,8 @@ fn text_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
-// Dense vertical bars inside (40,70)-(160,170) in top-left page space.
-// Their short period gives mosaic and blur a high-frequency signal to
-// reduce, while the untouched white margin catches an effect placed wide.
+// Dense bars inside (40,70)-(160,170): a high-frequency signal for mosaic and
+// blur to reduce, with the untouched margin catching an effect placed wide.
 fn striped_pdf_with_rotation(rotation: Option<i32>) -> Vec<u8> {
     let mut content = "0 0 0 rg\n".to_string();
 
@@ -1097,9 +1064,8 @@ fn rotated_striped_pdf() -> Vec<u8> {
     striped_pdf_with_rotation(Some(90))
 }
 
-// Four asymmetric colour fields inside the rectangle-effect target. A test
-// that only checks the target band cannot distinguish the two quarter-turn
-// counter-rotations; these fields make the content's orientation observable.
+// Four asymmetric colour fields: without them the target band alone cannot
+// distinguish the two quarter-turn counter-rotations.
 fn quadrant_pdf(rotation: i32) -> Vec<u8> {
     let content = concat!(
         "1 0 0 rg\n40 180 60 50 re f\n",
@@ -1144,12 +1110,8 @@ fn a4_striped_pdf() -> Vec<u8> {
 /// A page point is two device pixels on the 200x300 fixtures at this width.
 const TEST_RENDER_WIDTH: i32 = 400;
 
-/// How much ink a render of `page_number` puts on the page, and where.
-///
-/// Off the pixels rather than the annotation list: an annotation PDFium has
-/// stored but will not draw counts the same as one that works. Split by
-/// region rather than totalled: a highlight at the wrong end of the page
-/// puts down exactly as much ink as one at the right end.
+/// Ink off the pixels, not the annotation list — one PDFium stored but will
+/// not draw counts as working. Split by region: misplaced ink totals the same.
 fn ink_inside_and_outside(
     engine: &PdfiumEngine,
     document_id: u64,
@@ -1595,14 +1557,8 @@ fn rejects_an_unusable_rectangle_effect() {
     );
 }
 
-/// The pixel box the page's ink actually occupies, or `None` for a blank
-/// page.
-///
-/// Where `ink_inside_and_outside` asks "did anything land here", this asks
-/// "how big is what landed" — which is what tells text drawn at its proper
-/// size from the same text drawn shrunk, stretched, or squashed into a
-/// corner of the same box. Every one of those puts all its ink inside the
-/// band and none outside it.
+/// The pixel box the ink occupies: unlike `ink_inside_and_outside`, this tells
+/// text at its proper size from the same text shrunk or squashed into the band.
 fn ink_bounds(
     engine: &PdfiumEngine,
     document_id: u64,
@@ -1645,15 +1601,13 @@ fn rendered_darkness(engine: &PdfiumEngine, document_id: u64, page_number: i32) 
     inside + outside
 }
 
-// A highlight has to actually be drawn, not merely recorded. PDFium keeps an
-// annotation's colour in one of two entries and only draws a highlight from
-// one of them, so this is what tells the two apart.
+// A highlight must be drawn, not merely recorded: PDFium keeps an annotation's
+// colour in one of two entries and draws a highlight from only one of them.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn draws_a_highlight_where_it_was_asked_for() {
     let engine = test_engine();
     let document = engine.open(text_pdf()).expect("PDFium should open the PDF");
-    // The quad (45,40)-(155,70) at two pixels per point.
     let band = (90, 80, 310, 140);
     let (inside_before, outside_before) = ink_inside_and_outside(engine, document.id, 1, band);
 
@@ -1686,8 +1640,6 @@ fn draws_a_highlight_where_it_was_asked_for() {
     );
 }
 
-// A rectangle, like a highlight, has to land where it was asked for and
-// nowhere else — which is what lets the band outside it stay exactly as it was.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn draws_a_square_where_it_was_asked_for() {
@@ -1695,7 +1647,6 @@ fn draws_a_square_where_it_was_asked_for() {
     let document = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
-    // The box (50,60)-(150,150) at two pixels per point.
     let band = (100, 120, 300, 300);
     let (inside_before, outside_before) = ink_inside_and_outside(engine, document.id, 1, band);
 
@@ -1727,9 +1678,8 @@ fn draws_a_square_where_it_was_asked_for() {
     );
 }
 
-// Opacity is what the block is for: a wash has to let the page through where
-// a solid one hides it. Only the pixels can say so — PDFium will accept an
-// alpha it then declines to honour.
+// Only the pixels can say a wash lets the page through — PDFium will accept
+// an alpha it then declines to honour.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn draws_a_translucent_rectangle_lighter_than_a_solid_one() {
@@ -1791,7 +1741,6 @@ fn rejects_an_unusable_rectangle() {
         .expect_err("a non-finite coordinate is rejected before it reaches PDFium");
     assert!(error.contains("coordinates are out of range"));
 
-    // A far-off but finite coordinate: refused before it can overflow a page edge.
     let error = engine
         .add_rect(
             document.id,
@@ -1802,9 +1751,8 @@ fn rejects_an_unusable_rectangle() {
         .expect_err("bounds beyond the page range are rejected");
     assert!(error.contains("coordinates are out of range"));
 
-    // An opacity outside the slider's range is refused, not clamped: below the
-    // floor it would draw a mark too faint to see that still records as an
-    // edit, and past full it is not a value the reader could have chosen.
+    // Refused, not clamped: below the floor draws a mark too faint to see that
+    // still records as an edit; past full is not a value the reader could choose.
     for style in [
         rect_style("#ff3b30", 0.0),
         rect_style("#ff3b30", 0.09),
@@ -1842,9 +1790,8 @@ fn rejects_an_unusable_rectangle() {
     assert!(error.contains("does not exist"));
 }
 
-// A rectangle's flip onto PDFium's axes runs through the same helpers a
-// highlight uses, and a `/Rotate` page is where a wrong one shows. Pinned to
-// hardcoded values, not read back through the flip that placed it.
+// A `/Rotate` page is where a wrong axis flip shows. Expected values are
+// hardcoded, not read back through the flip that placed the rectangle.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn places_a_rectangle_in_unrotated_space_for_a_rotated_page() {
@@ -1870,9 +1817,6 @@ fn places_a_rectangle_in_unrotated_space_for_a_rotated_page() {
             .expect("the rectangle should have bounds")
     });
 
-    // The fixture's unrotated height is 300pt. A box 30pt down from the top,
-    // 50pt tall, sits 220..270pt up from the bottom; 40pt in, 60pt wide, at
-    // 40..100. Against those figures, not against the input fed back.
     assert!(
         (bounds.left().value - 40.0).abs() < 0.5,
         "left was {}, expected 40",
@@ -1950,7 +1894,6 @@ fn writes_a_rectangle_that_survives_a_save() {
     let document = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
-    // The box (50,60)-(150,150): px band (100,120)-(300,300).
     let band = (100, 120, 300, 300);
     engine
         .add_rect(
@@ -1979,7 +1922,6 @@ fn writes_a_rectangle_that_survives_a_save() {
         1,
         "the rectangle should have been written to the file"
     );
-    // Where it was drawn and nowhere else, after the round trip through the file.
     let (inside, outside) = ink_inside_and_outside(engine, reopened.id, 1, band);
     assert!(
         inside > 0,
@@ -1993,10 +1935,8 @@ fn writes_a_rectangle_that_survives_a_save() {
     fs::remove_dir_all(&directory).ok();
 }
 
-// The temporary file is the save's own business, and it is hidden, so one
-// left behind is one the reader would never find and never clear. Saving
-// twice over the same name is where a temporary that outlives its save, or a
-// name that repeats itself, would show up.
+// A hidden temporary left behind is one the reader would never find and never
+// clear; saving twice is where one that outlives its save would show up.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn leaves_nothing_beside_a_saved_document() {
@@ -2059,8 +1999,6 @@ fn open_by_path_then_save_round_trips() {
         "a document opened by path should report that path"
     );
 
-    // The quad (45,40)-(155,70) at two pixels per point, as the highlight
-    // placement test draws it.
     let band = (90, 80, 310, 140);
     engine
         .add_highlight(
@@ -2145,7 +2083,6 @@ fn export_adopts_the_destination_of_a_byte_opened_document() {
         "a byte-opened document's first export is its save-as"
     );
 
-    // The adoption has to hold: a plain save now has somewhere to go.
     engine
         .save(document.id)
         .expect("the adopted path should take a save");
@@ -2173,8 +2110,7 @@ fn export_beside_the_source_is_not_a_save() {
         "a copy elsewhere leaves the source behind the history"
     );
 
-    // …while exporting *onto* the source is exactly a save, whatever the
-    // button was called.
+    // Exporting *onto* the source is exactly a save, whatever the button was called.
     let onto_source = engine
         .export_to(document.id, &source)
         .expect("the export should overwrite the source");
@@ -2183,11 +2119,8 @@ fn export_beside_the_source_is_not_a_save() {
     fs::remove_dir_all(&directory).ok();
 }
 
-// Exporting *onto* the source is an ordinary save for a plain document — so
-// it has to carry the same watermark refusal `save` makes, or the export
-// dialog becomes the way around it. The reader would get no second chance:
-// once their own file holds the mark and closes, this app can no longer
-// lift it.
+// An export onto the source must carry `save`'s watermark refusal, or the
+// export dialog becomes the way around it — a closed file can't be unmarked.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_watermarked_export_will_not_overwrite_the_source() {
@@ -2217,7 +2150,6 @@ fn a_watermarked_export_will_not_overwrite_the_source() {
         "the refusal has to come before the write, not after it"
     );
 
-    // A copy elsewhere is still the one destination a watermark may reach.
     engine
         .export_to(document.id, &directory.join("copy.pdf"))
         .expect("the export should write the watermarked copy");
@@ -2225,9 +2157,8 @@ fn a_watermarked_export_will_not_overwrite_the_source() {
     fs::remove_dir_all(&directory).ok();
 }
 
-// The dialog hands back whatever path the reader navigated to, which on a
-// machine with a symlinked home or `/tmp` is routinely not the spelling the
-// source was opened under.
+// The dialog hands back whatever spelling the reader navigated to, which on
+// a symlinked home or `/tmp` is routinely not the one the source was opened under.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_watermarked_export_resolves_aliases_of_the_source() {
@@ -2257,17 +2188,13 @@ fn a_watermarked_export_resolves_aliases_of_the_source() {
     fs::remove_dir_all(&directory).ok();
 }
 
-// Deleting an annotation leaves its resources — for a Chinese note, a whole
-// font subset — in the document, and a straight save writes them all out:
-// measured at 21 KB after five undo/redo rounds against 4 KB clean. The
-// save path reloads to collect them, and this is the byte-count that
-// proves it still does.
+// Deleting an annotation strands its resources — a whole font subset for a
+// Chinese note — and the save path reloads to collect them; this counts the bytes.
 #[test]
 #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
 fn a_save_after_deletions_collects_what_they_left_behind() {
     let engine = test_engine();
 
-    // The baseline: the same note added once and never deleted.
     let clean = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
@@ -2316,11 +2243,9 @@ fn a_save_after_deletions_collects_what_they_left_behind() {
              {baseline}; deleted annotations are not being collected"
     );
 
-    // The reload the collection rides on must not surrender the undo guard:
-    // the session's note is still the tail of the page's annotations…
+    // The reload the collection rides on must not surrender the undo guard.
     delete_last_mark(engine, document.id, 1)
         .expect("the session's note should survive the collecting save");
-    // …and past the session's own marks it still refuses.
     assert!(
         delete_last_mark(engine, document.id, 1).is_err(),
         "the guard should still refuse the document's own annotations"
@@ -2359,10 +2284,8 @@ fn places_a_highlight_in_unrotated_space_for_a_rotated_page() {
             .expect("the highlight should have bounds")
     });
 
-    // Against the page's own unrotated height, not against `span.top`: both
-    // directions of the flip go through `unrotated_page_height`, so a test
-    // that only checked the highlight landed back where the span said would
-    // pass with the flip broken in both, each error cancelling the other.
+    // Checked against the page's unrotated height, not `span.top`: a check fed
+    // back through the flip would pass with it broken in both directions.
     assert!(
         (bounds.top().value - (300.0 - span.top)).abs() < 0.5,
         "a run {}pt down a 300pt page should sit {}pt up, not {}",
@@ -2427,15 +2350,12 @@ fn deletes_only_the_most_recent_annotation() {
     assert!(error.contains("no mark of this session's"));
 }
 
-// The guard between a frontend that has lost count and the reader's own
-// document.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn refuses_to_remove_an_annotation_it_did_not_add() {
     let engine = test_engine();
     let document = engine.open(link_pdf()).expect("PDFium should open the PDF");
 
-    // The document arrives with one annotation of its own.
     assert_eq!(
         with_page(engine, document.id, 1, |page| page.annotations().len()),
         1
@@ -2460,9 +2380,8 @@ fn refuses_to_remove_an_annotation_it_did_not_add() {
         .delete_marks(document.id, &[mark])
         .expect("the session's own highlight comes back off");
 
-    // The id names one mark, once. Offered again — a frontend that has lost
-    // track — it reaches nothing rather than the document's own annotation
-    // now sitting at the end of the page.
+    // An id names one mark, once. Offered again it must reach nothing — not
+    // the document's own annotation now sitting at the end of the page.
     let error = engine
         .delete_marks(document.id, &[mark])
         .expect_err("the document's own annotation is not the session's to remove");
@@ -2474,8 +2393,6 @@ fn refuses_to_remove_an_annotation_it_did_not_add() {
     );
 }
 
-// The eraser's aim: the mark a point lands on, topmost first, and only ever one
-// of this session's own.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn finds_the_mark_under_a_point() {
@@ -2637,8 +2554,6 @@ fn removes_a_mark_from_the_middle_of_the_tail() {
         "only the middle one should have gone"
     );
 
-    // The two either side still answer to their own ids, wherever the removal
-    // left them sitting.
     assert_eq!(
         engine
             .mark_at_point(document.id, 1, &note_origin(50.0, 110.0))
@@ -2806,10 +2721,8 @@ fn dark_runs_on_scanline(
     runs
 }
 
-// A block has to cover the box the reader dragged, edge to edge and no
-// further. Measuring the run of dark pixels across a scanline is what tells a
-// full fill from one inset, clipped, or spilling past its bounds — counting
-// annotations, or total ink, would not.
+// A scanline's dark run tells a full fill from one inset, clipped, or
+// spilling past its bounds — counting annotations or total ink would not.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn fills_the_whole_box_it_was_dragged() {
@@ -2818,8 +2731,6 @@ fn fills_the_whole_box_it_was_dragged() {
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
 
-    // A black block on the box (50,50)-(150,150). At two pixels per point that
-    // is px 100 through 300, filled solid the whole way across.
     engine
         .add_rect(
             document.id,
@@ -2829,7 +2740,6 @@ fn fills_the_whole_box_it_was_dragged() {
         )
         .expect("PDFium should create the rectangle");
 
-    // Halfway down the box, so the scanline crosses its whole width.
     let runs = dark_runs_on_scanline(engine, document.id, 1, 200);
 
     assert_eq!(
@@ -2869,10 +2779,8 @@ fn saved_size(engine: &PdfiumEngine, document_id: u64) -> u64 {
     size
 }
 
-// Where the reader clicked is the top of the text, but PDFium draws from the
-// baseline — so a note placed without correcting for that lands a whole line
-// away from the click. Only the pixels can tell: the annotation's own bounds
-// would report the wrong place just as confidently as the right one.
+// The click is the top of the text but PDFium draws from the baseline, so an
+// uncorrected note lands a line off — and its own bounds would lie about it.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn draws_a_note_where_it_was_asked_for() {
@@ -2891,9 +2799,8 @@ fn draws_a_note_where_it_was_asked_for() {
         )
         .expect("PDFium should add the note");
 
-    // The note starts at (20,100) and one line of 24pt type is at most 24pt
-    // tall, so at two pixels per point every mark belongs inside this box.
-    // A baseline mistaken for the top would put the text above it.
+    // One line of 24pt type at two pixels per point fits this box around
+    // (20,100); a baseline mistaken for the top would put the text above it.
     let band = (36, 194, 360, 254);
     let (inside, outside) = ink_inside_and_outside(engine, document.id, 1, band);
 
@@ -2906,14 +2813,12 @@ fn draws_a_note_where_it_was_asked_for() {
         "no part of the note should land outside the line it was placed on"
     );
 
-    // Where it landed is only half of it — the ink has to be the *size* a
-    // 24pt line is, too. Text scaled into a corner of the right box passes
-    // every check above and is still the wrong picture.
+    // The ink also has to be the *size* a 24pt line is: text scaled into a
+    // corner of the right box passes every check above and is still wrong.
     let (left, top, right, bottom) =
         ink_bounds(engine, document.id, 1).expect("the note should draw something");
 
-    // Two pixels to the point on this fixture, so the note's own 20pt left
-    // edge is 40px, give or take the first glyph's side bearing.
+    // The 20pt left edge is 40px here, give or take the first glyph's side bearing.
     assert!(
         (36..=52).contains(&left),
         "the note started at x={left}px rather than the 40px it was given"
@@ -2938,10 +2843,8 @@ fn draws_a_note_where_it_was_asked_for() {
     );
 }
 
-// The bug this exists for: a subset stripped of its `cmap` renders every
-// string as the same row of empty boxes. Two different strings drawing the
-// same ink is exactly that failure, and it passes every count-the-annotations
-// check there is.
+// A subset stripped of its `cmap` renders every string as the same row of
+// boxes — a failure that passes every count-the-annotations check there is.
 #[test]
 #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
 fn draws_the_glyphs_the_text_asked_for() {
@@ -2976,11 +2879,8 @@ fn draws_the_glyphs_the_text_asked_for() {
     );
 }
 
-// The placement test above is Latin, and a Chinese note takes a different
-// route to the page: a subset face rather than a standard one, and so a
-// different ascent to hang the first line from. An ascent PDFium declined
-// to report for a subset would land every Chinese note a line off the click
-// while every Latin one stayed right.
+// A Chinese note takes a different route to the page — a subset face, and so
+// a different ascent: one PDFium declined to report lands it a line off the click.
 #[test]
 #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
 fn draws_a_chinese_note_where_it_was_asked_for() {
@@ -3047,8 +2947,7 @@ fn embeds_only_the_glyphs_a_chinese_note_uses() {
     let growth = saved_size(engine, document.id) - before;
 
     // PDFium embeds whatever bytes it is handed, verbatim — the whole 17 MB
-    // face if that is what it gets. A note's worth of glyphs is a few KB, so
-    // this holds the subsetting to something no unsubset font could pass.
+    // face — so this ceiling holds the subsetting to what no unsubset font passes.
     assert!(
         growth < 50_000,
         "a two-character note grew the file by {growth} bytes; the font is \
@@ -3079,10 +2978,8 @@ fn embeds_no_font_for_a_latin_note() {
 
     let growth = saved_size(engine, document.id) - before;
 
-    // Between the two outcomes, not merely above the smaller: embedding
-    // even the tightest possible subset of the fallback face costs ~3.4 KB
-    // against ~650 bytes for a standard font, and a ceiling above both would
-    // pass whether or not a font went in.
+    // A ceiling between the two outcomes: the tightest subset costs ~3.4 KB
+    // against ~650 bytes for a standard font, so one above both passes either way.
     assert!(
         growth < 2_000,
         "a Latin note grew the file by {growth} bytes, so it embedded a font \
@@ -3090,13 +2987,8 @@ fn embeds_no_font_for_a_latin_note() {
     );
 }
 
-/// An engine for the assertions about *which* face an embedded run is drawn
-/// in, seeded with what the app would have resolved.
-///
-/// A second engine is safe beside the shared one above only because nothing
-/// reached from here touches PDFium: choosing a face reads fonts and returns
-/// bytes, leaving the document store — and the lock that serialises PDFium
-/// through it — alone.
+/// An engine seeded with what the app would have resolved. Safe beside the
+/// shared one: nothing reached from here touches PDFium or its serialising lock.
 fn font_engine(system_face: Option<(Vec<u8>, usize)>, fallback: Vec<PathBuf>) -> PdfiumEngine {
     PdfiumEngine {
         word: crate::convert::WordConverter::at_directory(std::env::temp_dir()),
@@ -3113,9 +3005,8 @@ fn font_engine(system_face: Option<(Vec<u8>, usize)>, fallback: Vec<PathBuf>) ->
     }
 }
 
-/// The face the embedded chain hands back on a machine that has a sans of its
-/// own — the source tree's here, so what is asserted is the branch rather than
-/// whichever fonts the machine running it happens to have.
+/// The face the embedded chain hands back — the source tree's here, so what is
+/// asserted is the branch, not whichever fonts the machine happens to have.
 fn resolved_system_face() -> (Vec<u8>, usize) {
     let source = fs::read(crate::pdfium::font::bundled_font_path(
         crate::pdfium::font::CJK_FONT_NAME,
@@ -3125,13 +3016,8 @@ fn resolved_system_face() -> (Vec<u8>, usize) {
     regular_face(&source, 0).expect("resolve the face the chain would hand back")
 }
 
-/// The subset an embedded run should come back as: the source tree's face,
-/// resolved as the app resolves it and cut to `text`.
-///
-/// Both faces a run can be drawn in are this one file here, so a subset that is
-/// not these bytes was cut from something else — whatever CJK sans the machine
-/// running the test happens to have — and the branch under test was not the
-/// branch taken.
+/// The subset a run should come back as. Both drawable faces are this one file
+/// here, so any other bytes mean the machine's own sans answered, not the branch.
 fn expected_subset(text: &str) -> Vec<u8> {
     let (bytes, index) = resolved_system_face();
 
@@ -3158,11 +3044,8 @@ fn draws(subset: &[u8], text: &str) -> bool {
     })
 }
 
-// The branch the app takes wherever the reader's own machine has a sans that
-// can be embedded, which is most of them and the whole point of resolving one.
-// There is nothing to fall back to here, and the bytes say which face answered:
-// a machine with a CJK sans of its own would otherwise cover a broken branch,
-// since the last resort asks the run's own text of the system all over again.
+// Nothing to fall back to, and the bytes compared exactly: a machine with a
+// CJK sans of its own would otherwise cover a broken branch.
 #[test]
 #[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
 fn draws_an_embedded_run_in_the_system_face() {
@@ -3208,11 +3091,8 @@ fn draws_an_embedded_run_in_the_fetched_face_when_the_system_has_none() {
     );
 }
 
-// Neither: no face the probe accepted, nothing fetched, and a run that is
-// outside Latin-1 without being Chinese. Both answers are correct — this
-// machine's own sans draws Cyrillic, or it does not and the reader is offered
-// the download — so what is asserted is that it is one of them, and never a
-// subsetting error reaching the frontend as text nobody can act on.
+// Cyrillic with no face configured: both answers are correct depending on the
+// machine, so assert one of them — never a subsetting error reaching the frontend.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn asks_the_run_itself_before_offering_the_download() {
@@ -3366,8 +3246,6 @@ fn rejects_an_unusable_note() {
         assert!(result.is_err(), "{case} should be refused");
     }
 
-    // Nothing was drawn and nothing was left behind: every refusal above
-    // happened before a mark reached the page, or wound one back if it had.
     assert_eq!(
         rendered_darkness(engine, document.id, 1),
         0,
@@ -3410,8 +3288,6 @@ fn four_page_banded_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
-// Three pages where only the first carries an annotation — the document's own
-// link. The test adds a session highlight beside it.
 fn three_page_link_pdf() -> Vec<u8> {
     build_pdf(&[
         "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
@@ -3494,7 +3370,6 @@ fn page_fingerprints(engine: &PdfiumEngine, document_id: u64, page_count: i32) -
 
 #[test]
 fn page_order_validation_refuses_everything_but_a_permutation() {
-    // Identity is the no-op, reported as None.
     assert_eq!(validate_page_order(&[1, 2, 3], 3), Ok(None));
     // A genuine permutation comes back as zero-based move indices.
     assert_eq!(validate_page_order(&[3, 1, 2], 3), Ok(Some(vec![2, 0, 1])));
@@ -3549,7 +3424,6 @@ fn reorders_pages_and_their_content() {
         }
     }
 
-    // A full permutation: position i holds what was page order[i].
     let order = [3, 1, 4, 2];
     let update = engine
         .reorder_pages(document.id, &order)
@@ -3569,9 +3443,8 @@ fn reorders_pages_and_their_content() {
     }
 }
 
-// Three pages no two of which measure alike, the middle one rotated: enough
-// that a page list reported in the wrong order, or read off a stale entry,
-// cannot pass for the right one.
+// Three pages no two of which measure alike, the middle rotated: a wrong or
+// stale page list cannot pass for the right one.
 fn three_size_pdf() -> Vec<u8> {
     build_pdf(&[
         "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
@@ -3583,7 +3456,6 @@ fn three_size_pdf() -> Vec<u8> {
     ])
 }
 
-/// Each page's reported geometry, as the frontend receives it.
 fn reported_geometry(update: &PdfStructureUpdate) -> Vec<(f32, f32, f32)> {
     update
         .pages
@@ -3592,13 +3464,8 @@ fn reported_geometry(update: &PdfStructureUpdate) -> Vec<(f32, f32, f32)> {
         .collect()
 }
 
-// A structure command reports the whole page list back, and measuring it out of
-// PDFium costs a page load apiece — more than the edit itself once a document
-// runs long, and paid again on every later edit. The engine therefore measures
-// a page once and keeps the answer under that page's stable id. This is what
-// says the memo still follows the pages: it has to travel with them through a
-// permutation, shrink with a delete, come back with the undo, and leave a page
-// new to the document measured rather than guessed.
+// Measuring a page out of PDFium costs a page load, so the engine memoises
+// each page's geometry under its stable id — this says the memo follows the pages.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn reported_page_geometry_follows_the_pages_through_every_structure_edit() {
@@ -3863,7 +3730,6 @@ fn reorder_keeps_annotations_with_their_page() {
         )
         .expect("PDFium should create the highlight");
 
-    // Send the annotated first page to the back: [B, C, A].
     engine
         .reorder_pages(document.id, &[2, 3, 1])
         .expect("PDFium should reorder the pages");
@@ -3901,9 +3767,8 @@ fn reorder_keeps_annotations_with_their_page() {
     });
 
     assert_eq!(count, 2, "both annotations should ride with their page");
-    // `/Annots` order survives the move: the document's link is still first and
-    // the session's highlight still the tail, which is where a mark id resolves
-    // its annotation.
+    // `/Annots` order survives the move — the session's highlight stays the
+    // tail, which is where a mark id resolves its annotation.
     assert!(
         (262.0..=278.0).contains(&first_top),
         "the link sat at top {first_top}",
@@ -3913,8 +3778,6 @@ fn reorder_keeps_annotations_with_their_page() {
         "the highlight sat at top {last_top}",
     );
 
-    // The marks moved with the page: the session's highlight comes off its new
-    // position, and the document's link is left with no id to name it by.
     delete_last_mark(engine, document.id, 3)
         .expect("the session's highlight should come off the moved page");
 
@@ -3945,7 +3808,6 @@ fn reorder_keeps_outline_destinations() {
         "the bookmark starts on the last page",
     );
 
-    // Bring the bookmarked page to the front: [C, A, B].
     let update = engine
         .reorder_pages(document.id, &[3, 1, 2])
         .expect("PDFium should reorder the pages");
@@ -4005,7 +3867,6 @@ fn delete_then_restore_is_lossless() {
         "a delete and restore should be lossless, highlight and all",
     );
 
-    // The session's ownership count came back with the page.
     delete_last_mark(engine, document.id, 2)
         .expect("the restored highlight should still be the session's to remove");
 
@@ -4118,7 +3979,6 @@ fn inserted_blank_page_matches_its_neighbor() {
         .open(two_size_pdf())
         .expect("PDFium should open the two-size PDF");
 
-    // Before the first page: sized from the page that will follow it.
     let update = engine
         .insert_blank_page(document.id, 1)
         .expect("PDFium should insert at the front");
@@ -4130,7 +3990,6 @@ fn inserted_blank_page_matches_its_neighbor() {
         "a front insert should take the following page's size",
     );
 
-    // Past the last page: sized from the page that will precede it.
     let update = engine
         .insert_blank_page(document.id, 4)
         .expect("PDFium should insert at the end");
@@ -4142,7 +4001,6 @@ fn inserted_blank_page_matches_its_neighbor() {
         "an end insert should take the preceding page's size",
     );
 
-    // The blank pages render blank.
     let fingerprints = page_fingerprints(engine, document.id, 4);
 
     assert!(
@@ -4191,9 +4049,8 @@ fn inserted_blank_page_ignores_the_neighbors_rotation() {
     );
 }
 
-// M7's blank-page insertion registers pages the watermark does not cover as
-// zero-object entries: the guard must accept the bare page, a replacement must
-// cover it, and a removal must still lift every owned object.
+// A blank page inserted into a marked document registers a zero-object entry:
+// the guard must accept it, a replacement cover it, a removal lift the rest.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn insert_extends_watermark_state_with_an_empty_entry() {
@@ -4219,7 +4076,6 @@ fn insert_extends_watermark_state_with_an_empty_entry() {
     assert_eq!(objects_on(2), 0, "the inserted page is bare");
     assert_eq!(objects_on(3), 1, "the last page carries its mark");
 
-    // A replacement re-plans over the zero-object entry and covers the page.
     engine
         .apply_watermark(document.id, watermark_config("FINAL"))
         .expect("the replacement should accept the bare page");
@@ -4362,9 +4218,8 @@ fn deleting_pages_marks_compaction() {
     fs::remove_dir_all(directory).ok();
 }
 
-// One 200x300 page per band offset, each carrying a single black bar at that
-// x — so every page in a merge renders to a distinct fingerprint, which is
-// what lets a merge test say which document's page now sits where.
+// One page per offset, each with its bar at that x: distinct fingerprints let
+// a merge test say which document's page now sits where.
 fn banded_pdf(offsets: &[i32]) -> Vec<u8> {
     let count = offsets.len();
     let kids = (0..count)
@@ -4527,9 +4382,6 @@ fn page_range_argument_compresses_runs() {
     assert_eq!(page_range_argument(&[0, 2, 4, 5, 6]), "1,3,5-7");
 }
 
-/// A drag from another tab's grid: only the pages the reader had in hand cross,
-/// they open the gap they were dropped into, and the document they came from is
-/// left exactly as it was — the pages are copied, not moved.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn copies_chosen_pages_into_another_document() {
@@ -4660,9 +4512,6 @@ fn refuses_pages_and_positions_that_do_not_exist() {
     );
 }
 
-/// The grid's copy-and-paste: the chosen pages are copied back into the gap the
-/// reader pointed at, in the order the grid shows them, and the pages they were
-/// copied from stay exactly where they were.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn duplicates_chosen_pages_into_a_gap_of_the_same_document() {
@@ -4779,13 +4628,11 @@ fn merge_preserves_both_documents_annotations() {
     let engine = test_engine();
     let directory = scratch_directory("merge-annotations");
     let source_path = directory.join("linked.pdf");
-    // The source's own page carries a link — input content, not this session's.
     fs::write(&source_path, link_pdf()).expect("the source should write to disk");
 
     let document = engine
         .open(three_page_link_pdf())
         .expect("PDFium should open the base document");
-    // A session highlight beside the base's own first-page link.
     engine
         .add_highlight(
             document.id,
@@ -4800,8 +4647,6 @@ fn merge_preserves_both_documents_annotations() {
         .insert_from_path(document.id, source_path, 4)
         .expect("PDFium should insert the document");
 
-    // Both documents' annotations rode across: the base's link and highlight on
-    // page 1, and the source's link on the new page 4.
     assert_eq!(
         with_page(engine, document.id, 1, |page| page.annotations().len()),
         2,
@@ -4813,8 +4658,6 @@ fn merge_preserves_both_documents_annotations() {
         "the merged page keeps its own link",
     );
 
-    // Only this session's marks carry ids: the highlight comes off page 1, and
-    // the base's own link is then left with nothing to name it by.
     delete_last_mark(engine, document.id, 1)
         .expect("the session highlight is the session's to remove");
     assert_eq!(
@@ -4823,7 +4666,6 @@ fn merge_preserves_both_documents_annotations() {
         "the base's own link must stay beyond reach"
     );
 
-    // The merged page's link is input content too — nothing the session added.
     assert_eq!(
         last_mark(engine, document.id, 4),
         None,
@@ -4833,16 +4675,14 @@ fn merge_preserves_both_documents_annotations() {
     fs::remove_dir_all(directory).ok();
 }
 
-// A merged page carries its source's own content, so its owned-but-bare
-// watermark entry must pin that content as the base — the whole-document
-// preflight then still passes, and a re-apply covers the new page.
+// A merged page's bare watermark entry must pin the content it arrived with
+// as the base, or the whole-document preflight fails for a page it owns.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn merge_extends_watermark_state() {
     let engine = test_engine();
     let directory = scratch_directory("merge-watermark");
     let source_path = directory.join("added.pdf");
-    // One page with a single content object of its own (a band).
     fs::write(&source_path, banded_pdf(&[100])).expect("the source should write to disk");
 
     let document = engine
@@ -4869,9 +4709,8 @@ fn merge_extends_watermark_state() {
         "the merged page keeps its own band, unmarked",
     );
 
-    // Removal succeeding is the proof the bare entry's base was set to the
-    // merged page's content count, not zero — a zero base would fail the
-    // preflight for a page holding one object.
+    // Removal succeeding proves the bare entry's base was the merged page's
+    // content count, not zero — zero fails the preflight for a page holding one.
     engine
         .remove_watermark(document.id)
         .expect("the removal should still pass with the bare merged page");
@@ -4879,7 +4718,6 @@ fn merge_extends_watermark_state() {
     assert_eq!(objects_on(2), 0, "the second page is clean");
     assert_eq!(objects_on(3), 1, "the merged page keeps its own band");
 
-    // A fresh watermark now covers the merged page as well.
     engine
         .apply_watermark(document.id, watermark_config("FINAL"))
         .expect("a fresh watermark should cover every page");
@@ -4906,13 +4744,12 @@ fn merge_undo_redo_is_lossless() {
         .expect("PDFium should insert the document");
     let merged = page_fingerprints(engine, document.id, 5);
 
-    // Undo: delete the appended range under the history entry's stash id.
     let update = engine
         .delete_pages(document.id, &[3, 4, 5], 9)
         .expect("the undo should delete the merged range");
     assert_eq!(update.num_pages, 2);
 
-    // Redo: restore from the stash — not a re-read of the file, which may have
+    // Restore comes from the stash, not a re-read of a file that may have
     // changed on disk.
     let update = engine
         .restore_pages(document.id, 9)
@@ -4927,10 +4764,8 @@ fn merge_undo_redo_is_lossless() {
     fs::remove_dir_all(directory).ok();
 }
 
-// A merged document carries the watermark's export-only restriction: saving or
-// exporting onto its source would write another file's pages over the first
-// file. The guard tracks what is present, so undoing the merge lifts it and
-// redoing it puts it back.
+// A merged document may not write another file's pages over its source; the
+// guard tracks what is present, so undoing the merge lifts it and redo restores it.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_merged_document_will_not_overwrite_its_source() {
@@ -4949,13 +4784,11 @@ fn a_merged_document_will_not_overwrite_its_source() {
         .insert_from_path(document.id, addendum, 3)
         .expect("PDFium should insert the addendum");
 
-    // A plain save over the source is refused…
     let error = engine
         .save(document.id)
         .expect_err("a merged document must not save over its source");
     assert!(error.contains("exported as a copy"), "why: {error}");
 
-    // …and so is an export that lands on the source — the dialog is no way round.
     let error = engine
         .export_to(document.id, &source)
         .expect_err("a merged export must not land on the source");
@@ -4966,12 +4799,10 @@ fn a_merged_document_will_not_overwrite_its_source() {
         "the refusal has to come before the write, not after it",
     );
 
-    // A copy elsewhere is the merged document's one destination.
     engine
         .export_to(document.id, &directory.join("copy.pdf"))
         .expect("the export should write the merged copy");
 
-    // Undoing the merge (deleting its pages) lifts the restriction…
     engine
         .delete_pages(document.id, &[3, 4, 5], 1)
         .expect("the undo should delete the merged range");
@@ -4979,7 +4810,6 @@ fn a_merged_document_will_not_overwrite_its_source() {
         .save(document.id)
         .expect("the un-merged document may save over its source again");
 
-    // …and redoing it (restoring the pages) puts the guard back.
     engine
         .restore_pages(document.id, 1)
         .expect("the redo should restore the merged range");
@@ -5036,8 +4866,6 @@ fn merge_invalidates_a_captured_rect_effect() {
     fs::remove_dir_all(directory).ok();
 }
 
-// --- M9 page numbers ---
-
 fn page_numbers_config() -> PageNumbersConfig {
     PageNumbersConfig {
         mode: PageNumbersMode::Single,
@@ -5054,9 +4882,8 @@ fn page_numbers_config() -> PageNumbersConfig {
     }
 }
 
-// A 600x800 page is wide enough that the 2.54 cm side margins pull the
-// right- and left-anchored numbers to clearly separate halves — a 200 pt page
-// would leave both near the middle.
+// 600 pt wide, so the side margins pull left- and right-anchored numbers to
+// clearly separate halves — a 200 pt page would leave both near the middle.
 fn wide_two_page_pdf() -> Vec<u8> {
     let objects = [
         "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
@@ -5088,7 +4915,6 @@ fn dark_bottom_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
-/// The extractable text of one page, its spans concatenated.
 fn extracted_text(engine: &PdfiumEngine, document_id: u64, page_number: i32) -> String {
     engine
         .extract_text(document_id, page_number)
@@ -5116,7 +4942,6 @@ fn numbers_every_page_and_extracts_the_label() {
     assert_eq!(progress, [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]);
 
     for (page_number, digit) in [(1, "1"), (2, "2")] {
-        // The label lands in a band along the bottom-centre of the page.
         let (inside, _) =
             ink_inside_and_outside(engine, document.id, page_number, (150, 460, 250, 520));
         assert!(inside > 0, "page {page_number} should render a page number");
@@ -5271,7 +5096,6 @@ fn duplex_mirrors_odd_and_even_pages() {
         .apply_page_numbers(document.id, config)
         .expect("PDFium should number both sides");
 
-    // The 600 pt page renders 400 px wide; its halves are cleanly apart.
     let left_band = (10, 470, 110, 515);
     let right_band = (300, 470, 390, 515);
     let (odd_left, _) = ink_inside_and_outside(engine, document.id, 1, left_band);
@@ -5467,14 +5291,12 @@ fn coexists_with_a_watermark() {
         .apply_page_numbers(document.id, page_numbers_config())
         .expect("PDFium should number over the watermark");
 
-    // Both layers are on the page, page numbers on top.
     let text = extracted_text(engine, document.id, 1);
     assert!(
         text.contains("DRAFT") && text.contains('—'),
         "both layers should be present, got {text:?}"
     );
 
-    // Removing one leaves the other exactly in place.
     engine
         .remove_page_numbers(document.id)
         .expect("removing page numbers should keep the watermark");
@@ -5548,10 +5370,8 @@ fn refuses_a_foreign_page_number_tail() {
     );
 }
 
-// A 600x800 page painted a light grey just above the luminance split across the
-// bottom, where a page number lands, and white above. The grey is close enough
-// to the 0.5 threshold that a number resampled over its own previous ink would
-// tip under and wrongly flip to white.
+// A grey just above the luminance split where the number lands: close enough
+// that resampling over the label's own previous ink would tip it under to white.
 fn grey_band_pdf() -> Vec<u8> {
     let content = "0.53 g\n0 0 600 130 re f\n";
     let contents = format!(
@@ -5578,7 +5398,6 @@ fn smart_colour_resamples_the_backdrop_not_its_own_label() {
     let mut config = page_numbers_config();
     config.smart_color = true;
 
-    // On the light-grey drop the number takes black ink.
     let band = |image: &image::RgbImage| {
         let mut dark = 0u32;
         let mut bright = 0u32;
@@ -5610,10 +5429,8 @@ fn smart_colour_resamples_the_backdrop_not_its_own_label() {
     assert!(dark > 0, "a light-grey drop should take black ink");
     assert_eq!(bright, 0, "and not white");
 
-    // A watermark rebuilds the page-number layer, resampling the drop. The
-    // previous label is popped before the sample, so the number must read the
-    // grey drop it truly sits on — not the black label it is replacing, which
-    // would tip the average under the split and flip it to white.
+    // A watermark rebuild resamples the drop: the previous label must be popped
+    // first, or the black it is replacing tips the average under the split.
     engine
         .apply_watermark(document.id, watermark_config("DRAFT"))
         .expect("PDFium should watermark the numbered page");
@@ -5647,9 +5464,8 @@ fn blank_middle_page_pdf() -> Vec<u8> {
     }
 
     for page in 0..3 {
-        // The empty page draws in white rather than drawing nothing, so it has
-        // an object of its own: the blank test then has to render it to find out
-        // it is blank, which is the path these tests are about.
+        // The empty page draws white rather than nothing, so it owns an object
+        // and the blank test must render to find out — the path under test.
         let content = if page == 1 {
             "1 1 1 rg\n40 150 120 100 re f\n".to_string()
         } else {
@@ -5674,8 +5490,6 @@ fn blank_pages_can_leave_the_numbering_or_only_its_ink() {
         .open(blank_middle_page_pdf())
         .expect("PDFium should open the blank-middle fixture");
 
-    // Counted but not numbered: the empty page keeps its place, so the page
-    // after it still prints 3.
     let mut silent = page_numbers_config();
     silent.blank_numbered = false;
 
@@ -5690,9 +5504,8 @@ fn blank_pages_can_leave_the_numbering_or_only_its_ink() {
     );
     assert!(extracted_text(engine, document.id, 3).contains('3'));
 
-    // Neither counted nor numbered: the numbering closes up over it. This also
-    // re-reads a page the first apply left a label on — pages 1 and 3 — and
-    // must still see them as printed pages rather than as its own ink.
+    // Neither counted nor numbered: numbering closes up over it. The re-run
+    // re-reads pages the first apply labelled and must not mistake that for content.
     let mut skipped = page_numbers_config();
     skipped.blank_numbered = false;
     skipped.blank_counted = false;
@@ -5709,9 +5522,8 @@ fn blank_pages_can_leave_the_numbering_or_only_its_ink() {
     );
 }
 
-/// A note is an annotation, and annotations are no part of a page's object
-/// count — but they are drawn, so a page the reader has written on is a page
-/// with something on it.
+/// Annotations are no part of a page's object count, but they are drawn — a
+/// page the reader has written on is a page with something on it.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_page_carrying_only_an_annotation_is_not_blank() {
@@ -5756,7 +5568,6 @@ fn a_page_stays_blank_under_a_number_this_session_drew() {
         .open(blank_middle_page_pdf())
         .expect("PDFium should open the blank-middle fixture");
 
-    // Number every page first, so the empty page carries a label of ours.
     engine
         .apply_page_numbers(document.id, page_numbers_config())
         .expect("PDFium should number every page");
@@ -5813,9 +5624,8 @@ fn wide_single_page_pdf() -> Vec<u8> {
     ])
 }
 
-/// A 200x300 page carrying one square annotation and one link — the two kinds
-/// of annotation a source file brings to a merge, and what tells an import that
-/// keeps them apart from one that does not.
+/// One square annotation and one link — the two kinds a merge source brings,
+/// and what tells an import that keeps them apart from one that does not.
 fn annotated_pdf() -> Vec<u8> {
     let content = "0 0 0 rg\n20 100 30 120 re f\n".to_string();
     let objects = [
@@ -5854,9 +5664,8 @@ fn landscape_banded_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
-/// The smallest box holding every pixel that is not the page's white ground,
-/// as fractions of the rendered page. Fractions rather than pixels so a render
-/// of an A4 sheet and one of the page it carries can be compared directly.
+/// The smallest box around every non-white pixel, as fractions of the render:
+/// fractions let an A4 sheet and the page it carries be compared directly.
 fn rendered_ink_box(image: &image::RgbImage) -> (f32, f32, f32, f32) {
     let mut left = u32::MAX;
     let mut top = u32::MAX;
@@ -5889,12 +5698,8 @@ fn rendered_ink_box(image: &image::RgbImage) -> (f32, f32, f32, f32) {
     )
 }
 
-/// Held for the length of every test that runs a merge.
-///
-/// `OperationTarget::Merge` names no document — the app only ever has the one
-/// wizard — so the stopped-merge test's cancel reaches *any* merge listed on the
-/// shared engine, including one another test has begun and is still waiting on
-/// the store's lock to start. Serialised, there is never a second one to reach.
+/// Held for the length of every merge test: `OperationTarget::Merge` names no
+/// document, so a stop in one test would cancel a merge another test just started.
 fn merge_test_guard() -> MutexGuard<'static, ()> {
     static GUARD: Mutex<()> = Mutex::new(());
 
@@ -5903,8 +5708,6 @@ fn merge_test_guard() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Writes each fixture into its own file in `directory`, named `<stem>.pdf`,
-/// and hands back the paths in order — the shape `merge_files` takes.
 fn merge_sources(directory: &Path, files: &[(&str, Vec<u8>)]) -> Vec<PathBuf> {
     files
         .iter()
@@ -6051,10 +5854,8 @@ fn a_stopped_merge_hands_back_nothing() {
         )
         .expect("a stopped merge is not a failure");
 
-    // Nothing to check in the store beyond this: handing back no document is
-    // exactly how a stopped merge leaves nothing in it, since the store is
-    // reached only by the open on the very last step. (The engine is shared
-    // with every other test here, so its size is not this test's to read.)
+    // No store check follows: a stopped merge never reaches the store's open,
+    // and the shared engine's size is not this test's to read.
     assert!(merged.is_none(), "a stopped merge produces no document");
     assert!(
         !engine.cancel_operation(OperationTarget::Merge),
@@ -6064,8 +5865,6 @@ fn a_stopped_merge_hands_back_nothing() {
     fs::remove_dir_all(directory).ok();
 }
 
-/// Writes a solid `width` x `height` PNG into `directory` and hands back its
-/// path — the shape an image source of a merge takes.
 fn image_source(directory: &Path, name: &str, width: u32, height: u32) -> PathBuf {
     let path = directory.join(name);
     let image = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
@@ -6080,12 +5879,8 @@ fn image_source(directory: &Path, name: &str, width: u32, height: u32) -> PathBu
     path
 }
 
-/// Writes a `width` x `height` JPEG carrying EXIF orientation 6 — "rotate a
-/// quarter turn clockwise to display" — which is what a phone records rather
-/// than rotating the pixels it stores.
-///
-/// Built by hand because the `image` crate writes no metadata: a minimal APP1
-/// segment holding a one-entry IFD0 is spliced in behind the JPEG's own SOI.
+/// A JPEG carrying EXIF orientation 6 — what a phone records instead of
+/// rotating its pixels — built by hand because the `image` crate writes no EXIF.
 fn rotated_image_source(directory: &Path, name: &str, width: u32, height: u32) -> PathBuf {
     let mut jpeg = Cursor::new(Vec::new());
 
@@ -6122,7 +5917,6 @@ fn rotated_image_source(directory: &Path, name: &str, width: u32, height: u32) -
     path
 }
 
-/// Every entry in the archive at `path`, in the order it was written.
 fn archive_entries(path: &Path) -> Vec<(String, Vec<u8>)> {
     let file = fs::File::open(path).expect("the archive should be readable");
     let mut archive = zip::ZipArchive::new(file).expect("the archive should be a zip");
@@ -6153,7 +5947,6 @@ fn an_archive_entry_is_named_after_its_file_and_never_repeats() {
         archive_pdf_name(Path::new("/tmp/scan.JPG"), &mut used),
         "scan.pdf"
     );
-    // Two directories, one name: the second is numbered rather than lost.
     assert_eq!(
         archive_pdf_name(Path::new("/elsewhere/report.pdf"), &mut used),
         "report (2).pdf"
@@ -6366,8 +6159,6 @@ fn watermarked_copies_are_written_one_per_source() {
         ["first.pdf", "second.pdf"]
     );
 
-    // Each copy is a document of its own, normalized and marked — and the
-    // sources it was built from are untouched.
     for (name, bytes) in &entries {
         assert_eq!(&bytes[..5], b"%PDF-", "{name} should be a PDF");
 
@@ -6469,7 +6260,6 @@ fn a_normalized_page_leaves_its_source_s_annotations_behind() {
         &[("first", source.clone()), ("second", source.clone())],
     );
 
-    // An ordinary merge imports whole pages, annotations and all.
     let plain = engine
         .merge_files(paths.clone(), false, MergeBookmarks::None)
         .expect("PDFium should merge the files");
@@ -6481,10 +6271,8 @@ fn a_normalized_page_leaves_its_source_s_annotations_behind() {
 
     engine.close(plain.id).expect("the merge should close");
 
-    // Fitting to A4 sends the page's *content* through a form XObject, which
-    // carries no annotations — the square and the link both stay behind. This
-    // is what `mergeWizard.normalizeA4Warning` tells the reader; keep the two
-    // in step.
+    // Fitting to A4 routes content through a form XObject, which carries no
+    // annotations — what `mergeWizard.normalizeA4Warning` tells the reader.
     let fitted = engine
         .merge_files_onto_a4(paths, false)
         .expect("PDFium should merge onto A4");
@@ -6525,9 +6313,8 @@ fn a_normalized_page_keeps_its_own_size_in_the_middle_of_the_sheet() {
         .expect("PDFium should merge onto A4");
     let sheet = rendered_ink_box(&rendered_rgb(engine, merged.id));
 
-    // The 200x300 page fits A4 whole, so its bar keeps its size in points; on
-    // the larger sheet that is a smaller fraction, offset by the centring
-    // margin. Both are computed from the placement rather than from the render.
+    // The bar keeps its point size — a smaller fraction of the larger sheet,
+    // offset by the centring margin — computed from placement, not the render.
     let scale_x = 200.0 / A4_SHORT_POINTS;
     let scale_y = 300.0 / A4_LONG_POINTS;
     let margin_x = (1.0 - scale_x) / 2.0;
@@ -6566,9 +6353,8 @@ fn a_normalized_merge_carries_a_rotated_page_the_way_it_reads() {
         &[("first", source.clone()), ("second", source.clone())],
     );
 
-    // `/Rotate 90` makes a 200x300 page read as 300x200, and that is the shape
-    // the sheet has to carry — the rotation itself cannot survive, since the
-    // sheet has one of its own.
+    // `/Rotate 90` makes the page read 300x200, and that is the shape the sheet
+    // carries — the rotation cannot survive, since the sheet has one of its own.
     let alone = engine.open(source).expect("PDFium should open the source");
     let (left, top, right, bottom) = rendered_ink_box(&rendered_rgb(engine, alone.id));
 
@@ -6623,9 +6409,8 @@ fn merge_files_pads_only_the_files_that_would_open_on_an_even_page() {
         .merge_files(paths.clone(), true, MergeBookmarks::None)
         .expect("PDFium should merge the files");
 
-    // One page, a pad, the wide page, then the two-page file: the pad before
-    // the third file would be surplus, since it already opens on page 4… which
-    // is even, so it gets one too.
+    // One page, a pad, the wide page, the two-page file: that file already
+    // opens on page 4 — even — so it gets a pad too, surplus as that may read.
     assert_eq!(padded.num_pages, 6);
     assert_eq!(
         (padded.pages[1].width, padded.pages[1].height),
@@ -6791,9 +6576,8 @@ fn writing_the_outline_leaves_the_pages_as_pdfium_saved_them() {
         &[("first", first.clone()), ("second", second.clone())],
     );
 
-    // The same merge twice: once straight from PDFium's own bytes, once through
-    // the outline writer. Only a bookmarked run is reparsed and rewritten by
-    // lopdf, so this is what says that pass changes nothing a reader can see.
+    // Only a bookmarked run is reparsed and rewritten by lopdf, so comparing
+    // it with a plain merge is what says that pass changes nothing visible.
     let plain = engine
         .merge_files(paths.clone(), false, MergeBookmarks::None)
         .expect("PDFium should merge the files");

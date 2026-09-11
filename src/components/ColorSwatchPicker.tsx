@@ -15,12 +15,8 @@ type ColorSwatchPickerProps = {
   value: HexColor
 }
 
-/**
- * Swatches for the common cases, and `<input type="color">` for the rest rather
- * than a hand-built wheel — the platform already does it, with a keyboard and a
- * screen reader. A picker whose swatches are the whole offer turns that well off
- * with `allowCustom`.
- */
+/** Swatches for the common cases, `<input type="color">` for the rest rather
+    than a hand-built wheel — the platform brings keyboard and screen reader. */
 export function ColorSwatchPicker({
   allowCustom = true,
   labelledBy,
@@ -29,7 +25,6 @@ export function ColorSwatchPicker({
   value,
 }: ColorSwatchPickerProps) {
   const { t } = useTranslation()
-  // A mixed colour has no swatch to check, so the custom well shows as chosen.
   const isCustom = !swatches.includes(value)
 
   return (

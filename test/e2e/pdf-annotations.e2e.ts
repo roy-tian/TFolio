@@ -31,10 +31,8 @@ describe("TFolio annotations", () => {
       "true",
     )
 
-    // Select a run the way a reader would: press on the text, drag out a
-    // selection, let go. The press matters — letting go is only a commit when
-    // the gesture began on the text, so a bare pointerup would prove nothing a
-    // reader could reproduce.
+    // The press matters — letting go only commits when the gesture began on the
+    // text — so a bare pointerup would prove nothing a reader could reproduce.
     const selectedText = await browser.execute(() => {
       const span = document.querySelector(".pdf-text-layer span")
 
@@ -80,10 +78,8 @@ describe("TFolio annotations", () => {
       timeoutMsg: "undo did not take the highlight back off the page",
     })
 
-    // …and redo puts back exactly the mark that was there, not merely some ink.
-    // Exact, because redo re-runs the same command into a deterministic render:
-    // a redo that applied the command twice would stack two highlights and read
-    // as a pass against any "more ink than clean" bar.
+    // Exact, because a redo that ran the command twice would stack two highlights
+    // and still pass any "more ink than clean" bar.
     await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pageInk()) === highlighted, {
       timeout: 15_000,
@@ -96,14 +92,11 @@ describe("TFolio annotations", () => {
     await expect($("button[aria-label^='Redo']")).toBeDisabled()
   })
 
-  // A selection outlives the drag that made it, and clicking a button does not
-  // clear it. Committing on any release at all would mark that stale selection
-  // when the reader pressed a toolbar control — so pressing Undo would *add* a
-  // highlight, and then have nothing to undo.
+  // A selection outlives its drag, and committing on any release would mark that
+  // stale one — pressing Undo would add a highlight with nothing left to undo.
   it("does not mark a stale selection when a toolbar button is clicked", async () => {
     const clean = await pageInk()
 
-    // Select some text with the tool off, as a reader would to read or copy it.
     await browser.execute(() => {
       const span = document.querySelector(".pdf-text-layer span")!
       const range = document.createRange()
@@ -113,7 +106,6 @@ describe("TFolio annotations", () => {
       selection.addRange(range)
     })
 
-    // Turn the tool on, then press a toolbar button while the selection stands.
     await $("button[aria-label='Highlight text']").click()
     await $("button[aria-label='Rotate clockwise']").click()
     await browser.pause(2500)
@@ -196,10 +188,8 @@ describe("TFolio annotations", () => {
     })
   })
 
-  // The pointer is what says which tool is on. The text layer covers the whole
-  // page and asks for an I-beam of its own, so it has to hand the tool's
-  // through — otherwise the only pointer a reader ever sees over a page is the
-  // I-beam, whichever tool is on.
+  // The text layer covers the page and asks for an I-beam of its own, so it must
+  // hand the tool's through — or the reader sees an I-beam whichever tool is on.
   it("gives every drawing tool a pointer of its own over the page", async () => {
     // The rectangle takes the system crosshair; the other three carry a glyph
     // of their own, which reaches the page as an inlined image.
@@ -242,7 +232,6 @@ describe("TFolio annotations", () => {
     // Four tools, four pointers: one shared with another would say nothing.
     expect(new Set(seen).size).toBe(tools.length)
 
-    // With every tool off the page reads as text again.
     const idle = await browser.execute(
       () => getComputedStyle(document.querySelector(".pdf-text-layer")!).cursor,
     )

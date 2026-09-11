@@ -25,9 +25,8 @@ import {
 } from "@/lib/notices"
 import { cn } from "@/lib/utils"
 
-/** Every tone but the plain one carries its colour in the words as well as the
-    border: a border alone is too quiet to tell good news from a bare report,
-    which is the whole difference between a finished download and a copied page. */
+/** Every tone but the plain one colours the words as well as the border: a
+    border alone is too quiet to tell good news from a bare report. */
 const toneClasses: Record<NoticeTone, string> = {
   danger: "border-destructive/40 text-destructive",
   info: "border-border",
@@ -35,9 +34,8 @@ const toneClasses: Record<NoticeTone, string> = {
   warning: "border-warning/40 text-warning",
 }
 
-/** The mark every row leads with. Tone is carried twice — here and in the
-    colour — because colour alone is no signal in forced-colours or to a reader
-    who cannot tell the red from the green. */
+/** Tone is carried twice — mark and colour — because colour alone is no signal
+    in forced-colours, or to a reader who cannot tell red from green. */
 const toneIcons: Record<NoticeTone, LucideIcon> = {
   danger: CircleAlert,
   info: Info,
@@ -55,24 +53,15 @@ const toneRoles: Record<NoticeTone, "alert" | "status"> = {
 }
 
 type NoticeCenterProps = {
-  /** The tab in front, or null on the home tab, which owns no document. */
   activeDocumentId: number | null
   notices: Notice[]
   onAction: (notice: Notice) => void
-  /** The reader's press on the X, which some notices answer for. */
   onDismiss: (notice: Notice) => void
-  /** A transient notice reaching the end of its time, which none answer for. */
   onExpire: (id: string) => void
 }
 
-/**
- * The one corner of the window that speaks.
- *
- * Above the dialogs at `z-50`, because the corner has to be able to report on
- * work a modal started and then went on standing over. It shares the band and
- * the width of the find bar, which is the only other thing that floats here,
- * and steps below it in `index.css` while that bar is open.
- */
+/** Above the dialogs: the corner must be able to report on work a modal
+    started and went on standing over. */
 export function NoticeCenter({
   activeDocumentId,
   notices,
@@ -98,9 +87,8 @@ export function NoticeCenter({
   }, [onExpire, overflow])
 
   return (
-    // Base UI hides everything outside an open modal from a screen reader and
-    // spares only live regions, which it finds by the attribute rather than by
-    // the role each row carries. "off" leaves the announcing to those rows.
+    // Base UI spares only live regions from a modal's screen-reader hiding,
+    // found by attribute, not by the role each row carries — rows announce.
     <div
       aria-live="off"
       // The anchor moves in `index.css` while the find bar shares this band.

@@ -1,12 +1,5 @@
-//! The one way this app keeps a file of its own between runs.
-//!
-//! Both files it keeps — the reader's settings and their recent list — answer
-//! the same three questions, and have to answer them the same way: where the
-//! file lives (the app data directory, so per user and per machine), what an
-//! unreadable one means (nothing was stored), and what a failed write costs
-//! (nothing — everything kept this way is a convenience, and no failure to
-//! record one may fail the gesture that earned it). Keeping those answers in
-//! one place is what stops them drifting apart.
+//! One way to keep a file between runs: unreadable means nothing was stored, and
+//! a failed write costs nothing — recording a convenience may not fail its gesture.
 
 use std::{
     fs,
@@ -16,12 +9,8 @@ use std::{
 
 use tauri::{AppHandle, Manager};
 
-/// The value one file holds.
-///
-/// `parse` is total on purpose: what is on disk may come from an older version
-/// of the app, or from a reader with a text editor, so it never reports an
-/// error — only how much of the file it could believe. `render` may decline,
-/// and a declined write leaves the last good file where it was.
+/// `parse` is total on purpose — disk may hold an older schema or a reader's
+/// edit — and reports only how much of the file it could believe.
 pub trait Stored: Default {
     const FILE_NAME: &'static str;
 
@@ -31,9 +20,8 @@ pub trait Stored: Default {
 }
 
 struct StoreInner<T> {
-    /// None when no app data directory resolves. The value then lasts for this
-    /// run only, which beats failing the gesture that set it over having
-    /// nowhere to write it down.
+    /// None when no app data directory resolves; the value then lasts for this
+    /// run only, which beats failing the gesture that set it.
     file: Option<PathBuf>,
     value: Mutex<T>,
 }
@@ -79,11 +67,8 @@ impl<T: Stored> Store<T> {
         self.0.file.as_deref().and_then(Path::parent)
     }
 
-    /// Folds what an older version of the app left beside this file into the
-    /// value, then removes it — so this runs once, on the first run after the
-    /// file it reads was replaced. `fold` decides what to do with what it
-    /// finds; the value it is handed is whatever the current file already held,
-    /// which is the newer of the two and should win.
+    /// Folds what an older version left beside this file, then removes it so this
+    /// runs once; `fold` is handed the current value, the newer of the two.
     pub fn adopt(&self, replaced: &str, fold: impl FnOnce(&mut T, &str)) {
         let Some(directory) = self.directory() else {
             return;
@@ -93,9 +78,8 @@ impl<T: Stored> Store<T> {
             return;
         };
 
-        // Removed only once the fold is actually on disk: this is the last
-        // other copy of what was just read, so a run that could not write it
-        // down must not be the run that drops it. It keeps until one can.
+        // Removed only once the fold is on disk: this is the last other copy, and
+        // a run that could not write it down must not be the one that drops it.
         if self.write(|value| fold(value, &contents)) {
             let _ = fs::remove_file(&file);
         }
@@ -110,10 +94,8 @@ impl<T: Stored> Store<T> {
         }
     }
 
-    /// Applies `change` and writes the result out, giving up quietly at every
-    /// step it cannot take. Answers whether the file now holds the change —
-    /// only `adopt`, which is about to delete the last other copy of it, has
-    /// any reason to ask.
+    /// Applies `change` and writes it out, giving up quietly. Answers whether the
+    /// file now holds it — only `adopt`, about to delete the last other copy, asks.
     pub fn write(&self, change: impl FnOnce(&mut T)) -> bool {
         let Ok(mut value) = self.0.value.lock() else {
             return false;
@@ -230,9 +212,8 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
     }
 
-    /// The write is what earns the delete. A fold this store cannot record —
-    /// here a render that declines — has to leave the reader's only other copy
-    /// alone, so a later run can try again.
+    /// The write is what earns the delete: a fold that cannot be recorded must
+    /// leave the only other copy alone, so a later run can try again.
     #[test]
     fn keeps_the_replaced_file_when_the_write_did_not_land() {
         let directory = scratch("adopt-failed");

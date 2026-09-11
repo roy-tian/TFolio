@@ -79,9 +79,8 @@ body {
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  /* A caution rather than a refusal: amber, far enough from `destructive`'s
-     red in hue to be told apart, and dark enough to read as small text on the
-     light ground. */
+  /* A caution, not a refusal: far enough from `destructive`'s red in hue to be
+     told apart, dark enough to read as small text on the light ground. */
   --warning: oklch(0.554 0.135 66.442);
   /* Good news rather than a caution: green, and dark enough that the notice it
      tints can still be read as small text over it. */
@@ -168,7 +167,6 @@ body {
     background: #fff;
   }
 
-  /* The interface never prints — only the sheet the print button built. */
   body > *:not([data-print-sheet]) {
     display: none !important;
   }

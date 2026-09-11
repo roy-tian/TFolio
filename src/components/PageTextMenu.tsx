@@ -33,16 +33,8 @@ type PageTextMenuProps = {
   style: CSSProperties
 }
 
-/**
- * The page's own right-click menu, standing in for the WebView's — which the
- * app drops everywhere (`lib/contextMenu.ts`) — where a reader still has
- * something to take: text selected on the page.
- *
- * This *is* the text layer rather than a wrapper around it, so the spans keep
- * the geometry `PdfPage` lays them out in. With nothing selected the menu has
- * no entry worth showing, so the right-click opens nothing at all — while a
- * select-all is standing there always is, and it is the whole document.
- */
+/** The page's right-click menu, standing in for the WebView's dropped one.
+    Renders as the text layer itself, so the spans keep the layout they got. */
 export function PageTextMenu({
   children,
   onCopyAll,

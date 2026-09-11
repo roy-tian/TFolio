@@ -26,9 +26,8 @@ export type PdfSearchProps = {
   searching: boolean
 }
 
-/** The app-owned find bar. It floats over the document below the title and tab
-    bars, so it remains part of TFolio instead of opening the WebView's native
-    page search (which would also search tabs and toolbar labels). */
+/** The app-owned find bar, in place of the WebView's native page search —
+    which would also search tabs and toolbar labels. */
 export function PdfSearch({
   activeIndex,
   failed,

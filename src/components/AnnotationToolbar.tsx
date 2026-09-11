@@ -36,30 +36,23 @@ import { cn } from "@/lib/utils"
 const splitMenuButtonClassName =
   "relative w-3.5 items-end border-input px-0 pb-1 before:pointer-events-none before:absolute before:inset-y-1.5 before:left-0 before:w-px before:bg-border before:opacity-0 before:transition-opacity hover:before:opacity-100"
 
-/** The tool the reader is drawing with — or rubbing out with — or none. */
 export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
   disabled: boolean
-  /** Whether a page is on show to rub a mark off; the thumbnail grid is not. */
   eraserApplies: boolean
-  /** Whether the layout has text to mark; the grid of thumbnails does not. */
   highlightApplies: boolean
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle) => void
-  /** Opens the merge wizard. It builds a document of its own rather than
-      touching this one, but it sits with the document tools because that is
-      where a reader looks for what acts on whole files. */
+  /** Builds a document of its own rather than touching this one. */
   onMergeWizard: () => void
   onPageNumbers: () => void
   onToolChange: (tool: AnnotationTool) => void
   onWatermark: () => void
-  /** Whether a page is on show to draw on; the thumbnail grid is not. */
   rectApplies: boolean
   rectStyle: RectStyle
-  /** Whether a page is on show to type on; the thumbnail grid is not. */
   textNoteApplies: boolean
   textNoteColor: HexColor
 }
@@ -220,9 +213,8 @@ export function AnnotationToolbar({
             </ToolbarTooltip>
           ) : null}
 
-          {/* Last of the drawing tools, and the one that undoes their work: it
-              takes off a mark this session made, wherever in the stack it sits,
-              which is what plain undo cannot do. */}
+          {/* The one that undoes the others' work: it takes off a mark this
+              session made, wherever in the stack — what plain undo cannot. */}
           {eraserApplies ? (
             <ToolbarTooltip label={eraserLabel}>
               <Toggle
@@ -272,8 +264,6 @@ export function AnnotationToolbar({
           </Button>
         </ToolbarTooltip>
 
-        {/* Last in the group: the two before it mark the document on screen,
-            while this one leaves to build another. */}
         <MergeWizardButton onClick={onMergeWizard} />
       </ButtonGroup>
     </div>

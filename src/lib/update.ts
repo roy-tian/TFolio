@@ -2,18 +2,8 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
 /**
- * The release check, as the interface sees it.
- *
- * Every part of it lives in `src-tauri/src/update.rs`: the request to GitHub,
- * the signature check over what comes back, and the install. Nothing here names
- * a URL or a file, because nothing here may — the endpoint and the key are
- * compiled into the bundle. This module only reads a status the backend keeps
- * for the whole process, so two windows never disagree about it and never
- * download the same release twice.
- *
- * Silence is a state: an app already on the newest release and an app that
- * could not reach GitHub at all both stay `idle`, and nothing is shown for
- * either. Only a step the reader pressed for reports that it went wrong.
+ * The whole check lives in `src-tauri/src/update.rs`: nothing here may name
+ * a URL or file, and the backend's one status keeps every window agreed.
  */
 export type AppUpdateStatus =
   | { state: "idle" }
@@ -60,11 +50,8 @@ export function isAppUpdateStatus(value: unknown): value is AppUpdateStatus {
   }
 }
 
-/**
- * Whether the notice belongs on screen. An app with nothing to update says
- * nothing at all, and a notice the reader waved away stays away — until the
- * update reaches a state they have not answered yet, which is news again.
- */
+/** A notice waved away stays away, until the update reaches a state the
+    reader has not answered — which is news again. */
 export function shouldShowUpdate(
   status: AppUpdateStatus,
   dismissedState: AppUpdateStatus["state"] | null,

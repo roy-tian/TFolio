@@ -1,10 +1,7 @@
 import { usesEmbeddedFont } from "@/lib/embeddedFont"
 
-/**
- * The face a note is drawn in, as closely as CSS can say it: Helvetica for the
- * Latin-1 the standard fonts cover, and the system's own sans for everything
- * past it — the same two the backend picks between, in the same order.
- */
+/** The same two faces the backend picks between, in the same order:
+    Helvetica for Latin-1, the system sans past it. */
 export function noteFontFamily(text: string): string {
   return usesEmbeddedFont(text) ? "sans-serif" : "Helvetica, Arial, sans-serif"
 }
@@ -13,8 +10,8 @@ export function noteFontFamily(text: string): string {
     `src-tauri/src/pdfium/geometry.rs`. */
 export const TEXT_NOTE_LINE_HEIGHT = 1.2
 
-/** What PDFium reports for the standard Helvetica, which is its own bundled
-    clone — not whatever Helvetica or Arial the host happens to have. */
+/** What PDFium reports for the standard Helvetica — its own bundled clone,
+    not whatever the host happens to have. */
 const STANDARD_ASCENT_RATIO = 0.945
 
 /** Large enough that the metric's own rounding cannot reach the ratio. */
@@ -51,15 +48,8 @@ function measuredSystemAscent(): number {
 }
 
 /**
- * How far below a note's origin its first baseline sits, as a fraction of the
- * font size: `add_text_note` puts each baseline the face's own ascent below the
- * point that was clicked, and faces differ by a fifth of a line.
- *
- * Pinned for the standard face, whose ascent is PDFium's own wherever the note
- * is read; measured for the embedded one, because `embedded_face_subset` takes
- * the system's face ahead of the bundled fallback, and so does the browser. A
- * host whose default sans cannot draw the note is the case the two can differ
- * on, and the one where the preview's glyphs would already be substitutes.
+ * Pinned for the standard face, whose ascent is PDFium's own; measured for
+ * the embedded one, which the browser resolves as the backend's subset does.
  */
 export function noteAscentRatio(text: string): number {
   return usesEmbeddedFont(text)

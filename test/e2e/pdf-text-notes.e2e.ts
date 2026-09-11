@@ -11,7 +11,6 @@ import {
   seedSettings,
 } from "./helpers"
 
-/** Places a note by clicking the page, the way a reader opens one. */
 async function clickOnPage(atX = 0.3, atY = 0.3) {
   await browser.execute(
     (at) => {
@@ -34,12 +33,8 @@ async function clickOnPage(atX = 0.3, atY = 0.3) {
 }
 
 /**
- * Presses a control the way a reader does — with a real `pointerdown` first.
- *
- * WebDriver's own click fires neither `pointerdown` nor `mousedown` here, so a
- * test that only clicks never reaches the document-level listener that decides
- * what happens to an open note. Any test asserting the note survives (or does
- * not survive) a press has to send the press itself.
+ * WebDriver's click fires neither `pointerdown` nor `mousedown` here, so a test
+ * asserting a note survives (or not) a press sends the real press itself.
  */
 async function pressControl(selector: string) {
   await browser.execute((query) => {
@@ -102,9 +97,8 @@ describe("TFolio text notes", () => {
     })
   })
 
-  // Two different strings must not draw the same picture. They would if the
-  // embedded subset lost its character map, which renders every note as an
-  // identical row of empty boxes — accepted, saved, and quite unreadable.
+  // They would draw the same if the embedded subset lost its character map —
+  // every note an identical row of empty boxes, accepted, saved, unreadable.
   it("draws different Chinese text differently", async () => {
     const inkOf = async (text: string) => {
       await clickOnPage()
@@ -140,10 +134,8 @@ describe("TFolio text notes", () => {
     expect(hello).not.toBe(other)
   })
 
-  // A note has to stay on screen from the moment it is confirmed until the page
-  // is repainted carrying it: PDFium, the IPC round trip and a bitmap decode all
-  // sit in between, and an editor that closed on the commit blanked the text for
-  // every frame of that gap.
+  // The note must stay on screen from confirm until the page repaints carrying
+  // it — PDFium, IPC and a decode sit between, and closing early blanked the text.
   for (const note of [{ label: "Latin", text: "Note gy" }, { label: "Chinese", text: "你好" }]) {
     it(`hands the ${note.label} note to the page without a blank or doubled frame`, async () => {
       // Large, so a wrong ascent is points off rather than a fraction of one.
@@ -200,9 +192,8 @@ describe("TFolio text notes", () => {
         }
 
         void (async () => {
-          // Delay only decoding: the note still goes through real IPC, PDFium,
-          // and history. A fix that only kept the editor open would show two
-          // copies of the text once the page landed.
+          // Only decoding is delayed — IPC, PDFium and history stay real; a fix
+          // that merely kept the editor open would double the text once landed.
           const decode = window.createImageBitmap.bind(window)
           window.createImageBitmap = (async (...args: Parameters<typeof decode>) => {
             const bitmap = await decode(...args)
@@ -229,9 +220,8 @@ describe("TFolio text notes", () => {
               if (!changed) {
                 waitingFrames += 1
                 if (preview) {
-                  // The baseline the preview chose, in page points, less an ink
-                  // ascent measured from the face itself: an element box would
-                  // only give back the ascent that placed the baseline.
+                  // The preview's baseline less the face's own ink ascent — an
+                  // element box gives only the ascent that placed the baseline.
                   const line = preview.querySelector("text")!
                   const size = Number(line.getAttribute("font-size"))
                   const context = document.createElement("canvas").getContext("2d")!
@@ -274,10 +264,8 @@ describe("TFolio text notes", () => {
       expect(result.blankFrames).toBe(0)
       expect(result.doubled).toBe(false)
       expect(result.landed).toBe(true)
-      // The preview stands in for the pixels, so it has to sit where they land.
-      // Four points of a 48pt note clears the cap-height difference between
-      // PDFium's Helvetica and the browser's stand-in (~1.5), while a
-      // fifth-of-a-line ascent error — the wrong face's — would be ten.
+      // Four points clears the cap-height difference between PDFium's Helvetica
+      // and the browser's stand-in (~1.5); the wrong face's error would be ten.
       expect(Math.abs(result.previewInkTop - result.renderedInkTop)).toBeLessThan(4)
       await browser.saveScreenshot(
         `artifacts/e2e/text-note-${note.label.toLowerCase()}.png`,
@@ -301,15 +289,13 @@ describe("TFolio text notes", () => {
     expect(await pageInk()).toBe(clean)
   })
 
-  // Undo takes back the last committed edit, which a reader may trigger while
-  // partway through the next note. An undo that only removes an annotation moves
-  // no page, so it must leave the open draft to be finished, not discard it.
+  // A reader may undo while partway through the next note; an undo that moves
+  // no page must leave the open draft to be finished, not discard it.
   it("keeps an open note draft when an undo takes back an earlier note", async () => {
     const editor = () => $("textarea[aria-label='Note text']")
 
     await $("button[aria-label='Add a note']").click()
 
-    // First note: placed, typed, committed — the edit the undo will take back.
     await clickOnPage(0.3, 0.3)
     await editor().waitForDisplayed({ timeout: 15_000 })
     await editor().setValue("first")
@@ -318,7 +304,6 @@ describe("TFolio text notes", () => {
     // deterministic target rather than racing the first note's commit.
     await $("button[aria-label^='Undo']").waitForEnabled({ timeout: 15_000 })
 
-    // Second note: placed and typed, left open.
     await clickOnPage(0.3, 0.6)
     await editor().waitForDisplayed({ timeout: 15_000 })
     await editor().setValue("second")
@@ -327,16 +312,12 @@ describe("TFolio text notes", () => {
     // press alone); then undo takes back the first note.
     await pressControl("button[aria-label^='Undo']")
 
-    // The draft is still open on the second note…
     await expect(editor()).toBeDisplayed()
-    // …and the undone edit was the first note: nothing is left to undo.
     await expect($("button[aria-label^='Undo']")).toBeDisabled()
   })
 
-  // Placing a note while one is open swaps the draft inside a single render
-  // rather than remounting the editor, so a caret that only arrived on mount
-  // would leave every note after the first needing a click before it could be
-  // typed into.
+  // A placement swaps the draft in a single render, not a remount, so a caret
+  // that only arrived on mount would strand every note after the first.
   it("puts the caret in each note placed in a row", async () => {
     await $("button[aria-label='Add a note']").click()
 
@@ -360,10 +341,8 @@ describe("TFolio text notes", () => {
     expect(focused).toBe("Note text")
   })
 
-  // The editor floats in screen space, so nothing moves it when the page moves.
-  // Zooming resizes the page by writing its own CSS width, which fires neither
-  // a scroll nor a window resize when the page already fits — so an editor that
-  // listened only for those drifted away from the point it was pinned to.
+  // Zooming writes the page's CSS width, firing neither scroll nor window resize
+  // when the page already fits — an editor listening only for those drifted off.
   it("stays pinned to its point through a zoom", async () => {
     const offsetFromClickPoint = () =>
       browser.execute(() => {
@@ -414,9 +393,8 @@ describe("TFolio text notes", () => {
     expect(after.dy).toBe(before.dy)
   })
 
-  // The options sit above the text box, which puts them off the top of the
-  // window for a note placed near the top of the page — where they cannot be
-  // reached or even seen. They drop below the box instead.
+  // Above the text box, the options sit off the top of the window for a note
+  // near the page's top — unreachable, unseen — so they drop below the box.
   it("keeps the options on screen for a note near the top of the page", async () => {
     const optionsBox = () =>
       browser.execute(() => {
@@ -444,9 +422,8 @@ describe("TFolio text notes", () => {
     expect(box.panelTop).toBeGreaterThan(box.textareaTop)
   })
 
-  // Reaching for zoom or rotate is not finishing the note. Closing on any press
-  // outside the viewer threw an empty note away the moment the reader zoomed in
-  // to place it accurately, and committed a half-typed one.
+  // Reaching for zoom or rotate is not finishing the note: closing on any press
+  // outside the viewer threw away drafts the moment a reader zoomed to place.
   it("survives a press on the viewer controls", async () => {
     await $("button[aria-label='Add a note']").click()
     await clickOnPage(0.3, 0.4)

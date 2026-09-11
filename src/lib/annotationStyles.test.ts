@@ -24,9 +24,8 @@ describe("isRectStyle", () => {
     expect(isRectStyle({ ...defaultRectStyle, strength: 24 })).toBe(true)
   })
 
-  // Both numbers are kept whichever effect is showing, so both are checked
-  // whichever effect is stored — the one the effect does not use is one switch
-  // away from being the mark.
+  // Both numbers are checked whichever effect is stored: the one it does not
+  // use is kept, and one switch away from being the mark.
   it("checks the settings the stored effect does not use", () => {
     expect(isRectStyle({ ...defaultRectStyle, effect: "blur", opacity: 0 })).toBe(
       false,

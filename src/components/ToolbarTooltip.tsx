@@ -14,11 +14,9 @@ type ToolbarTooltipProps = {
   /** The chord this control also answers to, named beside its label. Left off
       where the label already explains why the control is unavailable. */
   shortcut?: Shortcut
-  /** Where the label sits; under the control, as a top bar's controls want. */
   side?: "top" | "bottom" | "left" | "right"
 }
 
-/** A bar control's visible label, sharing the shadcn tooltip treatment. */
 export function ToolbarTooltip({
   children,
   label,

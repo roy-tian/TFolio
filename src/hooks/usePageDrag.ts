@@ -12,10 +12,7 @@ import {
 type UsePageDragOptions = {
   active: boolean
   columns: number
-  /** The thumbnail grid element the cells are laid out in. */
   gridRef: RefObject<HTMLElement | null>
-  /** Where a drag that has left this grid goes — another document's tab, and
-      the grid behind it. Absent where there is nowhere to hand one to. */
   handoff?: PageHandoff
   /** The page list snapshot: a committed structure edit ends its preview. */
   layoutVersion: object
@@ -23,33 +20,23 @@ type UsePageDragOptions = {
       until it settles. */
   onReorder: (order: number[]) => void | Promise<unknown>
   pageCount: number
-  /** Dragging a selected page carries the whole selection with it. */
   selectedPages: ReadonlySet<number>
 }
 
-/** A drag in progress, for the ghost and the make-way preview. */
 export type PageDragState = {
   layoutVersion: object
-  /** The workspace has taken the drag — the pointer has left this grid for the
-      tab strip or for another document. This one then shows no landing place
-      and commits no reorder; it only keeps the pages in hand, and the ghost on
-      the pointer. Null while the drag is still its own. */
+  /** The workspace has taken the drag, so this grid shows no landing place and
+      commits no reorder — only the ghost goes on. Null while it is its own. */
   away: PageHandoffPlace | null
-  /** The cell boxes as they stood when the drag began, in grid coordinates:
-      the slots the grid's own pages slide between to open the drop's hole. Each
-      is the whole cell, the row gap it carries as padding included. */
+  /** Cell boxes as they stood when the drag began, in grid coordinates: the
+      slots pages slide between, each the whole cell with its row gap. */
   cells: CellBox[]
-  /** The gap the drop would land in: 0 before page 1, n after the last. */
   gap: number
-  /** Where the grabbed page's own top-left sits relative to the pointer, so
-      the ghost keeps the grip it was picked up by. */
   grip: { x: number; y: number }
   /** The page actually pressed — the one the ghost shows, whatever else in
       the selection travels with it. */
   lead: number
-  /** Ascending page numbers travelling with the pointer. */
   pages: number[]
-  /** Client coordinates the ghost follows. */
   pointer: { x: number; y: number }
   /** The pointer is up: show every page in its landing slot while the backend
       commits, then discard the offsets together with the old page list. */
@@ -57,15 +44,8 @@ export type PageDragState = {
 }
 
 /**
- * Drag-to-reorder for the thumbnail grid, drawn by hand from pointer events:
- * Tauri's drag-drop handling and WebKitGTK make HTML5 DnD unusable here (the
- * M3 lesson), and a self-drawn drag is also what the e2e suite can drive.
- *
- * A press only becomes a drag past a small movement threshold, which is what
- * keeps single and double click working on the same cells. Cell geometry is
- * measured once at that moment, in grid coordinates; every later move is pure
- * math against the snapshot plus one rect read of the grid itself, and those
- * are settled once a frame rather than once per pointer report.
+ * Hand-drawn from pointer events: Tauri drag-drop handling and WebKitGTK make
+ * HTML5 DnD unusable here, and a self-drawn drag is what the e2e suite drives.
  */
 export function usePageDrag({
   active,
@@ -83,16 +63,11 @@ export function usePageDrag({
   wasDragClick: () => boolean
 } {
   const [drag, setDrag] = useState<PageDragState | null>(null)
-  // When the last drag ended, read by the click handlers: the click a drag's
-  // release fires arrives within milliseconds and must not change the
-  // selection. Judged by recency rather than a cleared-on-pointerdown flag,
-  // so a click that never had a press — a synthetic one, as the e2e suite
-  // dispatches — cannot be swallowed by a long-finished drag.
+  // When the last drag ended: its release fires a click that must not re-select.
+  // Recency, not a flag, so a synthetic press-less click (e2e) is never swallowed.
   const dragEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
-  // The pointer listeners subscribe once per active period and read these
-  // through refs, so an owner re-render mid-gesture — an unstable `onReorder`,
-  // a resolving edit bumping `pending` — cannot resubscribe them and discard
-  // the in-flight `gesture` the closure holds.
+  // Listeners bind once per active period and read refs, so an owner re-render
+  // mid-gesture cannot resubscribe them and drop the in-flight gesture.
   const onReorderRef = useRef(onReorder)
   const handoffRef = useRef(handoff)
   const columnsRef = useRef(columns)
@@ -117,10 +92,8 @@ export function usePageDrag({
     // cannot clear a drag that started after it.
     let release = 0
     let settling = false
-    // A pointer reports faster than the display refreshes, and every report
-    // re-renders a grid that can hold hundreds of cells. Hold the latest
-    // position and settle it once a frame: the drop still reads the pointer's
-    // own coordinates at release, so only the preview is coalesced.
+    // Pointer reports outnumber frames and each re-renders a grid of hundreds;
+    // settle once a frame — the drop still reads the pointer's own coordinates.
     let frame = 0
     let latest: { x: number; y: number } | null = null
     let gesture: {
@@ -130,11 +103,9 @@ export function usePageDrag({
       grip: { x: number; y: number }
       cells: CellBox[]
       layoutVersion: object
-      /** The pages in hand, read once at the press: the grid the drag started
-          in clears its selection the moment the workspace shows another
-          document, and the block must not shrink on its way there. */
+      /** Read once at the press: the source grid's selection is cleared when
+          another document shows, and the block must not shrink mid-flight. */
       pages: number[]
-      /** Set once the threshold is passed; mirrors the `drag` state. */
       dragging: boolean
     } | null = null
 
@@ -159,8 +130,6 @@ export function usePageDrag({
       latest = null
     }
 
-    /** The pages a press takes: a grabbed page that is part of the selection
-        brings the whole selection with it, any other goes alone. */
     const draggedPages = (pageNumber: number) => {
       const selectedPages = selectedPagesRef.current
 
@@ -236,16 +205,8 @@ export function usePageDrag({
         return
       }
 
-      // The layout cannot change mid-drag, so one measurement pass here is the
-      // whole geometry: cell boxes in the grid's own space stay true however
-      // the viewer scrolls underneath the pointer.
-      //
-      // The whole cell, not the paper inside it: cells tile the grid, so every
-      // row is one band and the slide that opens the drop's hole is the plain
-      // difference between two slots. Paper boxes would be neither — a page
-      // centred in a row taller than itself sits at its own height, and a
-      // landscape page sliding into a portrait page's slot would jump to the
-      // top of the row on the way.
+      // The whole cell, not the paper inside it: cells tile the grid, so each
+      // row is one band and the make-way slide is a plain slot difference.
       const gridRect = grid.getBoundingClientRect()
       const cells = Array.from(
         grid.querySelectorAll<HTMLElement>("[data-page-cell]"),

@@ -20,16 +20,8 @@ const FONT_COMMIT = "2894aab31764f10f29c421bdfd2340d3b382d384"
 const repositoryRoot = resolve(import.meta.dirname, "..")
 const outputDirectory = join(repositoryRoot, "src-tauri", "resources", "fonts")
 
-// One fallback face, for text a PDF's own standard fonts cannot draw — notes
-// and watermarks that leave Latin-1 on a machine with no sans of its own that
-// can be embedded. Nothing here is bundled: the app fetches this same file from
-// the same pinned commit at runtime (see `download_fallback_font` in
-// `font.rs`), and this script puts a copy in the source tree so the tests never
-// reach for the network. Page numbers take no fetched font at all.
-//
-// Each font pins an exact size and checksum — matched by `font.rs`, which
-// fetches the same bytes — and `host` is `raw` where a source is too large for
-// jsDelivr's per-file ceiling.
+// One fallback face for text standard fonts cannot draw; not bundled — the app
+// fetches these same pinned bytes at runtime, and this copy keeps tests offline.
 const fonts = [
   {
     name: "NotoSansSC.ttf",
@@ -56,9 +48,8 @@ if (ready) {
   process.exit(0)
 }
 
-// jsDelivr serves a commit-pinned path from a CDN, so an ordinary fetch does not
-// lean on one host; a source past its per-file ceiling falls back to GitHub's
-// own raw host, which has no such limit.
+// jsDelivr serves commit-pinned paths from a CDN; a source past its per-file
+// ceiling falls back to GitHub's raw host, which has no such limit.
 const contentUrl = (font, path) =>
   font.host === "raw"
     ? `https://raw.githubusercontent.com/google/fonts/${FONT_COMMIT}/${path}`
@@ -78,9 +69,8 @@ async function download(url, destination) {
   await pipeline(Readable.fromWeb(response.body), createWriteStream(destination))
 }
 
-// Keep staging beside the final files: Windows runners put the OS temp folder
-// on C: and the checked-out repository on D:, where renameSync() cannot move a
-// file across volumes. A sibling directory preserves the atomic final rename.
+// Staged beside the final files: Windows runners put temp and the checkout on
+// different volumes, where renameSync cannot move; this keeps the rename atomic.
 mkdirSync(outputDirectory, { recursive: true })
 const temporaryDirectory = mkdtempSync(
   join(outputDirectory, ".tfolio-fonts-"),
@@ -117,8 +107,7 @@ try {
     await download(contentUrl(font, font.license.source), stagedLicense)
 
     // Moved into place only once both files are whole, so an interrupted run
-    // cannot leave a half-written font that the checksum above would never see
-    // again — the cache marker is written last for the same reason.
+    // cannot leave a half-written font; the cache marker is written last too.
     renameSync(stagedOutput, join(outputDirectory, font.name))
     renameSync(stagedLicense, join(outputDirectory, font.license.name))
   }
@@ -128,9 +117,8 @@ try {
   rmSync(temporaryDirectory, { force: true, recursive: true })
 }
 
-// The whole directory is what the tests read from, so a face this script no
-// longer manages — one dropped from the list above — must not be left behind
-// for one of them to pick up. Only ever after the staging directory has gone.
+// A face dropped from the list above must not linger where the tests read, so
+// the directory is swept — only ever after the staging directory has gone.
 const expected = new Set([
   ".gitkeep",
   "VERSION",

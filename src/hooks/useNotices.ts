@@ -18,13 +18,11 @@ export type NoticeChannel = {
   retract: (owner: NoticeOwner, kinds?: readonly NoticeKind[]) => void
 }
 
-/** The channel with one document's name already on it. */
 export type DocumentNotices = {
   raise: (kind: NoticeKind, carried?: Omit<NoticeInput, "kind" | "owner">) => void
   retract: (kinds?: readonly NoticeKind[]) => void
 }
 
-/** Every notice this window is holding, and the one way to add to them. */
 export function useNotices(): { channel: NoticeChannel; notices: Notice[] } {
   const [notices, setNotices] = useState<Notice[]>([])
   const tickRef = useRef(0)
@@ -49,7 +47,6 @@ export function useNotices(): { channel: NoticeChannel; notices: Notice[] } {
   return { channel, notices }
 }
 
-/** Binds a session to its own document, so it cannot address another's. */
 export function useDocumentNotices(
   channel: NoticeChannel,
   documentId: number,

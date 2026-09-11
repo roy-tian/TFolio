@@ -3,18 +3,13 @@ import { useCallback, useEffect, useState } from "react"
 import { isTypingTarget } from "@/lib/contextMenu"
 
 type UseTextSelectAllOptions = {
-  /** Only the visible document's page views hold a selection of their own. */
   active: boolean
-  /** Puts the document's text on the clipboard — what the selection is for. */
   onCopy: () => void
 }
 
 /**
- * Whether the whole document's text stands selected in the page views.
- *
- * The selection is the app's own rather than a range in the document, which
- * could only ever hold the few pages virtualisation keeps mounted: the layout's
- * CSS draws the highlight from this, and the copy below comes from PDFium.
+ * App state rather than a document range, which could span only the pages
+ * virtualisation keeps mounted; CSS draws the highlight, PDFium the copy.
  */
 export function useTextSelectAll({ active, onCopy }: UseTextSelectAllOptions) {
   const [selectedAll, setSelectedAll] = useState(false)

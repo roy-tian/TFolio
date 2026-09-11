@@ -47,18 +47,10 @@ const OPTIONS_GAP = 8
 /** The editor's own width, in pixels — Tailwind's `w-64`. */
 const EDITOR_WIDTH = 256
 
-/** How close the editor may come to the window's edge before it is pulled in. */
 const VIEWPORT_MARGIN = 8
 
-/**
- * Where a note is typed, floating over the page at the point it was placed.
- *
- * Rendered in screen space rather than inside the page's own layer, which turns
- * with the page: at 90° a reader would be typing sideways. The cost is that
- * nothing moves it when the page does, so it has to watch for that itself —
- * scrolling, zooming, rotating, and resizing all shift the point it is pinned
- * to.
- */
+/** Floating in screen space, not the page's layer — at 90° a reader would be
+    typing sideways. Nothing moves it when the page changes, so it watches. */
 export function TextNoteEditor({
   draft,
   editorRef,
@@ -74,9 +66,8 @@ export function TextNoteEditor({
   const { t } = useTranslation()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const optionsRef = useRef<HTMLDivElement | null>(null)
-  // The options sit above the text box, which is where a reader expects them —
-  // until the note is near the top of the window and there is no room, and they
-  // would be cut off by its edge. Then they go below it instead.
+  // Options sit above the text box, where a reader expects them — until the
+  // note nears the window's top, where there is no room, and they go below.
   const [optionsBelow, setOptionsBelow] = useState(false)
   const [placement, setPlacement] = useState<{
     left: number
@@ -103,17 +94,8 @@ export function TextNoteEditor({
     // scale that holds however the page is turned.
     const footprint = dimensionsForRotation(rotation, page.width, page.height)
 
-    // Held inside the window: placed at a click near an edge the editor would
-    // otherwise run off it, taking its confirm and discard buttons with it.
-    // Pulled back only as far as it has to be, so it still reads as belonging
-    // to the point it was placed at.
-    //
-    // Defensive, and not covered by a test: every arrangement tried — including
-    // a page zoomed well past the viewport — left the editor on screen anyway,
-    // because a note's origin is clamped inside the page and the page's own
-    // margin then keeps the box in view. Removing this changed nothing that
-    // could be measured, so treat it as a guard rather than a fix for a
-    // reproduced bug.
+    // Held inside the window, only as far as needed. Defensive — no arrangement
+    // tried left it off screen — so treat it as a guard, not a bug fix.
     const left = Math.max(
       VIEWPORT_MARGIN,
       Math.min(point.x, window.innerWidth - EDITOR_WIDTH - VIEWPORT_MARGIN),
@@ -146,17 +128,13 @@ export function TextNoteEditor({
     // Capture, because the page scrolls inside the viewer rather than the
     // window: without it a scroll on an inner element would not be heard.
     viewer.addEventListener("scroll", measure, { capture: true, passive: true })
-    // Ctrl+wheel previews move the page on the compositor before its layout box
-    // is committed. Follow that one lightweight event so the screen-space editor
-    // stays pinned to its point throughout the gesture, not only after it ends.
+    // Ctrl+wheel previews move the page on the compositor before layout lands;
+    // follow that event so the editor stays pinned throughout the gesture.
     viewer.addEventListener(ZOOM_PREVIEW_EVENT, measure)
     window.addEventListener("resize", measure)
 
-    // Scrolling moves the page; zooming resizes it, and does so by writing the
-    // page's own CSS width — which fires neither of the events above when the
-    // page already fits the viewer and its scroll offset stays clamped at zero.
-    // Watching the element itself catches every way it can change, rather than
-    // a list of the ways it was known to.
+    // Zooming writes the page's own CSS width, firing neither event above when
+    // the scroll offset stays clamped; watching the element catches every way.
     const pageElement = viewer.querySelector(
       `[data-page-number="${draft.pageNumber}"]`,
     )
@@ -174,13 +152,8 @@ export function TextNoteEditor({
     }
   }, [draft.pageNumber, measure, viewerRef])
 
-  // A note is placed to be typed in, so the caret starts here rather than
-  // making the reader click the box they just opened.
-  //
   // Keyed to which note this is, not to mounting: placing one while another is
-  // open swaps the draft inside a single render, so this editor stays mounted
-  // and an effect that ran once would leave every note after the first without
-  // a caret.
+  // open swaps drafts in place, and a run-once effect would leave no caret.
   useEffect(() => {
     textareaRef.current?.focus()
   }, [draft.pageNumber, draft.origin.left, draft.origin.top])
@@ -199,9 +172,8 @@ export function TextNoteEditor({
       ref={editorRef as RefObject<HTMLDivElement>}
       style={{ left: placement.left, top: placement.top }}
     >
-      {/* Lifted out of the flow so the text box — not the options beside it —
-          starts at the point that was clicked, which is where the note will
-          actually be drawn. */}
+      {/* Out of the flow so the text box — not the options beside it — starts
+          at the point clicked, which is where the note will be drawn. */}
       <div
         className={cn(
           "absolute flex w-64 flex-col gap-3 rounded-lg border bg-popover p-3 text-popover-foreground shadow-md",

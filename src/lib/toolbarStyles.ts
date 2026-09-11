@@ -6,6 +6,5 @@ const selectionBarShape =
 /** Blue is the menu button's, the toolbar's one accent. */
 export const toolbarSelectionBarClassName = `${selectionBarShape} after:bg-blue-600 dark:after:bg-blue-400`
 
-/** The same bar in the colour the tool draws in (`--tool-ink`, from the caller).
-    The ring keeps an ink close to the toolbar's own colour from vanishing. */
+/** The ring keeps an ink close to the toolbar's own colour from vanishing. */
 export const toolbarInkBarClassName = `${selectionBarShape} after:bg-(--tool-ink) after:ring-1 after:ring-foreground/25`

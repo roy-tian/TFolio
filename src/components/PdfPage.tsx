@@ -21,16 +21,12 @@ import {
 } from "@/lib/pdf"
 import { POINT_TO_PX } from "@/lib/zoom"
 
-// The transparent text layer renders every span with the same font family that
-// measures the run width, so the horizontal scale stays consistent between
-// measurement and layout.
+// The text layer renders every span in the font that measured its run width,
+// so the horizontal scale stays consistent between measurement and layout.
 const TEXT_LAYER_FONT_FAMILY = "sans-serif"
 
 let measureContext: CanvasRenderingContext2D | null = null
 
-// Natural width, in the same units as `fontSize`, that `text` occupies in the
-// text-layer font. Used to derive the horizontal scale that stretches a span to
-// match the width PDFium reported for the run.
 function measureTextWidth(text: string, fontSize: number) {
   if (!measureContext) {
     measureContext = document.createElement("canvas").getContext("2d")
@@ -63,27 +59,20 @@ type PdfPageProps = {
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   page: PdfPageInfo
   pageNumber: number
-  /** Bumped when the page is drawn on, so the bitmap is fetched again. */
   renderEpoch: number
   /** Viewer-level settled zoom used only to choose the bitmap resolution. */
   renderScale: number
   searchMatches: IndexedSearchMatch[]
-  /** Bumped only when page content text changes. */
   textEpoch: number
   rotation: number
-  /** Resolved zoom; 1 lays the page out at one PDF point per CSS pixel. */
   scale: number
   /** Keep the current heavy-page window fixed during a compositor zoom preview. */
   virtualizationPaused: boolean
   /** Do not evict mounted surfaces while a text-selection drag crosses pages. */
   virtualizationRetainExited: boolean
-  /**
-   * CSS pixels to lay the page out at, overriding `scale`. Only for a layout
-   * that has to share one column across pages of different sizes, as a book
-   * spread does; elsewhere every page takes its own size from the zoom.
-   */
+  /** CSS pixels to lay the page out at, overriding `scale` — only for a layout
+      sharing one column across pages of different sizes, as a book spread. */
   width?: number
-  /** Settled render width for a shared-column layout such as book mode. */
   renderWidth?: number
 }
 
@@ -105,11 +94,8 @@ type PdfPageSurfaceProps = {
   textEpoch: number
 }
 
-/**
- * The expensive half of a page. It exists only around the viewport, so leaving
- * a page releases its canvas backing store, extracted text, and annotation
- * preview instead of letting a long reading session retain all of them.
- */
+/** Exists only around the viewport: leaving a page releases its canvas backing
+    store, extracted text, and annotation preview instead of retaining them. */
 const PdfPageSurface = memo(function PdfPageSurface({
   activeSearchIndex,
   documentId,
@@ -155,9 +141,8 @@ const PdfPageSurface = memo(function PdfPageSurface({
 
   useEffect(() => {
     let cancelled = false
-    // A text epoch means the page's selectable content is no longer the content
-    // these spans describe. Do not leave stale runs clickable while PDFium
-    // extracts the replacement — especially after pages of different sizes move.
+    // A text epoch means these spans no longer describe the page's selectable
+    // content; do not leave stale runs clickable while PDFium extracts anew.
     setTextSpans([])
 
     void invoke<PdfTextSpan[]>("extract_pdf_page_text", {
@@ -180,18 +165,16 @@ const PdfPageSurface = memo(function PdfPageSurface({
     }
   }, [documentId, pageNumber, textEpoch])
 
-  // Text spans are in the page's unrotated coordinate space. For 90°/270° pages
-  // the unrotated dimensions are the displayed ones swapped; the layer itself is
-  // rotated (below) to line back up with the rendered bitmap.
+  // Spans are in the page's unrotated space; for 90°/270° the dimensions are
+  // swapped and the layer itself is rotated to line back up with the bitmap.
   const { height: layoutHeight, width: layoutWidth } = dimensionsForRotation(
     page.rotation,
     page.width,
     page.height,
   )
 
-  // Positions are page-relative and the horizontal scale is resolution
-  // independent, so this only needs recomputing when the spans themselves
-  // change — not on every resize-driven re-render.
+  // Positions are page-relative and scale is resolution-independent, so only
+  // the spans themselves — not a resize — call for recomputing this.
   const positionedSpans = useMemo(
     () =>
       textSpans.map((span) => {
@@ -358,9 +341,8 @@ export function PdfPage({
     },
   )
 
-  // The user rotation spins the whole page (canvas + text layer) clockwise. It
-  // is applied on top of the bitmap's displayed dimensions, so a 90°/270° user
-  // rotation swaps the on-screen footprint the page occupies in the column.
+  // User rotation spins the whole page clockwise on top of the bitmap's own
+  // rotation, so a 90°/270° page swaps the footprint it takes in the column.
   const { height: footprintHeight, width: footprintWidth } =
     dimensionsForRotation(rotation, page.width, page.height)
   const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale

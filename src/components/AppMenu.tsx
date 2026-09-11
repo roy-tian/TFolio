@@ -41,15 +41,11 @@ import { formatShortcut, shortcuts } from "@/lib/shortcuts"
 /** The entries that act on the workspace rather than on one document, so the
     home tab's menu and every document's carry the same ones. */
 export type AppMenuActions = {
-  /** Whether anything is open to close. */
   canCloseAll: boolean
-  /** Whether any open document may be written back over its own file. */
   canSaveAll: boolean
   onCloseAll: () => void
-  /** Opens the merge wizard, which builds a document of its own rather than
-      touching the one on screen — a workspace action like opening a file. Not
-      a menu entry: it is a button, in the document tools' group of the toolbar
-      (`MergeWizardButton`), and this bag is how it reaches every header. */
+  /** Not a menu entry: it is a toolbar button (`MergeWizardButton`), and this
+      bag is how it reaches every header. */
   onMergeWizard: () => void
   onNew: () => void
   onNewWindow: () => void
@@ -58,28 +54,19 @@ export type AppMenuActions = {
   /** Read the recent list again as the menu opens: it is the backend's, and a
       document tab's menu would otherwise show whatever the home tab last saw. */
   onRefreshRecent: () => void
-  /** Writes back every open document that may be: one keystroke for a session
-      spread over several tabs. Workspace-wide, so it is the menu's alone —
-      no document's toolbar speaks for the tabs beside it. */
+  /** One keystroke for a session spread over several tabs. Workspace-wide, so
+      it is the menu's alone — no document's toolbar speaks for the tabs. */
   onSaveAll: () => void
   recentFiles: RecentFile[]
 }
 
 type AppMenuProps = AppMenuActions & {
-  /** Whether the active document may be written back over its own file. */
   canSave?: boolean
   onSave?: () => void
-  /** Absent while no document is open, which is what greys the item out. */
   onSaveAs?: () => void
-  /** Why saving is unavailable, where the reason is not already on screen. */
   saveHint?: string
 }
 
-/**
- * The window's one menu, at the left end of every header: the file actions
- * with no key of their own, the recent list the home tab shows, and the
- * app-level entries under them.
- */
 export function AppMenu({
   canCloseAll,
   canSave = false,
@@ -178,8 +165,7 @@ export function AppMenu({
             </DropdownMenuSub>
             <HintTooltip label={saveHint} side="right">
               <DropdownMenuItem
-                // The hint is only ever set while the item is disabled, and a
-                // disabled item is `pointer-events: none` — which would leave
+                // A disabled item is `pointer-events: none`, which would leave
                 // the tooltip with no hover to open on.
                 className="data-disabled:pointer-events-auto"
                 data-action="save"

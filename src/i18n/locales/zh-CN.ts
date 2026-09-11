@@ -306,8 +306,7 @@ const zhCN = {
     deleteSelected: "删除选中的 {{count}} 页",
     insertBefore: "在第 {{pageNumber}} 页前插入空白页",
     insertAtEnd: "在末尾插入空白页",
-    /** The right-click menu on a page, which acts on the whole selection.
-        Chinese has one plural form, so `_one` never renders: keep it identical. */
+    /** Chinese has one plural form, so `_one` never renders: keep it identical. */
     cut_one: "剪切 {{count}} 页",
     cut_other: "剪切 {{count}} 页",
     copy_one: "复制 {{count}} 页",
@@ -316,7 +315,6 @@ const zhCN = {
     rotate_other: "旋转 {{count}} 页",
     pasteBefore: "粘贴到第 {{pageNumber}} 页前",
     pasteAtEnd: "粘贴到末尾",
-    /** The notices: what was taken, and where a paste put it. */
     cutNotice_one: "已剪切 {{count}} 页（第 {{pages}} 页）",
     cutNotice_other: "已剪切 {{count}} 页（第 {{pages}} 页）",
     copiedNotice_one: "已复制 {{count}} 页（第 {{pages}} 页）",

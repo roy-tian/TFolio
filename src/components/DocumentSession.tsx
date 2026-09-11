@@ -131,13 +131,10 @@ import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 const RECENT_VIEW_WRITE_INTERVAL_MS = 250
 const RESIZE_COMPOSITOR_SETTLE_MS = 150
 
-/** How long a seek waits for the result's highlight layer to be drawn. */
 const SEARCH_REVEAL_TIMEOUT_MS = 3000
 
-/** A file dragged in from the desktop, as the window's own handler sees it —
-    positions in CSS pixels, not the OS's physical ones. `over` carries the
-    paths the drag announced on entry, or null when the window never heard
-    them; the OS itself names them only on entry and on release. */
+/** A file dragged in from the desktop: points in CSS pixels, and `over` with
+    null paths when the OS never named them to this window. */
 export type FileDragEvent =
   | { kind: "over"; paths: string[] | null; point: { x: number; y: number } }
   | { kind: "drop"; paths: string[]; point: { x: number; y: number } }
@@ -145,9 +142,7 @@ export type FileDragEvent =
 
 /**
  * Pages dragged out of another document's grid, as the workspace passes them
- * down (see `usePageHandoff`). Positions are in CSS pixels, like a file drag's;
- * only the drop names the pages, since only then is there anything to do with
- * them.
+ * down; only the drop names the pages, there being nothing yet to do with them.
  */
 export type PageDragEvent =
   | { kind: "over"; point: { x: number; y: number } }
@@ -160,42 +155,29 @@ export type PageDragEvent =
   | { kind: "leave" }
 
 export type DocumentSessionHandle = {
-  /** The reader turning down the fallback face, which lets go of the edit that
-      was waiting on it — the note's text lives nowhere else by then. */
+  /** Lets go of the edit it held: the note's text lives nowhere else by then. */
   dismissNoteFont: () => void
-  /** The reader taking the fallback face, from the notice the workspace draws
-      on this session's behalf. */
   fetchNoteFont: () => void
   hasUnsavedWorkNow: () => boolean
-  /** Opens this document's page-numbers dialog. */
   openPageNumbers: () => void
-  /** Opens the app-owned find bar for this document. */
   openSearch: () => void
-  /** Opens this document's watermark dialog. */
   openWatermark: () => void
-  /** Lays this document out for paper and opens the OS print dialog on it. */
   print: () => void
-  /** Captures and durably queues the latest reading view before a close. */
   rememberViewNow: () => Promise<void>
-  /** Writes this document back over its own file — and refuses wherever the
-      toolbar's button is greyed out, so no key can write what it will not. */
+  /** Refuses wherever the toolbar's button is greyed out, so no key can write
+      what it will not. */
   save: () => void
-  /** Exports this document as a copy, through the backend's own dialog. */
   saveAs: () => void
-  /** Selects everything the visible view holds: the grid's pages, or the text
-      the page views lay over them. */
   selectAll: () => void
-  /** Takes back the last edit, exactly as the toolbar's undo does. */
   undo: () => void
-  /** Whether this session takes the drag: true only over its thumbnail grid,
-      where a dropped PDF is inserted at the gap under the pointer instead of
-      opening as a tab of its own. */
+  /** True only over this session's thumbnail grid, where a dropped PDF is
+      inserted at the gap under the pointer instead of opening as a tab. */
   onFileDrag: (event: FileDragEvent) => boolean
   /** The same answer for pages dragged from another document's grid, which land
-      in the gap under the pointer as copies. */
+      in the gap under the pointer as copies — their source keeps them. */
   onPageDrag: (event: PageDragEvent) => boolean
-  /** Shows this document's pages, for a drag the workspace has just brought
-      here: the grid is the one view a page can be dropped into. */
+  /** Called for a drag the workspace has just brought here: the grid is the
+      one view a page can be dropped into. */
   showThumbnails: () => void
 }
 
@@ -206,15 +188,13 @@ type DocumentSessionProps = {
   /** Whether this app-created document has yet to be written to its first
       file. It remains unsaved even before the reader makes another edit. */
   initialSaveRequired?: boolean
-  /** Page numbers to lay on as the session opens — what the merge wizard asked
-      for. Applied through the ordinary command, so they are one undo away and
-      the dialog finds them where it expects. */
+  /** Page numbers to lay on as the session opens — the merge wizard's ask, run
+      through the ordinary command so they stay one undo away. */
   initialPageNumbers?: PageNumbersConfig | null
   /** A path-backed document's last reading view. */
   initialRecentView?: RecentPdfView
-  /** The view this document opens in, where something other than the reader's
-      stored preference suits it: a merge opens on the thumbnail grid, which is
-      where the whole result can be looked over at once. */
+  /** Overrides the stored preference where another view suits the document: a
+      merge opens on the thumbnail grid, where the whole result can be seen. */
   initialViewMode?: ViewMode
   /** Reports the merge wizard's initial page-content work while it stays open. */
   onInitialLayerProgress?: PdfOwnedLayerProgressHandler
@@ -229,8 +209,7 @@ type DocumentSessionProps = {
   notices: NoticeChannel
   onDirtyChange: (documentId: number, dirty: boolean) => void
   /** Whether this document may now be written back over its own file. Only the
-      session can say — the workspace sees the file and the dirty flag, not the
-      session-owned page content that makes a document export-only. */
+      session can say: the workspace cannot see what makes it export-only. */
   onSavableChange: (documentId: number, canSave: boolean) => void
   /** An export that gave a document its first file: the tab now stands for
       that file, not for the bytes it opened from. */
@@ -238,9 +217,7 @@ type DocumentSessionProps = {
   /** The workspace's answer for a page drag that has left this document's grid,
       and the way another document's pages reach it. */
   pageHandoff: PageHandoffTarget
-  /** Present only when Rust recorded this opened path as recent. */
   recentPath?: string
-  /** Overrides the ordinary annotation-copy name in the Save As dialog. */
   saveAsDefaultName?: string
 }
 
@@ -283,14 +260,11 @@ function DocumentSession(
     keys: openedDocument.pages.map((_, index) => index),
     nextKey: openedDocument.numPages,
   }))
-  // Whether any page another file brought in is still here, which — like a
-  // watermark — leaves the document export-only. The backend answers it with
-  // every structure update, so this never has to be replayed from history: a
-  // freshly opened document holds none of them.
+  // Pages another file brought in leave the document export-only, like a
+  // watermark. The backend answers with every structure update, so no replay.
   const [hasMergedPages, setHasMergedPages] = useState(false)
-  // Where pages dragged over the grid would land — a PDF from the desktop, or
-  // another document's pages. Only the insertion line reads it; every drop
-  // resolves the point again, so a stale index can never place anything.
+  // Only the insertion line reads this; every drop resolves the point again,
+  // so a stale index can never place anything.
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState(() =>
     Math.min(
@@ -299,9 +273,8 @@ function DocumentSession(
     ),
   )
   const [pageInput, setPageInput] = useState(() => String(currentPage))
-  // Whether the reader is typing a page number. The odometer stands in for
-  // the field's own text the rest of the time, and has to stand aside while
-  // what the field holds is no longer the page being read.
+  // The odometer stands in for the field's own text, and has to stand aside
+  // while what the field holds is no longer the page being read.
   const [pageInputFocused, setPageInputFocused] = useState(false)
   const [pageRotations, setPageRotations] = useState(() =>
     openedDocument.pages.map(() => 0),
@@ -320,10 +293,8 @@ function DocumentSession(
     "noteFontFailed" | "noteFontMissing" | null
   >(null)
   /**
-   * The edit that failed for want of a face to draw it in, kept so accepting
-   * the download can re-run it. A note's text lives nowhere else by then — the
-   * editor that held it closed when the note was committed — so without this
-   * the reader would fetch a 17 MB font and then have to type the note again.
+   * The edit that failed for want of a face, kept so accepting the download can
+   * re-run it: a note's text lives nowhere else by then.
    */
   const [unfontedEdit, setUnfontedEdit] = useState<AnnotationCommand | null>(
     null,
@@ -338,9 +309,8 @@ function DocumentSession(
       readStoredViewMode() ??
       defaultViewMode,
   )
-  // Current-page tracking and persistence wait until the saved point has been
-  // put back. Otherwise the first, temporary layout would immediately replace
-  // the very position this session is trying to restore.
+  // Tracking and persistence wait until the saved point is back: the first,
+  // temporary layout would otherwise replace the position being restored.
   const [restoringRecentView, setRestoringRecentView] = useState(
     initialRecentView !== undefined,
   )
@@ -393,9 +363,8 @@ function DocumentSession(
   // Which offer a fetch in flight belongs to. A download cannot be called back,
   // so what it returns to is checked against this instead.
   const noteFontOfferRef = useRef(0)
-  // The offer and the edit it is holding go together: once it is off the
-  // screen there is no way back to it, and a kept edit would only be re-run by
-  // the next offer.
+  // The offer and the edit it holds go together: once it is off the screen
+  // there is no way back, and a kept edit would only be re-run by the next.
   const clearNoteFontOffer = useCallback(() => {
     noteFontOfferRef.current += 1
     setNoteFontOffer(null)
@@ -411,16 +380,11 @@ function DocumentSession(
   const bookApplies = hasBookSpread(pdfDocument.numPages)
   const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
   // The mode the last commit actually laid out, so a switch can be told from a
-  // re-render. Seeded with the mode the first render shows, which is why it sits
-  // here rather than with the refs above — and it tracks the laid-out mode, not
-  // the reader's stored choice, since it is the layout that strands an offset.
+  // re-render — the layout is what strands an offset, not the stored choice.
   const laidOutViewModeRef = useRef(viewMode)
 
-  // The thumbnail grid gives every cell the same width whatever the page, so it
-  // has no single scale to report or anything for a zoom to act on. The controls
-  // are absent there rather than disabled: disabled reads as "not just now",
-  // which is what an unopened document means, and it would leave the readout
-  // showing a figure that describes nothing on screen.
+  // The grid has no single scale for a zoom to act on. The controls are absent
+  // rather than disabled: disabled is what an unopened document means.
   const zoomApplies = viewMode === "single" || viewMode === "book"
   const bookmarksApply = viewMode === "thumbnail"
   const zoom = useZoom({
@@ -442,9 +406,8 @@ function DocumentSession(
     viewMode,
     viewerRef,
   })
-  // Every drawing tool needs a page under the pointer, which the thumbnail grid
-  // does not show. Only the watermark and the page numbers act on the document
-  // rather than a page, so they stay.
+  // Every drawing tool needs a page under the pointer, which the grid does not
+  // show; the watermark and page numbers act on the document, so they stay.
   const drawingApplies = viewMode === "single" || viewMode === "book"
   // In the thumbnail grid a click is a selection, so the grid doubles as the
   // page-editing surface; leaving it clears what was chosen.
@@ -479,9 +442,8 @@ function DocumentSession(
     () => new Set(clipboard?.mode === "cut" ? clipboard.pages : []),
     [clipboard],
   )
-  // Fetched as the selection is made, not when the copy asks for it: the
-  // clipboard takes a write only from inside the keypress that asked, and a
-  // long document's text is hundreds of round trips away from one.
+  // Fetched as the selection is made, not when the copy asks: the clipboard
+  // write must land inside its keypress, and a long document's text is slow.
   const selectedText = useRef<Promise<string> | null>(null)
   const copyDocumentText = useCallback(() => {
     const pending =
@@ -561,9 +523,8 @@ function DocumentSession(
       () => notice.raise("saveFailed"),
       [notice],
     ),
-    // A structure command replaces the page list wholesale — nothing here
-    // mirrors it — and, where it moved the pages under everything keyed by
-    // page number, brings each position-derived state back into range.
+    // A structure command replaces the page list wholesale; where it moved the
+    // pages, bring each position-derived state back into range.
     onStructureChange: useCallback(
       (
         documentId: number,
@@ -587,9 +548,8 @@ function DocumentSession(
         setPdfDocument(next)
         setHasMergedPages(update.hasMergedPages)
 
-        // A page turned where it stands: every position still holds the page it
-        // held, so the selection the reader is turning survives the edit — and
-        // must, or a second press would find nothing chosen and turn the lot.
+        // Turned where it stands, so every position still holds its page — a
+        // second press of the rotation must still find the selection it turns.
         if (movement === "inPlace") {
           return
         }
@@ -703,9 +663,8 @@ function DocumentSession(
     viewerRef,
   })
 
-  // Which pointer the viewer hovers a page with — one per tool, keyed to the
-  // `[data-tool-cursor]` rules in `index.css`. Null wherever a tool would not
-  // draw, so the reader gets the plain pointer back.
+  // Keyed to the `[data-tool-cursor]` rules in `index.css`; null wherever a
+  // tool would not draw, so the reader gets the plain pointer back.
   const toolCursor = drawingApplies ? activeTool : null
 
   // Both drawing tools hold previews that only a page's own paint may retire;
@@ -770,10 +729,8 @@ function DocumentSession(
     })
   }, [openedDocument.id])
 
-  // Search PDFium's page text rather than the WebView's DOM. Besides excluding
-  // the toolbar and file tabs, this reaches virtualized pages whose text layer
-  // is not mounted. A short debounce avoids launching a whole-document pass for
-  // every intermediate IME composition or rapid keystroke.
+  // PDFium's page text, not the DOM's: it reaches virtualized pages whose text
+  // layer is not mounted. Debounced, so IME compositions do not launch passes.
   useEffect(() => {
     const generation = searchGenerationRef.current + 1
     searchGenerationRef.current = generation
@@ -795,9 +752,8 @@ function DocumentSession(
     setSearching(true)
     const timer = setTimeout(() => {
       void (async () => {
-        // A term replacing one still in flight first waits for its direct
-        // cancellation command to set the old run's flag. The search itself
-        // will release the PDFium lock at the next page boundary.
+        // A new term waits for the old run's cancellation command first: the
+        // search itself releases the PDFium lock at the next page boundary.
         await searchCancellationRef.current
 
         if (searchGenerationRef.current !== generation) {
@@ -930,10 +886,8 @@ function DocumentSession(
     }
   }, [])
 
-  // Applied once, on the first render of a session that was handed them: the
-  // wizard's own steps, run through the same commands the dialogs use so the
-  // reader can undo either. Page numbers first, so the watermark lands above
-  // them — the order the two dialogs leave a document in.
+  // Applied once: the wizard's steps through the ordinary commands, so the
+  // reader can undo either. Numbers first, so the watermark lands above them.
   const initialLayers = useRef({
     pageNumbers: initialPageNumbers ?? null,
     watermark: initialWatermark ?? null,
@@ -994,17 +948,8 @@ function DocumentSession(
       return
     }
 
-    // The reader's place, as a point on the page they are on, taken while the
-    // document is still laid out for the size the viewer has just left. Every
-    // mode that fits pages to the column takes its scale from that width, so a
-    // window dragged sideways re-lays the whole document out under a scroll
-    // offset the browser keeps in pixels — and the reader, who asked for a
-    // change of width, watches the page slide vertically away from them.
-    //
-    // The reading line is the viewer's top edge: everything above it has been
-    // read, and holding it still is what "the document did not move" means. The
-    // point is taken at the middle of the width, which is where the column
-    // centres what it lays out.
+    // Taken while the old layout stands: fitting pages to a new width slides
+    // the page away. The reading line is the viewer's own top edge.
     const captureResizeAnchor = () => {
       const page = viewer.querySelector<HTMLElement>(
         `[data-page-number="${currentPageRef.current}"]`,
@@ -1012,12 +957,8 @@ function DocumentSession(
       const rect = viewer.getBoundingClientRect()
       const pageRect = page?.getBoundingClientRect()
 
-      // Only a page on screen can hold the reader's place. The tracked page is
-      // named the moment a seek starts, so a smooth `scrollToPage` still on its
-      // way names a page pages off; anchoring to that would scale the gaps and
-      // padding between here and there, which no re-fit scales, and would land
-      // the correction — cancelling the seek's animation as it writes — nowhere
-      // the reader ever was.
+      // Only a page on screen can hold the reader's place: mid-seek the tracked
+      // page is pages off, and anchoring to it lands nowhere the reader was.
       resizeAnchorRef.current =
         pageRect && pageRect.bottom > rect.top && pageRect.top < rect.bottom
           ? anchorOnPage(
@@ -1029,12 +970,8 @@ function DocumentSession(
           : null
     }
 
-    // An inactive tab is `hidden`, so it has no layout box and the observer
-    // reports 0x0. Committing that would lay every page out at the minimum
-    // scale, and the collapsed scroll height is what the viewer's offset is
-    // clamped against — the reader's place in the document, lost before the tab
-    // is even shown again. Hold the last real geometry instead; the observer
-    // reports the true size again the moment the panel comes back.
+    // A hidden tab has no layout box and the observer reports 0x0; committing
+    // that loses the reader's place. Hold the last real geometry instead.
     const commitSize = (width: number, height: number) => {
       const roundedWidth = Math.round(width)
       const roundedHeight = Math.round(height)
@@ -1052,10 +989,8 @@ function DocumentSession(
         return
       }
 
-      // Not on the first size, which has no reading position behind it, and not
-      // when a seek is already pending — a tab coming back to a window resized
-      // without it holds a position from a layout that no longer exists, and
-      // has its own way of finding the page again.
+      // Skip the first size, which has no reading position behind it, and any
+      // pending seek — a returning tab finds its page its own way.
       if (committed.width > 0 && pendingScrollPageRef.current === null) {
         captureResizeAnchor()
       }
@@ -1074,13 +1009,8 @@ function DocumentSession(
     commitSize(viewer.clientWidth, viewer.clientHeight)
     let compositorTimer: ReturnType<typeof setTimeout> | undefined
 
-    // Commit every observed size straight away. Layout — the grid's column
-    // count, a fit mode's page scale — tracks the window in real time, while
-    // the heavy PDFium renders stay throttled by the viewer's settled
-    // `renderScale` debounce. ResizeObserver already batches to one callback
-    // per frame, so a timer here would only add the lag of waiting for it.
-    // Measured off the element rather than the entry's `contentRect`, so every
-    // committed figure comes from the same box the activation check below reads.
+    // Layout tracks the window in real time; only the PDFium renders are
+    // debounced. Measured off the element, the box the activation check reads.
     const resizeObserver = new ResizeObserver(() => {
       if (!viewer.dataset.resizeCompositing) {
         viewer.dataset.resizeCompositing = "true"
@@ -1100,16 +1030,14 @@ function DocumentSession(
     }
   }, [])
 
-  // Pay the anchor back against the pages as they have just been laid out. A
-  // layout effect, so the correction lands in the same frame as the new sizes
+  // A layout effect, so the correction lands in the same frame as the new size
   // and the reader sees the column change width, not the document jump.
   useLayoutEffect(() => {
     const anchor = resizeAnchorRef.current
     const viewer = viewerRef.current
 
-    // A seek queued after the anchor was taken owns the offset instead: it names
-    // a page to find in the layout that has just been made, while the anchor
-    // describes one that was never committed.
+    // A queued seek owns the offset instead: it names a page in the layout just
+    // made, while the anchor describes one that was never committed.
     if (!anchor || !viewer || pendingScrollPageRef.current !== null) {
       resizeAnchorRef.current = null
       return
@@ -1130,15 +1058,8 @@ function DocumentSession(
     viewer.scrollTop += correction.top
   }, [viewerHeight, viewerWidth])
 
-  // The geometry a hidden tab holds can be out of date, since the window may
-  // have been resized while another tab had the screen: the new size reaches
-  // this one only as it comes back, and the offset it kept would then point into
-  // a document laid out at a different scale. Seek to the page being read
-  // instead, once the size it was measured against has been committed.
-  //
-  // It has to be a layout effect: the observer delivers the panel's new size
-  // before a passive effect would run, and its commit writes the very ref this
-  // compares against — leaving nothing to notice, and the reader stranded.
+  // A tab hidden through a resize holds an offset into a stale layout; seek the
+  // page once the new size is committed, as a layout effect or never at all.
   useLayoutEffect(() => {
     const viewer = viewerRef.current
 
@@ -1158,10 +1079,8 @@ function DocumentSession(
     pendingScrollPageRef.current = currentPage
   }, [active, currentPage, restoringRecentView])
 
-  // Restore against the first real layout, after this visible panel's size and
-  // the saved zoom have both sized its pages. A normalized point on the page is
-  // placed under the new viewport's top-centre reading line, so a different
-  // window size does not turn a useful position into an unrelated raw offset.
+  // Restored against the first real layout, once size and saved zoom have both
+  // sized the pages; normalized, so a new window size stays a useful position.
   useLayoutEffect(() => {
     const position = initialRecentPositionRef.current
     const viewer = viewerRef.current
@@ -1230,14 +1149,8 @@ function DocumentSession(
     storeViewMode(preferredViewMode)
   }, [preferredViewMode])
 
-  // A structure edit reachable while a note is open must settle the draft
-  // *before* it runs — a note is anchored by page number, which an edit can move
-  // out from under it, and a note the reader finishes mid-edit would be dropped
-  // by the in-flight-edit guard after the editor had already cleared its text.
-  // Undo and redo can move any page and can't take a note as their target, so
-  // the uncommitted draft is discarded before the step (`undoStep`, and the
-  // toolbar's redo); every other page edit lives in the thumbnail grid, where no
-  // note can be open. The callback is stable.
+  // Undo and redo can move a note's anchored page out from under it and cannot
+  // take the note as their target, so the uncommitted draft goes before a step.
   const cancelTextNote = textNote.cancel
 
   const undoStep = useCallback(() => {
@@ -1286,9 +1199,8 @@ function DocumentSession(
     currentPageRef.current = match.pageNumber
     setCurrentPage(match.pageNumber)
 
-    // Search results are page text, so a thumbnail has nowhere to draw one.
-    // Move back to the ordinary page view and let its existing pending seek put
-    // the result's page on screen before the rectangle-level seek below.
+    // A thumbnail has nowhere to draw a result: return to the page view, whose
+    // pending seek brings the page up before the rectangle-level seek below.
     if (viewMode === "thumbnail") {
       pendingScrollPageRef.current = match.pageNumber
       setBookmarksOpen(false)
@@ -1409,9 +1321,8 @@ function DocumentSession(
 
       const eventTarget = event.target
 
-      // A page key being used in a field or an open popup belongs to that UI,
-      // not to the document behind it. In particular, do not turn the PDF while
-      // its page-number field or a text-note draft is being edited.
+      // A page key in a field or an open popup belongs to that UI, not to the
+      // document behind it — a note draft or the field may be mid-edit.
       if (
         (eventTarget instanceof Element &&
           eventTarget.closest("input, textarea, select, [contenteditable]")) ||
@@ -1434,9 +1345,8 @@ function DocumentSession(
           ? (spreadPages(current, pdfDocument.numPages)[0] ?? current)
           : current
 
-      // Consume the key at either document edge too. Letting the WebView handle
-      // it there would reintroduce a partial viewport scroll within the first
-      // or last page.
+      // Consume the key at either edge too: the WebView's own handling would
+      // reintroduce a partial viewport scroll within the first or last page.
       if (target === currentRow) {
         return
       }
@@ -1477,18 +1387,12 @@ function DocumentSession(
     }
   }
 
-  // Every page-editing gesture carries page numbers read off the screen, so it
-  // must not be queued behind a *page-shifting* edit, or it would land on the
-  // wrong page. The gesture is dropped while such an edit is in flight; the
-  // pages the reader sees then always match the numbers their next gesture
-  // names. An annotation in flight, which shifts nothing, does not block
-  // editing. Checked off the ref so a gesture in the same tick as the edit that
-  // started the churn is caught.
+  // Gestures name pages read off the screen, so they are dropped while a
+  // page-shifting edit is in flight; an annotation in flight shifts nothing.
   const editingBusy = () => annotations.isStructureBusyNow()
 
-  // The x on a selected page takes the whole selection with it; on any other
-  // page it takes that page alone. No confirmation — the delete is one undo
-  // away, which a dialog would only pretend to improve on.
+  // On a selected page the x takes the whole selection with it; on any other
+  // page, that page alone. No confirmation: the delete is one undo away.
   const deleteThumbnailPage = (pageNumber: number) => {
     if (!pdfDocument || editingBusy()) {
       return
@@ -1510,10 +1414,8 @@ function DocumentSession(
   }
 
   /**
-   * The rotate button pressed over the grid, where turning a page is an edit of
-   * the document — undone, saved and carried into the file like any other —
-   * rather than the reading views' way of looking at it. It takes the
-   * selection, or the whole document when there is none.
+   * The rotate button over the grid, where turning a page edits the document —
+   * undone and saved like any other — taking the selection, or all of it.
    */
   const rotateThumbnailPages = () => {
     if (!pdfDocument || editingBusy()) {
@@ -1527,10 +1429,8 @@ function DocumentSession(
   }
 
   /**
-   * Puts the clipboard into the gap before `index`. A cut is a move, which the
-   * reorder command already makes one undo step of; a copy is the document
-   * taking its own pages in again, and stays on the clipboard afterwards —
-   * following the pages its own insert pushed down.
+   * A cut is a move, one undo step by way of the reorder command; a copy stays
+   * on the clipboard, following the pages its own insert pushed down.
    */
   const pastePages = (index: number) => {
     if (!pdfDocument || editingBusy()) {
@@ -1590,9 +1490,8 @@ function DocumentSession(
     return annotations.reorderPages(order)
   }
 
-  // Page content this session owns (a watermark, page numbers) and merged
-  // pages each leave the document export-only, for the reasons the menu's hint
-  // gives; a document opened from bytes has no file to write back to at all.
+  // Owned page content (watermark, numbers) and merged pages leave a document
+  // export-only; one opened from bytes has no file to write back to at all.
   const hasOwnedContent =
     annotations.watermarkConfig !== null || annotations.pageNumbersConfig !== null
   const hasSourceFile = Boolean(pdfDocument?.path)
@@ -1625,11 +1524,8 @@ function DocumentSession(
     onSavableChange(openedDocument.id, canSave)
   }, [canSave, onSavableChange, openedDocument.id])
 
-  // Inserts each PDF in turn at `index`, in the order they were dropped: the
-  // second file goes after the first, so a multi-file drop reads down the grid
-  // the way the reader arranged it. How far to advance is what the file itself
-  // brought — only the backend knows that, and only it can say, since the
-  // document's own growth would also count an edit that landed in between.
+  // Each PDF in drop order, advancing by what the backend says the insert
+  // added — the document's own growth could count an edit landing in between.
   const insertFiles = useCallback(
     async (paths: string[], index: number) => {
       let at = index
@@ -1645,11 +1541,8 @@ function DocumentSession(
     [annotations],
   )
 
-  // A PDF dragged in from the desktop, handed down by the window's one drag
-  // handler (see `App.tsx`). The thumbnail grid is the only surface that takes
-  // one: it is where a position can be pointed at — the page views show one page
-  // at a time and no gaps — so anywhere else the drag is left to the workspace,
-  // which opens the file as a tab of its own.
+  // A desktop PDF, from the window's one drag handler (see `App.tsx`). Only the
+  // grid takes one — it is the one surface where a position can be pointed at.
   const handleFileDrag = useCallback(
     (event: FileDragEvent): boolean => {
       const viewer = viewerRef.current
@@ -1664,18 +1557,15 @@ function DocumentSession(
         return false
       }
 
-      // A drag this document could not take is left to the workspace, whose
-      // full-window target says honestly that the file opens rather than lands:
-      // an insertion line drawn for a folder promises a place it will refuse.
-      // Null paths mean the window never heard them, not that there are none.
+      // An untakeable drag goes to the workspace, whose target honestly says
+      // the file opens; null paths mean the window never heard them, not none.
       if (!(event.paths?.some(isPdfPath) ?? true)) {
         setDropIndex(null)
         return false
       }
 
-      // Resolved from the point every time, drop included: the index the line
-      // was drawn at belongs to the render that drew it, and a file must land
-      // where the pointer is, not where it was.
+      // Resolved from the point every time, drop included: the drawn index
+      // belongs to its render, and a file lands where the pointer is now.
       const index = insertIndexForHit(
         dropHitAt(event.point, viewer),
         event.point.x,
@@ -1691,10 +1581,8 @@ function DocumentSession(
         return true
       }
 
-      // Claimed either way: the drag was over this document's grid, so a drop it
-      // cannot act on is an error to show here, not a tab to open behind the
-      // reader's back. A page-shifting edit in flight is the one such case —
-      // the gap was read off a grid that edit is about to renumber.
+      // Claimed either way: a drop it cannot act on is an error shown here, not
+      // a tab opened behind the reader's back; the busy case is the one such.
       if (annotations.isStructureBusyNow()) {
         notice.raise("editInFlight")
       } else {
@@ -1707,9 +1595,8 @@ function DocumentSession(
   )
 
   /**
-   * Pages dragged out of another document's grid, brought here by the workspace
-   * once its tab was sprung open. They land where a dropped file would, by the
-   * same hit test — and as copies: the document they came from keeps them.
+   * Pages from another document's grid, brought here once the workspace sprung
+   * this tab open — landing as a dropped file would, as copies the source keeps.
    */
   const handlePageDrag = useCallback(
     (event: PageDragEvent): boolean => {
@@ -1760,9 +1647,8 @@ function DocumentSession(
     [active, annotations, notice, viewMode],
   )
 
-  // The workspace springs this tab open under a drag that is made of pages, so
-  // the view it opens on has to be the one with gaps between them. Opened for
-  // that drag rather than pressed, so it is not stored as a preference either.
+  // Opened for a drag made of pages, so the view must be the one with gaps —
+  // and for a drag rather than a press, it is not stored as a preference.
   const showThumbnails = useCallback(() => {
     if (preferredViewMode === "thumbnail") {
       return
@@ -1772,9 +1658,8 @@ function DocumentSession(
     setPreferredViewMode("thumbnail")
   }, [preferredViewMode])
 
-  // The workspace's handoff with this document's own id filled in: its grid
-  // asks whether a drag has left for somewhere the workspace answers for, and
-  // gives up the release when it has.
+  // The workspace's handoff with this document's own id filled in, so its grid
+  // asks whether a drag has left for somewhere the workspace answers for.
   const handoff = useMemo<PageHandoff>(
     () => ({
       cancel: pageHandoff.cancel,
@@ -1784,20 +1669,16 @@ function DocumentSession(
     [openedDocument.id, pageHandoff],
   )
 
-  // A drag the reader started here but finished elsewhere — they switched tabs
-  // while a file was in the air, or the wizard took the drop — never sends this
-  // session a `leave`, so the line it drew would outlive the drag.
+  // A drag finished elsewhere — a tab switch, the wizard taking the drop —
+  // never sends a `leave`, so the line it drew would outlive the drag.
   useEffect(() => {
     if (!active) {
       setDropIndex(null)
     }
   }, [active])
 
-  // Each mode stacks its pages to a different total height, and the viewer keeps
-  // its scroll offset across the switch, so the old offset would land somewhere
-  // unrelated. Remember the page being read and seek back to it instead. Queued
-  // here rather than from the commit below so that the layout effects of the
-  // very next render already see the seek pending, and yield the offset to it.
+  // Each mode stacks pages to a different height, so the kept offset would land
+  // somewhere unrelated; queued here, ahead of the next render's layout effects.
   const changeViewMode = (mode: ViewMode) => {
     if (mode !== viewMode) {
       pendingScrollPageRef.current = currentPage
@@ -1810,10 +1691,8 @@ function DocumentSession(
     setPreferredViewMode(mode)
   }
 
-  // The same seek for the switch nobody pressed: a merge past a one-page
-  // document's first spread brings book view back on its own. A seek already
-  // queued — the press above, or a thumbnail opened at its own page — is the
-  // more specific target and stands.
+  // For the switch nobody pressed: a merge past a one-page document's spread
+  // brings book view back. A seek already queued is the more specific target.
   useEffect(() => {
     if (laidOutViewModeRef.current === viewMode) {
       return
@@ -1826,9 +1705,8 @@ function DocumentSession(
     }
   }, [currentPage, viewMode])
 
-  // The target only exists once the new layout has mounted, so the scroll waits
-  // for the commit rather than running alongside the mode change — or, for a
-  // tab returning to a window that was resized without it, the new geometry.
+  // The target exists only once the new layout has mounted, so the scroll waits
+  // for the commit — or, for a tab returning to a resized window, the geometry.
   useEffect(() => {
     const pendingPage = pendingScrollPageRef.current
     const viewer = viewerRef.current
@@ -1842,11 +1720,8 @@ function DocumentSession(
 
     const committed = committedSizeRef.current
 
-    // Leaving the thumbnail grid closes the bookmark sidebar in the same commit,
-    // which widens the viewer — and the zoom that sizes every page only follows
-    // once that width has been committed, growing the pages under a scroll
-    // offset already taken. Keep the page until the layout the seek measured is
-    // the settled one, so the last seek is the one that stands.
+    // Leaving the grid closes the bookmark sidebar, widening the viewer after
+    // the seek was measured; hold the page until settled, so the last seek stands.
     if (
       viewer.clientWidth === committed.width &&
       viewer.clientHeight === committed.height
@@ -1863,9 +1738,8 @@ function DocumentSession(
     }
 
     writtenRecentViewVersionRef.current = pending.version
-    // Keep writes from two nearby scroll samples in capture order. Tauri calls
-    // are asynchronous; without the chain a slower old write could otherwise
-    // arrive after the newer position and put the document back too far.
+    // Tauri calls are asynchronous: without this chain a slower older write
+    // could land after a newer one and put the document back too far.
     recentViewWriteChainRef.current = recentViewWriteChainRef.current.then(() =>
       storeRecentPdfView(pending.path, pending.view),
     )
@@ -1882,9 +1756,8 @@ function DocumentSession(
       const version = (pendingRecentViewRef.current?.version ?? 0) + 1
       pendingRecentViewRef.current = { path: recentPath, version, view }
 
-      // Leading and trailing samples, with at most one trailing timer. A long
-      // scroll is consequently durable as it goes, while its exact resting
-      // point is written no more than a quarter second later.
+      // Leading and trailing samples, one trailing timer: a long scroll is
+      // durable as it goes, its resting point written a quarter second later.
       if (recentViewTimerRef.current !== undefined) {
         return
       }
@@ -1974,21 +1847,16 @@ function DocumentSession(
   }, [flushRecentView, rememberCurrentView])
 
   /**
-   * Fetches the fallback face, then re-runs the edit that wanted it.
-   *
-   * The retry is the whole point: by now the note's text is in `unfontedEdit`
-   * and nowhere else. A failed fetch leaves it there and keeps the offer on
-   * screen, so it can be taken again rather than costing the reader what they
-   * typed.
+   * The retry is the point: the note's text is in `unfontedEdit` and nowhere
+   * else, so a failed fetch keeps both and the offer can be taken again.
    */
   const fetchNoteFont = useCallback(async () => {
     const offer = noteFontOfferRef.current
 
     setFetchingNoteFont(true)
 
-    // Only the fetch is caught here: an edit that fails after it reports
-    // through `onAnnotateError`, and reading that as a download failure would
-    // send the reader to check a connection that had just worked.
+    // Only the fetch is caught: an edit failing after it reports through
+    // `onAnnotateError`, not as a download failure to blame a connection for.
     try {
       await invoke("download_pdf_note_font")
     } catch {
@@ -2134,10 +2002,8 @@ function DocumentSession(
       id={panelElementId(openedDocument.id)}
       role="tabpanel"
     >
-      {/* pb-px keeps the content box an even height: without it the bottom
-          border leaves 47px, and centring a 32px control there puts its own
-          border on a half pixel, which the WebView rounds per element — some
-          outlines paint 1px solid, others two half-intensity rows. */}
+      {/* pb-px keeps the content box even: a 47px row centres a 32px control
+          on a half pixel, which the WebView rounds per element, fringing it. */}
       <header
         className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
         data-tauri-drag-region="deep"
@@ -2148,8 +2014,6 @@ function DocumentSession(
             macOS && "pl-[72px]",
           )}
         >
-          {/* The window menu leads the left-hand controls, immediately before
-              this document's bookmark and search actions. */}
           {active ? (
             <AppMenu
               {...menu}
@@ -2171,8 +2035,6 @@ function DocumentSession(
               <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
             </Toggle>
           </ToolbarTooltip>
-          {/* The three that act on the document itself, grouped apart from
-              the view controls after them, which act only on the reading. */}
           <ButtonGroup>
             {/* The chord is named only when it works: a disabled save
                 spends the tooltip on why it cannot. */}
@@ -2277,11 +2139,8 @@ function DocumentSession(
               aria-label={t("toolbar.pageNumberInput")}
               className={cn(
                 "h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground",
-                // The field goes on holding the number — it is what a typed
-                // jump starts from, and what the field itself reads out as its
-                // value — but hands the drawing of it to the odometer, which
-                // would otherwise be read through the field's own text standing
-                // still underneath.
+                // The field holds the value for typed jumps and screen readers,
+                // but the odometer does the drawing, over transparent text.
                 !pageInputFocused &&
                   "text-transparent disabled:text-transparent",
               )}
@@ -2308,10 +2167,8 @@ function DocumentSession(
               type="text"
               value={pageInput}
             />
-            {/* Over the field, and deaf to the pointer, so a click still lands
-                in the field it covers. Forced colours override the field's
-                transparent text, so there the field draws its own number again
-                and this has to stand down rather than double it. */}
+            {/* Deaf to the pointer, so a click lands in the field it covers;
+                forced colours un-hide the field's text, so this stands down. */}
             {pageInputFocused ? null : (
               <PageOdometer
                 className={cn(
@@ -2333,8 +2190,6 @@ function DocumentSession(
         </div>
 
         <div className="flex items-center gap-1 justify-self-end">
-          {/* Leading the right-hand tools: undo and redo answer every mark and
-              page edit made with them, not the view controls opposite. */}
           <HistoryControls
             canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
@@ -2342,11 +2197,8 @@ function DocumentSession(
             nextRedo={annotations.nextRedo}
             nextUndo={annotations.nextUndo}
             onRedo={() => {
-              // Only a page-moving step would strand the note on a page that has
-              // shifted or gone, and undo/redo cannot take the uncommitted note
-              // as their target; so the draft is discarded before such a step,
-              // but an annotation step (a highlight, say) leaves it to finish.
-              // The target is the head of the queue's live history.
+              // Only a page-moving step would strand the uncommitted note on a
+              // shifted page; the target is the head of the queue's live history.
               const target = annotations.historyNow().future.at(-1)?.command
               if (target && movesPages(target)) {
                 cancelTextNote()
@@ -2401,9 +2253,8 @@ function DocumentSession(
           />
         ) : null}
 
-        {/* The viewer's own scroll box cannot host the zoom readout — anything
-            absolute inside it is placed against the scrolled content and would
-            drift off the middle of the screen. This box holds still around it. */}
+        {/* The viewer's scroll box cannot host the readout: anything absolute
+            inside it is placed against scrolled content and would drift. */}
         <div className="relative min-w-0 flex-1">
           <main
             className="relative size-full overflow-auto bg-zinc-200/70 dark:bg-zinc-950"
@@ -2459,9 +2310,8 @@ function DocumentSession(
         </div>
       </div>
 
-      {/* Outside the viewer's own scroll box, in the screen space it positions
-          itself against — inside, it would scroll away from the page it belongs
-          to and turn with the page it sits on. */}
+      {/* Outside the viewer's scroll box, in the screen space it positions
+          itself against — inside, it would scroll away with the page it is on. */}
       {textNote.draft && pdfDocument?.pages[textNote.draft.pageNumber - 1] ? (
         <TextNoteEditor
           draft={textNote.draft}

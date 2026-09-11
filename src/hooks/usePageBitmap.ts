@@ -5,41 +5,29 @@ import { resolveOutputScale } from "@/lib/pdf"
 
 type PageBitmapOptions = {
   canvasRef: RefObject<HTMLCanvasElement | null>
-  /** Tauri command rendering the page, e.g. `render_pdf_page`. */
   command: string
   documentId: number
   isNearViewport: boolean
   /** Backend ceiling for the render width; the backend rejects wider. */
   maxRenderWidth: number
-  /** MIME type of the bytes `command` returns. */
   mimeType: string
-  /** Minimum backing pixels per CSS pixel; useful for low-DPI reading surfaces. */
   minOutputScale?: number
   /** Runs in the same task as the canvas replacement, before browser paint. */
   onPaint?: (pageNumber: number, renderEpoch: number) => void
-  /** The page's displayed size in points. Taken apart rather than as a
-      `PdfPageInfo` so a caller whose page list is replaced wholesale — every
-      structure edit replaces it — hands this hook numbers that compare equal
-      instead of a fresh object. */
+  /** Numbers, not a `PdfPageInfo`: structure edits replace the page list, and
+      primitives compare equal where a fresh object would not. */
   pageHeight: number
   pageNumber: number
   pageWidth: number
   /**
-   * Bumped when the page's content changes: the same page at the same width
-   * renders differently once it has been drawn on, which nothing else about a
-   * render request would reveal.
+   * Bumped when the page's content changes: drawing on it changes the render
+   * at the same width, which nothing else about the request would reveal.
    */
   renderEpoch: number
   rotation: number
-  /** CSS pixels the bitmap has to cover. Zero or less defers the render. */
   targetWidth: number
 }
 
-/**
- * Paints `pageNumber` onto `canvasRef` once it is near the viewport, and repaints
- * only when the resolved render width changes. Shared by the page and thumbnail
- * views, which differ just in their command, image format, and width ceiling.
- */
 export function usePageBitmap({
   canvasRef,
   command,
@@ -81,20 +69,14 @@ export function usePageBitmap({
       window.devicePixelRatio,
       minOutputScale,
     )
-    // A 90°/270° rotation makes the page's width span more CSS pixels for a
-    // landscape page (its long side becomes the height the column caps), and
-    // rotation itself does not re-render. Render at that wider target so a
-    // rotated landscape page stays sharp; portrait pages get smaller when
-    // rotated, so the base target already covers them (scale stays 1).
+    // A rotated landscape page spans more CSS pixels and rotation alone does
+    // not re-render; portrait shrinks, so the base target already covers it.
     const rotationScale =
       rotation === 90 || rotation === 270
         ? Math.max(1, pageWidth / pageHeight)
         : 1
-    // The output-scale floor is a render *intent*, not a guarantee: once heavy
-    // zoom pushes `targetWidth * outputScale * rotationScale` past
-    // `maxRenderWidth`, the render is clamped and the effective backing ratio
-    // drops back below the floor — at the extreme the text is a touch softer
-    // than the floor promises.
+    // The output-scale floor is an intent, not a guarantee: past
+    // `maxRenderWidth` the render is clamped and the backing ratio drops below it.
     const renderWidth = Math.round(
       Math.min(maxRenderWidth, targetWidth * outputScale * rotationScale),
     )

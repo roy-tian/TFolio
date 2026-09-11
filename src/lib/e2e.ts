@@ -1,30 +1,20 @@
 /**
- * The GUI suite's stand-ins for what WebDriver cannot drive.
- *
- * Tauri seals `__TAURI_INTERNALS__.invoke` (non-writable, non-configurable),
- * so a test cannot stub the IPC boundary from outside, and the WDIO service's
- * mocks wrap only the `withGlobalTauri` copy — not the bundled API this app
- * calls. The seam therefore has to be the app's own. It is live only in the
- * `e2e` build: everywhere else the mode check is a compile-time constant and
- * the branch — hook and all — is dropped from the bundle.
+ * Tauri seals `__TAURI_INTERNALS__.invoke`, so the e2e seam must be the app's
+ * own; the mode check is a compile-time constant, dead in every other build.
  */
 import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
 export type E2eOverrides = {
-  /** Stands in for the native save dialog and export command. */
   exportPdf?: (args: {
     documentId: number
     filterLabel: string
     suggestedName: string
   }) => Promise<PdfExportOutcome | null>
-  /** Stands in for the native open-file dialog: a path, or null for cancel. */
   pickPdfPath?: () => Promise<string | null>
   /** Stands in for `open_pdf_from_path`, so a spec can hand the backend bytes
       with no path at all — the state the save key's disabled case needs. */
   openPdfFromPath?: (path: string) => Promise<unknown>
-  /** Stands in for the merge wizard's multi-select dialog: the paths chosen,
-      or none for cancel. */
   pickPdfPaths?: () => Promise<string[]>
   /** Stands in for the OS print dialog, which no driver can answer: the real
       one blocks the window until a person closes it. */
@@ -51,8 +41,7 @@ export type E2eOverrides = {
     },
     onProgress: (progress: PdfProgress) => void,
   ) => Promise<PdfDocumentInfo>
-  /** Stands in for both archive exports, which put up a native save dialog no
-      driver can answer. The path written, or null for a dismissed dialog. */
+  /** Both archive exports put up a native save dialog no driver can answer. */
   exportPdfArchive?: (
     command: string,
     args: Record<string, unknown>,

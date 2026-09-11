@@ -27,10 +27,8 @@ export type HistoryAction = {
 }
 
 /**
- * What a history entry did, named for the reader rather than for the tool that
- * made it: an erased mark is an erase whichever mark it was, and a watermark
- * command is told apart by what it leaves behind — the config it sets and the
- * one it replaces, since all three of adding, changing and clearing are it.
+ * Named for the reader, not the tool: a watermark command is told apart by
+ * what it leaves behind, all three of adding, changing and clearing being it.
  */
 export function historyAction(command: AnnotationCommand): HistoryAction {
   switch (command.kind) {

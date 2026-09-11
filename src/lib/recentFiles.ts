@@ -4,9 +4,8 @@ import { fileNameFromPath } from "@/lib/pdf"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 import { MAX_ZOOM, MIN_ZOOM, type ZoomMode, type ZoomState } from "@/lib/zoom"
 
-/** How many of the backend's list the home tab shows. It keeps more than this,
-    so the shorter list still fills up once files that have since gone are left
-    out of it. */
+/** The home tab's share of the backend's list, which keeps more so the
+    shorter list still fills once files that have gone are left out. */
 export const RECENT_FILE_LIMIT = 5
 
 export type RecentFile = {
@@ -56,9 +55,8 @@ function isPageNumber(value: unknown): value is number {
 }
 
 /**
- * Checks the app-owned record again at the WebView boundary. An older app or a
- * hand edit may have left a shape this version cannot place; that costs only
- * this convenience, never opening the PDF.
+ * Checked again at the WebView boundary: an older app or a hand edit may
+ * have left a shape this version cannot place.
  */
 export function parseRecentPdfView(value: unknown): RecentPdfView | null {
   if (!isRecord(value) || !isRecord(value.zoom) || !isRecord(value.position)) {
@@ -113,8 +111,7 @@ export function directoryFromPath(path: string) {
   const directory = path.slice(0, index)
 
   // A file directly under a root leaves only the root before the separator —
-  // nothing on POSIX, a bare drive on Windows — and there the separator is
-  // part of the folder's name rather than a divider inside it.
+  // nothing on POSIX, a bare drive on Windows — where it belongs to the name.
   return directory === "" || /^[A-Za-z]:$/.test(directory)
     ? path.slice(0, index + 1)
     : directory
@@ -132,12 +129,8 @@ export function describeRecentFiles(
 }
 
 /**
- * The recently opened files the backend still finds on disk.
- *
- * The list lives there rather than in this WebView's storage because it is the
- * durable half of the approved-path set: a path only reopens if the backend
- * watched the OS produce it, and only the backend can say that of a path from
- * an earlier run.
+ * Kept by the backend, not this WebView's storage: it is the durable half of
+ * the approved-path set, and only the backend can vouch for an earlier run.
  */
 export async function readRecentFiles(): Promise<RecentFile[]> {
   try {
@@ -149,7 +142,6 @@ export async function readRecentFiles(): Promise<RecentFile[]> {
   }
 }
 
-/** The view last kept for a recent path, if this version can use it. */
 export async function readRecentPdfView(
   path: string,
 ): Promise<RecentPdfView | null> {
@@ -163,9 +155,8 @@ export async function readRecentPdfView(
 }
 
 /**
- * Keeps one recent PDF's view. Like the list itself this is a convenience: a
- * failed write must not interrupt scrolling, zooming, or closing a document.
- * The backend ignores paths that a successful open did not already record.
+ * A convenience, like the list itself: a failed write must not interrupt
+ * scrolling or closing, and the backend ignores paths no open recorded.
  */
 export async function storeRecentPdfView(
   path: string,
@@ -174,7 +165,6 @@ export async function storeRecentPdfView(
   try {
     await invoke("set_recent_pdf_view", { path, view })
   } catch {
-    // The open document remains fully usable when its convenience file cannot
-    // be written.
+    // The document stays fully usable when its convenience write fails.
   }
 }

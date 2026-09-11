@@ -46,7 +46,6 @@ import {
   type ThemePreference,
 } from "@/lib/theme"
 
-/** Which pane the dialog opens on; the menu names one when it opens it. */
 export type SettingsSection = "appearance" | "imports" | "about"
 
 const sections: Array<{
@@ -375,9 +374,8 @@ export function SettingsDialog({
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  {/* The write is a convenience like every remembered
-                      setting: a failure to record it never fails the switch,
-                      which already shows what was chosen. */}
+                  {/* A failure to record never fails the switch, which already
+                      shows what was chosen. */}
                   <Switch
                     checked={wordConversion}
                     id="settings-word-conversion"

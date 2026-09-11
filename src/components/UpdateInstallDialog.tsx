@@ -17,13 +17,8 @@ type UpdateInstallDialogProps = {
   open: boolean
 }
 
-/**
- * What the reader is asked before an install takes the app away.
- *
- * Not a notice: the corner reports, and this one step needs an answer before
- * anything happens — a restart discards unsaved work in every window, not only
- * the one the offer was pressed in.
- */
+/** Asked before an install takes the app away: a restart discards unsaved work
+    in every window, not only the one the offer was pressed in. */
 export function UpdateInstallDialog({
   onConfirm,
   onOpenChange,

@@ -6,19 +6,13 @@ import {
 } from "@/lib/textNoteLayout"
 
 type TextNotePreviewProps = {
-  /** The unrotated page's size in points, which is this layer's own box. */
   layoutHeight: number
   layoutWidth: number
   note: HeldNote
 }
 
-/**
- * A written note standing in for its pixels until the page carries them.
- *
- * Drawn as SVG rather than a styled box because only a `<text>` puts a baseline
- * exactly where it is asked to, which is what `add_text_note` places lines by;
- * a CSS line box would add whatever half-leading its face happens to want.
- */
+/** A written note standing in for its pixels. SVG because only a `<text>` puts
+    a baseline exactly where `add_text_note` places lines; CSS adds half-leading. */
 export function TextNotePreview({
   layoutHeight,
   layoutWidth,

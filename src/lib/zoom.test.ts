@@ -22,7 +22,6 @@ import {
   zoomToPercent,
 } from "./zoom"
 
-// A stock A4 page, in PDF points.
 const a4: PdfPageInfo = { height: 842, rotation: 0, width: 595 }
 const page = (width: number, height: number): PdfPageInfo => ({
   height,
@@ -49,9 +48,8 @@ describe("zoomToPercent", () => {
 })
 
 describe("POINT_TO_PX", () => {
-  // What 100% means, and the one figure another reader can be checked against:
-  // A4 is 210mm — 8.27in — across, which is 794 pixels at the 96 DPI CSS
-  // assumes. A point-for-pixel scale would render it 595 and be a quarter short.
+  // A4 is 210mm across — 794 pixels at the 96 DPI CSS assumes — the one figure
+  // another reader can be checked against.
   test("puts a page at its paper size at 100%", () => {
     expect(Math.round(595.276 * POINT_TO_PX)).toBe(794)
     // US Letter, 8.5in across.
@@ -91,7 +89,6 @@ describe("referenceDimensions", () => {
     })
   })
 
-  // Rotating the document swaps what a page spans, so a fit has to follow it.
   test("applies the user rotation", () => {
     expect(referenceDimensions([a4], [90])).toEqual({
       referenceHeight: px(595),
@@ -137,7 +134,6 @@ describe("bookColumnWidth", () => {
 })
 
 describe("autoScale", () => {
-  // The sizing a uniform document has always opened at, now spelled as a scale.
   test("fills a narrow column", () => {
     expect(autoScale(500, 595, 595)).toBeCloseTo(500 / 595)
   })
@@ -181,7 +177,6 @@ describe("fitDimensions", () => {
     referenceHeight: 842 * POINT_TO_PX,
     referenceWidth: 595 * POINT_TO_PX,
   }
-  // A portrait document with one landscape page in it.
   const mixed = [a4, page(842, 595)]
 
   test("measures the page the fit was asked from, in CSS pixels", () => {

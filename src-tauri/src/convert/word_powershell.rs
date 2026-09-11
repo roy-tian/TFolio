@@ -1,14 +1,5 @@
-//! Microsoft Word and WPS Writer on Windows, through the automation model
-//! both of them implement — reached the way a script reaches it, over
-//! PowerShell, because the raw COM surface this crate's `windows` version
-//! exposes is an untyped union with none of the safety the script runtime
-//! already has. One script run serves the whole batch: one Word startup,
-//! every file, one quit.
-//!
-//! The script is staged by this engine and fixed; every path reaches it as
-//! an argument, never as text spliced into code, so a filename with a quote
-//! in it is a filename still. `|` cannot appear in a Windows filename, which
-//! is what the pairing on the command line leans on.
+//! Word/WPS automation over PowerShell (raw COM here is an untyped union);
+//! paths reach the fixed script as arguments, never spliced into its code.
 
 use std::{
     fs,
@@ -25,10 +16,8 @@ use super::{
 pub(crate) const WORD_PROG_ID: &str = "Word.Application";
 pub(crate) const WPS_PROG_ID: &str = "KWPS.Application";
 
-/// One script run, one answer per file on standard output:
-/// `OK|<input path>` or `FAIL|<input path>|<message>`. What a run was killed
-/// before answering stays unanswered — those files are this engine's
-/// refusals, and the chain offers them to the next engine.
+/// One line per file on stdout — `OK|<input>` or `FAIL|<input>|<message>`;
+/// files a killed run never answered become refusals for the next engine.
 const CONVERT_SCRIPT: &str = r#"
 param([string]$ProgId, [string[]]$Pairs)
 $ErrorActionPreference = 'Stop'
@@ -65,10 +54,8 @@ try {
 }
 "#;
 
-/// Whether an automation class is registered. Click-to-Run Office registers
-/// per user and MSI installs per machine, but HKCR is the merged view of
-/// both — and looking is all this does: no class is activated, so nothing
-/// starts.
+/// HKCR is the merged view of per-user (Click-to-Run) and per-machine (MSI)
+/// registration; looking activates nothing.
 pub(crate) fn prog_id_installed(prog_id: &str) -> bool {
     windows_registry::CLASSES_ROOT.open(prog_id).is_ok()
 }
@@ -164,9 +151,8 @@ impl ConvertSession for Session {
     }
 }
 
-/// One file's answer, read from its line: `OK|<path>`, or
-/// `FAIL|<path>|<message>`. A line that is neither is a script that never
-/// got going — this file's answer is no answer.
+/// A line in neither shape is a script that never got going — this file's
+/// answer is no answer.
 fn answer_for(line: &str, job: &ConvertJob) -> Result<(), String> {
     let mut parts = line.splitn(3, '|');
 

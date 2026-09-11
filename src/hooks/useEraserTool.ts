@@ -9,11 +9,6 @@ import {
 import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 
-/**
- * How far the pointer may travel between press and release and still count as a
- * click, in CSS pixels. A press that wanders further was the reader changing
- * their mind or nudging the window, not aiming at a mark.
- */
 const CLICK_SLOP = 4
 
 type UseEraserToolOptions = {
@@ -25,10 +20,8 @@ type UseEraserToolOptions = {
 }
 
 /**
- * The eraser takes a mark off with a click on it: press and release on the same
- * spot, so a press that lands on the wrong mark can still be dragged off before
- * it counts. What is under the point is the backend's to answer — it holds the
- * annotations — so this only turns a click into a page and a point on it.
+ * What is under the point is the backend's to answer — it holds the annotations
+ * — so this only turns a click into a page and a point on it.
  */
 export function useEraserTool({
   active,
@@ -42,9 +35,8 @@ export function useEraserTool({
       return
     }
 
-    // The element rather than the box it had at `pointerdown`: the viewer still
-    // scrolls under a pointer that has not itself moved, and the release is
-    // measured against where the page is by then.
+    // The element, not the box it had at `pointerdown`: the viewer can scroll
+    // under a still pointer, so the release reads where the page is by then.
     let gesture: {
       element: Element
       page: PdfPageInfo
@@ -57,8 +49,6 @@ export function useEraserTool({
     const handlePointerDown = (event: PointerEvent) => {
       gesture = null
 
-      // Only the primary button of the primary pointer erases, as with every
-      // other tool: a right-click or a second finger is not aiming at a mark.
       if (event.button !== 0 || !event.isPrimary) {
         return
       }

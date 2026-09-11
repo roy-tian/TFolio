@@ -2,25 +2,18 @@ use pdfium_render::prelude::*;
 
 use super::PagePointsRect;
 
-/// The page's intrinsic clockwise `/Rotate` in degrees (0/90/180/270), or 0 if
-/// PDFium cannot report it.
 pub(super) fn page_rotation_degrees(page: &PdfPage<'_>) -> f32 {
     page.rotation()
         .map(|rotation| rotation.as_degrees())
         .unwrap_or(0.0)
 }
 
-/// A page's height in its own *unrotated* coordinate space.
-///
-/// `height()` is the displayed height, `/Rotate` already applied, so a 90°/270°
-/// page's unrotated height is its displayed *width*. Every flip between PDFium's
-/// bottom-left origin and the frontend's top-left goes through this, so the two
-/// directions cannot disagree about which edge the y-axis starts at.
+/// `height()` is the displayed height, `/Rotate` already applied, so a
+/// 90°/270° page's unrotated height is its displayed width.
 pub(super) fn unrotated_page_height(page: &PdfPage<'_>) -> f32 {
     unrotated_page_size(page).1
 }
 
-/// A page's width and height before its intrinsic `/Rotate` is applied.
 pub(super) fn unrotated_page_size(page: &PdfPage<'_>) -> (f32, f32) {
     let rotation = page_rotation_degrees(page);
 
@@ -31,15 +24,11 @@ pub(super) fn unrotated_page_size(page: &PdfPage<'_>) -> (f32, f32) {
     }
 }
 
-/// A4 at 72 points to the inch: 210 x 297 mm, the sheet a normalized merge
-/// fits every page onto. Held here rather than taken from
-/// `PdfPagePaperSize::a4()` because the placement arithmetic below is pure and
-/// must be testable without PDFium loaded.
+/// Held here rather than `PdfPagePaperSize::a4()` so the placement arithmetic
+/// stays pure and testable without PDFium loaded.
 pub(super) const A4_SHORT_POINTS: f32 = 595.276;
 pub(super) const A4_LONG_POINTS: f32 = 841.89;
 
-/// Where one page lands once it is fitted to an A4 sheet: the sheet's own size,
-/// the factor the page is drawn at, and the offset that centres it there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct A4Placement {
     pub(super) sheet_width: f32,
@@ -49,17 +38,8 @@ pub(super) struct A4Placement {
     pub(super) bottom: f32,
 }
 
-/// Fits a page of `width` x `height` *displayed* points onto an A4 sheet.
-///
-/// A page that already fits is never enlarged — it keeps its own size in the
-/// middle of the sheet — and one that does not is shrunk on both axes by the
-/// same factor. The sheet turns landscape only where that is the orientation
-/// the page fits better in, so portrait wins every tie: a small page fits both
-/// ways at full size, and portrait is the one a reader expects.
-///
-/// Sizes that are not finite and positive cannot be fitted to anything; they
-/// come back as an unscaled portrait sheet, which leaves the page where PDFium
-/// put it rather than moving it by a nonsense offset.
+/// A page that fits is never enlarged, and portrait wins every tie. Unusable
+/// sizes come back as an unscaled portrait sheet, moving the page by no offset.
 pub(super) fn a4_placement(width: f32, height: f32) -> A4Placement {
     let portrait = |scale: f32| A4Placement {
         sheet_width: A4_SHORT_POINTS,
@@ -115,15 +95,8 @@ pub(super) fn annotation_color(hex: &str, opacity: f32) -> Result<PdfColor, Stri
     Ok(color.with_alpha((opacity.clamp(0.0, 1.0) * 255.0).round() as u8))
 }
 
-/// The four quad points a text markup annotation is drawn from.
-///
-/// Hand-built rather than `PdfQuadPoints::from_rect`, which winds the corners
-/// anticlockwise from the bottom left. PDF orders them by *position* — top-left,
-/// top-right, bottom-left, bottom-right — and PDFium reads the third pair's x as
-/// the left edge and the second pair's as the right. Fed the anticlockwise
-/// winding it takes both from the right-hand corners, so left equals right and
-/// the highlight is a rectangle of zero width: stored, saved, reported by every
-/// accessor, never drawn.
+/// Hand-built because `PdfQuadPoints::from_rect` winds the corners
+/// anticlockwise, which PDFium reads as a zero-width highlight that never draws.
 pub(super) fn quad_points_from_rect(rect: &PdfRect) -> PdfQuadPoints {
     PdfQuadPoints::new(
         rect.left(),
@@ -137,13 +110,8 @@ pub(super) fn quad_points_from_rect(rect: &PdfRect) -> PdfQuadPoints {
     )
 }
 
-/// Whether `(x, y)` — in PDFium's own bottom-left page space — lands on what
-/// this annotation draws.
-///
-/// A text markup annotation's `/Rect` encloses every run it covers, so a
-/// highlight wrapped across three lines would answer for the whole block down
-/// to its ragged right edge. Its quad points are what it actually paints, so
-/// they are what a point is tested against wherever it has them.
+/// A markup annotation's `/Rect` encloses every line it covers; its quad points
+/// are what it actually paints, so they are tested wherever it has them.
 pub(super) fn annotation_covers(annotation: &PdfPageAnnotation<'_>, x: f32, y: f32) -> bool {
     let points = annotation.attachment_points();
 
@@ -163,28 +131,23 @@ fn rect_covers(rect: &PdfRect, x: f32, y: f32) -> bool {
         && y <= rect.top().value
 }
 
-/// The ceiling on a coordinate a rectangle carries, in page points. The PDF spec
-/// caps a page's MediaBox at 14400pt; this leaves generous room past that, so a
-/// real annotation always fits while an absurd value from the WebView falls
-/// outside and is refused.
+/// The PDF spec caps a MediaBox at 14400pt; headroom past that admits a real
+/// annotation while refusing an absurd value from the WebView.
 const MAX_PAGE_POINTS: f32 = 100_000.0;
 
-/// The ranges a rectangle's style values may use. These mirror the sliders in
-/// `src/lib/annotationStyles.ts` — together they are the app's one contract for
-/// a rectangle style — so keep the two in step if a slider's range changes.
+/// These mirror the sliders in `src/lib/annotationStyles.ts` — keep the two in
+/// step if a slider's range changes.
 pub(super) const MIN_RECT_OPACITY: f32 = 0.1;
 pub(super) const MIN_RECT_EFFECT_STRENGTH: f32 = 2.0;
 pub(super) const MAX_RECT_EFFECT_STRENGTH: f32 = 24.0;
 
-/// The ranges a text note's style values may use, held to the same contract with
-/// `src/lib/annotationStyles.ts` as the rectangle constants above.
+/// The same contract with `src/lib/annotationStyles.ts` as the rectangle constants.
 pub(super) const MIN_TEXT_NOTE_OPACITY: f32 = 0.1;
 pub(super) const MIN_TEXT_NOTE_FONT_SIZE: f32 = 6.0;
 pub(super) const MAX_TEXT_NOTE_FONT_SIZE: f32 = 72.0;
 
-/// A ceiling on a note's length. Every character is a glyph in the subset this
-/// note embeds and every line is a PDFium call made under the lock renders wait
-/// on, so a pasted novel is refused rather than left to stall the app.
+/// Every character is a glyph in the note's subset and every line a PDFium call
+/// under the lock, so a pasted novel is refused rather than stalling the app.
 pub(super) const MAX_TEXT_NOTE_CHARS: usize = 4096;
 pub(super) const MAX_TEXT_NOTE_LINES: usize = 256;
 
@@ -192,15 +155,12 @@ pub(super) const MAX_TEXT_NOTE_LINES: usize = 256;
 /// font size — normal prose leading, since a note is prose.
 pub(super) const TEXT_NOTE_LINE_HEIGHT: f32 = 1.2;
 
-/// How far a note's bounds sit outside its ink, in page points.
 pub(super) const TEXT_NOTE_BOUNDS_MARGIN: f32 = 1.0;
 
-/// Whether `value` is a coordinate a rectangle could really carry.
 pub(super) fn within_page_range(value: f32) -> bool {
     value.is_finite() && value.abs() <= MAX_PAGE_POINTS
 }
 
-/// The smallest rectangle covering every one of `rects`, or `None` if empty.
 pub(super) fn union_rect(rects: &[PdfRect]) -> Option<PdfRect> {
     rects.iter().copied().reduce(|union, rect| {
         PdfRect::new(
@@ -218,11 +178,9 @@ mod tests {
 
     #[test]
     fn holds_page_values_to_a_usable_range() {
-        // A real page and annotation sit well inside the range.
         assert!(within_page_range(0.0));
         assert!(within_page_range(-14400.0));
         assert!(within_page_range(14400.0));
-        // Non-finite or absurd is outside it, whichever sign.
         assert!(!within_page_range(f32::NAN));
         assert!(!within_page_range(f32::INFINITY));
         assert!(!within_page_range(f32::MAX));
@@ -260,7 +218,6 @@ mod tests {
 
         assert_eq!(tall.sheet_width, A4_SHORT_POINTS);
         assert!((tall.scale - A4_SHORT_POINTS / 900.0).abs() < 0.001);
-        // Shrunk on both axes by the one factor, and centred on what is left.
         assert!(tall.left.abs() < 0.001);
         assert!((tall.bottom - (A4_LONG_POINTS - 1000.0 * tall.scale) / 2.0).abs() < 0.001);
 

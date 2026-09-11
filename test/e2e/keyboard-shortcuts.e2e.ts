@@ -77,7 +77,6 @@ function visibleInk() {
   }, visible)
 }
 
-/** Selects the page's one text run and lets go, the way the reader highlights. */
 async function highlightTheText() {
   // A Toggle: clicking the tool while it is active would put it away again.
   const tool = $(`${visible} button[aria-label='Highlight text']`)

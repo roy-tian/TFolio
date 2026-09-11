@@ -43,7 +43,6 @@ const defaultWatermarkWidthRatios = {
   zebra: 0.3,
 } as const satisfies Record<WatermarkLayout, number>
 
-/** The useful starting size for each repeat pattern. */
 export function defaultWatermarkWidthRatio(layout: WatermarkLayout): number {
   return defaultWatermarkWidthRatios[layout]
 }
@@ -69,12 +68,8 @@ export function isWatermarkLayout(value: unknown): value is WatermarkLayout {
   return watermarkLayouts.includes(value as WatermarkLayout)
 }
 
-/**
- * Mirrors `watermark_rotation` in `src-tauri/src/pdfium/watermark.rs`: the mark
- * leans along the page's own diagonal, so a full-width one runs corner to
- * corner whatever proportions the sheet has. Clockwise degrees, as CSS and
- * PDFium both read them.
- */
+/** Mirrors `watermark_rotation` in `watermark.rs`: the mark leans along the
+    page's diagonal, clockwise degrees as CSS and PDFium both read them. */
 export function watermarkRotation(
   direction: WatermarkDirection,
   displayWidth: number,
@@ -85,11 +80,8 @@ export function watermarkRotation(
   return direction === "ascending" ? -diagonal : diagonal
 }
 
-/**
- * Mirrors `watermark_font_size`: the size at which the mark covers its share of
- * the page width, from the same mark measured at `WATERMARK_REFERENCE_FONT_SIZE`.
- * Both arguments must be in the same unit, and the result comes back in it.
- */
+/** Mirrors `watermark_font_size`: arguments share a unit, and the result
+    comes back in it. */
 export function watermarkFontSize(
   widthRatio: number,
   displayWidth: number,
@@ -113,12 +105,8 @@ export function watermarkZebraSpacing(fontSize: number) {
 }
 
 /**
- * Cuts `text` to the unit the validator and `MAX_WATERMARK_CHARS` in
- * `watermark.rs` both count in: Unicode code points. The field cannot use
- * `maxLength` for this — that counts UTF-16 code units, which stops a watermark
- * of emoji or other astral characters at half the allowance the two validators
- * grant. Keeping the cut here rather than dropping the cap entirely also keeps
- * a pasted novel out of the live preview.
+ * `maxLength` counts UTF-16 code units, not the code points the validators
+ * count; the cut also keeps a pasted novel out of the live preview.
  */
 export function clampWatermarkText(text: string): string {
   const points = [...text]
@@ -171,9 +159,8 @@ export function sameWatermarkConfig(
 }
 
 /**
- * The reader's last applied watermark, text included — unlike the styles the
- * annotation tools keep, this one is the whole setting, so the next document
- * opens on the mark this reader always applies rather than an empty field.
+ * Text included, unlike the styles the annotation tools keep: the next
+ * document opens on the mark this reader always applies.
  */
 export function readStoredWatermarkConfig(): WatermarkConfig | null {
   const stored = storedSettings().watermark
@@ -184,9 +171,8 @@ export function readStoredWatermarkConfig(): WatermarkConfig | null {
 
   const config = stored as WatermarkConfig
 
-  // The settings file may have been written by an older version of the app, or
-  // edited by hand, so a stored mark earns its way back in through the same
-  // check the dialog applies — and comes back as its four fields alone.
+  // The file may be older than this app or hand-edited, so a stored mark
+  // earns its way back through the same check the dialog applies.
   return typeof config.text === "string" &&
     validateWatermarkConfig(config) === null
     ? {

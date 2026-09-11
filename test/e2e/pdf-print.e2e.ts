@@ -6,13 +6,10 @@ import { minimalPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings } f
 
 type PrintSeam = Window & {
   __tfolioE2E?: E2eOverrides
-  /** How many times the app has asked for the OS dialog this run. */
   __tfolioPrints?: number
-  /** Every CSP refusal since the collector went on, as "directive src". */
   __tfolioCspViolations?: string[]
 }
 
-/** One page of the sheet, as the printer would take it. */
 type SheetPage = {
   complete: boolean
   naturalWidth: number
@@ -39,7 +36,6 @@ async function countPrintRequests() {
   })
 }
 
-/** Prints, and answers with the sheet the request went out with. */
 async function printAndReadSheet(): Promise<SheetPage[]> {
   await countPrintRequests()
   await $("[data-slot='pdf-print-trigger']").click()

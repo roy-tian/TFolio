@@ -6,16 +6,14 @@ pub(super) const MAX_WATERMARK_OBJECTS_PER_PAGE: usize = 512;
 pub(super) const MIN_WATERMARK_WIDTH_RATIO: f32 = 0.1;
 pub(super) const MAX_WATERMARK_WIDTH_RATIO: f32 = 1.0;
 
-/// The look the reader does not choose. Mirrored by `src/lib/watermark.ts`, so
-/// the dialog's preview shows the ink the page will carry.
+/// Mirrored by `src/lib/watermark.ts`, so the dialog's preview shows this ink.
 pub(super) const WATERMARK_COLOR: &str = "#64748b";
 pub(super) const WATERMARK_OPACITY: f32 = 0.25;
 /// The zebra gap as a share of the font size, so one density holds at any size.
 pub(super) const WATERMARK_ZEBRA_GAP_RATIO: f32 = 1.5;
 
-/// The size the mark is measured at before it is scaled to the share of the
-/// page width the reader asked for. Any size would do; a large one keeps the
-/// ratio clear of the rounding a 1pt box would carry into it.
+/// Any reference size would do; a large one keeps the ratio clear of the
+/// rounding a 1pt box would carry into it.
 pub(super) const WATERMARK_REFERENCE_FONT_SIZE: f32 = 100.0;
 /// Bounds on the *derived* size — a guard against a degenerate measurement or a
 /// hostile page box, not a choice offered to the reader.
@@ -26,7 +24,6 @@ pub(super) const MAX_WATERMARK_FONT_SIZE: f32 = 1_000.0;
 #[serde(rename_all = "camelCase")]
 pub struct WatermarkConfig {
     pub(super) text: String,
-    /// The mark's width as a share of the page's displayed width.
     pub(super) width_ratio: f32,
     pub(super) direction: WatermarkDirection,
     pub(super) layout: WatermarkLayout,
@@ -35,9 +32,7 @@ pub struct WatermarkConfig {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum WatermarkDirection {
-    /// Reads from the page's bottom-left corner towards its top-right.
     Ascending,
-    /// Reads from the page's top-left corner towards its bottom-right.
     Descending,
 }
 
@@ -55,9 +50,6 @@ pub(super) struct WatermarkPlacement {
 }
 
 impl WatermarkConfig {
-    /// Validates every value that crossed the WebView boundary. Angle and font
-    /// size are no longer among them — the page decides both — so what is left
-    /// is the text and the share of the width it should span.
     pub(super) fn validated(mut self) -> Result<Self, String> {
         self.text = self.text.trim().to_owned();
         if self.text.is_empty() {
@@ -91,9 +83,8 @@ fn is_usable_size(value: f32) -> bool {
     value.is_finite() && value > 0.0
 }
 
-/// The angle the mark reads along, in clockwise degrees from the page's normal
-/// displayed direction: the page's own diagonal, so a full-width mark runs
-/// corner to corner whatever proportions the sheet has.
+/// The page's own diagonal, so a full-width mark runs corner to corner at any
+/// sheet proportions.
 pub(super) fn watermark_rotation(
     direction: WatermarkDirection,
     display_width: f32,
@@ -113,10 +104,8 @@ pub(super) fn watermark_rotation(
     })
 }
 
-/// The font size at which the mark covers `width_ratio` of the page's displayed
-/// width. `measured_width` is the same mark's displayed width at
-/// `WATERMARK_REFERENCE_FONT_SIZE`; text bounds scale with the size, so the two
-/// are one ratio apart.
+/// Text bounds scale with the size, so one measured width at the reference size
+/// fixes the size for any target share.
 pub(super) fn watermark_font_size(
     width_ratio: f32,
     display_width: f32,
@@ -139,9 +128,8 @@ pub(super) fn watermark_zebra_spacing(font_size: f32) -> f32 {
     font_size * WATERMARK_ZEBRA_GAP_RATIO
 }
 
-/// How many steps of `step` it takes to reach `distance`, as a count that keeps
-/// its meaning when the step is a hair's breadth: the per-page object limit is
-/// what actually stops a grid that fine, and it is checked as tiles are made.
+/// Clamped, so a hair's-breadth step keeps its meaning: the per-page object
+/// limit is what actually stops a grid that fine.
 fn steps_to_cover(distance: f32, step: f32) -> i32 {
     let steps = (distance / step).ceil();
 
@@ -169,9 +157,8 @@ pub(super) fn add_document_object_count(
     Ok(total)
 }
 
-/// Produces target centres in unrotated page space. The caller measures the
-/// already-rotated text first, so these steps describe what readers actually
-/// see rather than the unrotated font box.
+/// The caller measures the already-rotated text, so these steps describe what
+/// readers see, not the unrotated font box.
 pub(super) fn watermark_placements(
     page_width: f32,
     page_height: f32,
@@ -201,10 +188,8 @@ pub(super) fn watermark_placements(
         return Err("a watermark grid has an unusable step".into());
     }
 
-    // The grid is laid out from the middle of the page rather than from a
-    // corner, so a mark too big to repeat inside the page still leaves one
-    // whole copy where a single mark would have been, with the neighbours
-    // running off the edges around it.
+    // Laid out from the middle, so a mark too big to repeat still leaves one
+    // whole copy where a single mark would have been.
     let middle_x = page_width / 2.0;
     let middle_y = page_height / 2.0;
     let columns = steps_to_cover(middle_x + text_width, step_x);
@@ -212,9 +197,8 @@ pub(super) fn watermark_placements(
     let mut placements = Vec::new();
 
     for row in -rows..=rows {
-        // Odd rows shift half a step to the right, which costs that half at the
-        // left edge; the extra column goes there rather than leaving a wedge
-        // uncovered — the shift itself already covers the right.
+        // Odd rows shift half a step right, costing that half at the left edge;
+        // the extra column covers it.
         let offset = if row % 2 == 0 { 0.0 } else { step_x / 2.0 };
 
         for column in -columns - 1..=columns {
@@ -297,8 +281,6 @@ mod tests {
 
     #[test]
     fn the_derived_size_scales_the_measured_mark_to_the_asked_share() {
-        // A mark measuring 300pt wide at the reference size covers half a
-        // 600pt page at twice that size.
         assert_eq!(
             watermark_font_size(1.0, 600.0, 300.0).unwrap(),
             WATERMARK_REFERENCE_FONT_SIZE * 2.0

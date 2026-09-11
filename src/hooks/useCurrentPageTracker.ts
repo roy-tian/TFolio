@@ -4,12 +4,8 @@ import { pickCurrentPage, type PageCandidate } from "@/lib/pdf"
 import type { ViewMode } from "@/lib/viewMode"
 
 /**
- * Reports whichever page sits nearest the viewer's reading line as it scrolls.
- *
- * Every layout tags its pages with `data-page-number`, so this stays layout
- * agnostic. It does re-run on `viewMode` though: switching modes re-parents each
- * page node, and the observer would otherwise keep watching detached elements
- * and silently stop reporting.
+ * Re-runs on `viewMode`: switching modes re-parents every page node, and the
+ * observer would keep watching detached elements and silently stop reporting.
  */
 export function useCurrentPageTracker(
   viewerRef: RefObject<HTMLElement | null>,
@@ -28,8 +24,7 @@ export function useCurrentPageTracker(
     const viewer = viewerRef.current
 
     // A zoom preview moves the document on the compositor without changing its
-    // layout boxes. Tracking that transient picture would report stale geometry
-    // and compete with the gesture; reconnect after the committed layout lands.
+    // layout boxes, so tracking it reports stale geometry; wait for the commit.
     if (!viewer || documentId === undefined || paused) {
       return
     }
