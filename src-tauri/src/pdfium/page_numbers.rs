@@ -239,7 +239,7 @@ pub(super) fn is_blank_sample(rgba: &[u8]) -> bool {
     let mut ink = 0u32;
     let mut count = 0u32;
 
-    for pixel in rgba.chunks_exact(4) {
+    for pixel in rgba.as_chunks::<4>().0 {
         let alpha = pixel[3] as f32 / 255.0;
         let luminance = (1.0 - alpha) + alpha * relative_luminance(pixel[0], pixel[1], pixel[2]);
 
@@ -351,7 +351,7 @@ pub(super) fn average_luminance(rgba: &[u8]) -> f32 {
     let mut sum = 0.0f32;
     let mut count = 0u32;
 
-    for pixel in rgba.chunks_exact(4) {
+    for pixel in rgba.as_chunks::<4>().0 {
         sum += relative_luminance(pixel[0], pixel[1], pixel[2]);
         count += 1;
     }

@@ -1570,7 +1570,7 @@ impl PdfiumEngine {
         // `pdfium-render::set_image()` performs this RGBA -> BGRA copy after it
         // has created a PDFium bitmap. Shuffle the owned bytes while unlocked,
         // then hand that buffer to a PdfBitmap during the short commit phase.
-        for pixel in bgra.chunks_exact_mut(4) {
+        for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
 
