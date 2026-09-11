@@ -74,6 +74,7 @@ export function RectDraftOverlay({
   return (
     <div
       className="pointer-events-none absolute"
+      data-slot="rect-draft-preview"
       style={{
         backgroundColor: treatsPixels ? undefined : style.color,
         height: `${rect.height * 100}%`,

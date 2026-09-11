@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { SliderRow } from "@/components/SliderRow"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import {
   Popover,
@@ -58,18 +59,19 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
           </p>
           {usesColor ? null : (
             <Popover>
-              <PopoverTrigger
-                render={
-                  <Button
-                    aria-label={t("annotate.effectAbout")}
-                    size="icon-xs"
-                    title={t("annotate.effectAbout")}
-                    variant="ghost"
-                  />
-                }
-              >
-                <Info />
-              </PopoverTrigger>
+              <ToolbarTooltip label={t("annotate.effectAbout")} side="top">
+                <PopoverTrigger
+                  render={
+                    <Button
+                      aria-label={t("annotate.effectAbout")}
+                      size="icon-xs"
+                      variant="ghost"
+                    />
+                  }
+                >
+                  <Info />
+                </PopoverTrigger>
+              </ToolbarTooltip>
               <PopoverContent align="end" className="w-64">
                 <p
                   className="text-xs leading-relaxed text-muted-foreground"

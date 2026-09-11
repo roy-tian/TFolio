@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import {
+  pagesToRotate,
   rotationForPage,
   rotationsAfterRotate,
   rotationsForPageCount,
@@ -9,36 +10,30 @@ import {
 const selected = (...pages: number[]) => new Set(pages)
 
 describe("rotationsAfterRotate", () => {
-  it("rotates every page in the single and book views", () => {
-    expect(rotationsAfterRotate([0, 90, 180], "single", selected(2))).toEqual([
-      90,
-      180,
-      270,
-    ])
-    expect(rotationsAfterRotate([0, 90, 180], "book", selected(2))).toEqual([
-      90,
-      180,
-      270,
-    ])
-  })
-
-  it("rotates only selected pages in the thumbnail view", () => {
-    expect(
-      rotationsAfterRotate([0, 0, 0, 0], "thumbnail", selected(2, 4)),
-    ).toEqual([0, 90, 0, 90])
-  })
-
-  it("rotates every thumbnail when none or all are selected", () => {
-    expect(
-      rotationsAfterRotate([0, 90, 180], "thumbnail", selected()),
-    ).toEqual([90, 180, 270])
-    expect(
-      rotationsAfterRotate([0, 90, 180], "thumbnail", selected(1, 2, 3)),
-    ).toEqual([90, 180, 270])
+  it("turns every page of a reading view a quarter further", () => {
+    expect(rotationsAfterRotate([0, 90, 180])).toEqual([90, 180, 270])
   })
 
   it("wraps a full turn back to upright", () => {
-    expect(rotationsAfterRotate([270], "thumbnail", selected(1))).toEqual([0])
+    expect(rotationsAfterRotate([270])).toEqual([0])
+  })
+})
+
+describe("pagesToRotate", () => {
+  it("turns only the selected pages", () => {
+    expect(pagesToRotate(4, selected(2, 4))).toEqual([2, 4])
+  })
+
+  it("turns the whole document when nothing is selected", () => {
+    expect(pagesToRotate(3, selected())).toEqual([1, 2, 3])
+  })
+
+  it("reads a complete selection as the same whole document", () => {
+    expect(pagesToRotate(3, selected(1, 2, 3))).toEqual([1, 2, 3])
+  })
+
+  it("leaves out a selected page the document no longer has", () => {
+    expect(pagesToRotate(2, selected(2, 5))).toEqual([2])
   })
 })
 

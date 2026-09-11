@@ -11,15 +11,21 @@ import {
   fillErasedPages,
   fillInsertFileOutcome,
   insertFilePages,
+  insertPagesRange,
   isDirty,
   markSaved,
+  nextRedoCommand,
+  nextUndoCommand,
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
+  planDuplicatePages,
   planEraseAnnotation,
   planInsertBlankPage,
   planInsertFile,
+  planInsertPages,
   planPageNumbersChange,
   planReorderPages,
+  planRotatePages,
   planWatermarkChange,
   redo,
   retargetCommand,
@@ -31,6 +37,7 @@ import {
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
+import { e2eOverride } from "@/lib/e2e"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
   PdfExportOutcome,
@@ -54,10 +61,19 @@ function progressChannel(onProgress?: ProgressHandler) {
   return channel
 }
 
+/**
+ * How a structure command left the page list: an array is new slot -> previous
+ * page number, for existing pages that only moved; `"inPlace"` is an edit that
+ * moved nothing at all, and so leaves everything held by page number — the
+ * selection, the clipboard, the grid's own identities — still true.
+ */
+type PageMovement = number[] | "inPlace"
+
 /** Where a structure command's fresh metadata lands, applied or undone. */
 type StructureChangeHandler = (
   documentId: number,
   update: PdfStructureUpdate,
+  movement?: PageMovement,
 ) => void
 
 type UseAnnotationsOptions = {
@@ -223,6 +239,18 @@ async function applyCommand(
           documentId,
           order: command.order,
         }),
+        command.order,
+      )
+      return []
+    case "rotatePages":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rotate_pdf_pages", {
+          degrees: command.degrees,
+          documentId,
+          pageNumbers: command.pages,
+        }),
+        "inPlace",
       )
       return []
     case "deletePages":
@@ -245,9 +273,11 @@ async function applyCommand(
       )
       return []
     case "insertFile":
-      // Only ever a redo here — the first apply reads the file through
-      // `insertFile` below. A redo restores the pages the undo stashed rather
-      // than re-reading the file, which may have changed on disk since.
+    case "insertPages":
+    case "duplicatePages":
+      // Only ever a redo here — the first apply reads the pages across through
+      // `insertFile`/`insertPages` below. A redo restores what the undo stashed
+      // rather than re-reading a file, or a document, that may have moved on.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("restore_pdf_pages", {
@@ -357,6 +387,20 @@ async function retractCommand(
           documentId,
           order: command.inverse,
         }),
+        command.inverse,
+      )
+      return []
+    case "rotatePages":
+      // The rest of the way round, which is what puts each page back however
+      // far it was turned to begin with.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rotate_pdf_pages", {
+          degrees: 360 - command.degrees,
+          documentId,
+          pageNumbers: command.pages,
+        }),
+        "inPlace",
       )
       return []
     case "deletePages":
@@ -390,6 +434,18 @@ async function retractCommand(
         await invoke<PdfStructureUpdate>("delete_pdf_pages", {
           documentId,
           pageNumbers: insertFilePages(command),
+          stashId: command.stashId,
+        }),
+      )
+      return []
+    case "insertPages":
+    case "duplicatePages":
+      // The same undo, over the block the drag or the paste brought in.
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("delete_pdf_pages", {
+          documentId,
+          pageNumbers: insertPagesRange(command),
           stashId: command.stashId,
         }),
       )
@@ -433,6 +489,8 @@ export function useAnnotations({
 }: UseAnnotationsOptions) {
   const [history, setHistory] = useState<AnnotationHistory>(emptyHistory)
   const [renderEpochs, setRenderEpochs] = useState<RenderEpochs>({})
+  // Commit receipts need the queue's exact epoch, before React renders it.
+  const renderEpochsRef = useRef<RenderEpochs>({})
   const [textEpochs, setTextEpochs] = useState<RenderEpochs>({})
   const [pending, setPending] = useState(0)
   // The synchronous counterpart to `pending`: guards cannot wait for React to
@@ -463,15 +521,14 @@ export function useAnnotations({
   const marksRef = useRef<MarkStore>(new Map())
 
   const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
-    setRenderEpochs((epochs) => {
-      const next = { ...epochs }
+    const next = { ...renderEpochsRef.current }
 
-      for (const pageNumber of pageNumbers) {
-        next[pageNumber] = (next[pageNumber] ?? 0) + 1
-      }
+    for (const pageNumber of pageNumbers) {
+      next[pageNumber] = (next[pageNumber] ?? 0) + 1
+    }
 
-      return next
-    })
+    renderEpochsRef.current = next
+    setRenderEpochs(next)
     if (textPages.length > 0) {
       setTextEpochs((epochs) => {
         const next = { ...epochs }
@@ -483,6 +540,7 @@ export function useAnnotations({
         return next
       })
     }
+    return next
   }, [])
 
   /**
@@ -513,6 +571,8 @@ export function useAnnotations({
             on, which a structure edit may have renumbered since the command
             that made it. Redrawn alongside `pages`. */
         touched?: () => number[]
+        /** Identifies the first bitmap request that includes this commit. */
+        onApplied?: (epochs: RenderEpochs) => void
       } | null,
       onFailure: (error: unknown) => void,
     ) => {
@@ -537,8 +597,9 @@ export function useAnnotations({
           return
         }
 
+        let happened = false
         try {
-          const happened = await step.work()
+          happened = await step.work()
 
           if (generation !== generationRef.current) {
             return
@@ -561,10 +622,13 @@ export function useAnnotations({
           // Whether or not the work succeeded: a command that failed partway
           // still changed the pages it reached.
           if (generation === generationRef.current) {
-            applyEpochs(
+            const epochs = applyEpochs(
               [...step.pages, ...(step.touched?.() ?? [])],
               step.textPages,
             )
+            if (happened) {
+              step.onApplied?.(epochs)
+            }
           }
         }
       })
@@ -578,9 +642,12 @@ export function useAnnotations({
   )
 
   const commitCommand = useCallback(
-    async (command: AnnotationCommand) => {
+    async (
+      command: AnnotationCommand,
+      onApplied?: (epochs: RenderEpochs) => void,
+    ) => {
       if (documentId === undefined) {
-        return
+        return false
       }
 
       // A drawing or note carries the page it was made on; a page-moving edit
@@ -588,11 +655,16 @@ export function useAnnotations({
       // wrong one. Dropped rather than misplaced — a rare gesture, one the
       // reader can simply repeat.
       if (structurePendingRef.current > 0) {
-        return
+        return false
       }
 
+      let applied = false
       await enqueue(
         (current) => ({
+          onApplied: (epochs) => {
+            applied = true
+            onApplied?.(epochs)
+          },
           next: commit(current, command),
           pages: commandPages(command),
           textPages: commandTextPages(command),
@@ -611,6 +683,7 @@ export function useAnnotations({
         }),
         (error) => onAnnotateError(error, command),
       )
+      return applied
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
@@ -676,6 +749,12 @@ export function useAnnotations({
 
   const reorderPages = useCallback(
     (order: number[]) => commitStructure((current) => planReorderPages(current, order)),
+    [commitStructure],
+  )
+
+  const rotatePages = useCallback(
+    (pages: number[], degrees: number) =>
+      commitStructure((current) => planRotatePages(current, pages, degrees)),
     [commitStructure],
   )
 
@@ -756,6 +835,144 @@ export function useAnnotations({
       }
 
       return inserted
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  /**
+   * Copies `sourcePages` out of another open document into this one at `index`
+   * — a thumbnail drag that crossed to this document's tab. Like `insertFile`
+   * it cannot go through `commitStructure`, whose apply path is the redo's:
+   * the first apply reads the pages across, and only a redo restores the stash.
+   *
+   * The pages are the source grid's own numbers and the position is this grid's,
+   * both read off the screen — which is why the caller, like every other grid
+   * gesture, declines a drop while a page-shifting edit is in flight.
+   */
+  const insertPages = useCallback(
+    async (
+      sourceDocumentId: number,
+      sourcePages: number[],
+      index: number,
+      pageCount: number,
+    ) => {
+      if (documentId === undefined) {
+        return false
+      }
+
+      let landed = false
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planInsertPages(
+            current,
+            sourceDocumentId,
+            sourcePages,
+            index,
+            pageCount,
+          )
+
+          if (!planned) {
+            // A position this document does not have — the grid the gap was
+            // read off has since been renumbered. A null plan reaches neither
+            // the success nor the failure path, so it is said here.
+            onAnnotateError()
+            return null
+          }
+
+          return {
+            next: planned.history,
+            pages: commandPages(planned.command),
+            textPages: commandTextPages(planned.command),
+            work: async () => {
+              onStructureChange(
+                documentId,
+                await invoke<PdfStructureUpdate>(
+                  "insert_pdf_pages_from_document",
+                  {
+                    documentId,
+                    index,
+                    // The plan's own block: sorted and deduplicated, so the
+                    // range the undo deletes is the one the backend copied.
+                    pageNumbers: planned.command.sourcePages,
+                    sourceDocumentId,
+                  },
+                ),
+              )
+              landed = true
+              return true
+            },
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+      }
+
+      return landed
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  /**
+   * Copies this document's own `sourcePages` back into it at `index` — the
+   * grid's paste. It takes `insertPages`' path rather than `commitStructure`'s
+   * for the same reason: there the apply *is* the redo, and a redo of a paste
+   * restores the pages its undo stashed instead of copying them a second time.
+   */
+  const duplicatePages = useCallback(
+    async (sourcePages: number[], index: number, pageCount: number) => {
+      if (documentId === undefined) {
+        return false
+      }
+
+      let landed = false
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planDuplicatePages(
+            current,
+            sourcePages,
+            index,
+            pageCount,
+          )
+
+          if (!planned) {
+            // A page or a position this document no longer has: the grid both
+            // were read off has since been renumbered. A null plan reaches
+            // neither the success nor the failure path, so it is said here.
+            onAnnotateError()
+            return null
+          }
+
+          return {
+            next: planned.history,
+            pages: commandPages(planned.command),
+            textPages: commandTextPages(planned.command),
+            work: async () => {
+              onStructureChange(
+                documentId,
+                await invoke<PdfStructureUpdate>("duplicate_pdf_pages", {
+                  documentId,
+                  index,
+                  // The plan's own block: sorted and deduplicated, so the range
+                  // the undo deletes is the one the backend copied.
+                  pageNumbers: planned.command.sourcePages,
+                }),
+              )
+              landed = true
+              return true
+            },
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+      }
+
+      return landed
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
@@ -1086,11 +1303,11 @@ export function useAnnotations({
           pages: [],
           textPages: [],
           work: async () => {
-            const outcome = await invoke<PdfExportOutcome | null>("export_pdf", {
-              documentId,
-              filterLabel,
-              suggestedName,
-            })
+            const args = { documentId, filterLabel, suggestedName }
+            const override = e2eOverride("exportPdf")
+            const outcome = override
+              ? await override(args)
+              : await invoke<PdfExportOutcome | null>("export_pdf", args)
 
             if (!outcome) {
               // The reader cancelled the dialog; nothing happened.
@@ -1159,6 +1376,7 @@ export function useAnnotations({
     marksRef.current = new Map()
     setHistory(emptyHistory)
     setRenderEpochs({})
+    renderEpochsRef.current = {}
     setTextEpochs({})
   }, [])
 
@@ -1171,20 +1389,25 @@ export function useAnnotations({
       cancelOperation,
       commit: commitCommand,
       deletePages,
+      duplicatePages,
       eraseAt,
       exportCopy,
       hasPendingWorkNow,
       historyNow,
       insertBlankPage,
       insertFile,
+      insertPages,
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,
+      nextRedo: nextRedoCommand(history),
+      nextUndo: nextUndoCommand(history),
       pageNumbersConfig: currentPageNumbersConfig(history),
       redo: redoCommand,
       reorderPages,
       renderEpochs,
       reset,
+      rotatePages,
       save,
       setPageNumbers,
       setWatermark,
@@ -1196,6 +1419,7 @@ export function useAnnotations({
       cancelOperation,
       commitCommand,
       deletePages,
+      duplicatePages,
       eraseAt,
       exportCopy,
       hasPendingWorkNow,
@@ -1203,6 +1427,7 @@ export function useAnnotations({
       historyNow,
       insertBlankPage,
       insertFile,
+      insertPages,
       isBusy,
       isDirtyNow,
       isStructureBusyNow,
@@ -1210,6 +1435,7 @@ export function useAnnotations({
       renderEpochs,
       reorderPages,
       reset,
+      rotatePages,
       save,
       setPageNumbers,
       setWatermark,

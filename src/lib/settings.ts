@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 
 /**
  * The one place the app's settings are read and written.
@@ -22,6 +23,16 @@ export type Settings = {
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }
   watermark?: unknown
   pageNumbers?: unknown
+  import?: { wordConversion?: unknown }
+}
+
+/** Whether the import wizard may drive the machine's own office suites to
+    convert Word documents. Absent is yes: that is this version's default,
+    and the setting is the reader's way of opting out. */
+export function wordConversionEnabled(): boolean {
+  const stored = storedSettings().import?.wordConversion
+
+  return typeof stored === "boolean" ? stored : true
 }
 
 let current: Settings = {}
@@ -52,6 +63,37 @@ export function storedSettings(): Settings {
   return current
 }
 
+const SETTINGS_CHANGED_EVENT = "settings://changed"
+
+// Every subscriber that renders a setting, woken by each snapshot swap.
+const listeners = new Set<() => void>()
+
+/** Subscribes to the loaded snapshot's changes — a local remember, or another
+    window's write arriving — with the unsubscribe function React's
+    `useSyncExternalStore` asks for. */
+export function subscribeSettings(listener: () => void): () => void {
+  listeners.add(listener)
+
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function announce() {
+  listeners.forEach((listener) => listener())
+}
+
+// Writes replace the whole document, so other windows must update this snapshot first.
+export function watchSettings() {
+  void listen<unknown>(SETTINGS_CHANGED_EVENT, (event) => {
+    // Pending local edits must not be replaced by an incoming snapshot.
+    if (loaded && unacknowledged === 0 && isSettings(event.payload)) {
+      current = event.payload
+      announce()
+    }
+  }).catch(() => undefined)
+}
+
 /**
  * Folds `patch` into the settings and writes them out. Sections merge by field,
  * so a caller names only what it changed; a field's value is replaced whole,
@@ -67,6 +109,7 @@ export function rememberSettings(patch: Settings): Promise<boolean> {
   }
 
   current = merged(current, patch)
+  announce()
 
   return persist()
 }
@@ -76,7 +119,12 @@ export function rememberSettings(patch: Settings): Promise<boolean> {
     could leave the older of the two there. */
 let writing: Promise<unknown> = Promise.resolve()
 
+// A counter is needed because several local writes can be queued at once.
+let unacknowledged = 0
+
 function persist(): Promise<boolean> {
+  unacknowledged += 1
+
   const written = writing.then(async () => {
     try {
       // The whole document, not the patch: this copy is the current one, and a
@@ -87,6 +135,8 @@ function persist(): Promise<boolean> {
       return true
     } catch {
       return false
+    } finally {
+      unacknowledged -= 1
     }
   })
 
@@ -105,6 +155,7 @@ function merged(base: Settings, patch: Settings): Settings {
     ...patch,
     ui: mergedSection(base.ui, patch.ui),
     annotate: mergedSection(base.annotate, patch.annotate),
+    import: mergedSection(base.import, patch.import),
   }
 }
 

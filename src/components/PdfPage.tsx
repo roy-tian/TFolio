@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
+import { TextNotePreview } from "@/components/TextNotePreview"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import type { RectDraft } from "@/hooks/useRectTool"
+import type { TextNotePreview as HeldNote } from "@/hooks/useTextNoteTool"
 import {
   dimensionsForRotation,
   MAX_RENDER_WIDTH,
@@ -51,8 +53,14 @@ type IndexedSearchMatch = {
 type PdfPageProps = {
   activeSearchIndex: number | null
   documentId: number
-  /** The rectangle being dragged out on this page, if any. */
-  draft?: RectDraft
+  /** Live and released rectangles awaiting this page's pixels. */
+  drafts: RectDraft[]
+  /** Written notes awaiting this page's pixels. */
+  notes: HeldNote[]
+  /** Present only while a select-all stands: the page's menu then offers the
+      whole document, which is what is selected, and not this page alone. */
+  onCopyAllText?: () => void
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   page: PdfPageInfo
   pageNumber: number
   /** Bumped when the page is drawn on, so the bitmap is fetched again. */
@@ -82,7 +90,10 @@ type PdfPageProps = {
 type PdfPageSurfaceProps = {
   activeSearchIndex: number | null
   documentId: number
-  draft?: RectDraft
+  drafts: RectDraft[]
+  notes: HeldNote[]
+  onCopyAllText?: () => void
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   footprintHeight: number
   footprintWidth: number
   page: PdfPageInfo
@@ -99,10 +110,13 @@ type PdfPageSurfaceProps = {
  * a page releases its canvas backing store, extracted text, and annotation
  * preview instead of letting a long reading session retain all of them.
  */
-function PdfPageSurface({
+const PdfPageSurface = memo(function PdfPageSurface({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  notes,
+  onCopyAllText,
+  onPagePaint,
   footprintHeight,
   footprintWidth,
   page,
@@ -127,6 +141,7 @@ function PdfPageSurface({
     maxRenderWidth: MAX_RENDER_WIDTH,
     mimeType: "image/png",
     minOutputScale: MIN_PAGE_OUTPUT_SCALE,
+    onPaint: onPagePaint,
     pageHeight: page.height,
     pageNumber,
     pageWidth: page.width,
@@ -184,7 +199,7 @@ function PdfPageSurface({
         const scaleX = naturalWidth > 0 ? span.width / naturalWidth : 1
 
         return {
-          fontSize: `${(span.height / layoutHeight) * 100}cqh`,
+          fontSize: span.height,
           left: `${(span.left / layoutWidth) * 100}%`,
           text: span.text,
           top: `${(span.top / layoutHeight) * 100}%`,
@@ -233,6 +248,18 @@ function PdfPageSurface({
           ref={canvasRef}
           width={Math.max(1, Math.round(page.width))}
         />
+        {notes.length > 0 ? (
+          <div className="pointer-events-none absolute" style={pageLayerStyle}>
+            {notes.map((note) => (
+              <TextNotePreview
+                key={note.id}
+                layoutHeight={layoutHeight}
+                layoutWidth={layoutWidth}
+                note={note}
+              />
+            ))}
+          </div>
+        ) : null}
         {hasRendered && positionedSearchRects.length > 0 ? (
           <div
             aria-hidden
@@ -255,7 +282,7 @@ function PdfPageSurface({
           </div>
         ) : null}
         {hasRendered && positionedSpans.length > 0 ? (
-          <PageTextMenu style={pageLayerStyle}>
+          <PageTextMenu onCopyAll={onCopyAllText} style={pageLayerStyle}>
             {positionedSpans.map((span, index) => (
               <span
                 key={index}
@@ -285,23 +312,27 @@ function PdfPageSurface({
           </span>
         </div>
       ) : null}
-      {draft ? (
+      {drafts.map((draft) => (
         <RectDraftOverlay
           draft={draft}
+          key={draft.id}
           pageWidth={page.width}
           rotation={rotation}
           sourceCanvasRef={canvasRef}
           sourceRevision={bitmapRevision}
         />
-      ) : null}
+      ))}
     </>
   )
-}
+})
 
 export function PdfPage({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  notes,
+  onCopyAllText,
+  onPagePaint,
   page,
   pageNumber,
   renderEpoch,
@@ -335,6 +366,16 @@ export function PdfPage({
   const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
   const targetRenderWidth =
     renderWidth ?? footprintWidth * POINT_TO_PX * renderScale
+  const surfaceScale = displayWidth / footprintWidth
+  // Keep the surface's props stable while only the outer page size changes.
+  const pageDrafts = useMemo(
+    () => drafts.filter((draft) => draft.pageNumber === pageNumber),
+    [drafts, pageNumber],
+  )
+  const pageNotes = useMemo(
+    () => notes.filter((note) => note.pageNumber === pageNumber),
+    [notes, pageNumber],
+  )
 
   return (
     <div
@@ -346,20 +387,35 @@ export function PdfPage({
       style={{ aspectRatio: footprintWidth / footprintHeight, width: displayWidth }}
     >
       {isNearViewport ? (
-        <PdfPageSurface
-          activeSearchIndex={activeSearchIndex}
-          documentId={documentId}
-          draft={draft}
-          footprintHeight={footprintHeight}
-          footprintWidth={footprintWidth}
-          page={page}
-          pageNumber={pageNumber}
-          renderEpoch={renderEpoch}
-          renderWidth={targetRenderWidth}
-          rotation={rotation}
-          searchMatches={searchMatches}
-          textEpoch={textEpoch}
-        />
+        <div
+          className="absolute left-0 top-0 origin-top-left"
+          data-pdf-page-surface
+          // Fixed page coordinates avoid laying out every text span on resize.
+          // Canvas, selection, search and draft marks share the same transform.
+          style={{
+            height: footprintHeight,
+            transform: `scale3d(${surfaceScale}, ${surfaceScale}, 1)`,
+            width: footprintWidth,
+          }}
+        >
+          <PdfPageSurface
+            activeSearchIndex={activeSearchIndex}
+            documentId={documentId}
+            drafts={pageDrafts}
+            notes={pageNotes}
+            onCopyAllText={onCopyAllText}
+            onPagePaint={onPagePaint}
+            footprintHeight={footprintHeight}
+            footprintWidth={footprintWidth}
+            page={page}
+            pageNumber={pageNumber}
+            renderEpoch={renderEpoch}
+            renderWidth={targetRenderWidth}
+            rotation={rotation}
+            searchMatches={searchMatches}
+            textEpoch={textEpoch}
+          />
+        </div>
       ) : null}
     </div>
   )

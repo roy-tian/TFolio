@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
+  AppWindow,
   FilePlus2,
   FolderOpen,
   History,
@@ -8,12 +9,14 @@ import {
   LogOut,
   Menu,
   Save,
+  SaveAll,
   Settings,
   SquareX,
   Upload,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import {
   SettingsDialog,
   type SettingsSection,
@@ -26,18 +29,22 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { RecentFile } from "@/lib/recentFiles"
+import { formatShortcut, shortcuts } from "@/lib/shortcuts"
 
 /** The entries that act on the workspace rather than on one document, so the
     home tab's menu and every document's carry the same ones. */
 export type AppMenuActions = {
   /** Whether anything is open to close. */
   canCloseAll: boolean
+  /** Whether any open document may be written back over its own file. */
+  canSaveAll: boolean
   onCloseAll: () => void
   /** Opens the merge wizard, which builds a document of its own rather than
       touching the one on screen — a workspace action like opening a file. Not
@@ -45,11 +52,16 @@ export type AppMenuActions = {
       (`MergeWizardButton`), and this bag is how it reaches every header. */
   onMergeWizard: () => void
   onNew: () => void
+  onNewWindow: () => void
   onOpen: () => void
   onOpenRecent: (path: string) => void
   /** Read the recent list again as the menu opens: it is the backend's, and a
       document tab's menu would otherwise show whatever the home tab last saw. */
   onRefreshRecent: () => void
+  /** Writes back every open document that may be: one keystroke for a session
+      spread over several tabs. Workspace-wide, so it is the menu's alone —
+      no document's toolbar speaks for the tabs beside it. */
+  onSaveAll: () => void
   recentFiles: RecentFile[]
 }
 
@@ -64,19 +76,22 @@ type AppMenuProps = AppMenuActions & {
 }
 
 /**
- * The window's one menu, at the left end of every header: the file actions the
- * toolbar no longer carries, the recent list the home tab shows, and the
+ * The window's one menu, at the left end of every header: the file actions
+ * with no key of their own, the recent list the home tab shows, and the
  * app-level entries under them.
  */
 export function AppMenu({
   canCloseAll,
   canSave = false,
+  canSaveAll,
   onCloseAll,
   onNew,
+  onNewWindow,
   onOpen,
   onOpenRecent,
   onRefreshRecent,
   onSave,
+  onSaveAll,
   onSaveAs,
   recentFiles,
   saveHint,
@@ -119,10 +134,23 @@ export function AppMenu({
             <DropdownMenuItem data-action="new" onClick={onNew}>
               <FilePlus2 />
               {t("menu.new")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.new)}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem data-action="new-window" onClick={onNewWindow}>
+              <AppWindow />
+              {t("menu.newWindow")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.newWindow)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem data-action="open" onClick={onOpen}>
               <FolderOpen />
               {t("menu.openFile")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.open)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger data-action="open-recent">
@@ -136,31 +164,35 @@ export function AppMenu({
                   </DropdownMenuItem>
                 ) : (
                   recentFiles.map((file) => (
-                    <DropdownMenuItem
-                      data-action="recent"
-                      key={file.path}
-                      onClick={() => onOpenRecent(file.path)}
-                      title={file.path}
-                    >
-                      <span className="truncate">{file.name}</span>
-                    </DropdownMenuItem>
+                    <HintTooltip key={file.path} label={file.path} side="right">
+                      <DropdownMenuItem
+                        data-action="recent"
+                        onClick={() => onOpenRecent(file.path)}
+                      >
+                        <span className="truncate">{file.name}</span>
+                      </DropdownMenuItem>
+                    </HintTooltip>
                   ))
                 )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuItem
-              // The hint is only ever set while the item is disabled, and a
-              // disabled item is `pointer-events: none` — which would leave the
-              // browser with no hover to hang the tooltip on.
-              className="data-disabled:pointer-events-auto"
-              data-action="save"
-              disabled={!canSave}
-              onClick={onSave}
-              title={saveHint}
-            >
-              <Save />
-              {t("annotate.save")}
-            </DropdownMenuItem>
+            <HintTooltip label={saveHint} side="right">
+              <DropdownMenuItem
+                // The hint is only ever set while the item is disabled, and a
+                // disabled item is `pointer-events: none` — which would leave
+                // the tooltip with no hover to open on.
+                className="data-disabled:pointer-events-auto"
+                data-action="save"
+                disabled={!canSave}
+                onClick={onSave}
+              >
+                <Save />
+                {t("annotate.save")}
+                <DropdownMenuShortcut>
+                  {formatShortcut(shortcuts.save)}
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+            </HintTooltip>
             <DropdownMenuItem
               data-action="save-as"
               disabled={!onSaveAs}
@@ -168,6 +200,20 @@ export function AppMenu({
             >
               <Upload />
               {t("menu.saveAs")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.saveAs)}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="save-all"
+              disabled={!canSaveAll}
+              onClick={onSaveAll}
+            >
+              <SaveAll />
+              {t("menu.saveAll")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.saveAll)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem
               data-action="close-all"

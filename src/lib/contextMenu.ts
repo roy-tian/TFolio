@@ -40,6 +40,25 @@ export function acceptsTypedText(field: EditableField | null): boolean {
   return tag === "textarea" || textInputTypes.has(field.type ?? "text")
 }
 
+/** Whether an event landed in a field the reader types into, where an editing
+    shortcut belongs to the field rather than to the app around it. */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    acceptsTypedText(target.closest(editableSelector))
+  )
+}
+
+/** Whether something modal stands over the workspace. While one does the
+    keyboard is its own, and the window's own keys stand down. */
+export function hasLayerOverWorkspace(): boolean {
+  return Boolean(
+    document.querySelector(
+      "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
+    ),
+  )
+}
+
 /**
  * Drops the WebView's own context menu, which is the browser's and not this
  * app's: it offers a reader reload, back and view source over a page of a PDF.

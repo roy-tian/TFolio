@@ -8,8 +8,10 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
 
 export type PdfSearchProps = {
   activeIndex: number | null
@@ -74,7 +76,7 @@ export function PdfSearch({
   return (
     <div
       aria-label={t("search.title")}
-      className="fixed top-22 right-3 z-50 flex h-10 w-88 max-w-[calc(100vw-1.5rem)] items-center gap-1 rounded-lg border bg-background p-1 shadow-lg"
+      className="fixed top-22 right-4 z-50 flex h-10 w-88 max-w-[calc(100vw-2rem)] items-center gap-1 rounded-lg border bg-background p-1 shadow-lg"
       data-slot="pdf-search"
       role="search"
     >
@@ -111,42 +113,50 @@ export function PdfSearch({
 
       <span
         aria-live="polite"
-        className="flex min-w-15 shrink-0 items-center justify-center whitespace-nowrap text-xs text-muted-foreground"
+        className={cn(
+          "flex min-w-15 shrink-0 items-center justify-center whitespace-nowrap text-xs",
+          // A search that broke is a refusal, and every other one in the app is
+          // red; grey would leave it reading like "no results".
+          failed ? "text-destructive" : "text-muted-foreground",
+        )}
         data-slot="pdf-search-status"
       >
         {searching ? <LoaderCircle className="size-3.5 animate-spin" /> : status}
         {searching ? <span className="sr-only">{status}</span> : null}
       </span>
 
-      <Button
-        aria-label={t("search.previous")}
-        disabled={!canNavigate}
-        onClick={onPrevious}
-        size="icon-sm"
-        title={t("search.previous")}
-        variant="ghost"
-      >
-        <ChevronUp />
-      </Button>
-      <Button
-        aria-label={t("search.next")}
-        disabled={!canNavigate}
-        onClick={onNext}
-        size="icon-sm"
-        title={t("search.next")}
-        variant="ghost"
-      >
-        <ChevronDown />
-      </Button>
-      <Button
-        aria-label={t("search.close")}
-        onClick={onClose}
-        size="icon-sm"
-        title={t("search.close")}
-        variant="ghost"
-      >
-        <X />
-      </Button>
+      <ToolbarTooltip label={t("search.previous")}>
+        <Button
+          aria-label={t("search.previous")}
+          disabled={!canNavigate}
+          onClick={onPrevious}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <ChevronUp />
+        </Button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={t("search.next")}>
+        <Button
+          aria-label={t("search.next")}
+          disabled={!canNavigate}
+          onClick={onNext}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <ChevronDown />
+        </Button>
+      </ToolbarTooltip>
+      <ToolbarTooltip label={t("search.close")}>
+        <Button
+          aria-label={t("search.close")}
+          onClick={onClose}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <X />
+        </Button>
+      </ToolbarTooltip>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import {
   emptySelection,
   selectionAfterClick,
   selectionAfterStructureChange,
+  selectionOfAllPages,
   type ThumbnailSelection,
 } from "@/lib/thumbnailSelection"
 
@@ -63,5 +64,25 @@ describe("selectionAfterStructureChange", () => {
   it("keeps nothing, because page numbers name different pages now", () => {
     expect(selectionAfterStructureChange().pages.size).toBe(0)
     expect(selectionAfterStructureChange().anchor).toBeNull()
+  })
+})
+
+describe("selectionOfAllPages", () => {
+  it("takes every page and anchors on the first", () => {
+    const selection = selectionOfAllPages(4)
+
+    expect(pagesOf(selection)).toEqual([1, 2, 3, 4])
+    expect(selection.anchor).toBe(1)
+  })
+
+  it("has nothing to select in a document without pages", () => {
+    expect(selectionOfAllPages(0).pages.size).toBe(0)
+    expect(selectionOfAllPages(0).anchor).toBeNull()
+  })
+
+  it("leaves a following shift-click spanning from the first page", () => {
+    const narrowed = selectionAfterClick(selectionOfAllPages(6), 3, range)
+
+    expect(pagesOf(narrowed)).toEqual([1, 2, 3])
   })
 })

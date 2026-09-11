@@ -13,9 +13,11 @@ import {
   openPdfFromBytes,
   openPdfFromDisk,
   pageInk,
+  refreshApp,
   renderedPage,
   seedSettings,
   textPdf,
+  writeScratchPdf,
 } from "./helpers"
 
 /** Selects the page's one text run and lets go, the way the reader highlights:
@@ -50,7 +52,7 @@ async function highlightTheText() {
 describe("TFolio save", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
   })
 
@@ -92,7 +94,7 @@ describe("TFolio save", () => {
     // The saved file has to hold the mark: reopened from the same path, the
     // page carries more ink than it did clean. Reloading first, because the
     // drop zone — the only way to the picker — exists only without a document.
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPathViaDialog(filePath)
     await renderedPage()
@@ -117,8 +119,15 @@ describe("TFolio save", () => {
     // Saving a copy stays on offer — for this document it is the only way to
     // a file at all.
     const saveAs = await appMenuItem("save-as")
-    await expect(saveAs).toHaveText("Save as…")
+    await expect(saveAs).toHaveText(expect.stringContaining("Save as…"))
     expect(await saveAs.getAttribute("data-disabled")).toBe(null)
     await closeAppMenu(saveAs)
+
+    // The bytes open's overrides must not outlive it: a picker-driven open
+    // on this same page lands the real two-page file, not the stale payload.
+    await openPathViaDialog(writeScratchPdf("after-bytes.pdf", textPdf(2)))
+    await expect(
+      $("[data-active='true'] [data-slot='page-status']"),
+    ).toHaveAttribute("aria-label", "Page 1 of 2")
   })
 })

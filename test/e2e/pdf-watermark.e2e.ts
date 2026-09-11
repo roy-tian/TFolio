@@ -10,8 +10,10 @@ import {
   dropZoneButton,
   openPdfFromDisk,
   pagePixelFingerprint,
+  refreshApp,
   renderedPage,
   seedSettings,
+  tooltipOn,
 } from "./helpers"
 
 async function openWatermarkDialog() {
@@ -49,7 +51,7 @@ describe("TFolio document watermark", () => {
     // Everything else unset, the stored mark included: it outlives the suite,
     // and would otherwise carry one spec's choices into the next.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("watermark.pdf", blankPdf())
     await renderedPage()
@@ -113,13 +115,13 @@ describe("TFolio document watermark", () => {
       timeoutMsg: "the page text layer never picked up the watermark",
     })
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 30_000,
       timeoutMsg: "undo did not restore the clean page",
     })
 
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 30_000,
       timeoutMsg: "redo did not restore the same watermark",
@@ -132,7 +134,7 @@ describe("TFolio document watermark", () => {
     await openWatermarkDialog()
     await $("[data-testid='watermark-text']").setValue("CANCELLED")
     await $("//button[normalize-space()='Cancel']").click()
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
     expect(await pagePixelFingerprint()).toBe(clean)
 
     await applyWatermark("ALPHA")
@@ -147,13 +149,13 @@ describe("TFolio document watermark", () => {
     expect(await extractedText()).not.toContain("ALPHA")
 
     // One undo returns to A, rather than removing the watermark altogether.
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await extractedText()).includes("ALPHA"), {
       timeout: 20_000,
       timeoutMsg: "undo did not restore the replaced watermark",
     })
 
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
       timeout: 20_000,
     })
@@ -165,7 +167,7 @@ describe("TFolio document watermark", () => {
       timeoutMsg: "explicit removal did not restore the clean page",
     })
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
       timeout: 20_000,
       timeoutMsg: "undo did not restore the explicitly removed watermark",
@@ -175,7 +177,7 @@ describe("TFolio document watermark", () => {
   it("applies from thumbnails and leaves the reader's own file alone", async () => {
     // Reopen a known path: the beforeEach fixture deliberately does not expose
     // its scratch path, while the file has to be proved untouched on disk.
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     const sourcePath = await openPdfFromDisk("watermark-save.pdf", blankPdf())
     await renderedPage()
@@ -199,7 +201,9 @@ describe("TFolio document watermark", () => {
     // and a document with no file of its own disable it too.
     const save = await appMenuItem("save")
     expect(await save.getAttribute("data-disabled")).not.toBe(null)
-    expect(await save.getAttribute("title")).toContain("exported as a copy")
+    expect(await tooltipOn("[data-action='save']")).toContain(
+      "exported as a copy",
+    )
     await closeAppMenu(save)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
 

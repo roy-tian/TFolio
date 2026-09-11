@@ -15,7 +15,7 @@
 //! file is the reader's to edit.
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use crate::{
     pdfium::{PageNumbersPreferences, WatermarkConfig},
@@ -26,6 +26,8 @@ use crate::{
 /// once into `settings.toml` and deleted, so the reader keeps the style they
 /// set and the directory keeps one file.
 const REPLACED_FILE_NAME: &str = "preferences.json";
+
+pub const SETTINGS_CHANGED_EVENT: &str = "settings://changed";
 
 /// Every setting is optional, so a version that did not write one — or a reader
 /// who deleted it by hand — leaves the frontend on its own defaults rather than
@@ -49,6 +51,8 @@ pub struct Settings {
     watermark: Option<WatermarkConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     page_numbers: Option<PageNumbersPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    import: Option<ImportPreferences>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -96,6 +100,16 @@ struct TextNotePreferences {
     opacity: f64,
 }
 
+/// How the import wizard may use the machine's own software. Nothing here
+/// reaches a document: it is which kinds of help the reader accepts, and the
+/// wizard asks again each time what this setting has settled once.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct ImportPreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    word_conversion: Option<bool>,
+}
+
 impl Stored for Settings {
     const FILE_NAME: &'static str = "settings.toml";
 
@@ -111,6 +125,7 @@ impl Stored for Settings {
             annotate: section(&table, "annotate"),
             watermark: section(&table, "watermark"),
             page_numbers: section(&table, "pageNumbers"),
+            import: section(&table, "import"),
         }
     }
 
@@ -132,8 +147,23 @@ impl Settings {
             annotate: sent_section(document, "annotate"),
             watermark: sent_section(document, "watermark"),
             page_numbers: sent_section(document, "pageNumbers"),
+            import: sent_section(document, "import"),
         }
     }
+}
+
+/// Whether the reader lets the installed office suites convert Word documents
+/// for the import wizard. Absent is `true`: accepting Word documents is this
+/// version's default, and the setting exists to opt out — invisible Office
+/// launches are not everyone's idea of an import.
+pub fn word_conversion_enabled(store: &Store<Settings>) -> bool {
+    store.read(|settings| {
+        settings
+            .import
+            .as_ref()
+            .and_then(|import| import.word_conversion)
+            .unwrap_or(true)
+    })
 }
 
 fn section<T: DeserializeOwned>(table: &toml::Table, key: &str) -> Option<T> {
@@ -191,11 +221,21 @@ pub async fn settings(store: State<'_, Store<Settings>>) -> Result<Settings, Str
 #[tauri::command]
 pub async fn set_settings(
     settings: serde_json::Value,
+    app: AppHandle,
+    window: WebviewWindow,
     store: State<'_, Store<Settings>>,
 ) -> Result<(), String> {
     let sent = Settings::sent(&settings);
+    let written = sent.clone();
 
     store.write(|stored| *stored = sent);
+
+    // Other windows write whole snapshots; a stale copy would overwrite these changes.
+    for label in app.webview_windows().into_keys() {
+        if label != window.label() {
+            let _ = app.emit_to(label.as_str(), SETTINGS_CHANGED_EVENT, &written);
+        }
+    }
 
     Ok(())
 }
@@ -232,6 +272,9 @@ mod tests {
             }),
             watermark: None,
             page_numbers: Some(page_numbers()),
+            import: Some(ImportPreferences {
+                word_conversion: Some(false),
+            }),
         }
     }
 
@@ -262,6 +305,27 @@ mod tests {
         assert!(rendered.contains("fontSize"));
         // Nothing was set there, so nothing stands in the file for it.
         assert!(!rendered.contains("[watermark]"));
+        assert!(rendered.contains("[import]"));
+        assert!(rendered.contains("wordConversion = false"));
+    }
+
+    /// The reader's own edit of the file is read back at the same grain as
+    /// the frontend's write: one section, by its wire name.
+    #[test]
+    fn word_conversion_reads_its_own_section() {
+        let settings = Settings::parse("[import]\nwordConversion = false\n");
+
+        assert_eq!(
+            settings.import.and_then(|import| import.word_conversion),
+            Some(false)
+        );
+
+        // Absent — the file an older version wrote — is the default, not a
+        // refusal the reader never made.
+        assert!(Settings::default()
+            .import
+            .and_then(|import| import.word_conversion)
+            .is_none());
     }
 
     /// The frontend's copy carries whatever the storage it replaced held, and

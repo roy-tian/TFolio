@@ -6,6 +6,7 @@ import {
   dropZoneButton,
   minimalPdf,
   openPdfFromDisk,
+  refreshApp,
   seedSettings,
   textPdf,
 } from "./helpers"
@@ -63,9 +64,46 @@ describe("TFolio PDF viewer", () => {
   before(async () => {
     // The view mode persists, so leave it unset to start from the single view.
     await seedSettings({ ui: { language: "en" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist()
   })
+
+  // The page tracker revises its input only once a navigation's scroll has
+  // landed and a frame has passed, so a page-number assertion right after a
+  // jump would pass against the stale value. Waiting for the scroll to stop
+  // plus a short margin covers the revision without a fixed long sleep.
+  async function trackerSettled(mode?: "book" | "single" | "thumbnail") {
+    // Until a switched-to layout mounts, the outgoing one's scroll reads as
+    // settled, so `mode` first waits for that layout's own container.
+    if (mode) {
+      await browser.waitUntil(
+        async () =>
+          $(
+            `[data-document-session][data-active='true'] [data-view-mode='${mode}']`,
+          ).isExisting(),
+        { timeout: 15_000, timeoutMsg: `the ${mode} layout never mounted` },
+      )
+    }
+
+    const scrollTop = () =>
+      browser.execute(
+        () =>
+          document.querySelector<HTMLElement>(
+            "[data-document-session][data-active='true'] main",
+          )!.scrollTop,
+      )
+    await browser.waitUntil(
+      async () => {
+        const first = await scrollTop()
+        await browser.pause(200)
+        return (await scrollTop()) === first
+      },
+      // A parallel run's lanes share this machine, so settling can take longer
+      // than on an idle one; the state waited on is unchanged.
+      { timeout: 20_000, timeoutMsg: "the viewer never stopped scrolling" },
+    )
+    await browser.pause(400)
+  }
 
   // The room a fit has to fill is measured off the layout itself rather than
   // recomputed from the padding the code already uses, so that a fit which
@@ -236,7 +274,7 @@ describe("TFolio PDF viewer", () => {
     // This test both asserts the single-view default and leaves a mode behind,
     // so it clears the key itself rather than leaning on the one-time `before`.
     await seedSettings({ ui: { language: "en" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("nine-pages.pdf", minimalPdf(9))
     await $("[data-page-number='1']").waitForDisplayed()
 
@@ -273,13 +311,13 @@ describe("TFolio PDF viewer", () => {
     await toggle("Single page").click()
     await pageInput.setValue("5")
     await browser.keys("Enter")
-    await browser.pause(1500)
+    await trackerSettled()
     await expect(pageInput).toHaveValue("5")
     await toggle("Book").click()
-    // Give the page tracker time to settle. It only revises the current page
-    // once the new layout has mounted, so asserting right away would pass
-    // against the stale value before the layout can strand it.
-    await browser.pause(1500)
+    // The tracker only revises the current page once the new layout has
+    // mounted, so asserting right away would pass against the stale value
+    // before the layout can strand it.
+    await trackerSettled("book")
     await expect(pageInput).toHaveValue("5")
 
     // Thumbnails are an image and no selectable text layer; since M7 a click
@@ -306,7 +344,7 @@ describe("TFolio PDF viewer", () => {
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("page-turns.pdf", minimalPdf(8))
     await $("[data-page-number='1']").waitForDisplayed()
 
@@ -363,14 +401,22 @@ describe("TFolio PDF viewer", () => {
         return event.defaultPrevented
       }, key)
 
+    // The field holds the number, but what is read is the odometer over it,
+    // which draws the field's value while nobody is typing into it.
+    const odometer = $("[data-slot='page-odometer']")
+
     await focusViewerAtStart()
     await expect(pageInput).toHaveValue("1")
+    await expect(odometer).toHaveText("1")
     expect(await pressPageKey("PageDown")).toBe(true)
     await expect(pageInput).toHaveValue("2")
+    // Settles once the digit that was replaced has rolled out of its box.
+    await expect(odometer).toHaveText("2")
     expect(await pageTopInViewer(2)).toBe(20)
 
     expect(await pressPageKey("PageUp")).toBe(true)
     await expect(pageInput).toHaveValue("1")
+    await expect(odometer).toHaveText("1")
 
     await $("button[aria-label='Book']").click()
     await expect($("button[aria-label='Book']")).toHaveAttribute(
@@ -391,7 +437,7 @@ describe("TFolio PDF viewer", () => {
   // document is most of a test's time budget on its own.
   it("keeps the chosen view mode across a reload", async () => {
     await seedSettings({ ui: { language: "en" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("mode-kept.pdf", minimalPdf(3))
     await $("[data-page-number='1']").waitForDisplayed()
 
@@ -402,7 +448,7 @@ describe("TFolio PDF viewer", () => {
 
     // The home tab carries no view controls — it has no document to act on — so
     // it takes the next document opened to say whether the mode was kept.
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist()
     await openPdfFromDisk("reopened.pdf", minimalPdf(3))
     await $("[data-page-number='1']").waitForDisplayed()
@@ -411,7 +457,7 @@ describe("TFolio PDF viewer", () => {
 
   it("zooms from the toolbar and from ctrl+wheel", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("two-pages.pdf", minimalPdf(2))
     await $("[data-page-number='1']").waitForDisplayed()
 
@@ -744,7 +790,7 @@ describe("TFolio PDF viewer", () => {
   // made of — which is still what the opening zoom and the spread column go on.
   it("fits the page the reader is on, not the document's usual page", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk(
       "mixed.pdf",
       minimalPdf(6, (index) => (index === 3 ? "0 0 400 200" : "0 0 200 300")),
@@ -765,7 +811,7 @@ describe("TFolio PDF viewer", () => {
     await browser.keys("Enter")
     // The tracker revises the page only once the scroll lands, and the fit is
     // measured from whatever it reports when the button is pressed.
-    await browser.pause(1500)
+    await trackerSettled()
     await expect(pageInput).toHaveValue("4")
 
     await $("button[aria-label='Fit width']").click()
@@ -786,7 +832,7 @@ describe("TFolio PDF viewer", () => {
   // exactly the ResizeObserver callback a window resize delivers.
   it("holds the reading position when the viewport changes width", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("resized.pdf", minimalPdf(12))
     await $("[data-page-number='1']").waitForDisplayed()
 
@@ -835,9 +881,24 @@ describe("TFolio PDF viewer", () => {
       )!
       viewer.scrollTop = Math.round(viewer.scrollHeight * 0.35)
     })
-    // The anchor is taken on the page the tracker reports, which follows a
-    // scroll a frame later.
-    await browser.pause(500)
+    // The anchor is taken on the page the tracker reports, and the report
+    // follows the scroll by a few frames — so wait for the tracker's own
+    // output (the page input) to stop moving before the resize lands.
+    const pageInput = await $("input[aria-label='Page number']")
+    await browser.waitUntil(
+      async () => {
+        const reported = await pageInput.getValue()
+        await browser.pause(200)
+        return (
+          (await pageInput.getValue()) === reported &&
+          Number(reported) > 1
+        )
+      },
+      {
+        timeout: 5_000,
+        timeoutMsg: "the tracker never settled on the scrolled-to page",
+      },
+    )
 
     const before = await readingLine()
     expect(before.at).toBeGreaterThan(1)
@@ -875,7 +936,7 @@ describe("TFolio PDF viewer", () => {
 
   it("keeps only near-viewport full-page surfaces mounted", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("forty-pages.pdf", minimalPdf(40))
     await $("[data-page-number='1'] canvas").waitForExist()
 
@@ -914,7 +975,7 @@ describe("TFolio PDF viewer", () => {
   // viewer, or navigation lands on a row and the tracker reports a later one.
   it("stays on the requested page in a grid of landscape pages", async () => {
     await seedSettings({ ui: { language: "en" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("landscape.pdf", minimalPdf(40, "0 0 300 200"))
     await $("[data-page-number='1']").waitForDisplayed()
 
@@ -945,7 +1006,7 @@ describe("TFolio PDF viewer", () => {
     await browser.keys("Enter")
     // Let the tracker settle: it revises the page only after the scroll lands,
     // so asserting straight away would pass against the pre-scroll value.
-    await browser.pause(1500)
+    await trackerSettled()
     await expect(pageInput).toHaveValue(target)
   })
 
@@ -955,7 +1016,7 @@ describe("TFolio PDF viewer", () => {
   // listener rather than a stand-in for it.
   it("drops the WebView's context menu away from a text field", async () => {
     await seedSettings({ ui: { language: "en" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("one-page.pdf", minimalPdf())
     await $("[data-page-number='1']").waitForDisplayed()
 
@@ -982,7 +1043,7 @@ describe("TFolio PDF viewer", () => {
   // promise instead of replacing either.
   it("copies selected page text from a menu of its own", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("text.pdf", textPdf())
     await $(".pdf-text-layer span").waitForDisplayed({ timeout: 15_000 })
 

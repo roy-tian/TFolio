@@ -11,6 +11,36 @@ export type CellBox = {
   height: number
 }
 
+/**
+ * How long a drag has to rest on a tab before the workspace opens it. Long
+ * enough that crossing the strip on the way somewhere else opens nothing, short
+ * enough to read as an answer rather than a wait.
+ */
+export const TAB_SPRING_MS = 600
+
+/**
+ * What the workspace is doing with a drag it has taken: the pages are over a
+ * grid that would take them where the pointer is, or merely being carried —
+ * over the strip, or over a document with no gap under the pointer.
+ */
+export type PageHandoffPlace = "grid" | "carried"
+
+/**
+ * Where a page drag goes once it leaves the grid it started in. The workspace
+ * answers for the tab strip and for whichever document is showing, so a grid
+ * never has to know that another document exists: it asks whether the drag is
+ * still its own, and hands over the release when it is not.
+ */
+export type PageHandoff = {
+  /** How the workspace has the drag at this point, or null while the grid it
+      started in still owns it — a release there being a reorder, not a drop. */
+  claim: (point: { x: number; y: number }) => PageHandoffPlace | null
+  /** The release, when claimed. */
+  drop: (point: { x: number; y: number }, pages: number[]) => void
+  /** The gesture ended somewhere the workspace has no claim to. */
+  cancel: () => void
+}
+
 /** How far a press may wander and still be a click rather than a drag. */
 export const DRAG_THRESHOLD = 4
 

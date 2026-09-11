@@ -13,6 +13,7 @@ import {
   openFileButton,
   openPathViaDialog,
   openPdfFromDisk,
+  refreshApp,
   seedSettings,
 } from "./helpers"
 
@@ -26,6 +27,18 @@ function writePdf(name: string, pages: number) {
 /** Every tab in the strip, the home tab included — it leads the list. */
 function tabButtons() {
   return $$("button[role='tab']")
+}
+
+/** The tab a document is open in, by the name it shows. */
+function tabButton(name: string) {
+  return $(`//button[@role='tab'][normalize-space()='${name}']`)
+}
+
+/** A file's row in the home tab's recent list, by the name it shows. */
+function recentEntry(filePath: string) {
+  return $(
+    `//button[@data-slot='recent-file'][contains(., '${path.basename(filePath)}')]`,
+  )
 }
 
 /** Where the active document is scrolled to, which is where its reader is. */
@@ -58,10 +71,10 @@ async function settledScrollTop() {
 }
 
 async function resetWorkspace() {
-  await browser.refresh()
+  await refreshApp()
   // The view mode persists, so leave it unset to start from the single view.
   await seedSettings({ ui: { language: "en" } })
-  await browser.refresh()
+  await refreshApp()
   await openFileButton().waitForExist({ timeout: 30_000 })
 }
 
@@ -98,9 +111,9 @@ describe("independent document tabs", () => {
 
     const secondPath = writePdf("second.pdf", 1)
     await openPathViaDialog(secondPath)
-    await $("button[role='tab'][title='second.pdf']").waitForExist()
+    await tabButton("second.pdf").waitForExist()
     await expect(tabButtons()).toBeElementsArrayOfSize(3)
-    await expect($("button[role='tab'][title='second.pdf']")).toHaveAttribute(
+    await expect(tabButton("second.pdf")).toHaveAttribute(
       "aria-controls",
       expect.stringMatching(/^workspace-panel-/),
     )
@@ -112,7 +125,7 @@ describe("independent document tabs", () => {
       $("[data-active='true'] input[aria-label='Page number']"),
     ).toHaveValue("1")
 
-    await $("button[role='tab'][title='first.pdf']").click()
+    await tabButton("first.pdf").click()
     await expect(
       $("[data-active='true'] input[aria-label='Page number']"),
     ).toHaveValue("2")
@@ -122,22 +135,22 @@ describe("independent document tabs", () => {
     )
 
     // An exact duplicate activates its existing tab instead of opening a third.
-    await $("button[role='tab'][title='second.pdf']").click()
+    await tabButton("second.pdf").click()
     await openPathViaDialog(firstPath)
     await expect(tabButtons()).toBeElementsArrayOfSize(3)
-    await expect($("button[role='tab'][title='first.pdf']")).toHaveAttribute(
+    await expect(tabButton("first.pdf")).toHaveAttribute(
       "aria-selected",
       "true",
     )
 
     await $("button[aria-label='Close second.pdf']").click()
     await expect(tabButtons()).toBeElementsArrayOfSize(2)
-    await expect($("button[role='tab'][title='first.pdf']")).toBeFocused()
+    await expect(tabButton("first.pdf")).toBeFocused()
 
     // Reopen a clean neighbour, dirty the first document, and verify both
     // branches of the tab-close guard.
     await openPathViaDialog(secondPath)
-    await $("button[role='tab'][title='first.pdf']").click()
+    await tabButton("first.pdf").click()
     await $("button[aria-label='Thumbnails']").click()
     await $("button[aria-label='Delete page 1']").waitForExist()
     await $("button[aria-label='Delete page 1']").click()
@@ -148,13 +161,13 @@ describe("independent document tabs", () => {
       { timeoutMsg: "the page deletion never made the tab dirty" },
     )
 
-    await $("button[role='tab'][title='second.pdf']").click()
+    await tabButton("second.pdf").click()
     await expect(
-      $("[data-active='true'] button[aria-label='Undo']"),
+      $("[data-active='true'] button[aria-label^='Undo']"),
     ).toBeDisabled()
-    await $("button[role='tab'][title='first.pdf']").click()
+    await tabButton("first.pdf").click()
     await expect(
-      $("[data-active='true'] button[aria-label='Undo']"),
+      $("[data-active='true'] button[aria-label^='Undo']"),
     ).toBeEnabled()
 
     await $("button[aria-label='Close first.pdf']").click()
@@ -174,12 +187,12 @@ describe("independent document tabs", () => {
     await $("button[aria-label='Close recent.pdf']").click()
     await dropZoneButton().waitForDisplayed()
 
-    const entry = $("[data-slot='recent-file'][title='" + filePath + "']")
+    const entry = recentEntry(filePath)
     await entry.waitForDisplayed()
     await expect(entry).toHaveText(/recent\.pdf/)
 
     await entry.click()
-    await $("button[role='tab'][title='recent.pdf']").waitForExist()
+    await tabButton("recent.pdf").waitForExist()
     await expect($("[data-page-number='1']")).toBeDisplayed()
 
     // A file already open is not opened twice: its recent entry just goes back
@@ -187,7 +200,7 @@ describe("independent document tabs", () => {
     await $("#workspace-tab-home").click()
     await entry.click()
     await expect(tabButtons()).toBeElementsArrayOfSize(2)
-    await expect($("button[role='tab'][title='recent.pdf']")).toHaveAttribute(
+    await expect(tabButton("recent.pdf")).toHaveAttribute(
       "aria-selected",
       "true",
     )
@@ -229,7 +242,6 @@ describe("independent document tabs", () => {
       )!
       viewer.scrollTop += 80
     })
-    await browser.pause(400)
     const readingOffset = await activeScrollTop()
     await expect(pageInput).toHaveValue("5")
 
@@ -239,12 +251,12 @@ describe("independent document tabs", () => {
     // The global default now disagrees with this file, proving that Book comes
     // from the recent entry rather than the ordinary view-mode preference.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForDisplayed()
 
-    const entry = $("[data-slot='recent-file'][title='" + filePath + "']")
+    const entry = recentEntry(filePath)
     await entry.click()
-    await $("button[role='tab'][title='view-kept.pdf']").waitForExist()
+    await tabButton("view-kept.pdf").waitForExist()
     await expect($("button[aria-label='Book']")).toHaveAttribute(
       "aria-pressed",
       "true",

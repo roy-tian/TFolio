@@ -9,17 +9,19 @@ import {
   useState,
 } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { Bookmark, RotateCw, Search } from "lucide-react"
+import { Bookmark, Printer, RotateCw, Save, Search } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
-import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumbersDialog } from "@/components/PageNumbersDialog"
+import { PageOdometer } from "@/components/PageOdometer"
 import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
+import { PrintDialog } from "@/components/PrintDialog"
+import { PrintSheet } from "@/components/PrintSheet"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
@@ -28,15 +30,21 @@ import { WindowControls } from "@/components/WindowControls"
 import { ZoomControls } from "@/components/ZoomControls"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Toggle } from "@/components/ui/toggle"
 import { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
+import { useDocumentNotices, type NoticeChannel } from "@/hooks/useNotices"
+import { usePageClipboard } from "@/hooks/usePageClipboard"
+import { usePrint } from "@/hooks/usePrint"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
+import type { PageHandoffTarget } from "@/hooks/usePageHandoff"
 import { useEraserTool } from "@/hooks/useEraserTool"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useRectTool } from "@/hooks/useRectTool"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useTextNoteTool } from "@/hooks/useTextNoteTool"
+import { useTextSelectAll } from "@/hooks/useTextSelectAll"
 import { useWatermark } from "@/hooks/useWatermark"
 import { useZoom } from "@/hooks/useZoom"
 import {
@@ -59,8 +67,18 @@ import {
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
+import { copyPlainText } from "@/lib/clipboard"
+import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
+import { documentPlainText } from "@/lib/documentText"
 import { dropHitAt, insertIndexForHit } from "@/lib/fileDrop"
+import { documentRefusals } from "@/lib/notices"
+import {
+  formatPageRanges,
+  pastePlan,
+  type PageClipboard,
+} from "@/lib/pageClipboard"
+import type { PageHandoff } from "@/lib/pageDrag"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
   isPdfPath,
@@ -72,9 +90,12 @@ import {
 } from "@/lib/pdf"
 import {
   firstSearchMatchFromPage,
+  searchRevealOffset,
   stepSearchMatch,
 } from "@/lib/pdfSearch"
 import {
+  pagesToRotate,
+  QUARTER_TURN,
   rotationForPage,
   rotationsAfterRotate,
   rotationsForPageCount,
@@ -85,6 +106,7 @@ import {
   storeRecentPdfView,
   type RecentPdfView,
 } from "@/lib/recentFiles"
+import { shortcuts } from "@/lib/shortcuts"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import {
   defaultViewMode,
@@ -107,18 +129,10 @@ import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 const RECENT_VIEW_WRITE_INTERVAL_MS = 250
+const RESIZE_COMPOSITOR_SETTLE_MS = 150
 
-type ViewerError =
-  | "annotateFailed"
-  | "editInFlight"
-  | "exportFailed"
-  | "fileTooLarge"
-  | "invalidFile"
-  | "noteFontFailed"
-  | "noteFontMissing"
-  | "openFailed"
-  | "saveFailed"
-  | null
+/** How long a seek waits for the result's highlight layer to be drawn. */
+const SEARCH_REVEAL_TIMEOUT_MS = 3000
 
 /** A file dragged in from the desktop, as the window's own handler sees it —
     positions in CSS pixels, not the OS's physical ones. `over` carries the
@@ -129,22 +143,69 @@ export type FileDragEvent =
   | { kind: "drop"; paths: string[]; point: { x: number; y: number } }
   | { kind: "leave" }
 
+/**
+ * Pages dragged out of another document's grid, as the workspace passes them
+ * down (see `usePageHandoff`). Positions are in CSS pixels, like a file drag's;
+ * only the drop names the pages, since only then is there anything to do with
+ * them.
+ */
+export type PageDragEvent =
+  | { kind: "over"; point: { x: number; y: number } }
+  | {
+      kind: "drop"
+      pages: number[]
+      point: { x: number; y: number }
+      sourceDocumentId: number
+    }
+  | { kind: "leave" }
+
 export type DocumentSessionHandle = {
+  /** The reader turning down the fallback face, which lets go of the edit that
+      was waiting on it — the note's text lives nowhere else by then. */
+  dismissNoteFont: () => void
+  /** The reader taking the fallback face, from the notice the workspace draws
+      on this session's behalf. */
+  fetchNoteFont: () => void
   hasUnsavedWorkNow: () => boolean
+  /** Opens this document's page-numbers dialog. */
+  openPageNumbers: () => void
   /** Opens the app-owned find bar for this document. */
   openSearch: () => void
+  /** Opens this document's watermark dialog. */
+  openWatermark: () => void
+  /** Lays this document out for paper and opens the OS print dialog on it. */
+  print: () => void
   /** Captures and durably queues the latest reading view before a close. */
   rememberViewNow: () => Promise<void>
+  /** Writes this document back over its own file — and refuses wherever the
+      toolbar's button is greyed out, so no key can write what it will not. */
+  save: () => void
+  /** Exports this document as a copy, through the backend's own dialog. */
+  saveAs: () => void
+  /** Selects everything the visible view holds: the grid's pages, or the text
+      the page views lay over them. */
+  selectAll: () => void
+  /** Takes back the last edit, exactly as the toolbar's undo does. */
+  undo: () => void
   /** Whether this session takes the drag: true only over its thumbnail grid,
       where a dropped PDF is inserted at the gap under the pointer instead of
       opening as a tab of its own. */
   onFileDrag: (event: FileDragEvent) => boolean
+  /** The same answer for pages dragged from another document's grid, which land
+      in the gap under the pointer as copies. */
+  onPageDrag: (event: PageDragEvent) => boolean
+  /** Shows this document's pages, for a drag the workspace has just brought
+      here: the grid is the one view a page can be dropped into. */
+  showThumbnails: () => void
 }
 
 type DocumentSessionProps = {
   active: boolean
   document: PdfDocumentInfo
   fileName: string
+  /** Whether this app-created document has yet to be written to its first
+      file. It remains unsaved even before the reader makes another edit. */
+  initialSaveRequired?: boolean
   /** Page numbers to lay on as the session opens — what the merge wizard asked
       for. Applied through the ordinary command, so they are one undo away and
       the dialog finds them where it expects. */
@@ -163,12 +224,24 @@ type DocumentSessionProps = {
   initialWatermark?: WatermarkConfig | null
   /** The workspace half of the header's menu, which every tab shares. */
   menu: AppMenuActions
+  /** Where this session says what happened. Write-only, and bound to this
+      document below, so a session cannot speak for another's tab. */
+  notices: NoticeChannel
   onDirtyChange: (documentId: number, dirty: boolean) => void
+  /** Whether this document may now be written back over its own file. Only the
+      session can say — the workspace sees the file and the dirty flag, not the
+      session-owned page content that makes a document export-only. */
+  onSavableChange: (documentId: number, canSave: boolean) => void
   /** An export that gave a document its first file: the tab now stands for
       that file, not for the bytes it opened from. */
   onSourceChange: (documentId: number, path: string) => void
+  /** The workspace's answer for a page drag that has left this document's grid,
+      and the way another document's pages reach it. */
+  pageHandoff: PageHandoffTarget
   /** Present only when Rust recorded this opened path as recent. */
   recentPath?: string
+  /** Overrides the ordinary annotation-copy name in the Save As dialog. */
+  saveAsDefaultName?: string
 }
 
 function closePdf(documentId: number) {
@@ -183,29 +256,42 @@ function DocumentSession(
     fileName,
     initialPageNumbers,
     initialRecentView,
+    initialSaveRequired = false,
     initialViewMode,
     initialWatermark,
     menu,
+    notices,
     onInitialLayerProgress,
     onInitialLayersSettled,
     onDirtyChange,
+    onSavableChange,
     onSourceChange,
+    pageHandoff,
     recentPath,
+    saveAsDefaultName,
   },
   ref,
 ) {
   const { t } = useTranslation()
   const macOS = isMacOS()
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo>(openedDocument)
+  const [saveRequired, setSaveRequired] = useState(initialSaveRequired)
+  const saveRequiredRef = useRef(initialSaveRequired)
+  // Thumbnail canvases follow their pages through a reorder, including undo.
+  // Other structure edits keep the existing position-based invalidation.
+  const [thumbnailIdentity, setThumbnailIdentity] = useState(() => ({
+    keys: openedDocument.pages.map((_, index) => index),
+    nextKey: openedDocument.numPages,
+  }))
   // Whether any page another file brought in is still here, which — like a
   // watermark — leaves the document export-only. The backend answers it with
   // every structure update, so this never has to be replayed from history: a
   // freshly opened document holds none of them.
   const [hasMergedPages, setHasMergedPages] = useState(false)
-  // Where a PDF dragged in from the desktop would land, while one is over the
-  // grid. Only the insertion line reads it; the drop itself resolves the point
-  // again, so a stale index can never place a file.
-  const [fileDropIndex, setFileDropIndex] = useState<number | null>(null)
+  // Where pages dragged over the grid would land — a PDF from the desktop, or
+  // another document's pages. Only the insertion line reads it; every drop
+  // resolves the point again, so a stale index can never place anything.
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [currentPage, setCurrentPage] = useState(() =>
     Math.min(
       Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
@@ -213,6 +299,10 @@ function DocumentSession(
     ),
   )
   const [pageInput, setPageInput] = useState(() => String(currentPage))
+  // Whether the reader is typing a page number. The odometer stands in for
+  // the field's own text the rest of the time, and has to stand aside while
+  // what the field holds is no longer the page being read.
+  const [pageInputFocused, setPageInputFocused] = useState(false)
   const [pageRotations, setPageRotations] = useState(() =>
     openedDocument.pages.map(() => 0),
   )
@@ -224,8 +314,11 @@ function DocumentSession(
   const [searching, setSearching] = useState(false)
   const [searchFailed, setSearchFailed] = useState(false)
   const [searchLimitReached, setSearchLimitReached] = useState(false)
-  const [viewerError, setViewerError] = useState<ViewerError>(null)
-  const [viewerErrorVersion, setViewerErrorVersion] = useState(0)
+  // The one notice this session holds rather than raises: it stands until the
+  // reader answers it, and the held edit below is what the answer is for.
+  const [noteFontOffer, setNoteFontOffer] = useState<
+    "noteFontFailed" | "noteFontMissing" | null
+  >(null)
   /**
    * The edit that failed for want of a face to draw it in, kept so accepting
    * the download can re-run it. A note's text lives nowhere else by then — the
@@ -296,14 +389,24 @@ function DocumentSession(
   const mountedRef = useRef(false)
   const searchGenerationRef = useRef(0)
   const searchCancellationRef = useRef<Promise<void>>(Promise.resolve())
-  const dismissViewerError = useCallback(() => {
-    setViewerError(null)
+  const notice = useDocumentNotices(notices, openedDocument.id)
+  // Which offer a fetch in flight belongs to. A download cannot be called back,
+  // so what it returns to is checked against this instead.
+  const noteFontOfferRef = useRef(0)
+  // The offer and the edit it is holding go together: once it is off the
+  // screen there is no way back to it, and a kept edit would only be re-run by
+  // the next offer.
+  const clearNoteFontOffer = useCallback(() => {
+    noteFontOfferRef.current += 1
+    setNoteFontOffer(null)
     setUnfontedEdit(null)
   }, [])
-  const showViewerError = useCallback((error: NonNullable<ViewerError>) => {
-    setViewerError(error)
-    setViewerErrorVersion((version) => version + 1)
-  }, [])
+  // A refusal that outlived what it described would sit over every mark the
+  // reader went on to make successfully.
+  const clearEditRefusals = useCallback(() => {
+    clearNoteFontOffer()
+    notice.retract(documentRefusals)
+  }, [clearNoteFontOffer, notice])
 
   const bookApplies = hasBookSpread(pdfDocument.numPages)
   const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
@@ -347,8 +450,70 @@ function DocumentSession(
   // page-editing surface; leaving it clears what was chosen.
   const thumbnailSelection = useThumbnailSelection({
     active: active && viewMode === "thumbnail",
+    numPages: pdfDocument.numPages,
   })
   const clearThumbnailSelection = thumbnailSelection.clear
+  // The paste's own work needs the history below, which is set up after this;
+  // the hook only ever calls it from a keypress, by which time it is here.
+  const pastePagesRef = useRef<(index: number) => void>(() => {})
+  const pageClipboard = usePageClipboard({
+    active: active && viewMode === "thumbnail",
+    onPaste: useCallback((index: number) => pastePagesRef.current(index), []),
+    onTaken: useCallback(
+      (taken: PageClipboard) =>
+        notice.raise(taken.mode === "cut" ? "pagesCut" : "pagesCopied", {
+          values: {
+            count: taken.pages.length,
+            pages: formatPageRanges(taken.pages),
+          },
+        }),
+      [notice],
+    ),
+    selectedPages: thumbnailSelection.selectedPages,
+  })
+  const pageClipboardStructureChanged = pageClipboard.structureChanged
+  const { clipboard } = pageClipboard
+  // Only a cut marks its pages in the grid: a copy takes nothing away, so the
+  // pages it named go on reading as the pages they are.
+  const cutThumbnailPages = useMemo(
+    () => new Set(clipboard?.mode === "cut" ? clipboard.pages : []),
+    [clipboard],
+  )
+  // Fetched as the selection is made, not when the copy asks for it: the
+  // clipboard takes a write only from inside the keypress that asked, and a
+  // long document's text is hundreds of round trips away from one.
+  const selectedText = useRef<Promise<string> | null>(null)
+  const copyDocumentText = useCallback(() => {
+    const pending =
+      selectedText.current ??
+      documentPlainText(pdfDocument.id, pdfDocument.numPages)
+
+    selectedText.current = pending
+    void pending.then(copyPlainText)
+  }, [pdfDocument.id, pdfDocument.numPages])
+  // The page views' half of a select-all; the grid's half is the selection
+  // above, and the view in front decides which of the two answers.
+  const textSelectAll = useTextSelectAll({
+    active: active && viewMode !== "thumbnail",
+    onCopy: copyDocumentText,
+  })
+
+  useEffect(() => {
+    selectedText.current = textSelectAll.selectedAll
+      ? documentPlainText(pdfDocument.id, pdfDocument.numPages)
+      : null
+  }, [pdfDocument.id, pdfDocument.numPages, textSelectAll.selectedAll])
+  const selectAllPages = thumbnailSelection.selectAll
+  const selectAllText = textSelectAll.selectAll
+  // Where the workspace's select-all shortcut lands: the grid holds pages, and
+  // the page views hold the text laid over them.
+  const selectAll = useCallback(() => {
+    if (viewMode === "thumbnail") {
+      selectAllPages()
+    } else {
+      selectAllText()
+    }
+  }, [selectAllPages, selectAllText, viewMode])
   const annotations = useAnnotations({
     documentId: pdfDocument?.id,
     onAnnotateError: useCallback(
@@ -357,17 +522,17 @@ function DocumentSession(
         // and the reader can fetch something that will.
         if (isNoteFontMissing(error)) {
           setUnfontedEdit(command ?? null)
-          showViewerError("noteFontMissing")
+          setNoteFontOffer("noteFontMissing")
           return
         }
 
-        showViewerError("annotateFailed")
+        notice.raise("annotateFailed")
       },
-      [showViewerError],
+      [notice],
     ),
     onExportError: useCallback(
-      () => showViewerError("exportFailed"),
-      [showViewerError],
+      () => notice.raise("exportFailed"),
+      [notice],
     ),
     // A byte-opened document adopts its first export's destination as its
     // source, which is when `path` appears and the save key comes alive.
@@ -384,6 +549,8 @@ function DocumentSession(
         }
 
         const next = { ...current, path: outcome.path }
+        saveRequiredRef.current = false
+        setSaveRequired(false)
         documentRef.current = next
         setPdfDocument(next)
         onSourceChange(documentId, outcome.path)
@@ -391,14 +558,18 @@ function DocumentSession(
       [onSourceChange],
     ),
     onSaveError: useCallback(
-      () => showViewerError("saveFailed"),
-      [showViewerError],
+      () => notice.raise("saveFailed"),
+      [notice],
     ),
-    // A structure command moved the page list under everything keyed by page
-    // number, so the metadata is replaced wholesale and every position-derived
-    // state — the current page, the selection — is brought back into range.
+    // A structure command replaces the page list wholesale — nothing here
+    // mirrors it — and, where it moved the pages under everything keyed by
+    // page number, brings each position-derived state back into range.
     onStructureChange: useCallback(
-      (documentId: number, update: PdfStructureUpdate) => {
+      (
+        documentId: number,
+        update: PdfStructureUpdate,
+        movement?: number[] | "inPlace",
+      ) => {
         const current = documentRef.current
 
         if (!current || current.id !== documentId) {
@@ -415,21 +586,36 @@ function DocumentSession(
         documentRef.current = next
         setPdfDocument(next)
         setHasMergedPages(update.hasMergedPages)
+
+        // A page turned where it stands: every position still holds the page it
+        // held, so the selection the reader is turning survives the edit — and
+        // must, or a second press would find nothing chosen and turn the lot.
+        if (movement === "inPlace") {
+          return
+        }
+
+        setThumbnailIdentity(({ keys, nextKey }) =>
+          movement
+            ? { keys: movement.map((page) => keys[page - 1]!), nextKey }
+            : {
+                keys: update.pages.map((_, index) => keys[index] ?? nextKey + index),
+                nextKey: nextKey + update.numPages,
+              },
+        )
         setCurrentPage((page) =>
           Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
         )
         clearThumbnailSelection()
+        // The page numbers on the clipboard now name other pages — unless this
+        // is the paste's own insert, which says how far they slid.
+        pageClipboardStructureChanged(update.numPages)
         setPageRotations((rotations) =>
           rotationsForPageCount(rotations, update.numPages),
         )
       },
-      [clearThumbnailSelection],
+      [clearThumbnailSelection, pageClipboardStructureChanged],
     ),
-    // A toast that outlives what it describes would sit over every mark the
-    // reader went on to make successfully. The edit held for a retry goes with
-    // it: once the offer is off the screen there is no way back to it, so
-    // keeping the edit would only leave it to be re-run by the next offer.
-    onSuccess: dismissViewerError,
+    onSuccess: clearEditRefusals,
   })
   const watermark = useWatermark({
     activeConfig: annotations.watermarkConfig,
@@ -446,6 +632,32 @@ function DocumentSession(
     onSet: annotations.setPageNumbers,
     pageCount: pdfDocument?.numPages ?? 0,
   })
+  // Named apart from the hooks so the window's keys and the toolbar's buttons
+  // open the one dialog; both openers are stable.
+  const openWatermarkDialog = watermark.openDialog
+  const openPageNumbersDialog = pageNumbers.openDialog
+  // Printed as the reader has it turned: the rotation is the viewer's own, and
+  // the backend's render of a page knows nothing about it.
+  const rotationAt = useCallback(
+    (pageNumber: number) => rotationForPage(pageRotations, pageNumber),
+    [pageRotations],
+  )
+  const print = usePrint({
+    documentId: pdfDocument?.id,
+    onError: () => notice.raise("printFailed"),
+    pages: pdfDocument?.pages ?? [],
+    rotationAt,
+  })
+  const discardPrint = print.discard
+  const startPrint = print.start
+
+  // Only the tab on screen keeps a sheet: print media would otherwise run
+  // every open document's pages together, and each holds its pages as images.
+  useEffect(() => {
+    if (!active) {
+      discardPrint()
+    }
+  }, [active, discardPrint])
 
   const textSelectionDragging = useHighlightTool({
     active: active && drawingApplies && activeTool === "highlight",
@@ -462,7 +674,7 @@ function DocumentSession(
   })
 
   const drawingRect = drawingApplies && activeTool === "rect"
-  const rectDraft = useRectTool({
+  const rectTool = useRectTool({
     active: active && drawingRect,
     onCommit: annotations.commit,
     pages: pdfDocument?.pages ?? [],
@@ -496,9 +708,22 @@ function DocumentSession(
   // draw, so the reader gets the plain pointer back.
   const toolCursor = drawingApplies ? activeTool : null
 
+  // Both drawing tools hold previews that only a page's own paint may retire;
+  // each ignores a paint covering nothing of its own.
+  const retireRectPreviews = rectTool.onPagePaint
+  const retireNotePreviews = textNote.onPagePaint
+  const onPagePaint = useCallback(
+    (pageNumber: number, renderEpoch: number) => {
+      retireRectPreviews(pageNumber, renderEpoch)
+      retireNotePreviews(pageNumber, renderEpoch)
+    },
+    [retireNotePreviews, retireRectPreviews],
+  )
+
   const draftDirty = isNoteWorthKeeping(textNote.draft?.text ?? "")
   const hasUnsavedWorkNow = useCallback(
     () =>
+      saveRequiredRef.current ||
       annotations.isDirtyNow() ||
       annotations.hasPendingWorkNow() ||
       isNoteWorthKeeping(textNote.draft?.text ?? ""),
@@ -506,8 +731,17 @@ function DocumentSession(
   )
 
   useEffect(() => {
-    onDirtyChange(openedDocument.id, annotations.isDirty || draftDirty)
-  }, [annotations.isDirty, draftDirty, onDirtyChange, openedDocument.id])
+    onDirtyChange(
+      openedDocument.id,
+      saveRequired || annotations.isDirty || draftDirty,
+    )
+  }, [
+    annotations.isDirty,
+    draftDirty,
+    onDirtyChange,
+    openedDocument.id,
+    saveRequired,
+  ])
 
   const focusSearchInput = useCallback(() => {
     requestAnimationFrame(() => {
@@ -676,10 +910,10 @@ function DocumentSession(
     }
 
     await annotations.exportCopy(
-      t("annotate.exportDefaultName"),
+      saveAsDefaultName ?? t("annotate.exportDefaultName"),
       t("annotate.exportFilter"),
     )
-  }, [annotations, pdfDocument, t])
+  }, [annotations, pdfDocument, saveAsDefaultName, t])
 
   useEffect(() => {
     mountedRef.current = true
@@ -838,6 +1072,7 @@ function DocumentSession(
     }
 
     commitSize(viewer.clientWidth, viewer.clientHeight)
+    let compositorTimer: ReturnType<typeof setTimeout> | undefined
 
     // Commit every observed size straight away. Layout — the grid's column
     // count, a fit mode's page scale — tracks the window in real time, while
@@ -847,12 +1082,21 @@ function DocumentSession(
     // Measured off the element rather than the entry's `contentRect`, so every
     // committed figure comes from the same box the activation check below reads.
     const resizeObserver = new ResizeObserver(() => {
+      if (!viewer.dataset.resizeCompositing) {
+        viewer.dataset.resizeCompositing = "true"
+      }
+      clearTimeout(compositorTimer)
+      compositorTimer = setTimeout(() => {
+        delete viewer.dataset.resizeCompositing
+      }, RESIZE_COMPOSITOR_SETTLE_MS)
       commitSize(viewer.clientWidth, viewer.clientHeight)
     })
     resizeObserver.observe(viewer)
 
     return () => {
       resizeObserver.disconnect()
+      clearTimeout(compositorTimer)
+      delete viewer.dataset.resizeCompositing
     }
   }, [])
 
@@ -991,10 +1235,21 @@ function DocumentSession(
   // out from under it, and a note the reader finishes mid-edit would be dropped
   // by the in-flight-edit guard after the editor had already cleared its text.
   // Undo and redo can move any page and can't take a note as their target, so
-  // the uncommitted draft is discarded before the step (see the toolbar); every
-  // other page edit lives in the thumbnail grid, where no note can be open. The
-  // callback is stable.
+  // the uncommitted draft is discarded before the step (`undoStep`, and the
+  // toolbar's redo); every other page edit lives in the thumbnail grid, where no
+  // note can be open. The callback is stable.
   const cancelTextNote = textNote.cancel
+
+  const undoStep = useCallback(() => {
+    // The target is the head of the queue's live history, not the rendered one.
+    const target = annotations.historyNow().past.at(-1)?.command
+
+    if (target && movesPages(target)) {
+      cancelTextNote()
+    }
+
+    void annotations.undo()
+  }, [annotations, cancelTextNote])
 
   useCurrentPageTracker(
     viewerRef,
@@ -1042,39 +1297,98 @@ function DocumentSession(
       return
     }
 
-    viewer
-      .querySelector<HTMLElement>(`[data-page-number="${match.pageNumber}"]`)
-      ?.scrollIntoView({ behavior: "auto", block: "center", inline: "center" })
+    const interruptScroll = () => viewer.scrollTo({
+      behavior: "instant",
+      left: viewer.scrollLeft,
+      top: viewer.scrollTop,
+    })
+    interruptScroll()
 
-    let frame = 0
-    let attempts = 0
-    const revealRectangle = () => {
-      const rectangle = viewer.querySelector<HTMLElement>(
-        `[data-search-match="${activeSearchIndex}"]`,
+    const activeMatchRects = () =>
+      Array.from(
+        viewer.querySelectorAll<HTMLElement>(
+          `[data-search-match="${activeSearchIndex}"]`,
+        ),
+        (rectangle) => rectangle.getBoundingClientRect(),
       )
 
-      if (rectangle) {
-        rectangle.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-          inline: "center",
-        })
+    const page = viewer.querySelector<HTMLElement>(
+      `[data-page-number="${match.pageNumber}"]`,
+    )
+    const pageBox = page?.getBoundingClientRect()
+    const viewerBox = viewer.getBoundingClientRect()
+
+    // A page off screen, sideways included, is virtualized with no highlight to
+    // measure: bring it over first so the near-viewport observer attaches one.
+    if (
+      activeMatchRects().length === 0 &&
+      (!pageBox ||
+        pageBox.bottom <= viewerBox.top ||
+        pageBox.top >= viewerBox.bottom ||
+        pageBox.right <= viewerBox.left ||
+        pageBox.left >= viewerBox.right)
+    ) {
+      page?.scrollIntoView({
+        behavior: "auto",
+        block: "center",
+        inline: "center",
+      })
+    }
+
+    let frame = 0
+    const deadline = performance.now() + SEARCH_REVEAL_TIMEOUT_MS
+    const revealMatch = () => {
+      const rects = activeMatchRects()
+
+      if (rects.length > 0) {
+        const offset = searchRevealOffset(
+          rects,
+          viewer.getBoundingClientRect(),
+          document
+            .querySelector<HTMLElement>(
+              `[data-document-search="${openedDocument.id}"] [data-slot="pdf-search"]`,
+            )
+            ?.getBoundingClientRect() ?? null,
+          {
+            minLeft: -viewer.scrollLeft,
+            maxLeft: viewer.scrollWidth - viewer.clientWidth - viewer.scrollLeft,
+            minTop: -viewer.scrollTop,
+            maxTop: viewer.scrollHeight - viewer.clientHeight - viewer.scrollTop,
+          },
+        )
+
+        if (offset) {
+          viewer.scrollTo({
+            behavior: "smooth",
+            left: viewer.scrollLeft + offset.left,
+            top: viewer.scrollTop + offset.top,
+          })
+        }
+
         return
       }
 
-      // The page wrapper is always mounted, but its bitmap/text/highlight
-      // surface is virtualized. Give the near-viewport observer a few frames to
-      // attach it after the page-level seek.
-      attempts += 1
-      if (attempts < 30) {
-        frame = requestAnimationFrame(revealRectangle)
+      // The layer is drawn once PDFium has the page back, which the seek above
+      // only starts; a heavy page can take a good part of a second.
+      if (performance.now() < deadline) {
+        frame = requestAnimationFrame(revealMatch)
       }
     }
 
-    frame = requestAnimationFrame(revealRectangle)
+    frame = requestAnimationFrame(revealMatch)
 
-    return () => cancelAnimationFrame(frame)
-  }, [active, activeSearchIndex, searchMatches, searchOpen, viewMode])
+    return () => {
+      cancelAnimationFrame(frame)
+      interruptScroll()
+    }
+  }, [
+    active,
+    activeSearchIndex,
+    openedDocument.id,
+    searchMatches,
+    searchOpen,
+    viewMode,
+  ])
 
   useEffect(() => {
     if (!active || viewMode === "thumbnail") {
@@ -1101,9 +1415,7 @@ function DocumentSession(
       if (
         (eventTarget instanceof Element &&
           eventTarget.closest("input, textarea, select, [contenteditable]")) ||
-        document.querySelector(
-          "[role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox']",
-        )
+        hasLayerOverWorkspace()
       ) {
         return
       }
@@ -1157,6 +1469,14 @@ function DocumentSession(
     thumbnailSelection.select(pageNumber, modifiers)
   }
 
+  // A right-click on a page the selection does not hold takes the selection to
+  // it, as every file manager does: the menu then acts on what is on screen.
+  const menuThumbnailPage = (pageNumber: number) => {
+    if (!thumbnailSelection.selectedPages.has(pageNumber)) {
+      thumbnailSelection.select(pageNumber, { range: false, toggle: false })
+    }
+  }
+
   // Every page-editing gesture carries page numbers read off the screen, so it
   // must not be queued behind a *page-shifting* edit, or it would land on the
   // wrong page. The gesture is dropped while such an edit is in flight; the
@@ -1189,6 +1509,77 @@ function DocumentSession(
     void annotations.insertBlankPage(index, pdfDocument.numPages)
   }
 
+  /**
+   * The rotate button pressed over the grid, where turning a page is an edit of
+   * the document — undone, saved and carried into the file like any other —
+   * rather than the reading views' way of looking at it. It takes the
+   * selection, or the whole document when there is none.
+   */
+  const rotateThumbnailPages = () => {
+    if (!pdfDocument || editingBusy()) {
+      return
+    }
+
+    void annotations.rotatePages(
+      pagesToRotate(pdfDocument.numPages, thumbnailSelection.selectedPages),
+      QUARTER_TURN,
+    )
+  }
+
+  /**
+   * Puts the clipboard into the gap before `index`. A cut is a move, which the
+   * reorder command already makes one undo step of; a copy is the document
+   * taking its own pages in again, and stays on the clipboard afterwards —
+   * following the pages its own insert pushed down.
+   */
+  const pastePages = (index: number) => {
+    if (!pdfDocument || editingBusy()) {
+      return
+    }
+
+    const plan = pastePlan(pageClipboard.clipboard, index, pdfDocument.numPages)
+
+    if (!plan) {
+      return
+    }
+
+    const count = plan.pages.length
+    const at = index <= pdfDocument.numPages ? index : undefined
+
+    // Said once the edit has landed rather than when it was asked for: a
+    // refusal has its own notice, and two would be one too many.
+    if (plan.kind === "move") {
+      void annotations.reorderPages(plan.order).then((landed) => {
+        if (landed) {
+          notice.raise(
+            at === undefined ? "pagesMovedToEnd" : "pagesMoved",
+            { values: at === undefined ? { count } : { at, count } },
+          )
+        }
+      })
+
+      return
+    }
+
+    // Armed before the work, because the insert's own structure change is what
+    // reaches the clipboard first — and disarmed if that insert never lands.
+    pageClipboard.armPaste(index, count, pdfDocument.numPages)
+    void annotations
+      .duplicatePages(plan.pages, index, pdfDocument.numPages)
+      .then((landed) => {
+        if (landed) {
+          notice.raise(
+            at === undefined ? "pagesPastedToEnd" : "pagesPasted",
+            { values: at === undefined ? { count } : { at, count } },
+          )
+        } else {
+          pageClipboard.disarmPaste()
+        }
+      })
+  }
+
+  pastePagesRef.current = pastePages
+
   // Answered with, rather than voided: the grid holds the pages where the drop
   // put them until this settles, since nothing moves before the backend has.
   const reorderPages = (order: number[]) => {
@@ -1216,6 +1607,24 @@ function DocumentSession(
       : hasSourceFile
         ? undefined
         : t("annotate.saveNoSource")
+  // The toolbar's button has only its tooltip to carry the reason, so a
+  // disabled save names it there rather than repeating the action's name.
+  const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
+
+  // The window's save key runs the button's action, refusal included: a
+  // watermarked or merged document may only ever be exported as a copy.
+  const saveDocument = useCallback(() => {
+    if (canSave) {
+      void annotations.save()
+    }
+  }, [annotations, canSave])
+
+  // Only the session can answer this, so the workspace's save-all is told
+  // rather than left to guess from the file name and the dirty flag.
+  useEffect(() => {
+    onSavableChange(openedDocument.id, canSave)
+  }, [canSave, onSavableChange, openedDocument.id])
+
   // Inserts each PDF in turn at `index`, in the order they were dropped: the
   // second file goes after the first, so a multi-file drop reads down the grid
   // the way the reader arranged it. How far to advance is what the file itself
@@ -1251,7 +1660,7 @@ function DocumentSession(
         !viewer ||
         viewMode !== "thumbnail"
       ) {
-        setFileDropIndex(null)
+        setDropIndex(null)
         return false
       }
 
@@ -1260,7 +1669,7 @@ function DocumentSession(
       // an insertion line drawn for a folder promises a place it will refuse.
       // Null paths mean the window never heard them, not that there are none.
       if (!(event.paths?.some(isPdfPath) ?? true)) {
-        setFileDropIndex(null)
+        setDropIndex(null)
         return false
       }
 
@@ -1272,7 +1681,7 @@ function DocumentSession(
         event.point.x,
       )
 
-      setFileDropIndex(event.kind === "over" ? index : null)
+      setDropIndex(event.kind === "over" ? index : null)
 
       if (index === null) {
         return false
@@ -1287,14 +1696,92 @@ function DocumentSession(
       // reader's back. A page-shifting edit in flight is the one such case —
       // the gap was read off a grid that edit is about to renumber.
       if (annotations.isStructureBusyNow()) {
-        showViewerError("editInFlight")
+        notice.raise("editInFlight")
       } else {
         void insertFiles(event.paths.filter(isPdfPath), index)
       }
 
       return true
     },
-    [active, annotations, insertFiles, showViewerError, viewMode],
+    [active, annotations, insertFiles, notice, viewMode],
+  )
+
+  /**
+   * Pages dragged out of another document's grid, brought here by the workspace
+   * once its tab was sprung open. They land where a dropped file would, by the
+   * same hit test — and as copies: the document they came from keeps them.
+   */
+  const handlePageDrag = useCallback(
+    (event: PageDragEvent): boolean => {
+      const viewer = viewerRef.current
+
+      if (
+        event.kind === "leave" ||
+        !active ||
+        !viewer ||
+        viewMode !== "thumbnail"
+      ) {
+        setDropIndex(null)
+        return false
+      }
+
+      const index = insertIndexForHit(
+        dropHitAt(event.point, viewer),
+        event.point.x,
+      )
+
+      setDropIndex(event.kind === "over" ? index : null)
+
+      if (index === null) {
+        return false
+      }
+
+      if (event.kind === "over") {
+        return true
+      }
+
+      // Claimed either way, as a file drop over this grid is: the one case it
+      // cannot act on is an edit already renumbering the gap it was read off.
+      if (annotations.isStructureBusyNow()) {
+        notice.raise("editInFlight")
+      } else {
+        void annotations.insertPages(
+          event.sourceDocumentId,
+          event.pages,
+          index,
+          // Off the ref, as an inserted file's bound is: a structure change
+          // writes it before the render that would refresh a captured value.
+          documentRef.current?.numPages ?? 0,
+        )
+      }
+
+      return true
+    },
+    [active, annotations, notice, viewMode],
+  )
+
+  // The workspace springs this tab open under a drag that is made of pages, so
+  // the view it opens on has to be the one with gaps between them. Opened for
+  // that drag rather than pressed, so it is not stored as a preference either.
+  const showThumbnails = useCallback(() => {
+    if (preferredViewMode === "thumbnail") {
+      return
+    }
+
+    viewModeChosen.current = false
+    setPreferredViewMode("thumbnail")
+  }, [preferredViewMode])
+
+  // The workspace's handoff with this document's own id filled in: its grid
+  // asks whether a drag has left for somewhere the workspace answers for, and
+  // gives up the release when it has.
+  const handoff = useMemo<PageHandoff>(
+    () => ({
+      cancel: pageHandoff.cancel,
+      claim: (point) => pageHandoff.claim(openedDocument.id, point),
+      drop: (point, pages) => pageHandoff.drop(openedDocument.id, point, pages),
+    }),
+    [openedDocument.id, pageHandoff],
   )
 
   // A drag the reader started here but finished elsewhere — they switched tabs
@@ -1302,7 +1789,7 @@ function DocumentSession(
   // session a `leave`, so the line it drew would outlive the drag.
   useEffect(() => {
     if (!active) {
-      setFileDropIndex(null)
+      setDropIndex(null)
     }
   }, [active])
 
@@ -1486,15 +1973,91 @@ function DocumentSession(
     return recentViewWriteChainRef.current
   }, [flushRecentView, rememberCurrentView])
 
+  /**
+   * Fetches the fallback face, then re-runs the edit that wanted it.
+   *
+   * The retry is the whole point: by now the note's text is in `unfontedEdit`
+   * and nowhere else. A failed fetch leaves it there and keeps the offer on
+   * screen, so it can be taken again rather than costing the reader what they
+   * typed.
+   */
+  const fetchNoteFont = useCallback(async () => {
+    const offer = noteFontOfferRef.current
+
+    setFetchingNoteFont(true)
+
+    // Only the fetch is caught here: an edit that fails after it reports
+    // through `onAnnotateError`, and reading that as a download failure would
+    // send the reader to check a connection that had just worked.
+    try {
+      await invoke("download_pdf_note_font")
+    } catch {
+      // Silent where the offer is gone: it took the held edit with it, so
+      // saying the fetch failed would put back an offer with nothing to retry.
+      if (offer === noteFontOfferRef.current) {
+        setNoteFontOffer("noteFontFailed")
+      }
+
+      return
+    } finally {
+      setFetchingNoteFont(false)
+    }
+
+    if (offer !== noteFontOfferRef.current) {
+      return
+    }
+
+    setNoteFontOffer(null)
+
+    // Let go before the retry rather than after: an edit that wants a face
+    // again comes back through `onAnnotateError`, which is what puts it back.
+    if (unfontedEdit) {
+      setUnfontedEdit(null)
+      await annotations.commit(unfontedEdit)
+    }
+  }, [annotations, unfontedEdit])
+
   useImperativeHandle(
     ref,
     () => ({
+      dismissNoteFont: clearNoteFontOffer,
+      fetchNoteFont: () => void fetchNoteFont(),
       hasUnsavedWorkNow,
       onFileDrag: handleFileDrag,
+      onPageDrag: handlePageDrag,
+      openPageNumbers: openPageNumbersDialog,
       openSearch,
+      openWatermark: openWatermarkDialog,
+      print: () => void startPrint(),
       rememberViewNow,
+      save: saveDocument,
+      saveAs: () => void exportPdf(),
+      selectAll,
+      showThumbnails,
+      undo: () => {
+        if (annotations.canUndo) {
+          undoStep()
+        }
+      },
     }),
-    [handleFileDrag, hasUnsavedWorkNow, openSearch, rememberViewNow],
+    [
+      annotations.canUndo,
+      clearNoteFontOffer,
+      exportPdf,
+      fetchNoteFont,
+      handleFileDrag,
+      handlePageDrag,
+      hasUnsavedWorkNow,
+      openPageNumbersDialog,
+      openSearch,
+      openWatermarkDialog,
+      rememberViewNow,
+      saveDocument,
+      selectAll,
+      showThumbnails,
+      startPrint,
+      undoStep,
+    ],
   )
 
   useEffect(() => {
@@ -1548,62 +2111,17 @@ function DocumentSession(
     ? t("toolbar.hideBookmarks")
     : t("toolbar.showBookmarks")
 
-  /**
-   * Fetches the fallback face, then re-runs the edit that wanted it.
-   *
-   * The retry is the whole point: by now the note's text is in `unfontedEdit`
-   * and nowhere else. A failed fetch leaves it there and keeps the offer on
-   * screen, so it can be taken again rather than costing the reader what they
-   * typed.
-   */
-  const fetchNoteFont = useCallback(async () => {
-    setFetchingNoteFont(true)
-
-    // Only the fetch is caught here: an edit that fails after it reports
-    // through `onAnnotateError`, and reading that as a download failure would
-    // send the reader to check a connection that had just worked.
-    try {
-      await invoke("download_pdf_note_font")
-    } catch {
-      showViewerError("noteFontFailed")
-
-      return
-    } finally {
-      setFetchingNoteFont(false)
+  // The offer is a condition rather than an event, so it is put back whenever
+  // its button changes: raising a standing notice again only updates it.
+  useEffect(() => {
+    if (noteFontOffer) {
+      notice.raise(noteFontOffer, {
+        action: { busy: fetchingNoteFont, kind: "noteFont" },
+      })
+    } else {
+      notice.retract(["noteFontMissing"])
     }
-
-    setViewerError(null)
-
-    // Let go before the retry rather than after: an edit that wants a face
-    // again comes back through `onAnnotateError`, which is what puts it back.
-    if (unfontedEdit) {
-      setUnfontedEdit(null)
-      await annotations.commit(unfontedEdit)
-    }
-  }, [annotations, showViewerError, unfontedEdit])
-
-  const errorAutoDismisses =
-    viewerError !== "noteFontMissing" && viewerError !== "noteFontFailed"
-  const errorMessage =
-    viewerError === "fileTooLarge"
-      ? t("viewer.fileTooLarge")
-      : viewerError === "invalidFile"
-        ? t("viewer.invalidFile")
-        : viewerError === "openFailed"
-          ? t("viewer.openFailed")
-          : viewerError === "exportFailed"
-            ? t("annotate.exportFailed")
-            : viewerError === "saveFailed"
-              ? t("annotate.saveFailed")
-              : viewerError === "annotateFailed"
-                ? t("annotate.failed")
-                : viewerError === "editInFlight"
-                  ? t("annotate.dropWhileEditing")
-                  : viewerError === "noteFontMissing"
-                    ? t("annotate.noteFontMissing")
-                    : viewerError === "noteFontFailed"
-                      ? t("annotate.noteFontFailed")
-                      : null
+  }, [fetchingNoteFont, notice, noteFontOffer])
 
   return (
     <div
@@ -1636,7 +2154,7 @@ function DocumentSession(
             <AppMenu
               {...menu}
               canSave={canSave}
-              onSave={() => void annotations.save()}
+              onSave={saveDocument}
               onSaveAs={() => void exportPdf()}
               saveHint={saveHint}
             />
@@ -1653,49 +2171,61 @@ function DocumentSession(
               <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
             </Toggle>
           </ToolbarTooltip>
-          <ToolbarTooltip label={t("search.open")}>
-            <Toggle
-              aria-label={t("search.open")}
-              className="size-8"
-              data-slot="pdf-search-trigger"
-              disabled={!pdfDocument}
-              onPressedChange={(pressed) => {
-                if (pressed) {
-                  openSearch()
-                } else {
-                  closeSearch()
-                }
-              }}
-              pressed={searchOpen}
-              variant="outline"
+          {/* The three that act on the document itself, grouped apart from
+              the view controls after them, which act only on the reading. */}
+          <ButtonGroup>
+            {/* The chord is named only when it works: a disabled save
+                spends the tooltip on why it cannot. */}
+            <ToolbarTooltip
+              label={saveLabel}
+              shortcut={canSave ? shortcuts.save : undefined}
             >
-              <Search />
-            </Toggle>
-          </ToolbarTooltip>
-          <HistoryControls
-            canRedo={annotations.canRedo}
-            canUndo={annotations.canUndo}
-            disabled={!pdfDocument}
-            onRedo={() => {
-              // Only a page-moving step would strand the note on a page that has
-              // shifted or gone, and undo/redo cannot take the uncommitted note
-              // as their target; so the draft is discarded before such a step,
-              // but an annotation step (a highlight, say) leaves it to finish.
-              // The target is the head of the queue's live history.
-              const target = annotations.historyNow().future.at(-1)?.command
-              if (target && movesPages(target)) {
-                cancelTextNote()
-              }
-              void annotations.redo()
-            }}
-            onUndo={() => {
-              const target = annotations.historyNow().past.at(-1)?.command
-              if (target && movesPages(target)) {
-                cancelTextNote()
-              }
-              void annotations.undo()
-            }}
-          />
+              <Button
+                aria-label={t("annotate.save")}
+                // A disabled control takes no pointer, and the hint saying why
+                // saving is unavailable has to have a hover to open on.
+                className="disabled:pointer-events-auto"
+                data-slot="pdf-save-trigger"
+                disabled={!canSave}
+                onClick={saveDocument}
+                size="icon"
+                variant="outline"
+              >
+                <Save />
+              </Button>
+            </ToolbarTooltip>
+            <ToolbarTooltip label={t("print.open")} shortcut={shortcuts.print}>
+              <Button
+                aria-label={t("print.open")}
+                data-slot="pdf-print-trigger"
+                disabled={!pdfDocument || print.preparing}
+                onClick={() => void print.start()}
+                size="icon"
+                variant="outline"
+              >
+                <Printer />
+              </Button>
+            </ToolbarTooltip>
+            <ToolbarTooltip label={t("search.open")} shortcut={shortcuts.search}>
+              <Toggle
+                aria-label={t("search.open")}
+                className="size-8"
+                data-slot="pdf-search-trigger"
+                disabled={!pdfDocument}
+                onPressedChange={(pressed) => {
+                  if (pressed) {
+                    openSearch()
+                  } else {
+                    closeSearch()
+                  }
+                }}
+                pressed={searchOpen}
+                variant="outline"
+              >
+                <Search />
+              </Toggle>
+            </ToolbarTooltip>
+          </ButtonGroup>
           <ViewModeToggle
             bookApplies={bookApplies}
             disabled={!pdfDocument}
@@ -1718,15 +2248,13 @@ function DocumentSession(
             <Button
               aria-label={t("toolbar.rotate")}
               disabled={!pdfDocument}
-              onClick={() =>
-                setPageRotations((rotations) =>
-                  rotationsAfterRotate(
-                    rotations,
-                    viewMode,
-                    thumbnailSelection.selectedPages,
-                  ),
-                )
-              }
+              onClick={() => {
+                if (viewMode === "thumbnail") {
+                  rotateThumbnailPages()
+                } else {
+                  setPageRotations(rotationsAfterRotate)
+                }
+              }}
               size="icon"
               variant="outline"
             >
@@ -1744,26 +2272,56 @@ function DocumentSession(
           data-slot="page-status"
           role="group"
         >
-          <input
-            aria-label={t("toolbar.pageNumberInput")}
-            className="h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground"
-            disabled={!pdfDocument}
-            inputMode="numeric"
-            onBlur={() => setPageInput(String(currentPage))}
-            onChange={(event) =>
-              setPageInput(event.target.value.replaceAll(/[^0-9]/g, ""))
-            }
-            onFocus={(event) => event.currentTarget.select()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault()
-                submitPageNumber()
-                event.currentTarget.blur()
+          <div className="relative">
+            <input
+              aria-label={t("toolbar.pageNumberInput")}
+              className={cn(
+                "h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground",
+                // The field goes on holding the number — it is what a typed
+                // jump starts from, and what the field itself reads out as its
+                // value — but hands the drawing of it to the odometer, which
+                // would otherwise be read through the field's own text standing
+                // still underneath.
+                !pageInputFocused &&
+                  "text-transparent disabled:text-transparent",
+              )}
+              disabled={!pdfDocument}
+              inputMode="numeric"
+              onBlur={() => {
+                setPageInputFocused(false)
+                setPageInput(String(currentPage))
+              }}
+              onChange={(event) =>
+                setPageInput(event.target.value.replaceAll(/[^0-9]/g, ""))
               }
-            }}
-            type="text"
-            value={pageInput}
-          />
+              onFocus={(event) => {
+                setPageInputFocused(true)
+                event.currentTarget.select()
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  submitPageNumber()
+                  event.currentTarget.blur()
+                }
+              }}
+              type="text"
+              value={pageInput}
+            />
+            {/* Over the field, and deaf to the pointer, so a click still lands
+                in the field it covers. Forced colours override the field's
+                transparent text, so there the field draws its own number again
+                and this has to stand down rather than double it. */}
+            {pageInputFocused ? null : (
+              <PageOdometer
+                className={cn(
+                  "pointer-events-none absolute inset-0 justify-center forced-colors:hidden",
+                  !pdfDocument && "text-muted-foreground",
+                )}
+                value={currentPage}
+              />
+            )}
+          </div>
           <span className="text-muted-foreground">/</span>
           <span>{pdfDocument?.numPages ?? 0}</span>
           <span aria-live="polite" className="sr-only">
@@ -1775,6 +2333,28 @@ function DocumentSession(
         </div>
 
         <div className="flex items-center gap-1 justify-self-end">
+          {/* Leading the right-hand tools: undo and redo answer every mark and
+              page edit made with them, not the view controls opposite. */}
+          <HistoryControls
+            canRedo={annotations.canRedo}
+            canUndo={annotations.canUndo}
+            disabled={!pdfDocument}
+            nextRedo={annotations.nextRedo}
+            nextUndo={annotations.nextUndo}
+            onRedo={() => {
+              // Only a page-moving step would strand the note on a page that has
+              // shifted or gone, and undo/redo cannot take the uncommitted note
+              // as their target; so the draft is discarded before such a step,
+              // but an annotation step (a highlight, say) leaves it to finish.
+              // The target is the head of the queue's live history.
+              const target = annotations.historyNow().future.at(-1)?.command
+              if (target && movesPages(target)) {
+                cancelTextNote()
+              }
+              void annotations.redo()
+            }}
+            onUndo={undoStep}
+          />
           <AnnotationToolbar
             activeTool={activeTool}
             disabled={!pdfDocument}
@@ -1783,13 +2363,14 @@ function DocumentSession(
             highlightColor={highlightColor}
             onHighlightColorChange={changeHighlightColor}
             onMergeWizard={menu.onMergeWizard}
-            onPageNumbers={pageNumbers.openDialog}
+            onPageNumbers={openPageNumbersDialog}
             onRectStyleChange={changeRectStyle}
             onToolChange={setActiveTool}
-            onWatermark={watermark.openDialog}
+            onWatermark={openWatermarkDialog}
             rectApplies={drawingApplies}
             rectStyle={rectStyle}
             textNoteApplies={drawingApplies}
+            textNoteColor={textNoteStyle.color}
           />
           {active && !macOS ? <WindowControls /> : null}
         </div>
@@ -1832,18 +2413,29 @@ function DocumentSession(
             <PdfViewerLayout
               currentPage={currentPage}
               documentId={pdfDocument.id}
-              draft={rectDraft ?? undefined}
+              drafts={rectTool.drafts}
+              notes={textNote.previews}
+              onPagePaint={onPagePaint}
               fileName={fileName}
               key={pdfDocument.id}
               pageEdit={{
-                fileDropIndex,
+                canPaste: pageClipboard.clipboard !== null,
+                cutPages: cutThumbnailPages,
+                dropIndex,
+                handoff,
                 onClearSelection: clearThumbnailSelection,
+                onCopyPages: pageClipboard.copy,
+                onCutPages: pageClipboard.cut,
                 onDeletePage: deleteThumbnailPage,
                 onInsertBlankPage: insertBlankPage,
+                onMenuPage: menuThumbnailPage,
                 onOpenPage: openThumbnailPage,
+                onPastePages: pastePages,
                 onReorderPages: reorderPages,
+                onRotatePages: rotateThumbnailPages,
                 onSelectPage: selectThumbnailPage,
                 selectedPages: thumbnailSelection.selectedPages,
+                thumbnailKeys: thumbnailIdentity.keys,
               }}
               pages={pdfDocument.pages}
               referencePageWidth={zoom.referencePageWidth}
@@ -1852,7 +2444,9 @@ function DocumentSession(
               scale={zoom.scale}
               searchMatchesByPage={searchMatchesByPage}
               activeSearchIndex={activeSearchIndex}
+              onCopyAllText={copyDocumentText}
               textEpochs={annotations.textEpochs}
+              textSelectAll={textSelectAll.selectedAll}
               textSelectionDragging={textSelectionDragging}
               viewMode={viewMode}
               viewerWidth={viewerWidth}
@@ -1914,37 +2508,13 @@ function DocumentSession(
         validationError={pageNumbers.validationError}
       />
 
-      {errorMessage ? (
-        <DismissibleAlert
-          // A hidden tab has not shown its warning yet, and the font notices
-          // hold the reader's otherwise-lost note until they answer the offer.
-          autoDismiss={active && errorAutoDismisses}
-          className="fixed top-25 right-4 z-40 max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-          dismissKey={viewerErrorVersion}
-          onDismiss={dismissViewerError}
-        >
-          <div className="flex items-center gap-3">
-            <span>{errorMessage}</span>
-            {/* The only refusals the reader can answer from here, so the only
-                ones that carry a button — a fetch that failed included, since
-                the edit waiting on it is still held. */}
-            {viewerError === "noteFontMissing" ||
-            viewerError === "noteFontFailed" ? (
-              <Button
-                className="shrink-0"
-                disabled={fetchingNoteFont}
-                onClick={() => void fetchNoteFont()}
-                size="sm"
-                variant="outline"
-              >
-                {fetchingNoteFont
-                  ? t("annotate.noteFontFetching")
-                  : t("annotate.noteFontFetch")}
-              </Button>
-            ) : null}
-          </div>
-        </DismissibleAlert>
-      ) : null}
+      <PrintDialog
+        onStop={discardPrint}
+        open={active && print.preparing}
+        progress={print.progress}
+      />
+
+      {active && print.sheet ? <PrintSheet pages={print.sheet} /> : null}
     </div>
   )
 })

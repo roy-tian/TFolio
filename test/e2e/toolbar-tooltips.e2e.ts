@@ -4,6 +4,7 @@ import "@wdio/tauri-service"
 import {
   minimalPdf,
   openPdfFromDisk,
+  refreshApp,
   seedSettings,
 } from "./helpers"
 
@@ -38,7 +39,7 @@ async function expectShadcnTooltip(label: string) {
 describe("TFolio toolbar tooltips", () => {
   before(async () => {
     await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await openPdfFromDisk("toolbar-tooltips.pdf", minimalPdf(2))
     await $("[data-page-number='1']").waitForDisplayed()
   })
@@ -58,5 +59,17 @@ describe("TFolio toolbar tooltips", () => {
     const highlightOptions = await expectShadcnTooltip("高亮设置")
     await highlightOptions.click()
     await expect($("#highlight-color-label")).toHaveText("高亮颜色")
+  })
+
+  it("leaves no native tooltip in the workspace", async () => {
+    // Every hint the app shows is a shadcn tooltip, so nothing on screen may
+    // still carry the attribute the WebView would draw its own from.
+    const natives = await browser.execute(() =>
+      [...document.querySelectorAll("[title]")].map(
+        (node) => `${node.tagName.toLowerCase()}: ${node.getAttribute("title")}`,
+      ),
+    )
+
+    expect(natives).toEqual([])
   })
 })

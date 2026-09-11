@@ -1,0 +1,180 @@
+//! Microsoft Word and WPS Writer on Windows, through the automation model
+//! both of them implement — reached the way a script reaches it, over
+//! PowerShell, because the raw COM surface this crate's `windows` version
+//! exposes is an untyped union with none of the safety the script runtime
+//! already has. One script run serves the whole batch: one Word startup,
+//! every file, one quit.
+//!
+//! The script is staged by this engine and fixed; every path reaches it as
+//! an argument, never as text spliced into code, so a filename with a quote
+//! in it is a filename still. `|` cannot appear in a Windows filename, which
+//! is what the pairing on the command line leans on.
+
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
+
+use super::{
+    run_with_timeout, BatchOutcome, ConvertJob, ConvertSession, EngineKind, CONVERT_TIMEOUT,
+    START_TIMEOUT,
+};
+
+pub(crate) const WORD_PROG_ID: &str = "Word.Application";
+pub(crate) const WPS_PROG_ID: &str = "KWPS.Application";
+
+/// One script run, one answer per file on standard output:
+/// `OK|<input path>` or `FAIL|<input path>|<message>`. What a run was killed
+/// before answering stays unanswered — those files are this engine's
+/// refusals, and the chain offers them to the next engine.
+const CONVERT_SCRIPT: &str = r#"
+param([string]$ProgId, [string[]]$Pairs)
+$ErrorActionPreference = 'Stop'
+# Redirected output is otherwise the OEM code page on Windows PowerShell 5.1,
+# and a path with a non-ASCII character in it — the cache dir lives under the
+# user's profile — would echo back as something else entirely.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$application = $null
+try {
+    $application = New-Object -ComObject $ProgId
+    $application.Visible = $false
+    $application.DisplayAlerts = 0
+    try { $application.AutomationSecurity = 3 } catch {}
+    foreach ($pair in $Pairs) {
+        $parts = $pair -split '\|', 2
+        $inputPath = $parts[0]
+        $outputPath = $parts[1]
+        try {
+            $document = $application.Documents.Open($inputPath, $null, $true, $false)
+            try {
+                $document.ExportAsFixedFormat($outputPath, 17, $false)
+                Write-Output "OK|$inputPath"
+            } finally {
+                $document.Close(0)
+            }
+        } catch {
+            Write-Output "FAIL|$inputPath|$($_.Exception.Message)"
+        }
+    }
+} finally {
+    if ($null -ne $application) {
+        try { $application.Quit() } catch {}
+    }
+}
+"#;
+
+/// Whether an automation class is registered. Click-to-Run Office registers
+/// per user and MSI installs per machine, but HKCR is the merged view of
+/// both — and looking is all this does: no class is activated, so nothing
+/// starts.
+pub(crate) fn prog_id_installed(prog_id: &str) -> bool {
+    windows_registry::CLASSES_ROOT.open(prog_id).is_ok()
+}
+
+pub(crate) struct Session {
+    prog_id: &'static str,
+    script: PathBuf,
+}
+
+pub(crate) fn open_session(kind: EngineKind, run_dir: &Path) -> Result<Session, String> {
+    let prog_id = match kind {
+        EngineKind::Word => WORD_PROG_ID,
+        EngineKind::Wps => WPS_PROG_ID,
+        EngineKind::LibreOffice => return Err("LibreOffice is not a script engine".into()),
+    };
+
+    // In this run's own directory, beside the staged copies: no second
+    // instance of the app ever writes here.
+    let script = run_dir.join("word-convert.ps1");
+
+    fs::write(&script, CONVERT_SCRIPT)
+        .map_err(|error| format!("the conversion script could not be staged: {error}"))?;
+
+    Ok(Session { prog_id, script })
+}
+
+impl ConvertSession for Session {
+    fn convert(&mut self, jobs: &[ConvertJob], cancelled: &dyn Fn() -> bool) -> BatchOutcome {
+        // One script run is the whole batch: an already-landed stop spends
+        // nothing starting one; one during it waits for the deadline.
+        if cancelled() {
+            return BatchOutcome::Done(
+                jobs.iter()
+                    .map(|_| Err("stopped by the reader".into()))
+                    .collect(),
+            );
+        }
+
+        // One pairing per file, the two paths joined by a separator no
+        // Windows filename may contain.
+        let pairs: Vec<String> = jobs
+            .iter()
+            .map(|job| format!("{}|{}", job.staged.display(), job.output.display()))
+            .collect();
+
+        let mut command = Command::new("powershell.exe");
+
+        command
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&self.script)
+            .args(["-ProgId", self.prog_id])
+            .arg("-Pairs");
+
+        for pair in &pairs {
+            command.arg(pair);
+        }
+
+        // The suite's startup is the slow part and happens once, so it is
+        // owed in full however many files follow it.
+        let timeout = START_TIMEOUT + CONVERT_TIMEOUT.saturating_mul(jobs.len() as u32);
+
+        let finished = match run_with_timeout(&mut command, timeout) {
+            Ok(finished) => finished,
+            Err(error) => return BatchOutcome::Engine(format!("PowerShell did not run: {error}")),
+        };
+
+        // A killed run's answers die with its pipes, so every file answers
+        // unfinished below — refusals for the next engine, in order.
+        let stdout = String::from_utf8_lossy(&finished.output.stdout);
+
+        BatchOutcome::Done(
+            jobs.iter()
+                .zip(stdout.lines())
+                .map(|(job, line)| answer_for(line, job))
+                .chain(
+                    jobs.iter()
+                        .skip(stdout.lines().count())
+                        .map(|_| Err("did not finish before the engine was stopped".into())),
+                )
+                .collect(),
+        )
+    }
+
+    fn finish(&mut self) {
+        // The script quits the suite in its `finally`; a run killed past it
+        // may leave one behind — the cost of never killing by name.
+    }
+}
+
+/// One file's answer, read from its line: `OK|<path>`, or
+/// `FAIL|<path>|<message>`. A line that is neither is a script that never
+/// got going — this file's answer is no answer.
+fn answer_for(line: &str, job: &ConvertJob) -> Result<(), String> {
+    let mut parts = line.splitn(3, '|');
+
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some("OK"), Some(path), None) if path == job.staged.to_string_lossy().as_ref() => Ok(()),
+        (Some("FAIL"), Some(_), detail) => Err(detail.unwrap_or("the conversion failed").into()),
+        _ => Err(format!(
+            "the script answered in a shape it should not have: {line}"
+        )),
+    }
+}

@@ -14,14 +14,20 @@ import {
   isDirty,
   markSaved,
   insertFilePages,
+  insertPagesRange,
   movesPages,
+  nextRedoCommand,
+  nextUndoCommand,
   pageNumbersConfig,
   planDeletePages,
+  planDuplicatePages,
   planEraseAnnotation,
   planInsertBlankPage,
   planInsertFile,
+  planInsertPages,
   planPageNumbersChange,
   planReorderPages,
+  planRotatePages,
   planWatermarkChange,
   redo,
   retargetCommand,
@@ -210,6 +216,23 @@ describe("commit", () => {
   })
 })
 
+describe("nextUndoCommand and nextRedoCommand", () => {
+  it("names the step each direction would take", () => {
+    const history = historyOf(highlight(1), highlight(2))
+    const undone = undo(history)!.history
+
+    expect(nextUndoCommand(history)).toBe(history.past[1]!.command)
+    expect(nextRedoCommand(history)).toBeNull()
+    expect(nextUndoCommand(undone)).toBe(history.past[0]!.command)
+    expect(nextRedoCommand(undone)).toBe(history.past[1]!.command)
+  })
+
+  it("names nothing on an untouched document", () => {
+    expect(nextUndoCommand(emptyHistory)).toBeNull()
+    expect(nextRedoCommand(emptyHistory)).toBeNull()
+  })
+})
+
 describe("undo and redo", () => {
   it("reports nothing to undo on an untouched document", () => {
     expect(undo(emptyHistory)).toBeNull()
@@ -331,12 +354,13 @@ describe("movesPages", () => {
       expect(movesPages(command)).toBe(true)
     }
 
-    // An annotation, watermark, or page number leaves every page where it was,
-    // so undoing one must not discard a note the reader is still typing.
+    // An annotation, watermark, page number or turn leaves every page where it
+    // was, so undoing one must not discard a note the reader is still typing.
     for (const command of [
       highlight(1),
       watermark(null),
       pageNumbers(pageNumbersConfigValue()),
+      planRotatePages(emptyHistory, [1], 90)!.command,
     ]) {
       expect(movesPages(command)).toBe(false)
     }
@@ -504,6 +528,122 @@ describe("insert-file commands", () => {
     // The delete an undo runs, and the restore a redo runs, cover the file's own
     // range — pages 3 through 6.
     expect(insertFilePages(command as never)).toEqual([3, 4, 5, 6])
+  })
+})
+
+describe("cross-document insert commands", () => {
+  it("plans an insert of the pages a drag brought from another document", () => {
+    const history = historyOf(highlight(1))
+    const planned = planInsertPages(history, 7, [4, 2], 2, 3)!
+
+    expect(planned.command).toEqual({
+      index: 2,
+      kind: "insertPages",
+      pageCount: 5,
+      sourceDocumentId: 7,
+      // Sorted and deduplicated: the block lands in the order the source grid
+      // shows it, whichever page of it the reader happened to grab.
+      sourcePages: [2, 4],
+      stashId: history.nextId,
+    })
+    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
+  })
+
+  it("refuses a position the document does not have, and an empty block", () => {
+    expect(planInsertPages(emptyHistory, 7, [1], 0, 3)).toBeNull()
+    expect(planInsertPages(emptyHistory, 7, [1], 5, 3)).toBeNull()
+    expect(planInsertPages(emptyHistory, 7, [], 2, 3)).toBeNull()
+    // One past the end is a position: the pages go after the last one.
+    expect(planInsertPages(emptyHistory, 7, [1], 4, 3)).not.toBeNull()
+  })
+
+  it("invalidates the gap and everything after it, and moves the pages", () => {
+    const command = planInsertPages(emptyHistory, 7, [1, 2], 2, 3)!.command
+
+    expect(commandPages(command)).toEqual([2, 3, 4, 5])
+    expect(commandTextPages(command)).toEqual([2, 3, 4, 5])
+    expect(movesPages(command)).toBe(true)
+  })
+
+  it("names the block its undo deletes and its redo restores", () => {
+    const command = planInsertPages(emptyHistory, 7, [1, 3, 4], 3, 5)!.command
+
+    expect(insertPagesRange(command as never)).toEqual([3, 4, 5])
+  })
+})
+
+describe("turning pages", () => {
+  it("plans one turn of the pages the grid chose", () => {
+    const history = historyOf(highlight(1))
+    const planned = planRotatePages(history, [3, 1, 3], 90)!
+
+    expect(planned.command).toEqual({
+      degrees: 90,
+      kind: "rotatePages",
+      // Sorted and deduplicated: the undo turns back exactly what turned.
+      pages: [1, 3],
+    })
+    expect(planned.history.past).toHaveLength(2)
+  })
+
+  it("refuses an empty selection and a turn that comes to nothing", () => {
+    expect(planRotatePages(emptyHistory, [], 90)).toBeNull()
+    expect(planRotatePages(emptyHistory, [1], 0)).toBeNull()
+    expect(planRotatePages(emptyHistory, [1], 360)).toBeNull()
+  })
+
+  it("keeps the turn inside one clockwise circle", () => {
+    expect(planRotatePages(emptyHistory, [1], 450)!.command.degrees).toBe(90)
+    expect(planRotatePages(emptyHistory, [1], -90)!.command.degrees).toBe(270)
+  })
+
+  it("redraws the pages that turned and no others, text included", () => {
+    const command = planRotatePages(emptyHistory, [2, 4], 90)!.command
+
+    expect(commandPages(command)).toEqual([2, 4])
+    // The spans keep their places in the page's own space; only the layer
+    // drawn over them turns, so nothing has to be extracted again.
+    expect(commandTextPages(command)).toEqual([])
+  })
+})
+
+describe("pasting the document's own pages", () => {
+  it("plans a copy of the pages the reader took, in the grid's order", () => {
+    const history = historyOf(highlight(1))
+    const planned = planDuplicatePages(history, [3, 1, 3], 2, 3)!
+
+    expect(planned.command).toEqual({
+      index: 2,
+      kind: "duplicatePages",
+      pageCount: 5,
+      // Sorted and deduplicated, as a dragged block is: what the undo deletes
+      // has to be the range the backend copied.
+      sourcePages: [1, 3],
+      stashId: history.nextId,
+    })
+    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
+  })
+
+  it("refuses a position the document does not have, and an empty block", () => {
+    expect(planDuplicatePages(emptyHistory, [1], 0, 3)).toBeNull()
+    expect(planDuplicatePages(emptyHistory, [1], 5, 3)).toBeNull()
+    expect(planDuplicatePages(emptyHistory, [], 2, 3)).toBeNull()
+    // One past the end is a position: the copies go after the last page.
+    expect(planDuplicatePages(emptyHistory, [1], 4, 3)).not.toBeNull()
+  })
+
+  it("invalidates the gap and everything after it, and moves the pages", () => {
+    const command = planDuplicatePages(emptyHistory, [1, 2], 2, 3)!.command
+
+    expect(commandPages(command)).toEqual([2, 3, 4, 5])
+    expect(commandTextPages(command)).toEqual([2, 3, 4, 5])
+    expect(movesPages(command)).toBe(true)
+  })
+
+  it("names the block its undo deletes and its redo restores", () => {
+    const command = planDuplicatePages(emptyHistory, [1, 3, 4], 3, 5)!.command
+
+    expect(insertPagesRange(command)).toEqual([3, 4, 5])
   })
 })
 

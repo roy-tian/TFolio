@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::Cursor,
+    io::{Cursor, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -9,9 +9,10 @@ use std::{
     },
 };
 
-use image::{imageops, DynamicImage, ImageFormat};
+use image::{imageops, metadata::Orientation, DynamicImage, ImageDecoder, ImageFormat};
 use pdfium_render::prelude::*;
 use tauri::AppHandle;
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
 use super::{
     font::{
@@ -19,9 +20,10 @@ use super::{
         system_embedded_face, EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR, PAGE_NUMBER_GLYPHS,
     },
     geometry::{
-        annotation_color, annotation_covers, page_rect_to_pdfium, page_rotation_degrees,
-        quad_points_from_rect, union_rect, unrotated_page_height, unrotated_page_size,
-        within_page_range, MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
+        a4_placement, annotation_color, annotation_covers, page_rect_to_pdfium,
+        page_rotation_degrees, quad_points_from_rect, union_rect, unrotated_page_height,
+        unrotated_page_size, within_page_range, A4_LONG_POINTS, A4_SHORT_POINTS,
+        MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
         MAX_TEXT_NOTE_LINES, MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_TEXT_NOTE_FONT_SIZE,
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
@@ -38,10 +40,10 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, InsertOutcome, MergeBookmarks, PagePoint, PagePointsRect, PdfDocumentInfo,
-    PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
-    MAX_PDF_BYTES,
+    ExportOutcome, InsertOutcome, MergeBookmarks, MergeSourceError, MergeSourceKind, PagePoint,
+    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch,
+    PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle,
+    TextNoteStyle, MAX_PDF_BYTES,
 };
 
 const MIN_RENDER_WIDTH: i32 = 64;
@@ -65,10 +67,27 @@ const MAX_SEARCH_RECTS: usize = 50_000;
 // ceiling as an open, so the count is what bounds the whole run. Far past any
 // stack of files a reader assembles by hand.
 const MAX_MERGE_FILES: usize = 64;
+// What a merge accepts besides PDFs, matched on the extension because the
+// wizard has to sort a dropped file before anything reads it. The bytes are
+// still identified by their own header when they are decoded.
+pub(super) const MERGE_IMAGE_EXTENSIONS: [&str; 8] =
+    ["bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"];
+// An image file is read whole before it is decoded, and a photograph is nothing
+// like a document in size, so it gets a ceiling of its own well under the PDF
+// one.
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+// What one image may expand to once decoded. An A4 page scanned at 600dpi is
+// about 35 megapixels, so this leaves generous room above real input while
+// refusing a header that claims a bitmap no machine could hold.
+const MAX_IMAGE_PIXELS: u64 = 80_000_000;
 // Image effects capture page pixels at a print-like resolution, capped at the
 // same dimensions as an ordinary page render so one drag cannot allocate an
 // unbounded bitmap or inflate the saved file without limit.
 const RECT_EFFECT_DPI: f32 = 150.0;
+// What one page becomes when a merge is exported as images rather than as a
+// document: enough to print and to read on screen, and the same resolution the
+// rectangle effects already capture at.
+const PAGE_IMAGE_DPI: f32 = 150.0;
 const POINTS_PER_INCH: f32 = 72.0;
 // Smart colour only needs an average luminance under one small label, so it
 // samples at a fraction of a print-resolution capture — a few pixels across the
@@ -419,10 +438,10 @@ struct OpenDocument {
     /// every structure command reports the whole page list back, and measuring
     /// it costs one `FPDF_LoadPage` per page — more than the edit itself once a
     /// document runs to hundreds of pages, and paid again on every later edit.
-    /// Nothing in a session resizes or re-rotates a page, so an entry is
-    /// written the first time that page is measured and only read afterwards;
-    /// an id is never reused, so a deleted page's entry is still its own if the
-    /// undo brings it back.
+    /// An entry is written the first time that page is measured and only read
+    /// afterwards; a rotation — the one edit that changes a page's own shape —
+    /// retires it, so the page is measured afresh. An id is never reused, so a
+    /// deleted page's entry is still its own if the undo brings it back.
     page_geometry: HashMap<u64, PdfPageInfo>,
     /// Deleted pages awaiting a possible undo, keyed by the history entry that
     /// deleted them. A delete under an occupied key replaces the stash: the key
@@ -601,6 +620,97 @@ fn validate_pages_to_delete(page_numbers: &[i32], page_count: usize) -> Result<V
         .collect())
 }
 
+/// Checks the pages a command names exist and are distinct; hands back their
+/// zero-based indices in ascending order. `action` names the command in the
+/// refusals ("an insert", "a rotation"), which is all its callers differ by:
+/// neither an insert nor a rotation leaves a page behind, so unlike a deletion
+/// they may take the whole document at once.
+fn validate_distinct_pages(
+    page_numbers: &[i32],
+    page_count: usize,
+    action: &str,
+) -> Result<Vec<usize>, String> {
+    if page_numbers.is_empty() {
+        return Err(format!("{action} needs at least one page"));
+    }
+
+    let mut seen = vec![false; page_count];
+
+    for &page_number in page_numbers {
+        let Some(index) = page_index(page_number, page_count) else {
+            return Err(format!("page {page_number} does not exist"));
+        };
+
+        if seen[index] {
+            return Err(format!("page {page_number} appears twice in {action}"));
+        }
+
+        seen[index] = true;
+    }
+
+    Ok(seen
+        .iter()
+        .enumerate()
+        .filter_map(|(index, selected)| selected.then_some(index))
+        .collect())
+}
+
+/// The clockwise turn a rotation asks for, as degrees in `0..360`. A page's
+/// `/Rotate` holds quarter turns and nothing else, so anything else is refused
+/// rather than rounded to one: the number is the WebView's.
+fn quarter_turn(degrees: i32) -> Result<i32, String> {
+    let turn = degrees.rem_euclid(360);
+
+    if turn % 90 != 0 {
+        return Err(format!("{degrees} is not a quarter turn"));
+    }
+
+    Ok(turn)
+}
+
+/// The `/Rotate` value for a clockwise turn in degrees, which `quarter_turn`
+/// has already established is one of the four.
+fn quarter_turn_rotation(degrees: i32) -> PdfPageRenderRotation {
+    match degrees.rem_euclid(360) {
+        90 => PdfPageRenderRotation::Degrees90,
+        180 => PdfPageRenderRotation::Degrees180,
+        270 => PdfPageRenderRotation::Degrees270,
+        _ => PdfPageRenderRotation::None,
+    }
+}
+
+/// PDFium's own page-range syntax for an import: 1-based numbers and runs, as
+/// in "1,3,5-7". Built from ascending indices, so the copied pages land in the
+/// order the grid shows them however the reader picked them out.
+fn page_range_argument(indices: &[usize]) -> String {
+    let run = |start: usize, end: usize| {
+        if start == end {
+            format!("{}", start + 1)
+        } else {
+            format!("{}-{}", start + 1, end + 1)
+        }
+    };
+    let mut ranges = Vec::new();
+    let mut open: Option<(usize, usize)> = None;
+
+    for &index in indices {
+        open = match open {
+            Some((start, end)) if index == end + 1 => Some((start, index)),
+            Some((start, end)) => {
+                ranges.push(run(start, end));
+                Some((index, index))
+            }
+            None => Some((index, index)),
+        };
+    }
+
+    if let Some((start, end)) = open {
+        ranges.push(run(start, end));
+    }
+
+    ranges.join(",")
+}
+
 /// The entry for `document_id`, with the one wording for a closed document.
 fn open_entry(
     documents: &HashMap<u64, OpenDocument>,
@@ -644,6 +754,10 @@ pub(super) enum OperationTarget {
     Document(u64),
     Merge,
     Search(u64),
+    /// The Word→PDF conversions behind a wizard inspection, which can outlast
+    /// a reader's patience on their own. A merge's conversions stay under its
+    /// own target: stopping a merge stops everything it was doing.
+    Convert,
 }
 
 /// One long operation, listed while it runs so the reader's cancel can find it.
@@ -739,6 +853,9 @@ pub(super) struct PdfiumEngine {
     /// lock could never be set in time to stop anything.
     operations: Mutex<HashMap<u64, RunningOperation>>,
     next_operation_id: AtomicU64,
+    /// The Word-import engine: which office suite to drive, where the
+    /// converted PDFs land, and what has already been converted this run.
+    word: crate::convert::WordConverter,
 }
 
 #[derive(Clone)]
@@ -762,6 +879,7 @@ impl PdfiumState {
             approved_paths: Mutex::new(HashSet::new()),
             operations: Mutex::new(HashMap::new()),
             next_operation_id: AtomicU64::new(1),
+            word: crate::convert::WordConverter::new(app),
         })))
     }
 
@@ -769,6 +887,16 @@ impl PdfiumState {
     /// calls this, from outside the `pdfium` module.
     pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
         self.0.approve_paths(paths);
+    }
+
+    /// Closing takes the PDFium lock, so it must not block the window event loop.
+    pub fn close_document_detached(&self, document_id: u64) {
+        let engine = Arc::clone(&self.0);
+        engine.cancel_document_work(document_id);
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = engine.close(document_id);
+        });
     }
 }
 
@@ -844,6 +972,12 @@ impl PdfiumEngine {
         }
 
         asked
+    }
+
+    /// Cancel first so closing a document does not wait for its entire rebuild.
+    pub(super) fn cancel_document_work(&self, document_id: u64) {
+        self.cancel_operation(OperationTarget::Document(document_id));
+        self.cancel_operation(OperationTarget::Search(document_id));
     }
 
     /// A new one-page A4 document, built in memory. It has no file of its own,
@@ -1116,6 +1250,31 @@ impl PdfiumEngine {
             limit_reached: false,
             matches,
         })
+    }
+
+    /// The page's text as PDFium reconstructs it, line breaks included. The
+    /// spans above carry the same characters cut into positioned runs, which is
+    /// a layout and not something a reader would want on the clipboard.
+    pub(super) fn extract_plain_text(
+        &self,
+        document_id: u64,
+        page_number: i32,
+    ) -> Result<String, String> {
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+
+        entry.page_id(page_number)?;
+
+        let page = entry
+            .document
+            .pages()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        let text = page.text().map_err(|error| {
+            format!("PDFium could not read text on page {page_number}: {error}")
+        })?;
+
+        Ok(text.all())
     }
 
     pub(super) fn extract_text(
@@ -3341,6 +3500,74 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
+    /// Turns the given pages clockwise by `degrees`, on top of whatever each
+    /// one already carries. Alone among the structure commands this moves no
+    /// page: it rewrites each one's `/Rotate`, which is what makes the turn
+    /// part of the document — saved with it, and undone by turning back.
+    pub(super) fn rotate_pages(
+        &self,
+        document_id: u64,
+        page_numbers: &[i32],
+        degrees: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        let turn = quarter_turn(degrees)?;
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let indices = validate_distinct_pages(page_numbers, entry.page_ids.len(), "a rotation")?;
+
+        if turn == 0 {
+            return Ok(structure_update(entry));
+        }
+
+        // Every page is read before any is turned. `FPDFPage_SetRotation`
+        // cannot fail once the page is in hand, so a page PDFium will not load
+        // refuses the whole edit here rather than leaving half of it applied —
+        // which no history entry would then be holding.
+        let mut turned = Vec::with_capacity(indices.len());
+
+        for index in &indices {
+            let page =
+                entry.document.pages().get(*index as i32).map_err(|error| {
+                    format!("PDFium could not load page {}: {error}", index + 1)
+                })?;
+
+            turned.push(quarter_turn_rotation(
+                page_rotation_degrees(&page) as i32 + turn,
+            ));
+        }
+
+        for (index, rotation) in indices.iter().zip(turned) {
+            let measured = {
+                let mut page = entry
+                    .document
+                    .pages_mut()
+                    .get(*index as i32)
+                    .map_err(|error| {
+                        format!("PDFium could not load page {}: {error}", index + 1)
+                    })?;
+
+                page.set_rotation(rotation);
+                // PDFium updates the page's dimensions as it sets the rotation,
+                // so the new shape is already there to read off the page in
+                // hand — and reading it here is what spares `page_infos` a
+                // second load of every page the reader turned.
+                measure_page(&page)
+            };
+            let page_id = entry.page_ids[*index];
+
+            // The one thing in a session that re-shapes a page, so the one
+            // thing that has to write a geometry memo rather than only fill it.
+            // An effect holding pixels captured before the turn must fail its
+            // check, as it would after any other edit to the page. Both go page
+            // by page, so a turn that gives out partway still leaves the pages
+            // it reached describing themselves.
+            entry.page_geometry.insert(page_id, measured);
+            *entry.revisions.entry(page_id).or_insert(0) += 1;
+        }
+
+        Ok(structure_update(entry))
+    }
+
     /// Deletes the given pages, first copying them — and the session state
     /// riding with them — into a stash under `stash_id` for a later restore.
     /// An occupied `stash_id` is replaced: the key names one history entry,
@@ -3660,68 +3887,10 @@ impl PdfiumEngine {
             ));
         }
 
-        // An inserted page carries its source's own content objects. When this
-        // session owns any layer, each new page takes an owned-but-bare record
-        // whose base is that content and whose tail is empty — no active layer
-        // covers a page it never marked. Measured before the recording loop,
-        // which needs a mutable borrow of the same entry.
-        //
-        // A read failure here rolls the import back like the import itself does:
-        // the pages are already on the document, so a bare `?` would leave them
-        // there while `page_ids` never learned of them — a desync every later
-        // command trusts against.
-        let mut new_base_objects = match &entry.owned_content {
-            Some(_) => {
-                let measured = (0..added_count)
-                    .map(|offset| {
-                        let index = slot as i32 + offset;
-                        entry
-                            .document
-                            .pages()
-                            .get(index)
-                            .map(|page| page.objects().len())
-                            .map_err(|error| {
-                                format!(
-                                    "PDFium could not inspect inserted page {}: {error}",
-                                    index + 1
-                                )
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>();
-
-                match measured {
-                    Ok(values) => values,
-                    Err(error) => {
-                        return Err(self.restore_document_snapshot(entry, snapshot, error));
-                    }
-                }
-            }
-            None => Vec::new(),
-        }
-        .into_iter();
-
-        for offset in 0..added_count as usize {
-            let page_id = entry.next_page_id;
-
-            entry.next_page_id += 1;
-            entry.page_ids.insert(slot + offset, page_id);
-            // This page is another file's content: while it stays, the document
-            // may only be exported as a copy, not saved over its own file.
-            entry.merged_page_ids.insert(page_id);
-
-            if let Some(state) = entry.owned_content.as_mut() {
-                // Owned but bare: its base is the source file's own content, and
-                // no active layer covers a page it never marked.
-                state.per_page.insert(
-                    page_id,
-                    OwnedTailState {
-                        base_objects: new_base_objects
-                            .next()
-                            .expect("one measured base count per inserted page"),
-                        segments: Vec::new(),
-                    },
-                );
-            }
+        if let Err(error) =
+            Self::record_inserted_pages(entry, slot, &vec![true; added_count as usize])
+        {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
         }
 
         // Nothing was removed, so no compaction is owed; but every page's
@@ -3735,15 +3904,271 @@ impl PdfiumEngine {
         })
     }
 
+    /// Takes the pages a copy has just put at `slot` into the entry's own
+    /// bookkeeping: fresh page ids, the guard that keeps a document holding
+    /// another file's pages export-only, and — for a session that owns a layer —
+    /// an owned-but-bare record per page. `merged` says which of them carry
+    /// content this document may not be saved over, one flag per page: every
+    /// page of an import does, only a duplicate of such a page does.
+    ///
+    /// Everything that can fail is measured before anything is recorded, so an
+    /// error leaves the entry as it was and the caller has only the document
+    /// itself to roll back.
+    fn record_inserted_pages(
+        entry: &mut OpenDocument,
+        slot: usize,
+        merged: &[bool],
+    ) -> Result<(), String> {
+        let count = merged.len();
+        // What the document really grew by, rather than what was asked for:
+        // `page_ids` is the list every later command trusts against.
+        let grown_by = (entry.document.pages().len() as usize).saturating_sub(entry.page_ids.len());
+
+        if grown_by != count {
+            return Err(format!(
+                "PDFium added {grown_by} pages where {count} were asked for"
+            ));
+        }
+
+        // A copied page carries its source's own content objects. When this
+        // session owns any layer, each new page takes an owned-but-bare record
+        // whose base is that content and whose tail is empty — no active layer
+        // covers a page it never marked.
+        let mut new_base_objects = match &entry.owned_content {
+            Some(_) => (0..count)
+                .map(|offset| {
+                    let index = (slot + offset) as i32;
+                    entry
+                        .document
+                        .pages()
+                        .get(index)
+                        .map(|page| page.objects().len())
+                        .map_err(|error| {
+                            format!(
+                                "PDFium could not inspect inserted page {}: {error}",
+                                index + 1
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            None => Vec::new(),
+        }
+        .into_iter();
+
+        for (offset, &from_elsewhere) in merged.iter().enumerate() {
+            let page_id = entry.next_page_id;
+
+            entry.next_page_id += 1;
+            entry.page_ids.insert(slot + offset, page_id);
+
+            // This page holds content from outside this document's own file:
+            // while it stays, that file may only be exported to, never saved.
+            if from_elsewhere {
+                entry.merged_page_ids.insert(page_id);
+            }
+
+            if let Some(state) = entry.owned_content.as_mut() {
+                state.per_page.insert(
+                    page_id,
+                    OwnedTailState {
+                        base_objects: new_base_objects
+                            .next()
+                            .expect("one measured base count per inserted page"),
+                        segments: Vec::new(),
+                    },
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Copies `page_numbers` out of another open document into this one at
+    /// 1-based `index` — the thumbnail drag that crosses tabs. The pages are
+    /// copied, never moved, and they are read from the document as the reader
+    /// has it rather than from any file, so whatever that session has made of
+    /// them travels with them.
+    ///
+    /// Like an inserted file's, the pages become this document's own and leave
+    /// it export-only; unlike one, they name no path, so there is nothing here
+    /// for the approval check to answer for.
+    pub(super) fn insert_pages_from_document(
+        &self,
+        document_id: u64,
+        source_document_id: u64,
+        page_numbers: &[i32],
+        index: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        // Both a real refusal and what makes the two entries below disjoint.
+        // Within one document a drag reorders, which is a different command.
+        if document_id == source_document_id {
+            return Err("a document cannot take pages from itself".into());
+        }
+
+        let mut documents = self.lock_documents()?;
+        let source_count = open_entry(&documents, source_document_id)?.page_ids.len();
+        let source_pages = validate_distinct_pages(page_numbers, source_count, "an insert")?;
+        let page_count = open_entry(&documents, document_id)?.page_ids.len();
+        // One past the end is a position too, exactly as a blank page's is.
+        let Some(slot) = page_index(index, page_count + 1) else {
+            return Err(format!("a page cannot go to position {index}"));
+        };
+
+        let [Some(entry), Some(source)] =
+            documents.get_disjoint_mut([&document_id, &source_document_id])
+        else {
+            return Err("PDF document is no longer open".into());
+        };
+
+        // The import may fail partway; snapshot first so a failure rolls the
+        // document back whole, as every multi-page structure change does.
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        if let Err(error) = entry.document.pages_mut().copy_pages_from_document(
+            &source.document,
+            &page_range_argument(&source_pages),
+            slot as i32,
+        ) {
+            return Err(self.restore_document_snapshot(
+                entry,
+                snapshot,
+                format!("PDFium could not insert the pages: {error}"),
+            ));
+        }
+
+        if let Err(error) =
+            Self::record_inserted_pages(entry, slot, &vec![true; source_pages.len()])
+        {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        // Every page's content now sits in a longer document, so an M5 effect
+        // captured before this must fail its revision check after it.
+        entry.invalidate_all_page_revisions();
+
+        Ok(structure_update(entry))
+    }
+
+    /// Copies this document's own `page_numbers` back into it at 1-based
+    /// `index` — the grid's copy-and-paste. PDFium cannot import a document
+    /// into itself, so the pages go by way of a scratch document, exactly as a
+    /// delete's stash does.
+    ///
+    /// The copies are the document's own content, so they leave it saveable —
+    /// unless the page copied is itself another file's, or carries this
+    /// session's owned layer, which travels baked into the copy.
+    pub(super) fn duplicate_pages(
+        &self,
+        document_id: u64,
+        page_numbers: &[i32],
+        index: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let page_count = entry.page_ids.len();
+        let sources = validate_distinct_pages(page_numbers, page_count, "an insert")?;
+        // One past the end is a position too, exactly as a blank page's is.
+        let Some(slot) = page_index(index, page_count + 1) else {
+            return Err(format!("a page cannot go to position {index}"));
+        };
+
+        // The copy may fail partway; snapshot first so a failure rolls the
+        // document back whole, as every multi-page structure change does.
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        let copied = (|| -> Result<(), String> {
+            let mut scratch = self
+                .pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not prepare the copies: {error}"))?;
+
+            scratch
+                .pages_mut()
+                .copy_pages_from_document(&entry.document, &page_range_argument(&sources), 0)
+                .map_err(|error| format!("PDFium could not copy the pages aside: {error}"))?;
+
+            entry
+                .document
+                .pages_mut()
+                .copy_page_range_from_document(
+                    &scratch,
+                    0..=(sources.len() - 1) as i32,
+                    slot as i32,
+                )
+                .map_err(|error| format!("PDFium could not insert the copies: {error}"))
+        })();
+
+        if let Err(error) = copied {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        // Read while `page_ids` still stands as the sources were named: a copy
+        // of a page this document may not be saved over is one too.
+        let merged: Vec<bool> = sources
+            .iter()
+            .map(|source| {
+                let page_id = entry.page_ids[*source];
+
+                entry.merged_page_ids.contains(&page_id)
+                    || entry.owned_content.as_ref().is_some_and(|state| {
+                        state
+                            .per_page
+                            .get(&page_id)
+                            .is_some_and(|tail| !tail.segments.is_empty())
+                    })
+            })
+            .collect();
+
+        if let Err(error) = Self::record_inserted_pages(entry, slot, &merged) {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        // Every page's content now sits in a longer document, so an M5 effect
+        // captured before this must fail its revision check after it.
+        entry.invalidate_all_page_revisions();
+
+        Ok(structure_update(entry))
+    }
+
     /// Reads each candidate file of a guided merge just far enough to report
     /// what the wizard's first step shows: how many pages it brings, and whether
     /// it has bookmarks of its own. A file that cannot be read is reported as
     /// such rather than dropped, so the row the reader added stays on screen and
     /// says why it is unusable.
-    pub(super) fn inspect_files(&self, paths: Vec<PathBuf>) -> Result<Vec<PdfFileSummary>, String> {
+    pub(super) fn inspect_files(
+        &self,
+        paths: Vec<PathBuf>,
+        word_conversion: bool,
+    ) -> Result<Vec<PdfFileSummary>, String> {
         if paths.len() > MAX_MERGE_FILES {
             return Err(merge_file_limit_error());
         }
+
+        // A Word document has no page count to report until an office suite
+        // has made a PDF of it. Seconds of work, all of it another process's
+        // — so it runs before the lock, like the image decode below it, and
+        // under its own stop target: this is the one part of an inspection a
+        // reader might reasonably want to interrupt.
+        let operation = self.begin_operation(OperationTarget::Convert);
+        let cancelled = || operation.is_cancelled();
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
+
+        // An image is decoded the same way the merge itself will decode it, so a
+        // row the wizard shows as usable is one the merge can actually lay on a
+        // page — but only decoded, never laid: the sheet it becomes is one page
+        // and carries no outline, so building it here would answer nothing
+        // already known. Done before the lock, because a decode is pure Rust
+        // work that PDFium neither performs nor has to be serialized against.
+        let images: Vec<Option<bool>> = paths
+            .iter()
+            .map(|path| is_merge_image(path).then(|| read_image(path).is_ok()))
+            .collect();
 
         // Loading a PDF is PDFium work like any other, so the whole sweep runs
         // under the store's lock even though it inserts nothing into the store.
@@ -3751,30 +4176,134 @@ impl PdfiumEngine {
 
         Ok(paths
             .into_iter()
-            .map(|path| {
-                let opened = read_pdf_bytes(&path)
-                    .ok()
-                    .and_then(|bytes| self.pdfium.load_pdf_from_byte_vec(bytes, None).ok());
-                let path = path.to_string_lossy().into_owned();
+            .zip(images)
+            .zip(word)
+            .map(|((path, image), word)| {
+                let path_text = path.to_string_lossy().into_owned();
+
+                // A converted Word document is read like any other PDF, under
+                // its own row's name: the row says what the file is, not what
+                // the conversion left behind.
+                if let crate::convert::Entry::Converted(pdf) = &word {
+                    let opened = load_merge_source(self.pdfium, pdf).ok();
+
+                    return match opened {
+                        Some(document) => {
+                            let page_count = document.pages().len();
+
+                            PdfFileSummary {
+                                path: path_text,
+                                kind: MergeSourceKind::Word,
+                                page_count: (page_count >= 1).then_some(page_count),
+                                has_outline: document.bookmarks().root().is_some(),
+                                error: None,
+                            }
+                        }
+                        // The conversion came back with something this app's
+                        // own reader cannot open — rarer than a refusal, and
+                        // worded the same way for the row.
+                        None => PdfFileSummary {
+                            path: path_text,
+                            kind: MergeSourceKind::Word,
+                            page_count: None,
+                            has_outline: false,
+                            error: Some(MergeSourceError::ConversionFailed),
+                        },
+                    };
+                }
+
+                if let crate::convert::Entry::Failed(error) = word {
+                    return PdfFileSummary {
+                        path: path_text,
+                        kind: MergeSourceKind::Word,
+                        page_count: None,
+                        has_outline: false,
+                        error: Some(match error {
+                            crate::convert::ConvertError::NoConverter => {
+                                MergeSourceError::ConverterMissing
+                            }
+                            crate::convert::ConvertError::Failed(_) => {
+                                MergeSourceError::ConversionFailed
+                            }
+                        }),
+                    };
+                }
+
+                if let Some(readable) = image {
+                    return PdfFileSummary {
+                        path: path_text,
+                        kind: MergeSourceKind::Image,
+                        page_count: readable.then_some(1),
+                        has_outline: false,
+                        error: None,
+                    };
+                }
+
+                let opened = load_merge_source(self.pdfium, &path).ok();
 
                 match opened {
                     Some(document) => {
                         let page_count = document.pages().len();
 
                         PdfFileSummary {
-                            path,
+                            path: path_text,
+                            kind: MergeSourceKind::Pdf,
                             page_count: (page_count >= 1).then_some(page_count),
                             has_outline: document.bookmarks().root().is_some(),
+                            error: None,
                         }
                     }
                     None => PdfFileSummary {
-                        path,
+                        path: path_text,
+                        kind: MergeSourceKind::Pdf,
                         page_count: None,
                         has_outline: false,
+                        error: None,
                     },
                 }
             })
             .collect())
+    }
+
+    /// Every Word document among `paths`, as PDFs of this run's own — or the
+    /// refusal that says why not. The stop flag is the caller's, because the
+    /// three pipelines that reach for a conversion each run under their own
+    /// operation; what a stop leaves unconverted reads here as a refusal, and
+    /// the callers that answer stops with their own "nothing was built" say
+    /// so before they ever look at these entries.
+    fn resolve_word_documents(
+        &self,
+        paths: &[PathBuf],
+        enabled: bool,
+        cancelled: &dyn Fn() -> bool,
+        on_converted: &mut dyn FnMut(),
+    ) -> Vec<crate::convert::Entry> {
+        if !enabled
+            || !paths
+                .iter()
+                .any(|path| crate::convert::is_word_document(path))
+        {
+            return paths
+                .iter()
+                .map(|_| crate::convert::Entry::NotWord)
+                .collect();
+        }
+
+        match self.word.resolve(paths, cancelled, on_converted) {
+            Ok(entries) => entries,
+            Err(_) => paths
+                .iter()
+                .map(|path| {
+                    if crate::convert::is_word_document(path) {
+                        crate::convert::Entry::Failed(crate::convert::ConvertError::Failed(
+                            "stopped by the reader".into(),
+                        ))
+                    } else {
+                        crate::convert::Entry::NotWord
+                    }
+                })
+                .collect(),
+        }
     }
 
     /// Merges `paths`, in the order given, into one new document — the guided
@@ -3787,11 +4316,17 @@ impl PdfiumEngine {
     /// `smart_padding` inserts a blank before any file that would otherwise open
     /// on an even page — the rule the files view's toggle already follows, so
     /// that each file begins on a right-hand leaf when printed double-sided.
+    ///
+    /// `normalize_a4` fits every page onto an A4 sheet of its own instead of
+    /// carrying the source's page sizes through — see `append_page_fitted_to_a4`
+    /// for what that costs.
     pub(super) fn merge_files_with_progress(
         &self,
         paths: Vec<PathBuf>,
         smart_padding: bool,
+        normalize_a4: bool,
         bookmarks: MergeBookmarks,
+        word_conversion: bool,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<Option<PdfDocumentInfo>, String> {
         if paths.len() < 2 {
@@ -3809,11 +4344,51 @@ impl PdfiumEngine {
         // so a stopped run simply hands back nothing.
         let operation = self.begin_operation(OperationTarget::Merge);
 
-        // One unit per source, followed by serialization, outline writing, and
-        // opening the completed bytes into the document store.
-        let total = paths.len() + 3;
-        let mut completed = 0usize;
-        on_progress(completed, total);
+        // One unit per source, plus the Word conversions this run will really
+        // do (a cache hit adds none), followed by serialization, outline
+        // writing, and opening the completed bytes into the document store.
+        let conversions = if word_conversion {
+            self.word.pending_count(&paths)
+        } else {
+            0
+        };
+        let total = paths.len() + 3 + conversions;
+
+        on_progress(0, total);
+
+        // The Word conversions run here, before the lock: an office suite's
+        // startup is seconds another process spends, and no render of the
+        // reader's should wait behind it.
+        let cancelled = || operation.is_cancelled();
+        let mut converted = 0usize;
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {
+            converted += 1;
+            on_progress(converted, total);
+        });
+
+        // The estimate above promised pending conversions; this run really
+        // did `converted` of them, and only a difference is worth saying —
+        // the bar answers to what happened, never twice to what did not.
+        let mut total = total;
+        let mut completed = converted;
+
+        if converted != conversions {
+            total = paths.len() + 3 + converted;
+            on_progress(completed.min(total), total);
+        }
+
+        if operation.is_cancelled() {
+            return Ok(None);
+        }
+
+        for (path, entry) in paths.iter().zip(&word) {
+            if let crate::convert::Entry::Failed(error) = entry {
+                return Err(format!(
+                    "{} could not be converted: {error}",
+                    path.display()
+                ));
+            }
+        }
 
         let (bytes, nodes) = {
             // Building the document is PDFium work like any other, so it is done
@@ -3826,21 +4401,24 @@ impl PdfiumEngine {
                 .map_err(|error| format!("PDFium could not create a document: {error}"))?;
             let mut nodes = Vec::new();
 
-            for path in &paths {
+            for (path, word) in paths.iter().zip(&word) {
                 // Between files, which is this loop's page: a source is copied
                 // whole or not at all.
                 if operation.is_cancelled() {
                     return Ok(None);
                 }
 
+                // A Word source is read from the PDF its conversion left,
+                // while its name — error wording, bookmark title — stays the
+                // reader's own file's.
+                let read_from = match word {
+                    crate::convert::Entry::Converted(pdf) => pdf.as_path(),
+                    _ => path,
+                };
+
                 // Each source is opened only to be copied from and dropped at the
                 // end of this loop; none of them ever enters the document store.
-                // The error wording matches `open`'s, so an encrypted file is
-                // refused the same way whichever door it comes through.
-                let source = self
-                    .pdfium
-                    .load_pdf_from_byte_vec(read_pdf_bytes(path)?, None)
-                    .map_err(|error| format!("PDFium could not open the document: {error}"))?;
+                let source = load_merge_source(self.pdfium, read_from)?;
 
                 if source.pages().is_empty() {
                     return Err(format!("{} has no pages", path.display()));
@@ -3848,7 +4426,9 @@ impl PdfiumEngine {
 
                 if smart_padding && merged.pages().len() % 2 == 1 {
                     // Sized like the file it precedes, so the blank reads as that
-                    // file's own leading sheet rather than the last file's tail.
+                    // file's own leading sheet rather than the last file's tail —
+                    // or like the sheet that file's first page is about to be
+                    // fitted onto, where every page is being normalized.
                     let (width, height) = {
                         let first = source.pages().get(0).map_err(|error| {
                             format!(
@@ -3857,7 +4437,13 @@ impl PdfiumEngine {
                             )
                         })?;
 
-                        unrotated_page_size(&first)
+                        if normalize_a4 {
+                            let placement = a4_placement(first.width().value, first.height().value);
+
+                            (placement.sheet_width, placement.sheet_height)
+                        } else {
+                            unrotated_page_size(&first)
+                        }
                     };
                     let page = merged
                         .pages_mut()
@@ -3880,9 +4466,24 @@ impl PdfiumEngine {
                 // the merged one has to be written by hand afterwards.
                 let outline = collect_bookmark_siblings(source.bookmarks().root());
 
-                merged.pages_mut().append(&source).map_err(|error| {
-                    format!("PDFium could not merge {}: {error}", path.display())
-                })?;
+                if normalize_a4 {
+                    // Page by page rather than in one call: each sheet is sized
+                    // and its content placed on its own terms.
+                    for index in 0..source.pages().len() {
+                        // A long file's pages are this loop's own unit, and it
+                        // holds the one PDFium lock throughout — so the stop is
+                        // read here too, not only between files.
+                        if operation.is_cancelled() {
+                            return Ok(None);
+                        }
+
+                        append_page_fitted_to_a4(&mut merged, &source, index, path)?;
+                    }
+                } else {
+                    merged.pages_mut().append(&source).map_err(|error| {
+                        format!("PDFium could not merge {}: {error}", path.display())
+                    })?;
+                }
 
                 nodes.extend(merge_bookmark_nodes(
                     bookmarks,
@@ -3940,6 +4541,291 @@ impl PdfiumEngine {
         Ok(Some(document))
     }
 
+    /// One page of `document_id`, rendered at `dpi` and encoded as a PNG.
+    ///
+    /// The lock is taken and given back per page, so a whole document's worth of
+    /// these leaves room between them for the renders a viewer is asking for.
+    fn page_png(&self, document_id: u64, page_number: i32, dpi: f32) -> Result<Vec<u8>, String> {
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+        let page = entry
+            .document
+            .pages()
+            .get(page_number - 1)
+            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+        let width = page.width().value;
+        let height = page.height().value;
+
+        // The contract `render_page_sample` states: a page whose size is not a
+        // usable number would scale to one that is not either.
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return Err(format!("page {page_number} has no usable size"));
+        }
+
+        let image = Self::render_page_sample(&page, dpi)
+            .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))?;
+
+        drop(page);
+        drop(documents);
+
+        let mut png = Cursor::new(Vec::new());
+
+        image
+            .write_to(&mut png, ImageFormat::Png)
+            .map_err(|error| format!("could not encode page {page_number}: {error}"))?;
+
+        Ok(png.into_inner())
+    }
+
+    /// Writes every page of `document_id` into a zip at `destination`, one PNG
+    /// per page. `false` is the reader's stop, which leaves `destination` alone.
+    ///
+    /// The document is the merge's own result, layers and all — this only reads
+    /// it — so nothing here can reach one of the files the merge was built from.
+    pub(super) fn export_page_images(
+        &self,
+        document_id: u64,
+        destination: &Path,
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<bool, String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
+        let page_count = {
+            let documents = self.lock_documents()?;
+
+            open_entry(&documents, document_id)?.page_ids.len()
+        };
+
+        if page_count == 0 {
+            return Err("this document has no pages to export".into());
+        }
+
+        on_progress(0, page_count);
+
+        // Already deflated: a PNG put through the archive's own compressor
+        // costs a second pass over every pixel and gives back nothing.
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        let digits = page_count.to_string().len();
+
+        write_file_atomically(destination, |file| {
+            let mut archive = ZipWriter::new(file);
+
+            for page_number in 1..=page_count {
+                // Between pages, which is this loop's unit: a page is written
+                // whole or not at all, and an abandoned archive is removed.
+                if operation.is_cancelled() {
+                    return Ok(false);
+                }
+
+                let png = self.page_png(document_id, page_number as i32, PAGE_IMAGE_DPI)?;
+
+                archive
+                    .start_file(format!("page-{page_number:0digits$}.png"), options)
+                    .map_err(|error| format!("could not start page {page_number}: {error}"))?;
+                archive
+                    .write_all(&png)
+                    .map_err(|error| format!("could not write page {page_number}: {error}"))?;
+                on_progress(page_number, page_count);
+            }
+
+            archive
+                .finish()
+                .map_err(|error| format!("could not finish the archive: {error}"))?;
+
+            Ok(true)
+        })
+    }
+
+    /// Writes one watermarked copy of each of `paths` into a zip at
+    /// `destination` — the merge wizard's third export, which merges nothing.
+    ///
+    /// Each source is built, watermarked and written on its own, and never
+    /// through its own path: the copies are documents of this app's making with
+    /// no source behind them, so nothing here can be written back over a file
+    /// the reader named. `false` is their stop.
+    pub(super) fn export_watermarked_copies(
+        &self,
+        paths: Vec<PathBuf>,
+        normalize_a4: bool,
+        watermark: Option<WatermarkConfig>,
+        word_conversion: bool,
+        destination: &Path,
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<bool, String> {
+        if paths.is_empty() {
+            return Err("an export needs at least one file".into());
+        }
+
+        if paths.len() > MAX_MERGE_FILES {
+            return Err(merge_file_limit_error());
+        }
+
+        // A destination that resolves onto one of the sources would replace a
+        // reader's own PDF with an archive. The dialog offers `.zip`, but the
+        // name it comes back with is theirs to type.
+        for path in &paths {
+            if same_file(path, destination) {
+                return Err("the archive would replace one of the files it is built from".into());
+            }
+        }
+
+        let operation = self.begin_operation(OperationTarget::Merge);
+
+        // The Word conversions happen before the archive is begun, under the
+        // export's own stop, and count in its total — like the merge's.
+        let conversions = if word_conversion {
+            self.word.pending_count(&paths)
+        } else {
+            0
+        };
+        let mut total = paths.len() + conversions;
+
+        // Before the conversions, so the first of them — a minute of an
+        // office suite's time, on a cold start — is not the first news.
+        on_progress(0, total);
+
+        let cancelled = || operation.is_cancelled();
+        let mut converted = 0usize;
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {
+            converted += 1;
+            on_progress(converted, total);
+        });
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
+        if converted != conversions {
+            total = paths.len() + converted;
+            on_progress(converted.min(total), total);
+        }
+
+        for (path, entry) in paths.iter().zip(&word) {
+            if let crate::convert::Entry::Failed(error) = entry {
+                return Err(format!(
+                    "{} could not be converted: {error}",
+                    path.display()
+                ));
+            }
+        }
+
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let mut used = HashSet::new();
+
+        write_file_atomically(destination, |file| {
+            let mut archive = ZipWriter::new(file);
+
+            for (index, (path, word)) in paths.iter().zip(&word).enumerate() {
+                // Between files, which is this loop's unit — the same place the
+                // merge itself stops.
+                if operation.is_cancelled() {
+                    return Ok(false);
+                }
+
+                // A Word source is read from the PDF its conversion left; the
+                // archive entry still wears the reader's own file's name.
+                let read_from = match word {
+                    crate::convert::Entry::Converted(pdf) => pdf.as_path(),
+                    _ => path,
+                };
+                let bytes =
+                    self.watermarked_copy(read_from, normalize_a4, &watermark, &operation)?;
+                let Some(bytes) = bytes else {
+                    return Ok(false);
+                };
+
+                archive
+                    .start_file(archive_pdf_name(path, &mut used), options)
+                    .map_err(|error| format!("could not start {}: {error}", path.display()))?;
+                archive
+                    .write_all(&bytes)
+                    .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+                on_progress(converted + index + 1, total);
+            }
+
+            archive
+                .finish()
+                .map_err(|error| format!("could not finish the archive: {error}"))?;
+
+            Ok(true)
+        })
+    }
+
+    /// One source built as its own document, watermarked if the reader asked for
+    /// one, and handed back as bytes. `None` is their stop.
+    ///
+    /// The document lives in the store only for as long as the watermark takes:
+    /// that is the one machinery that can apply a mark, and it works on an entry.
+    /// It is closed on every path out, including a failure, so a stopped run
+    /// leaves nothing behind for a window to own.
+    fn watermarked_copy(
+        &self,
+        path: &Path,
+        normalize_a4: bool,
+        watermark: &Option<WatermarkConfig>,
+        operation: &OperationGuard<'_>,
+    ) -> Result<Option<Vec<u8>>, String> {
+        let bytes = {
+            let _documents = self.lock_documents()?;
+            let source = load_merge_source(self.pdfium, path)?;
+
+            if source.pages().is_empty() {
+                return Err(format!("{} has no pages", path.display()));
+            }
+
+            if normalize_a4 {
+                let mut sheets = self
+                    .pdfium
+                    .create_new_pdf()
+                    .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+
+                for index in 0..source.pages().len() {
+                    if operation.is_cancelled() {
+                        return Ok(None);
+                    }
+
+                    append_page_fitted_to_a4(&mut sheets, &source, index, path)?;
+                }
+
+                sheets.save_to_bytes()
+            } else {
+                source.save_to_bytes()
+            }
+            .map_err(|error| format!("PDFium could not build {}: {error}", path.display()))?
+        };
+
+        let Some(config) = watermark.clone() else {
+            return Ok(Some(bytes));
+        };
+
+        // Opened with no source path, so the copy can never be written back over
+        // the file it was built from.
+        let document = self.open_with_source(bytes, None)?;
+        let marked = (|| -> Result<Option<Vec<u8>>, String> {
+            // The reader's stop reaches the merge, not this document; passing it
+            // on is what keeps a long mark from running past their asking.
+            let applied = self.apply_watermark_with_progress(document.id, config, |_, _| {
+                if operation.is_cancelled() {
+                    self.cancel_document_work(document.id);
+                }
+            })?;
+
+            if !applied || operation.is_cancelled() {
+                return Ok(None);
+            }
+
+            let documents = self.lock_documents()?;
+
+            open_entry(&documents, document.id)?
+                .document
+                .save_to_bytes()
+                .map(Some)
+                .map_err(|error| format!("PDFium could not write {}: {error}", path.display()))
+        })();
+
+        self.close(document.id)?;
+        marked
+    }
+
     #[cfg(test)]
     pub(super) fn merge_files(
         &self,
@@ -3947,8 +4833,25 @@ impl PdfiumEngine {
         smart_padding: bool,
         bookmarks: MergeBookmarks,
     ) -> Result<PdfDocumentInfo, String> {
-        self.merge_files_with_progress(paths, smart_padding, bookmarks, |_, _| {})?
+        self.merge_files_with_progress(paths, smart_padding, false, bookmarks, false, |_, _| {})?
             .ok_or_else(|| "the merge was stopped".to_string())
+    }
+
+    #[cfg(test)]
+    pub(super) fn merge_files_onto_a4(
+        &self,
+        paths: Vec<PathBuf>,
+        smart_padding: bool,
+    ) -> Result<PdfDocumentInfo, String> {
+        self.merge_files_with_progress(
+            paths,
+            smart_padding,
+            true,
+            MergeBookmarks::None,
+            false,
+            |_, _| {},
+        )?
+        .ok_or_else(|| "the merge was stopped".to_string())
     }
 
     /// Writes the document back over the file it was opened from.
@@ -4104,80 +5007,14 @@ impl PdfiumEngine {
     fn write_document(&self, entry: &mut OpenDocument, path: &Path) -> Result<(), String> {
         self.collect_orphans(entry)?;
 
-        // A fresh export has nothing to canonicalize; the given path is it.
-        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let path = path.as_path();
-        // A bare name has `""` for a parent, which would put the temporary file
-        // in whatever directory the process started from — losing the atomic
-        // rename, which needs one filesystem.
-        let directory = match path.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent,
-            _ => return Err(format!("{} is not a usable destination", path.display())),
-        };
-        // Random, and created only if absent: a name someone can guess, in a
-        // directory anyone can write to, could be waiting as a symlink, and the
-        // document would be written through to whatever it points at. Random
-        // rather than a counter, which would restart at 1 every launch — a
-        // temporary file a crash left behind would then collide with, and
-        // permanently block, every later save of the same document.
-        let suffix = getrandom::u64()
-            .map_err(|error| format!("could not name a temporary file: {error}"))?;
-        let temporary = directory.join(format!(
-            ".{}.{suffix:016x}.tfolio-save",
-            bounded_file_name(
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("document.pdf")
-            ),
-        ));
-
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|error| format!("could not write beside {}: {error}", path.display()))?;
-
-        // Written through the handle `create_new` just proved was ours, never by
-        // handing the name back to be opened a second time: in that gap the file
-        // could be swapped for a symlink, and PDFium's own `save_to_file` opens
-        // by path.
-        let saved = entry
-            .document
-            .save_to_writer(&mut file)
-            .map_err(|error| format!("PDFium could not write the document: {error}"))
-            // The rename orders the replacement; only a flush makes it real. A
-            // crash between an unsynced rename and the writeback would leave
-            // the name pointing at a hollow file — exactly the loss the
-            // temporary file exists to prevent.
-            .and_then(|()| {
-                file.sync_all()
-                    .map_err(|error| format!("could not flush the document: {error}"))
-            });
-
-        drop(file);
-
-        // The temporary was born with default permissions; the file it is about
-        // to become may be tighter (a 0600 document must not come back 0644).
-        // Best effort — a failure here still saves, with default permissions.
-        if let Ok(metadata) = fs::metadata(path) {
-            let _ = fs::set_permissions(&temporary, metadata.permissions());
-        }
-
-        let written = saved.and_then(|()| {
-            fs::rename(&temporary, path)
-                .map_err(|error| format!("could not write to {}: {error}", path.display()))
-        });
-
-        if written.is_err() {
-            // Hidden, so one left behind is one the reader would never find.
-            let _ = fs::remove_file(&temporary);
-        } else if let Ok(handle) = fs::File::open(directory) {
-            // The rename itself lives in the directory; flush that too, best
-            // effort, so the replacement survives a crash.
-            let _ = handle.sync_all();
-        }
-
-        written
+        write_file_atomically(path, |file| {
+            entry
+                .document
+                .save_to_writer(file)
+                .map_err(|error| format!("PDFium could not write the document: {error}"))
+                .map(|()| true)
+        })
+        .map(|_| ())
     }
 
     pub(super) fn close(&self, document_id: u64) -> Result<(), String> {
@@ -4185,6 +5022,126 @@ impl PdfiumEngine {
 
         Ok(())
     }
+}
+
+/// Writes `path` through a temporary file beside it, renamed into place only
+/// once every byte is on disk. `write` returning `false` abandons the write:
+/// the temporary goes and `path` is left as it was, which is how a stopped
+/// export leaves nothing half-written behind.
+///
+/// Shared by every write this app makes — a saved document and the wizard's
+/// archives — so the reasoning in it is stated once rather than per call site.
+fn write_file_atomically(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> Result<bool, String>,
+) -> Result<bool, String> {
+    // A fresh export has nothing to canonicalize; the given path is it.
+    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = path.as_path();
+    // A bare name has `""` for a parent, which would put the temporary file
+    // in whatever directory the process started from — losing the atomic
+    // rename, which needs one filesystem.
+    let directory = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => return Err(format!("{} is not a usable destination", path.display())),
+    };
+    // Random, and created only if absent: a name someone can guess, in a
+    // directory anyone can write to, could be waiting as a symlink, and the
+    // document would be written through to whatever it points at. Random
+    // rather than a counter, which would restart at 1 every launch — a
+    // temporary file a crash left behind would then collide with, and
+    // permanently block, every later save of the same document.
+    let suffix =
+        getrandom::u64().map_err(|error| format!("could not name a temporary file: {error}"))?;
+    let temporary = directory.join(format!(
+        ".{}.{suffix:016x}.tfolio-save",
+        bounded_file_name(
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("document.pdf")
+        ),
+    ));
+
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| format!("could not write beside {}: {error}", path.display()))?;
+
+    // Written through the handle `create_new` just proved was ours, never by
+    // handing the name back to be opened a second time: in that gap the file
+    // could be swapped for a symlink, and PDFium's own `save_to_file` opens
+    // by path.
+    let written = write(&mut file).and_then(|keep| {
+        if !keep {
+            return Ok(false);
+        }
+
+        // The rename orders the replacement; only a flush makes it real. A
+        // crash between an unsynced rename and the writeback would leave
+        // the name pointing at a hollow file — exactly the loss the
+        // temporary file exists to prevent.
+        file.sync_all()
+            .map_err(|error| format!("could not flush the document: {error}"))
+            .map(|()| true)
+    });
+
+    drop(file);
+
+    // The temporary was born with default permissions; the file it is about
+    // to become may be tighter (a 0600 document must not come back 0644).
+    // Best effort — a failure here still saves, with default permissions.
+    if let Ok(metadata) = fs::metadata(path) {
+        let _ = fs::set_permissions(&temporary, metadata.permissions());
+    }
+
+    let renamed = written.and_then(|keep| {
+        if !keep {
+            return Ok(false);
+        }
+
+        fs::rename(&temporary, path)
+            .map_err(|error| format!("could not write to {}: {error}", path.display()))
+            .map(|()| true)
+    });
+
+    if !matches!(renamed, Ok(true)) {
+        // Hidden, so one left behind is one the reader would never find.
+        let _ = fs::remove_file(&temporary);
+    } else if let Ok(handle) = fs::File::open(directory) {
+        // The rename itself lives in the directory; flush that too, best
+        // effort, so the replacement survives a crash.
+        let _ = handle.sync_all();
+    }
+
+    renamed
+}
+
+/// What one source is called inside a watermark-only archive: its own name with
+/// a `.pdf` extension, since an image comes out as the page it was laid on.
+///
+/// Two sources from different directories can share a name, so a name already
+/// taken gains a number — an archive with one entry silently missing would be
+/// worse than one with an odd name in it. The stem is reduced to its last path
+/// component first, so nothing a path carries can name a directory in the
+/// archive.
+fn archive_pdf_name(path: &Path, used: &mut HashSet<String>) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.replace(['/', '\\'], "_"))
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "document".to_string());
+    let stem = bounded_file_name(&stem).to_string();
+    let mut name = format!("{stem}.pdf");
+    let mut ordinal = 1;
+
+    while !used.insert(name.clone()) {
+        ordinal += 1;
+        name = format!("{stem} ({ordinal}).pdf");
+    }
+
+    name
 }
 
 /// At most 200 bytes of `name`, cut on a character boundary: the temporary
@@ -4262,6 +5219,220 @@ fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+/// Whether `path` names one of the image formats a merge can bring in as a page.
+pub(super) fn is_merge_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            MERGE_IMAGE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
+}
+
+/// Decodes `path` as an image, under both of the ceilings above.
+///
+/// The format comes from the bytes rather than the extension: a file the reader
+/// named `.png` is still whatever it actually is, and every decoder here is
+/// pure Rust, so a mislabelled one is a decode error rather than a hazard.
+fn read_image(path: &Path) -> Result<DynamicImage, String> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+
+    if metadata.len() > MAX_IMAGE_BYTES {
+        return Err(image_limit_error());
+    }
+
+    let mut limits = image::Limits::default();
+
+    limits.max_alloc = Some(MAX_IMAGE_PIXELS * 4);
+
+    let mut reader = image::ImageReader::open(path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?
+        .with_guessed_format()
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+
+    reader.limits(limits);
+
+    let unusable =
+        |error: image::ImageError| format!("{} is not a usable image: {error}", path.display());
+    let mut decoder = reader.into_decoder().map_err(unusable)?;
+    let (width, height) = decoder.dimensions();
+
+    // Read off the header, before a pixel is allocated: `max_alloc` above is a
+    // limit the crate documents as non-strict, so the size a file *claims* is
+    // what refuses a bitmap no machine could hold — both as a pixel count and
+    // as the bytes those pixels take at this file's own channel depth.
+    if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS
+        || decoder.total_bytes() > MAX_IMAGE_PIXELS * 4
+    {
+        return Err(image_limit_error());
+    }
+
+    // Cameras and scanners record the way a sheet was held in the metadata
+    // rather than in the pixels, and decoding leaves it there: without this a
+    // portrait photograph arrives 4032 wide and is laid sideways on a landscape
+    // sheet.
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut image = DynamicImage::from_decoder(decoder).map_err(unusable)?;
+
+    image.apply_orientation(orientation);
+
+    Ok(image)
+}
+
+/// A one-page document holding `path`'s image, laid on an A4 sheet turned the
+/// way the image is and scaled to fill it.
+///
+/// An image has no page size of its own — its pixels are not points — so unlike
+/// a PDF page it is always fitted to the sheet, enlarged as readily as shrunk.
+/// That makes the merge's own A4 option a no-op for images, which is the only
+/// answer that reads the same whether the option is on or off.
+fn image_page_document<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<'a>, String> {
+    let image = read_image(path)?;
+    let pixel_width = image.width() as f32;
+    let pixel_height = image.height() as f32;
+
+    if pixel_width < 1.0 || pixel_height < 1.0 {
+        return Err(format!("{} has no pixels", path.display()));
+    }
+
+    let (sheet_width, sheet_height) = if pixel_width > pixel_height {
+        (A4_LONG_POINTS, A4_SHORT_POINTS)
+    } else {
+        (A4_SHORT_POINTS, A4_LONG_POINTS)
+    };
+    let scale = (sheet_width / pixel_width).min(sheet_height / pixel_height);
+    let width = pixel_width * scale;
+    let height = pixel_height * scale;
+    let mut document = pdfium
+        .create_new_pdf()
+        .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+    let mut object = PdfPageImageObject::new_with_size(
+        &document,
+        &image,
+        PdfPoints::new(width),
+        PdfPoints::new(height),
+    )
+    .map_err(|error| format!("PDFium could not place {}: {error}", path.display()))?;
+
+    object
+        .translate(
+            PdfPoints::new((sheet_width - width) / 2.0),
+            PdfPoints::new((sheet_height - height) / 2.0),
+        )
+        .map_err(|error| format!("PDFium could not centre {}: {error}", path.display()))?;
+
+    let mut page = document
+        .pages_mut()
+        .create_page_at_end(PdfPagePaperSize::Custom(
+            PdfPoints::new(sheet_width),
+            PdfPoints::new(sheet_height),
+        ))
+        .map_err(|error| format!("PDFium could not create the image's sheet: {error}"))?;
+
+    page.objects_mut()
+        .add_image_object(object)
+        .map_err(|error| format!("PDFium rejected {}: {error}", path.display()))?;
+    page.regenerate_content()
+        .map_err(|error| format!("PDFium could not finish the image's sheet: {error}"))?;
+    drop(page);
+
+    Ok(document)
+}
+
+/// One file of a merge, opened as the pages it contributes — a PDF read by
+/// PDFium, or an image laid on a sheet of its own.
+fn load_merge_source<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<'a>, String> {
+    if is_merge_image(path) {
+        return image_page_document(pdfium, path);
+    }
+
+    // The error wording matches `open`'s, so an encrypted file is refused the
+    // same way whichever door it comes through.
+    pdfium
+        .load_pdf_from_byte_vec(read_pdf_bytes(path)?, None)
+        .map_err(|error| format!("PDFium could not open the document: {error}"))
+}
+
+/// Copies page `index` of `source` onto a fresh A4 sheet at the end of `merged`,
+/// centred there and shrunk only as far as the sheet makes necessary.
+///
+/// The page travels as a form XObject rather than as a page of its own: PDFium
+/// can place and scale an object, but has no way to resize a page it has already
+/// imported. A form carries the source page's content alone, so annotations are
+/// left behind — which is why this route is taken only when the reader asks for
+/// one page size, and an ordinary merge still appends whole pages.
+fn append_page_fitted_to_a4<'a>(
+    merged: &mut PdfDocument<'a>,
+    source: &PdfDocument<'a>,
+    index: PdfPageIndex,
+    path: &Path,
+) -> Result<(), String> {
+    let failed = |what: &str, error: PdfiumError| {
+        format!(
+            "PDFium could not {what} page {} of {}: {error}",
+            index + 1,
+            path.display()
+        )
+    };
+    // Taken through `objects_mut`, which is the accessor that keeps the
+    // document's own lifetime — `objects` borrows the page, and the form object
+    // has to outlive it to reach the sheet built below.
+    let mut page = source
+        .pages()
+        .get(index)
+        .map_err(|error| failed("load", error))?;
+    // The *displayed* size, `/Rotate` already applied — which is the space the
+    // form arrives in too, since PDFium builds it through the page's own
+    // display matrix.
+    let placement = a4_placement(page.width().value, page.height().value);
+    let mut form = page
+        .objects_mut()
+        .copy_into_x_object_form_object(merged)
+        .map_err(|error| failed("copy", error))?;
+
+    // One matrix rather than a scale and a translate: PDFium composes each call
+    // onto what the object already carries, and these offsets are measured on
+    // the sheet rather than on the page.
+    form.transform(
+        placement.scale as PdfMatrixValue,
+        0.0,
+        0.0,
+        placement.scale as PdfMatrixValue,
+        placement.left as PdfMatrixValue,
+        placement.bottom as PdfMatrixValue,
+    )
+    .map_err(|error| failed("place", error))?;
+
+    let mut sheet = merged
+        .pages_mut()
+        .create_page_at_end(PdfPagePaperSize::Custom(
+            PdfPoints::new(placement.sheet_width),
+            PdfPoints::new(placement.sheet_height),
+        ))
+        .map_err(|error| format!("PDFium could not create the A4 sheet: {error}"))?;
+
+    sheet
+        .objects_mut()
+        .add_object(form)
+        .map_err(|error| failed("add", error))?;
+    sheet
+        .regenerate_content()
+        .map_err(|error| failed("finish the sheet for", error))?;
+
+    Ok(())
+}
+
+fn image_limit_error() -> String {
+    format!(
+        "image file exceeds the {} MiB limit",
+        MAX_IMAGE_BYTES / 1024 / 1024
+    )
+}
+
 fn merge_file_limit_error() -> String {
     format!("a merge takes at most {MAX_MERGE_FILES} files")
 }
@@ -4326,6 +5497,16 @@ struct DocumentLayout {
     outline: Vec<PdfOutlineItem>,
 }
 
+/// One page's geometry as the frontend receives it: the displayed size, the
+/// page's own `/Rotate` already applied, and that rotation.
+fn measure_page(page: &PdfPage<'_>) -> PdfPageInfo {
+    PdfPageInfo {
+        width: page.width().value,
+        height: page.height().value,
+        rotation: page_rotation_degrees(page),
+    }
+}
+
 /// The page list and outline as they stand, measured out of PDFium page by
 /// page. What an open reports; every later structure command answers from
 /// `page_infos` instead, which is the same list read off a memo. The frontend
@@ -4335,14 +5516,7 @@ fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
 
     DocumentLayout {
         num_pages: pages.len(),
-        pages: pages
-            .iter()
-            .map(|page| PdfPageInfo {
-                width: page.width().value,
-                height: page.height().value,
-                rotation: page_rotation_degrees(&page),
-            })
-            .collect(),
+        pages: pages.iter().map(|page| measure_page(&page)).collect(),
         outline: collect_bookmark_siblings(document.bookmarks().root()),
     }
 }
@@ -4381,14 +5555,7 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
             .filter_map(|(index, page_id)| {
                 let page = pages.get(index).ok()?;
 
-                Some((
-                    page_id,
-                    PdfPageInfo {
-                        width: page.width().value,
-                        height: page.height().value,
-                        rotation: page_rotation_degrees(&page),
-                    },
-                ))
+                Some((page_id, measure_page(&page)))
             })
             .collect::<Vec<_>>()
     };

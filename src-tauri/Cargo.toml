@@ -18,15 +18,27 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
+# The one transform between a signed release and the two strings that check
+# it: both the key and the signature reach this app base64-wrapped. Already
+# in the tree under the updater plugin, so this names it rather than adds it.
+base64 = "0.22"
 fontdb = "0.24.0"
 getrandom = "0.4"
-image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+# The formats a merge may bring in as pages, plus the two the app already
+# renders with. Every decoder here is pure Rust: an image the reader picked is
+# parsed in this process, and `MAX_IMAGE_PIXELS` bounds what one may expand to.
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
 # PDFium reads outlines but cannot write one, so the merge wizard hands the
 # bytes PDFium just produced to lopdf to have their /Outlines written. It
 # only ever parses this app's own fresh output — a reader's file still
 # reaches PDFium alone. Default features are off: they are only date and
 # parallelism helpers this use has no need of.
 lopdf = { version = "0.44", default-features = false }
+# What lets a downloaded installer outlive the run that fetched it. The
+# updater plugin checks the signature over bytes it never writes down and
+# keeps that check private, so a saved package is checked again here — with
+# the same crate the plugin itself verifies with.
+minisign-verify = "0.2"
 pdfium-render = { version = "=0.9.3", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
 # The fallback face is fetched at runtime rather than bundled, so the app needs
 # an HTTPS client of its own. `tauri` already depends on reqwest, but with no
@@ -40,12 +52,38 @@ serde_json = "1"
 sha2 = "0.11"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# The release check. Its network call, its signature check and its install are
+# all Rust-side: the WebView is granted none of the plugin's own commands, so
+# the endpoint and the key its bytes must match stay compiled-in rather than
+# nameable from the page. `rustls` again, so this adds no second TLS backend.
+tauri-plugin-updater = "2"
 tauri-plugin-wdio = { version = "1", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 # The settings file's format. Already in the tree — `tauri-build` reads
 # `tauri.conf.json`'s Cargo side with it — so naming it here adds a name,
 # not a dependency.
 toml = "1"
+# The merge wizard's two archive exports. Only the flate2 deflate backend is
+# turned on: `lopdf` already brings flate2 in, so this adds a writer rather
+# than a second compression stack, and none of the encrypted or exotic codec
+# features are wanted for an archive this app writes itself.
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+
+# Where a file the reader double-clicked arrives, on the two platforms whose
+# answer to "open this with TFolio" is a second TFolio: it hands that process's
+# arguments to the one already running. macOS names the file to the running app
+# itself — `RunEvent::Opened`, no plugin — so it is left out there rather than
+# paying for zbus and a socket it would never use.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+# The Windows Word-import engine's probe: whether Word's and WPS's
+# automation classes are registered, read straight from the merged HKCR
+# view. Already in the tree (the Tauri stack pulls it in), so naming it here
+# adds a direct use, not a new dependency, and this section costs the Linux
+# and macOS builds nothing.
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
 
 # pdfium-render 0.9.3 binds FPDF_MovePages but exposes no safe wrapper, and
 # same-document page reordering has no other route (rebuilding via

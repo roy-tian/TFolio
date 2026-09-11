@@ -96,10 +96,15 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The updater refuses a bundle it cannot verify, so every artifact is
+          # signed here with the key whose public half is in `tauri.conf.json`.
+          # Both are repository secrets; the password is empty unless the key
+          # was regenerated with one.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: TFolio ${{ github.ref_name }}
-          generateReleaseNotes: true
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
@@ -111,9 +116,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The notes are written once the bundles are in place, because every
+      # matrix job would otherwise race to author the body of the same release.
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build the release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bun run changelog > "$RUNNER_TEMP/release-notes.md"
+
       - name: Publish completed release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release edit "$RELEASE_TAG" --draft=false
+        run: |
+          gh release edit "$RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --draft=false

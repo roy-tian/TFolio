@@ -103,5 +103,11 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The updater refuses a bundle it cannot verify, so every artifact is
+          # signed here with the key whose public half is in `tauri.conf.json`.
+          # Both are repository secrets; the password is empty unless the key
+          # was regenerated with one.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.args }}

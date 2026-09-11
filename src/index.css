@@ -38,6 +38,8 @@ body {
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -77,6 +79,13 @@ body {
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* A caution rather than a refusal: amber, far enough from `destructive`'s
+     red in hue to be told apart, and dark enough to read as small text on the
+     light ground. */
+  --warning: oklch(0.554 0.135 66.442);
+  /* Good news rather than a caution: green, and dark enough that the notice it
+     tints can still be read as small text over it. */
+  --success: oklch(0.548 0.128 152.1);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -112,6 +121,8 @@ body {
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --warning: oklch(0.852 0.199 91.936);
+  --success: oklch(0.792 0.169 151.7);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
@@ -142,21 +153,68 @@ body {
   }
 }
 
-/*
- * Selectable text layer overlaid on the rendered page image. Each span is
- * absolutely positioned in page-percentage units and sized with container
- * query units (cqh), so the layer stays aligned as the page scales with the
- * viewport. The text itself is transparent — only the native selection
- * highlight is visible over the rendered glyphs.
- *
- * Size, centering, and rotation are set inline per page (PdfPage.tsx): the layer
- * is laid out in the page's unrotated dimensions and rotated to match the
- * rendered bitmap, so a rotated page's glyphs and selection stay aligned.
- */
+/* Off screen, where the app itself is the document; print media below is the
+   one place these page images are ever shown. */
+[data-print-sheet] {
+  display: none;
+}
+
+@media print {
+  /* The page area, not the window: the sheet takes its height from here. */
+  html,
+  body {
+    height: 100%;
+    overflow: visible;
+    background: #fff;
+  }
+
+  /* The interface never prints — only the sheet the print button built. */
+  body > *:not([data-print-sheet]) {
+    display: none !important;
+  }
+
+  [data-print-sheet] {
+    display: block;
+    height: 100%;
+  }
+
+  /* Tighter than the 0.5in a WebView would otherwise take, and still clear of
+     the margin no printer can reach. */
+  @page {
+    margin: 5mm;
+  }
+
+  /* One page per sheet. The query container is what lets a quarter-turned page
+     be fitted into the sheet's own height before it is turned back. */
+  .pdf-print-page {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+    container-type: size;
+    break-after: page;
+  }
+
+  .pdf-print-page:last-child {
+    break-after: auto;
+  }
+
+  /* Centred by the transform PrintSheet.tsx completes: a turned page's box
+     outgrows the sheet, and every box centring falls back to one edge. */
+  .pdf-print-page img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+/* The surface scales fixed page coordinates as a whole, keeping text layout
+   and hit testing aligned without resizing each span's font. */
 .pdf-text-layer {
   position: absolute;
   overflow: hidden;
-  container-type: size;
   line-height: 1;
   cursor: text;
   user-select: text;
@@ -177,9 +235,20 @@ body {
   background: rgb(56 132 255 / 0.35);
 }
 
-/* Search results are geometry from PDFium, not text rendered again in a proxy
-   font. That keeps the PDF's own glyphs visible and highlights a wrapped match
-   with one rectangle on each line. */
+/* Only the mounted page surfaces receive a transient compositor hint while the
+   viewport is changing; keeping every page promoted would waste GPU memory. */
+[data-resize-compositing] [data-pdf-page-surface] {
+  will-change: transform;
+}
+
+/* The app's own select-all, which a range in the document could not stand for:
+   only the pages near the reader hold a text layer to put a range over. */
+[data-select-all="true"] .pdf-text-layer span {
+  background: rgb(56 132 255 / 0.35);
+}
+
+/* Highlights are geometry from PDFium, not text re-rendered in a proxy font:
+   the PDF's own glyphs stay visible, a wrapped match gets one box per line. */
 .pdf-search-layer {
   position: absolute;
   pointer-events: none;
@@ -199,27 +268,8 @@ body {
   box-shadow: inset 0 0 0 2px rgb(234 88 12 / 0.72);
 }
 
-/*
- * A pointer of its own for each drawing tool, so which tool is on — and where
- * it will act — is legible without looking back at the toolbar. Three carry
- * that tool's toolbar glyph, hotspotted on the point it works from: the
- * highlighter's nib, the top-left of the note a click starts, the eraser's
- * rubbing face. Each glyph is drawn twice in its file, a white halo under a
- * black stroke, so it reads on a page and on the dark ground around one; the
- * keyword after each image is what an engine that will not take an SVG cursor
- * falls back to.
- *
- * The rectangle is the exception, and takes the system crosshair: it is the one
- * tool whose gesture is a drag from an exact point, and the platform's own
- * pointer is thinner and sharper at that point than any glyph.
- *
- * Each glyph file holds nothing but that lucide icon — a pointer that carries a
- * second mark, an I-beam beside the tool say, reads as two cursors at once.
- *
- * Set on the viewer, and only while the tool can actually draw — the thumbnail
- * grid hides the toggle that would turn the tool back off, so a tool's pointer
- * left over it would promise a gesture that does nothing.
- */
+/* Each hotspot sits on the point its tool acts from, not the glyph's corner.
+   The rectangle keeps the system crosshair, sharper where a drag starts. */
 [data-tool-cursor="highlight"] {
   cursor: url("./assets/cursors/highlight.svg") 5 20, text;
 }
@@ -240,4 +290,73 @@ body {
    would otherwise be the only pointer a reader ever saw over a page. */
 [data-tool-cursor] .pdf-text-layer {
   cursor: inherit;
+}
+
+/* The corner shares the find bar's band and outranks it, so it steps below the
+   bar: `top-22` plus `h-10` is 8rem, and 0.5rem more is the gap after it. */
+:root:has([data-slot="pdf-search"]) [data-slot="notice-center"] {
+  top: 8.5rem;
+}
+
+/* These all need `both`: the default fill would spring a leaving digit back
+   over its replacement and reopen the gap it left, off-centring the number. */
+@theme {
+  --animate-digit-enter-up: digit-enter-up 240ms cubic-bezier(0.32, 0.72, 0, 1)
+    both;
+  --animate-digit-enter-down: digit-enter-down 240ms
+    cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-digit-leave-up: digit-leave-up 240ms cubic-bezier(0.32, 0.72, 0, 1)
+    both;
+  --animate-digit-leave-down: digit-leave-down 240ms
+    cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-digit-open: digit-open 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  --animate-digit-close: digit-close 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+
+  @keyframes digit-enter-up {
+    from {
+      transform: translateY(100%);
+    }
+  }
+
+  @keyframes digit-enter-down {
+    from {
+      transform: translateY(-100%);
+    }
+  }
+
+  @keyframes digit-leave-up {
+    to {
+      transform: translateY(-100%);
+    }
+  }
+
+  @keyframes digit-leave-down {
+    to {
+      transform: translateY(100%);
+    }
+  }
+
+  @keyframes digit-open {
+    from {
+      width: 0;
+    }
+  }
+
+  @keyframes digit-close {
+    to {
+      width: 0;
+    }
+  }
+}
+
+/* The bar that counts out a page drag's dwell on a tab. DocumentTabs.tsx sets
+   the real duration from TAB_SPRING_MS; the one here is only a fallback. */
+@theme {
+  --animate-tab-spring: tab-spring 600ms linear both;
+
+  @keyframes tab-spring {
+    from {
+      transform: scaleX(0);
+    }
+  }
 }

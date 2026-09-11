@@ -4,18 +4,34 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type RefObject,
 } from "react"
-import { Plus } from "lucide-react"
+import { createPortal } from "react-dom"
+import { ClipboardPaste, Copy, Plus, RotateCw, Scissors } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import { PdfPage } from "@/components/PdfPage"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
+import type { TextNotePreview } from "@/hooks/useTextNoteTool"
 import type { RenderEpochs } from "@/lib/annotations"
-import { orderAfterMove, slotOffsets, type CellBox } from "@/lib/pageDrag"
+import {
+  orderAfterMove,
+  slotOffsets,
+  type CellBox,
+  type PageHandoff,
+} from "@/lib/pageDrag"
 import {
   rotationForPage,
   type PageRotations,
@@ -45,19 +61,41 @@ const RENDER_SETTLE_MS = 150
 
 /** Everything the thumbnail grid's page editing needs from its owner. */
 export type PageEditProps = {
-  /** Where a PDF dragged in from the desktop would land: the 1-based position
-      its first page would take, or null while nothing is being dragged over the
-      grid. The owner reads the drop; the grid only draws where it points. */
-  fileDropIndex: number | null
+  /** Whether the clipboard holds pages, which is what puts a paste button in
+      every gap beside the + that inserts a blank page. */
+  canPaste: boolean
+  /** Pages a cut is standing over: still in the document, and shown as leaving
+      it. Empty for a copy, which takes nothing away. */
+  cutPages: ReadonlySet<number>
+  /** Where pages dragged over the grid would land: the 1-based position the
+      first of them would take, or null while nothing is over it. A PDF from the
+      desktop and another document's pages both point here. The owner reads the
+      drop; the grid only draws where it points. */
+  dropIndex: number | null
+  /** Where a drag that leaves this grid goes: the workspace, which carries it
+      to another document's tab. */
+  handoff: PageHandoff
   onClearSelection: () => void
+  onCopyPages: () => void
+  onCutPages: () => void
   onDeletePage: (pageNumber: number) => void
   onInsertBlankPage: (index: number) => void
+  /** A right-click, before its menu opens: a page outside the selection
+      becomes the selection, so cut and copy always mean what is on screen. */
+  onMenuPage: (pageNumber: number) => void
+  /** Pastes the clipboard into the gap before this 1-based page. */
+  onPastePages: (index: number) => void
   /** Double-click: leave the grid for the page itself. */
   onOpenPage: (pageNumber: number) => void
   /** Answers with the reorder's own promise, which the grid holds its
       make-way layout until: the pages change only once the backend has moved
       them. */
   onReorderPages: (order: number[]) => void | Promise<unknown>
+  /** Turns the pages the menu acts on a quarter further, in the document
+      itself: the same edit the toolbar's rotate makes over this grid. */
+  onRotatePages: () => void
+  /** Stable across reorders, so painted canvases move with their pages. */
+  thumbnailKeys: number[]
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   selectedPages: ReadonlySet<number>
 }
@@ -74,8 +112,14 @@ type LayoutProps = {
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
-  /** The rectangle being dragged out, on whichever page it started. */
-  draft?: RectDraft
+  /** Live and released rectangle previews, each tied to its starting page. */
+  drafts: RectDraft[]
+  /** Written notes awaiting the pixels of the page each was placed on. */
+  notes: TextNotePreview[]
+  /** Copies the whole document, and stands for a select-all being in force:
+      absent, a page's menu falls back to whatever the reader dragged over. */
+  onCopyAllText?: () => void
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   pages: PdfPageInfo[]
   /** The document's usual page width at 100%, for a layout sharing one column. */
   referencePageWidth: number
@@ -97,7 +141,10 @@ type LayoutProps = {
 function SingleLayout({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  notes,
+  onCopyAllText,
+  onPagePaint,
   pages,
   renderEpochs,
   renderScale,
@@ -111,7 +158,10 @@ function SingleLayout({
   return pages.map((page, index) => (
     <PdfPage
       documentId={documentId}
-      draft={draft?.pageNumber === index + 1 ? draft : undefined}
+      drafts={drafts}
+      notes={notes}
+      onCopyAllText={onCopyAllText}
+      onPagePaint={onPagePaint}
       key={`${documentId}-${index + 1}`}
       page={page}
       pageNumber={index + 1}
@@ -131,7 +181,10 @@ function SingleLayout({
 function BookLayout({
   activeSearchIndex,
   documentId,
-  draft,
+  drafts,
+  notes,
+  onCopyAllText,
+  onPagePaint,
   pages,
   referencePageWidth,
   renderEpochs,
@@ -161,7 +214,10 @@ function BookLayout({
       {row.map((pageNumber) => (
         <PdfPage
           documentId={documentId}
-          draft={draft?.pageNumber === pageNumber ? draft : undefined}
+          drafts={drafts}
+          notes={notes}
+          onCopyAllText={onCopyAllText}
+          onPagePaint={onPagePaint}
           key={`${documentId}-${pageNumber}`}
           page={pages[pageNumber - 1]}
           pageNumber={pageNumber}
@@ -182,6 +238,10 @@ function BookLayout({
   ))
 }
 
+/** How far the + and the paste button sit from the middle of the line, in CSS
+    pixels: half a button each, so the two hit areas meet without overlapping. */
+const PASTE_BUTTON_GAP = 14
+
 /** What draws the line and the +: a hover anywhere in the gap, or a keyboard
     reaching the button inside it. */
 const ZONE_SHOWN =
@@ -190,22 +250,26 @@ const ZONE_SHOWN =
 /**
  * The gap beside a thumbnail: it fills the space between the two pages, so
  * hovering anywhere in there shows a dashed insertion line down the middle of
- * the gap and, on the line, the + that inserts a blank page. Only that button
- * inserts — the gap is a target for the eye and for a drop, not for a click, so
- * reaching past a page cannot add one. The same line, solid, marks where a PDF
- * dragged in from the desktop would land — which is why the zone carries its own
- * position as `data-insert-index`, for the drop to read off the element under
- * the pointer. A page dragged *within* the grid says it differently: the cells
- * themselves move aside, so while that gesture runs the zone shows nothing and
- * goes inert, leaving it the pointer.
+ * the gap and, on the line, the + that inserts a blank page — joined, while the
+ * grid's clipboard holds pages, by the button that pastes them here. Only those
+ * buttons act — the gap is a target for the eye and for a drop, not for a click,
+ * so reaching past a page cannot add anything. The same line, solid, marks where
+ * a PDF dragged in from the desktop would land — which is why the zone carries
+ * its own position as `data-insert-index`, for the drop to read off the element
+ * under the pointer. A page dragged *within* the grid says it differently: the
+ * cells themselves move aside, so while that gesture runs the zone shows nothing
+ * and goes inert, leaving it the pointer.
  */
 function InsertZone({
   active,
+  canPaste,
   dragging,
   index,
   label,
   onInsert,
+  onPaste,
   paperHeight,
+  pasteLabel,
   trailing,
 }: {
   /** Whether a file dragged in from the desktop would land in this gap.
@@ -213,16 +277,20 @@ function InsertZone({
       here, so a drag over the grid re-renders the two gaps it names instead of
       every gap in the document. */
   active: boolean
+  /** Whether the clipboard has pages to offer this gap. */
+  canPaste: boolean
   /** Whether a page drag has the grid, which mutes every zone. */
   dragging: boolean
   /** The 1-based position a page inserted here would take. */
   index: number
   label: string
   onInsert: (index: number) => void
+  onPaste: (index: number) => void
   /** The neighbouring page's own height in CSS pixels. The gap runs the full
       cell, which is taller — it also holds the page number and the row's own
       spacing — so the line is sized to the paper instead of stretched past it. */
   paperHeight: number
+  pasteLabel: string
   trailing?: boolean
 }) {
   return (
@@ -256,30 +324,54 @@ function InsertZone({
           )}
           style={{ height: paperHeight }}
         />
-        <button
-          aria-label={label}
-          // The button is the whole target and nothing else in the gap is, so
-          // the circle it fades in is the only place a page can be added from.
-          // It keeps its own hit area rather than borrowing the gap's: the
-          // pointer that made it appear is already on it.
-          className="absolute left-0 grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none"
-          onClick={() => onInsert(index)}
-          // A press here is a press on the button, not on the grid under it.
-          onPointerDown={(event) => event.stopPropagation()}
-          style={{ top: paperHeight / 2 }}
-          title={label}
-          type="button"
-        >
-          <span
-            className={cn(
-              "grid size-5 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
-              !dragging && ZONE_SHOWN,
-              active && "opacity-100",
-            )}
+        <HintTooltip label={label}>
+          <button
+            aria-label={label}
+            // The button is the whole target and nothing else in the gap is, so
+            // the circle it fades in is the only place a page can be added
+            // from. It keeps its own hit area rather than borrowing the gap's:
+            // the pointer that made it appear is already on it.
+            className="absolute left-0 grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none"
+            onClick={() => onInsert(index)}
+            // A press here is a press on the button, not on the grid under it.
+            onPointerDown={(event) => event.stopPropagation()}
+            // The two share the line's middle when the clipboard has something
+            // to put here; alone, the + keeps it to itself.
+            style={{ top: paperHeight / 2 - (canPaste ? PASTE_BUTTON_GAP : 0) }}
+            type="button"
           >
-            <Plus className="size-3" />
-          </span>
-        </button>
+            <span
+              className={cn(
+                "grid size-5 place-items-center rounded-full border border-primary bg-background text-primary opacity-0 shadow-sm transition-opacity",
+                !dragging && ZONE_SHOWN,
+                active && "opacity-100",
+              )}
+            >
+              <Plus className="size-3" />
+            </span>
+          </button>
+        </HintTooltip>
+        {canPaste ? (
+          <HintTooltip label={pasteLabel}>
+            <button
+              aria-label={pasteLabel}
+              className="absolute left-0 grid size-7 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none"
+              onClick={() => onPaste(index)}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{ top: paperHeight / 2 + PASTE_BUTTON_GAP }}
+              type="button"
+            >
+              <span
+                className={cn(
+                  "grid size-5 place-items-center rounded-full border border-primary bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity",
+                  !dragging && ZONE_SHOWN,
+                )}
+              >
+                <ClipboardPaste className="size-3" />
+              </span>
+            </button>
+          </HintTooltip>
+        ) : null}
       </div>
     </div>
   )
@@ -335,15 +427,25 @@ function DragGhost({
 
   const footprint = dimensionsForRotation(rotation, page.width, page.height)
   const height = (THUMBNAIL_WIDTH * footprint.height) / footprint.width
+  const carried = drag.away === "carried"
 
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed z-50"
+      className={cn(
+        "pointer-events-none fixed z-50 transition-[transform,opacity] duration-150 ease-out",
+        // Carried rather than placed: no grid is offering these pages a slot,
+        // so the card stands aside for the tab it is about to open.
+        carried && "opacity-70",
+      )}
       style={{
         height,
         left: drag.pointer.x + drag.grip.x,
         top: drag.pointer.y + drag.grip.y,
+        transform: carried ? "scale(0.4)" : undefined,
+        // The grip's own point, so the card shrinks towards the pointer rather
+        // than away from it and comes back to the same spot of itself.
+        transformOrigin: `${-drag.grip.x}px ${-drag.grip.y}px`,
         width: THUMBNAIL_WIDTH,
       }}
     >
@@ -389,10 +491,8 @@ function DragGhost({
  * in. Read straight from the drag, so the preview and the drop that follows it
  * are the same arithmetic.
  *
- * Letting go changes none of it. The pages have not moved yet — the backend
- * has still to be asked — so the way stays made and the hole stays open, held
- * for the pages the ghost was carrying, until the reorder lands and the grid
- * really holds what this was drawing.
+ * On release, the lifted pages fill their slots immediately using the canvases
+ * already painted. This layout lasts until the backend commits the page list.
  */
 function dropPreview(
   drag: PageDragState,
@@ -402,12 +502,19 @@ function dropPreview(
   lifted: ReadonlySet<number>
   offsets: Map<number, { x: number; y: number }>
 } {
+  const lifted = new Set(drag.released ? [] : drag.pages)
+
+  // A drag the workspace has taken is on its way to another document: these
+  // pages are in hand, but nothing here has anywhere to make way for.
+  if (drag.away) {
+    return { landing: undefined, lifted, offsets: new Map() }
+  }
+
   const order = orderAfterMove(drag.pages, drag.gap, pageCount)
-  const lifted = new Set(drag.pages)
 
   return {
     // The block keeps its order, so its first page is where it starts.
-    landing: drag.cells[order.indexOf(drag.pages[0]!)],
+    landing: drag.released ? undefined : drag.cells[order.indexOf(drag.pages[0]!)],
     lifted,
     offsets: slotOffsets(order, drag.cells, lifted),
   }
@@ -426,11 +533,13 @@ function dropPreview(
  * render and switches the memo back off.
  */
 const ThumbnailCell = memo(function ThumbnailCell({
+  canPaste,
   deleteDisabled,
   documentId,
   dragging,
   insertActive,
   isCurrent,
+  isCut,
   isSelected,
   lifted,
   offsetX,
@@ -438,16 +547,19 @@ const ThumbnailCell = memo(function ThumbnailCell({
   onDelete,
   onInsert,
   onOpen,
+  onPaste,
   onSelect,
   pageHeight,
   pageNumber,
   pageWidth,
+  released,
   renderEpoch,
   rotation,
   selectedCount,
   trailingInsertActive,
   trailingZone,
 }: {
+  canPaste: boolean
   deleteDisabled: boolean
   documentId: number
   /** Whether a page drag has the grid — every cell carries the transition the
@@ -457,6 +569,8 @@ const ThumbnailCell = memo(function ThumbnailCell({
       this page, and — below — in the gap after it. */
   insertActive: boolean
   isCurrent: boolean
+  /** Whether a cut is standing over this page. */
+  isCut: boolean
   isSelected: boolean
   /** This page is travelling with the pointer, so the grid it left reads as one
       page short rather than as a page sitting under its own ghost. */
@@ -469,10 +583,12 @@ const ThumbnailCell = memo(function ThumbnailCell({
   onDelete: (pageNumber: number) => void
   onInsert: (index: number) => void
   onOpen: (pageNumber: number) => void
+  onPaste: (index: number) => void
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  released: boolean
   renderEpoch: number
   rotation: number
   selectedCount: number
@@ -496,12 +612,9 @@ const ThumbnailCell = memo(function ThumbnailCell({
         // band beside a short page has to keep naming its position for a file
         // dragged across the grid.
         "relative flex flex-col justify-center",
-        // Only while a drag runs. It outlives the pointer by the reorder's own
-        // round trip, so the transform and the transition that carries it both
-        // go in the very commit that reorders the pages: that commit is the
-        // no-op it looks like, not a slide back out of a place the page by then
-        // really holds.
-        dragging && "transition-transform duration-200 ease-out",
+        // Letting go places every canvas immediately; committing the page list
+        // then moves the same DOM nodes and removes these offsets together.
+        dragging && !released && "transition-transform duration-200 ease-out",
         // The ghost carries this page; the grid it left has to read as one page
         // short, not as a page sitting under its own ghost.
         lifted && "opacity-0",
@@ -522,6 +635,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
         deleteDisabled={deleteDisabled}
         documentId={documentId}
         isCurrent={isCurrent}
+        isCut={isCut}
         isSelected={isSelected}
         onDelete={onDelete}
         onOpen={onOpen}
@@ -536,11 +650,14 @@ const ThumbnailCell = memo(function ThumbnailCell({
       />
       <InsertZone
         active={insertActive}
+        canPaste={canPaste}
         dragging={dragging}
         index={pageNumber}
         label={t("pageEdit.insertBefore", { pageNumber })}
         onInsert={onInsert}
+        onPaste={onPaste}
         paperHeight={paperHeight}
+        pasteLabel={t("pageEdit.pasteBefore", { pageNumber })}
       />
       {/* The gap after the last cell of every row, not only after the last
           page: it is the same gap the next row's first cell leads with, but
@@ -550,6 +667,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
       {trailingZone !== "none" ? (
         <InsertZone
           active={trailingInsertActive}
+          canPaste={canPaste}
           dragging={dragging}
           index={pageNumber + 1}
           label={
@@ -558,7 +676,13 @@ const ThumbnailCell = memo(function ThumbnailCell({
               : t("pageEdit.insertBefore", { pageNumber: pageNumber + 1 })
           }
           onInsert={onInsert}
+          onPaste={onPaste}
           paperHeight={paperHeight}
+          pasteLabel={
+            trailingZone === "end"
+              ? t("pageEdit.pasteAtEnd")
+              : t("pageEdit.pasteBefore", { pageNumber: pageNumber + 1 })
+          }
           trailing
         />
       ) : null}
@@ -578,12 +702,15 @@ function ThumbnailLayout({
   currentPage: number
   pageEdit: PageEditProps
 }) {
+  const { t } = useTranslation()
   const columns = computeThumbnailColumns(contentWidth)
   const gridRef = useRef<HTMLDivElement>(null)
   const { drag, wasDragClick } = usePageDrag({
     active: true,
     columns,
     gridRef,
+    handoff: pageEdit.handoff,
+    layoutVersion: pages,
     onReorder: pageEdit.onReorderPages,
     pageCount: pages.length,
     selectedPages: pageEdit.selectedPages,
@@ -608,6 +735,19 @@ function ThumbnailLayout({
     (index: number) => pageEditRef.current.onInsertBlankPage(index),
     [],
   )
+  const pastePages = useCallback(
+    (index: number) => pageEditRef.current.onPastePages(index),
+    [],
+  )
+  const cutPages = useCallback(() => pageEditRef.current.onCutPages(), [])
+  const copyPages = useCallback(() => pageEditRef.current.onCopyPages(), [])
+  const rotatePages = useCallback(() => pageEditRef.current.onRotatePages(), [])
+  // The page the menu is open on, and the page the press that would open it
+  // landed on. One menu for the whole grid rather than one per cell: a document
+  // of several hundred pages would otherwise mount as many popup roots, each
+  // with a document listener of its own, for a gesture that happens once.
+  const [menuPage, setMenuPage] = useState<number | null>(null)
+  const pressedPage = useRef<number | null>(null)
   const selectPage = useCallback(
     (pageNumber: number, modifiers: SelectionModifiers) => {
       // The click a finished drag releases is the gesture ending, not a choice.
@@ -626,104 +766,170 @@ function ThumbnailLayout({
   )
   const ghostPage = drag ? pages[drag.lead - 1] : undefined
   const dragging = Boolean(drag)
-  const { fileDropIndex, selectedPages } = pageEdit
+  const { canPaste, cutPages: cut, dropIndex, selectedPages } = pageEdit
+
+  // What the menu's own entries act on: the selection when the press landed in
+  // it, and otherwise the one page `onMenuPage` is about to make the selection.
+  const menuCount =
+    menuPage !== null && selectedPages.has(menuPage) ? selectedPages.size : 1
 
   return (
-    <div
-      className="relative grid"
-      ref={gridRef}
-      // The row gap is the cell's own bottom padding rather than the grid's, so
-      // that every point between two rows still belongs to a cell: a file drag
-      // crossing it must keep naming a position, not fall through to the
-      // workspace's open-as-a-tab target for the height of the gap.
-      style={{
-        columnGap: THUMBNAIL_COLUMN_GAP,
-        gridTemplateColumns: `repeat(${columns}, ${THUMBNAIL_WIDTH}px)`,
-        rowGap: 0,
-      }}
-    >
-      {/* The hole the block would drop into, drawn before the cells so a page
-          sliding past it passes over it rather than under. */}
-      {preview?.landing ? (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute border-2 border-dashed border-primary/60 bg-primary/5 transition-all duration-200 ease-out"
-          style={{
-            // The cell carries the row gap as its own bottom padding, which
-            // lies between two slots rather than in either.
-            height: preview.landing.height - THUMBNAIL_ROW_GAP,
-            left: preview.landing.left,
-            top: preview.landing.top,
-            width: preview.landing.width,
-          }}
-        />
-      ) : null}
-      {pages.map((page, index) => {
-        const pageNumber = index + 1
-        // Where this page stands while the drag hovers: aside, to open the
-        // hole, or gone from the grid because it is in hand.
-        const offset = preview?.offsets.get(pageNumber)
-        const isSelected = selectedPages.has(pageNumber)
-        const trailingZone =
-          pageNumber === pages.length
-            ? "end"
-            : pageNumber % columns === 0
-              ? "row"
-              : "none"
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (!open) {
+          setMenuPage(null)
 
-        return (
-          <ThumbnailCell
-            deleteDisabled={
-              pages.length === 1 ||
-              // Deleting a selected page takes the whole selection; when that
-              // is every page the backend refuses it, so the button that would
-              // silently do nothing is disabled instead.
-              (isSelected && selectedPages.size === pages.length)
-            }
-            documentId={documentId}
-            dragging={dragging}
-            insertActive={fileDropIndex === pageNumber}
-            isCurrent={currentPage === pageNumber}
-            isSelected={isSelected}
-            key={`${documentId}-${pageNumber}`}
-            lifted={preview?.lifted.has(pageNumber) ?? false}
-            offsetX={offset?.x ?? 0}
-            offsetY={offset?.y ?? 0}
-            onDelete={deletePage}
-            onInsert={insertPage}
-            onOpen={openPage}
-            onSelect={selectPage}
-            pageHeight={page.height}
-            pageNumber={pageNumber}
-            pageWidth={page.width}
-            renderEpoch={renderEpochs[pageNumber] ?? 0}
-            rotation={rotationForPage(rotations, pageNumber)}
-            // Only a page the delete would actually take the selection with
-            // needs the count; giving it to the rest would re-render the whole
-            // grid every time the selection grew by one.
-            selectedCount={isSelected ? selectedPages.size : 1}
-            // Only where that gap is actually drawn: a cell with none of its
-            // own must not re-render for a drop it cannot show.
-            trailingInsertActive={
-              trailingZone !== "none" && fileDropIndex === pageNumber + 1
-            }
-            trailingZone={trailingZone}
+          return
+        }
+
+        const pageNumber = pressedPage.current
+
+        // A press on a gap, or past the last page, opens nothing: the entries
+        // here are a page's, and the gaps have buttons of their own.
+        if (pageNumber !== null) {
+          pageEditRef.current.onMenuPage(pageNumber)
+        }
+
+        setMenuPage(pageNumber)
+      }}
+      open={menuPage !== null}
+    >
+      <ContextMenuTrigger
+        className="relative grid"
+        // Read here rather than from the open below, which is handed no event:
+        // Base UI runs this before its own handler opens the menu.
+        onContextMenu={(event) => {
+          const cell =
+            event.target instanceof Element
+              ? event.target.closest("[data-page-cell]")
+              : null
+
+          pressedPage.current = cell
+            ? Number(cell.getAttribute("data-page-cell"))
+            : null
+        }}
+        ref={gridRef}
+        // The row gap is the cell's own bottom padding rather than the grid's, so
+        // that every point between two rows still belongs to a cell: a file drag
+        // crossing it must keep naming a position, not fall through to the
+        // workspace's open-as-a-tab target for the height of the gap.
+        style={{
+          columnGap: THUMBNAIL_COLUMN_GAP,
+          gridTemplateColumns: `repeat(${columns}, ${THUMBNAIL_WIDTH}px)`,
+          rowGap: 0,
+        }}
+      >
+        {/* The hole the block would drop into, drawn before the cells so a page
+            sliding past it passes over it rather than under. */}
+        {preview?.landing ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute border-2 border-dashed border-primary/60 bg-primary/5 transition-all duration-200 ease-out"
+            style={{
+              // The cell carries the row gap as its own bottom padding, which
+              // lies between two slots rather than in either.
+              height: preview.landing.height - THUMBNAIL_ROW_GAP,
+              left: preview.landing.left,
+              top: preview.landing.top,
+              width: preview.landing.width,
+            }}
           />
-        )
-      })}
-      {/* Gone the moment the pointer is up, though the made way stands until
-          the reorder lands. The page it names may already be out of range —
-          the grid can be handed a shorter document mid-gesture — and a ghost
-          is not worth taking the viewer down for. */}
-      {drag && !drag.released && ghostPage ? (
-        <DragGhost
-          drag={drag}
-          gridRef={gridRef}
-          page={ghostPage}
-          rotation={rotationForPage(rotations, drag.lead)}
-        />
-      ) : null}
-    </div>
+        ) : null}
+        {pages.map((page, index) => {
+          const pageNumber = index + 1
+          // Where this page stands while the drag hovers: aside, to open the
+          // hole, or gone from the grid because it is in hand.
+          const offset = preview?.offsets.get(pageNumber)
+          const isSelected = selectedPages.has(pageNumber)
+          const trailingZone =
+            pageNumber === pages.length
+              ? "end"
+              : pageNumber % columns === 0
+                ? "row"
+                : "none"
+
+          return (
+            <ThumbnailCell
+              canPaste={canPaste}
+              deleteDisabled={
+                pages.length === 1 ||
+                // Deleting a selected page takes the whole selection; when that
+                // is every page the backend refuses it, so the button that would
+                // silently do nothing is disabled instead.
+                (isSelected && selectedPages.size === pages.length)
+              }
+              documentId={documentId}
+              dragging={dragging}
+              insertActive={dropIndex === pageNumber}
+              isCurrent={currentPage === pageNumber}
+              isCut={cut.has(pageNumber)}
+              isSelected={isSelected}
+              key={`${documentId}-${pageEdit.thumbnailKeys[index]}`}
+              lifted={preview?.lifted.has(pageNumber) ?? false}
+              offsetX={offset?.x ?? 0}
+              offsetY={offset?.y ?? 0}
+              onDelete={deletePage}
+              onInsert={insertPage}
+              onOpen={openPage}
+              onPaste={pastePages}
+              onSelect={selectPage}
+              pageHeight={page.height}
+              pageNumber={pageNumber}
+              pageWidth={page.width}
+              released={drag?.released ?? false}
+              renderEpoch={renderEpochs[pageNumber] ?? 0}
+              rotation={rotationForPage(rotations, pageNumber)}
+              // Only a page the delete would actually take the selection with
+              // needs the count; giving it to the rest would re-render the whole
+              // grid every time the selection grew by one.
+              selectedCount={isSelected ? selectedPages.size : 1}
+              // Only where that gap is actually drawn: a cell with none of its
+              // own must not re-render for a drop it cannot show.
+              trailingInsertActive={
+                trailingZone !== "none" && dropIndex === pageNumber + 1
+              }
+              trailingZone={trailingZone}
+            />
+          )
+        })}
+        {/* Gone the moment the pointer is up, though the made way stands until
+            the reorder lands. The page it names may already be out of range —
+            the grid can be handed a shorter document mid-gesture — and a ghost
+            is not worth taking the viewer down for.
+
+            In the body because this grid is hidden the moment the workspace opens
+            another tab under the drag, and the pages are still in hand. */}
+        {drag && !drag.released && ghostPage
+          ? createPortal(
+              <DragGhost
+                drag={drag}
+                gridRef={gridRef}
+                page={ghostPage}
+                rotation={rotationForPage(rotations, drag.lead)}
+              />,
+              document.body,
+            )
+          : null}
+      </ContextMenuTrigger>
+      {/* Everything the menu can aim at a page: the two that take pages away
+          with them, and the turn that leaves them where they are. A paste is a
+          position rather than a page, so it stays with the gaps and their +. */}
+      <ContextMenuContent>
+        <ContextMenuItem data-action="cut-pages" onClick={cutPages}>
+          <Scissors />
+          {t("pageEdit.cut", { count: menuCount })}
+        </ContextMenuItem>
+        <ContextMenuItem data-action="copy-pages" onClick={copyPages}>
+          <Copy />
+          {t("pageEdit.copy", { count: menuCount })}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem data-action="rotate-pages" onClick={rotatePages}>
+          <RotateCw />
+          {t("pageEdit.rotate", { count: menuCount })}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -731,7 +937,9 @@ type PdfViewerLayoutProps = {
   activeSearchIndex: number | null
   currentPage: number
   documentId: number
-  draft?: RectDraft
+  drafts: RectDraft[]
+  notes: TextNotePreview[]
+  onPagePaint: (pageNumber: number, renderEpoch: number) => void
   fileName: string
   pageEdit: PageEditProps
   pages: PdfPageInfo[]
@@ -741,6 +949,10 @@ type PdfViewerLayoutProps = {
   scale: number
   searchMatchesByPage: ReadonlyMap<number, IndexedPdfSearchMatch[]>
   textEpochs: RenderEpochs
+  /** Whether the whole document's text stands selected; the highlight over the
+      runs is drawn from the attribute this sets, not by the WebView. */
+  textSelectAll: boolean
+  onCopyAllText: () => void
   viewMode: ViewMode
   viewerWidth: number
   textSelectionDragging: boolean
@@ -756,7 +968,10 @@ export function PdfViewerLayout({
   activeSearchIndex,
   currentPage,
   documentId,
-  draft,
+  drafts,
+  notes,
+  onCopyAllText,
+  onPagePaint,
   fileName,
   pageEdit,
   pages,
@@ -766,6 +981,7 @@ export function PdfViewerLayout({
   scale,
   searchMatchesByPage,
   textEpochs,
+  textSelectAll,
   viewMode,
   viewerWidth,
   textSelectionDragging,
@@ -777,7 +993,10 @@ export function PdfViewerLayout({
     activeSearchIndex,
     contentWidth,
     documentId,
-    draft,
+    drafts,
+    notes,
+    onCopyAllText: textSelectAll ? onCopyAllText : undefined,
+    onPagePaint,
     pages,
     referencePageWidth,
     renderEpochs,
@@ -794,6 +1013,8 @@ export function PdfViewerLayout({
     <div
       aria-label={fileName}
       data-pdf-viewer-layout
+      data-select-all={textSelectAll}
+      data-view-mode={viewMode}
       onClick={(event) => {
         if (viewMode !== "thumbnail") {
           return
@@ -801,9 +1022,15 @@ export function PdfViewerLayout({
 
         const target = event.target
 
-        // A page or editing control owns its click. Everything else in this
-        // layout is blank grid or workspace and clears the thumbnail choice.
-        if (!(target instanceof Element) || !target.closest("button")) {
+        // A page or editing control owns its click, and so does the page menu:
+        // its items are portalled out of the layout but still bubble here
+        // through the React tree, and choosing one of them is not a press on
+        // blank space. Everything else here is blank grid or workspace and
+        // clears the thumbnail choice.
+        if (
+          !(target instanceof Element) ||
+          !target.closest("button, [data-slot='context-menu-content']")
+        ) {
           pageEdit.onClearSelection()
         }
       }}

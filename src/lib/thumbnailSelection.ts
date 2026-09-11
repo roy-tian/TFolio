@@ -63,6 +63,15 @@ export function selectionAfterClick(
 }
 
 /**
+ * Every page at once, as the grid's select-all leaves it. The anchor goes to
+ * the first page, so a shift-click after it narrows the selection from there
+ * rather than from wherever the last single click happened to be.
+ */
+export function selectionOfAllPages(numPages: number): ThumbnailSelection {
+  return numPages < 1 ? emptySelection : { anchor: 1, pages: range(1, numPages) }
+}
+
+/**
  * The selection still valid after the document's pages changed shape. Page
  * numbers may now name different pages entirely, so nothing survives — the
  * one honest answer a selection keyed by position can give.

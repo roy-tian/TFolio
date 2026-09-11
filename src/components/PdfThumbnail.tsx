@@ -2,6 +2,7 @@ import { useRef } from "react"
 import { LoaderCircle, TriangleAlert, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { HintTooltip } from "@/components/HintTooltip"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
@@ -20,6 +21,9 @@ type PdfThumbnailProps = {
   deleteDisabled: boolean
   documentId: number
   isCurrent: boolean
+  /** Whether a cut is standing over this page: it is still here, and a paste
+      is what would move it. */
+  isCut: boolean
   isSelected: boolean
   onDelete: (pageNumber: number) => void
   /** Double-click: leave the grid for the page itself. */
@@ -46,12 +50,14 @@ type PdfThumbnailProps = {
  * deliberately carries no selectable text layer, so a grid of them stays cheap
  * even on a long document. A click selects, a double-click opens the page, and
  * the corner button deletes — the current selection when this page is in it,
- * this page alone otherwise.
+ * this page alone otherwise. The right-click that cuts or copies belongs to the
+ * grid rather than to each cell: see `ThumbnailLayout`.
  */
 export function PdfThumbnail({
   deleteDisabled,
   documentId,
   isCurrent,
+  isCut,
   isSelected,
   onDelete,
   onOpen,
@@ -95,85 +101,95 @@ export function PdfThumbnail({
     : t("pageEdit.deletePage", { pageNumber })
 
   return (
-    <div className="group/thumb relative flex flex-col items-center">
-      <button
-        aria-current={isCurrent ? "page" : undefined}
-        aria-label={label}
-        aria-pressed={isSelected}
-        className={cn(
-          "relative block w-full scroll-mt-5 overflow-hidden bg-white shadow-md outline-none ring-1 ring-black/10 transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-3 focus-visible:ring-ring/50",
-          // The current page keeps its marker, faded: in the editing grid the
-          // selection is the louder voice.
-          isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
-          // Offset from the page, so the ring reads against the page's own
-          // white even when the theme paints the ring light.
-          isSelected &&
-            "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary dark:ring-offset-zinc-950",
-        )}
-        data-page-number={pageNumber}
-        data-rotation={rotation}
-        onClick={(event) =>
-          onSelect(pageNumber, {
-            range: event.shiftKey,
-            toggle: event.ctrlKey || event.metaKey,
-          })
-        }
-        onDoubleClick={() => onOpen(pageNumber)}
-        ref={wrapperRef}
-        style={{ aspectRatio: footprintWidth / footprintHeight }}
-        title={label}
-        type="button"
+    <div
+      className={cn(
+        "group/thumb relative flex flex-col items-center transition-opacity",
+        // Faded, the way a file manager marks a cut: the page is still here,
+        // and a paste is what moves it.
+        isCut && "opacity-45",
+      )}
+    >
+      {/* A page that could not be drawn says so instead: the cell is a white
+          card with a warning in it, and the reason is what a hover owes it. */}
+      <HintTooltip
+        label={renderFailed ? t("viewer.pageError", { pageNumber }) : label}
       >
-        <div
-          className="absolute"
-          style={{
-            height: `${(pageHeight / footprintHeight) * 100}%`,
-            left: "50%",
-            top: "50%",
-            transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-            width: `${(pageWidth / footprintWidth) * 100}%`,
-          }}
+        <button
+          aria-current={isCurrent ? "page" : undefined}
+          aria-label={label}
+          aria-pressed={isSelected}
+          className={cn(
+            "relative block w-full scroll-mt-5 overflow-hidden bg-white shadow-md outline-none ring-1 ring-black/10 transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-3 focus-visible:ring-ring/50",
+            // The current page keeps its marker, faded: in the editing grid the
+            // selection is the louder voice.
+            isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
+            // Offset from the page, so the ring reads against the page's own
+            // white even when the theme paints the ring light.
+            isSelected &&
+              "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary dark:ring-offset-zinc-950",
+          )}
+          data-page-number={pageNumber}
+          data-rotation={rotation}
+          onClick={(event) =>
+            onSelect(pageNumber, {
+              range: event.shiftKey,
+              toggle: event.ctrlKey || event.metaKey,
+            })
+          }
+          onDoubleClick={() => onOpen(pageNumber)}
+          ref={wrapperRef}
+          style={{ aspectRatio: footprintWidth / footprintHeight }}
+          type="button"
         >
-          <canvas
-            className="block h-full w-full"
-            height={Math.max(1, Math.round(pageHeight))}
-            ref={canvasRef}
-            width={Math.max(1, Math.round(pageWidth))}
-          />
-        </div>
-        {!hasRendered && !renderFailed ? (
-          <span className="absolute inset-0 grid place-items-center bg-white text-zinc-400">
-            <LoaderCircle className="size-4 animate-spin" />
-          </span>
-        ) : null}
-        {renderFailed ? (
-          <span
-            className="absolute inset-0 grid place-items-center bg-white text-zinc-500"
-            title={t("viewer.pageError", { pageNumber })}
+          <div
+            className="absolute"
+            style={{
+              height: `${(pageHeight / footprintHeight) * 100}%`,
+              left: "50%",
+              top: "50%",
+              transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+              width: `${(pageWidth / footprintWidth) * 100}%`,
+            }}
           >
-            <TriangleAlert className="size-4" />
-          </span>
-        ) : null}
-      </button>
-      <button
-        aria-label={deleteLabel}
-        className={cn(
-          "absolute -left-2 -top-2 z-20 grid size-6 place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm outline-none transition-opacity hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-0",
-          // No hover on a touch screen, so a selected page shows its button.
-          isSelected
-            ? "opacity-100"
-            : "opacity-0 group-hover/thumb:opacity-100",
-        )}
-        disabled={deleteDisabled}
-        onClick={() => onDelete(pageNumber)}
-        // A press here is a press on the button, never the start of a page
-        // drag under it.
-        onPointerDown={(event) => event.stopPropagation()}
-        title={deleteLabel}
-        type="button"
-      >
-        <X className="size-3.5" />
-      </button>
+            <canvas
+              className="block h-full w-full"
+              height={Math.max(1, Math.round(pageHeight))}
+              ref={canvasRef}
+              width={Math.max(1, Math.round(pageWidth))}
+            />
+          </div>
+          {!hasRendered && !renderFailed ? (
+            <span className="absolute inset-0 grid place-items-center bg-white text-zinc-400">
+              <LoaderCircle className="size-4 animate-spin" />
+            </span>
+          ) : null}
+          {renderFailed ? (
+            <span className="absolute inset-0 grid place-items-center bg-white text-zinc-500">
+              <TriangleAlert className="size-4" />
+            </span>
+          ) : null}
+        </button>
+      </HintTooltip>
+      <HintTooltip label={deleteLabel}>
+        <button
+          aria-label={deleteLabel}
+          className={cn(
+            "absolute -left-2 -top-2 z-20 grid size-6 place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm outline-none transition-opacity hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-0",
+            // No hover on a touch screen, so a selected page shows its button.
+            isSelected
+              ? "opacity-100"
+              : "opacity-0 group-hover/thumb:opacity-100",
+          )}
+          disabled={deleteDisabled}
+          onClick={() => onDelete(pageNumber)}
+          // A press here is a press on the button, never the start of a page
+          // drag under it.
+          onPointerDown={(event) => event.stopPropagation()}
+          type="button"
+        >
+          <X className="size-3.5" />
+        </button>
+      </HintTooltip>
       {/* The space over the number is the caption's own box rather than the
           column's gap, so what the number costs the cell is one known height —
           which is what lets the insertion line beside the cell find the paper

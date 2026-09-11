@@ -6,6 +6,7 @@ import {
   dropZoneButton,
   openPdfFromDisk,
   pageInk,
+  refreshApp,
   renderedPage,
   seedSettings,
 } from "./helpers"
@@ -54,7 +55,7 @@ describe("TFolio text notes", () => {
   beforeEach(async () => {
     // Type in the default style, whatever a prior run persisted.
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("blank.pdf", blankPdf())
     await renderedPage()
@@ -86,7 +87,7 @@ describe("TFolio text notes", () => {
 
     const drawn = await pageInk()
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pageInk()) === clean, {
       timeout: 15_000,
       timeoutMsg: "undo did not take the note back off the page",
@@ -94,7 +95,7 @@ describe("TFolio text notes", () => {
 
     // Exact, so a redo that ran the command twice would fail rather than pass
     // for carrying "more ink than clean".
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pageInk()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the note exactly",
@@ -111,13 +112,21 @@ describe("TFolio text notes", () => {
       const editor = await $("textarea[aria-label='Note text']")
       await editor.waitForDisplayed({ timeout: 15_000 })
       await editor.setValue(text)
+      // The mark reaches the canvas as a repaint, so the ink moving off the
+      // pre-add baseline — and back to it on undo — is the commit itself.
+      const baseline = await pageInk()
       await $("button[aria-label='Add this note']").click()
-      await browser.pause(2500)
-
+      await browser.waitUntil(
+        async () => (await pageInk()) !== baseline,
+        { timeout: 15_000, timeoutMsg: "the note never reached the canvas" },
+      )
       const ink = await pageInk()
 
-      await $("button[aria-label='Undo']").click()
-      await browser.pause(2000)
+      await $("button[aria-label^='Undo']").click()
+      await browser.waitUntil(
+        async () => (await pageInk()) === baseline,
+        { timeout: 15_000, timeoutMsg: "undo never restored the canvas" },
+      )
 
       return ink
     }
@@ -131,6 +140,151 @@ describe("TFolio text notes", () => {
     expect(hello).not.toBe(other)
   })
 
+  // A note has to stay on screen from the moment it is confirmed until the page
+  // is repainted carrying it: PDFium, the IPC round trip and a bitmap decode all
+  // sit in between, and an editor that closed on the commit blanked the text for
+  // every frame of that gap.
+  for (const note of [{ label: "Latin", text: "Note gy" }, { label: "Chinese", text: "你好" }]) {
+    it(`hands the ${note.label} note to the page without a blank or doubled frame`, async () => {
+      // Large, so a wrong ascent is points off rather than a fraction of one.
+      await seedSettings({
+        annotate: { textNote: { color: "#000000", fontSize: 48, opacity: 1 } },
+        ui: { language: "en", viewMode: "single" },
+      })
+      await refreshApp()
+      await dropZoneButton().waitForExist({ timeout: 30_000 })
+      await openPdfFromDisk("blank.pdf", blankPdf())
+      await renderedPage()
+
+      await $("button[aria-label='Add a note']").click()
+      await clickOnPage()
+
+      const editor = await $("textarea[aria-label='Note text']")
+      await editor.waitForDisplayed({ timeout: 15_000 })
+      await editor.setValue(note.text)
+
+      const result = await browser.executeAsync((done: (result: {
+        blankFrames: number
+        canvasWidth: number
+        doubled: boolean
+        landed: boolean
+        previewInkTop: number
+        renderedInkTop: number
+        waitingFrames: number
+      }) => void) => {
+        const page = document.querySelector("[data-page-number='1']")!
+        const source = page.querySelector<HTMLCanvasElement>("canvas")!
+        const clean = source.toDataURL()
+        const selector = "[data-slot='text-note-preview']"
+        const frame = () => new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        )
+        // Where the note's ink starts, in the page's own points: the canvas is
+        // rendered at some multiple of the 300x400 page.
+        const inkTop = () => {
+          const { data } = source.getContext("2d")!.getImageData(
+            0, 0, source.width, source.height,
+          )
+
+          for (let y = 0; y < source.height; y += 1) {
+            for (let x = 0; x < source.width; x += 1) {
+              const at = (y * source.width + x) * 4
+
+              if (765 - data[at]! - data[at + 1]! - data[at + 2]! > 160) {
+                return y / (source.width / 300)
+              }
+            }
+          }
+
+          return Number.NaN
+        }
+
+        void (async () => {
+          // Delay only decoding: the note still goes through real IPC, PDFium,
+          // and history. A fix that only kept the editor open would show two
+          // copies of the text once the page landed.
+          const decode = window.createImageBitmap.bind(window)
+          window.createImageBitmap = (async (...args: Parameters<typeof decode>) => {
+            const bitmap = await decode(...args)
+            await new Promise((resolve) => setTimeout(resolve, 400))
+            return bitmap
+          }) as typeof window.createImageBitmap
+
+          let blankFrames = 0
+          let waitingFrames = 0
+          let doubled = false
+          let landed = false
+          let previewInkTop = Number.NaN
+          try {
+            document.querySelector<HTMLButtonElement>(
+              "button[aria-label='Add this note']",
+            )!.click()
+
+            const deadline = performance.now() + 25_000
+            while (performance.now() < deadline) {
+              await frame()
+              const preview = page.querySelector(selector)
+              const changed = source.toDataURL() !== clean
+
+              if (!changed) {
+                waitingFrames += 1
+                if (preview) {
+                  // The baseline the preview chose, in page points, less an ink
+                  // ascent measured from the face itself: an element box would
+                  // only give back the ascent that placed the baseline.
+                  const line = preview.querySelector("text")!
+                  const size = Number(line.getAttribute("font-size"))
+                  const context = document.createElement("canvas").getContext("2d")!
+                  context.font = `100px ${line.getAttribute("font-family")}`
+                  previewInkTop =
+                    Number(line.getAttribute("y")) -
+                    (context.measureText(line.textContent!).actualBoundingBoxAscent /
+                      100) *
+                      size
+                } else if (!document.querySelector("textarea[aria-label='Note text']")) {
+                  blankFrames += 1
+                }
+              } else {
+                doubled ||= Boolean(preview)
+                if (!preview) {
+                  landed = true
+                  break
+                }
+              }
+            }
+          } finally {
+            window.createImageBitmap = decode
+          }
+
+          // Let the render settle before the ink is measured.
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          done({
+            blankFrames,
+            canvasWidth: source.width,
+            doubled,
+            landed,
+            previewInkTop,
+            renderedInkTop: inkTop(),
+            waitingFrames,
+          })
+        })()
+      })
+
+      expect(result.waitingFrames).toBeGreaterThan(2)
+      expect(result.blankFrames).toBe(0)
+      expect(result.doubled).toBe(false)
+      expect(result.landed).toBe(true)
+      // The preview stands in for the pixels, so it has to sit where they land.
+      // Four points of a 48pt note clears the cap-height difference between
+      // PDFium's Helvetica and the browser's stand-in (~1.5), while a
+      // fifth-of-a-line ascent error — the wrong face's — would be ten.
+      expect(Math.abs(result.previewInkTop - result.renderedInkTop)).toBeLessThan(4)
+      await browser.saveScreenshot(
+        `artifacts/e2e/text-note-${note.label.toLowerCase()}.png`,
+      )
+    })
+  }
+
   // An editor closed without a word in it is not an edit. Otherwise a stray
   // click with the tool on would record an undo step that changed nothing.
   it("keeps an empty note off the page and out of the history", async () => {
@@ -143,7 +297,7 @@ describe("TFolio text notes", () => {
     await $("button[aria-label='Discard this note']").click()
     await browser.pause(2500)
 
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
     expect(await pageInk()).toBe(clean)
   })
 
@@ -162,7 +316,7 @@ describe("TFolio text notes", () => {
     await $("button[aria-label='Add this note']").click()
     // Landed in history before the second note opens, so the undo below has a
     // deterministic target rather than racing the first note's commit.
-    await $("button[aria-label='Undo']").waitForEnabled({ timeout: 15_000 })
+    await $("button[aria-label^='Undo']").waitForEnabled({ timeout: 15_000 })
 
     // Second note: placed and typed, left open.
     await clickOnPage(0.3, 0.6)
@@ -171,12 +325,12 @@ describe("TFolio text notes", () => {
 
     // A real press, so the note tool's own listener runs (it leaves an off-page
     // press alone); then undo takes back the first note.
-    await pressControl("button[aria-label='Undo']")
+    await pressControl("button[aria-label^='Undo']")
 
     // The draft is still open on the second note…
     await expect(editor()).toBeDisplayed()
     // …and the undone edit was the first note: nothing is left to undo.
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
   })
 
   // Placing a note while one is open swaps the draft inside a single render
@@ -191,7 +345,13 @@ describe("TFolio text notes", () => {
     await browser.pause(500)
 
     await clickOnPage(0.3, 0.6)
-    await browser.pause(1500)
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(
+          () => document.activeElement?.getAttribute("aria-label") ?? null,
+        )) === "Note text",
+      { timeout: 5_000, timeoutMsg: "the second placement never took the caret" },
+    )
 
     const focused = await browser.execute(
       () => document.activeElement?.getAttribute("aria-label") ?? null,
@@ -230,7 +390,21 @@ describe("TFolio text notes", () => {
     await pressControl("button[aria-label='Zoom out']")
     await browser.pause(400)
     await pressControl("button[aria-label='Zoom out']")
-    await browser.pause(1800)
+    // The editor re-pins a beat after the page relays out, so the shrunk page
+    // alone is not enough: the offset has to stop moving as well.
+    await browser.waitUntil(
+      async () => {
+        const first = await offsetFromClickPoint()
+        await browser.pause(300)
+        const again = await offsetFromClickPoint()
+        return (
+          again.pageWidth < before.pageWidth &&
+          again.dx === first.dx &&
+          again.dy === first.dy
+        )
+      },
+      { timeout: 10_000, timeoutMsg: "the zoom never relaid out the page" },
+    )
 
     const after = await offsetFromClickPoint()
 
@@ -279,8 +453,21 @@ describe("TFolio text notes", () => {
     await $("textarea[aria-label='Note text']").waitForDisplayed({ timeout: 15_000 })
     await browser.pause(500)
 
+    // The rotation commits as the page box flipping to the rotated footprint;
+    // the bitmap repaints behind it at an unchanged canvas size.
+    const pageBox = () =>
+      browser.execute(() => {
+        const box = document
+          .querySelector("[data-page-number='1']")!
+          .getBoundingClientRect()
+        return `${Math.round(box.width)}x${Math.round(box.height)}`
+      })
+    const beforeRotate = await pageBox()
     await pressControl("button[aria-label='Rotate clockwise']")
-    await browser.pause(1200)
+    await browser.waitUntil(
+      async () => (await pageBox()) !== beforeRotate,
+      { timeout: 10_000, timeoutMsg: "the rotation never relaid out the page" },
+    )
 
     await expect($("textarea[aria-label='Note text']")).toBeDisplayed()
   })
@@ -316,7 +503,7 @@ describe("TFolio text notes", () => {
   // and its reader is the one most likely to be running the app in Chinese.
   it("adds a note through the Chinese interface", async () => {
     await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("blank.pdf", blankPdf())
     await renderedPage()

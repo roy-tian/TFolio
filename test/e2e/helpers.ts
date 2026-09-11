@@ -17,18 +17,20 @@ import {
 import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 
-import { $, browser } from "@wdio/globals"
+import { $, $$, browser } from "@wdio/globals"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
 import type { Settings } from "../../src/lib/settings"
 
-/** Where the backend keeps this build's settings: the app data directory
-    Tauri resolves for `com.roytian.tfolio.e2e` on the suite's one platform. */
-const settingsFile = path.join(
-  process.env.XDG_DATA_HOME || path.join(homedir(), ".local/share"),
-  "com.roytian.tfolio.e2e",
-  "settings.toml",
-)
+/** Where the backend keeps this build's settings: the lane's app data
+    directory, known only once the worker's session starts — read per call. */
+function settingsFile() {
+  return path.join(
+    process.env.XDG_DATA_HOME || path.join(homedir(), ".local/share"),
+    "com.roytian.tfolio.e2e",
+    "settings.toml",
+  )
+}
 
 /**
  * A content-free PDF of `pageCount` pages, portrait unless `mediaBox` says
@@ -225,7 +227,8 @@ export async function seedSettings(settings: Settings = {}) {
   // below costs this fragile bridge no round trips at all — and it checks the
   // bytes the app will actually read back. Cleared first so that its being
   // there again is the signal.
-  rmSync(settingsFile, { force: true })
+  const settingsPath = settingsFile()
+  rmSync(settingsPath, { force: true })
 
   // As a string: the old seeding passed flat strings through this bridge for a
   // year without trouble, and there is no reason to be the first to hand it
@@ -251,12 +254,12 @@ export async function seedSettings(settings: Settings = {}) {
 
   await browser.waitUntil(
     () => {
-      if (!existsSync(settingsFile)) {
+      if (!existsSync(settingsPath)) {
         return false
       }
 
       // A half-written file simply fails the check and is polled again.
-      const written = readFileSync(settingsFile, "utf8")
+      const written = readFileSync(settingsPath, "utf8")
 
       return wanted.every((value) => written.includes(value))
     },
@@ -275,6 +278,44 @@ function seededValues(settings: object): string[] {
   })
 }
 
+/**
+ * Reloads the app and waits out the reboot, which is how a settings change
+ * gets applied. A stamp planted on the dying page is what the poll tells its
+ * replacement from: a script that lands early reads the stamp back and waits
+ * again, so it cannot vouch for a page the reload is about to discard. The
+ * pause only keeps the first injection clear of the driver's teardown race —
+ * a script the handoff loses waits out a hard 30s — and the 40s budget
+ * absorbs one such hang and still comes back.
+ */
+export async function refreshApp() {
+  await browser.execute(() => {
+    const stamped = window as Window & { __tfolioReloadStamp?: boolean }
+    stamped.__tfolioReloadStamp = true
+  })
+  await browser.refresh()
+  await browser.pause(250)
+  await browser.waitUntil(
+    async () => {
+      try {
+        return await browser.execute(() => {
+          const stamped = window as Window & { __tfolioReloadStamp?: boolean }
+
+          return (
+            stamped.__tfolioReloadStamp === undefined &&
+            !!document.querySelector("[data-slot='tab-open-file']")
+          )
+        })
+      } catch {
+        return false
+      }
+    },
+    {
+      timeout: 40_000,
+      timeoutMsg: "the app never came back from its refresh",
+    },
+  )
+}
+
 /** The home tab's drop zone, its own route to the native picker. It is in the
     page whichever tab is showing, so it doubles as the signal that the app has
     booted; it is only clickable while the home tab is the one on screen.
@@ -289,8 +330,74 @@ export function openFileButton() {
 }
 
 /**
- * Opens the header's menu — where the file commands live, the toolbar having
- * no save key of its own — and hands back the item for `action`. The caller
+ * Hovers `selector`.
+ *
+ * WebKitGTK's embedded WebDriver moves the pointer without the WebView ever
+ * seeing a hover, so the events Base UI listens for are dispatched in the page.
+ */
+export async function hoverElement(selector: string) {
+  await $(selector).waitForExist({ timeout: 15_000 })
+  await browser.execute((css: string) => {
+    const node = document.querySelector(css)!
+    const box = node.getBoundingClientRect()
+    const init = {
+      bubbles: true,
+      clientX: box.left + box.width / 2,
+      clientY: box.top + box.height / 2,
+      pointerType: "mouse",
+    }
+
+    // A pointer that never leaves would leave the last hint standing, and hints
+    // outside one delay group do not close each other. Take the hover back
+    // first, so the popup read below is the one this hover opened.
+    for (const open of document.querySelectorAll(
+      "[data-base-ui-tooltip-trigger][data-popup-open]",
+    )) {
+      if (open !== node) {
+        open.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }))
+        open.dispatchEvent(new MouseEvent("mouseleave"))
+      }
+    }
+
+    node.dispatchEvent(new PointerEvent("pointerover", init))
+    node.dispatchEvent(new PointerEvent("pointerenter", { ...init, bubbles: false }))
+    node.dispatchEvent(new MouseEvent("mouseover", init))
+    node.dispatchEvent(new MouseEvent("mouseenter", { ...init, bubbles: false }))
+    node.dispatchEvent(new MouseEvent("mousemove", init))
+  }, selector)
+}
+
+/** Whether the tooltip this trigger owns is up; others may be open too. */
+export function tooltipOpen(selector: string) {
+  return browser.execute(
+    (css: string) =>
+      document.querySelector(css)?.hasAttribute("data-popup-open") ?? false,
+    selector,
+  )
+}
+
+/** Hovers `selector` and answers with the text of the tooltip that opens. */
+export async function tooltipOn(selector: string) {
+  await hoverElement(selector)
+  await browser.waitUntil(async () => tooltipOpen(selector), {
+    timeout: 15_000,
+    timeoutMsg: `no tooltip opened on ${selector}`,
+  })
+
+  // The newest popup is this one: portals are appended as they open, and every
+  // hint hovered before this one has been let go of above.
+  return browser.execute(() => {
+    const open = document.querySelectorAll(
+      "[data-slot='tooltip-content'][data-open]",
+    )
+
+    return open[open.length - 1]?.textContent?.trim() ?? ""
+  })
+}
+
+/**
+ * Opens the header's menu — where the file commands the toolbar has no key
+ * for live — and hands back the item for `action`. The caller
  * either clicks it or reads it and presses Escape; `data-action` rather than
  * the label, which changes with the language.
  */
@@ -332,6 +439,17 @@ export async function appMenuItemEnabled(action: string) {
   return disabled === null
 }
 
+/** Scratch directories this worker has created, removed when the process
+    exits: a spec's files must live until its last assertion has read them
+    back, and only a synchronous exit hook can be relied on there. */
+const scratchDirectories: string[] = []
+
+process.on("exit", () => {
+  for (const directory of scratchDirectories) {
+    rmSync(directory, { force: true, recursive: true })
+  }
+})
+
 /**
  * Writes `contents` to a scratch file and opens it through the app's real
  * choose-a-file flow — only the native dialog is stubbed, resolving with the
@@ -342,6 +460,7 @@ export async function openPdfFromDisk(
   contents: Uint8Array,
 ): Promise<string> {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
+  scratchDirectories.push(directory)
   const filePath = path.join(directory, fileName)
   writeFileSync(filePath, contents)
   await openPathViaDialog(filePath)
@@ -369,6 +488,7 @@ export async function openPathViaDialog(filePath: string) {
  */
 export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
+  scratchDirectories.push(directory)
   const filePath = path.join(directory, fileName)
 
   writeFileSync(filePath, contents)
@@ -401,25 +521,42 @@ export async function pointPickerAt(filePath: string) {
   }, filePath)
 }
 
+/** What `openPdfFromBytes` found on the two keys it takes over, held in the
+    page until its cleanup puts the values back. */
+type BytesOpenPrior = Partial<
+  Pick<E2eOverrides, "openPdfFromPath" | "pickPdfPath">
+>
+
 /**
  * Opens `contents` as a document with no path at all, pointing the seam's
  * `openPdfFromPath` at the byte-payload `open_pdf` command — the documented
  * fallback for a document that never came from a file, which is the state the
- * save key's disabled case needs. Reading `__TAURI_INTERNALS__` is fine; only
- * writing it is sealed.
+ * save key's disabled case needs. Both overrides it installs sit beside
+ * whatever else is on the seam, and once the tab they built appears the two
+ * keys go back to what they held before. Reading `__TAURI_INTERNALS__` is
+ * fine; only writing it is sealed.
  */
 export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
+  const tabsNamed = () =>
+    $$(`//button[@role='tab'][normalize-space()='${fileName}']`).length
+
   await openFileButton().waitForExist({ timeout: 30_000 })
   await browser.execute(
     ({ bytes, mockPath }: { bytes: number[]; mockPath: string }) => {
       const seam = window as unknown as Window & {
         __tfolioE2E?: E2eOverrides
+        __tfolioE2EBytesPrior?: BytesOpenPrior
         __TAURI_INTERNALS__: {
           invoke: (command: string, args?: unknown) => Promise<unknown>
         }
       }
 
+      seam.__tfolioE2EBytesPrior = {
+        openPdfFromPath: seam.__tfolioE2E?.openPdfFromPath,
+        pickPdfPath: seam.__tfolioE2E?.pickPdfPath,
+      }
       seam.__tfolioE2E = {
+        ...seam.__tfolioE2E,
         openPdfFromPath: () =>
           seam.__TAURI_INTERNALS__.invoke("open_pdf", new Uint8Array(bytes)),
         pickPdfPath: () => Promise.resolve(mockPath),
@@ -427,7 +564,41 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
     },
     { bytes: Array.from(contents), mockPath: `/e2e/${fileName}` },
   )
+
+  // Counted before the click, so a tab already carrying the name cannot
+  // pass for the new one and take the overrides off too early.
+  const existingTabs = await tabsNamed()
   await openFileButton().click()
+  await browser.waitUntil(async () => (await tabsNamed()) > existingTabs, {
+    timeout: 30_000,
+    timeoutMsg: "the byte-payload document never opened",
+  })
+
+  // The open consumed the pair. The keys go back to what they held before,
+  // or a later picker-driven open on this page runs the stale byte payload.
+  await browser.execute(() => {
+    const page = window as Window & {
+      __tfolioE2E?: E2eOverrides
+      __tfolioE2EBytesPrior?: BytesOpenPrior
+    }
+    const prior = page.__tfolioE2EBytesPrior
+
+    if (page.__tfolioE2E && prior) {
+      if (prior.openPdfFromPath) {
+        page.__tfolioE2E.openPdfFromPath = prior.openPdfFromPath
+      } else {
+        delete page.__tfolioE2E.openPdfFromPath
+      }
+
+      if (prior.pickPdfPath) {
+        page.__tfolioE2E.pickPdfPath = prior.pickPdfPath
+      } else {
+        delete page.__tfolioE2E.pickPdfPath
+      }
+    }
+
+    delete page.__tfolioE2EBytesPrior
+  })
 }
 
 /**
@@ -489,7 +660,20 @@ export async function renderedPage() {
     async () => Number(await canvas.getAttribute("width")) > 200,
     { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
   )
-  await browser.pause(1500)
+
+  // The first bitmap can be followed by a re-render once the viewer's zoom
+  // settles (a 150ms debounce), often at the same canvas size — so the width
+  // alone cannot say the paint is final. Two identical fingerprints a beat
+  // apart say the repaint storm is over.
+  await browser.pause(400)
+  await browser.waitUntil(
+    async () => {
+      const first = await pagePixelFingerprint()
+      await browser.pause(400)
+      return (await pagePixelFingerprint()) === first
+    },
+    { timeout: 15_000, timeoutMsg: "page 1's paint never settled" },
+  )
 }
 
 /**

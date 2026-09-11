@@ -1,12 +1,13 @@
 import { useEffect, useState, type RefObject } from "react"
 
+import { useReleasedPreviews } from "@/hooks/useReleasedPreviews"
 import {
   clampFraction,
   clientPointToFraction,
   fractionsToPageRect,
   type BoxFraction,
 } from "@/lib/annotationGeometry"
-import type { RectCommand, RectStyle } from "@/lib/annotations"
+import type { RectCommand, RectStyle, RenderEpochs } from "@/lib/annotations"
 import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import {
@@ -17,18 +18,24 @@ import {
 
 type UseRectToolOptions = {
   active: boolean
-  onCommit: (command: RectCommand) => void
+  onCommit: (
+    command: RectCommand,
+    onApplied: (epochs: RenderEpochs) => void,
+  ) => Promise<boolean>
   pages: PdfPageInfo[]
   rotations: PageRotations
   style: RectStyle
   viewerRef: RefObject<HTMLElement | null>
 }
 
-/** The rectangle being dragged, in fractions of one page's on-screen box. */
+/** A live or released preview, in fractions of one page's on-screen box. */
 export type RectDraft = {
+  id: number
   pageNumber: number
   rect: FractionRect
   style: RectStyle
+  /** Present only once the backend has accepted this released rectangle. */
+  renderEpoch?: number
 }
 
 /**
@@ -36,6 +43,8 @@ export type RectDraft = {
  * to the backend once the drag is over. Unlike a highlight there is no native
  * selection to lean on, so this keeps its own draft — but nothing crosses the
  * IPC boundary until `pointerup`, so a drag is never a burst of render calls.
+ * Released drafts keep their identity until a bitmap containing their commit
+ * is painted; another gesture or tool change only clears the live draft.
  */
 export function useRectTool({
   active,
@@ -44,8 +53,10 @@ export function useRectTool({
   rotations,
   style,
   viewerRef,
-}: UseRectToolOptions): RectDraft | null {
+}: UseRectToolOptions) {
   const [draft, setDraft] = useState<RectDraft | null>(null)
+  const { onPagePaint, previews, release, takeId } =
+    useReleasedPreviews<RectDraft>()
 
   useEffect(() => {
     if (!active) {
@@ -63,6 +74,7 @@ export function useRectTool({
     // itself moved. Measured against a stale box the rectangle would land as far
     // from the pointer as the page had travelled.
     let gesture: {
+      id: number
       element: Element
       from: BoxFraction
       page: PdfPageInfo
@@ -126,6 +138,7 @@ export function useRectTool({
       )
 
       gesture = {
+        id: takeId(),
         element: pageElement,
         from,
         page,
@@ -133,6 +146,7 @@ export function useRectTool({
         pointerId: event.pointerId,
       }
       setDraft({
+        id: gesture.id,
         pageNumber,
         rect: normalizeFractionRect(from, from),
         style,
@@ -153,6 +167,7 @@ export function useRectTool({
       )
 
       setDraft({
+        id: gesture.id,
         pageNumber: gesture.pageNumber,
         rect: normalizeFractionRect(gesture.from, to),
         style,
@@ -187,12 +202,24 @@ export function useRectTool({
         return
       }
 
-      onCommit({
-        bounds,
-        kind: "rect",
-        pageNumber: current.pageNumber,
-        style,
-      })
+      release(
+        {
+          id: current.id,
+          pageNumber: current.pageNumber,
+          rect: normalizeFractionRect(current.from, to),
+          style,
+        },
+        (onApplied) =>
+          onCommit(
+            {
+              bounds,
+              kind: "rect",
+              pageNumber: current.pageNumber,
+              style,
+            },
+            onApplied,
+          ),
+      )
     }
 
     // The pointer left for good — the OS took over a scroll or a gesture — so
@@ -217,7 +244,7 @@ export function useRectTool({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, onCommit, pages, rotations, style, viewerRef])
+  }, [active, onCommit, pages, release, rotations, style, takeId, viewerRef])
 
-  return draft
+  return { drafts: draft ? [...previews, draft] : previews, onPagePaint }
 }

@@ -1,7 +1,7 @@
 import { Clock, FileText, FileUp, LoaderCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { DismissibleAlert } from "@/components/DismissibleAlert"
+import { HintTooltip } from "@/components/HintTooltip"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -11,9 +11,6 @@ import type { RecentFile } from "@/lib/recentFiles"
 
 type HomePanelProps = {
   active: boolean
-  errorKey: number
-  errorMessage: string | null
-  onDismissError: () => void
   onOpenFile: () => void
   onOpenRecent: (path: string) => void
   opening: boolean
@@ -22,9 +19,6 @@ type HomePanelProps = {
 
 export function HomePanel({
   active,
-  errorKey,
-  errorMessage,
-  onDismissError,
   onOpenFile,
   onOpenRecent,
   opening,
@@ -50,41 +44,28 @@ export function HomePanel({
           </p>
 
           <div className="mt-8 grid w-full gap-6 sm:grid-cols-2 sm:items-start">
-            <div className="flex flex-col">
-              {/* A height of its own, rather than the grid row's: otherwise the
-                  drop target grows with the recent list beside it and shrinks
-                  again when an error message appears under it. */}
-              <button
-                aria-label={t("viewer.chooseFile")}
-                className="group flex min-h-72 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-12 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
-                data-slot="drop-zone"
-                disabled={opening}
-                onClick={onOpenFile}
-                type="button"
-              >
-                {opening ? (
-                  <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
-                ) : (
-                  <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
-                )}
-                <span className="text-lg font-semibold">
-                  {opening ? t("viewer.loading") : t("viewer.dropTitle")}
-                </span>
-                <span className="mt-2 text-sm text-muted-foreground">
-                  {t("viewer.dropDescription")}
-                </span>
-              </button>
-
-              {errorMessage ? (
-                <DismissibleAlert
-                  className="mt-4 self-center text-sm text-destructive"
-                  dismissKey={errorKey}
-                  onDismiss={onDismissError}
-                >
-                  {errorMessage}
-                </DismissibleAlert>
-              ) : null}
-            </div>
+            {/* A height of its own, rather than the grid row's: otherwise the
+                drop target grows with the recent list beside it. */}
+            <button
+              aria-label={t("viewer.chooseFile")}
+              className="group flex min-h-72 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-12 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+              data-slot="drop-zone"
+              disabled={opening}
+              onClick={onOpenFile}
+              type="button"
+            >
+              {opening ? (
+                <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
+              ) : (
+                <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
+              )}
+              <span className="text-lg font-semibold">
+                {opening ? t("viewer.loading") : t("viewer.dropTitle")}
+              </span>
+              <span className="mt-2 text-sm text-muted-foreground">
+                {t("viewer.dropDescription")}
+              </span>
+            </button>
 
             <section
               aria-label={t("home.recent")}
@@ -103,24 +84,25 @@ export function HomePanel({
                 <ul className="mt-2 flex flex-col">
                   {recentFiles.map((file) => (
                     <li key={file.path}>
-                      <button
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
-                        data-slot="recent-file"
-                        disabled={opening}
-                        onClick={() => onOpenRecent(file.path)}
-                        title={file.path}
-                        type="button"
-                      >
-                        <FileText className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm">
-                            {file.name}
+                      <HintTooltip label={file.path}>
+                        <button
+                          className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
+                          data-slot="recent-file"
+                          disabled={opening}
+                          onClick={() => onOpenRecent(file.path)}
+                          type="button"
+                        >
+                          <FileText className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm">
+                              {file.name}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {file.directory}
+                            </span>
                           </span>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {file.directory}
-                          </span>
-                        </span>
-                      </button>
+                        </button>
+                      </HintTooltip>
                     </li>
                   ))}
                 </ul>

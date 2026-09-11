@@ -3,14 +3,15 @@ import {
   Eraser,
   FileScan,
   Highlighter,
-  Square,
   SquarePen,
   Stamp,
 } from "lucide-react"
+import type { CSSProperties } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { MergeWizardButton } from "@/components/MergeWizardButton"
+import { RectEffectIcon } from "@/components/RectEffectIcon"
 import { RectStylePopover } from "@/components/RectStylePopover"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
@@ -23,11 +24,17 @@ import {
 import { Toggle } from "@/components/ui/toggle"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import { highlightSwatches } from "@/lib/annotationStyles"
-import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
+import { shortcuts } from "@/lib/shortcuts"
+import {
+  toolbarInkBarClassName,
+  toolbarSelectionBarClassName,
+} from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 
+/** A sliver rather than a second button's width, its chevron in the bottom
+    corner: the tool beside it is what the reader aims at, not this. */
 const splitMenuButtonClassName =
-  "relative w-5 border-input px-0 before:pointer-events-none before:absolute before:inset-y-1.5 before:left-0 before:w-px before:bg-border before:opacity-0 before:transition-opacity hover:before:opacity-100"
+  "relative w-3.5 items-end border-input px-0 pb-1 before:pointer-events-none before:absolute before:inset-y-1.5 before:left-0 before:w-px before:bg-border before:opacity-0 before:transition-opacity hover:before:opacity-100"
 
 /** The tool the reader is drawing with — or rubbing out with — or none. */
 export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
@@ -54,6 +61,7 @@ type AnnotationToolbarProps = {
   rectStyle: RectStyle
   /** Whether a page is on show to type on; the thumbnail grid is not. */
   textNoteApplies: boolean
+  textNoteColor: HexColor
 }
 
 export function AnnotationToolbar({
@@ -71,6 +79,7 @@ export function AnnotationToolbar({
   rectApplies,
   rectStyle,
   textNoteApplies,
+  textNoteColor,
 }: AnnotationToolbarProps) {
   const { t } = useTranslation()
   const highlightLabel = t("annotate.highlight")
@@ -92,7 +101,7 @@ export function AnnotationToolbar({
                 <Toggle
                   aria-label={highlightLabel}
                   className={cn(
-                    toolbarSelectionBarClassName,
+                    toolbarInkBarClassName,
                     "size-8 border-r-transparent p-0 peer/highlight",
                   )}
                   disabled={disabled}
@@ -100,6 +109,7 @@ export function AnnotationToolbar({
                     onToolChange(pressed ? "highlight" : null)
                   }
                   pressed={activeTool === "highlight"}
+                  style={{ "--tool-ink": highlightColor } as CSSProperties}
                   variant="outline"
                 >
                   <Highlighter />
@@ -121,7 +131,7 @@ export function AnnotationToolbar({
                       />
                     }
                   >
-                    <ChevronDown />
+                    <ChevronDown className="size-3" />
                   </PopoverTrigger>
                 </ToolbarTooltip>
                 <PopoverContent align="end" className="w-auto p-3">
@@ -160,7 +170,7 @@ export function AnnotationToolbar({
                   pressed={activeTool === "rect"}
                   variant="outline"
                 >
-                  <Square />
+                  <RectEffectIcon effect={rectStyle.effect} />
                 </Toggle>
               </ToolbarTooltip>
               <Popover>
@@ -179,7 +189,7 @@ export function AnnotationToolbar({
                       />
                     }
                   >
-                    <ChevronDown />
+                    <ChevronDown className="size-3" />
                   </PopoverTrigger>
                 </ToolbarTooltip>
                 <PopoverContent align="end" className="w-auto p-3">
@@ -196,12 +206,13 @@ export function AnnotationToolbar({
             <ToolbarTooltip label={textNoteLabel}>
               <Toggle
                 aria-label={textNoteLabel}
-                className={cn(toolbarSelectionBarClassName, "size-8 p-0")}
+                className={cn(toolbarInkBarClassName, "size-8 p-0")}
                 disabled={disabled}
                 onPressedChange={(pressed) =>
                   onToolChange(pressed ? "textNote" : null)
                 }
                 pressed={activeTool === "textNote"}
+                style={{ "--tool-ink": textNoteColor } as CSSProperties}
                 variant="outline"
               >
                 <SquarePen />
@@ -232,7 +243,7 @@ export function AnnotationToolbar({
       ) : null}
 
       <ButtonGroup>
-        <ToolbarTooltip label={watermarkLabel}>
+        <ToolbarTooltip label={watermarkLabel} shortcut={shortcuts.watermark}>
           <Button
             aria-label={watermarkLabel}
             className="border-input"
@@ -245,7 +256,10 @@ export function AnnotationToolbar({
           </Button>
         </ToolbarTooltip>
 
-        <ToolbarTooltip label={pageNumbersLabel}>
+        <ToolbarTooltip
+          label={pageNumbersLabel}
+          shortcut={shortcuts.pageNumbers}
+        >
           <Button
             aria-label={pageNumbersLabel}
             className="border-input"

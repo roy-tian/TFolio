@@ -2,6 +2,7 @@ import { Info } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { SliderRow } from "@/components/SliderRow"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WatermarkPreview } from "@/components/WatermarkPreview"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -78,18 +79,19 @@ export function WatermarkSettings({
         <div className="flex items-center gap-0.5">
           <FieldLabel>{t("watermark.preview")}</FieldLabel>
           <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  aria-label={t("watermark.disclosureAbout")}
-                  size="icon-xs"
-                  title={t("watermark.disclosureAbout")}
-                  variant="ghost"
-                />
-              }
-            >
-              <Info />
-            </PopoverTrigger>
+            <ToolbarTooltip label={t("watermark.disclosureAbout")} side="top">
+              <PopoverTrigger
+                render={
+                  <Button
+                    aria-label={t("watermark.disclosureAbout")}
+                    size="icon-xs"
+                    variant="ghost"
+                  />
+                }
+              >
+                <Info />
+              </PopoverTrigger>
+            </ToolbarTooltip>
             <PopoverContent align="start" className="w-64">
               <p
                 className="text-xs leading-relaxed text-muted-foreground"

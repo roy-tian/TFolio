@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { FileUp } from "lucide-react"
@@ -11,11 +12,12 @@ import {
   type DocumentSessionHandle,
   type FileDragEvent,
 } from "@/components/DocumentSession"
-import { DismissibleAlert } from "@/components/DismissibleAlert"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { MergeWizard } from "@/components/MergeWizard"
 import { MergeWizardButton } from "@/components/MergeWizardButton"
+import { NoticeCenter } from "@/components/NoticeCenter"
+import { UpdateInstallDialog } from "@/components/UpdateInstallDialog"
 import { WindowControls } from "@/components/WindowControls"
 import {
   AlertDialog,
@@ -28,10 +30,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { useAppUpdate } from "@/hooks/useAppUpdate"
+import { useNotices } from "@/hooks/useNotices"
 import {
   useMergeWizard,
   type MergeWizardResult,
 } from "@/hooks/useMergeWizard"
+import { usePageHandoff } from "@/hooks/usePageHandoff"
+import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
@@ -41,6 +47,14 @@ import {
   tabIdForPath,
   type TabId,
 } from "@/lib/documentTabs"
+import {
+  noticeEntry,
+  openRefusals,
+  updateNotice,
+  workspaceOwner,
+  type Notice,
+  type NoticeKind,
+} from "@/lib/notices"
 import {
   fileNameFromPath,
   isPdfPath,
@@ -54,6 +68,7 @@ import {
   type RecentFile,
   type RecentPdfView,
 } from "@/lib/recentFiles"
+import { matchesShortcut, shortcuts, type Shortcut } from "@/lib/shortcuts"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { cn } from "@/lib/utils"
 import type { ViewMode } from "@/lib/viewMode"
@@ -63,8 +78,16 @@ type OpenTab = {
   dirty: boolean
   document: PdfDocumentInfo
   id: number
+  /** An app-created document whose bytes have never reached a file. */
+  initialSaveRequired?: boolean
   name: string
   path: string
+  /** A document-specific name for Save As; ordinary PDFs use the annotation
+      export name. */
+  saveAsDefaultName?: string
+  /** What the session says: a file behind it, changes to write, and no
+      session-owned page content that makes it export-only. */
+  savable: boolean
   /** The path whose successful Rust-side open put it in the recent list.
       Unlike `path`, this stays absent when an app-created document adopts its
       first export destination. */
@@ -83,16 +106,17 @@ type OpenTab = {
   }
 }
 
-type WorkspaceError =
-  | "createFailed"
-  | "fileTooLarge"
-  | "invalidFile"
-  | "openFailed"
-  | null
 type PendingClose =
   | { kind: "all" }
   | { kind: "tab"; documentId: number }
   | { kind: "window" }
+
+/** What `launch.rs` says when the OS has a PDF for this window to open — a
+    double-click on a file TFolio is the handler for. Named in both places, so
+    the two have to be changed together. */
+const OPEN_REQUESTED_EVENT = "launch://open-requested"
+
+const FOCUS_DOCUMENT_EVENT = "workspace://focus-document"
 
 function hasUsableFocus() {
   const focused = document.activeElement
@@ -125,19 +149,9 @@ export default function App() {
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [workspaceError, setWorkspaceError] = useState<WorkspaceError>(null)
-  const [workspaceErrorVersion, setWorkspaceErrorVersion] = useState(0)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
-  const dismissWorkspaceError = useCallback(() => setWorkspaceError(null), [])
-  const showWorkspaceError = useCallback(
-    (error: NonNullable<WorkspaceError>) => {
-      setWorkspaceError(error)
-      // The same refusal can happen twice before the first notice expires. Its
-      // identity still changes so the second occurrence gets a full lifetime.
-      setWorkspaceErrorVersion((version) => version + 1)
-    },
-    [],
-  )
+  const [confirmingInstall, setConfirmingInstall] = useState(false)
+  const { channel: notices, notices: raisedNotices } = useNotices()
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -185,6 +199,14 @@ export default function App() {
     focusWorkspaceTarget(tabId)
   }, [])
 
+  // A page drag that leaves the grid it started in becomes the workspace's:
+  // resting on a tab opens it, and the document revealed takes the drop.
+  const { armedTabId, handoff } = usePageHandoff({
+    activeIdRef,
+    onActivate: activateTab,
+    sessions: sessionRefs,
+  })
+
   // Every way a document reaches the workspace runs through here: they queue
   // behind one another rather than racing over which tab ends up active, and
   // they share the one busy state the strip and the home panel read.
@@ -218,19 +240,29 @@ export default function App() {
       const pdfPaths = paths.filter(isPdfPath)
 
       if (pdfPaths.length === 0) {
-        showWorkspaceError("invalidFile")
+        notices.raise({ kind: "invalidFile", owner: workspaceOwner })
         return Promise.resolve()
       }
 
       return runOpenBatch(async () => {
         const openedIds: number[] = []
-        let firstError: WorkspaceError = null
+        let firstError: NoticeKind | null = null
 
         for (const path of pdfPaths) {
           const existingId = tabIdForPath(tabsRef.current, path)
 
           if (existingId !== null) {
             openedIds.push(existingId)
+            continue
+          }
+
+          // Independent edit histories over the same file would overwrite each other on save.
+          const heldElsewhere = await invoke<boolean>("focus_pdf_path", {
+            path,
+          }).catch(() => false)
+
+          if (heldElsewhere) {
+            notices.retract(workspaceOwner, openRefusals)
             continue
           }
 
@@ -274,6 +306,7 @@ export default function App() {
               path,
               recentPath: path,
               recentView: recentView ?? undefined,
+              savable: false,
             }
             replaceTabs((current) => [...current, tab])
             openedIds.push(tab.id)
@@ -298,22 +331,16 @@ export default function App() {
           activateTab(selectedId)
 
           if (firstError) {
-            showWorkspaceError(firstError)
+            notices.raise({ kind: firstError, owner: workspaceOwner })
           } else {
-            dismissWorkspaceError()
+            notices.retract(workspaceOwner, openRefusals)
           }
         } else if (firstError) {
-          showWorkspaceError(firstError)
+          notices.raise({ kind: firstError, owner: workspaceOwner })
         }
       })
     },
-    [
-      activateTab,
-      dismissWorkspaceError,
-      replaceTabs,
-      runOpenBatch,
-      showWorkspaceError,
-    ],
+    [activateTab, notices, replaceTabs, runOpenBatch],
   )
 
   // A new document is the app's own rather than a file's: with no path it
@@ -338,23 +365,23 @@ export default function App() {
             id: document.id,
             name: t("menu.untitled"),
             path: "",
+            savable: false,
           }
           replaceTabs((current) => [...current, tab])
           activateTab(tab.id)
-          dismissWorkspaceError()
+          notices.retract(workspaceOwner, openRefusals)
         } catch {
-          showWorkspaceError("createFailed")
+          notices.raise({ kind: "createFailed", owner: workspaceOwner })
         }
       }),
-    [
-      activateTab,
-      dismissWorkspaceError,
-      replaceTabs,
-      runOpenBatch,
-      showWorkspaceError,
-      t,
-    ],
+    [activateTab, notices, replaceTabs, runOpenBatch, t],
   )
+
+  const openNewWindow = useCallback(() => {
+    void invoke("open_new_window").catch(() =>
+      notices.raise({ kind: "newWindowFailed", owner: workspaceOwner }),
+    )
+  }, [notices])
 
   // A merged document is the app's own, like a new one: it has no file behind
   // it, so it lives in the workspace until an export gives it one — which is
@@ -386,9 +413,10 @@ export default function App() {
         }
       }
       const tab: OpenTab = {
-        dirty: false,
+        dirty: true,
         document,
         id: document.id,
+        initialSaveRequired: true,
         name: t("mergeWizard.mergedName"),
         opensWith: {
           onLayerProgress: hasInitialLayers ? onLayerProgress : undefined,
@@ -398,17 +426,75 @@ export default function App() {
           watermark,
         },
         path: "",
+        saveAsDefaultName: t("mergeWizard.mergedName"),
+        savable: false,
       }
 
       replaceTabs((current) => [...current, tab])
       activateTab(tab.id)
-      dismissWorkspaceError()
+      notices.retract(workspaceOwner, openRefusals)
 
       return layersSettled
     },
-    [activateTab, dismissWorkspaceError, replaceTabs, t],
+    [activateTab, notices, replaceTabs, t],
   )
   const mergeWizard = useMergeWizard({ onMerged: openMergeResult })
+  const appUpdate = useAppUpdate()
+  const { installFailed, status, visible } = appUpdate
+  const update = useMemo(
+    () => updateNotice({ installFailed, status, visible }),
+    [installFailed, status, visible],
+  )
+
+  // Mirrored rather than raised: the check belongs to the backend and is shared
+  // by every window, so the corner follows it instead of remembering it.
+  useEffect(() => {
+    if (update) {
+      notices.raise(update)
+    } else {
+      // Any one of the update's kinds names the whole slot they share.
+      notices.retract(workspaceOwner, ["updateAvailable"])
+    }
+
+    // A confirmation outliving the offer behind it would install what is no
+    // longer ready, and spring open by itself the next time one is shown.
+    if (update?.action?.kind !== "updateInstall") {
+      setConfirmingInstall(false)
+    }
+  }, [notices, update])
+
+  const runNoticeAction = useCallback(
+    (notice: Notice) => {
+      const kind = notice.action?.kind
+
+      if (kind === "updateDownload" || kind === "updateRetry") {
+        appUpdate.download()
+      } else if (kind === "updateInstall") {
+        setConfirmingInstall(true)
+      } else if (kind === "noteFont" && notice.owner.scope === "document") {
+        sessionRefs.current.get(notice.owner.documentId)?.fetchNoteFont()
+      }
+    },
+    [appUpdate],
+  )
+
+  // Two notices answer for their own dismissal: the update, whose reader waved
+  // it away for as long as it says the same thing, and the font offer, which
+  // takes the edit it was holding with it.
+  const dismissNotice = useCallback(
+    (notice: Notice) => {
+      const slot = noticeEntry(notice.kind).slot
+
+      if (slot === "update") {
+        appUpdate.dismiss()
+      } else if (slot === "noteFont" && notice.owner.scope === "document") {
+        sessionRefs.current.get(notice.owner.documentId)?.dismissNoteFont()
+      }
+
+      notices.dismiss(notice.id)
+    },
+    [appUpdate, notices],
+  )
 
   const chooseFile = useCallback(async () => {
     if (choosingFileRef.current) {
@@ -429,11 +515,11 @@ export default function App() {
         await openPaths([path])
       }
     } catch {
-      showWorkspaceError("openFailed")
+      notices.raise({ kind: "openFailed", owner: workspaceOwner })
     } finally {
       choosingFileRef.current = false
     }
-  }, [openPaths, showWorkspaceError, t])
+  }, [notices, openPaths, t])
 
   const rememberAllViews = useCallback(
     () =>
@@ -465,6 +551,9 @@ export default function App() {
       const next = replaceTabs((existing) =>
         existing.filter((tab) => tab.id !== documentId),
       )
+      // Taken back here rather than on the session's own unmount, which
+      // StrictMode runs twice for every mount it makes.
+      notices.retract({ documentId, scope: "document" })
       const nextActiveId =
         candidateId === HOME_TAB_ID ||
         next.some((tab) => tab.id === candidateId)
@@ -480,7 +569,7 @@ export default function App() {
 
       return remembered
     },
-    [replaceTabs],
+    [notices, replaceTabs],
   )
 
   const requestCloseTab = useCallback(
@@ -499,13 +588,18 @@ export default function App() {
     // promise. Remove the sessions now, so no edit can slip between the dirty
     // check (or discard confirmation) and the close.
     const remembered = rememberAllViews()
+
+    for (const tab of tabsRef.current) {
+      notices.retract({ documentId: tab.id, scope: "document" })
+    }
+
     replaceTabs(() => [])
     activeIdRef.current = HOME_TAB_ID
     setActiveId(HOME_TAB_ID)
     focusWorkspaceTarget(HOME_TAB_ID, true)
 
     return remembered
-  }, [rememberAllViews, replaceTabs])
+  }, [notices, rememberAllViews, replaceTabs])
 
   // One question for the lot, rather than a dialog per dirty document: the
   // reader asked to close everything, and answering the same prompt five times
@@ -559,25 +653,59 @@ export default function App() {
     [replaceTabs],
   )
 
+  const updateSavable = useCallback(
+    (documentId: number, savable: boolean) => {
+      replaceTabs((current) => {
+        const tab = current.find((item) => item.id === documentId)
+
+        if (!tab || tab.savable === savable) {
+          return current
+        }
+
+        return current.map((item) =>
+          item.id === documentId ? { ...item, savable } : item,
+        )
+      })
+    },
+    [replaceTabs],
+  )
+
+  // In tab order, and only where a document may be written back at all: one
+  // holding a watermark or another file's pages is export-only, and an export
+  // wants a destination chosen for it rather than one taken in a batch.
+  const saveAllDocuments = useCallback(() => {
+    for (const tab of tabsRef.current) {
+      sessionRefs.current.get(tab.id)?.save()
+    }
+  }, [])
+
+  const canSaveAll = tabs.some((tab) => tab.savable)
+
   const menuActions: AppMenuActions = useMemo(
     () => ({
       canCloseAll: tabs.length > 0,
+      canSaveAll,
       onCloseAll: requestCloseAll,
       onMergeWizard: mergeWizard.openWizard,
       onNew: () => void createDocument(),
+      onNewWindow: openNewWindow,
       onOpen: () => void chooseFile(),
       onOpenRecent: (path) => void openPaths([path]),
       onRefreshRecent: refreshRecentFiles,
+      onSaveAll: saveAllDocuments,
       recentFiles,
     }),
     [
+      canSaveAll,
       chooseFile,
       createDocument,
       mergeWizard.openWizard,
+      openNewWindow,
       openPaths,
       recentFiles,
       refreshRecentFiles,
       requestCloseAll,
+      saveAllDocuments,
       tabs.length,
     ],
   )
@@ -611,9 +739,7 @@ export default function App() {
     const openDocumentSearch = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
-        event.altKey ||
-        event.key.toLowerCase() !== "f" ||
-        (!event.ctrlKey && !event.metaKey)
+        !matchesShortcut(event, shortcuts.search, macOS)
       ) {
         return
       }
@@ -629,7 +755,180 @@ export default function App() {
     document.addEventListener("keydown", openDocumentSearch)
 
     return () => document.removeEventListener("keydown", openDocumentSearch)
-  }, [])
+  }, [macOS])
+
+  // The WebView's own print would put the interface on paper, so the key is
+  // consumed everywhere and answered only where there is a document to print.
+  useEffect(() => {
+    const printDocument = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        !matchesShortcut(event, shortcuts.print, macOS)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+
+      // Consumed on every repeat, but answered once: a held key must not let
+      // the WebView's own print through, nor lay the pages out again.
+      if (event.repeat) {
+        return
+      }
+
+      // A dialog or popup in front of the document owns the screen — this one
+      // included, while it counts out the pages.
+      if (hasLayerOverWorkspace()) {
+        return
+      }
+
+      const tabId = activeIdRef.current
+      if (tabId !== HOME_TAB_ID) {
+        sessionRefs.current.get(tabId)?.print()
+      }
+    }
+
+    document.addEventListener("keydown", printDocument)
+
+    return () => document.removeEventListener("keydown", printDocument)
+  }, [macOS])
+
+  // The WebView's select-all takes the whole interface — tab strip, toolbar and
+  // all — which is never what a reader means by it. It is consumed everywhere,
+  // and only a document tab has something to answer it with: its pages in the
+  // grid, or its text in the page views. A field being typed in keeps its own.
+  useEffect(() => {
+    const selectAllInDocument = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        !matchesShortcut(event, shortcuts.selectAll, macOS) ||
+        isTypingTarget(event.target)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+
+      // A select-all replaces what was selected, so the range a drag left goes
+      // too — on the next frame, after any default action this did not stop.
+      requestAnimationFrame(() => window.getSelection()?.removeAllRanges())
+
+      // Consumed on every repeat, but answered once: a held key would rebuild
+      // the grid's selection set at the repeat rate for nothing.
+      if (event.repeat) {
+        return
+      }
+
+      // A dialog or popup in front of the document owns the screen; the key is
+      // still consumed there, since the interface behind it is not selectable.
+      if (hasLayerOverWorkspace()) {
+        return
+      }
+
+      const tabId = activeIdRef.current
+      if (tabId !== HOME_TAB_ID) {
+        sessionRefs.current.get(tabId)?.selectAll()
+      }
+    }
+
+    document.addEventListener("keydown", selectAllInDocument)
+
+    return () => document.removeEventListener("keydown", selectAllInDocument)
+  }, [macOS])
+
+  useEffect(() => {
+    const openAnotherWindow = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        !matchesShortcut(event, shortcuts.newWindow, macOS)
+      ) {
+        return
+      }
+
+      // Consumed before the repeat is weighed, so a held chord never leaks the
+      // WebView's own answer to it on the second press onwards.
+      event.preventDefault()
+
+      if (event.repeat) {
+        return
+      }
+
+      openNewWindow()
+    }
+
+    document.addEventListener("keydown", openAnotherWindow)
+
+    return () => document.removeEventListener("keydown", openAnotherWindow)
+  }, [macOS, openNewWindow])
+
+  // The file and edit keys the window answers wherever it has the keyboard,
+  // whichever tab leads it. Bound to this document rather than registered with
+  // the OS: they are the window's while it is focused and take nothing from the
+  // desktop around it.
+  useEffect(() => {
+    const activeSession = () => {
+      const tabId = activeIdRef.current
+
+      return tabId === HOME_TAB_ID ? undefined : sessionRefs.current.get(tabId)
+    }
+
+    const actions: Array<{
+      /** Whether a field being typed in keeps the chord for its own editing. */
+      fieldFirst?: boolean
+      run: () => void
+      shortcut: Shortcut
+    }> = [
+      { run: () => void createDocument(), shortcut: shortcuts.new },
+      { run: () => void chooseFile(), shortcut: shortcuts.open },
+      { run: () => activeSession()?.save(), shortcut: shortcuts.save },
+      { run: () => activeSession()?.saveAs(), shortcut: shortcuts.saveAs },
+      { run: saveAllDocuments, shortcut: shortcuts.saveAll },
+      {
+        run: () => activeSession()?.openWatermark(),
+        shortcut: shortcuts.watermark,
+      },
+      {
+        run: () => activeSession()?.openPageNumbers(),
+        shortcut: shortcuts.pageNumbers,
+      },
+      // A field's own undo is the one the reader means while typing in it.
+      {
+        fieldFirst: true,
+        run: () => activeSession()?.undo(),
+        shortcut: shortcuts.undo,
+      },
+    ]
+
+    const runShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return
+      }
+
+      const action = actions.find((candidate) =>
+        matchesShortcut(event, candidate.shortcut, macOS),
+      )
+
+      if (!action || (action.fieldFirst && isTypingTarget(event.target))) {
+        return
+      }
+
+      // Consumed wherever the app holds the keyboard: the WebView's own answers
+      // to these keys act on the interface, which is never what is meant here.
+      event.preventDefault()
+
+      // Answered once for a held key, and never under a dialog or popup: while
+      // one stands, the screen — and the keyboard with it — is its own.
+      if (event.repeat || hasLayerOverWorkspace()) {
+        return
+      }
+
+      action.run()
+    }
+
+    document.addEventListener("keydown", runShortcut)
+
+    return () => document.removeEventListener("keydown", runShortcut)
+  }, [chooseFile, createDocument, macOS, saveAllDocuments])
 
   // Nothing here is dragged with the browser's own drag and drop — the
   // thumbnail grid reorders from pointer events — so a drag starting inside the
@@ -736,6 +1035,75 @@ export default function App() {
     }
   }, [dragToSession, openPaths])
 
+  // A PDF double-clicked in the file manager reaches the app before this
+  // workspace exists, so Rust holds it and hands it over here. Taking is what
+  // empties the queue, which is why the event carries no paths of its own: a
+  // second double-click, arriving once the window is already up, only says
+  // there is something to take.
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    const openWhatTheOsNamed = () =>
+      invoke<string[]>("take_launch_pdfs")
+        .then((paths) => {
+          // Not conditioned on `cancelled`: a take that already emptied the
+          // queue is the only chance these paths get, and `openPaths` guards
+          // its own unmounted case.
+          if (paths.length > 0) {
+            void openPaths(paths, "first")
+          }
+        })
+        .catch(() => undefined)
+
+    // Bound before the first take, so a file arriving between the two is
+    // announced to a listener that is already there rather than to nobody.
+    void listen(OPEN_REQUESTED_EVENT, () => void openWhatTheOsNamed()).then(
+      (stop) => {
+        if (cancelled) {
+          stop()
+          return
+        }
+
+        unlisten = stop
+        void openWhatTheOsNamed()
+      },
+      // A subscription that never bound leaves the queue full all the same,
+      // and taking it is the half that opens the file the reader launched
+      // this run for.
+      () => {
+        if (!cancelled) {
+          void openWhatTheOsNamed()
+        }
+      },
+    )
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [openPaths])
+
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    void listen<number>(FOCUS_DOCUMENT_EVENT, (event) =>
+      activateTab(event.payload),
+    ).then((stop) => {
+      if (cancelled) {
+        stop()
+      } else {
+        unlisten = stop
+      }
+    })
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [activateTab])
+
   useEffect(() => {
     if (isE2eBuild) {
       return
@@ -793,17 +1161,6 @@ export default function App() {
     }
   }, [homeActive, refreshRecentFiles])
 
-  const errorMessage =
-    workspaceError === "createFailed"
-      ? t("menu.newFailed")
-      : workspaceError === "fileTooLarge"
-        ? t("viewer.fileTooLarge")
-        : workspaceError === "invalidFile"
-          ? t("viewer.invalidFile")
-          : workspaceError === "openFailed"
-            ? t("viewer.openFailed")
-            : null
-
   return (
     <div className="h-svh overflow-hidden bg-background">
       {homeActive ? (
@@ -832,11 +1189,6 @@ export default function App() {
 
       <HomePanel
         active={homeActive}
-        // Only the showing panel carries the message: two live `role="alert"`
-        // nodes for one error is one too many for a screen reader to reach.
-        errorKey={workspaceErrorVersion}
-        errorMessage={homeActive ? errorMessage : null}
-        onDismissError={dismissWorkspaceError}
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
         opening={isOpening}
@@ -848,16 +1200,20 @@ export default function App() {
           active={tab.id === activeId}
           document={tab.document}
           fileName={tab.name}
+          initialSaveRequired={tab.initialSaveRequired}
           initialPageNumbers={tab.opensWith?.pageNumbers}
           initialRecentView={tab.recentView}
           initialViewMode={tab.opensWith?.viewMode}
           initialWatermark={tab.opensWith?.watermark}
           key={tab.id}
           menu={menuActions}
+          notices={notices}
           onDirtyChange={updateDirty}
           onInitialLayerProgress={tab.opensWith?.onLayerProgress}
           onInitialLayersSettled={tab.opensWith?.onLayersSettled}
+          onSavableChange={updateSavable}
           onSourceChange={updateSource}
+          pageHandoff={handoff}
           ref={(handle) => {
             if (handle) {
               sessionRefs.current.set(tab.id, handle)
@@ -866,11 +1222,13 @@ export default function App() {
             }
           }}
           recentPath={tab.recentPath}
+          saveAsDefaultName={tab.saveAsDefaultName}
         />
       ))}
 
       <DocumentTabs
         activeId={activeId}
+        armedTabId={armedTabId}
         onActivate={activateTab}
         onClose={requestCloseTab}
         onOpenFile={() => void chooseFile()}
@@ -878,33 +1236,39 @@ export default function App() {
         tabs={tabs}
       />
 
-      {isDragging ? (
-        <div className="pointer-events-none fixed inset-3 top-24 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm">
+      {isDragging && !mergeWizard.open ? (
+        <div
+          className="pointer-events-none fixed inset-3 top-24 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm"
+          data-testid="workspace-file-drop"
+        >
           <div className="flex flex-col items-center text-center">
             <FileUp className="mb-4 size-12" />
-            <p className="text-lg font-semibold">
-              {mergeWizard.open ? t("viewer.dropNowMerge") : t("tabs.dropNow")}
-            </p>
+            <p className="text-lg font-semibold">{t("tabs.dropNow")}</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {mergeWizard.open
-                ? t("mergeWizard.filesDescription")
-                : t("tabs.dropHint")}
+              {t("tabs.dropHint")}
             </p>
           </div>
         </div>
       ) : null}
 
-      {!homeActive && errorMessage ? (
-        <DismissibleAlert
-          className="fixed top-25 right-4 z-60 max-w-80 rounded-lg border border-destructive/20 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-          dismissKey={workspaceErrorVersion}
-          onDismiss={dismissWorkspaceError}
-        >
-          {errorMessage}
-        </DismissibleAlert>
-      ) : null}
+      <NoticeCenter
+        activeDocumentId={activeId === HOME_TAB_ID ? null : activeId}
+        notices={raisedNotices}
+        onAction={runNoticeAction}
+        onDismiss={dismissNotice}
+        onExpire={notices.dismiss}
+      />
 
-      <MergeWizard wizard={mergeWizard} />
+      <UpdateInstallDialog
+        onConfirm={() => {
+          setConfirmingInstall(false)
+          appUpdate.install()
+        }}
+        onOpenChange={setConfirmingInstall}
+        open={confirmingInstall}
+      />
+
+      <MergeWizard draggingFiles={isDragging} wizard={mergeWizard} />
 
       <AlertDialog
         onOpenChange={(open) => {

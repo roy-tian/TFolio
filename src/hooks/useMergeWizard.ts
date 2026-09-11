@@ -8,10 +8,14 @@ import {
   canMerge,
   inspectFiles,
   mergedPageCount,
+  mergesIntoOneDocument,
+  mergeWizardSteps,
   moveFile,
   usableFiles,
   type MergeBookmarksMode,
+  type MergeExportMode,
   type MergeFile,
+  type MergeWizardStep,
 } from "@/lib/mergeWizard"
 import {
   defaultPageNumbersPreferences,
@@ -23,6 +27,7 @@ import {
   type PageNumbersDraft,
 } from "@/lib/pageNumbers"
 import type { PdfDocumentInfo } from "@/lib/pdf"
+import { wordConversionEnabled } from "@/lib/settings"
 import type {
   PdfOwnedLayer,
   PdfOwnedLayerProgressHandler,
@@ -36,11 +41,7 @@ import {
   type WatermarkConfig,
 } from "@/lib/watermark"
 
-/** The four steps, in the order they are asked. */
-export const MERGE_WIZARD_STEPS = 4
 const MERGE_PROGRESS_PHASE_UNITS = 100
-
-export type MergeWizardStep = 1 | 2 | 3 | 4
 
 export type MergeWizardError =
   | "fileTooLarge"
@@ -59,7 +60,7 @@ export type MergeWizardResult = {
   watermark: WatermarkConfig | null
 }
 
-type MergeProgressPhase = "merge" | PdfOwnedLayer
+type MergeProgressPhase = "merge" | PdfOwnedLayer | "archive"
 
 type UseMergeWizardOptions = {
   onMerged: (
@@ -84,6 +85,48 @@ function completedPhaseUnits(progress: PdfProgress, units: number) {
 }
 
 /**
+ * Runs one owned-layer command on the document a merge just made. `false` is
+ * the reader's stop, which the backend has already rolled back — the wizard
+ * only has to stop too.
+ *
+ * The tab route applies these through the session's own undo queue; an archive
+ * has no tab, so it asks for them here.
+ */
+async function applyOwnedLayer(
+  command: string,
+  documentId: number,
+  config: unknown,
+  onProgress: (progress: PdfProgress) => void,
+) {
+  const channel = new Channel<PdfProgress>()
+
+  channel.onmessage = onProgress
+  return invoke<boolean>(command, { config, documentId, onProgress: channel })
+}
+
+/**
+ * Runs one of the archive exports, which put up their own save dialog and
+ * answer with the path they wrote. `null` is a dialog the reader dismissed or a
+ * run they stopped: either way nothing was written and the wizard stays open.
+ */
+async function writeArchive(
+  command: string,
+  args: Record<string, unknown>,
+  onProgress: (progress: PdfProgress) => void,
+) {
+  const stub = e2eOverride("exportPdfArchive")
+
+  if (stub) {
+    return stub(command, args, onProgress)
+  }
+
+  const channel = new Channel<PdfProgress>()
+
+  channel.onmessage = onProgress
+  return invoke<string | null>(command, { ...args, onProgress: channel })
+}
+
+/**
  * The merge wizard's whole state: the file list and the three settings steps,
  * plus the one call that turns them into a document.
  *
@@ -93,9 +136,11 @@ function completedPhaseUnits(progress: PdfProgress, units: number) {
 export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const [step, setStep] = useState<MergeWizardStep>(1)
+  const [step, setStep] = useState<MergeWizardStep>("files")
   const [files, setFiles] = useState<MergeFile[]>([])
+  const [exportMode, setExportMode] = useState<MergeExportMode>("onePdf")
   const [smartPadding, setSmartPadding] = useState(false)
+  const [normalizeA4, setNormalizeA4] = useState(false)
   const [bookmarks, setBookmarks] = useState<MergeBookmarksMode>("perFile")
   const [pageNumbersOn, setPageNumbersOn] = useState(false)
   const [watermarkOn, setWatermarkOn] = useState(false)
@@ -124,9 +169,13 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   // A stop the backend had nothing to answer with, still owed to the reader.
   const unanswered = useRef(false)
 
+  const steps = useMemo(() => mergeWizardSteps(exportMode), [exportMode])
+  // The blank-page rule needs one page sequence to work on: where the files stay
+  // separate there is nothing between them to pad, so the total is their sum.
+  const padded = smartPadding && mergesIntoOneDocument(exportMode)
   const totalPages = useMemo(
-    () => mergedPageCount(files, smartPadding),
-    [files, smartPadding],
+    () => mergedPageCount(files, padded),
+    [files, padded],
   )
 
   const applyFiles = useCallback(
@@ -147,10 +196,12 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   }, [])
 
   const reset = useCallback(() => {
-    setStep(1)
+    setStep("files")
     filesRef.current = []
     setFiles([])
+    setExportMode("onePdf")
     setSmartPadding(false)
+    setNormalizeA4(false)
     setBookmarks("perFile")
     setPageNumbersOn(false)
     setWatermarkOn(false)
@@ -239,7 +290,13 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
       const paths = pick
         ? await pick()
         : await invoke<string[]>("pick_pdf_paths", {
-            filterLabel: t("annotate.exportFilter"),
+            // The label promises what the dialog behind it accepts, and the
+            // backend omits the Word extensions when the setting is off.
+            filterLabel: t(
+              wordConversionEnabled()
+                ? "mergeWizard.sourceFilter"
+                : "mergeWizard.sourceFilterPlain",
+            ),
           })
 
       await addPaths(paths)
@@ -274,16 +331,23 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     [watermarkDraft],
   )
 
-  // What stops the reader leaving the step they are on. Only the steps that can
-  // be wrong have an answer here; the file list is checked by `canMerge`.
-  const pageNumbersBroken = pageNumbersOn && pageNumbersParsed.error !== null
-  const watermarkBroken = watermarkOn && watermarkError !== null
+  // Only the steps this export actually asks can block it, and only the ones
+  // that can be wrong: the file list is checked by `canMerge`. A page-number
+  // range left unusable is a step behind by the time the last one is reached,
+  // so the final button answers for every step the run is about to commit.
+  const asks = useCallback(
+    (named: MergeWizardStep) => steps.includes(named),
+    [steps],
+  )
+  const pageNumbersBroken =
+    asks("pageNumbers") && pageNumbersOn && pageNumbersParsed.error !== null
+  const watermarkBroken =
+    asks("watermark") && watermarkOn && watermarkError !== null
+  const isLastStep = step === steps[steps.length - 1]
   const stepBlocked =
-    (step === 1 && !canMerge(files)) ||
-    (step === 3 && pageNumbersBroken) ||
-    // The last step's button is the merge itself, which commits both settings
-    // steps — so a page-number range left unusable back on step 3 stops it too.
-    (step === 4 && (pageNumbersBroken || watermarkBroken))
+    (step === "files" && !canMerge(files, exportMode)) ||
+    (step === "pageNumbers" && pageNumbersBroken) ||
+    (isLastStep && (pageNumbersBroken || watermarkBroken))
 
   const goToStep = useCallback(
     (next: MergeWizardStep) => {
@@ -292,7 +356,7 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
       // Entering the page-number step re-reads the reader's stored style against
       // the merge's own length — but only while they have not edited the draft
       // themselves, so going back for one more file never undoes their work.
-      if (next === 3 && pageNumbersUntouched.current) {
+      if (next === "pageNumbers" && pageNumbersUntouched.current) {
         setPageNumbersDraft(
           draftFromPreferences(storedPageNumbersPreferences(), totalPages),
         )
@@ -304,16 +368,36 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   )
 
   const back = useCallback(() => {
-    if (step > 1) {
-      goToStep((step - 1) as MergeWizardStep)
+    const previous = steps[steps.indexOf(step) - 1]
+
+    if (previous) {
+      goToStep(previous)
     }
-  }, [goToStep, step])
+  }, [goToStep, step, steps])
 
   const next = useCallback(() => {
-    if (step < MERGE_WIZARD_STEPS && !stepBlocked) {
-      goToStep((step + 1) as MergeWizardStep)
+    const following = steps[steps.indexOf(step) + 1]
+
+    if (following && !stepBlocked) {
+      goToStep(following)
     }
-  }, [goToStep, step, stepBlocked])
+  }, [goToStep, step, stepBlocked, steps])
+
+  /** The export mode is answered on the first step, where every mode's own
+      steps still lie ahead — so a mode that drops the step underway can only be
+      one the reader reached by another route, and it starts again from the top
+      rather than leaving them on a step this export never asks. */
+  const changeExportMode = useCallback(
+    (mode: MergeExportMode) => {
+      setError(null)
+      setExportMode(mode)
+
+      if (!mergeWizardSteps(mode).includes(step)) {
+        setStep("files")
+      }
+    },
+    [step],
+  )
 
   /**
    * Asks whichever half of the run is going to stop, and remembers an ask the
@@ -338,37 +422,44 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   }, [])
 
   const finish = useCallback(async () => {
-    if (!canMerge(files) || stepBlocked || isBusy) {
+    if (!canMerge(files, exportMode) || stepBlocked || isBusy) {
       return
     }
 
-    const pageNumbers = pageNumbersOn ? pageNumbersParsed.config : null
-    const watermark = watermarkOn
-      ? { ...watermarkDraft, text: watermarkDraft.text.trim() }
-      : null
+    // Read off the steps this export actually asked: a setting from a step it
+    // skipped is one the reader never saw, and must not reach the result.
+    const pageNumbers =
+      asks("pageNumbers") && pageNumbersOn ? pageNumbersParsed.config : null
+    const watermark =
+      asks("watermark") && watermarkOn
+        ? { ...watermarkDraft, text: watermarkDraft.text.trim() }
+        : null
+    const paths = usableFiles(files).map((file) => file.path)
 
     unanswered.current = false
     setIsBusy(true)
     setIsStopping(false)
     setError(null)
 
-    const paths = usableFiles(files).map((file) => file.path)
     // Give each visible phase the same share, while its own backend events
     // describe progress within that share. Raw page counts would otherwise pin
     // a two-file merge near 0% until hundreds of layer pages began processing.
-    const mergeUnits = MERGE_PROGRESS_PHASE_UNITS
-    const pageNumberUnits = pageNumbers ? MERGE_PROGRESS_PHASE_UNITS : 0
-    const watermarkUnits = watermark ? MERGE_PROGRESS_PHASE_UNITS : 0
-    const operationTotal = mergeUnits + pageNumberUnits + watermarkUnits
-    setMergePhase("merge")
-    setMergeProgress({ completed: 0, total: operationTotal })
-
-    try {
-      const plan = { bookmarks, paths, smartPadding }
-      const stub = e2eOverride("mergePdfFiles")
-      const onMergeProgress = (progress: PdfProgress) => {
+    // The copies export is one backend call from end to end, so it is one phase.
+    const merges = mergesIntoOneDocument(exportMode)
+    const mergeUnits = merges ? MERGE_PROGRESS_PHASE_UNITS : 0
+    const pageNumberUnits = merges && pageNumbers ? MERGE_PROGRESS_PHASE_UNITS : 0
+    const watermarkUnits = merges && watermark ? MERGE_PROGRESS_PHASE_UNITS : 0
+    const archiveUnits =
+      exportMode === "onePdf" ? 0 : MERGE_PROGRESS_PHASE_UNITS
+    const operationTotal =
+      mergeUnits + pageNumberUnits + watermarkUnits + archiveUnits
+    const archiveOffset = mergeUnits + pageNumberUnits + watermarkUnits
+    const phaseProgress =
+      (phase: MergeProgressPhase, offset: number, units: number) =>
+      (progress: PdfProgress) => {
+        setMergePhase(phase)
         setMergeProgress({
-          completed: completedPhaseUnits(progress, mergeUnits),
+          completed: offset + completedPhaseUnits(progress, units),
           total: operationTotal,
         })
 
@@ -376,6 +467,43 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
           void ask()
         }
       }
+
+    setMergePhase(merges ? "merge" : "archive")
+    setMergeProgress({ completed: 0, total: operationTotal })
+
+    try {
+      // Nothing is merged here: each file is watermarked and written into the
+      // archive on its own, by one backend call that also puts up its dialog.
+      if (!merges) {
+        const written = await writeArchive(
+          "export_watermarked_pdf_copies",
+          {
+            filterLabel: t("mergeWizard.archiveFilter"),
+            plan: { normalizeA4, paths, watermark },
+            suggestedName: t(
+              watermark
+                ? "mergeWizard.copiesArchiveName"
+                : "mergeWizard.copiesArchiveNamePlain",
+            ),
+          },
+          phaseProgress("archive", archiveOffset, archiveUnits),
+        )
+
+        if (written === null) {
+          return
+        }
+
+        if (watermark) {
+          storeWatermarkConfig(watermark)
+        }
+
+        setOpen(false)
+        return
+      }
+
+      const plan = { bookmarks, normalizeA4, paths, smartPadding }
+      const stub = e2eOverride("mergePdfFiles")
+      const onMergeProgress = phaseProgress("merge", 0, mergeUnits)
       let document: PdfDocumentInfo | null
 
       if (stub) {
@@ -384,8 +512,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
         const progress = new Channel<PdfProgress>()
         progress.onmessage = onMergeProgress
         document = await invoke<PdfDocumentInfo | null>("merge_pdf_files", {
-          ...plan,
           onProgress: progress,
+          plan,
         })
       }
 
@@ -407,31 +535,83 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
         storeWatermarkConfig(watermark)
       }
 
-      // Keep the same progress surface alive while the new session applies the
-      // optional layers through its ordinary, undoable commands.
-      setMergePhase(pageNumbers ? "pageNumbers" : watermark ? "watermark" : "merge")
+      // Keep the same progress surface alive, named for whatever runs next —
+      // an export with no layers to apply goes straight on to its archive.
+      setMergePhase(
+        pageNumbers
+          ? "pageNumbers"
+          : watermark
+            ? "watermark"
+            : exportMode === "onePdf"
+              ? "merge"
+              : "archive",
+      )
       setMergeProgress({ completed: mergeUnits, total: operationTotal })
 
-      const onLayerProgress: PdfOwnedLayerProgressHandler = (layer, progress) => {
-        const pageNumberOffset = mergeUnits
-        const watermarkOffset = mergeUnits + pageNumberUnits
-        const units = layer === "pageNumbers" ? pageNumberUnits : watermarkUnits
-        const offset =
-          layer === "pageNumbers" ? pageNumberOffset : watermarkOffset
+      const onLayerProgress: PdfOwnedLayerProgressHandler = (layer, progress) =>
+        phaseProgress(
+          layer,
+          layer === "pageNumbers" ? mergeUnits : mergeUnits + pageNumberUnits,
+          layer === "pageNumbers" ? pageNumberUnits : watermarkUnits,
+        )(progress)
 
-        setMergePhase(layer)
-        setMergeProgress({
-          completed: offset + completedPhaseUnits(progress, units),
-          total: operationTotal,
-        })
-
-        if (unanswered.current) {
-          void ask()
-        }
+      // The merged document reaches the workspace as a tab, where its layers
+      // are applied through the ordinary undoable commands.
+      if (exportMode === "onePdf") {
+        await onMerged({ document, pageNumbers, watermark }, onLayerProgress)
+        setOpen(false)
+        return
       }
 
-      await onMerged({ document, pageNumbers, watermark }, onLayerProgress)
-      setOpen(false)
+      // An archive of images is a file, not a tab: the layers are applied to
+      // the merged document here, and it is closed once its pages are written.
+      try {
+        if (pageNumbers) {
+          const applied = await applyOwnedLayer(
+            "apply_pdf_page_numbers",
+            document.id,
+            pageNumbers,
+            (progress) => onLayerProgress("pageNumbers", progress),
+          )
+
+          if (!applied) {
+            return
+          }
+        }
+
+        if (watermark) {
+          const applied = await applyOwnedLayer(
+            "apply_pdf_watermark",
+            document.id,
+            watermark,
+            (progress) => onLayerProgress("watermark", progress),
+          )
+
+          if (!applied) {
+            return
+          }
+        }
+
+        const written = await writeArchive(
+          "export_pdf_page_images",
+          {
+            documentId: document.id,
+            filterLabel: t("mergeWizard.archiveFilter"),
+            suggestedName: t("mergeWizard.pagesArchiveName"),
+          },
+          phaseProgress("archive", archiveOffset, archiveUnits),
+        )
+
+        if (written !== null) {
+          setOpen(false)
+        }
+      } finally {
+        // The document was only ever a step on the way to the archive, so it
+        // leaves the store however this ended — stopped, failed or written.
+        await invoke("close_pdf", { documentId: document.id }).catch(
+          () => undefined,
+        )
+      }
     } catch (failure) {
       setError(
         String(failure).includes("MiB limit") ? "fileTooLarge" : "mergeFailed",
@@ -443,18 +623,36 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
       mergedIdRef.current = null
     }
   }, [
+    asks,
     ask,
     bookmarks,
+    exportMode,
     files,
     isBusy,
+    normalizeA4,
     onMerged,
     pageNumbersOn,
     pageNumbersParsed.config,
     smartPadding,
     stepBlocked,
+    t,
     watermarkDraft,
     watermarkOn,
   ])
+
+  /**
+   * The reader's way out of an add that is still converting Word documents —
+   * the one slow thing an add can be doing, and the one the dialog's busy
+   * state would otherwise give no button to. Nothing waits for the answer:
+   * the inspection settles on its own, its rows answering for what stopped.
+   */
+  const stopAdding = useCallback(async () => {
+    try {
+      await invoke<boolean>("cancel_word_conversion")
+    } catch {
+      // Nothing to report: the run's own result closes the surface either way.
+    }
+  }, [])
 
   /**
    * The reader's way out of a run that has already started — the wizard's whole
@@ -485,13 +683,16 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     bookmarks,
     chooseFiles,
     error,
+    exportMode,
     files,
     finish,
     isBusy,
+    isLastStep,
     isStopping,
     mergePhase,
     mergeProgress,
     next,
+    normalizeA4,
     onOpenChange,
     open,
     openWizard,
@@ -501,14 +702,18 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     removeFile,
     reorderFile,
     setBookmarks,
+    setExportMode: changeExportMode,
+    setNormalizeA4,
     setPageNumbersDraft: changePageNumbersDraft,
     setPageNumbersOn,
     setSmartPadding,
     setWatermarkDraft,
     setWatermarkOn,
     smartPadding,
+    stopAdding,
     step,
     stepBlocked,
+    steps,
     stop,
     totalPages,
     watermarkDraft,

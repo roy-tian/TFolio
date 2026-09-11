@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react"
 
+import { usesEmbeddedFont } from "@/lib/embeddedFont"
 import {
   watermarkFontSize,
   watermarkRotation,
-  watermarkUsesEmbeddedFont,
   watermarkZebraSpacing,
   WATERMARK_COLOR,
   WATERMARK_OPACITY,
@@ -115,7 +115,7 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
     height: sheetWidth * (A4_HEIGHT / A4_WIDTH),
     width: sheetWidth,
   }
-  const embedded = watermarkUsesEmbeddedFont(config.text)
+  const embedded = usesEmbeddedFont(config.text)
   const text = config.text || placeholder
   const fontFamily = embedded ? "sans-serif" : "Helvetica, Arial, sans-serif"
   const rotation = `rotate(${watermarkRotation(config.direction, A4_WIDTH, A4_HEIGHT)}deg)`

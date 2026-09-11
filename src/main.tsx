@@ -5,7 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import App from "./App"
 import { initializeI18n } from "./i18n"
 import { suppressNativeContextMenu } from "./lib/contextMenu"
-import { loadSettings } from "./lib/settings"
+import { loadSettings, watchSettings } from "./lib/settings"
 import { initializeTheme } from "./lib/theme"
 import "./index.css"
 
@@ -13,6 +13,7 @@ async function bootstrap() {
   // Before anything else: the theme and the language are settings, and both
   // have to be settled before the first paint is made in them.
   await loadSettings()
+  watchSettings()
   initializeTheme()
   suppressNativeContextMenu()
 

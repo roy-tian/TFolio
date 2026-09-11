@@ -6,6 +6,7 @@ import {
   openPdfFromDisk,
   pageInk,
   renderedPage,
+  refreshApp,
   seedSettings,
   textPdf,
 } from "./helpers"
@@ -13,7 +14,7 @@ import {
 describe("TFolio annotations", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("text.pdf", textPdf())
     await renderedPage()
@@ -73,7 +74,7 @@ describe("TFolio annotations", () => {
     )
     expect(stillSelected).toBe("")
 
-    await $("button[aria-label='Undo']").click()
+    await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pageInk()) === clean, {
       timeout: 15_000,
       timeoutMsg: "undo did not take the highlight back off the page",
@@ -83,7 +84,7 @@ describe("TFolio annotations", () => {
     // Exact, because redo re-runs the same command into a deterministic render:
     // a redo that applied the command twice would stack two highlights and read
     // as a pass against any "more ink than clean" bar.
-    await $("button[aria-label='Redo']").click()
+    await $("button[aria-label^='Redo']").click()
     await browser.waitUntil(async () => (await pageInk()) === highlighted, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the highlight exactly",
@@ -91,8 +92,8 @@ describe("TFolio annotations", () => {
   })
 
   it("leaves undo and redo alone until there is something to take back", async () => {
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
-    await expect($("button[aria-label='Redo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Redo']")).toBeDisabled()
   })
 
   // A selection outlives the drag that made it, and clicking a button does not
@@ -117,12 +118,12 @@ describe("TFolio annotations", () => {
     await $("button[aria-label='Rotate clockwise']").click()
     await browser.pause(2500)
 
-    await expect($("button[aria-label='Undo']")).toBeDisabled()
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
     expect(await pageInk()).toBe(clean)
   })
 
   it("keeps both ends of a cross-page selection mounted until highlight commit", async () => {
-    await browser.refresh()
+    await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("cross-page-text.pdf", textPdf(6))
     await renderedPage()
