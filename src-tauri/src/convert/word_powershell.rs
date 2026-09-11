@@ -19,7 +19,7 @@ pub(crate) const WPS_PROG_ID: &str = "KWPS.Application";
 /// One line per file on stdout — `OK|<input>` or `FAIL|<input>|<message>`;
 /// files a killed run never answered become refusals for the next engine.
 const CONVERT_SCRIPT: &str = r#"
-param([string]$ProgId, [string[]]$Pairs)
+param([string]$ProgId, [string]$Pairs)
 $ErrorActionPreference = 'Stop'
 # Redirected output is otherwise the OEM code page on Windows PowerShell 5.1,
 # and a path with a non-ASCII character in it — the cache dir lives under the
@@ -31,7 +31,9 @@ try {
     $application.Visible = $false
     $application.DisplayAlerts = 0
     try { $application.AutomationSecurity = 3 } catch {}
-    foreach ($pair in $Pairs) {
+    # One argument, '>'-joined: `-File` cannot bind several values to one
+    # parameter, and neither separator may occur inside a Windows filename.
+    foreach ($pair in $Pairs.Split('>')) {
         $parts = $pair -split '\|', 2
         $inputPath = $parts[0]
         $outputPath = $parts[1]
@@ -94,12 +96,13 @@ impl ConvertSession for Session {
             );
         }
 
-        // One pairing per file, the two paths joined by a separator no
-        // Windows filename may contain.
-        let pairs: Vec<String> = jobs
+        // Each pair joins in|out with separators no Windows filename may
+        // contain, and the pairs join into the one argument `-File` can bind.
+        let pairs = jobs
             .iter()
             .map(|job| format!("{}|{}", job.staged.display(), job.output.display()))
-            .collect();
+            .collect::<Vec<_>>()
+            .join(">");
 
         let mut command = Command::new("powershell.exe");
 
@@ -113,11 +116,8 @@ impl ConvertSession for Session {
             ])
             .arg(&self.script)
             .args(["-ProgId", self.prog_id])
-            .arg("-Pairs");
-
-        for pair in &pairs {
-            command.arg(pair);
-        }
+            .arg("-Pairs")
+            .arg(pairs);
 
         // The suite's startup is the slow part and happens once, so it is
         // owed in full however many files follow it.

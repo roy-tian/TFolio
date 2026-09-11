@@ -266,6 +266,8 @@ const zhCN = {
     wordConversion: "用本机 Office 软件转换 Word 文档",
     wordConversionHint:
       "导入向导会调用 Microsoft Word、WPS Office 或 LibreOffice，把加入的 Word 文档先转成 PDF。关闭后，向导只接受 PDF 和图片。",
+    wordConversionHint_windows:
+      "导入向导会调用 Microsoft Word 或 WPS Office，把加入的 Word 文档先转成 PDF。关闭后，向导只接受 PDF 和图片。",
     about: "关于",
     theme: "主题",
     themeHint: "选择明亮或暗黑外观。",
@@ -352,6 +354,7 @@ const zhCN = {
     pageCount_other: "{{count}} 页",
     unreadable: "无法读取",
     errorConverterMissing: "需要安装 Word、WPS 或 LibreOffice",
+    errorConverterMissing_windows: "需要安装 Microsoft Word 或 WPS Office",
     errorConversionFailed: "转换失败",
     remove: "移除 {{name}}",
     fileCount_one: "{{count}} 个文件",

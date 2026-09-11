@@ -1,5 +1,5 @@
 //! Word-to-PDF conversion through the machine's own office software, in
-//! fidelity order — Word, WPS, LibreOffice — the only trusted renderers.
+//! fidelity order — Word, WPS, LibreOffice; on Windows, Word and WPS alone.
 
 pub(crate) mod libreoffice;
 
@@ -13,7 +13,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant, SystemTime},
 };
@@ -45,7 +45,7 @@ pub(crate) enum EngineKind {
     Word,
     #[cfg_attr(not(windows), allow(dead_code))]
     Wps,
-    #[cfg_attr(feature = "e2e", allow(dead_code))]
+    #[cfg_attr(any(windows, feature = "e2e"), allow(dead_code))]
     LibreOffice,
 }
 
@@ -147,8 +147,14 @@ fn probe() -> Detected {
         }
     }
 
+    // Windows stops at Word and WPS: LibreOffice is too rare there to chase,
+    // and soffice.exe answers before the PDF lands (only its .com twin waits).
+    #[cfg(not(windows))]
     let soffice = libreoffice::find_soffice();
+    #[cfg(windows)]
+    let soffice: Option<PathBuf> = None;
 
+    #[cfg(not(windows))]
     if soffice.is_some() {
         engines.push(EngineKind::LibreOffice);
     }
@@ -652,6 +658,10 @@ pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std:
 
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
+
+    // Piped, else `wait_with_output` reads nothing back — a few short lines
+    // per file cannot fill the pipe's 64KB buffer while the deadline polls.
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
     let deadline = Instant::now() + timeout;

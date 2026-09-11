@@ -267,6 +267,8 @@ const en = {
     wordConversion: "Convert Word documents with the installed office apps",
     wordConversionHint:
       "The import wizard asks Microsoft Word, WPS Office, or LibreOffice to turn Word documents into PDFs as they are added. When off, the wizard takes PDFs and images only.",
+    wordConversionHint_windows:
+      "The import wizard asks Microsoft Word or WPS Office to turn Word documents into PDFs as they are added. When off, the wizard takes PDFs and images only.",
     theme: "Theme",
     themeHint: "Choose a light or dark appearance.",
     themeLight: "Light",
@@ -353,8 +355,8 @@ const en = {
     pageCount_one: "{{count}} page",
     pageCount_other: "{{count}} pages",
     unreadable: "Unreadable",
-    errorConverterMissing:
-      "Needs Word, WPS, or LibreOffice",
+    errorConverterMissing: "Needs Word, WPS, or LibreOffice",
+    errorConverterMissing_windows: "Needs Microsoft Word or WPS Office",
     errorConversionFailed: "Could not be converted",
     remove: "Remove {{name}}",
     fileCount_one: "{{count}} file",

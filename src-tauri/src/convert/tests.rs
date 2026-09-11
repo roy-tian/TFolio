@@ -210,12 +210,6 @@ fn file_urls_percent_encode_everything_but_the_grammar() {
         libreoffice::file_url(Path::new("/tmp/a b/文档.pdf")),
         "file:///tmp/a%20b/%E6%96%87%E6%A1%A3.pdf"
     );
-    // A drive-prefixed Windows path is absolute without a leading slash; the
-    // URL grammar still wants three.
-    assert_eq!(
-        libreoffice::file_url(Path::new(r"C:\Users\R OY\o.docx")),
-        "file:///C:/Users/R%20OY/o.docx"
-    );
 }
 
 #[test]
@@ -617,4 +611,30 @@ fn the_same_path_twice_in_one_batch_is_one_conversion() {
     assert!(results[0].is_some());
     assert_eq!(results[0], results[1], "both rows read the same PDF");
     assert_eq!(log.lock().unwrap().conversions, 1);
+}
+
+// The PowerShell engine's whole result protocol rides the child's stdout, and
+// `wait_with_output` reads nothing when nothing was piped — this pins that.
+#[test]
+fn a_child_answers_on_captured_stdout() {
+    // `cmd` on Windows, where the engine lives; `sh` everywhere tests run.
+    let mut command = if cfg!(windows) {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/c", "echo probe-answer"]);
+        command
+    } else {
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "echo probe-answer"]);
+        command
+    };
+
+    let finished = super::run_with_timeout(&mut command, std::time::Duration::from_secs(10))
+        .expect("a shell should run");
+
+    assert!(!finished.timed_out);
+    assert!(finished.output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&finished.output.stdout).trim(),
+        "probe-answer",
+    );
 }

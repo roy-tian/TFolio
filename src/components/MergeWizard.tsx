@@ -53,6 +53,7 @@ import {
   type MergeFile,
   type MergeWizardStep,
 } from "@/lib/mergeWizard"
+import { isWindows } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 
 const stepTitleKey = {
@@ -154,7 +155,9 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
         {usable
           ? t("mergeWizard.pageCount", { count: file.pageCount })
           : file.error === "converterMissing"
-            ? t("mergeWizard.errorConverterMissing")
+            ? t("mergeWizard.errorConverterMissing", {
+              context: isWindows() ? "windows" : undefined,
+            })
             : file.error === "conversionFailed"
               ? t("mergeWizard.errorConversionFailed")
               : t("mergeWizard.unreadable")}

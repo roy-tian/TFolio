@@ -38,6 +38,7 @@ import {
   subscribeSettings,
   wordConversionEnabled,
 } from "@/lib/settings"
+import { isWindows } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 import {
   setThemePreference,
@@ -370,7 +371,9 @@ export function SettingsDialog({
                     {t("settings.wordConversion")}
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    {t("settings.wordConversionHint")}
+                    {t("settings.wordConversionHint", {
+                      context: isWindows() ? "windows" : undefined,
+                    })}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">

@@ -2,7 +2,6 @@
 //! soffice processes sharing the default profile would block each other.
 
 use std::{
-    env,
     ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
@@ -115,14 +114,8 @@ pub(crate) fn libreoffice_args(profile: &Path, out_dir: &Path, input: &Path) -> 
 /// A `file:` URL for `-env:`, which takes a URL, not a path: everything
 /// outside the grammar's unreserved set is percent-encoded.
 pub(crate) fn file_url(path: &Path) -> String {
-    let text = path.to_string_lossy().replace('\\', "/");
+    let text = path.to_string_lossy();
     let mut url = String::from("file://");
-
-    // A drive-prefixed Windows path is absolute without starting in '/', and
-    // the URL grammar wants three slashes before it.
-    if !text.starts_with('/') {
-        url.push('/');
-    }
 
     for byte in text.bytes() {
         match byte {
@@ -150,21 +143,10 @@ fn detail(output: &std::process::Output) -> String {
 
 /// Passive: files are looked for, nothing is run. The PATH scan is last
 /// because PATH may hold a wrapper rather than the real binary.
+#[cfg(not(windows))]
 #[cfg_attr(feature = "e2e", allow(dead_code))]
 pub(crate) fn find_soffice() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-
-    #[cfg(windows)]
-    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
-        if let Some(root) = env::var_os(variable) {
-            candidates.push(
-                PathBuf::from(root)
-                    .join("LibreOffice")
-                    .join("program")
-                    .join("soffice.exe"),
-            );
-        }
-    }
 
     #[cfg(target_os = "macos")]
     {
@@ -172,7 +154,7 @@ pub(crate) fn find_soffice() -> Option<PathBuf> {
             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         ));
 
-        if let Some(home) = env::var_os("HOME") {
+        if let Some(home) = std::env::var_os("HOME") {
             candidates.push(
                 PathBuf::from(home)
                     .join("Applications")
@@ -193,25 +175,23 @@ pub(crate) fn find_soffice() -> Option<PathBuf> {
         candidates.push(PathBuf::from(fixed));
     }
 
-    candidates.extend(path_lookup(if cfg!(windows) {
-        "soffice.exe"
-    } else {
-        "soffice"
-    }));
+    candidates.extend(path_lookup("soffice"));
 
     candidates
         .into_iter()
         .find(|candidate| is_executable(candidate))
 }
 
+#[cfg(not(windows))]
 fn path_lookup(name: &str) -> Vec<PathBuf> {
-    let path = env::var_os("PATH").unwrap_or_default();
+    let path = std::env::var_os("PATH").unwrap_or_default();
 
-    env::split_paths(&path)
+    std::env::split_paths(&path)
         .map(|directory| directory.join(name))
         .collect()
 }
 
+#[cfg(not(windows))]
 fn is_executable(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
@@ -221,15 +201,7 @@ fn is_executable(path: &Path) -> bool {
         return false;
     }
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::PermissionsExt;
 
-        metadata.permissions().mode() & 0o111 != 0
-    }
-
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    metadata.permissions().mode() & 0o111 != 0
 }
