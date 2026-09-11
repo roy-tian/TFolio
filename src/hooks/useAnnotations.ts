@@ -37,6 +37,7 @@ import {
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
+import { e2eOverride } from "@/lib/e2e"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
   PdfExportOutcome,
@@ -1302,11 +1303,11 @@ export function useAnnotations({
           pages: [],
           textPages: [],
           work: async () => {
-            const outcome = await invoke<PdfExportOutcome | null>("export_pdf", {
-              documentId,
-              filterLabel,
-              suggestedName,
-            })
+            const args = { documentId, filterLabel, suggestedName }
+            const override = e2eOverride("exportPdf")
+            const outcome = override
+              ? await override(args)
+              : await invoke<PdfExportOutcome | null>("export_pdf", args)
 
             if (!outcome) {
               // The reader cancelled the dialog; nothing happened.

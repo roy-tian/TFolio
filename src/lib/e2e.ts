@@ -8,10 +8,16 @@
  * `e2e` build: everywhere else the mode check is a compile-time constant and
  * the branch — hook and all — is dropped from the bundle.
  */
-import type { PdfDocumentInfo } from "@/lib/pdf"
+import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
 export type E2eOverrides = {
+  /** Stands in for the native save dialog and export command. */
+  exportPdf?: (args: {
+    documentId: number
+    filterLabel: string
+    suggestedName: string
+  }) => Promise<PdfExportOutcome | null>
   /** Stands in for the native open-file dialog: a path, or null for cancel. */
   pickPdfPath?: () => Promise<string | null>
   /** Stands in for `open_pdf_from_path`, so a spec can hand the backend bytes

@@ -78,8 +78,13 @@ type OpenTab = {
   dirty: boolean
   document: PdfDocumentInfo
   id: number
+  /** An app-created document whose bytes have never reached a file. */
+  initialSaveRequired?: boolean
   name: string
   path: string
+  /** A document-specific name for Save As; ordinary PDFs use the annotation
+      export name. */
+  saveAsDefaultName?: string
   /** What the session says: a file behind it, changes to write, and no
       session-owned page content that makes it export-only. */
   savable: boolean
@@ -408,9 +413,10 @@ export default function App() {
         }
       }
       const tab: OpenTab = {
-        dirty: false,
+        dirty: true,
         document,
         id: document.id,
+        initialSaveRequired: true,
         name: t("mergeWizard.mergedName"),
         opensWith: {
           onLayerProgress: hasInitialLayers ? onLayerProgress : undefined,
@@ -420,6 +426,7 @@ export default function App() {
           watermark,
         },
         path: "",
+        saveAsDefaultName: t("mergeWizard.mergedName"),
         savable: false,
       }
 
@@ -1193,6 +1200,7 @@ export default function App() {
           active={tab.id === activeId}
           document={tab.document}
           fileName={tab.name}
+          initialSaveRequired={tab.initialSaveRequired}
           initialPageNumbers={tab.opensWith?.pageNumbers}
           initialRecentView={tab.recentView}
           initialViewMode={tab.opensWith?.viewMode}
@@ -1214,6 +1222,7 @@ export default function App() {
             }
           }}
           recentPath={tab.recentPath}
+          saveAsDefaultName={tab.saveAsDefaultName}
         />
       ))}
 

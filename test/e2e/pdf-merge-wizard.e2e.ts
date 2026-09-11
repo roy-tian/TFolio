@@ -1,8 +1,10 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
+import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   bandedPdf,
+  clickAppMenuItem,
   dropZoneButton,
   minimalPdf,
   pointMultiPickerAt,
@@ -221,6 +223,53 @@ describe("merge wizard", () => {
     // The reader's stored view is single; a merge opens on the grid regardless,
     // which is where the whole result can be looked over at once.
     await expect($("[data-slot='merge-wizard-button']")).toBeDisplayed()
+
+    const mergedTab = $("button[role='tab'][aria-selected='true']")
+    await expect(mergedTab).toHaveText(expect.stringContaining("Merged.pdf"))
+    await expect(
+      mergedTab.$("[aria-label='Unsaved changes']"),
+    ).toBeDisplayed()
+
+    // The result exists only in memory until Save As gives it a path, so
+    // closing it must take the same unsaved-work route as an edited document.
+    await $("button[aria-label='Close Merged.pdf']").click()
+    await expect($("[role='alertdialog']")).toBeDisplayed()
+    await $("button=Keep editing").click()
+
+    // WebDriver cannot answer the native dialog; the e2e-only seam records the
+    // suggestion and stands in for a successful first save.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __mergeExportName?: string
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: (args) => {
+          page.__mergeExportName = args.suggestedName
+          return Promise.resolve({
+            path: "/tmp/Merged.pdf",
+            savedToSource: true,
+          })
+        },
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () =>
+            (window as Window & { __mergeExportName?: string })
+              .__mergeExportName === "Merged.pdf",
+        ),
+      { timeoutMsg: "Save As did not receive the merged document name" },
+    )
+    await browser.waitUntil(
+      async () =>
+        !(await mergedTab.$("[aria-label='Unsaved changes']").isExisting()),
+      { timeoutMsg: "the first save never marked the merged document saved" },
+    )
   })
 
   it("shows determinate progress while the final merge is pending", async () => {

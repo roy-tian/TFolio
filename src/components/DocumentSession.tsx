@@ -203,6 +203,9 @@ type DocumentSessionProps = {
   active: boolean
   document: PdfDocumentInfo
   fileName: string
+  /** Whether this app-created document has yet to be written to its first
+      file. It remains unsaved even before the reader makes another edit. */
+  initialSaveRequired?: boolean
   /** Page numbers to lay on as the session opens — what the merge wizard asked
       for. Applied through the ordinary command, so they are one undo away and
       the dialog finds them where it expects. */
@@ -237,6 +240,8 @@ type DocumentSessionProps = {
   pageHandoff: PageHandoffTarget
   /** Present only when Rust recorded this opened path as recent. */
   recentPath?: string
+  /** Overrides the ordinary annotation-copy name in the Save As dialog. */
+  saveAsDefaultName?: string
 }
 
 function closePdf(documentId: number) {
@@ -251,6 +256,7 @@ function DocumentSession(
     fileName,
     initialPageNumbers,
     initialRecentView,
+    initialSaveRequired = false,
     initialViewMode,
     initialWatermark,
     menu,
@@ -262,12 +268,15 @@ function DocumentSession(
     onSourceChange,
     pageHandoff,
     recentPath,
+    saveAsDefaultName,
   },
   ref,
 ) {
   const { t } = useTranslation()
   const macOS = isMacOS()
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo>(openedDocument)
+  const [saveRequired, setSaveRequired] = useState(initialSaveRequired)
+  const saveRequiredRef = useRef(initialSaveRequired)
   // Thumbnail canvases follow their pages through a reorder, including undo.
   // Other structure edits keep the existing position-based invalidation.
   const [thumbnailIdentity, setThumbnailIdentity] = useState(() => ({
@@ -540,6 +549,8 @@ function DocumentSession(
         }
 
         const next = { ...current, path: outcome.path }
+        saveRequiredRef.current = false
+        setSaveRequired(false)
         documentRef.current = next
         setPdfDocument(next)
         onSourceChange(documentId, outcome.path)
@@ -712,6 +723,7 @@ function DocumentSession(
   const draftDirty = isNoteWorthKeeping(textNote.draft?.text ?? "")
   const hasUnsavedWorkNow = useCallback(
     () =>
+      saveRequiredRef.current ||
       annotations.isDirtyNow() ||
       annotations.hasPendingWorkNow() ||
       isNoteWorthKeeping(textNote.draft?.text ?? ""),
@@ -719,8 +731,17 @@ function DocumentSession(
   )
 
   useEffect(() => {
-    onDirtyChange(openedDocument.id, annotations.isDirty || draftDirty)
-  }, [annotations.isDirty, draftDirty, onDirtyChange, openedDocument.id])
+    onDirtyChange(
+      openedDocument.id,
+      saveRequired || annotations.isDirty || draftDirty,
+    )
+  }, [
+    annotations.isDirty,
+    draftDirty,
+    onDirtyChange,
+    openedDocument.id,
+    saveRequired,
+  ])
 
   const focusSearchInput = useCallback(() => {
     requestAnimationFrame(() => {
@@ -889,10 +910,10 @@ function DocumentSession(
     }
 
     await annotations.exportCopy(
-      t("annotate.exportDefaultName"),
+      saveAsDefaultName ?? t("annotate.exportDefaultName"),
       t("annotate.exportFilter"),
     )
-  }, [annotations, pdfDocument, t])
+  }, [annotations, pdfDocument, saveAsDefaultName, t])
 
   useEffect(() => {
     mountedRef.current = true
