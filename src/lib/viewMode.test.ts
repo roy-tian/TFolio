@@ -37,7 +37,6 @@ describe("pairPages", () => {
     ])
   })
 
-  // The lone page keeps the left slot so it renders at spread size, not double.
   test("leaves a trailing odd page alone in its row", () => {
     expect(pairPages(5)).toEqual([[1, 2], [3, 4], [5]])
   })

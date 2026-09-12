@@ -10,7 +10,6 @@ import {
   type CellBox,
 } from "@/lib/pageDrag"
 
-/** A grid of uniform cells, as the thumbnail layout arranges them. */
 function grid(count: number, columns: number): CellBox[] {
   const width = 160
   const height = 220
@@ -35,18 +34,13 @@ describe("dropGapForPoint", () => {
   const cells = grid(6, 3)
 
   it("finds the gap left of a cell from the pointer's half", () => {
-    // Left half of the first cell: before page 1.
     expect(dropGapForPoint({ x: 40, y: 100 }, cells, 3)).toBe(0)
-    // Right half of the first cell: between pages 1 and 2.
     expect(dropGapForPoint({ x: 120, y: 100 }, cells, 3)).toBe(1)
-    // Past the last cell of the row: after page 3.
     expect(dropGapForPoint({ x: 520, y: 100 }, cells, 3)).toBe(3)
   })
 
   it("lands in the row the pointer is in", () => {
-    // Second row, left half of its first cell: before page 4.
     expect(dropGapForPoint({ x: 40, y: 340 }, cells, 3)).toBe(3)
-    // Second row, right edge: after page 6.
     expect(dropGapForPoint({ x: 520, y: 340 }, cells, 3)).toBe(6)
   })
 
@@ -62,9 +56,7 @@ describe("dropGapForPoint", () => {
 
 describe("orderAfterMove", () => {
   it("moves one page forward and back", () => {
-    // Page 4 dropped before page 2.
     expect(orderAfterMove([4], 1, 5)).toEqual([1, 4, 2, 3, 5])
-    // Page 1 dropped after page 3.
     expect(orderAfterMove([1], 3, 5)).toEqual([2, 3, 1, 4, 5])
   })
 
@@ -74,7 +66,6 @@ describe("orderAfterMove", () => {
   })
 
   it("drops into a gap inside the dragged block as the identity", () => {
-    // Dropping pages 2-3 between themselves changes nothing.
     expect(orderAfterMove([2, 3], 2, 5)).toEqual([1, 2, 3, 4, 5])
     expect(orderAfterMove([2], 1, 5)).toEqual([1, 2, 3, 4, 5])
     expect(orderAfterMove([2], 2, 5)).toEqual([1, 2, 3, 4, 5])
@@ -123,10 +114,8 @@ describe("slotOffsets", () => {
   const cells = grid(6, 3)
 
   it("slides the pages a lifted one moves past, and leaves the rest", () => {
-    // Page 1 dropped before page 4: [2, 3, 1, 4, 5, 6].
     const offsets = slotOffsets(orderAfterMove([1], 3, 6), cells, new Set([1]))
 
-    // Pages 2 and 3 close up over the hole; the rest never move.
     expect(offsets.get(2)).toEqual({ x: -176, y: 0 })
     expect(offsets.get(3)).toEqual({ x: -176, y: 0 })
     expect(offsets.has(1)).toBe(false)
@@ -135,10 +124,8 @@ describe("slotOffsets", () => {
   })
 
   it("carries a page over the row break it is pushed across", () => {
-    // Page 6 dropped before page 1: [6, 1, 2, 3, 4, 5].
     const offsets = slotOffsets(orderAfterMove([6], 0, 6), cells, new Set([6]))
 
-    // Page 3 drops to the second row; everything after it just steps right.
     expect(offsets.get(3)).toEqual({ x: -352, y: 236 })
     expect(offsets.get(4)).toEqual({ x: 176, y: 0 })
   })
@@ -150,7 +137,6 @@ describe("slotOffsets", () => {
   })
 
   it("keeps a block together and skips the pages carrying it", () => {
-    // Pages 1 and 2 dropped past the end: [3, 4, 5, 6, 1, 2].
     const offsets = slotOffsets(
       orderAfterMove([1, 2], 6, 6),
       cells,

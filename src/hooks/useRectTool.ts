@@ -28,7 +28,6 @@ type UseRectToolOptions = {
   viewerRef: RefObject<HTMLElement | null>
 }
 
-/** A live or released preview, in fractions of one page's on-screen box. */
 export type RectDraft = {
   id: number
   pageNumber: number
@@ -39,12 +38,8 @@ export type RectDraft = {
 }
 
 /**
- * A rectangle is dragged out corner to corner, previewed live, and only written
- * to the backend once the drag is over. Unlike a highlight there is no native
- * selection to lean on, so this keeps its own draft — but nothing crosses the
- * IPC boundary until `pointerup`, so a drag is never a burst of render calls.
- * Released drafts keep their identity until a bitmap containing their commit
- * is painted; another gesture or tool change only clears the live draft.
+ * No native selection to lean on, so this keeps its own draft, but nothing
+ * crosses IPC until `pointerup`; released drafts live until repainted.
  */
 export function useRectTool({
   active,
@@ -64,15 +59,8 @@ export function useRectTool({
       return
     }
 
-    // Which page the drag started on. A rectangle belongs to one page: the drag
-    // locks to whichever the pointer went down on, and running off it clamps
-    // rather than switches page. The pointer id ties the move and release back
-    // to this same press.
-    //
-    // The element, not the box it had at `pointerdown`: the viewer still scrolls
-    // and zooms mid-drag, which moves the page under a pointer that has not
-    // itself moved. Measured against a stale box the rectangle would land as far
-    // from the pointer as the page had travelled.
+    // The drag locks to the page it began on — off it clamps, not switches.
+    // The element, not a `pointerdown` box: the page moves under it mid-drag.
     let gesture: {
       id: number
       element: Element
@@ -83,14 +71,11 @@ export function useRectTool({
     } | null = null
 
     const handlePointerDown = (event: PointerEvent) => {
-      // Every press clears a drag the last one left unfinished, whatever it
-      // lands on — otherwise a release lost off-window would leave a live
-      // gesture, and the next click anywhere would commit it as a rectangle.
+      // Every press clears an unfinished drag: a release lost off-window must
+      // not leave a live gesture the next click commits as a rectangle.
       gesture = null
       setDraft(null)
 
-      // Only the primary button of the primary pointer draws: a right- or
-      // middle-click, or a second finger, clears a stale drag but starts none.
       if (event.button !== 0 || !event.isPrimary) {
         return
       }
@@ -104,8 +89,6 @@ export function useRectTool({
 
       const pageElement = target.closest("[data-page-number]")
 
-      // Started off any page — a toolbar click, the margin — so it is not a
-      // draw. Without this, pressing a button would leave a rectangle.
       if (!pageElement) {
         return
       }

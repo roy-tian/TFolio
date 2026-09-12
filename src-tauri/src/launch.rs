@@ -1,16 +1,5 @@
-//! The PDFs the OS itself asks this app to open.
-//!
-//! Double-clicking a document, or picking this app from the file manager's
-//! "open with", names the file to the handler and nothing else: on Windows and
-//! Linux as arguments to a fresh process, on macOS as an event to the running
-//! one. Either way the path arrives before there is a workspace to put it in,
-//! so it is parked here until the frontend asks — and a path that arrives once
-//! the workspace is already up is announced, so the same asking runs again.
-//!
-//! A path that gets here is approved for `open_pdf_from_path` exactly as a drop
-//! or a dialog pick is, and for the same reason: the OS produced it in this
-//! process's sight, out of the reader's own gesture on a file they had already
-//! chosen, and no page code had a say in it.
+//! The OS names a PDF before there is a workspace to put it in, so it waits here
+//! until asked — approved like a dialog pick, since the OS named it, not page code.
 
 use std::{
     collections::HashMap,
@@ -22,9 +11,8 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 use crate::{pdfium::PdfiumState, windows::focus_target};
 
-/// Says a PDF the OS named is waiting. Carries nothing: the queue below is
-/// drained by a command, so the paths cross the boundary once, by one route.
-/// Spelled again in `App.tsx`, which listens for it.
+/// Carries nothing: the paths cross the boundary once, by the command that
+/// drains the queue. Spelled again in `App.tsx`, which listens for it.
 pub const OPEN_REQUESTED_EVENT: &str = "launch://open-requested";
 
 /// `%F` may supply several files; `None` holds launches before any window exists.
@@ -76,15 +64,8 @@ pub fn queue_open(app: &AppHandle, paths: Vec<PathBuf>) -> Option<WebviewWindow>
     target
 }
 
-/// The PDFs named among one launch's arguments — the program's own name
-/// already dropped — resolved against the directory it was launched from and
-/// kept in the order the OS gave them.
-///
-/// Everything else is left alone rather than refused: a launch carries
-/// switches this app never reads, and an argument that names no readable PDF
-/// is not something a reader asked to see. The test for one is the shape the
-/// recent list and `open_pdf_from_path` already require of a path — absolute,
-/// named as a PDF, and a file that is there.
+/// Non-PDF arguments are left alone rather than refused — a launch carries
+/// switches this app never reads — and the path test is the recent list's own.
 pub fn pdf_paths_from_args<I: IntoIterator<Item = String>>(args: I, cwd: &Path) -> Vec<PathBuf> {
     args.into_iter()
         .filter(|argument| !argument.starts_with('-'))
@@ -96,22 +77,16 @@ pub fn pdf_paths_from_args<I: IntoIterator<Item = String>>(args: I, cwd: &Path) 
                 cwd.join(path)
             };
 
-            // Collected through its components, which drops the `.` segments a
-            // shell leaves in a name. The frontend matches an open document by
-            // its path verbatim, so `/docs/./a.pdf` would otherwise put a
-            // second tab on a file the reader already has open — two edit
-            // histories over one file, and whichever saves last wins.
+            // Components drop the `.` a shell leaves in a name: the frontend matches
+            // paths verbatim, so a `.` would open a second edit history on one file.
             path.components().collect::<PathBuf>()
         })
         .filter(|path| is_pdf_file(path))
         .collect()
 }
 
-/// This process's own arguments, as PDF paths.
-///
-/// Arguments are read as `OsString` and the ones that are not UTF-8 dropped:
-/// `std::env::args` would panic on one, and a path that cannot be a `String`
-/// could not survive the trip to the frontend and back anyway.
+/// `args_os`, not `args`: `std::env::args` panics on non-UTF-8, which could not
+/// survive the trip to the frontend anyway.
 pub fn pdf_paths_from_this_launch() -> Vec<PathBuf> {
     let arguments = std::env::args_os()
         .skip(1)
@@ -130,12 +105,8 @@ pub fn pdf_paths_from_urls(urls: &[tauri::Url]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The recent list's own test for a path, plus the file being there.
-///
-/// Absolute is half of that test and load-bearing here: a second instance whose
-/// working directory it could not read hands over an empty one, and a name left
-/// relative would then be resolved — and approved — against the directory the
-/// *running* process happens to sit in.
+/// The recent list's test, plus the file being there. Absolute is load-bearing:
+/// a relative name would resolve against the running process's own directory.
 fn is_pdf_file(path: &Path) -> bool {
     crate::recent::is_recordable(path) && path.is_file()
 }
@@ -228,9 +199,8 @@ mod tests {
 
     #[test]
     fn refuses_a_name_no_launch_directory_can_make_absolute() {
-        // What a second instance that could not read its own working directory
-        // hands over. Resolving the name against this process's directory
-        // instead would open — and approve — a different file of that name.
+        // A second instance that could not read its working directory hands this
+        // over; resolving it here would open — and approve — a different file.
         assert!(pdf_paths_from_args(["some.pdf".to_string()], Path::new("")).is_empty());
     }
 

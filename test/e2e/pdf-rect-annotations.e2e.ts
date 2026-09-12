@@ -12,10 +12,8 @@ import {
   stripedPdf,
 } from "./helpers"
 
-// Drags a rectangle across the middle of page 1 the way a reader would: press on
-// the page, move to the far corner, release. The press has to land on the page —
-// letting go is only a commit when the gesture began there — so this proves what
-// a reader can actually reproduce, not a bare call into the commit path.
+// A reader's drag — press on the page, move, release: letting go only commits
+// when the gesture began there, so the press must land on the page itself.
 async function dragRectOnPage() {
   await browser.execute(() => {
     const page = document.querySelector("[data-page-number='1']")!
@@ -47,8 +45,8 @@ async function dragRectOnPage() {
 }
 
 /**
- * The share of page 1 the default red wash has tinted. The fixture is black bars
- * on white, so a red-dominant pixel can only have come from the mark.
+ * The share of page 1 the default red wash has tinted: the fixture is black
+ * bars on white, so a red-dominant pixel can only have come from the mark.
  */
 async function washedShare() {
   return browser.execute(() => {
@@ -315,9 +313,8 @@ describe("TFolio rectangle annotations", () => {
       timeout: 15_000,
       timeoutMsg: "the rectangle never reached the page",
     })
-    // Drawn, not merely stored: PDFium will accept and keep a mark it then
-    // declines to paint. The drag covers the middle two fifths of each side, so
-    // the default half-opaque red block has to tint about a sixth of the page.
+    // Drawn, not merely stored — PDFium keeps marks it declines to paint. The
+    // drag covers the middle two fifths of each side, so about a sixth tints.
     expect(await washedShare()).toBeGreaterThan(0.1)
 
     const drawn = await pagePixelFingerprint()
@@ -347,9 +344,8 @@ describe("TFolio rectangle annotations", () => {
     const disclosure = await $("[data-slot='rect-effect-disclosure']")
     const about = await $("button[aria-label='About this effect']")
 
-    // Translucent: the colour is the mark, so the swatches are on the panel and
-    // the one slider is its opacity. The swatches are the whole offer — no well
-    // for a colour off the row.
+    // Translucent: the colour is the mark, so the swatches are the whole offer —
+    // the one slider is its opacity, and no well for a colour off the row.
     await expect(amount).toHaveText(/Opacity/)
     await expect(white).toExist()
     await expect($("[data-slot='rect-colors'] input[type='color']")).not.toExist()
@@ -568,9 +564,7 @@ describe("TFolio rectangle annotations", () => {
       const page = document.querySelector("[data-page-number='1']")!
       const box = page.getBoundingClientRect()
 
-      // Every workspace panel carries a `<main>`, the home tab's included, and
-      // all but the showing one are `hidden`. The wheel has to reach this
-      // document's viewer, which is the active panel's.
+      // Hidden panels also carry a `<main>`; the wheel must reach the active one's.
       const viewer = document.querySelector<HTMLElement>(
         "[data-document-session][data-active='true'] main",
       )!
@@ -603,9 +597,8 @@ describe("TFolio rectangle annotations", () => {
     })
   })
 
-  // A gesture that began off any page is not a draw. Pressing a toolbar button
-  // and then moving over the page must not leave a rectangle behind — otherwise
-  // turning the tool on and clicking around would litter the document.
+  // A gesture begun off any page is not a draw, or turning the tool on and
+  // clicking around would litter the document with rectangles.
   it("does not draw when the gesture began off the page", async () => {
     const clean = await pageInk()
 
@@ -641,9 +634,8 @@ describe("TFolio rectangle annotations", () => {
     expect(await pageInk()).toBe(clean)
   })
 
-  // Only the primary button of the primary pointer draws. A secondary button
-  // (a right-click) and a secondary pointer (a second finger) are each refused,
-  // so both guards are covered — removing either would turn one of these red.
+  // Both refusal guards are covered — a secondary button and a secondary
+  // pointer — so removing either turns one of these red.
   for (const secondary of [
     { button: 2, isPrimary: true, name: "a non-primary button" },
     { button: 0, isPrimary: false, name: "a non-primary pointer" },

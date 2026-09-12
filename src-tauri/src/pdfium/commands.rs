@@ -9,10 +9,8 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
-use crate::convert::WORD_EXTENSIONS;
+use crate::convert::{self, WORD_EXTENSIONS};
 use crate::recent::RecentFiles;
-use crate::settings::{word_conversion_enabled, Settings};
-use crate::store::Store;
 use crate::windows::{record_document, DocumentOwners};
 
 use super::engine::{OperationTarget, MERGE_IMAGE_EXTENSIONS};
@@ -29,12 +27,8 @@ use super::{
 #[cfg(not(feature = "e2e"))]
 use super::engine::PdfiumEngine;
 
-/// The one approval check every path-taking command makes, in the one wording.
 /// A path is a string any page code can make up, so only paths the OS produced
-/// in this process's sight — a drop the window handler saw, a pick a dialog
-/// returned, or one an earlier run recorded as recent — are ever acted on. The
-/// e2e harness works on scratch files no dialog ever blessed, so its build
-/// waives the check.
+/// in this process's sight are acted on; the e2e build waives the check.
 #[cfg(not(feature = "e2e"))]
 fn ensure_approved(engine: &PdfiumEngine, path: &Path) -> Result<(), String> {
     if engine.is_approved(path) {
@@ -47,9 +41,8 @@ fn ensure_approved(engine: &PdfiumEngine, path: &Path) -> Result<(), String> {
     }
 }
 
-/// Turns fine-grained engine work into at most one channel message per whole
-/// percentage. A PDF with tens of thousands of pages must not spend more time
-/// repainting its progress bar than processing its pages.
+/// At most one channel message per whole percentage, or repainting the progress
+/// bar outpaces processing the pages.
 fn channel_progress(on_progress: Channel<PdfProgress>) -> impl FnMut(usize, usize) {
     let mut last_percentage = None;
 
@@ -159,9 +152,8 @@ pub async fn extract_pdf_page_text(
         .map_err(|error| format!("PDFium text extraction task failed: {error}"))?
 }
 
-/// The whole of one page's text, for a select-all the viewer cannot answer
-/// from the DOM: only the pages near the reader hold a text layer, and a copy
-/// has to carry the pages between them too.
+/// For a select-all the DOM cannot answer: only the pages near the reader hold
+/// a text layer, and a copy must carry the pages between them.
 #[tauri::command]
 pub async fn extract_pdf_page_plain_text(
     document_id: u64,
@@ -190,9 +182,7 @@ pub async fn search_pdf_text(
         .map_err(|error| format!("PDFium search task failed: {error}"))?
 }
 
-/// Stops a read-only document search when its field closes or its term changes.
-/// Like the owned-content cancel command, this must not wait behind the PDFium
-/// lock held by the work it is trying to stop.
+/// Must not wait behind the PDFium lock held by the search it is stopping.
 #[tauri::command]
 pub async fn cancel_pdf_search(
     document_id: u64,
@@ -273,14 +263,8 @@ pub async fn add_pdf_text_note_annotation(
     .map_err(|error| format!("PDFium note task failed: {error}"))?
 }
 
-/// Fetches the fallback face, so text no installed font can draw has something
-/// to be embedded in. Answered by the frontend's offer to download, which is
-/// itself raised only by `FONT_MISSING_ERROR` coming back from an edit.
-///
-/// Takes nothing the WebView could shape. The host, the pinned commit, the
-/// digest and the destination are all fixed in `font.rs`, so however this is
-/// called it can only ever fetch that one file to that one place — a command
-/// that took a URL would be an open request forwarder wearing this one's name.
+/// Takes nothing the WebView could shape: host, commit, digest and destination
+/// are fixed in `font.rs`, so a URL argument would be an open request forwarder.
 #[tauri::command]
 pub async fn download_pdf_note_font(app: AppHandle) -> Result<(), String> {
     let destination = fallback_font_destination(&app)
@@ -289,9 +273,8 @@ pub async fn download_pdf_note_font(app: AppHandle) -> Result<(), String> {
     download_fallback_font(&destination).await
 }
 
-/// Lays a watermark over every page, and answers whether it landed: `false` is
-/// the reader stopping it partway through a long document, which leaves the
-/// document exactly as it was rather than half-marked.
+/// `false` is the reader stopping it partway: the document is left exactly as
+/// it was, not half-marked.
 #[tauri::command]
 pub async fn apply_pdf_watermark(
     document_id: u64,
@@ -323,8 +306,7 @@ pub async fn remove_pdf_watermark(
     .map_err(|error| format!("PDFium watermark removal task failed: {error}"))?
 }
 
-/// Numbers the pages, and answers whether it landed — `false` for a run the
-/// reader stopped, exactly as `apply_pdf_watermark` reports one.
+/// `false` is a run the reader stopped, as `apply_pdf_watermark` reports.
 #[tauri::command]
 pub async fn apply_pdf_page_numbers(
     document_id: u64,
@@ -356,18 +338,8 @@ pub async fn remove_pdf_page_numbers(
     .map_err(|error| format!("PDFium page-number removal task failed: {error}"))?
 }
 
-/// Stops the watermark or page-number work now running on `document_id`, which
-/// then rolls the document back to the bytes it started from. Answers whether
-/// anything was running to stop.
-///
-/// Deliberately not `spawn_blocking`: every other command parks a blocking
-/// thread on the PDFium lock, and the operation this one has to reach is the
-/// very thing holding it — a cancel queued behind that would arrive only once
-/// there was nothing left to cancel. It takes the operations lock alone, which
-/// is never held for more than a few instructions.
-///
-/// A document id is all it takes, which is all any command here takes: the
-/// worst a page can do with it is stop work that same page asked for.
+/// Deliberately not `spawn_blocking`: the operation this one must reach holds
+/// the PDFium lock, so a queued cancel would arrive with nothing left to cancel.
 #[tauri::command]
 pub async fn cancel_pdf_operation(
     document_id: u64,
@@ -378,26 +350,21 @@ pub async fn cancel_pdf_operation(
         .cancel_operation(OperationTarget::Document(document_id)))
 }
 
-/// Stops the merge now running, which then produces nothing at all. Takes no
-/// argument because a merge has no document to name until it has finished
-/// building one — and is not `spawn_blocking` for the reason above.
+/// Takes no argument: a merge has no document to name until it finishes. Not
+/// `spawn_blocking`, for the reason above.
 #[tauri::command]
 pub async fn cancel_pdf_merge(state: State<'_, PdfiumState>) -> Result<bool, String> {
     Ok(state.0.cancel_operation(OperationTarget::Merge))
 }
 
-/// Stops the Word→PDF conversions behind a wizard inspection. Those are the
-/// one slow thing an inspection can be doing, and they run outside every
-/// PDFium lock — so, like the other cancels, this names no document and
-/// waits for nothing.
+/// The conversions run outside every PDFium lock, so this waits for nothing.
 #[tauri::command]
 pub async fn cancel_word_conversion(state: State<'_, PdfiumState>) -> Result<bool, String> {
     Ok(state.0.cancel_operation(OperationTarget::Convert))
 }
 
-/// Removes marks this session made, by the ids their adds handed back — what an
-/// undo and the eraser both go through. Reports the page each was on, so the
-/// frontend can redraw exactly those.
+/// Removes only marks this session made, by the ids their adds handed back;
+/// reports the page each was on for redrawing.
 #[tauri::command]
 pub async fn delete_pdf_annotations(
     document_id: u64,
@@ -411,8 +378,7 @@ pub async fn delete_pdf_annotations(
         .map_err(|error| format!("PDFium annotation removal task failed: {error}"))?
 }
 
-/// The mark under a point on a page, for the eraser to aim at — `None` where
-/// the reader pointed at nothing of this session's.
+/// `None` where the point hits nothing of this session's marks.
 #[tauri::command]
 pub async fn pdf_annotation_at_point(
     document_id: u64,
@@ -442,10 +408,7 @@ pub async fn reorder_pdf_pages(
         .map_err(|error| format!("PDFium reorder task failed: {error}"))?
 }
 
-/// Turns pages of one document clockwise by `degrees` — the thumbnail grid's
-/// rotate button, which unlike the reading views' turns the document rather
-/// than the view. One document, so the engine's own page and turn checks are
-/// what answer for the numbers the WebView named.
+/// Turns the document rather than the view, unlike the reading views' rotate.
 #[tauri::command]
 pub async fn rotate_pdf_pages(
     document_id: u64,
@@ -491,10 +454,6 @@ pub async fn restore_pdf_pages(
         .map_err(|error| format!("PDFium page restore task failed: {error}"))?
 }
 
-/// Copies pages of one document back into itself at 1-based `index` — the
-/// thumbnail grid's copy-and-paste. One document, so — like every other
-/// single-document structure command — the engine's own page and position
-/// checks are what answer for the numbers the WebView named.
 #[tauri::command]
 pub async fn duplicate_pdf_pages(
     document_id: u64,
@@ -602,8 +561,6 @@ pub async fn insert_pdf_from_path(
     tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(path);
 
-        // The same approval a fresh open needs, and for the same reason: an
-        // insert reads a file the WebView named.
         #[cfg(not(feature = "e2e"))]
         ensure_approved(&engine, &path)?;
 
@@ -613,10 +570,8 @@ pub async fn insert_pdf_from_path(
     .map_err(|error| format!("PDFium insert task failed: {error}"))?
 }
 
-/// Copies pages from one open document into another — the thumbnail drag that
-/// crosses tabs. Nothing is read from disk, so there is no path to approve; what
-/// is checked instead is that this window holds both documents, and the engine
-/// answers for the page numbers and the position it is handed.
+/// Nothing is read from disk, so there is no path to approve; what is checked
+/// instead is that this window holds both documents.
 #[tauri::command]
 pub async fn insert_pdf_pages_from_document(
     document_id: u64,
@@ -643,18 +598,14 @@ pub async fn insert_pdf_pages_from_document(
     .map_err(|error| format!("PDFium insert task failed: {error}"))?
 }
 
-/// Shows the native open dialog in multi-select mode, for the merge wizard's
-/// file list. Every chosen path is recorded as approved, exactly as the
-/// single-file pick does — see `pick_pdf_path`.
 #[tauri::command]
 pub async fn pick_pdf_paths(
     filter_label: String,
     app: AppHandle,
     state: State<'_, PdfiumState>,
-    settings: State<'_, Store<Settings>>,
 ) -> Result<Vec<String>, String> {
     let engine = Arc::clone(&state.0);
-    let word = word_conversion_enabled(&settings);
+    let word = convert::word_available();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
         // One filter covering everything a merge can take: a reader adding a
@@ -663,8 +614,8 @@ pub async fn pick_pdf_paths(
 
         extensions.extend_from_slice(&MERGE_IMAGE_EXTENSIONS);
 
-        // Word documents follow the reader's own setting: the dialog offering
-        // a file the backend would then refuse is a worse promise than none.
+        // Word documents follow what the machine itself offers: a dialog
+        // offering a file the backend would then refuse is a worse promise.
         if word {
             extensions.extend_from_slice(&WORD_EXTENSIONS);
         }
@@ -697,16 +648,13 @@ pub async fn pick_pdf_paths(
     .map_err(|error| format!("dialog task failed: {error}"))?
 }
 
-/// Reports what each candidate file of a merge holds, so the wizard's first
-/// step can show page counts and total the result up before anything is merged.
 #[tauri::command]
 pub async fn inspect_pdf_files(
     paths: Vec<String>,
     state: State<'_, PdfiumState>,
-    settings: State<'_, Store<Settings>>,
 ) -> Result<Vec<PdfFileSummary>, String> {
     let engine = Arc::clone(&state.0);
-    let word = word_conversion_enabled(&settings);
+    let word = convert::word_available();
 
     tauri::async_runtime::spawn_blocking(move || {
         let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
@@ -724,29 +672,22 @@ pub async fn inspect_pdf_files(
     .map_err(|error| format!("PDFium inspection task failed: {error}"))?
 }
 
-/// Merges the named files, in order, into one new document — the merge
-/// wizard's whole backend half. The result has no source path, so it can only
-/// ever be exported to a copy: nothing it merged can be written back over.
-///
-/// `None` is the reader stopping it partway: a merge builds its document off to
-/// the side, so a stopped one leaves nothing behind to close or clean up.
+/// The result has no source path, so it can only ever be exported to a copy.
+/// `None` is the reader stopping it: a stopped merge leaves nothing behind.
 #[tauri::command]
 pub async fn merge_pdf_files(
     plan: MergePlan,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-    settings: State<'_, Store<Settings>>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&state.0);
-    let word = word_conversion_enabled(&settings);
+    let word = convert::word_available();
 
     let merged = tauri::async_runtime::spawn_blocking(move || {
         let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
 
-        // The same approval a fresh open needs, for the same reason a merge into
-        // an open document needs it: a merge reads files the WebView named.
         #[cfg(not(feature = "e2e"))]
         for path in &paths {
             ensure_approved(&engine, path)?;
@@ -780,9 +721,8 @@ pub async fn save_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result
         .map_err(|error| format!("PDFium save task failed: {error}"))?
 }
 
-/// Only a file name may reach the dialog: the WebView chooses what the dialog
-/// *suggests*, and a suggestion carrying directories would start the reader in
-/// a place of the page's choosing.
+/// A suggestion carrying directories would start the reader in a place of the
+/// page's choosing.
 fn suggested_file_name(suggested: &str) -> String {
     Path::new(suggested)
         .file_name()
@@ -791,15 +731,8 @@ fn suggested_file_name(suggested: &str) -> String {
         .to_string()
 }
 
-/// Asks the reader where to export, then writes there. `None` means they
-/// cancelled.
-///
-/// The dialog is this command's own rather than the WebView's: a path argument
-/// here would be an arbitrary-file write for any code that got into the page,
-/// since Tauri's ACL does not cover this app's own commands. The WebView only
-/// gets to say *that* an export happens — and to suggest, via `suggested_name`
-/// and the localized `filter_label`, how the dialog reads — never where the
-/// bytes land.
+/// The dialog is this command's own: Tauri's ACL does not cover custom commands,
+/// so a path argument would be an arbitrary-file write for any page code.
 #[tauri::command]
 pub async fn export_pdf(
     document_id: u64,
@@ -811,9 +744,8 @@ pub async fn export_pdf(
 ) -> Result<Option<ExportOutcome>, String> {
     let engine = Arc::clone(&state.0);
 
-    // `blocking_save_file` parks this thread on the dialog until the reader
-    // answers, which would deadlock the main thread; in `spawn_blocking` it is
-    // fine, and the document lock is not taken until they have chosen.
+    // `blocking_save_file` would deadlock the main thread outside
+    // `spawn_blocking`; the document lock is not taken until the reader chooses.
     let exported = tauri::async_runtime::spawn_blocking(move || {
         let Some(picked) = app
             .dialog()
@@ -842,12 +774,8 @@ pub async fn export_pdf(
     Ok(exported)
 }
 
-/// Asks the reader where to put the archive, then writes it there. `None` is a
-/// dialog they dismissed or a run they stopped.
-///
-/// The dialog is this command's own, for the reason `export_pdf` states: a path
-/// argument here would be an arbitrary-file write for anything that got into the
-/// page. The WebView only says *that* an export happens.
+/// The dialog is this command's own, for the reason `export_pdf` states: a
+/// path argument would be an arbitrary-file write.
 async fn export_archive<F>(
     suggested_name: String,
     filter_label: String,
@@ -877,9 +805,8 @@ where
     .map_err(|error| format!("PDFium archive task failed: {error}"))?
 }
 
-/// Writes every page of a merged document into a zip as its own PNG — the merge
-/// wizard's second export. The document is the merge's own result, so this only
-/// ever reads something this app just made.
+/// The document is the merge's own result, so this only ever reads something
+/// this app just made.
 #[tauri::command]
 pub async fn export_pdf_page_images(
     document_id: u64,
@@ -897,9 +824,8 @@ pub async fn export_pdf_page_images(
     .await
 }
 
-/// Writes one watermarked copy of each named file into a zip — the merge
-/// wizard's third export, which merges nothing. Every source is approved the way
-/// a merge's are, since these are files the WebView named.
+/// Every source is approved the way a merge's are: these are files the WebView
+/// named.
 #[tauri::command]
 pub async fn export_watermarked_pdf_copies(
     plan: WatermarkCopiesPlan,
@@ -908,10 +834,9 @@ pub async fn export_watermarked_pdf_copies(
     on_progress: Channel<PdfProgress>,
     app: AppHandle,
     state: State<'_, PdfiumState>,
-    settings: State<'_, Store<Settings>>,
 ) -> Result<Option<String>, String> {
     let engine = Arc::clone(&state.0);
-    let word = word_conversion_enabled(&settings);
+    let word = convert::word_available();
 
     export_archive(suggested_name, filter_label, app, move |path| {
         let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
@@ -933,9 +858,8 @@ pub async fn export_watermarked_pdf_copies(
     .await
 }
 
-// Async like every other command, although the close itself is a map removal:
-// it takes the documents lock, and a sync command runs on the main thread —
-// which would freeze the UI for as long as a save in flight holds that lock.
+// Async although the close is a map removal: a sync command runs on the main
+// thread, which a save holding the documents lock would freeze.
 #[tauri::command]
 pub async fn close_pdf(
     document_id: u64,

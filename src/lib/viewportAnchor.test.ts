@@ -42,9 +42,8 @@ describe("anchorCorrection", () => {
     expect(anchorCorrection(anchor, box)).toEqual({ left: 0, top: 0 })
   })
 
-  // The bug this exists for: a viewport dragged narrower re-fits every page, so
-  // the stack above the reader shrinks and the document slides under an offset
-  // the browser keeps in pixels.
+  // The bug this exists for: a narrower viewport re-fits every page, and the
+  // document slides under an offset the browser keeps in pixels.
   test("takes up the slack of a document laid out at a new scale", () => {
     // Half of page 4 is above the reading line at clientY 0.
     const anchor = anchorOnPage(4, rect(-250), 300, 0)!

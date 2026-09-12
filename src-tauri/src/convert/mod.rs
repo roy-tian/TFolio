@@ -1,18 +1,5 @@
-//! Word documents brought into the merge wizard, converted to PDF by the
-//! office software this machine already has.
-//!
-//! No converter ships with the app and none is pure Rust: the engines here
-//! drive Microsoft Word and WPS through the automation interfaces they
-//! already expose (PowerShell on Windows, AppleScript on macOS) and
-//! LibreOffice through its command line, because those three are the only
-//! renderers a Word file's layout can be trusted to. Fidelity orders the
-//! chain — Word, then WPS, then LibreOffice — and a machine with none of
-//! them answers with an error that names what to install rather than a
-//! silent refusal.
-//!
-//! Everything here runs *outside* the PDFium lock: an office suite takes
-//! seconds to start, and the merge pipeline calls in before it takes that
-//! lock, exactly where image decoding already sits.
+//! Word-to-PDF conversion through the machine's own office software, in
+//! fidelity order — Word, WPS, LibreOffice; on Windows, Word and WPS alone.
 
 pub(crate) mod libreoffice;
 
@@ -26,7 +13,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant, SystemTime},
 };
@@ -36,30 +23,21 @@ use tauri::{AppHandle, Manager};
 
 use crate::pdfium::MAX_PDF_BYTES;
 
-/// The one Word format pair the wizard accepts. The engines all read both;
-/// anything older or richer (WordPerfect, .rtf, .odt) stays out until one of
-/// them earns its place here.
+/// Both engines read .doc and .docx; anything richer waits until one earns it.
 pub(crate) const WORD_EXTENSIONS: [&str; 2] = ["doc", "docx"];
 
-/// How long one file may take under one engine. Generous — a big document on
-/// a cold Word start takes tens of seconds — but finite, because a hung
-/// converter must give way to the next engine rather than park the wizard.
+/// Generous (a cold Word start takes tens of seconds) but finite: a hung
+/// converter must give way to the next engine.
 pub(crate) const CONVERT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// What starting an office suite may take before the first file is even
-/// looked at. Bounded for the same reason as the per-file share.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) const START_TIMEOUT: Duration = Duration::from_secs(45);
 
-/// Directories under the cache root from runs that never cleaned up after
-/// themselves are swept once they are a day old. Newer ones are left alone:
-/// on macOS a second instance may legitimately be mid-run.
+/// Newer run directories are left alone: on macOS a second instance may
+/// legitimately be mid-run.
 const STALE_RUN_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const RUN_DIR_PREFIX: &str = "word-import-";
 
-/// One convertible engine, in the order a file is offered to them. The
-/// quieter platforms and the e2e build construct fewer of these than exist:
-/// an engine is named where its software can actually be found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "e2e", allow(dead_code))]
 pub(crate) enum EngineKind {
@@ -67,7 +45,7 @@ pub(crate) enum EngineKind {
     Word,
     #[cfg_attr(not(windows), allow(dead_code))]
     Wps,
-    #[cfg_attr(feature = "e2e", allow(dead_code))]
+    #[cfg_attr(any(windows, feature = "e2e"), allow(dead_code))]
     LibreOffice,
 }
 
@@ -81,23 +59,17 @@ impl EngineKind {
     }
 }
 
-/// What resolving a batch did with one input path.
 #[derive(Clone, Debug)]
 pub(crate) enum Entry {
-    /// Not a Word document — the caller reads it as whatever else it is.
     NotWord,
-    /// Converted (or already cached); the path to read instead.
     Converted(PathBuf),
-    /// This file needed converting, and no engine could.
     Failed(ConvertError),
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum ConvertError {
-    /// Nothing installed here converts Word documents at all.
     NoConverter,
-    /// The engines that tried this file gave up on it; the string is theirs,
-    /// for a log or an error dialog rather than the row's own wording.
+    /// The refusing engines' own text, verbatim — for logs, not row wording.
     Failed(String),
 }
 
@@ -112,54 +84,37 @@ impl std::fmt::Display for ConvertError {
     }
 }
 
-/// A batch was asked to stop. The caller owns the stop flag and already
-/// knows what its own "stopped" answer looks like.
 #[derive(Debug)]
 pub(crate) struct Cancelled;
 
-/// One file's conversion, as an engine receives it: where the staged copy
-/// sits, and where the PDF belongs. The names are the chain's, derived from
-/// the source's identity, so no two jobs in a batch can collide.
 #[derive(Clone, Debug)]
 pub(crate) struct ConvertJob {
     pub(crate) staged: PathBuf,
     pub(crate) output: PathBuf,
 }
 
-/// One engine's whole answer to a batch of jobs.
 pub(crate) enum BatchOutcome {
-    /// One result per job, in order. `Ok` promises a converted file at the
-    /// job's output path; `Err` is this engine's refusal of that one file —
-    /// the engine itself stays in the chain's good books.
+    /// Per file in order: `Err` refuses that one file; the engine stays in the chain.
     Done(Vec<Result<(), String>>),
-    /// The engine could not run at all. Every file in the batch moves on to
-    /// the next engine untried, which is a different thing from refusing.
-    /// Only the script engines report it, which is why quieter platforms
-    /// never construct it.
+    /// The engine could not run: the whole batch moves on untried.
     #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
     Engine(String),
 }
 
-/// How the chain asks for an engine's hold: detection in, session out. A
-/// named shape because the chain hands it to its own tests as their seam.
+/// Named rather than inline: the chain's tests use it as their seam.
 pub(crate) type SessionOpener<'a> =
     dyn Fn(&Detected, EngineKind, &Path) -> Result<Box<dyn ConvertSession>, String> + 'a;
 
-/// One engine's hold on the conversion machinery, for the length of one
-/// batch. What "holding" means is the engine's: one Word for the whole batch
-/// through a single script run, or a fresh process per file.
+/// One batch long; what holding means is the engine's — one script run, or a
+/// process per file.
 pub(crate) trait ConvertSession {
-    /// Converts the batch, reading `cancelled` between its files: a stop
-    /// must cost the rest of the batch, not a wait for it. Files a stop
-    /// reaches come back as per-file errors — the chain, which knows what a
-    /// stop means to its caller, is the one that turns them into one.
+    /// Poll `cancelled` between files: a stop costs the rest of the batch as
+    /// per-file errors, which the chain turns into its own stop answer.
     fn convert(&mut self, jobs: &[ConvertJob], cancelled: &dyn Fn() -> bool) -> BatchOutcome;
     /// Best-effort shutdown, called however the batch ended.
     fn finish(&mut self);
 }
 
-/// What one run of the app found installed, probed once: the engines worth
-/// starting, in fidelity order, and where LibreOffice's binary is when it is.
 pub(crate) struct Detected {
     pub(crate) engines: Vec<EngineKind>,
     pub(crate) soffice: Option<PathBuf>,
@@ -169,6 +124,23 @@ static DETECTED: OnceLock<Detected> = OnceLock::new();
 
 fn detected() -> &'static Detected {
     DETECTED.get_or_init(probe)
+}
+
+/// Whether the wizard may promise Word conversion: the machine's own
+/// suites, detected passively — never a reader setting.
+pub(crate) fn word_available() -> bool {
+    // E2e answers yes with no engine behind it, so specs can drive the row
+    // a refused conversion leaves; a closed door would never show it.
+    if cfg!(feature = "e2e") {
+        return true;
+    }
+
+    !detected().engines.is_empty()
+}
+
+#[tauri::command]
+pub fn word_conversion_available() -> bool {
+    word_available()
 }
 
 /// Passive only: nothing here may start an office suite, because probing runs
@@ -192,8 +164,14 @@ fn probe() -> Detected {
         }
     }
 
+    // Windows stops at Word and WPS: LibreOffice is too rare there to chase,
+    // and soffice.exe answers before the PDF lands (only its .com twin waits).
+    #[cfg(not(windows))]
     let soffice = libreoffice::find_soffice();
+    #[cfg(windows)]
+    let soffice: Option<PathBuf> = None;
 
+    #[cfg(not(windows))]
     if soffice.is_some() {
         engines.push(EngineKind::LibreOffice);
     }
@@ -211,17 +189,13 @@ fn probe() -> Detected {
     }
 }
 
-/// Whether `path` is one of the Word formats the wizard converts. Matched on
-/// the extension because this decides before anything reads the file — the
-/// same bargain the image list makes.
+/// Extension only: this decides before anything reads the file.
 pub(crate) fn is_word_document(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| WORD_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
 }
 
-/// The inputs' identity, taken once: what a cache entry is keyed on and what
-/// a staged copy is named after, so an unchanged file is one hash all run.
 #[derive(Clone)]
 struct SourceFacts {
     canonical: PathBuf,
@@ -249,19 +223,13 @@ fn source_facts(path: &Path) -> Option<SourceFacts> {
     })
 }
 
-/// A run's conversions: where they land, and which source file each one came
-/// from. The cache is keyed by the source's identity — canonical path, mtime,
-/// size — so a file edited between the wizard's list and its merge is
-/// converted again rather than merged stale.
+/// The cache is keyed by canonical path, mtime and size, so a file edited
+/// between listing and merging converts again rather than merging stale.
 pub struct WordConverter {
-    /// `None` when no cache directory could be had: conversion then has
-    /// nowhere to stage a copy or write a result, and says so per file.
     run_dir: Option<PathBuf>,
     cache: Mutex<HashMap<PathBuf, CachedPdf>>,
-    /// Held for a whole batch. Everything a batch touches is named by the
-    /// run directory alone, so two batches at once — two windows importing
-    /// Word files — would overwrite each other's staged copies and share one
-    /// LibreOffice profile; waiting a batch out is the cheaper mistake.
+    /// Held for a whole batch: two windows importing at once would overwrite
+    /// each other's staged copies and share one LibreOffice profile.
     gate: Mutex<()>,
 }
 
@@ -293,8 +261,7 @@ impl WordConverter {
         }
     }
 
-    /// For tests: a converter pointed at a directory of the caller's making,
-    /// with the startup sweep skipped — a test's scratch tree is brand new.
+    /// No startup sweep: a test's scratch tree is brand new.
     #[cfg(test)]
     pub(crate) fn at_directory(run_dir: PathBuf) -> Self {
         Self {
@@ -304,9 +271,6 @@ impl WordConverter {
         }
     }
 
-    /// For tests: a converter with nowhere to put anything, whose every Word
-    /// document answers the same deterministic refusal — the engine's own
-    /// wiring can then be tested without an office suite in sight.
     #[cfg(test)]
     pub(crate) fn nowhere() -> Self {
         Self {
@@ -316,8 +280,6 @@ impl WordConverter {
         }
     }
 
-    /// How many of `paths` would be converted right now — what a progress
-    /// total can promise before the work starts. Cache hits count as nothing.
     pub(crate) fn pending_count(&self, paths: &[PathBuf]) -> usize {
         paths
             .iter()
@@ -325,9 +287,6 @@ impl WordConverter {
             .count()
     }
 
-    /// Reads each Word document among `paths` into a PDF of this run's own,
-    /// returning one entry per input, in order. Non-Word paths come back
-    /// untouched; the caller goes on reading those as it always did.
     pub(crate) fn resolve(
         &self,
         paths: &[PathBuf],
@@ -345,8 +304,8 @@ impl WordConverter {
         on_converted: &mut dyn FnMut(),
         open_session: &SessionOpener<'_>,
     ) -> Result<Vec<Entry>, Cancelled> {
-        // One batch at a time, process-wide — see `gate`. A poisoned lock is
-        // opened rather than refused: refusing it would ban conversion.
+        // A poisoned gate is opened rather than refused: refusing it would
+        // ban conversion process-wide.
         let _batch = self
             .gate
             .lock()
@@ -354,8 +313,6 @@ impl WordConverter {
 
         let mut entries: Vec<Entry> = vec![Entry::NotWord; paths.len()];
         let mut pending: Vec<(usize, SourceFacts, ConvertJob)> = Vec::new();
-        // A path listed twice in one batch is one conversion: the second
-        // entry points at the first's answer, not a rival under its name.
         let mut first_for: HashMap<PathBuf, usize> = HashMap::new();
         let mut duplicates: HashMap<usize, usize> = HashMap::new();
 
@@ -402,8 +359,6 @@ impl WordConverter {
             }
         }
 
-        // Why each still-pending file has been refused so far, per engine:
-        // the notes are what a final failure names, in the order gathered.
         let mut refusals: HashMap<usize, Vec<String>> = HashMap::new();
         let mut note = |index: usize, kind: EngineKind, detail: &str| {
             refusals
@@ -421,8 +376,6 @@ impl WordConverter {
 
             let mut session = match open_session(detected, kind, run_dir) {
                 Ok(session) => session,
-                // Starting the engine failed, not converting under it: every
-                // pending file moves on to the next engine untried.
                 Err(error) => {
                     let detail = format!("could not be started: {error}");
 
@@ -449,8 +402,6 @@ impl WordConverter {
                     let mut leftover = Vec::new();
 
                     for ((index, facts, job), result) in pending.iter().zip(results) {
-                        // An Ok worth believing is an output that really is
-                        // a PDF; anything less refuses, and the file rides on.
                         let conversion = result.and_then(|()| validate_pdf(&job.output));
 
                         match conversion {
@@ -516,8 +467,6 @@ impl WordConverter {
     }
 }
 
-/// A cache hit the output file still backs: recorded for exactly these file
-/// facts, with its PDF still on disk.
 fn cached_pdf(cache: &Mutex<HashMap<PathBuf, CachedPdf>>, facts: &SourceFacts) -> Option<PathBuf> {
     let cache = cache.lock().ok()?;
     let cached = cache.get(&facts.canonical)?;
@@ -532,13 +481,8 @@ fn cached_pdf(cache: &Mutex<HashMap<PathBuf, CachedPdf>>, facts: &SourceFacts) -
     }
 }
 
-/// Copies the source into the run directory, under the name its identity
-/// hashes to, and hands back where the converted PDF belongs.
-///
-/// The copy is what keeps the office suite away from the reader's own file:
-/// Word writes an owner file beside what it opens and refuses read-only
-/// folders outright, and a converted-from copy carries no mark-of-the-web, so
-/// Protected View — which blocks automation entirely — never engages.
+/// The copy keeps the suite away from the reader's own file (Word writes
+/// owner files, refuses read-only folders) and carries no mark-of-the-web.
 fn stage(run_dir: &Path, facts: &SourceFacts) -> Result<ConvertJob, String> {
     let hash = source_hash(facts);
     let staged = run_dir.join(format!("staged-{hash}.{}", facts.extension));
@@ -558,9 +502,8 @@ fn stage(run_dir: &Path, facts: &SourceFacts) -> Result<ConvertJob, String> {
     })
 }
 
-/// SHA-256 over the file's identity, truncated for the name only: a collision
-/// between two staging names would have to coincide with identical paths,
-/// mtimes and sizes to matter, and the cache is keyed in full regardless.
+/// Truncated for the name only: a colliding name would still mean identical
+/// facts, and the cache is keyed in full regardless.
 fn source_hash(facts: &SourceFacts) -> String {
     let mut hasher = Sha256::new();
 
@@ -585,9 +528,7 @@ fn source_hash(facts: &SourceFacts) -> String {
     name
 }
 
-/// The output an engine claims to have written, held to the same standard any
-/// other file is before PDFium is pointed at it. A non-PDF result is a file
-/// failure — it says the converter gave up, not that the engine is broken.
+/// An engine's claim is not trusted: a non-PDF output refuses the file, not the engine.
 fn validate_pdf(output: &Path) -> Result<(), String> {
     let metadata = fs::metadata(output).map_err(|error| format!("no PDF was written: {error}"))?;
 
@@ -612,11 +553,8 @@ fn validate_pdf(output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The mark the OS puts on a downloaded file, which an office suite reads as
-/// a reason to refuse automation — Protected View on Windows, quarantine on
-/// macOS. `fs::copy` carries the mark along, so it is dropped here: the
-/// staged copy is ours, in our own run directory, and dropping it there says
-/// nothing about the reader's original.
+/// Office suites refuse to automate marked files, and `fs::copy` carries the
+/// mark over — dropped on our staged copy, never the reader's original.
 #[cfg(windows)]
 fn strip_download_marks(staged: &Path) {
     // The colon-qualified name goes straight to `DeleteFileW`, which is what
@@ -674,15 +612,11 @@ fn sweep_stale_runs(run_dir: &Path) {
     }
 }
 
-/// Sessions arrive as their engine's own type and leave as the chain's one —
-/// named so each arm says what it opens rather than how it is boxed. Only
-/// the script engines' arms call it, which the quiet platforms never build.
 #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 fn box_session(session: impl ConvertSession + 'static) -> Box<dyn ConvertSession> {
     Box::new(session)
 }
 
-/// Runs one engine's session opener with the run's own detection result.
 fn open_session(
     detected: &Detected,
     kind: EngineKind,
@@ -725,21 +659,13 @@ fn open_session(
     }
 }
 
-/// A command that ran, and whether it was killed for taking too long. Even a
-/// killed run keeps whatever it had written to its pipes by then — an engine
-/// that finished three files before the fourth hung still reports the three.
 pub(crate) struct Ran {
     pub(crate) output: Output,
     pub(crate) timed_out: bool,
 }
 
-/// Runs `command` to completion, or kills it at `timeout`.
-///
-/// Killing reaches the child this process spawned and no other process of
-/// that name — a reader's own LibreOffice, or a Word they are working in,
-/// must never be killed over an import. A grandchild the wrapper spawned
-/// instead of exec'ing is left to notice its dead parent and leave on its
-/// own; the isolated profile and staged copies keep it from mattering here.
+/// Kills only the child this process spawned, never a process by name: a
+/// reader's own Word or LibreOffice must never die over an import.
 pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std::io::Result<Ran> {
     // A converter is never the reader's console: this app has none to give,
     // and Windows would otherwise flash one for every script or soffice run.
@@ -749,6 +675,10 @@ pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std:
 
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
+
+    // Piped, else `wait_with_output` reads nothing back — a few short lines
+    // per file cannot fill the pipe's 64KB buffer while the deadline polls.
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
     let deadline = Instant::now() + timeout;

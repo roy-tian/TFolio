@@ -37,9 +37,6 @@ type UsePageHandoffOptions = {
   sessions: RefObject<Map<number, DocumentSessionHandle>>
 }
 
-/** What the strip has under `point`: whether it is there at all — it takes a
-    drag wherever over it the pointer is — and the document tab, if that is
-    what the pointer found. */
 function tabAtPoint(point: { x: number; y: number }) {
   const element = document.elementFromPoint(point.x, point.y)
   const tab = element?.closest<HTMLElement>("[data-document-tab]") ?? null
@@ -52,22 +49,14 @@ function tabAtPoint(point: { x: number; y: number }) {
 }
 
 /**
- * Carries a thumbnail drag from the grid it started in to another document's.
- *
- * One document is on screen at a time, so the tab strip is the way across: a
- * drag resting on a tab springs it open — showing its pages, since that is what
- * the drag is made of — and the grid revealed takes over as the drop's target,
- * marking the gap the pages would land in exactly as a file dragged in from the
- * desktop does. Everything from the source grid's edge onwards belongs to the
- * workspace, so a release over the strip, or anywhere else that is not a grid,
- * lands nothing rather than quietly reordering the document left behind.
+ * The tab strip is the way across; anywhere else a release lands nothing,
+ * rather than quietly reordering the document left behind.
  */
 export function usePageHandoff({
   activeIdRef,
   onActivate,
   sessions,
 }: UsePageHandoffOptions): {
-  /** The tab a drag is resting on, on its way to being opened. */
   armedTabId: number | null
   handoff: PageHandoffTarget
 } {
@@ -89,7 +78,6 @@ export function usePageHandoff({
     setArmedTabId(null)
   }, [])
 
-  /** Whether the document told about the drag takes it where the pointer is. */
   const tell = useCallback(
     (documentId: number | null, event: PageDragEvent) =>
       documentId !== null &&
@@ -98,8 +86,6 @@ export function usePageHandoff({
   )
 
   const handoff = useMemo<PageHandoffTarget>(() => {
-    /** The document that could take the drop: whichever is showing, as long as
-        it is not the one the pages are being dragged out of. */
     const targetOf = (sourceDocumentId: number) => {
       const activeId = activeIdRef.current
 

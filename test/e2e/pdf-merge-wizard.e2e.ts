@@ -14,8 +14,6 @@ import {
   writeScratchPdf,
 } from "./helpers"
 
-/** A PDF whose one bookmark aims at its second page, so a wizard run that keeps
-    the sources' outlines has something of its own to carry over. */
 function outlinedPdf() {
   const objects = [
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>\nendobj\n",
@@ -51,7 +49,6 @@ function outlinedPdf() {
   return Buffer.from(chunks.join(""), "ascii")
 }
 
-/** Opens the wizard from the header, with the picker pointed at `paths`. */
 async function openWizardWith(paths: string[]) {
   await pointMultiPickerAt(paths)
   await $("[data-slot='merge-wizard-button']").click()
@@ -74,7 +71,6 @@ function chooseExportMode(mode: string) {
   return $(`[data-testid='merge-wizard-export-${mode}']`).click()
 }
 
-/** The steps the footer's trail is showing, in order. */
 function trailSteps() {
   return browser.execute(() =>
     Array.from(
@@ -85,10 +81,8 @@ function trailSteps() {
 }
 
 /**
- * Drags the row at `from` to rest above or below the row at `to`, both 0-based
- * — press, move past the threshold, drop — with dispatched pointer events,
- * which under WebKitGTK are the only press semantics a test can produce (the
- * same route `dragThumbToGap` takes in the page-edit suite).
+ * Drags the row at `from` to rest above or below the row at `to` (0-based) —
+ * pointer events, the only press semantics a test has under WebKitGTK.
  */
 function dragRow(
   from: number,
@@ -152,7 +146,6 @@ function dragRow(
   )
 }
 
-/** Releases a drag held by `dragRow`, at the ghost's current grip. */
 function releaseRow() {
   return browser.execute(() => {
     const ghost = document.querySelector<HTMLElement>(
@@ -170,7 +163,6 @@ function releaseRow() {
   })
 }
 
-/** The file names on the wizard's list, top to bottom. */
 function listedNames() {
   return browser.execute(() =>
     [...document.querySelectorAll("[data-slot='merge-file']")].map(
@@ -210,7 +202,6 @@ describe("merge wizard", () => {
     )
     await expect($("[data-testid='merge-wizard-next']")).toBeEnabled()
 
-    // Bookmarks off, so the result carries nothing but its pages.
     await nextStep()
     await $("[data-testid='merge-wizard-bookmarks-none']").click()
     await nextStep()
@@ -318,9 +309,8 @@ describe("merge wizard", () => {
     await nextStep()
     await nextStep()
 
-    // Hold the final operation open long enough to observe both its initial and
-    // advanced state. The real backend's progress sequence is covered in its
-    // engine test; this seam tests the wizard's face without a timing race.
+    // Holds the operation open to observe both states; the real backend's
+    // progress sequence is the engine test's, without a timing race here.
     await browser.execute(() => {
       const seam = window as unknown as {
         __tfolioE2E?: Record<string, unknown>
@@ -483,9 +473,8 @@ describe("merge wizard", () => {
       expect.stringContaining("annotations and links"),
     )
 
-    // The plan is read off the seam rather than the result: what each option
-    // does to the pages is settled by the engine's own tests, and what this
-    // suite can say is that the checkbox reaches the call.
+    // The plan is read off the seam, not the result: what each option does to
+    // pages is the engine's tests' to say; this suite checks the call alone.
     await browser.execute(() => {
       const seam = window as unknown as {
         __tfolioE2E?: Record<string, unknown>
@@ -549,7 +538,6 @@ describe("merge wizard", () => {
       $("[data-testid='merge-wizard-padding']"),
     ).toHaveAttribute("aria-disabled", "true")
 
-    // One step on from the list is the last one, so the button commits.
     await nextStep()
     await expect($("[data-testid='merge-wizard-merge']")).toBeDisplayed()
     await expect($("[data-testid='merge-wizard-watermark']")).toBeDisplayed()
@@ -714,6 +702,56 @@ describe("merge wizard", () => {
     expect(overflow?.scrollable).toBe(true)
     await expect($("[data-testid='merge-wizard-add']")).toBeDisplayed()
     await expect($("[data-testid='merge-wizard-total']")).toBeDisplayed()
+  })
+
+  it("holds one frame height across the steps and their switches", async () => {
+    const first = writeScratchPdf("frame-first.pdf", minimalPdf(1))
+    const second = writeScratchPdf("frame-second.pdf", minimalPdf(1))
+
+    await openWizardWith([first, second])
+    await addPickedFiles(2)
+
+    // `offsetHeight`, not a rect: the dialog's opening zoom is a transform,
+    // and a rect read inside its 100 ms would measure the scaled frame.
+    const frameHeight = () =>
+      browser.execute(
+        () =>
+          document.querySelector<HTMLElement>("[data-testid='merge-wizard']")!
+            .offsetHeight,
+      )
+
+    // The tallest step sets the one rectangle every step and switch state is
+    // shown in, so nothing below the frame moves as the steps change. Each
+    // step's content is awaited before measuring, so the frame is read settled.
+    const heights = [await frameHeight()]
+
+    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks-none']").waitForExist({
+      timeout: 15_000,
+    })
+    heights.push(await frameHeight())
+
+    await nextStep()
+    await $("[data-testid='merge-wizard-page-numbers']").waitForExist({
+      timeout: 15_000,
+    })
+    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await $("[data-testid='page-numbers-from']").waitForExist({
+      timeout: 15_000,
+    })
+    heights.push(await frameHeight())
+
+    await nextStep()
+    await $("[data-testid='merge-wizard-watermark']").waitForExist({
+      timeout: 15_000,
+    })
+    await $("[data-testid='merge-wizard-watermark']").click()
+    await $("[data-testid='watermark-text']").waitForExist({
+      timeout: 15_000,
+    })
+    heights.push(await frameHeight())
+
+    expect(new Set(heights).size).toBe(1)
   })
 
   it("keeps a file it cannot read out of the merge", async () => {

@@ -27,13 +27,8 @@ function stepsToCover(distance: number, step: number) {
 
 type Box = { height: number; width: number }
 
-/**
- * Mirrors `watermark_placements` in `src-tauri/src/pdfium/watermark.rs`: tiles
- * step by the rotated text box plus the spacing, and odd rows shift half a step.
- * An approximation of the real thing — PDFium measures the glyphs the page will
- * actually carry, on the page's own box rather than this A4 stand-in — so treat
- * a mismatch here as a preview bug, not a page bug.
- */
+/** Mirrors `watermark_placements` in `src-tauri/src/pdfium/watermark.rs`, as an
+    approximation — PDFium measures real glyphs — so a mismatch is a preview bug. */
 function previewPlacements(
   sheet: Box,
   tile: Box,
@@ -81,7 +76,6 @@ function previewPlacements(
 
 type WatermarkPreviewProps = {
   config: WatermarkConfig
-  /** Stand-in mark for an empty draft, so the sheet is never blank. */
   placeholder: string
 }
 
@@ -121,10 +115,8 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
   const rotation = `rotate(${watermarkRotation(config.direction, A4_WIDTH, A4_HEIGHT)}deg)`
   const referenceFontSize = WATERMARK_REFERENCE_FONT_SIZE * scale
 
-  // The rotated box is what both the size and the grid are derived from, and a
-  // client rect already accounts for the transform — so measure rather than
-  // derive it. One measurement at the reference size is enough: text scales
-  // with its font size, which is what the backend leans on too.
+  // The rotated box feeds both size and grid; a client rect already carries the
+  // transform, so measure it — once at the reference size, since text scales.
   useLayoutEffect(() => {
     const node = measureRef.current
     const sheetNode = sheetRef.current
@@ -133,10 +125,8 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
       return
     }
 
-    // A client rect carries every ancestor transform, and the dialog scales this
-    // whole subtree while it opens; `sheetWidth` is a layout size, which does
-    // not. Divide that scale back out against the sheet's own two widths, or the
-    // mark keeps whatever the animation was mid-way through when it measured.
+    // The dialog's open animation scales this subtree; a client rect carries
+    // that, a layout size does not — divide the scale back out before using it.
     const rendered = sheetNode.getBoundingClientRect().width
     const laidOut = sheetNode.offsetWidth
     const transform = laidOut > 0 && rendered > 0 ? rendered / laidOut : 1

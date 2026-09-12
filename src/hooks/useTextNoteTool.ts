@@ -36,7 +36,6 @@ type UseTextNoteToolOptions = {
   viewerRef: RefObject<HTMLElement | null>
 }
 
-/** A written note, kept on its page until the page's own pixels carry it. */
 export type TextNotePreview = {
   id: number
   origin: PagePoint
@@ -59,13 +58,8 @@ export type TextNoteTool = {
 }
 
 /**
- * A note is placed with a click, typed into, and written only once the reader is
- * finished with it — so nothing crosses the IPC boundary until then, and a note
- * is one command and one undo however long it took to type.
- *
- * Closing is a commit, not a discard: a reader who clicks away from an editor
- * they have typed into means to keep what they wrote. Only an empty one is
- * dropped, which is what makes a stray click harmless rather than an error.
+ * Nothing crosses IPC until close, so a note is one command and one undo; and
+ * closing commits rather than discards — only an empty note is dropped.
  */
 export function useTextNoteTool({
   active,
@@ -80,13 +74,8 @@ export function useTextNoteTool({
   const { onPagePaint, previews, release, takeId } =
     useReleasedPreviews<TextNotePreview>()
   const editorRef = useRef<HTMLElement | null>(null)
-  // The listeners below are bound once per activation but must always act on the
-  // draft and style as they are now, not as they were when the effect last ran.
-  //
-  // Written after the render rather than during it: a render React discards
-  // still runs the component body, and a ref set there would keep a value that
-  // was never shown. Effects only run for renders that commit, and they flush
-  // before the next event a listener could fire on.
+  // Listeners bind once per activation but read the draft and style as they
+  // are now; written in an effect, since a discarded render must not set them.
   const draftRef = useRef<TextNoteDraft | null>(null)
   const styleRef = useRef(style)
 
@@ -160,9 +149,8 @@ export function useTextNoteTool({
         return
       }
 
-      // Only the primary button of the primary pointer places a note, as with a
-      // rectangle: a right-click or a second finger would otherwise close the
-      // open note and open another, and swallow the gesture it was meant for.
+      // A right-click or second finger would otherwise close the open note and
+      // open another, swallowing the gesture it was meant for.
       if (event.button !== 0 || !event.isPrimary) {
         return
       }
@@ -175,12 +163,8 @@ export function useTextNoteTool({
 
       const viewer = viewerRef.current
 
-      // Off the viewer entirely is the app's own furniture — zoom, rotate,
-      // bookmarks, settings — and reaching for one of those is not finishing
-      // the note. Closing on it would throw away an empty note the moment the
-      // reader zoomed in to place it accurately, and commit a half-typed one.
-      // The note is left alone; it is finished from its own buttons, with
-      // Escape or Cmd/Ctrl+Enter, or by clicking the document again.
+      // App furniture is not finishing the note: closing there would drop an
+      // empty one mid-placement or commit a half-typed one, so it is left open.
       if (!viewer || !viewer.contains(target)) {
         return
       }

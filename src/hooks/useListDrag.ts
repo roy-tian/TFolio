@@ -8,17 +8,13 @@ import {
 
 type UseListDragOptions = {
   active: boolean
-  /** The scroll box holding the rows, each carrying `data-list-index`. */
   listRef: RefObject<HTMLElement | null>
-  /** Both indices 0-based. Only called for a drop that really moves the row. */
   onReorder: (from: number, to: number) => void
 }
 
 /**
- * Each row's top and height in the list's own scrolled content space — the
- * space `contentY` answers in, so the two agree whatever the list's offset
- * parent turns out to be. Measured off the rectangles rather than `offsetTop`,
- * which is relative to whichever ancestor happens to be positioned.
+ * Rects, not `offsetTop`, and in the list's scrolled content space — the space
+ * `contentY` answers in — so the two agree whatever the offset parent is.
  */
 function measureRows(list: HTMLElement) {
   const listTop = list.getBoundingClientRect().top
@@ -33,27 +29,16 @@ function measureRows(list: HTMLElement) {
   )
 }
 
-/** A row drag in progress, for carrying the row and opening its landing
-    place in the list. */
 export type ListDragState = {
-  /** The 0-based row in hand. */
   index: number
-  /** Where the drop would land: 0 above the first row, n below the last. */
   gap: number
-  /** Where the row's top-left sits relative to the pointer, so the ghost keeps
-      the exact grip it was picked up by. */
   grip: { x: number; y: number }
-  /** The original row's dimensions, which keep its fixed ghost identical. */
   height: number
-  /** Client coordinates the ghost follows. */
   pointer: { x: number; y: number }
-  /** How far every other row slides to close the old hole and open the new. */
   rowOffsets: number[]
   width: number
 }
 
-/** The make-way slide for a row moving to `gap`. Measured slot distances
-    put each shifted row exactly where its neighbour stood. */
 function makeWayOffsets(
   index: number,
   gap: number,
@@ -76,14 +61,8 @@ function makeWayOffsets(
 }
 
 /**
- * Drag-to-reorder for a single-column list — the same self-drawn pointer
- * gesture the thumbnail grid uses (`usePageDrag`), with the geometry a stack of
- * rows needs instead of a grid's: `dropGapForRow` reads the row's own vertical
- * midpoint.
- *
- * Rows are measured in the list's own scrolled content space, not the
- * viewport's, so a list the reader scrolls mid-drag keeps answering about the
- * row under the pointer.
+ * Rows are measured in the list's scrolled content space, not the viewport's,
+ * so scrolling mid-drag still answers about the row under the pointer.
  */
 export function useListDrag({
   active,
@@ -114,7 +93,6 @@ export function useListDrag({
       width: number
     } | null = null
 
-    /** The pointer's y in the list's own scrolled content space. */
     const contentY = (event: PointerEvent) => {
       const list = listRef.current
 
@@ -160,8 +138,7 @@ export function useListDrag({
       const rowRect = row.getBoundingClientRect()
 
       // Text and image selection are never an alternate meaning for a press on
-      // a reorderable row. In particular, WebKit must not start a native text
-      // drag before this gesture crosses its own threshold.
+      // a reorderable row; WebKit must not start a native text drag here.
       event.preventDefault()
 
       gesture = {

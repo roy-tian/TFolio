@@ -3,12 +3,9 @@ import { describe, expect, it } from "bun:test"
 import { documentPlainText } from "@/lib/documentText"
 
 type Stub = {
-  /** Every page number asked for, in the order the copy asked for it. */
   asked: number[]
 }
 
-/** Runs `body` against a backend answering with `pages`, then puts `window`
-    back. `null` stands for a page PDFium refuses. */
 async function withPageText(
   pages: (string | null)[],
   body: (stub: Stub) => Promise<void>,

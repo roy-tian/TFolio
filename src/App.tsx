@@ -78,7 +78,6 @@ type OpenTab = {
   dirty: boolean
   document: PdfDocumentInfo
   id: number
-  /** An app-created document whose bytes have never reached a file. */
   initialSaveRequired?: boolean
   name: string
   path: string
@@ -88,15 +87,12 @@ type OpenTab = {
   /** What the session says: a file behind it, changes to write, and no
       session-owned page content that makes it export-only. */
   savable: boolean
-  /** The path whose successful Rust-side open put it in the recent list.
-      Unlike `path`, this stays absent when an app-created document adopts its
-      first export destination. */
+  /** The path whose Rust-side open put it in the recent list; unlike `path`,
+      absent when an app-created document adopts its first export destination. */
   recentPath?: string
-  /** The reading view this path last held when it was open before. */
   recentView?: RecentPdfView
-  /** What a document the app itself built opens with, over and above the file
-      it was read from: the merge wizard's view and its two page-content
-      layers. Absent for every ordinary open. */
+  /** What an app-built document opens with over and above its file — the
+      merge wizard's view and layers. Absent for every ordinary open. */
   opensWith?: {
     onLayerProgress?: PdfOwnedLayerProgressHandler
     onLayersSettled?: () => void
@@ -111,9 +107,8 @@ type PendingClose =
   | { kind: "tab"; documentId: number }
   | { kind: "window" }
 
-/** What `launch.rs` says when the OS has a PDF for this window to open — a
-    double-click on a file TFolio is the handler for. Named in both places, so
-    the two have to be changed together. */
+/** What `launch.rs` emits when the OS has a PDF for this window; named in both
+    places, so the two have to be changed together. */
 const OPEN_REQUESTED_EVENT = "launch://open-requested"
 
 const FOCUS_DOCUMENT_EVENT = "workspace://focus-document"
@@ -199,17 +194,14 @@ export default function App() {
     focusWorkspaceTarget(tabId)
   }, [])
 
-  // A page drag that leaves the grid it started in becomes the workspace's:
-  // resting on a tab opens it, and the document revealed takes the drop.
   const { armedTabId, handoff } = usePageHandoff({
     activeIdRef,
     onActivate: activateTab,
     sessions: sessionRefs,
   })
 
-  // Every way a document reaches the workspace runs through here: they queue
-  // behind one another rather than racing over which tab ends up active, and
-  // they share the one busy state the strip and the home panel read.
+  // Every open queues behind the last rather than racing over which tab ends
+  // up active, and shares the one busy state the strip and home panel read.
   const runOpenBatch = useCallback(
     (run: () => Promise<void>) => {
       openBatchesRef.current += 1
@@ -343,9 +335,8 @@ export default function App() {
     [activateTab, notices, replaceTabs, runOpenBatch],
   )
 
-  // A new document is the app's own rather than a file's: with no path it
-  // matches no open tab and has nothing to be saved back over, so it lives on
-  // in the workspace until an export gives it a file.
+  // The app's own rather than a file's: no path means no tab to match and
+  // nothing to save back over, until an export gives it a file.
   const createDocument = useCallback(
     () =>
       runOpenBatch(async () => {
@@ -383,9 +374,8 @@ export default function App() {
     )
   }, [notices])
 
-  // A merged document is the app's own, like a new one: it has no file behind
-  // it, so it lives in the workspace until an export gives it one — which is
-  // the only way it can be written, since it holds other files' pages.
+  // The app's own, like a new one, and export-only: it holds other files'
+  // pages, so a chosen destination is the only thing it can be written to.
   const openMergeResult = useCallback(
     (
       { document, pageNumbers, watermark }: MergeWizardResult,
@@ -478,9 +468,8 @@ export default function App() {
     [appUpdate],
   )
 
-  // Two notices answer for their own dismissal: the update, whose reader waved
-  // it away for as long as it says the same thing, and the font offer, which
-  // takes the edit it was holding with it.
+  // Two notices own their dismissal: the update, waved away while it says the
+  // same thing, and the font offer, which takes its held edit with it.
   const dismissNotice = useCallback(
     (notice: Notice) => {
       const slot = noticeEntry(notice.kind).slot
@@ -533,10 +522,8 @@ export default function App() {
 
   const removeTabNow = useCallback(
     (documentId: number) => {
-      // Capture synchronously while the panel still has geometry, but do not
-      // hold the close behind a convenience write. Waiting here leaves a clean
-      // document editable after its unsaved-work check, which can then discard
-      // work created during the wait without asking again.
+      // Captured synchronously while the panel still has geometry, but not
+      // waited on: waiting leaves a document editable after its unsaved-work check.
       const remembered =
         sessionRefs.current.get(documentId)?.rememberViewNow() ??
         Promise.resolve()
@@ -584,9 +571,8 @@ export default function App() {
   )
 
   const removeAllTabsNow = useCallback(() => {
-    // `rememberAllViews` captures every visible value before returning its
-    // promise. Remove the sessions now, so no edit can slip between the dirty
-    // check (or discard confirmation) and the close.
+    // `rememberAllViews` captures every visible value up front; the sessions
+    // go now so no edit slips between the dirty check and the close.
     const remembered = rememberAllViews()
 
     for (const tab of tabsRef.current) {
@@ -601,9 +587,8 @@ export default function App() {
     return remembered
   }, [notices, rememberAllViews, replaceTabs])
 
-  // One question for the lot, rather than a dialog per dirty document: the
-  // reader asked to close everything, and answering the same prompt five times
-  // is not five decisions.
+  // One question for the lot: the reader asked to close everything, and the
+  // same prompt five times is not five decisions.
   const requestCloseAll = useCallback(() => {
     if (tabsRef.current.length === 0) {
       return
@@ -620,9 +605,8 @@ export default function App() {
     }
   }, [removeAllTabsNow])
 
-  // An export that adopted its destination has given a document its first file.
-  // The tab follows it: the name the reader now knows it by, and the path the
-  // duplicate-open check reads.
+  // An adopted export destination gives the document its first file; the tab
+  // follows with the reader's name and the duplicate-open check's path.
   const updateSource = useCallback(
     (documentId: number, path: string) => {
       replaceTabs((current) =>
@@ -670,9 +654,8 @@ export default function App() {
     [replaceTabs],
   )
 
-  // In tab order, and only where a document may be written back at all: one
-  // holding a watermark or another file's pages is export-only, and an export
-  // wants a destination chosen for it rather than one taken in a batch.
+  // Only where a document may be written back: a watermark or another file's
+  // pages makes it export-only, and an export wants its own destination.
   const saveAllDocuments = useCallback(() => {
     for (const tab of tabsRef.current) {
       sessionRefs.current.get(tab.id)?.save()
@@ -710,9 +693,8 @@ export default function App() {
     ],
   )
 
-  // The drop listener is bound once, so what a drop should do is read from a
-  // ref rather than captured: while the wizard is open the files join its list
-  // instead of opening as tabs of their own.
+  // The drop listener is bound once, so it reads a ref: while the wizard is
+  // open a drop joins its list instead of opening tabs.
   const wizardDropRef = useRef<((paths: string[]) => void) | null>(null)
 
   useEffect(() => {
@@ -732,9 +714,8 @@ export default function App() {
     )
   }, [])
 
-  // Replace the WebView's page-wide find bar with the active document's own.
-  // Even on Home the shortcut is consumed: searching the interface or a file
-  // tab would contradict find-in-current-PDF, and there is no current PDF there.
+  // The WebView's find bar is replaced by the document's own; consumed even on
+  // Home, where there is no current PDF for the interface to search.
   useEffect(() => {
     const openDocumentSearch = (event: KeyboardEvent) => {
       if (
@@ -793,10 +774,8 @@ export default function App() {
     return () => document.removeEventListener("keydown", printDocument)
   }, [macOS])
 
-  // The WebView's select-all takes the whole interface — tab strip, toolbar and
-  // all — which is never what a reader means by it. It is consumed everywhere,
-  // and only a document tab has something to answer it with: its pages in the
-  // grid, or its text in the page views. A field being typed in keeps its own.
+  // The WebView's select-all takes the whole interface, never what a reader
+  // means; consumed everywhere, answered only by a document tab.
   useEffect(() => {
     const selectAllInDocument = (event: KeyboardEvent) => {
       if (
@@ -861,10 +840,8 @@ export default function App() {
     return () => document.removeEventListener("keydown", openAnotherWindow)
   }, [macOS, openNewWindow])
 
-  // The file and edit keys the window answers wherever it has the keyboard,
-  // whichever tab leads it. Bound to this document rather than registered with
-  // the OS: they are the window's while it is focused and take nothing from the
-  // desktop around it.
+  // Bound to this document rather than registered with the OS: they are the
+  // window's while it is focused, and take nothing from the desktop around it.
   useEffect(() => {
     const activeSession = () => {
       const tabId = activeIdRef.current
@@ -873,7 +850,6 @@ export default function App() {
     }
 
     const actions: Array<{
-      /** Whether a field being typed in keeps the chord for its own editing. */
       fieldFirst?: boolean
       run: () => void
       shortcut: Shortcut
@@ -930,11 +906,8 @@ export default function App() {
     return () => document.removeEventListener("keydown", runShortcut)
   }, [chooseFile, createDocument, macOS, saveAllDocuments])
 
-  // Nothing here is dragged with the browser's own drag and drop — the
-  // thumbnail grid reorders from pointer events — so a drag starting inside the
-  // window is only ever a text selection or the page-number field's digits,
-  // with nowhere to land. Refused where it starts, so it never reaches the
-  // window's file handler below at all.
+  // No in-app drag uses the browser's own drag and drop, so one starting here
+  // is refused where it starts, never reaching the file handler below.
   useEffect(() => {
     const refuseDrag = (event: DragEvent) => event.preventDefault()
 
@@ -946,16 +919,11 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
-    // Only `enter` and `drop` name the files; `over` — the event that moves the
-    // insertion line — carries a position and nothing else. Held from the enter
-    // so the grid can refuse to promise a landing place for a file it cannot
-    // take. Unknown (a listener bound mid-drag) is not "none".
+    // Only `enter` and `drop` name the files — `over` carries a position and
+    // nothing else — and unknown (a listener bound mid-drag) is not "none".
     let draggedPaths: string[] | null = null
-    // The OS reports a drag of anything at all, text from another window
-    // included, and one carrying no file names no path. There is nothing to
-    // open, so it is left alone rather than met with a drop target and then an
-    // error about not being a PDF. Held from the enter, since the `over` events
-    // in between name nothing either.
+    // The OS reports drags of anything at all, and one naming no file has
+    // nothing to open: left alone rather than met with a drop target and an error.
     let namesNoFile = false
 
     void getCurrentWebview()
@@ -973,10 +941,8 @@ export default function App() {
           return
         }
 
-        // wry reports the pointer in the window's own units and Tauri labels
-        // them physical either way: WebView2 really does hand over device
-        // pixels, while Cocoa's `draggingLocation` and GTK's widget coordinates
-        // are already the logical ones the page hit-tests with.
+        // Tauri labels the pointer physical either way, but only WebView2
+        // really hands over device pixels; Cocoa and GTK give logical ones.
         const scale = isWindows() ? window.devicePixelRatio : 1
         const point = {
           x: event.payload.position.x / scale,
@@ -990,9 +956,8 @@ export default function App() {
 
           const toWizard = wizardDropRef.current
 
-          // The wizard is modal, so it takes every drop while it is open; the
-          // thumbnail grid takes one that points at a gap in it; anything else
-          // opens as tabs.
+          // The modal wizard takes every drop while open; the grid takes one
+          // pointing at a gap in it; anything else opens as tabs.
           if (toWizard) {
             toWizard(event.payload.paths)
           } else if (
@@ -1035,11 +1000,8 @@ export default function App() {
     }
   }, [dragToSession, openPaths])
 
-  // A PDF double-clicked in the file manager reaches the app before this
-  // workspace exists, so Rust holds it and hands it over here. Taking is what
-  // empties the queue, which is why the event carries no paths of its own: a
-  // second double-click, arriving once the window is already up, only says
-  // there is something to take.
+  // A double-clicked PDF reaches the app before this workspace exists, so Rust
+  // holds it: the event carries no paths, only that a take will find some.
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
@@ -1047,9 +1009,8 @@ export default function App() {
     const openWhatTheOsNamed = () =>
       invoke<string[]>("take_launch_pdfs")
         .then((paths) => {
-          // Not conditioned on `cancelled`: a take that already emptied the
-          // queue is the only chance these paths get, and `openPaths` guards
-          // its own unmounted case.
+          // Not conditioned on `cancelled`: a take that emptied the queue is
+          // the only chance these paths get; `openPaths` guards unmounted itself.
           if (paths.length > 0) {
             void openPaths(paths, "first")
           }
@@ -1069,8 +1030,7 @@ export default function App() {
         void openWhatTheOsNamed()
       },
       // A subscription that never bound leaves the queue full all the same,
-      // and taking it is the half that opens the file the reader launched
-      // this run for.
+      // and taking it is what opens the file launched this run for.
       () => {
         if (!cancelled) {
           void openWhatTheOsNamed()
@@ -1118,9 +1078,8 @@ export default function App() {
           sessionRefs.current.get(tab.id)?.hasUnsavedWorkNow(),
         )
 
-        // Even a clean close waits for the latest reading positions to reach
-        // Rust. Destroying the window immediately after a scroll could
-        // otherwise end the process ahead of the trailing persistence write.
+        // Even a clean close waits for reading positions to reach Rust, or the
+        // process could end ahead of the trailing persistence write.
         event.preventDefault()
 
         if (hasUnsaved) {
@@ -1170,15 +1129,12 @@ export default function App() {
           className="fixed inset-x-0 top-0 z-50 flex h-12 items-center justify-between border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
           data-tauri-drag-region="deep"
         >
-          {/* The window menu stays at the left end here just as it does before
-              the bookmark button in a document header. */}
           <div className={cn("flex items-center", macOS && "pl-[72px]")}>
             <AppMenu {...menuActions} />
           </div>
           <div className="flex items-center gap-2">
-            {/* The home tab has no document toolbar, and the wizard is the one
-                tool there that needs no document — so it keeps the look it has
-                in that toolbar, as a group of its own. */}
+            {/* The wizard is the one home tool that needs no document, so it
+                keeps the look it has in a document toolbar. */}
             <ButtonGroup>
               <MergeWizardButton onClick={mergeWizard.openWizard} />
             </ButtonGroup>

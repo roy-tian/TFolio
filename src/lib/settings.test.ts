@@ -4,19 +4,16 @@ import {
   loadSettings,
   rememberSettings,
   storedSettings,
-  wordConversionEnabled,
 } from "@/lib/settings"
 
 type Stub = {
-  /** Every document `set_settings` was handed, in order. */
   written: unknown[]
   storage: Map<string, string>
 }
 
 /**
- * Runs `body` against a stubbed backend and a stubbed WebView storage, then
- * puts `window` back. The settings go through the real IPC seam, so what these
- * assert is what `settings.rs` would actually be sent.
+ * The settings go through the real IPC seam, so what these assert is what
+ * `settings.rs` would actually be sent.
  */
 async function withBackend(
   stored: unknown,
@@ -79,44 +76,6 @@ describe("settings", () => {
         expect(stub.written.at(-1)).toEqual({
           pageNumbers: { mode: "single" },
           ui: { language: "en", theme: "dark", viewMode: "book" },
-        })
-      },
-    )
-  })
-
-  it("answers the Word conversion setting only as the boolean it is", async () => {
-    // Absent is the default — on — and anything the file may have drifted
-    // into is not read as a refusal the reader never made.
-    await withBackend(null, async () => {
-      await loadSettings()
-
-      expect(wordConversionEnabled()).toBe(true)
-    })
-
-    await withBackend({ import: { wordConversion: false } }, async () => {
-      await loadSettings()
-
-      expect(wordConversionEnabled()).toBe(false)
-    })
-
-    await withBackend({ import: { wordConversion: "no" } }, async () => {
-      await loadSettings()
-
-      expect(wordConversionEnabled()).toBe(true)
-    })
-  })
-
-  it("folds an import patch into the section it names", async () => {
-    // A sibling field the current version does not know still survives the
-    // write: the section merges by field, like ui and annotate.
-    await withBackend(
-      { import: { wordConversion: true, somedayField: "keep" } },
-      async (stub) => {
-        await loadSettings()
-        await rememberSettings({ import: { wordConversion: false } })
-
-        expect(stub.written.at(-1)).toEqual({
-          import: { somedayField: "keep", wordConversion: false },
         })
       },
     )

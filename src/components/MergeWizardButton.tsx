@@ -8,12 +8,8 @@ type MergeWizardButtonProps = {
   onClick: () => void
 }
 
-/**
- * The one control that opens the merge wizard, in the one look — the document
- * tools' group in a document's toolbar, and a group of its own on the home tab,
- * which has no toolbar but is exactly where a reader with nothing open starts a
- * merge.
- */
+/** One control, every look: the document tools' group in a toolbar, and a
+    group of its own on the home tab, which has no toolbar to sit in. */
 export function MergeWizardButton({ onClick }: MergeWizardButtonProps) {
   const { t } = useTranslation()
   const label = t("mergeWizard.open")

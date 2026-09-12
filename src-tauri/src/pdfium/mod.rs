@@ -29,10 +29,8 @@ pub use watermark::WatermarkConfig;
 // — also the ceiling a conversion's output must meet before it is one.
 pub(crate) const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
 
-/// The one wording for the size refusal, from all three checks: the frontend
-/// tells "too large" apart from every other open failure by the "MiB limit"
-/// substring (see `loadPdfFromPath` in `App.tsx`), so the message must never
-/// vary by call site.
+/// The frontend matches this refusal by its "MiB limit" substring
+/// (`loadPdfFromPath` in `App.tsx`), so every call site shares one wording.
 fn size_limit_error() -> String {
     format!(
         "PDF file exceeds the {} MiB limit",
@@ -40,9 +38,8 @@ fn size_limit_error() -> String {
     )
 }
 
-/// A bounded operation's completed work, streamed to the WebView over a Tauri
-/// channel. Both values count work units rather than bytes: pages for owned
-/// content, and source/finishing stages for a merge.
+/// Counts work units rather than bytes: pages for owned content, and
+/// source/finishing stages for a merge.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfProgress {
@@ -68,25 +65,21 @@ pub struct PdfDocumentInfo {
     path: Option<String>,
 }
 
-/// Fresh metadata after a page-structure change. The frontend holds no mirror
-/// of the page list to patch, so it replaces its copy wholesale.
+/// The frontend holds no mirror of the page list to patch, so it replaces its
+/// copy wholesale after every structure change.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfStructureUpdate {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
-    /// Whether any page another file brought in is still in the document —
-    /// which, like a watermark, leaves it export-only. The frontend's save key
-    /// reads this instead of replaying its own history, so it asks exactly the
-    /// question `save` refuses on.
+    /// Like a watermark, any page another file brought in leaves the document
+    /// export-only; the frontend's save key reads this, not its own history.
     has_merged_pages: bool,
 }
 
-/// What an insert brought in: how many pages the source held, and the fresh
-/// document metadata. The frontend chose the position, but `page_count` is the
-/// one thing it cannot know until the backend has read the file — and what its
-/// undo needs to know which pages to take back out.
+/// `page_count` is the one thing the frontend cannot know until the file is
+/// read — and what its undo needs to know which pages to take back out.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InsertOutcome {
@@ -94,9 +87,8 @@ pub struct InsertOutcome {
     update: PdfStructureUpdate,
 }
 
-/// How a guided merge turns its sources' bookmarks into the merged document's
-/// outline. Every mode but `None` needs an outline written, which PDFium cannot
-/// do — see `outline.rs`.
+/// How a merge turns its sources' bookmarks into the merged outline. Every
+/// mode but `None` needs an outline written, which PDFium cannot do.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeBookmarks {
@@ -112,9 +104,6 @@ pub enum MergeBookmarks {
     PerFileWithExisting,
 }
 
-/// Everything a guided merge is asked for besides its progress channel, in one
-/// argument: the command takes more settings than a signature comfortably holds,
-/// and they are one answer from one wizard rather than four unrelated ones.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MergePlan {
@@ -127,8 +116,8 @@ pub struct MergePlan {
     bookmarks: MergeBookmarks,
 }
 
-/// The same, for the export that watermarks each file rather than merging them:
-/// there is no order to keep and no outline to build, so it asks for less.
+/// The watermarked export's counterpart: no order to keep and no outline to
+/// build, so it asks for less than a merge.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatermarkCopiesPlan {
@@ -139,10 +128,8 @@ pub struct WatermarkCopiesPlan {
     watermark: Option<WatermarkConfig>,
 }
 
-/// What a merge reads one of its sources as. An image has no pages of its own:
-/// it is laid on a sheet, which is what the wizard's row says it will become.
-/// A Word document arrives as the PDF this machine's own office suite made of
-/// it — the only renderer its layout can be trusted to.
+/// An image is laid on a sheet of its own; a Word document arrives as the PDF
+/// this machine's office suite made of it — the only renderer it can be trusted to.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeSourceKind {
@@ -156,14 +143,12 @@ pub enum MergeSourceKind {
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeSourceError {
-    /// No application that can convert a Word document is installed.
     ConverterMissing,
-    /// The installed applications could not convert this file.
     ConversionFailed,
 }
 
-/// What one candidate file of a guided merge holds, read before anything is
-/// merged so the wizard can show page counts and total up the result.
+/// Read before anything is merged, so the wizard can show page counts and
+/// total up the result.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfFileSummary {
@@ -181,32 +166,26 @@ pub struct PdfFileSummary {
     error: Option<MergeSourceError>,
 }
 
-/// What an export wrote and where it stands relative to the document's source.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportOutcome {
     path: String,
-    /// Whether the write landed on the document's own source path — true for a
-    /// byte-opened document's first export too, which adopts its destination as
-    /// the source. This, not the operation's name, is what decides whether the
-    /// history counts as saved.
+    /// True for a byte-opened document's first export too, which adopts its
+    /// destination as the source; this, not the operation's name, marks saved.
     saved_to_source: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
 struct PdfPageInfo {
-    // `width`/`height` are the displayed dimensions (the page's intrinsic
-    // `/Rotate` already applied), matching the rendered bitmap. `rotation` is
-    // the clockwise rotation in degrees (0/90/180/270) so the frontend can
-    // orient the text layer to match.
+    // `width`/`height` are displayed dimensions (`/Rotate` already applied),
+    // matching the rendered bitmap; `rotation` orients the frontend text layer.
     width: f32,
     height: f32,
     rotation: f32,
 }
 
-/// A run of text on a page together with its bounding box, expressed in
-/// *unrotated* page points with a top-left origin. The frontend rotates the
-/// whole text layer by the page's rotation, so spans stay in unrotated space.
+/// A text run's bounding box in *unrotated* page points, top-left origin: the
+/// frontend rotates the whole text layer by the page's rotation.
 #[derive(Serialize)]
 pub struct PdfTextSpan {
     text: String,
@@ -216,9 +195,8 @@ pub struct PdfTextSpan {
     height: f32,
 }
 
-/// A rectangle in the same space `PdfTextSpan` reports text in: *unrotated* page
-/// points with a top-left origin. Every annotation is placed in these terms, so
-/// a caller never has to know which way PDFium counts its own axes.
+/// *Unrotated* page points with a top-left origin, so callers never have to
+/// know which way PDFium counts its own axes.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PagePointsRect {
@@ -228,9 +206,8 @@ pub struct PagePointsRect {
     height: f32,
 }
 
-/// One occurrence of a search term on a page. A wrapped occurrence has one
-/// rectangle per line; keeping those rectangles together is what makes the
-/// result counter advance by occurrences rather than by the lines they cross.
+/// One occurrence; a wrapped one has a rectangle per line, kept together so
+/// the result counter advances by occurrences rather than lines.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfSearchMatch {
@@ -238,9 +215,8 @@ pub struct PdfSearchMatch {
     rects: Vec<PagePointsRect>,
 }
 
-/// A document search can be stopped when its term changes. Partial matches are
-/// never returned as a result for the new term; `cancelled` lets the frontend
-/// quietly discard the interrupted run.
+/// A search can be stopped when its term changes; `cancelled` lets the
+/// frontend discard the interrupted run's partial matches.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfSearchOutcome {
@@ -251,9 +227,8 @@ pub struct PdfSearchOutcome {
     matches: Vec<PdfSearchMatch>,
 }
 
-/// How a rectangle annotation is drawn: a block of `color` with `opacity` on
-/// its alpha. There is no border and no corner radius — a rectangle covers what
-/// is under it, and the reader picks how much of it still shows through.
+/// A block of `color` with `opacity` on its alpha — no border or radius: the
+/// reader picks how much of what is under it still shows through.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RectStyle {
@@ -276,9 +251,8 @@ enum RectEffectKind {
     Blur,
 }
 
-/// A point in the same space `PagePointsRect` uses: *unrotated* page points with
-/// a top-left origin. A note is placed by its top-left corner, where the reader
-/// clicked, rather than by the text baseline PDFium draws from.
+/// The same space `PagePointsRect` uses. A note is placed by its top-left
+/// corner — where the reader clicked — not the baseline PDFium draws from.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PagePoint {
@@ -286,9 +260,8 @@ pub struct PagePoint {
     top: f32,
 }
 
-/// How a text note is drawn. There is no family to pick: Latin text is drawn in
-/// Helvetica, and anything else in whichever face the machine can actually
-/// embed, so a control here would have offered a choice a note might not get.
+/// No family to pick: Latin text draws in Helvetica, anything else in a face
+/// the machine can embed — a control would offer a choice a note might not get.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextNoteStyle {

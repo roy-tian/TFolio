@@ -29,15 +29,8 @@ export function ZoomControls({
 }: ZoomControlsProps) {
   const { t } = useTranslation()
 
-  // The button offers the fit the reader does not have, so its icon and label
-  // both name what pressing it will do. Whether a fit is on at all is what the
-  // pressed state carries.
-  //
-  // Both fits are drawn as the frame the page is being fitted into — all four
-  // corners for the page, the two side edges alone for the width. An arrow
-  // would name the direction more plainly, but it is the one icon in the
-  // toolbar with no border, and next to the other it reads as a different kind
-  // of control rather than the same one in its other position.
+  // Offers the fit the reader does not have — icon and label name what pressing
+  // does — and both fits draw a frame, an arrow reading as a different control.
   const fitActive = isFitActive(zoomMode)
   const nextFit = nextFitMode(zoomMode)
   const FitIcon = nextFit === "fit-width" ? Brackets : Maximize
@@ -47,10 +40,8 @@ export function ZoomControls({
   const zoomOutLabel = t("toolbar.zoomOut")
   const zoomInLabel = t("toolbar.zoomIn")
 
-  // Which fit is on belongs here rather than on the fit button, whose name is
-  // the fit it would switch *to*. Naming it that and marking it pressed would
-  // have a screen reader announce "fit page, pressed" while fit-width is what
-  // is actually on.
+  // Which fit is on belongs here: the button's name is the fit it would switch
+  // *to*, so "pressed" there would announce the fit that is not on.
   const groupLabel =
     zoomMode === "fit-width"
       ? t("toolbar.zoomLevelFitWidth", { percent: zoomPercent })
@@ -59,12 +50,8 @@ export function ZoomControls({
         : t("toolbar.zoomLevel", { percent: zoomPercent })
 
   return (
-    // Three actions, no readout: a figure sitting in the toolbar is read once
-    // and then ignored, so the viewport flashes it on each zoom instead. The
-    // group's own name is what keeps it available to a screen reader, and it
-    // belongs on the group rather than on any one button, whose label has to
-    // stay the action it performs — so entering the group reads the level once
-    // instead of re-reading it on every notch.
+    // Three actions, no readout: a toolbar figure is read once then ignored, so
+    // the viewport flashes it; the group's name holds the level for a reader.
     <ButtonGroup aria-label={groupLabel}>
       <ToolbarTooltip label={zoomOutLabel}>
         <Button
@@ -95,15 +82,8 @@ export function ZoomControls({
           disabled={disabled}
           onClick={onToggleFit}
           size="icon"
-          // Filled while a fit is on, which the group's own name spells out. Not a
-          // Toggle, and not aria-pressed: this cycles rather than toggles, and its
-          // name is the fit it moves to, not the one it would be reporting.
-          //
-          // A Toggle would also be the wrong shape here — its outline variant is
-          // unfilled where Button's is, which reads as a hole in a joined group.
-          // Secondary resolves to the same colour the view-mode group marks its
-          // own selection with, so the two groups agree. Keep the outline colour
-          // explicit because the secondary variant otherwise makes it transparent.
+          // Not a Toggle and no aria-pressed: it cycles, naming the fit it moves
+          // to. The border stays explicit — secondary would make it transparent.
           variant={fitActive ? "secondary" : "outline"}
         >
           <FitIcon />

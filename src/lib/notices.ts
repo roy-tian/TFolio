@@ -1,13 +1,6 @@
 /**
- * Everything the app says in the corner of the window.
- *
- * A message goes to the corner when the reader has already moved on from the
- * control that caused it: a refusal from a menu item, a keypress or a drop, the
- * outcome of an edit whose dialog has closed, a standing offer like the update.
- * A message stays where it was caused when what it is about is still on screen —
- * a field's own error under the offending input, a dialog's own band for a
- * refusal of the whole dialog, a panel's own line for a panel's own failure.
- * The test is whether the reader can still see the thing being talked about.
+ * The corner is for what the reader has moved on from; what is still on screen
+ * keeps its message where it was caused.
  */
 
 import type { ParseKeys } from "i18next"
@@ -15,20 +8,16 @@ import type { ParseKeys } from "i18next"
 import type { PdfProgress } from "@/lib/progress"
 import type { AppUpdateStatus } from "@/lib/update"
 
-/** How long a transient notice is given, once it is in front of the reader. */
 export const NOTICE_LIFE_MS = 5_000
 
-/** What the corner will hold at once. A standing notice is never dropped for
-    the count: each one is an offer, and there is no answering what is gone. */
+/** A standing notice is never dropped for the count: each one is an offer,
+    and there is no answering what is gone. */
 export const NOTICE_LIMIT = 3
 
-/** A refusal, a caution, good news, and a plain report of what just happened.
-    Red is for work that broke: something was attempted and could not be done.
+/** Red is for work that broke: something was attempted and could not be done.
     Amber is for a condition — nothing was lost, and the way on is in the words. */
 export type NoticeTone = "danger" | "info" | "success" | "warning"
 
-/** A transient notice reports an event and leaves; a standing one describes a
-    condition, and lives until it is dismissed or its source takes it back. */
 export type NoticeLife = "standing" | "transient"
 
 export type NoticeOwner =
@@ -37,9 +26,8 @@ export type NoticeOwner =
 
 export const workspaceOwner: NoticeOwner = { scope: "workspace" }
 
-/** What a notice's button does. Named rather than passed as a function, so a
-    notice stays a plain value: the work belongs to whoever can still do it,
-    which for a document is a session the workspace reaches through its handle. */
+/** Named rather than passed as a function, so a notice stays a plain value:
+    the work belongs to whoever can still do it. */
 export type NoticeActionKind =
   | "noteFont"
   | "updateDownload"
@@ -47,31 +35,20 @@ export type NoticeActionKind =
   | "updateRetry"
 
 export type NoticeAction = {
-  /** Pressed and still working: the label changes and the button locks. */
   busy?: boolean
   kind: NoticeActionKind
 }
 
 type NoticeEntry = {
-  /** A second line under the message. */
   detailKey?: ParseKeys
   life: NoticeLife
-  /** What this notice replaces, where that is not itself. The grid's six
-      clipboard notices are one running report of the last press, not six
-      messages that can stand together. */
+  /** What this notice replaces, where that is not itself: the grid's six
+      clipboard notices are one running report, not six that stand together. */
   slot?: string
   textKey: ParseKeys
   tone: NoticeTone
 }
 
-/**
- * Every message the corner can carry, with the two things a reader notices
- * about one: how loud it is, and whether it waits for them.
- *
- * Tones are transcribed from the colours these messages already had, not
- * re-judged. `warning` completes the scale and is what the merge wizard's
- * setting notes are drawn in.
- */
 export const noticeCatalogue = {
   annotateFailed: {
     life: "transient",
@@ -200,7 +177,6 @@ export const noticeCatalogue = {
 
 export type NoticeKind = keyof typeof noticeCatalogue
 
-/** The words on each button, so no call site spells its own. */
 export const noticeActions = {
   noteFont: {
     busyLabelKey: "annotate.noteFontFetching",
@@ -214,9 +190,8 @@ export const noticeActions = {
   { busyLabelKey?: ParseKeys; labelKey: ParseKeys }
 >
 
-/** Every refusal a document can hold. A mark that lands puts them all behind
-    the reader, and the grid's clipboard notices are not among them: those
-    report what worked, and nothing later disproves them. */
+/** A mark that lands puts every refusal behind the reader; the grid's
+    clipboard notices report what worked, and nothing later disproves them. */
 export const documentRefusals = [
   "annotateFailed",
   "editInFlight",
@@ -281,8 +256,7 @@ export function isPageNotice(kind: NoticeKind): boolean {
   return noticeEntry(kind).slot === "pageClipboard"
 }
 
-/** Puts an announcement in its slot. A slot already taken keeps its place in
-    the stack and is given a new lifetime. */
+/** A slot already taken keeps its place in the stack and gets a new lifetime. */
 export function raiseNotice(
   list: readonly Notice[],
   input: NoticeInput,
@@ -302,7 +276,6 @@ export function raiseNotice(
     : [...list, raised]
 }
 
-/** The reader's press on the X, and the row's own expiry. */
 export function dismissNotice(list: readonly Notice[], id: string): Notice[] {
   const kept = list.filter((notice) => notice.id !== id)
 
@@ -310,8 +283,7 @@ export function dismissNotice(list: readonly Notice[], id: string): Notice[] {
 }
 
 /** What a source takes back: everything an owner holds, or only the kinds
-    named — through any of the kinds sharing a slot, since one of them at most
-    is ever up. */
+    named — through any kind sharing a slot, since one at most is ever up. */
 export function retractNotices(
   list: readonly Notice[],
   owner: NoticeOwner,
@@ -335,13 +307,8 @@ function ownedBy(notice: Notice, owner: NoticeOwner): boolean {
 }
 
 /**
- * What the corner shows for the tab in front: the workspace's own notices, and
- * the leading document's. Another document's are held rather than lost — its
- * tab shows them when it comes back.
- *
- * Standing first and transient last, each oldest first. The stack grows
- * downward, so a new transient lands at the foot of it and moves nothing: the
- * rows carrying a button are the standing ones, and they are the ones pinned.
+ * The workspace's and the leading document's; another document's are held for
+ * its tab, not lost. Standing rows lead, so a new transient moves no button.
  */
 export function visibleNotices(
   list: readonly Notice[],
@@ -354,12 +321,8 @@ export function visibleNotices(
 }
 
 /**
- * The transients this tab has no room for, which their raiser is expected to
- * drop rather than park.
- *
- * A row nobody can see runs no clock, so one left in the list would come back
- * once the rows above it expired — long after what it reports. A document whose
- * tab is away is a different case: those are held, not overflowing.
+ * The transients this tab has no room for, which their raiser drops: a row
+ * nobody sees runs no clock and would come back long after what it reports.
  */
 export function overflowNotices(
   list: readonly Notice[],
@@ -397,13 +360,8 @@ function stackNotices(
   }
 }
 
-/**
- * The release check as a notice, or none while there is nothing to say.
- *
- * Derived rather than raised, because the check belongs to the backend and is
- * shared by every window: what this window puts in the corner is only what it
- * has been told and what its reader has waved away.
- */
+/** Derived rather than raised: the backend owns the check for every window,
+    so the corner shows only what it was told and what its reader waved away. */
 export function updateNotice(update: {
   installFailed: boolean
   status: AppUpdateStatus

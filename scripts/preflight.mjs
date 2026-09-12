@@ -1,13 +1,5 @@
-// Local release pre-flight: every single-platform check CI runs, plus a real
-// bundle for the current OS. Run it before tagging a release so type, lint,
-// test, compile, and bundling failures surface locally instead of as a failed
-// GitHub Actions run an hour later.
-//
-// It deliberately does NOT cover other operating systems — `tauri:bundle` here
-// only proves the bundler works on whatever you are running. To validate the
-// Windows MSI, macOS dmgs, and Linux packages, trigger the "Bundle dry-run"
-// workflow (.github/workflows/bundle-dry-run.yml), which runs this same
-// bundling step on all four release targets without publishing anything.
+// Run before tagging a release: every single-platform check CI runs, plus a real
+// bundle for this OS. Cross-platform bundles are the Bundle dry-run workflow's job.
 import path from "node:path"
 import process from "node:process"
 import { spawnSync } from "node:child_process"

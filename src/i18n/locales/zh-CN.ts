@@ -262,10 +262,6 @@ const zhCN = {
     title: "设置",
     description: "调整外观、语言等应用设置。",
     appearance: "外观",
-    imports: "导入",
-    wordConversion: "用本机 Office 软件转换 Word 文档",
-    wordConversionHint:
-      "导入向导会调用 Microsoft Word、WPS Office 或 LibreOffice，把加入的 Word 文档先转成 PDF。关闭后，向导只接受 PDF 和图片。",
     about: "关于",
     theme: "主题",
     themeHint: "选择明亮或暗黑外观。",
@@ -306,8 +302,7 @@ const zhCN = {
     deleteSelected: "删除选中的 {{count}} 页",
     insertBefore: "在第 {{pageNumber}} 页前插入空白页",
     insertAtEnd: "在末尾插入空白页",
-    /** The right-click menu on a page, which acts on the whole selection.
-        Chinese has one plural form, so `_one` never renders: keep it identical. */
+    /** Chinese has one plural form, so `_one` never renders: keep it identical. */
     cut_one: "剪切 {{count}} 页",
     cut_other: "剪切 {{count}} 页",
     copy_one: "复制 {{count}} 页",
@@ -316,7 +311,6 @@ const zhCN = {
     rotate_other: "旋转 {{count}} 页",
     pasteBefore: "粘贴到第 {{pageNumber}} 页前",
     pasteAtEnd: "粘贴到末尾",
-    /** The notices: what was taken, and where a paste put it. */
     cutNotice_one: "已剪切 {{count}} 页（第 {{pages}} 页）",
     cutNotice_other: "已剪切 {{count}} 页（第 {{pages}} 页）",
     copiedNotice_one: "已复制 {{count}} 页（第 {{pages}} 页）",
@@ -340,8 +334,10 @@ const zhCN = {
     stepWatermark: "水印",
     filesDescription:
       "PDF、图片和 Word 文档会按放下的顺序加入向导的列表。Word 文档会在加入时由本机 Office 软件转换为 PDF。",
+    filesDescriptionPlain: "PDF 和图片会按放下的顺序加入向导的列表。",
     addFiles: "添加文件",
     addingFiles: "正在添加文件……Word 文档会随添加转换为 PDF。",
+    addingFilesPlain: "正在添加文件……",
     sourceFilter: "PDF、图片和 Word 文档",
     sourceFilterPlain: "PDF 与图片",
     empty: "还没有文件。至少添加两个 PDF 才能合并；图片会各自转换成一页。",
@@ -354,6 +350,7 @@ const zhCN = {
     pageCount_other: "{{count}} 页",
     unreadable: "无法读取",
     errorConverterMissing: "需要安装 Word、WPS 或 LibreOffice",
+    errorConverterMissing_windows: "需要安装 Microsoft Word 或 WPS Office",
     errorConversionFailed: "转换失败",
     remove: "移除 {{name}}",
     fileCount_one: "{{count}} 个文件",
@@ -419,6 +416,7 @@ const zhCN = {
     title: "TFolio",
     description: "专注于阅读和编辑 PDF 文件的桌面工作空间。",
     version: "版本 {{version}}",
+    prerelease: "(内部测试版)",
     copyright: "版权所有 © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema<typeof en>

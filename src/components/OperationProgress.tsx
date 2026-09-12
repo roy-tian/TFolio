@@ -17,8 +17,6 @@ type OperationProgressProps = {
   testId?: string
 }
 
-/** One accessible, determinate progress treatment for the app's long
-    operations — a PDF the engine is working through, or an update arriving. */
 export function OperationProgress({
   className,
   label,

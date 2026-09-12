@@ -195,10 +195,8 @@ describe("TFolio document watermark", () => {
       { timeout: 30_000, timeoutMsg: "the thumbnail did not refresh" },
     )
 
-    // A watermark this app can no longer lift once the file closes never gets
-    // written back over the file it came from; only an exported copy carries it.
-    // The title says which rule is holding the item down, since a clean document
-    // and a document with no file of its own disable it too.
+    // A watermark the app can no longer lift saves only to copies; the tooltip
+    // names that rule, since a clean or pathless document disables the item too.
     const save = await appMenuItem("save")
     expect(await save.getAttribute("data-disabled")).not.toBe(null)
     expect(await tooltipOn("[data-action='save']")).toContain(

@@ -3,7 +3,6 @@ import { flushSync } from "react-dom"
 
 import type { RenderEpochs } from "@/lib/annotations"
 
-/** What every held preview has to carry for a page's pixels to retire it. */
 export type ReleasedPreview = {
   id: number
   pageNumber: number
@@ -12,12 +11,8 @@ export type ReleasedPreview = {
 }
 
 /**
- * Keeps a finished mark on the page until the bitmap carrying it is painted.
- *
- * A command's pixels are a round trip and a decode away, so a tool that dropped
- * its preview when the gesture ended would blank the mark for that whole gap.
- * Held previews are retired by the page itself, not by a timer or the promise:
- * only the paint knows when the pixels underneath them arrived.
+ * A command's pixels are a round trip and a decode away, so the preview stays
+ * until the page's own paint — not a timer or the promise — retires it.
  */
 export function useReleasedPreviews<Preview extends ReleasedPreview>() {
   const [previews, setPreviews] = useState<Preview[]>([])

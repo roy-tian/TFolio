@@ -8,27 +8,18 @@ import { cn } from "@/lib/utils"
 const HOLD_MS = 900
 
 type ZoomIndicatorProps = {
-  /** Bumped by every zoom the reader asks for — a button, or a pinch settling
-   *  — including one that resolves to the level already showing: pressing `+`
-   *  at the maximum still answers. */
+  /** Bumped by every zoom the reader asks for, including one that resolves to
+      the level already showing: pressing `+` at the maximum still answers. */
   flash: number
   percent: number
 }
 
-/**
- * The zoom level, flashed over the middle of the viewport and faded out again.
- * It answers the button that was just pressed, where a permanent readout in the
- * toolbar would sit there being read long after anyone cared.
- *
- * Silent to a screen reader: the level is already on the zoom group's own name,
- * which is where a reader who cannot see this looks for it.
- */
+/** Flashed over the viewport then faded: it answers the press just made, where
+    a permanent toolbar readout would sit there being read long after. */
 export function ZoomIndicator({ flash, percent }: ZoomIndicatorProps) {
   const [visible, setVisible] = useState(false)
-  // What was last answered, so only a *turn* of the counter flashes. Seeded
-  // from the counter as it stands, because a mount is not a zoom: the reader
-  // opening a document, or coming back to the page from the thumbnail grid,
-  // asked for no level and must not be shown one.
+  // Seeded from the counter as it stands, because a mount is not a zoom: only a
+  // *turn* of the counter may flash.
   const answeredRef = useRef(flash)
 
   useEffect(() => {
@@ -55,10 +46,8 @@ export function ZoomIndicator({ flash, percent }: ZoomIndicatorProps) {
       data-slot="zoom-indicator"
       data-visible={visible}
     >
-      {/* Dark in both themes, unlike everything else in the app. What this sits
-          over is the page, not the chrome: paper is light whichever theme is
-          on, so a card that followed the theme would be white on white the
-          moment the reader was in daylight mode. */}
+      {/* Dark in both themes: this sits over the page, and paper is light
+          whichever theme is on — a themed card would be white on white. */}
       <Card className="bg-zinc-900/75 text-zinc-50 shadow-xl ring-white/15 backdrop-blur-sm">
         <CardContent className="font-mono text-2xl font-semibold tabular-nums">
           {percent}%

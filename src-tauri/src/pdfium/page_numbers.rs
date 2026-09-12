@@ -1,31 +1,23 @@
 use serde::{Deserialize, Serialize};
 
-/// The one point size page numbers are ever set in — 宋体 11 pt. Not exposed in
-/// the dialog; a double-sided contract mirrored by `src/lib/pageNumbers.ts`.
+/// Not exposed in the dialog; a double-sided contract mirrored by
+/// `src/lib/pageNumbers.ts`.
 pub(super) const FONT_SIZE: f32 = 11.0;
-/// The gap from the displayed page's bottom edge to the number's bounds, in
-/// points: 1.8 cm. Measured in display space, so a `/Rotate`d page still counts
-/// from the edge the reader sees at the bottom.
+/// Measured in display space, so a `/Rotate`d page still counts from the edge
+/// the reader sees at the bottom.
 pub(super) const BOTTOM_MARGIN: f32 = 51.02;
-/// The gap from the displayed page's side edge to the number's bounds, in
-/// points: 2.54 cm. Used by the right- and left-anchored positions.
 pub(super) const SIDE_MARGIN: f32 = 72.0;
-/// A custom starting number is held to this ceiling, so an absurd value cannot
-/// blow the label out of the page. A double-sided contract with the frontend.
+/// A double-sided contract with the frontend.
 pub(super) const MAX_START: i32 = 99_999;
-/// Below this average relative luminance the drop is dark, so the number is set
-/// in white; at or above it, black. A constant, not exposed.
 const LUMINANCE_THRESHOLD: f32 = 0.5;
-/// Below this relative luminance a sampled pixel counts as ink, so a page
-/// carrying it is not blank. Well above the smart-colour threshold: the
-/// question here is "did anything print", not "is this dark".
+/// Well above the smart-colour threshold: the question is "did anything print",
+/// not "is this dark".
 const BLANK_INK_LUMINANCE: f32 = 0.9;
 /// The share of sampled pixels that may still be ink on a page called blank, so
 /// a speck of scanner noise does not make a sheet count as a printed page.
 const BLANK_INK_TOLERANCE: f32 = 0.001;
-/// How much of the page's bottom the blank test ignores: the band a page number
-/// of ours sits in. Without it a second apply would read its own first label as
-/// content — at the cost of calling a page whose only mark is a footer blank.
+/// The band our own page number sits in: without it a second apply would read
+/// its first label as content.
 const BLANK_SCAN_SKIRT: f32 = BOTTOM_MARGIN + FONT_SIZE * 1.5;
 
 const WHITE_INK: &str = "#FFFFFF";
@@ -37,26 +29,18 @@ pub struct PageNumbersConfig {
     pub(super) mode: PageNumbersMode,
     /// Used only by `Single`; ignored for `Duplex`, which mirrors by page parity.
     pub(super) position: PageNumbersPosition,
-    /// `None` numbers every page; `Some` is a 1-based inclusive range.
     pub(super) range: Option<(i32, i32)>,
-    /// `None` prints each page's own document position; `Some(x)` prints `x` on
-    /// the range's first page and counts up from there.
     pub(super) start: Option<i32>,
     pub(super) smart_color: bool,
-    /// Whether a page that renders blank prints the number it took. Reading it
-    /// costs a render per page, so both flags on — the default — skips the test
-    /// altogether and every page in range is numbered.
+    /// Reading it costs a render per page, so both flags on skips the test.
     pub(super) blank_numbered: bool,
-    /// Whether a page that renders blank takes a number from the sequence at
-    /// all. A page that takes none has nothing to print, so this off implies
-    /// `blank_numbered` off, whatever the caller sent.
+    /// A page that takes no number has nothing to print, so this off implies
+    /// `blank_numbered` off.
     pub(super) blank_counted: bool,
 }
 
-/// The part of a config that belongs to the reader rather than to one document:
-/// what `settings.rs` keeps between runs. Mirrored by
-/// `PageNumbersPreferences` in `src/lib/pageNumbers.ts`; the range and the
-/// starting number are deliberately not here, being about one document.
+/// What `settings.rs` keeps between runs, mirrored by `PageNumbersPreferences`
+/// in `src/lib/pageNumbers.ts`; the range and start stay per-document.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PageNumbersPreferences {
@@ -81,9 +65,6 @@ pub enum PageNumbersPosition {
     BottomRight,
 }
 
-/// Where a page's number sits along the bottom edge, in display space. `Single`
-/// resolves to the reader's chosen position; `Duplex` mirrors odd pages right
-/// and even pages left, by physical (document) page position.
 // Every anchor is along the bottom edge, so the shared prefix is the point.
 #[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,9 +74,8 @@ pub(super) enum PageNumberAnchor {
     BottomLeft,
 }
 
-/// A target centre for a number's measured bounds, in unrotated page space —
-/// the same space `WatermarkPlacement` uses, so the shared placement helper can
-/// position both.
+/// Unrotated page space, the same space `WatermarkPlacement` uses, so one
+/// placement helper can position both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct PageNumberPlacement {
     pub(super) center_x: f32,
@@ -113,9 +93,8 @@ pub(super) struct DisplayBox {
 }
 
 impl PageNumbersConfig {
-    /// Validates every value that crossed the WebView boundary against the
-    /// document it will number. Enums are guaranteed by serde; there is no page
-    /// cap because one page takes exactly one object.
+    /// Enums are guaranteed by serde, and there is no page cap because one page
+    /// takes exactly one object.
     pub(super) fn validated(self, page_count: i32) -> Result<Self, String> {
         if let Some((from, to)) = self.range {
             if !(from >= 1 && from <= to && to <= page_count) {
@@ -138,7 +117,6 @@ impl PageNumbersConfig {
         self.smart_color
     }
 
-    /// Whether this 1-based document page is inside the numbered range.
     pub(super) fn covers(&self, page_number: i32) -> bool {
         match self.range {
             Some((from, to)) => page_number >= from && page_number <= to,
@@ -150,16 +128,12 @@ impl PageNumbersConfig {
         self.range.map_or(1, |(from, _)| from)
     }
 
-    /// Whether a page has to be rendered to decide what it gets. Both rules on
-    /// — the default — treat every page in range alike, so nothing is sampled.
     pub(super) fn needs_blank_scan(&self) -> bool {
         !self.blank_numbered || !self.blank_counted
     }
 
-    /// Where a 1-based document page's number sits. Odd/even for `Duplex` is the
-    /// physical page position — the side a double-sided print binds it on — and
-    /// so is decided here, not by the printed number, which a custom start can
-    /// shift out of step.
+    /// `Duplex` odd/even follows the physical page — the binding side — not the
+    /// printed number, which a custom start can shift out of step.
     pub(super) fn anchor(&self, page_number: i32) -> PageNumberAnchor {
         match self.mode {
             PageNumbersMode::Single => match self.position {
@@ -181,11 +155,8 @@ fn label(printed: i32) -> String {
     format!("— {printed} —")
 }
 
-/// Hands out the label each page prints, walking the document in order.
-///
-/// A walk rather than a formula because a blank page may take no number: what a
-/// page prints then depends on how many pages before it were counted, not on
-/// its own position in the document.
+/// A walk rather than a formula: a blank page may take no number, so what a
+/// page prints depends on the pages before it.
 pub(super) struct PageNumbering<'a> {
     config: &'a PageNumbersConfig,
     next: i32,
@@ -199,12 +170,6 @@ impl<'a> PageNumbering<'a> {
         }
     }
 
-    /// Advances past a 1-based document page and returns the label it prints.
-    ///
-    /// A page outside the range never enters the sequence. A blank one enters
-    /// it only when blank pages are counted, and prints only when they are also
-    /// numbered — so an uncounted blank page silently prints nothing, which is
-    /// the only coherent reading of "not counted but numbered".
     pub(super) fn advance(&mut self, page_number: i32, blank: bool) -> Option<String> {
         if !self.config.covers(page_number) || (blank && !self.config.blank_counted) {
             return None;
@@ -217,10 +182,6 @@ impl<'a> PageNumbering<'a> {
     }
 }
 
-/// The part of a page the blank test looks at: everything above the band a page
-/// number of ours would sit in, in display space with a top-left origin. `None`
-/// when the page is too short to have anything above that band, so there is
-/// nothing to sample.
 pub(super) fn blank_scan_box(display_width: f32, display_height: f32) -> Option<DisplayBox> {
     let height = display_height - BLANK_SCAN_SKIRT;
 
@@ -232,9 +193,8 @@ pub(super) fn blank_scan_box(display_width: f32, display_height: f32) -> Option<
     })
 }
 
-/// Whether a run of RGBA pixels carries no ink worth calling content. Pixels are
-/// composited over white first, so a page whose only "content" is transparent
-/// still reads blank.
+/// Pixels are composited over white first, so a page whose only "content" is
+/// transparent still reads blank.
 pub(super) fn is_blank_sample(rgba: &[u8]) -> bool {
     let mut ink = 0u32;
     let mut count = 0u32;
@@ -252,9 +212,6 @@ pub(super) fn is_blank_sample(rgba: &[u8]) -> bool {
     ink as f32 <= count as f32 * BLANK_INK_TOLERANCE
 }
 
-/// The natural upright size of the label as the reader sees it, from the
-/// measured bounds of the object after it was turned to cancel the page's
-/// `/Rotate`: a 90°/270° page swaps the object's width and height back.
 fn upright_text_size(rotation: f32, bounds_width: f32, bounds_height: f32) -> (f32, f32) {
     match rotation as i32 {
         90 | 270 => (bounds_height, bounds_width),
@@ -262,7 +219,6 @@ fn upright_text_size(rotation: f32, bounds_width: f32, bounds_height: f32) -> (f
     }
 }
 
-/// The displayed page size, `/Rotate` applied, from the unrotated size.
 fn display_size(rotation: f32, unrotated_width: f32, unrotated_height: f32) -> (f32, f32) {
     match rotation as i32 {
         90 | 270 => (unrotated_height, unrotated_width),
@@ -270,8 +226,6 @@ fn display_size(rotation: f32, unrotated_width: f32, unrotated_height: f32) -> (
     }
 }
 
-/// The label's centre in display space (bottom-left origin): the bottom margin
-/// above the bottom edge, and the anchor's own horizontal rule.
 fn display_center(
     display_width: f32,
     text_width: f32,
@@ -288,9 +242,8 @@ fn display_center(
     (center_x, center_y)
 }
 
-/// The unrotated-space centre to translate the measured object onto so it lands
-/// at the display position. The inverse of the `/Rotate` a render applies, so a
-/// number is upright and correctly placed on a page turned any of the four ways.
+/// The inverse of the `/Rotate` a render applies, so the number lands upright
+/// at the display position on a page turned any of the four ways.
 pub(super) fn page_number_center(
     unrotated_width: f32,
     unrotated_height: f32,
@@ -316,8 +269,6 @@ pub(super) fn page_number_center(
     }
 }
 
-/// The label's box in the rendered (display, top-left) bitmap, so the smart
-/// colour sampler crops exactly the drop the number will cover.
 pub(super) fn page_number_display_box(
     unrotated_width: f32,
     unrotated_height: f32,
@@ -363,8 +314,6 @@ pub(super) fn average_luminance(rgba: &[u8]) -> f32 {
     }
 }
 
-/// The ink a drop of this average luminance calls for: white on a dark drop,
-/// black otherwise.
 pub(super) fn ink_color(average_luminance: f32) -> &'static str {
     if average_luminance < LUMINANCE_THRESHOLD {
         WHITE_INK
@@ -389,7 +338,6 @@ mod tests {
         }
     }
 
-    /// The labels a whole document prints, given which of its pages are blank.
     fn walk(config: &PageNumbersConfig, blanks: &[bool]) -> Vec<Option<String>> {
         let mut numbering = PageNumbering::new(config);
 
@@ -457,8 +405,6 @@ mod tests {
         value.range = Some((2, 4));
         value.start = Some(10);
 
-        // The range's first page prints the start and the rest count up; the
-        // pages either side of the range print nothing at all.
         assert_eq!(
             labels(&value, 5),
             vec![
@@ -475,8 +421,6 @@ mod tests {
     fn blank_pages_follow_the_two_rules_they_are_given() {
         let blanks = [false, true, false];
 
-        // Both on — the default — treats a blank page like any other, and asks
-        // for no render at all.
         let both = config();
         assert!(!both.needs_blank_scan());
         assert_eq!(
@@ -488,8 +432,6 @@ mod tests {
             ]
         );
 
-        // Counted but not numbered: the blank page keeps its place in the
-        // sequence, so the page after it still prints 3.
         let mut counted = config();
         counted.blank_numbered = false;
         assert!(counted.needs_blank_scan());
@@ -498,7 +440,6 @@ mod tests {
             vec![Some("— 1 —".to_string()), None, Some("— 3 —".to_string())]
         );
 
-        // Neither: the blank page leaves the sequence, and numbering closes up.
         let mut skipped = config();
         skipped.blank_numbered = false;
         skipped.blank_counted = false;
@@ -523,8 +464,6 @@ mod tests {
         value.blank_numbered = false;
         value.blank_counted = false;
 
-        // The sequence starts at the range's first page — page 2 — and the
-        // blank page inside the range costs it nothing, so page 4 prints 3.
         assert_eq!(
             walk(&value, &[true, false, true, false, true]),
             vec![
@@ -630,11 +569,8 @@ mod tests {
 
     #[test]
     fn right_and_left_anchors_track_the_display_edges_on_a_rotated_page() {
-        // A 90° page: unrotated 600x800 displays as 800x600. The object is
-        // turned -90° to sit upright, so its measured bounds are the upright
-        // 40x11 label's width and height swapped (11 wide, 40 tall). This is the
-        // case the bottom-centre rotation test cannot catch: only a side anchor
-        // makes text_width enter the horizontal placement.
+        // Only a side anchor makes text_width enter the horizontal placement, so
+        // this is the case the bottom-centre rotation test cannot catch.
         let right = page_number_center(
             600.0,
             800.0,
@@ -651,19 +587,16 @@ mod tests {
         assert!((right.center_x - up_from_bottom).abs() < 1e-3);
         assert!((left.center_x - up_from_bottom).abs() < 1e-3);
 
-        // The displayed left/right edges are the unrotated y-axis: the right
-        // anchor lands a side margin in from the 800 pt display width, the left
-        // a side margin in from zero, each pulled in by half the label width.
+        // The displayed side edges are the unrotated y-axis: each anchor lands
+        // a side margin in from its edge, pulled in by half the label width.
         assert!((right.center_y - (800.0 - SIDE_MARGIN - 20.0)).abs() < 1e-3);
         assert!((left.center_y - (SIDE_MARGIN + 20.0)).abs() < 1e-3);
     }
 
     #[test]
     fn places_the_number_in_display_space_on_a_rotated_page() {
-        // A 90° page: unrotated 800x600 displays as 600x800. The bottom-centre
-        // number must land where the reader sees the bottom, whichever way the
-        // page is turned — so its display box's bottom edge is the bottom margin
-        // up from the displayed bottom, on every rotation.
+        // The bottom-centre number must land where the reader sees the bottom,
+        // whichever way the page is turned.
         for rotation in [0.0, 90.0, 180.0, 270.0] {
             let sideways = rotation == 90.0 || rotation == 270.0;
             let (unrotated_width, unrotated_height) = if sideways {
@@ -671,9 +604,8 @@ mod tests {
             } else {
                 (600.0, 800.0)
             };
-            // The object is turned to cancel the page's rotation, so on a
-            // sideways page its measured (unrotated) bounds are the upright
-            // label's width and height swapped.
+            // Turned to cancel the page's rotation, the object's unrotated
+            // bounds are the upright label's width and height swapped.
             let (bounds_width, bounds_height) = if sideways { (11.0, 40.0) } else { (40.0, 11.0) };
             let box_ = page_number_display_box(
                 unrotated_width,
@@ -712,7 +644,6 @@ mod tests {
 
     #[test]
     fn luminance_crosses_at_the_threshold() {
-        // A mid grey either side of the split maps to the two inks.
         let dark = relative_luminance(100, 100, 100);
         let light = relative_luminance(160, 160, 160);
         assert!(dark < LUMINANCE_THRESHOLD);

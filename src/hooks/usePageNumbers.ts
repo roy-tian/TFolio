@@ -17,7 +17,6 @@ type UsePageNumbersOptions = {
   /** Stops the run in flight, which rolls the document back. Resolves to
       whether the backend had one listed to stop. */
   onCancel: () => Promise<boolean>
-  /** Resolves to how the change ended. */
   onSet: (
     config: PageNumbersConfig | null,
     pageCount: number,
@@ -27,9 +26,8 @@ type UsePageNumbersOptions = {
 }
 
 /**
- * What the dialog opens on: the document's own numbers where it has them, and
- * otherwise the style this reader last applied. Both are in hand before the
- * dialog paints — the settings are loaded once, at startup.
+ * The document's own numbers, else the style last applied. Both are in hand
+ * before the dialog paints — settings are read once, at startup.
  */
 function openingDraft(
   activeConfig: PageNumbersConfig | null,
@@ -65,12 +63,8 @@ export function usePageNumbers({
   }, [onCancel])
 
   /**
-   * The run's own progress, and the place a stop it missed is asked again.
-   *
-   * A stop is reachable the moment the dialog paints its progress, which is
-   * before the command behind it has listed itself to be stopped — and an ask
-   * that arrives then reaches nothing. Every event here comes from a run that
-   * *is* listed, so repeating it there costs the reader a page at most.
+   * A stop pressed before the command lists itself reaches nothing, so the ask
+   * is repeated here, where every event comes from a run that *is* listed.
    */
   const trackProgress = useCallback(
     (next: PdfProgress) => {
@@ -100,7 +94,6 @@ export function usePageNumbers({
     [activeConfig, isApplying, pageCount],
   )
 
-  // Opening from the toolbar is just the open half of `onOpenChange`.
   const openDialog = useCallback(() => onOpenChange(true), [onOpenChange])
 
   // One parse feeds both the apply and the error the dialog shows, so the
@@ -120,9 +113,8 @@ export function usePageNumbers({
     setIsApplying(true)
     setIsStopping(false)
     try {
-      // Only a change the document accepted is worth remembering as a style.
-      // A stop leaves the dialog too — the reader asked to be out of it — but
-      // takes nothing with it, since the document is back as it was.
+      // Only an accepted change is worth remembering as a style. A stop also
+      // leaves the dialog, but takes nothing: the document is back as it was.
       const outcome = await onSet(parsed.config, pageCount, trackProgress)
 
       if (outcome === "applied") {
@@ -159,12 +151,8 @@ export function usePageNumbers({
   }, [activeConfig, onSet, pageCount, trackProgress])
 
   /**
-   * The reader's way out of a long run: the backend stops between pages and
-   * rolls the document back, and the apply above then closes the dialog.
-   *
-   * Nothing here waits for that — the ask is what matters, and it is the one
-   * message that does not queue behind the work it is stopping. It is repeated
-   * from the run's progress until the backend answers that it landed.
+   * The ask is the one message that does not queue behind the work it stops;
+   * it is repeated from the run's progress until the backend answers.
    */
   const stop = useCallback(() => {
     if (!isApplying) {

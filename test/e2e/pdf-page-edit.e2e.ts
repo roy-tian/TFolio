@@ -17,9 +17,8 @@ import {
   tooltipOpen,
 } from "./helpers"
 
-/** The panel on screen. Only its cells have a layout, and only its document is
-    the one a gesture means — an unscoped query would find a hidden tab's grid
-    first, since it is still in the tree. */
+/** Only the active document's cells are laid out, and only it is what a gesture
+    means — a hidden tab's grid is still in the tree and would match first. */
 const ACTIVE_GRID = "[data-document-session][data-active='true']"
 
 function thumbCount(scope = "") {
@@ -31,10 +30,8 @@ function thumbCount(scope = "") {
 }
 
 /**
- * A position-sensitive digest of one thumbnail's pixels — what proves which
- * page now sits in a cell, rather than merely that some page does. -1 is a
- * missing cell; -2 a canvas not painted yet, which reads back as solid black
- * and would otherwise pass for a heavily inked page; 0 a painted blank page.
+ * A position-sensitive digest of one thumbnail's pixels. -1 no cell; -2 canvas
+ * not yet painted (solid black would pass for heavy ink); 0 a painted blank.
  */
 function thumbFingerprint(pageNumber: number, scope = "") {
   return browser.execute((page: number, within: string) => {
@@ -99,15 +96,12 @@ async function waitForThumb(
   }
 }
 
-/** Every cell painted and distinct, handed back as position -> fingerprint. */
 async function paintedFingerprints(pageCount: number, scope = "") {
   const fingerprints: number[] = []
 
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-    // Assigning a canvas its size clears it, so a cell read the instant it
-    // first paints can come back blank the moment after. Two equal readings
-    // are what say the bitmap has settled — and the reading kept is one of
-    // them, rather than a third taken after the wait.
+    // Assigning a canvas its size clears it, so a first paint can read blank the
+    // moment after; two equal readings say the bitmap has settled.
     let previous = -1
     let settled = -1
 
@@ -138,9 +132,8 @@ async function paintedFingerprints(pageCount: number, scope = "") {
   return fingerprints
 }
 
-/** Whether the gap shows the solid line that marks where a drop would land. A
-    wrapped gap is drawn twice — at the end of one row and the start of the next
-    — so any one of them showing is the answer. */
+/** Whether the gap shows the line marking where a drop would land; a wrapped
+    gap draws twice — end of one row, start of the next — so any one counts. */
 function dropLineShowing(index: number, scope = "") {
   return browser.execute(
     (at: number, within: string) =>
@@ -193,7 +186,6 @@ function pressEditKey(key: string) {
   }, key)
 }
 
-/** The right-click a page answers with its cut-and-copy menu. */
 async function openThumbMenu(pageNumber: number) {
   await browser.execute((page: number) => {
     const thumb = document.querySelector(`button[data-page-number='${page}']`)!
@@ -220,8 +212,6 @@ function selectedThumbs() {
   )
 }
 
-/** Each cell's shape as the grid draws it: a page turned a quarter of the way
-    round stands in a landscape box where an upright one is portrait. */
 function thumbShapes(scope = "") {
   return browser.execute(
     (within: string) =>
@@ -247,9 +237,8 @@ function pageRotations() {
 }
 
 /**
- * Drags a thumbnail the way a reader would — press, move past the threshold,
- * drop in a gap — with dispatched pointer events, which under WebKitGTK are
- * the only press semantics a test can produce (the M3 lesson).
+ * A reader's drag — press, move past the threshold, drop in a gap — dispatched
+ * as pointer events, the only press semantics a test has under WebKitGTK.
  */
 function dragThumbToGap(from: number, target: number, pastEnd = false) {
   return browser.execute(
@@ -350,7 +339,6 @@ function movePointer(
   )
 }
 
-/** The middle of the tab of the document that is not on screen. */
 function otherTabPoint() {
   return browser.execute(() => {
     const active = document
@@ -365,8 +353,6 @@ function otherTabPoint() {
   })
 }
 
-/** The middle of an insert zone in the grid on screen — `gapPoint`'s answer for
-    a workspace holding more than one document. */
 function activeGapPoint(index: number) {
   return browser.execute(
     (at: number, within: string) => {
@@ -436,9 +422,8 @@ describe("TFolio page editing", () => {
     const [, upright] = await paintedFingerprints(4)
     const rotate = () => $("button[aria-label='Rotate clockwise']").click()
 
-    // A partial selection is the target, and what turns is the page rather than
-    // the way it is being looked at: the cell takes a landscape box while the
-    // viewer's own rotation stays where it was.
+    // What turns is the page, not the way it is looked at: the cell takes a
+    // landscape box while the viewer's own rotation stays where it was.
     await clickThumb(2)
     await rotate()
     await browser.waitUntil(
@@ -517,7 +502,6 @@ describe("TFolio page editing", () => {
     await openPdfFromDisk("delete.pdf", bandedPdf(4))
     const [first, second, third, fourth] = await paintedFingerprints(4)
 
-    // Deleting an unselected page takes that page alone.
     await clickThumb(2)
     await $("button[aria-label='Delete page 2']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
@@ -539,7 +523,6 @@ describe("TFolio page editing", () => {
     await waitForThumb(1, first!)
     await waitForThumb(2, third!)
 
-    // Deleting a selected page takes the whole selection with it.
     await clickThumb(1)
     await clickThumb(3, { ctrl: true })
     await $("button[aria-label='Delete 2 selected pages']").click()
@@ -556,11 +539,8 @@ describe("TFolio page editing", () => {
     await openPdfFromDisk("insert.pdf", bandedPdf(3))
     const [first, second] = await paintedFingerprints(3)
 
-    // The gap only shows where a page would go — the + it draws is the button
-    // — so a click that lands beside a page adds nothing. What says so is the
-    // count at the end of this test rather than one taken here: an insert is a
-    // round trip, so the grid is still three pages long either way for as long
-    // as a synchronous read can see.
+    // The gap's + is the button, so a click beside a page adds nothing. The count
+    // at the end says so: an insert is a round trip, invisible to a sync read.
     await browser.execute(() => {
       document
         .querySelector("[data-insert-index='2']")!
@@ -571,7 +551,6 @@ describe("TFolio page editing", () => {
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the insert never landed",
     })
-    // The new page renders blank; its neighbours moved over intact.
     await waitForThumb(2, 0)
     await waitForThumb(1, first!)
     await waitForThumb(3, second!)
@@ -638,7 +617,6 @@ describe("TFolio page editing", () => {
     await pressEditKey("c")
     await expect($("[data-page-notice]")).toHaveText("Page 3 copied")
 
-    // Ctrl+V lands in front of the page the reader has chosen.
     await clickThumb(1)
     expect(await selectedThumbs()).toEqual([1])
     await pressEditKey("v")
@@ -720,13 +698,11 @@ describe("TFolio page editing", () => {
       timeoutMsg: "the dropped PDF never landed in the grid",
     })
 
-    // The file's page opened the gap; the base's pages moved over intact.
     await waitForThumb(1, first!)
     await waitForThumb(2, dropped!)
     await waitForThumb(3, second!)
     await waitForThumb(4, third!)
 
-    // The file joined this document at the gap rather than opening a tab.
     await expect($$("button[role='tab']")).toBeElementsArrayOfSize(2)
     // Another file's pages are in the document, so it may only be exported as a
     // copy — never written back over the file it was opened from.
@@ -763,7 +739,6 @@ describe("TFolio page editing", () => {
     })
 
     try {
-      // Page 1 dropped before page 3: [2, 1, 3, 4].
       await dragThumbToGap(1, 3)
       await waitForThumb(1, second!)
       await waitForThumb(2, first!)
@@ -778,7 +753,6 @@ describe("TFolio page editing", () => {
       await $("button[aria-label^='Undo']").click()
       await waitForThumb(1, first!)
 
-      // A shift-selected pair drags as one block, past the end: [3, 4, 1, 2].
       await clickThumb(1)
       await clickThumb(2, { shift: true })
       await dragThumbToGap(1, 4, true)
@@ -836,8 +810,6 @@ describe("TFolio page editing", () => {
       timeoutMsg: "resting on the other tab never opened it",
     })
 
-    // The grid it opened marks the gap under the pointer, exactly as it would
-    // for a PDF dragged in from the desktop.
     const gap = await activeGapPoint(2)
     await movePointer("pointermove", gap)
     await browser.waitUntil(async () => await dropLineShowing(2, ACTIVE_GRID), {
@@ -850,7 +822,6 @@ describe("TFolio page editing", () => {
       { timeoutMsg: "the carried page never landed in the other document" },
     )
 
-    // It opened the gap it was dropped into, and arrived as itself.
     await waitForThumb(1, first!, ACTIVE_GRID)
     await waitForThumb(2, striped!, ACTIVE_GRID)
     await waitForThumb(3, second!, ACTIVE_GRID)
@@ -881,10 +852,8 @@ describe("TFolio page editing", () => {
     const [striped] = await paintedFingerprints(1, ACTIVE_GRID)
     const destination = await activeDocumentId()
 
-    // Left on a view with no gaps to drop into: the drag has to bring the
-    // document it opens to its grid, or the pages would arrive nowhere. The
-    // press is the reader's, so it also becomes what the next open starts in —
-    // which is why the document dragged from asks for its own grid back.
+    // Left on a gapless view, the drag must bring the opened document to its grid
+    // or the pages arrive nowhere; and the press makes the next open start there.
     await $(`${ACTIVE_GRID} button[aria-label='Single page']`).click()
 
     await openPdfFromDisk("from-block.pdf", bandedPdf(3))
@@ -906,7 +875,6 @@ describe("TFolio page editing", () => {
       timeoutMsg: "resting on the other tab never opened it",
     })
 
-    // It opened on its pages, whatever view it was left in.
     await expect(
       $(`${ACTIVE_GRID} button[aria-label='Thumbnails']`),
     ).toHaveAttribute("aria-pressed", "true")
@@ -923,7 +891,6 @@ describe("TFolio page editing", () => {
       { timeoutMsg: "the carried block never landed whole" },
     )
 
-    // Both pages landed after the page that was already there, in their order.
     await waitForThumb(1, striped!, ACTIVE_GRID)
     await waitForThumb(2, first!, ACTIVE_GRID)
     await waitForThumb(3, second!, ACTIVE_GRID)
@@ -940,7 +907,6 @@ describe("TFolio page editing", () => {
     const filePath = await openPdfFromDisk("restructure.pdf", bandedPdf(4))
     const [, second, , fourth] = await paintedFingerprints(4)
 
-    // Delete page 1, then bring the last page to the front: [4, 2, 3].
     await clickThumb(1)
     await $("button[aria-label='Delete page 1']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
@@ -954,7 +920,6 @@ describe("TFolio page editing", () => {
       timeoutMsg: "the save never completed",
     })
 
-    // The saved file, reopened, still reads [4, 2, 3].
     await refreshApp()
     await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
     await openPathViaDialog(filePath)

@@ -23,9 +23,8 @@ function config(changes: Partial<WatermarkConfig> = {}): WatermarkConfig {
 }
 
 /**
- * Runs `read` against the settings a file holding `stored` would have loaded,
- * then puts `window` back. The load goes through the real IPC seam, so this
- * also pins that a watermark reaches the dialog as the backend sends it.
+ * The load goes through the real IPC seam, so this also pins that a
+ * watermark reaches the dialog as the backend sends it.
  */
 async function withStoredWatermark<Value>(stored: unknown, read: () => Value) {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
@@ -120,10 +119,8 @@ describe("clampWatermarkText", () => {
 })
 
 describe("watermark geometry", () => {
-  // Mirrors `the_two_directions_follow_the_page_diagonal` and
-  // `the_derived_size_scales_the_measured_mark_to_the_asked_share` in the
-  // backend's watermark.rs: the preview draws what the page will carry, so the
-  // two derivations have to agree.
+  // Mirrors the two geometry tests in the backend's watermark.rs: the preview
+  // draws what the page will carry, so the derivations have to agree.
   it("leans both directions along the page's own diagonal", () => {
     expect(watermarkRotation("ascending", 600, 800)).toBeCloseTo(-53.13, 2)
     expect(watermarkRotation("descending", 600, 800)).toBeCloseTo(53.13, 2)

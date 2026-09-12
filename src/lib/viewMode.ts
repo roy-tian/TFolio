@@ -6,41 +6,27 @@ export type ViewMode = (typeof viewModes)[number]
 
 export const defaultViewMode: ViewMode = "single"
 
-/** Width of one thumbnail cell, and the gaps around it, in CSS pixels. The
-    columns stand further apart than the rows: the space between two pages is
-    where the insertion line and its + button live, and it matches the layout's
-    own side padding so the gap after the last page is the same width. The row
-    gap is spent as each cell's bottom padding rather than the grid's `rowGap`,
-    so that no band between two rows belongs to no cell — a file dragged across
-    the grid has to name a position the whole way down. */
+/** The column gap holds the insertion line and its + button; the row gap is
+    spent as cell bottom padding so every band belongs to a cell. */
 export const THUMBNAIL_WIDTH = 160
 export const THUMBNAIL_ROW_GAP = 16
 export const THUMBNAIL_COLUMN_GAP = 32
 
-/** The page number under a thumbnail, the space over it included, as a CSS
-    length. A cell shorter than its row stands centred in it, so the gap beside
-    the cell can only put its insertion line beside that page's own paper by
-    knowing how much of the cell's height is spent below the paper. Said in
-    `rem` rather than pixels because the number itself is `text-xs` — one `rem`
-    of line box, plus the `0.375rem` that used to be the column's gap — so a
-    WebView whose root font size is not 16px keeps the box and the line agreed
-    instead of clipping the one and misplacing the other. */
+/** In `rem`, not pixels, because the number is `text-xs`: a WebView whose
+    root font size is not 16px keeps the box and the insertion line agreed. */
 export const THUMBNAIL_CAPTION_HEIGHT = "1.375rem"
 
 export function isViewMode(value: unknown): value is ViewMode {
   return viewModes.includes(value as ViewMode)
 }
 
-/** Whether the document has a spread to show; a single page has none. */
 export function hasBookSpread(numPages: number): boolean {
   return numPages > 1
 }
 
 /**
- * The mode the viewer really lays out, which can outvote the reader's choice: a
- * one-page document has no spread, and book view would leave that page in the
- * left half of a double-width column (see `pairPages`). The choice itself is
- * left standing, so inserting a page brings book view back.
+ * A one-page document has no spread, so the viewer outvotes book view — but
+ * the choice stays standing, and inserting a page brings book view back.
  */
 export function effectiveViewMode(
   preferred: ViewMode,
@@ -59,11 +45,8 @@ export function storeViewMode(mode: ViewMode) {
   rememberSettings({ ui: { viewMode: mode } })
 }
 
-/**
- * Groups page numbers into book-view rows: 1-2, 3-4, and so on. A trailing odd
- * page keeps the left slot of its own row, so it stays the same size as the
- * pages above it instead of stretching across the whole spread.
- */
+/** A trailing odd page keeps the left slot of its own row, so it stays the
+    same size as the pages above it. */
 export function pairPages(numPages: number): number[][] {
   const rows: number[][] = []
 
@@ -74,11 +57,6 @@ export function pairPages(numPages: number): number[][] {
   return rows
 }
 
-/**
- * The pages laid out beside `pageNumber`, itself included — the row `pairPages`
- * puts it in, which is what the reader of a spread actually has in front of
- * them. A trailing odd page stands alone.
- */
 export function spreadPages(pageNumber: number, numPages: number): number[] {
   const first = pageNumber % 2 === 1 ? pageNumber : pageNumber - 1
 
@@ -86,10 +64,8 @@ export function spreadPages(pageNumber: number, numPages: number): number[] {
 }
 
 /**
- * The page whose top a whole-page keyboard turn lands on. A book turn advances
- * one spread rather than one half, and always names the spread's left page so
- * either half being current gives the same answer. Kept independent of scale:
- * Page Up/Down turn pages, not a viewport-sized number of pixels.
+ * A book turn advances one spread and names its left page, so either half
+ * being current gives the same answer; Page Up/Down turn pages, not pixels.
  */
 export function pageTurnTarget(
   pageNumber: number,
@@ -110,10 +86,8 @@ export function pageTurnTarget(
   return Math.min(lastSpreadStart, Math.max(1, spreadStart + direction * 2))
 }
 
-/**
- * Thumbnails per row: as many as `containerWidth` fits, rounded down to an even
- * count so a row never splits a spread, and never fewer than two.
- */
+/** Rounded down to an even count, so a row never splits a spread; never
+    fewer than two. */
 export function computeThumbnailColumns(
   containerWidth: number,
   columnWidth = THUMBNAIL_WIDTH,

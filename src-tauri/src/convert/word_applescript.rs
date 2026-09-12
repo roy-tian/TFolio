@@ -1,11 +1,5 @@
-//! Microsoft Word on macOS, driven the one way it offers: Apple events over
-//! AppleScript. One script run per file, with the paths arriving as
-//! arguments rather than text interpolated into the script — a path with a
-//! quote in it is a filename, not a hole in what runs.
-//!
-//! The first file pays the launch (and, once per machine, the automation
-//! permission prompt macOS itself puts up); every file after it finds Word
-//! already running.
+//! Word on macOS over AppleScript, one script run per file: paths arrive as
+//! arguments, never interpolated — a quote in a path is not a hole in what runs.
 
 use std::{
     fs,
@@ -18,18 +12,12 @@ use super::{run_with_timeout, BatchOutcome, ConvertJob, ConvertSession, CONVERT_
 
 const WORD_BUNDLE_ID: &str = "com.microsoft.Word";
 
-/// The first automation of an app raises macOS's own permission prompt,
-/// which names this app and waits for a person; the timeout must outlast a
-/// reader reading it.
+/// The first automation raises macOS's own permission prompt, which waits
+/// for a person; the timeout must outlast a reader reading it.
 const WORD_START_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// One file, one script run. Word is told to open, export as PDF, and close
-/// without saving — the same trio the Windows engine asks of, one script run
-/// there instead of per file.
-/// The document `open` hands back is the one saved and closed — never
-/// whatever is active at that moment, which between one Apple event and the
-/// next can be a document of the reader's own, in a Word they were already
-/// working in.
+/// The document `open` hands back is the one saved and closed — never the
+/// active one, which between Apple events can be the reader's own document.
 const CONVERT_SCRIPT: &str = r#"
 on run argv
     set inputPath to item 1 of argv
@@ -42,8 +30,7 @@ on run argv
 end run
 "#;
 
-/// Whether Word is installed, by looking for its bundle. Passive: launching
-/// Word to ask it would put an icon in the reader's Dock for a probe.
+/// Passive: launching Word to ask would put an icon in the reader's Dock.
 pub(crate) fn word_installed() -> bool {
     let mut candidates = vec![PathBuf::from("/Applications/Microsoft Word.app")];
 
@@ -81,9 +68,8 @@ pub(crate) fn open_session(run_dir: &Path) -> Result<Session, String> {
     })
 }
 
-/// Whether Word is running — the one question answerable without sending
-/// Word an event or launching it, so it is also the one that never triggers
-/// the automation permission prompt.
+/// Answerable without sending Word an event or launching it, so it never
+/// triggers the automation permission prompt.
 fn word_is_running() -> Option<bool> {
     let answer = Command::new("osascript")
         .args([

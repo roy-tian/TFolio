@@ -17,7 +17,6 @@ type UseHighlightToolOptions = {
   opacity: number
   pages: PdfPageInfo[]
   rotations: PageRotations
-  /** Whether native text selection is available, even without the highlighter. */
   selectable: boolean
   viewerRef: RefObject<HTMLElement | null>
 }
@@ -26,10 +25,8 @@ type UseHighlightToolOptions = {
 const MIN_QUAD_POINTS = 0.5
 
 /**
- * Clipped to the span rather than read off `Range.getClientRects`, which reports
- * a rectangle for every *element* the range encloses whole, not just for text.
- * A selection dragged across a page break encloses the next page's canvas, whose
- * rectangle is the whole page — enough to turn two lines into a page of yellow.
+ * Clipped to the span, not `Range.getClientRects`, which reports a rect for
+ * every element the range encloses whole — e.g. the next page's whole canvas.
  */
 function selectedRectOfSpan(selection: Selection, span: Element) {
   const range = selection.getRangeAt(0)
@@ -50,7 +47,6 @@ function selectedRectOfSpan(selection: Selection, span: Element) {
   return overlap.collapsed ? null : overlap.getBoundingClientRect()
 }
 
-/** The rectangles a selection covers on one page, in that page's own points. */
 function quadsOnPage(
   selection: Selection,
   pageElement: Element,
@@ -91,9 +87,8 @@ function quadsOnPage(
 }
 
 /**
- * The selection is the preview, for free: the text layer is already selectable,
- * so the browser tints the run as the reader drags and this only reads the
- * result. Nothing reaches the backend until the gesture is over.
+ * The selection is the preview for free: the text layer is already selectable,
+ * and nothing reaches the backend until the gesture is over.
  */
 export function useHighlightTool({
   active,
@@ -113,9 +108,8 @@ export function useHighlightTool({
       return
     }
 
-    // A selection outlives the drag that made it and survives a button click, so
-    // committing on any pointerup would mark a stale selection when the reader
-    // pressed Undo — and then have nothing to undo.
+    // A selection outlives its drag, so committing on any pointerup would mark
+    // a stale one when the reader pressed Undo — and then have nothing to undo.
     let startedOnText = false
 
     const handlePointerDown = (event: PointerEvent) => {

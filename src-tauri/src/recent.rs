@@ -1,17 +1,5 @@
-//! The reader's recently opened PDFs, kept between runs.
-//!
-//! This list is the durable half of the engine's approved-path set. An entry
-//! gets here only after a file the OS itself named — a dialog pick, a drop the
-//! window saw — actually opened; nothing the WebView says adds one. That is
-//! what entitles `run()` to approve the whole list at startup: the home tab
-//! opens a recent file by path, and a path a save may later overwrite still
-//! has to be one this process watched the OS produce, even when it produced it
-//! in an earlier run.
-//!
-//! It keeps its own file rather than joining `settings.toml`: this is the app's
-//! bookkeeping and not the reader's to set, and folding a record with a security
-//! role in among the settings would make hand-editing those a way to name a file
-//! to open and then save over.
+//! Only files the OS itself named get here, which is what entitles startup to
+//! approve the list — kept out of `settings.toml`, which stays safe to hand-edit.
 
 use std::path::{Path, PathBuf};
 
@@ -20,13 +8,10 @@ use tauri::{AppHandle, State};
 
 use crate::store::{Store, Stored};
 
-/// How many paths the file keeps. The home tab shows fewer: the surplus is
-/// what keeps that shorter list full once entries whose file has since gone
-/// are left out of it.
+/// The home tab shows fewer; the surplus covers entries whose file has since gone.
 const RECENT_LIMIT: usize = 20;
 
-/// What 0.1.3 and earlier wrote this list to. Read once into `recent-files.toml`
-/// and deleted, so the reader keeps their list and the app writes one format.
+/// What 0.1.3 and earlier wrote this list to.
 const REPLACED_FILE_NAME: &str = "recent-files.json";
 
 const MIN_ZOOM: f64 = 0.25;
@@ -34,9 +19,8 @@ const MAX_ZOOM: f64 = 8.0;
 const MAX_PAGE_NUMBER: u32 = i32::MAX as u32;
 const MAX_ANCHOR_FRACTION: f64 = 100.0;
 
-/// The last view of one recent PDF. The position is a point on a page rather
-/// than a raw scroll offset: page sizes change with the window and zoom, while
-/// the point can be put back under the viewer's reading line at either size.
+/// A point on a page, not a scroll offset: page sizes change with window and
+/// zoom, while the point goes back under the reading line at either size.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentPdfView {
@@ -123,14 +107,8 @@ impl Stored for RecentFilesDocument {
     }
 }
 
-/// The entries a stored list may contribute.
-///
-/// What is on disk may come from an older version of the app, or from a reader
-/// with a text editor. An unreadable list is an empty one — and a readable one
-/// is still outside input, so every entry has to look like something this app
-/// could have recorded before `run()` approves it: an absolute path to a `.pdf`.
-/// Without that check a hand-edited list is a way to hand the WebView an
-/// arbitrary file to open and then save over.
+/// Outside input: every entry must look like something this app recorded —
+/// absolute, a `.pdf` — or a hand edit names an arbitrary file to save over.
 fn recordable(files: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut kept: Vec<PathBuf> = files
         .into_iter()
@@ -141,9 +119,8 @@ fn recordable(files: Vec<PathBuf>) -> Vec<PathBuf> {
     kept
 }
 
-/// A view is bookkeeping for a path already in the approved recent list, never
-/// another route into that list. Stored or hand-edited orphan entries are
-/// therefore dropped, as are values the viewer itself could never produce.
+/// Bookkeeping for a path already approved, never another route in: orphans and
+/// viewer-impossible values are dropped.
 fn recordable_views(views: Vec<RecentPdfViewEntry>, files: &[PathBuf]) -> Vec<RecentPdfViewEntry> {
     let mut kept = Vec::new();
 
@@ -189,18 +166,14 @@ impl RecentFiles {
         Self(store)
     }
 
-    /// Every stored path, including any whose file has gone — approving one
-    /// that no longer exists costs nothing, and the open would fail on its own
-    /// were the file to come back after this run started.
+    /// Includes paths whose file has gone: approving a missing one costs nothing,
+    /// and the open fails on its own if the file returns after this run started.
     pub fn stored(&self) -> Vec<PathBuf> {
         self.0.read(|document| document.files.clone())
     }
 
-    /// The paths still on disk, most recently opened first.
-    ///
-    /// Only the answer is filtered, never the file: an entry on a drive that
-    /// happens to be unmounted comes back when the drive does, and losing it
-    /// would be a worse trade than carrying a dead path in a 20-entry list.
+    /// Only the answer is filtered, never the file: an unmounted drive's entries
+    /// come back when it does — a better trade than losing them over a dead path.
     pub fn existing(&self) -> Vec<PathBuf> {
         self.stored()
             .into_iter()
@@ -229,11 +202,8 @@ impl RecentFiles {
         })
     }
 
-    /// Records a view only for a path already in the recent list. In
-    /// particular, this never promotes or adds the WebView-provided path: the
-    /// only operation that can do that is a successful PDF open in Rust. The
-    /// membership check also happens before `Store::write`, so an unknown path
-    /// cannot make the command rewrite an unchanged recent file.
+    /// Only for a path already recent: a view never promotes a WebView-provided
+    /// path, and the check runs before `Store::write` so an unknown path rewrites nothing.
     pub fn record_view(&self, path: &Path, view: RecentPdfView) -> bool {
         if !view.is_valid()
             || !self
@@ -266,23 +236,16 @@ fn remember_view(document: &mut RecentFilesDocument, path: &Path, view: RecentPd
     true
 }
 
-/// Moves `path` to the front, keeping one entry per path and at most
-/// `RECENT_LIMIT` of them. Entries match the way `is_approved` matches, by
-/// `Path`'s own equality, which reads a path as its components and so takes
-/// `/a/./b.pdf` for `/a/b.pdf` — a coarser rule than the frontend's verbatim
-/// `tabIdForPath`, and the safe direction for the two to differ in: it can
-/// only merge two names for one file, never split one file into two entries
-/// the approval check would then disagree about.
+/// `Path` equality reads `.` away, folding `/a/./b.pdf` into `/a/b.pdf` — coarser
+/// than the frontend's verbatim match, and safely so: it can only merge, never split.
 fn promote(entries: &mut Vec<PathBuf>, path: &Path) {
     entries.retain(|entry| entry != path);
     entries.insert(0, path.to_path_buf());
     entries.truncate(RECENT_LIMIT);
 }
 
-/// The shape every recorded path has: absolute, and named as a PDF — the same
-/// two things the frontend's `isPdfPath` and the OS's own dialogs guarantee of
-/// what reaches `open_pdf_from_path`. `launch.rs` holds the paths a launch
-/// names to this same test, so the one wording covers both.
+/// Absolute and named as a PDF — the same guarantees the OS's own dialogs give
+/// what reaches `open_pdf_from_path`. `launch.rs` holds launch paths to this test.
 pub(crate) fn is_recordable(path: &Path) -> bool {
     path.is_absolute()
         && path
@@ -290,9 +253,8 @@ pub(crate) fn is_recordable(path: &Path) -> bool {
             .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
-/// Async so the `is_file` probe behind `existing()` runs off the main thread:
-/// an entry on a stalled network mount would otherwise park the whole UI, and
-/// the home tab asks for this list on every visit.
+/// Off the main thread: `is_file` on a stalled network mount would park the UI,
+/// and the home tab asks for this list on every visit.
 #[tauri::command]
 pub async fn recent_pdfs(state: State<'_, RecentFiles>) -> Result<Vec<String>, String> {
     let recent = state.inner().clone();
@@ -308,9 +270,6 @@ pub async fn recent_pdfs(state: State<'_, RecentFiles>) -> Result<Vec<String>, S
     .map_err(|error| format!("recent files task failed: {error}"))
 }
 
-/// The view last recorded for a recent path. Looking one up cannot make an
-/// arbitrary WebView-provided path recent or approved; an unknown path simply
-/// has no view.
 #[tauri::command]
 pub async fn recent_pdf_view(
     path: String,
@@ -319,10 +278,8 @@ pub async fn recent_pdf_view(
     Ok(state.view(Path::new(&path)))
 }
 
-/// Keeps a recent PDF's reading view. The value is bounded here even though the
-/// frontend also checks what it reads: commands are callable by any page code,
-/// and neither hand-edited storage nor command input gets to put unusable
-/// geometry into the next viewer.
+/// Bounded here even though the frontend checks too: commands are callable by
+/// any page code, and command input must not shape the next viewer's geometry.
 #[tauri::command]
 pub async fn set_recent_pdf_view(
     path: String,

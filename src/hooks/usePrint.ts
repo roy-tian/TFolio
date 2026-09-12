@@ -17,17 +17,12 @@ type PrintOptions = {
   documentId: number | undefined
   onError: () => void
   pages: PdfPageInfo[]
-  /** The viewer's rotation for a 1-based page position. */
   rotationAt: (pageNumber: number) => number
 }
 
 /**
- * Lays every page out for print media, then opens the OS print dialog on it.
- *
- * The sheet stays afterwards: the dialog outlives the command that opened it
- * and nothing reports when the job has drawn, so taking the pages back out
- * would print blank paper. `discard` is for the moments it certainly may go —
- * this document leaving the screen, or another print replacing it.
+ * The sheet stays after the dialog opens: nothing reports when the job has
+ * drawn, so taking the pages back out would print blank paper.
  */
 export function usePrint({
   documentId,

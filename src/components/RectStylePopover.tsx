@@ -27,7 +27,6 @@ const effectLabelKey = {
   mosaic: "annotate.effectMosaic",
 } as const
 
-/** The one slider each effect wants, in its own terms. */
 const amountLabelKey = {
   translucent: "annotate.opacity",
   blur: "annotate.blurStrength",
@@ -39,15 +38,10 @@ type RectStylePopoverProps = {
   style: RectStyle
 }
 
-/**
- * The rectangle tool's options panel: an effect, the colour it uses if it uses
- * one, and the single amount it takes.
- */
 export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
   const { t } = useTranslation()
-  // A blur and a mosaic are built from the pixels under the box, so the colour
-  // has nothing to tint and the panel drops it: the effect decides what the
-  // rectangle is made of, and the panel only offers what that effect can use.
+  // A blur and a mosaic are built from the pixels under the box, so colour has
+  // nothing to tint and the panel drops it.
   const usesColor = style.effect === "translucent"
 
   return (

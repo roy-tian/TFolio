@@ -12,8 +12,6 @@ type HistoryControlsProps = {
   canRedo: boolean
   canUndo: boolean
   disabled: boolean
-  /** The steps the buttons would take, which they name. Null once there is
-      nothing left to take back or put back, when the bare verb is the label. */
   nextRedo: AnnotationCommand | null
   nextUndo: AnnotationCommand | null
   onRedo: () => void

@@ -1,18 +1,5 @@
-//! The reader's own settings, kept between runs — all of them, in one file.
-//!
-//! `settings.toml`, beside the recent list in the app's data directory, so it
-//! is per user and per machine. Everything here is a choice about how the app
-//! behaves, never about one document: a page-number range belongs to the PDF
-//! it numbers and is asked for again each time, while the style it is set in
-//! is the reader's and is remembered.
-//!
-//! The shapes below are the file's and the frontend's at once — one derive
-//! answers both, which is why the keys are camelCase rather than TOML's more
-//! usual kebab: a setting then has exactly one name in the file, over IPC, and
-//! in TypeScript, with nothing in between to keep in step. Rust types the
-//! structure and stops there; the palettes and slider ranges a value has to sit
-//! in are the frontend's, and it checks them on the way back in, because the
-//! file is the reader's to edit.
+//! The reader's own settings — how the app behaves, never one document's state —
+//! in one TOML file per user and machine, theirs to edit, so revalidated on the way in.
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -22,24 +9,13 @@ use crate::{
     store::{Store, Stored},
 };
 
-/// What 0.1.3 and earlier kept, and all it kept: the page-number style. Read
-/// once into `settings.toml` and deleted, so the reader keeps the style they
-/// set and the directory keeps one file.
+/// What 0.1.3 and earlier kept, and all it kept: the page-number style.
 const REPLACED_FILE_NAME: &str = "preferences.json";
 
 pub const SETTINGS_CHANGED_EVENT: &str = "settings://changed";
 
-/// Every setting is optional, so a version that did not write one — or a reader
-/// who deleted it by hand — leaves the frontend on its own defaults rather than
-/// being handed something invented here. An unset one is absent rather than
-/// null: TOML has no null to write, and the frontend should not have to read
-/// one.
-///
-/// A setting is stored as the type the rest of the app already sends over IPC
-/// wherever one means exactly this — the watermark and the page-number style
-/// are the engine's own. The rest are spelled out below, either because the
-/// engine has no such value at all or because what the reader picks and what it
-/// is handed are not the same shape.
+/// Every setting optional: an older version or a hand deletion leaves the
+/// frontend on its own defaults, and absent beats null — TOML has none to write.
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -51,8 +27,6 @@ pub struct Settings {
     watermark: Option<WatermarkConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     page_numbers: Option<PageNumbersPreferences>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    import: Option<ImportPreferences>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -77,10 +51,8 @@ struct AnnotatePreferences {
     text_note: Option<TextNotePreferences>,
 }
 
-/// Not `pdfium::RectStyle`: the engine is handed the block and its effect as
-/// two arguments, while the reader picks one style with the effect inside it —
-/// and keeps the strength of the effect they are not using, so that switching
-/// back to it draws what it drew before.
+/// Not `pdfium::RectStyle`: the reader picks one style with the effect inside it
+/// and keeps the unused strength, so switching back draws what it drew before.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RectPreferences {
@@ -100,23 +72,11 @@ struct TextNotePreferences {
     opacity: f64,
 }
 
-/// How the import wizard may use the machine's own software. Nothing here
-/// reaches a document: it is which kinds of help the reader accepts, and the
-/// wizard asks again each time what this setting has settled once.
-#[derive(Clone, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "camelCase")]
-struct ImportPreferences {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    word_conversion: Option<bool>,
-}
-
 impl Stored for Settings {
     const FILE_NAME: &'static str = "settings.toml";
 
-    /// One section at a time, so a value this version cannot make sense of — an
-    /// older schema, a reader's typo — costs that section and not the whole
-    /// file. A section is small and coherent enough for that to be the right
-    /// grain: losing the annotation styles must not also lose the language.
+    /// One section at a time: a value this version cannot place — older schema,
+    /// reader's typo — costs that section, not the language with the styles.
     fn parse(contents: &str) -> Self {
         let table = contents.parse::<toml::Table>().unwrap_or_default();
 
@@ -125,7 +85,6 @@ impl Stored for Settings {
             annotate: section(&table, "annotate"),
             watermark: section(&table, "watermark"),
             page_numbers: section(&table, "pageNumbers"),
-            import: section(&table, "import"),
         }
     }
 
@@ -135,35 +94,16 @@ impl Stored for Settings {
 }
 
 impl Settings {
-    /// `parse`'s reading, at the same grain and for the same reason, over what
-    /// the frontend sends. It carries whatever an older version of the app —
-    /// or an older schema in the storage this replaced — left in the copy it
-    /// loaded, so a section this version cannot place has to cost that section
-    /// alone. Deserialising the command's argument straight into `Settings`
-    /// would instead fail the whole call, and the write with it.
+    /// Section by section, like `parse`: deserialising the command's argument
+    /// straight into `Settings` would fail the whole write over one bad section.
     fn sent(document: &serde_json::Value) -> Self {
         Self {
             ui: sent_section(document, "ui"),
             annotate: sent_section(document, "annotate"),
             watermark: sent_section(document, "watermark"),
             page_numbers: sent_section(document, "pageNumbers"),
-            import: sent_section(document, "import"),
         }
     }
-}
-
-/// Whether the reader lets the installed office suites convert Word documents
-/// for the import wizard. Absent is `true`: accepting Word documents is this
-/// version's default, and the setting exists to opt out — invisible Office
-/// launches are not everyone's idea of an import.
-pub fn word_conversion_enabled(store: &Store<Settings>) -> bool {
-    store.read(|settings| {
-        settings
-            .import
-            .as_ref()
-            .and_then(|import| import.word_conversion)
-            .unwrap_or(true)
-    })
 }
 
 fn section<T: DeserializeOwned>(table: &toml::Table, key: &str) -> Option<T> {
@@ -211,13 +151,8 @@ pub async fn settings(store: State<'_, Store<Settings>>) -> Result<Settings, Str
     Ok(store.read(Clone::clone))
 }
 
-/// Takes the whole document rather than a patch: the frontend loaded these at
-/// startup and keeps the loaded copy current, so what it sends is the settings
-/// entire — and a setting it drops is one the reader cleared, which no merge
-/// here could tell from one it simply did not mention.
-///
-/// The document arrives untyped and is read section by section, which is what
-/// keeps one section this version cannot place from failing the whole write.
+/// Takes the whole document rather than a patch: what arrives is the settings
+/// entire, and a setting it drops is one the reader cleared — no merge could tell.
 #[tauri::command]
 pub async fn set_settings(
     settings: serde_json::Value,
@@ -272,9 +207,6 @@ mod tests {
             }),
             watermark: None,
             page_numbers: Some(page_numbers()),
-            import: Some(ImportPreferences {
-                word_conversion: Some(false),
-            }),
         }
     }
 
@@ -303,35 +235,12 @@ mod tests {
         assert!(rendered.contains("[annotate.textNote]"));
         assert!(rendered.contains("[pageNumbers]"));
         assert!(rendered.contains("fontSize"));
-        // Nothing was set there, so nothing stands in the file for it.
         assert!(!rendered.contains("[watermark]"));
-        assert!(rendered.contains("[import]"));
-        assert!(rendered.contains("wordConversion = false"));
+        assert!(!rendered.contains("[import]"));
     }
 
-    /// The reader's own edit of the file is read back at the same grain as
-    /// the frontend's write: one section, by its wire name.
-    #[test]
-    fn word_conversion_reads_its_own_section() {
-        let settings = Settings::parse("[import]\nwordConversion = false\n");
-
-        assert_eq!(
-            settings.import.and_then(|import| import.word_conversion),
-            Some(false)
-        );
-
-        // Absent — the file an older version wrote — is the default, not a
-        // refusal the reader never made.
-        assert!(Settings::default()
-            .import
-            .and_then(|import| import.word_conversion)
-            .is_none());
-    }
-
-    /// The frontend's copy carries whatever the storage it replaced held, and
-    /// an older schema's watermark is the likeliest thing in it. That must cost
-    /// its own section and nothing else — read strictly, one such value would
-    /// fail the call and so lose every setting the same write was carrying.
+    /// An older schema's watermark is the likeliest stray in the frontend's copy;
+    /// it must cost its section alone, not every setting the same write carried.
     #[test]
     fn a_section_the_frontend_sends_and_this_version_cannot_place_costs_only_itself() {
         let sent = Settings::sent(&serde_json::json!({

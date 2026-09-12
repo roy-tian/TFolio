@@ -12,11 +12,8 @@ export type PagePoint = {
   top: number
 }
 
-/**
- * A rectangle in unrotated page points with a top-left origin — the space
- * `PdfTextSpan` reports text in, and the only space annotation payloads use.
- * The backend flips it to PDFium's bottom-left origin at the boundary.
- */
+/** A rectangle in unrotated page points, top-left origin — the space annotation
+    payloads use; the backend flips it to PDFium's origin at the boundary. */
 export type PagePointsRect = {
   height: number
   left: number
@@ -24,24 +21,14 @@ export type PagePointsRect = {
   width: number
 }
 
-/**
- * The rotation between a page's own coordinates and what the reader sees.
- *
- * Content is rotated by the page's `/Rotate`, and that whole box again by the
- * reader's rotation. Rotations about a common centre compose, so undoing both
- * is one rotation rather than two nested ones.
- */
+/** Content turns by the page's `/Rotate`, and that whole box again by the
+    reader's rotation; about a common centre, the two compose into one. */
 export function totalPageRotation(page: PdfPageInfo, rotation: number) {
   return (((rotation + page.rotation) % 360) + 360) % 360
 }
 
-/**
- * Where a point of a rotated box's footprint sits in the box's own coordinates.
- *
- * Quarter turns are the whole domain — the toolbar steps by 90° and `/Rotate` is
- * a multiple of it — which is what keeps this a swap and a flip of two fractions
- * rather than trigonometry that would only approximate the corners back.
- */
+/** Quarter turns are the whole domain — the toolbar steps by 90°, `/Rotate` is a
+    multiple of it — so this is a swap and a flip of fractions, not trigonometry. */
 export function unrotateFraction(
   fraction: BoxFraction,
   degrees: number,
@@ -58,13 +45,6 @@ export function unrotateFraction(
   }
 }
 
-/**
- * The inverse of `unrotateFraction`: where a point of the box's own coordinates
- * lands on its rotated footprint.
- *
- * A quarter turn's inverse is the turn that completes the circle, so 90 and 270
- * swap and the other two are their own inverse.
- */
 export function rotateFraction(
   fraction: BoxFraction,
   degrees: number,
@@ -85,10 +65,8 @@ function unrotatedPageSize(page: PdfPageInfo) {
   return dimensionsForRotation(page.rotation, page.width, page.height)
 }
 
-/**
- * `fraction` is measured against the footprint box — the element carrying
- * `data-page-number`, which stays axis-aligned however the page inside it turns.
- */
+/** `fraction` is measured against the footprint box — the element carrying
+    `data-page-number`, axis-aligned however the page inside it turns. */
 export function fractionToPagePoint(
   fraction: BoxFraction,
   page: PdfPageInfo,
@@ -100,10 +78,8 @@ export function fractionToPagePoint(
   return { left: unrotated.x * width, top: unrotated.y * height }
 }
 
-/**
- * The corners are resolved independently and then squared up: a rotation can
- * carry one to any side of the other.
- */
+/** The corners are resolved independently and then squared up: a rotation can
+    carry one to any side of the other. */
 export function fractionsToPageRect(
   from: BoxFraction,
   to: BoxFraction,
@@ -121,14 +97,8 @@ export function fractionsToPageRect(
   }
 }
 
-/**
- * The way back out of page space: where a page point sits on the footprint box.
- *
- * The exact inverse of `fractionToPagePoint`, and what lets something drawn in
- * real screen space — a text editor the reader types into — sit over a point on
- * the page. The page's own layer would be easier to place it in, but it turns
- * with the page, and nobody wants to type at 90°.
- */
+/** The way back out of page space, so a screen-space text editor can sit over a
+    page point — the page layer turns, and nobody wants to type at 90°. */
 export function pagePointToFraction(
   point: PagePoint,
   page: PdfPageInfo,

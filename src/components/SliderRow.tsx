@@ -4,7 +4,6 @@ import { Slider } from "@/components/ui/slider"
 
 type SliderRowProps = {
   disabled?: boolean
-  /** The value as the reader reads it — "12pt", "40%" — beside the label. */
   display: string
   label: string
   max: number
@@ -14,7 +13,6 @@ type SliderRowProps = {
   value: number
 }
 
-/** A labelled slider with its current value shown, as every options panel wants. */
 export function SliderRow({
   disabled,
   display,

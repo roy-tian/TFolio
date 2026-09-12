@@ -21,11 +21,8 @@ export type AppUpdate = {
 }
 
 /**
- * This window's view of the one release check the process makes.
- *
- * The check, the download and the install all belong to the backend and are
- * shared by every window; what is kept here is only what this window has been
- * told and what its reader has waved away.
+ * The check, download and install are process-wide in the backend; this keeps
+ * only what this window has been told and what its reader has waved away.
  */
 export function useAppUpdate(): AppUpdate {
   const [status, setStatus] = useState<AppUpdateStatus>({ state: "idle" })

@@ -14,10 +14,8 @@ export const MIN_PRINT_DPI = 72
 export const PRINT_BUDGET_PAGES = 120
 
 /**
- * The resolution a document of `pageCount` pages prints at. Every page is held
- * as an image at once — the print dialog answers long after the sheet is laid
- * out — so a thousand-page document lowers its resolution instead of filling
- * memory with what a reader is unlikely to send to paper anyway.
+ * Every page is held as an image at once — the print dialog answers long
+ * after the sheet is laid out — so a long document lowers its resolution.
  */
 export function printDpi(pageCount: number): number {
   if (pageCount <= PRINT_BUDGET_PAGES) {
@@ -30,8 +28,8 @@ export function printDpi(pageCount: number): number {
   return Math.max(MIN_PRINT_DPI, Math.round(shared))
 }
 
-/** The width `render_pdf_page` is asked for, from the page's own width in
-    points. Clamped to what the backend accepts: it refuses either end. */
+/** Clamped to what the backend accepts: `render_pdf_page` refuses either
+    end. */
 export function printRenderWidth(pageWidth: number, dpi: number): number {
   const pixels = Math.round((pageWidth * dpi) / POINTS_PER_INCH)
 
@@ -43,10 +41,8 @@ export function printRenderWidth(pageWidth: number, dpi: number): number {
 const BASE64_CHUNK = 0x8000
 
 /**
- * A rendered page as an `<img>` source. The print sheet needs real image
- * elements — a canvas would hold every page uncompressed, and only elements
- * the print stylesheet lays out reach the paper — and `data:` is the one image
- * scheme the app's CSP already allows, so `blob:` stays out of it.
+ * The sheet needs real image elements, and `data:` is the one image scheme
+ * the app's CSP allows, so `blob:` stays out of it.
  */
 export function pngDataUrl(bytes: ArrayBuffer): string {
   const view = new Uint8Array(bytes)

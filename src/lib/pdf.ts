@@ -54,30 +54,26 @@ export type PdfDocumentInfo = {
   path: string | null
 }
 
-/** What an export wrote, and whether it landed on the document's own file —
-    which, not the operation's name, is what decides the history counts as
-    saved. */
+/** Whether the export landed on the document's own file: that, not the
+    operation's name, is what decides the history counts as saved. */
 export type PdfExportOutcome = {
   path: string
   savedToSource: boolean
 }
 
-/** Fresh metadata after a page-structure change. Nothing here is patched into
-    place: the page list and outline are replaced wholesale, because the
-    backend's document is the only truth about what the pages now are. */
+/** Nothing here is patched into place: the page list and outline are
+    replaced wholesale, the backend's document being the only truth. */
 export type PdfStructureUpdate = {
-  /** Whether any page another file brought in is still in the document, which
-      leaves it export-only. Answered by the backend rather than replayed from
-      history: it is the very set `save_pdf` refuses on. */
+  /** Whether a page another file brought in is still in the document, which
+      leaves it export-only; the backend answers, it being what `save_pdf` refuses. */
   hasMergedPages: boolean
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
 }
 
-/** What inserting a PDF brought in. `pageCount` is the one thing the frontend
-    cannot know until the backend has read the file, so the insert command
-    carries it back from here — it is what its undo takes out again. */
+/** `pageCount` is the one thing the frontend cannot know until the backend
+    has read the file; it is what the insert's undo takes out again. */
 export type PdfInsertOutcome = {
   pageCount: number
   update: PdfStructureUpdate
@@ -86,9 +82,8 @@ export type PdfInsertOutcome = {
 /** Widest a single page may render on screen, in CSS pixels. */
 export const MAX_PAGE_WIDTH = 896
 
-// Bounds for a render request, mirroring MIN_RENDER_WIDTH, MAX_RENDER_WIDTH
-// and MAX_THUMBNAIL_WIDTH in src-tauri/src/pdfium/engine.rs; the backend
-// rejects anything outside them.
+// Mirrors MIN_RENDER_WIDTH, MAX_RENDER_WIDTH and MAX_THUMBNAIL_WIDTH in
+// src-tauri/src/pdfium/engine.rs; the backend rejects anything outside them.
 export const MIN_RENDER_WIDTH = 64
 export const MAX_RENDER_WIDTH = 4096
 export const MAX_THUMBNAIL_RENDER_WIDTH = 512
@@ -103,13 +98,12 @@ export function isPdfPath(path: string) {
   return path.toLowerCase().endsWith(".pdf")
 }
 
-/** The name a path ends in, for display. Splits on both separators so a
-    Windows path reads as its file rather than the whole path. */
+/** Splits on both separators, so a Windows path reads as its file rather
+    than the whole path. */
 export function fileNameFromPath(path: string) {
   return path.split(/[/\\]/).pop() || path
 }
 
-// Rotating a page by 90° or 270° swaps its width and height; 0°/180° leave them.
 export function dimensionsForRotation(
   rotation: number,
   width: number,
@@ -121,21 +115,13 @@ export function dimensionsForRotation(
 }
 
 /**
- * Minimum backing pixels per CSS pixel for a settled page bitmap. PDFium's
- * ordinary grayscale anti-aliasing reads as visibly soft when a display gives
- * the page just one backing pixel per CSS pixel, so the viewer raises the
- * render-resolution floor from 1x to this modest 1.25x instead of paying for a
- * heavier 2x supersample. Only surfaces whose `devicePixelRatio` is below 1.25
- * are affected; a higher-DPI display already reaches the shared 2x ceiling.
+ * PDFium's ordinary anti-aliasing reads visibly soft at one backing pixel
+ * per CSS pixel, so low-DPI surfaces supersample to this instead of 2x.
  */
 export const MIN_PAGE_OUTPUT_SCALE = 1.25
 
-/**
- * Backing pixels to render per CSS pixel, floored at `minOutputScale` (so a
- * low-DPI surface still supersamples) and capped at 2 (the renderer's upper
- * bound). A zero or absent `dpr` falls back to 1, since a zero ratio never
- * means "no pixels".
- */
+/** Capped at 2, the renderer's upper bound; a zero or absent `dpr` falls
+    back to 1, since a zero ratio never means "no pixels". */
 export function resolveOutputScale(dpr: number, minOutputScale = 1) {
   return Math.min(Math.max(dpr || 1, minOutputScale), 2)
 }
@@ -146,18 +132,12 @@ export type PageCandidate = {
   top: number
 }
 
-// How much of itself a page has to show to claim the reader from the page above.
-// Half is load-bearing: two stacked pages can never both clear it, so exactly one
-// qualifies and the rule collapses to "whichever shows most" — where Chrome and
-// pdf.js land. Lower it and the tie holds the page above current far too long.
+// Half is load-bearing: two stacked pages can never both clear it, so the
+// rule collapses to "whichever shows most" — where Chrome and pdf.js land.
 const MIN_CURRENT_PAGE_VISIBILITY = 0.5
 
-/**
- * How much of `candidate` the viewport shows, against the most it could ever
- * show. Measuring against the viewport rather than the page's own height keeps
- * the score scale free: a page taller than the viewport reaches 1 by filling
- * it, exactly as a short thumbnail row reaches 1 by fitting inside it.
- */
+/** Measured against the most the viewport could ever show, not the page's
+    own height, so tall pages and short rows reach the same scale. */
 function visibleFraction(
   candidate: PageCandidate,
   viewportTop: number,
@@ -178,17 +158,8 @@ function visibleFraction(
 }
 
 /**
- * The page the reader is on, or null when nothing is visible: the first page
- * showing at least half of what it could, else whichever shows the most.
- *
- * Deliberately not a fixed line down the viewport. Navigation parks a page at
- * the top of the viewer, so any line deep enough to sit inside a full page
- * would fall past a short one — a thumbnail row, or a wide page in a book
- * spread — and hand the reader the row below the one they asked for. Judging a
- * page by how much of it shows holds for every row height.
- *
- * Ties resolve to the lowest page number, so a book spread reports its left
- * page and a thumbnail row its leftmost cell, whatever order they arrived in.
+ * Not a fixed line down the viewport: a line deep enough to sit inside a
+ * full page falls past a short row, handing the reader the row below.
  */
 export function pickCurrentPage(
   candidates: PageCandidate[],

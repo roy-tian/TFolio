@@ -12,11 +12,9 @@ export type PageNumbersConfig = {
   /** `null` prints each page's own position; otherwise the number the range's
       first page prints, counting up from there. */
   start: number | null
-  /** Whether a page that renders blank prints the number it took. */
   blankNumbered: boolean
-  /** Whether a page that renders blank takes a number from the sequence. A page
-      that takes none has nothing to print, so this off forces `blankNumbered`
-      off — `parsePageNumbersDraft` is where that is enforced. */
+  /** Whether a blank page takes a number from the sequence; off forces
+      `blankNumbered` off — a page that takes none has nothing to print. */
   blankCounted: boolean
 }
 
@@ -27,10 +25,8 @@ export type PageNumbersPreferences = Pick<
   "mode" | "position" | "smartColor" | "blankNumbered" | "blankCounted"
 >
 
-/**
- * The dialog's editable form. `range` and `start` are text so the fields can be
- * empty or mid-edit; they become a config only when applied.
- */
+/** `range` and `start` are text so the fields can be empty or mid-edit;
+    they become a config only when applied. */
 export type PageNumbersDraft = {
   mode: PageNumbersMode
   position: PageNumbersPosition
@@ -63,20 +59,18 @@ export const defaultPageNumbersPreferences: PageNumbersPreferences = {
   // On by default, so numbers stay legible on dark pages without the reader
   // discovering the toggle.
   smartColor: true,
-  // Also on by default: numbering every page is what a reader expects, and it
-  // is the one pair of rules the backend can honour without rendering a page.
+  // Also on by default: numbering every page is what a reader expects, and
+  // the one pair of rules the backend can honour without rendering a page.
   blankNumbered: true,
   blankCounted: true,
 }
 
-/** The face the label is set in, as close to the embedded one as a WebView can
-    get: the same chain `page_number_face` in `font.rs` walks, so a preview is
-    drawn in the font the page will carry wherever the system has it. */
+/** The same chain `page_number_face` in `font.rs` walks, so a preview is
+    drawn in the font the page will carry. */
 export const PAGE_NUMBERS_FONT_STACK =
   '"SimSun", "宋体", "NSimSun", "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "Noto Serif", serif'
 
-/** The label a page prints, mirroring `label` in `page_numbers.rs`: an em dash
-    and a space on each side. */
+/** Mirrors `label` in `page_numbers.rs`, so preview and page agree. */
 export function pageNumbersLabel(printed: number): string {
   return `— ${printed} —`
 }
@@ -89,11 +83,8 @@ export function isPosition(value: unknown): value is PageNumbersPosition {
   return pageNumbersPositions.includes(value as PageNumbersPosition)
 }
 
-/**
- * Where a number sits, as the one thing the reader picks: the two fixed places,
- * or `auto` for the mirrored one. The backend keeps taking a mode and a
- * position, so the pairing lives here rather than in either panel.
- */
+/** The backend keeps taking a mode and a position, so the `auto` pairing
+    lives here rather than in either panel. */
 export type PageNumbersPlacement = PageNumbersPosition | "auto"
 
 export const pageNumbersPlacements: readonly PageNumbersPlacement[] = [
@@ -120,9 +111,8 @@ export function draftWithPlacement(
     : { ...draft, mode: "single", position: placement }
 }
 
-/** Parses a field the reader typed into a positive integer, or null when it is
-    empty, blank, or not a whole number — so the validator can tell "left blank"
-    from "typed something unusable". */
+/** A positive integer, or null when empty or not whole — so the validator
+    can tell "left blank" from "typed something unusable". */
 function parseCount(value: string): number | null {
   const trimmed = value.trim()
 
@@ -186,13 +176,8 @@ export function maxPageNumbersStart(pageCount: number): number {
 }
 
 /**
- * The start field snapped back into range when the reader leaves it: past the
- * document's last page becomes that page, zero or below becomes one, and a
- * fraction becomes the whole number nearest it.
- *
  * Blank is left blank — that is the field's own meaning, each page's own
- * position — and so is anything that is not a number to begin with, which the
- * error below the field is there to name.
+ * position — and so is anything not a number, which the field's error names.
  */
 export function clampPageNumbersStart(value: string, pageCount: number): string {
   const trimmed = value.trim()
@@ -218,9 +203,8 @@ export function draftFromPreferences(
     blankNumbered: preferences.blankNumbered,
     blankCounted: preferences.blankCounted,
     ...wholeRange(pageCount),
-    // The range opens on the document's first page, and `page_numbers.rs`
-    // counts from the range's own first page when no start is given, so this
-    // is the default it already had — now written out where it can be edited.
+    // The backend counts from the range's own first page when no start is
+    // given, so "1" is the default it already had, now editable.
     start: "1",
   }
 }
@@ -242,14 +226,6 @@ export function draftFromConfig(
   }
 }
 
-/**
- * Turns a draft into a config, or names the field that stops it.
- *
- * A blank end of the range is the document's own end, so leaving both blank
- * numbers the whole document — as does spelling that whole span out. The range
- * is checked against the document's length; a blank start prints document
- * positions, and a filled one must be a whole number the document reaches.
- */
 export function parsePageNumbersDraft(
   draft: PageNumbersDraft,
   pageCount: number,
@@ -330,11 +306,8 @@ export function samePageNumbersConfig(
 }
 
 /**
- * The style the reader last applied, or the defaults if they never have.
- *
- * The record is typed on the Rust side, and still checked here: the settings
- * file is the reader's to edit, and a style that fails the check simply leaves
- * the dialog on its defaults.
+ * The style the reader last applied, or the defaults. Typed on the Rust
+ * side and still checked here: the settings file is the reader's to edit.
  */
 export function storedPageNumbersPreferences(): PageNumbersPreferences {
   const stored = storedSettings().pageNumbers
@@ -344,7 +317,6 @@ export function storedPageNumbersPreferences(): PageNumbersPreferences {
     : defaultPageNumbersPreferences
 }
 
-/** Records the style behind an applied config. */
 export function storePageNumbersPreferences(config: PageNumbersConfig) {
   rememberSettings({ pageNumbers: pageNumbersPreferences(config) })
 }

@@ -1,7 +1,5 @@
 import type { PdfSearchMatch } from "@/lib/pdf"
 
-/** Starts at the first occurrence on or after the page being read, wrapping to
-    the document's beginning when every occurrence is earlier. */
 export function firstSearchMatchFromPage(
   matches: PdfSearchMatch[],
   currentPage: number,
@@ -15,7 +13,6 @@ export function firstSearchMatchFromPage(
   return index === -1 ? 0 : index
 }
 
-/** Moves through occurrences in document order and wraps at either end. */
 export function stepSearchMatch(
   current: number | null,
   count: number,
@@ -30,7 +27,6 @@ export function stepSearchMatch(
   return (index + direction + count) % count
 }
 
-/** A box on screen, the part of `getBoundingClientRect` these need. */
 export type SearchBox = {
   bottom: number
   left: number
@@ -38,7 +34,6 @@ export type SearchBox = {
   top: number
 }
 
-/** The box around every rectangle of one occurrence, when it fits on screen. */
 export function searchMatchBox(rects: SearchBox[]): SearchBox | null {
   if (rects.length === 0) {
     return null
@@ -144,8 +139,7 @@ function boxIsVisible(
   )
 }
 
-/** Reveal the whole occurrence if it fits; otherwise prefer a reachable segment.
-    Bounds are allowable deltas from current scroll. */
+/** Bounds are allowable deltas from current scroll, not positions. */
 export function searchRevealOffset(
   rects: SearchBox[],
   viewport: SearchBox,

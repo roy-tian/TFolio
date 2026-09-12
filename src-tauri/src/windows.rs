@@ -171,9 +171,8 @@ impl DocumentOwners {
         }
     }
 
-    /// Whether `window` is the one that opened `document_id`. Ownership is per
-    /// window, so a command acting on two documents at once — a page drag from
-    /// one grid into another — has to find both in the window that asked.
+    /// Ownership is per window: a command touching two documents at once — a
+    /// page drag between grids — must find both in the window that asked.
     pub fn owns(&self, document_id: u64, window: &str) -> bool {
         self.0.lock().is_ok_and(|owners| {
             owners
@@ -270,10 +269,8 @@ pub async fn focus_pdf_path(
     Ok(true)
 }
 
-/// Opens the OS print dialog on this window's own webview, which prints the
-/// sheet of page images the frontend lays out for print media. Async so the
-/// dialog's nested loop runs on the event loop, not inside a main-thread
-/// command; it outlives this call, and no signal reports the job's end.
+/// The dialog's nested loop must run on the event loop, not inside a
+/// main-thread command; it outlives this call, and no signal reports its end.
 #[tauri::command]
 pub async fn print_window(window: WebviewWindow) -> Result<(), String> {
     window

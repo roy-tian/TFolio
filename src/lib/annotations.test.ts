@@ -51,7 +51,6 @@ function highlight(...pageNumbers: number[]): AnnotationCommand {
   }
 }
 
-/** Applies each command in turn, as a reader drawing them one after another. */
 function historyOf(...commands: AnnotationCommand[]): AnnotationHistory {
   return commands.reduce(commit, emptyHistory)
 }
@@ -90,8 +89,6 @@ describe("commandPages", () => {
     expect(commandPages(highlight(3))).toEqual([3])
   })
 
-  // A selection dragged across a page break is one action, so its command
-  // carries every page it touched and an undo has to take all of them back.
   it("reports every page a selection ran across", () => {
     expect(commandPages(highlight(3, 4))).toEqual([3, 4])
   })
@@ -458,9 +455,8 @@ describe("structure commands", () => {
       order: number[]
     }
 
-    // The undo re-enters through the same command, so one expression has to
-    // cover both directions — which it does, since a permutation and its
-    // inverse leave exactly the same positions untouched.
+    // The undo re-enters through the same command, so one expression covers
+    // both directions: a permutation and its inverse leave the same slots alone.
     expect(commandPages(reorder)).toEqual([1, 2, 3])
     expect(commandPages({ ...reorder, order: reorder.inverse })).toEqual([
       1, 2, 3,
@@ -523,10 +519,7 @@ describe("insert-file commands", () => {
     const filled = fillInsertFileOutcome(planned.history, id, 4)
     const command = filled.past.at(-1)!.command
 
-    // Four pages arrived, so the document now has eight.
     expect(command).toMatchObject({ insertedCount: 4, pageCount: 8 })
-    // The delete an undo runs, and the restore a redo runs, cover the file's own
-    // range — pages 3 through 6.
     expect(insertFilePages(command as never)).toEqual([3, 4, 5, 6])
   })
 })
@@ -648,7 +641,6 @@ describe("pasting the document's own pages", () => {
 })
 
 describe("erasing a mark", () => {
-  /** The ids of the entries the history holds, oldest first. */
   function applied(history: AnnotationHistory) {
     return history.past.map((entry) => entry.id)
   }
@@ -678,7 +670,6 @@ describe("erasing a mark", () => {
     const restored = undo(erased)!.history
 
     expect(applied(restored)).toEqual([1, 2, 3])
-    // …and a redo takes it back out again.
     expect(applied(redo(restored)!.history)).toEqual([1, 3, 4])
   })
 
@@ -687,7 +678,6 @@ describe("erasing a mark", () => {
     const erased = planEraseAnnotation(history, history.past[0]!.id)!.history
 
     expect(isDirty(erased)).toBe(true)
-    // Undoing it puts the document back at exactly what was saved.
     expect(isDirty(undo(erased)!.history)).toBe(false)
   })
 

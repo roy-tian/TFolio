@@ -17,7 +17,6 @@ type UseWatermarkOptions = {
   /** Stops the run in flight, which rolls the document back. Resolves to
       whether the backend had one listed to stop. */
   onCancel: () => Promise<boolean>
-  /** Resolves to how the change ended. */
   onSet: (
     config: WatermarkConfig | null,
     pageCount: number,
@@ -107,10 +106,8 @@ export function useWatermark({
     setIsApplying(true)
     setIsStopping(false)
     try {
-      // Only a change the document accepted is worth remembering as this
-      // reader's watermark. A stop leaves the dialog too — the reader asked to
-      // be out of it — but takes nothing with it, the document being back as
-      // it was.
+      // Only an accepted change is worth remembering. A stop leaves the dialog
+      // too, but takes nothing with it: the document is back as it was.
       const outcome = await onSet(config, pageCount, trackProgress)
 
       if (outcome === "applied") {

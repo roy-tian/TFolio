@@ -36,7 +36,6 @@ function copiedText() {
   return browser.execute(() => (window as ClipboardWatch).__tfolioCopied ?? null)
 }
 
-/** A right-click in the middle of the first element `selector` names. */
 function rightClick(selector: string) {
   return browser.execute((query: string) => {
     const element = document.querySelector(query)!
@@ -74,9 +73,8 @@ describe("TFolio select all", () => {
   })
 
   it("takes nothing from the interface itself", async () => {
-    // Dispatched rather than typed: the WebDriver bridge runs the WebView's
-    // select-all as a scripted editing command, which no key handler can
-    // refuse, so a typed chord cannot show that this one is consumed.
+    // Dispatched rather than typed: the bridge's typed chord runs a scripted
+    // editing command no key handler can refuse, so it cannot prove consumption.
     const consumed = await browser.execute(() => {
       const event = new KeyboardEvent("keydown", {
         bubbles: true,
@@ -92,7 +90,6 @@ describe("TFolio select all", () => {
 
     await browser.keys(["Control", "a"])
 
-    // And whatever a select-all did find is dropped on the next frame.
     await browser.waitUntil(async () => (await nativeSelection()) === "", {
       timeout: 5_000,
       timeoutMsg: "the interface was left holding a selection",

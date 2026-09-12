@@ -262,11 +262,7 @@ const en = {
     title: "Settings",
     description: "Adjust appearance, language, and other app settings.",
     appearance: "Appearance",
-    imports: "Import",
     about: "About",
-    wordConversion: "Convert Word documents with the installed office apps",
-    wordConversionHint:
-      "The import wizard asks Microsoft Word, WPS Office, or LibreOffice to turn Word documents into PDFs as they are added. When off, the wizard takes PDFs and images only.",
     theme: "Theme",
     themeHint: "Choose a light or dark appearance.",
     themeLight: "Light",
@@ -308,7 +304,6 @@ const en = {
     deleteSelected: "Delete {{count}} selected pages",
     insertBefore: "Insert a blank page before page {{pageNumber}}",
     insertAtEnd: "Insert a blank page at the end",
-    /** The right-click menu on a page, which acts on the whole selection. */
     cut_one: "Cut page",
     cut_other: "Cut {{count}} pages",
     copy_one: "Copy page",
@@ -317,7 +312,6 @@ const en = {
     rotate_other: "Rotate {{count}} pages",
     pasteBefore: "Paste before page {{pageNumber}}",
     pasteAtEnd: "Paste at the end",
-    /** The notices: what was taken, and where a paste put it. */
     cutNotice_one: "Page {{pages}} cut",
     cutNotice_other: "{{count}} pages cut ({{pages}})",
     copiedNotice_one: "Page {{pages}} copied",
@@ -341,11 +335,14 @@ const en = {
     stepWatermark: "Watermark",
     filesDescription:
       "PDFs, images, and Word documents join the wizard\u2019s list, in the order you drop them. A Word document is converted to PDF by your own Office apps as it is added.",
+    filesDescriptionPlain:
+      "PDFs and images join the wizard\u2019s list, in the order you drop them.",
     addFiles: "Add files",
     sourceFilter: "PDFs, images, and Word documents",
-    /** The same dialog with the Word conversions turned off in settings. */
+    /** The same dialog where no office suite was detected to convert Word. */
     sourceFilterPlain: "PDFs and images",
     addingFiles: "Adding files\u2026 Word documents convert as they arrive.",
+    addingFilesPlain: "Adding files\u2026",
     empty:
       "No files yet. Add at least two PDFs \u2014 images come in as pages of their own.",
     emptyCopies:
@@ -355,8 +352,8 @@ const en = {
     pageCount_one: "{{count}} page",
     pageCount_other: "{{count}} pages",
     unreadable: "Unreadable",
-    errorConverterMissing:
-      "Needs Word, WPS, or LibreOffice",
+    errorConverterMissing: "Needs Word, WPS, or LibreOffice",
+    errorConverterMissing_windows: "Needs Microsoft Word or WPS Office",
     errorConversionFailed: "Could not be converted",
     remove: "Remove {{name}}",
     fileCount_one: "{{count}} file",
@@ -427,6 +424,8 @@ const en = {
     title: "TFolio",
     description: "A focused desktop workspace for reading and editing PDF files.",
     version: "Version {{version}}",
+    /** Only while releases are internal: a stable one drops this key and its use. */
+    prerelease: "(internal beta)",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const

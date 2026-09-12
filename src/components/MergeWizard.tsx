@@ -53,7 +53,9 @@ import {
   type MergeFile,
   type MergeWizardStep,
 } from "@/lib/mergeWizard"
+import { isWindows } from "@/lib/platform"
 import { cn } from "@/lib/utils"
+import { wordConversionAvailable } from "@/lib/wordConversion"
 
 const stepTitleKey = {
   files: "mergeWizard.stepFiles",
@@ -116,9 +118,8 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
         {index + 1}
       </span>
       {usable ? (
-        // An image is not a document, and a Word document arrives by way of
-        // one: saying so on the row is what makes its pages, and the sheet or
-        // the conversion behind them, read as intended.
+        // An image is not a document and a Word document arrives by way of
+        // one: saying so makes its pages read as intended.
         file.kind === "image" ? (
           <HintTooltip label={t("mergeWizard.imageSource")}>
             <ImageIcon
@@ -155,7 +156,9 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
         {usable
           ? t("mergeWizard.pageCount", { count: file.pageCount })
           : file.error === "converterMissing"
-            ? t("mergeWizard.errorConverterMissing")
+            ? t("mergeWizard.errorConverterMissing", {
+              context: isWindows() ? "windows" : undefined,
+            })
             : file.error === "conversionFailed"
               ? t("mergeWizard.errorConversionFailed")
               : t("mergeWizard.unreadable")}
@@ -182,9 +185,8 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
   )
 })
 
-/** One caution under the settings that raised it. Both notes the step can show
-    carry the same mark and the same colour: neither is an error, and one
-    reading as louder than the other would say something neither means. */
+/** One caution under the settings that raised it: both notes the step can show
+    carry the same mark and colour, so neither reads as louder than the other. */
 function SettingNote({
   children,
   testId,
@@ -203,9 +205,8 @@ function SettingNote({
   )
 }
 
-/** The row in hand lives at the document root, outside both of the dialog's
-    clipped scroll boxes. It can therefore follow the pointer beyond either
-    edge instead of losing whichever half crossed the boundary. */
+/** The row in hand is portalled to the document root, outside the dialog's
+    clipped scroll boxes, so it follows the pointer past either edge. */
 function MergeFileDragGhost({
   drag,
   file,
@@ -236,14 +237,8 @@ function MergeFileDragGhost({
 }
 
 /**
- * The questions a merge answers, one step at a time: which files and in what
- * order, what comes out of them, and — where the answer can reach the result —
- * what the outline becomes and whether it carries page numbers and a watermark.
- *
- * Which steps are asked follows the export the first step names, so the trail
- * along the footer is the export's own rather than a fixed four.
- *
- * The whole state lives in `useMergeWizard`; this is its face.
+ * The face of the state in `useMergeWizard`. Which steps are asked follows the
+ * export the first step names, so the footer trail is that export's own.
  */
 export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
   const { t } = useTranslation()
@@ -324,9 +319,11 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
+      {/* Fixed at the tallest step's needs — the watermark settings plus an
+          error line — so the frame never jumps between steps. */}
       <DialogContent
         aria-busy={mergeProgress !== null}
-        className="flex max-h-[calc(100svh-2rem)] w-[52rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[52rem]"
+        className="flex h-[34rem] max-h-[calc(100svh-2rem)] w-[52rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[52rem]"
         data-testid="merge-wizard"
         showCloseButton={!isBusy}
       >
@@ -342,14 +339,17 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                 {t("viewer.dropNowMerge")}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                {t("mergeWizard.filesDescription")}
+                {t(
+                  wordConversionAvailable()
+                    ? "mergeWizard.filesDescription"
+                    : "mergeWizard.filesDescriptionPlain",
+                )}
               </p>
             </div>
           </div>
         ) : null}
 
-        {/* The step's own switch — is there anything to configure at all? —
-            rides the header rather than the body, where it would read as the
+        {/* The step's own switch rides the header, where it cannot read as the
             first of the settings it governs. `pr-12` clears the close button. */}
         <DialogHeader className="flex-row items-center justify-between gap-3 border-b py-4 pr-12 pl-5">
           <DialogTitle>{t("mergeWizard.title")}</DialogTitle>
@@ -397,9 +397,11 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           ) : null}
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        {/* A column, so each step can fill the fixed height or centre in it;
+            `my-auto`, not `justify-center`, keeps over-tall steps scrollable. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
           {mergeProgress ? (
-            <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8">
+            <div className="my-auto flex min-h-64 flex-col items-center justify-center gap-3 p-8">
               <OperationProgress
                 className="max-w-sm"
                 label={progressLabel}
@@ -413,11 +415,10 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           ) : null}
 
           {!mergeProgress && step === "files" ? (
-            // What goes in on the left, what is done to it on the right. The
-            // step asks enough questions now that a single column put the file
-            // list and the settings in one queue, where neither read as a group.
+            // What goes in on the left, what is done to it on the right: one
+            // column would queue list and settings where neither read as a group.
             <div
-              className="grid grid-cols-[minmax(0,1fr)_19rem] gap-5"
+              className="grid flex-1 grid-cols-[minmax(0,1fr)_19rem] gap-5"
               data-testid="merge-wizard-files"
             >
               <div className="flex min-w-0 flex-col gap-3">
@@ -427,7 +428,11 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                       className="text-xs text-muted-foreground"
                       data-testid="merge-wizard-adding"
                     >
-                      {t("mergeWizard.addingFiles")}
+                      {t(
+                        wordConversionAvailable()
+                          ? "mergeWizard.addingFiles"
+                          : "mergeWizard.addingFilesPlain",
+                      )}
                     </p>
                     <Button
                       data-testid="merge-wizard-stop-adding"
@@ -441,17 +446,14 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                   </div>
                 ) : null}
                 {files.length === 0 ? (
-                  // Stretched to the settings beside it, with its message in
-                  // the middle: an empty list is a target to drop onto, and a
-                  // box that ends above them would not read as one.
+                  // Stretched beside the settings with its message in the
+                  // middle: an empty list is a target to drop onto.
                   <p className="grid flex-1 place-content-center rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
                     {t(merges ? "mergeWizard.empty" : "mergeWizard.emptyCopies")}
                   </p>
                 ) : (
-                  // A box of its own rather than the dialog's: a long list
-                  // scrolls here, leaving the add button and the total where
-                  // the reader left them. The right padding keeps the overlay
-                  // scrollbar off the rows' own border.
+                  // Its own scroll box keeps the add button and the total where
+                  // the reader left them; `pr-2` keeps the scrollbar off the rows.
                   <ol
                     className="flex max-h-64 select-none flex-col gap-1.5 overflow-y-auto pr-2"
                     ref={listRef}
@@ -467,9 +469,8 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                             drag &&
                               drag.index !== index &&
                               "transition-transform duration-200 ease-out",
-                            // The portal ghost carries this file; its real row
-                            // stays in the layout as the hole the others move
-                            // around, but must not show beneath the copy.
+                            // The portal ghost carries this file; the real row
+                            // stays as the hole the others move around to fill.
                             drag?.index === index && "opacity-0",
                           )}
                           data-list-index={index}
@@ -482,9 +483,8 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                                 : `translateY(${rowOffset}px)`,
                           }}
                         >
-                          {/* Keep the landing line in the list's original
-                              coordinate space while its host row animates aside.
-                              The equal, opposite transform cancels the row's. */}
+                          {/* The equal, opposite transform keeps the landing
+                              line in the list's original coordinate space. */}
                           {drag &&
                           (drag.gap === index ||
                             (drag.gap === files.length &&
@@ -566,11 +566,9 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                   )}
                 </FieldLabel>
 
-                {/* All three on the page rather than behind a trigger: which
-                    export is chosen decides which steps the wizard even asks,
-                    so it is worth reading the alternatives before committing to
-                    one. `FieldTitle` rather than `FieldLabel` — this names a
-                    group, not a control. */}
+                {/* All three on the page, not behind a trigger: the export
+                    chosen decides which steps are even asked. `FieldTitle`
+                    names a group, not a control. */}
                 <div className="flex flex-col gap-2">
                   <FieldTitle>{t("mergeWizard.exportMode")}</FieldTitle>
                   <RadioGroup
@@ -600,9 +598,8 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                   </RadioGroup>
                 </div>
 
-                {/* At the foot of the settings, where what they cost is read
-                    after what they are — and only where a choice costs
-                    something. */}
+                {/* At the foot of the settings, so what they cost is read
+                    after what they are — and only where a choice costs. */}
                 <div className="mt-auto flex flex-col gap-2 empty:hidden">
                   {normalizeA4 ? (
                     <SettingNote testId="merge-wizard-a4-warning">
@@ -621,10 +618,9 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           ) : null}
 
           {!mergeProgress && step === "bookmarks" ? (
-            <div className="flex flex-col gap-3">
-              {/* Four exclusive answers, each carrying its own explanation —
-                  which is what a reader compares here, so it belongs on the
-                  option rather than in a line under the group. */}
+            <div className="my-auto flex flex-col gap-3">
+              {/* Each answer carries its own explanation, which is what a
+                  reader compares here — so it sits on the option. */}
               <RadioGroup
                 aria-label={t("mergeWizard.stepBookmarks")}
                 onValueChange={(value) => {
@@ -667,6 +663,7 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           {!mergeProgress && step === "pageNumbers" ? (
             pageNumbersOn ? (
               <PageNumbersSettings
+                className="my-auto"
                 draft={pageNumbersDraft}
                 idPrefix="merge-wizard-numbers"
                 onDraftChange={setPageNumbersDraft}
@@ -674,10 +671,9 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                 validationError={pageNumbersError}
               />
             ) : (
-              // The switch that governs this step now sits in the header, so
-              // its off state has to say something here — an empty panel would
-              // read as a step that failed to load.
-              <p className="py-6 text-center text-sm text-muted-foreground">
+              // The governing switch sits in the header, so the off state has
+              // to say something here rather than read as a failed step.
+              <p className="m-auto py-6 text-center text-sm text-muted-foreground">
                 {t("mergeWizard.pageNumbersSkipped")}
               </p>
             )
@@ -686,22 +682,22 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
           {!mergeProgress && step === "watermark" ? (
             watermarkOn ? (
               <WatermarkSettings
+                className="my-auto"
                 draft={watermarkDraft}
                 idPrefix="merge-wizard-mark"
                 onDraftChange={setWatermarkDraft}
                 validationError={watermarkError}
               />
             ) : (
-              <p className="py-6 text-center text-sm text-muted-foreground">
+              <p className="m-auto py-6 text-center text-sm text-muted-foreground">
                 {t("mergeWizard.watermarkSkipped")}
               </p>
             )
           ) : null}
         </div>
 
-        {/* Above the footer rather than in it: the trail and the buttons fill
-            that row, and an error the reader has to read must not have to
-            compete with them for the space. */}
+        {/* Above the footer, not in it: an error the reader must read does
+            not compete with the trail and buttons for the row. */}
         {errorMessage ? (
           <p
             className="border-t px-5 py-2 text-sm text-destructive"
@@ -712,9 +708,8 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
         ) : null}
 
         <DialogFooter className="mx-0 mb-0 items-center rounded-none border-t px-5 py-4">
-          {/* The trail sits with the controls that move along it: a step behind
-              the reader carries a tick rather than its number, the one they are
-              on is named, and all four tick once the merge itself begins. */}
+          {/* The trail sits with the controls that move along it: passed steps
+              tick, the current one is named, all tick once the merge begins. */}
           <ol
             aria-label={t("mergeWizard.steps")}
             className="mr-auto flex items-center gap-1 text-xs"

@@ -1,26 +1,15 @@
 /**
- * Where a PDF dragged in from the desktop would go in the thumbnail grid.
- *
- * The OS drag reports a window position and nothing else — no element, no
- * pointer events — so the target is found by hit-testing that point and asking
- * what it landed on. Unlike the grid's own page drag, which measures every cell
- * once at the start, this reads only what is under the pointer: an OS drag can
- * cross a thousand-page grid, and measuring it per move is a cost no drag can
- * carry.
+ * An OS drag reports only a window position, so the target is hit-tested per
+ * move: measuring every cell would be a cost a thousand-page drag cannot carry.
  */
 
-/** What the pointer is over: a gap between cells, which names its own position,
-    or a thumbnail, whose nearer vertical edge names one. */
 export type DropHit =
   | { kind: "gap"; index: number }
   | { kind: "page"; pageNumber: number; left: number; width: number }
 
 /**
- * The 1-based position a dropped file's first page would take, or null when the
- * pointer is over neither a gap nor a page. A thumbnail counts as a target in
- * its own right — the nearer edge wins — so the whole grid is live rather than
- * only the thin gaps, which is the difference between a drop that lands and one
- * the reader has to aim for.
+ * A thumbnail counts as a target in its own right — the nearer edge wins — so
+ * the whole grid is live, not only the thin gaps between cells.
  */
 export function insertIndexForHit(hit: DropHit | null, x: number): number | null {
   if (!hit) {
@@ -34,15 +23,10 @@ export function insertIndexForHit(hit: DropHit | null, x: number): number | null
   return x < hit.left + hit.width / 2 ? hit.pageNumber : hit.pageNumber + 1
 }
 
-/** Hit-tests `point` in the page, in CSS pixels, and reports what the grid has
-    there. `root` bounds the answer to one document's viewer, so a drag over an
-    inactive tab's grid — hidden, but still in the tree — finds nothing.
-
-    The cell is read off `data-page-cell`, which the grid puts on the whole cell,
-    rather than off `data-page-number`, which sits on the paper alone: the page
-    number under a thumbnail and the badge over its corner are siblings of the
-    paper, and a drop over either must still name the page it belongs to instead
-    of falling through to the workspace as a tab. */
+/**
+ * The cell, not the paper: a drop over the number or badge must name the page,
+ * not fall to the workspace. `root` keeps a hidden tab's grid out of the answer.
+ */
 export function dropHitAt(
   point: { x: number; y: number },
   root: HTMLElement,

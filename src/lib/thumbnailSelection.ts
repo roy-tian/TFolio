@@ -1,7 +1,6 @@
 /**
- * The thumbnail grid's selection: which pages are chosen, and where a shift
- * range anchors. Pure transforms over an immutable value, so every gesture is
- * a unit-testable step and the hook holding this stays a thin wrapper.
+ * Pure transforms over an immutable value, so every gesture is a testable
+ * step and the hook holding this stays a thin wrapper.
  */
 export type ThumbnailSelection = {
   /** Selected 1-based page numbers. */
@@ -32,7 +31,6 @@ function range(from: number, to: number): Set<number> {
   return pages
 }
 
-/** One click, whatever its modifiers, to the selection it leaves behind. */
 export function selectionAfterClick(
   selection: ThumbnailSelection,
   pageNumber: number,
@@ -62,19 +60,15 @@ export function selectionAfterClick(
   return { anchor: pageNumber, pages: new Set([pageNumber]) }
 }
 
-/**
- * Every page at once, as the grid's select-all leaves it. The anchor goes to
- * the first page, so a shift-click after it narrows the selection from there
- * rather than from wherever the last single click happened to be.
- */
+/** The anchor goes to the first page, so a shift-click after select-all
+    narrows from there, not from the last single click. */
 export function selectionOfAllPages(numPages: number): ThumbnailSelection {
   return numPages < 1 ? emptySelection : { anchor: 1, pages: range(1, numPages) }
 }
 
 /**
- * The selection still valid after the document's pages changed shape. Page
- * numbers may now name different pages entirely, so nothing survives — the
- * one honest answer a selection keyed by position can give.
+ * Page numbers may now name different pages entirely, so nothing survives —
+ * the one honest answer a selection keyed by position can give.
  */
 export function selectionAfterStructureChange(): ThumbnailSelection {
   return emptySelection

@@ -7,6 +7,7 @@ mod store;
 mod update;
 mod windows;
 
+use convert::word_conversion_available;
 use launch::{take_launch_pdfs, LaunchQueue};
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
@@ -30,17 +31,8 @@ use windows::{focus_pdf_path, open_new_window, print_window, AppWindows, Documen
 pub fn run() {
     let builder = tauri::Builder::default();
 
-    // Registered first, because a second instance's whole job is to hand over
-    // the file it was launched with and exit: anything set up ahead of that is
-    // work a process about to die did for nothing. Double-clicking a PDF while
-    // TFolio is open belongs in the window already showing the reader's other
-    // tabs — and two processes would keep two versions of one recent list.
-    //
-    // macOS needs none of it: Finder activates the running app and sends the
-    // file to it, which arrives below as `RunEvent::Opened`. Nor does the e2e
-    // build, which is the one binary that really is run again and again: a
-    // session outliving its spec would kill the next spec's app rather than
-    // its own.
+    // Registered first: a second instance just hands its file over and exits.
+    // macOS needs none of it (RunEvent::Opened), nor the per-spec e2e run.
     #[cfg(all(not(feature = "e2e"), any(target_os = "linux", target_os = "windows")))]
     let builder = {
         let single_instance =
@@ -60,11 +52,8 @@ pub fn run() {
                 }
             });
 
-        // A name of its own for a build that is not the installed app.
-        // Otherwise `tauri dev`, started while an installed TFolio is open,
-        // hands its arguments to that copy and exits — no window, no message,
-        // and only when the other one happens to be running. Linux alone: the
-        // D-Bus name is the only one the plugin lets an app choose.
+        // A dev-only D-Bus name, or `tauri dev` hands its arguments to a
+        // running installed copy and exits. Linux alone allows choosing one.
         #[cfg(debug_assertions)]
         let single_instance = single_instance.dbus_id("com.roytian.tfolio.dev");
 
@@ -83,11 +72,8 @@ pub fn run() {
     builder
         .setup(|app| {
             let pdfium = PdfiumState::new(app.handle()).map_err(std::io::Error::other)?;
-            // An earlier run's recent list is the one thing outside this
-            // process that may name a path the reader gets to reopen, and it
-            // holds only paths a dialog or a drop produced while this app
-            // watched — so approving it is approving the reader's own past
-            // gestures, not the WebView's word.
+            // The recent list holds only paths a dialog or drop produced
+            // while this app watched, so approving it approves past gestures.
             let recent = RecentFiles::load(app.handle());
             pdfium.approve_paths(recent.stored().iter());
             app.manage(pdfium);
@@ -101,22 +87,18 @@ pub fn run() {
             // nothing a spec drives may install anything over this build.
             #[cfg(not(feature = "e2e"))]
             update::check_in_background(app.handle());
-            // The file a double-click in the file manager launched this run
-            // for. It waits here for the workspace, which takes it as soon as
-            // there is one to open it in.
+            // This run's launch files wait here for a workspace to open them.
             launch::queue_open(app.handle(), launch::pdf_paths_from_this_launch());
             Ok(())
         })
-        // Reloading replaces the page without destroying its window, leaving its documents unreachable.
+        // Reloading replaces the page without destroying its window or closing documents.
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 windows::release_window(webview.app_handle(), webview.label());
             }
         })
-        // Recorded on the Rust side of the boundary, because this is the only
-        // place a drop's paths exist before the WebView has touched them:
-        // `open_pdf_from_path` only acts on paths approved here or by the
-        // dialog in `pick_pdf_path`.
+        // The only place a drop's paths exist before the WebView touches
+        // them; `open_pdf_from_path` acts only on paths approved here or by a dialog.
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                 if let Some(state) = window.try_state::<PdfiumState>() {
@@ -162,6 +144,7 @@ pub fn run() {
             cancel_pdf_operation,
             cancel_pdf_merge,
             cancel_word_conversion,
+            word_conversion_available,
             settings,
             set_settings,
             update_status,
@@ -190,7 +173,7 @@ pub fn run() {
         // Built and run in two steps for the one event below, which no builder
         // hook reports.
         .run(|_app, _event| {
-            // Finder activates the app, which may raise a different window or leave the target minimized.
+            // Finder may raise a different window or leave the target minimized.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
                 if let Some(window) = launch::queue_open(_app, launch::pdf_paths_from_urls(&urls)) {

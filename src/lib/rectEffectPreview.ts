@@ -23,11 +23,8 @@ function snapPixel(value: number) {
   return Math.abs(value - integer) < 1e-6 ? integer : value
 }
 
-/**
- * Maps a box on the reader's rotated page back into the page canvas bitmap.
- * The canvas already includes the PDF's intrinsic rotation; `rotation` is only
- * the extra clockwise turn applied by the reader toolbar.
- */
+/** The canvas already includes the PDF's intrinsic rotation; `rotation` is
+    only the extra clockwise turn the reader toolbar applied. */
 export function sourceCropForRotatedRect(
   rect: FractionRect,
   source: PixelSize,
@@ -114,17 +111,12 @@ function clearedContext(canvas: HTMLCanvasElement) {
   return context
 }
 
-// A drag can cover the entire high-DPI page. Keeping every intermediate at the
-// source bitmap's resolution would still spend several megapixels per frame even
-// after rAF coalescing; one million pixels stays sharper than the on-screen box
-// in the normal viewer while placing a hard ceiling on the preview work.
+// Keeping every intermediate at the source bitmap's resolution would spend
+// megapixels per frame; a million stays sharper than the on-screen box.
 export const MAX_RECT_EFFECT_PREVIEW_PIXELS = 1_000_000
 
-/**
- * Resolution used for the preview crop. Blur includes its clamped-edge padding
- * in the budget; otherwise a strong blur could make the scratch surface much
- * larger than the crop the cap was meant to protect.
- */
+/** The blur's clamped-edge padding is counted in the budget, or a strong
+    blur could make the surface larger than the cap protects. */
 export function rectEffectPreviewScale(
   crop: PixelSize,
   effect: RectPixelEffect,
@@ -203,9 +195,8 @@ function drawOrientedCrop(
 }
 
 /**
- * Extends the outermost row, column, and corner pixels around `source`. This is
- * the same clamp-at-the-edge boundary model used by `image::imageops::blur()`;
- * filtering the bare crop would instead pull transparent black into its edges.
+ * The same clamp-at-the-edge model as `image::imageops::blur()`; filtering
+ * the bare crop would pull transparent black into its edges.
  */
 function drawClampedPadding(
   source: HTMLCanvasElement,

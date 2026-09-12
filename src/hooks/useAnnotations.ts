@@ -61,15 +61,10 @@ function progressChannel(onProgress?: ProgressHandler) {
   return channel
 }
 
-/**
- * How a structure command left the page list: an array is new slot -> previous
- * page number, for existing pages that only moved; `"inPlace"` is an edit that
- * moved nothing at all, and so leaves everything held by page number — the
- * selection, the clipboard, the grid's own identities — still true.
- */
+/** An array maps new slot -> previous page number for pages that only moved;
+    `"inPlace"` moved nothing, so everything held by page number stays true. */
 type PageMovement = number[] | "inPlace"
 
-/** Where a structure command's fresh metadata lands, applied or undone. */
 type StructureChangeHandler = (
   documentId: number,
   update: PdfStructureUpdate,
@@ -78,33 +73,20 @@ type StructureChangeHandler = (
 
 type UseAnnotationsOptions = {
   documentId: number | undefined
-  /** `command` is the edit that failed, where re-running it is the whole
-      recovery — a note whose text would otherwise be lost with the editor that
-      held it. Absent for a refusal there is nothing to hold on to. */
+  /** `command` is the edit that failed, where re-running it is the recovery —
+      a note otherwise lost with the editor that held it. Absent for a refusal. */
   onAnnotateError: (error?: unknown, command?: AnnotationCommand) => void
   onExportError: () => void
-  /** An export landed; `outcome` says where, and whether that was the
-      document's own file. */
   onExported: (documentId: number, outcome: PdfExportOutcome) => void
   onSaveError: () => void
-  /** A structure command changed the page list; `update` replaces the
-      document's metadata wholesale. */
   onStructureChange: StructureChangeHandler
   onSuccess: () => void
 }
 
-/**
- * The marks each applied history entry put on the document, by entry id.
- *
- * PDFium owns the annotations themselves; these are only the handles it answers
- * to, which nothing in the history could work out for itself — and which are
- * what let a mark be taken off wherever it has come to sit, rather than only
- * from the end of its page.
- */
+/** Which of PDFium's marks each applied entry holds, by entry id — handles the
+    history cannot derive, so a mark can be taken off wherever it sits. */
 type MarkStore = Map<number, number[]>
 
-/** The entry whose command put mark `markId` on the page, if it is still
-    applied — how the eraser turns a hit test into a history entry. */
 function entryForMark(marks: MarkStore, markId: number) {
   for (const [entryId, ids] of marks) {
     if (ids.includes(markId)) {
@@ -115,8 +97,6 @@ function entryForMark(marks: MarkStore, markId: number) {
   return undefined
 }
 
-/** Takes an entry's marks off the document and forgets them, reporting the
-    pages the backend found them on. */
 async function removeMarks(
   documentId: number,
   entryId: number,
@@ -138,16 +118,8 @@ async function removeMarks(
   return pages
 }
 
-/**
- * A command that fails partway is wound back rather than left where it stopped:
- * the history holds one entry for the whole command and only gains it if this
- * resolves, so a page keeping its share of a failed command would hold a mark
- * nothing could take back.
- *
- * Marks the command creates are recorded under `entryId`, and marks it removes
- * are forgotten; the pages the backend reports it touched come back, since a
- * command's own page numbers are the ones it was made with.
- */
+/** A partway failure is wound back: the history gains its entry only if this
+    resolves; a page keeping its share would hold a mark nothing can take back. */
 async function applyCommand(
   documentId: number,
   entryId: number,
@@ -161,10 +133,8 @@ async function applyCommand(
       marks.set(entryId, await applyHighlight(documentId, command))
       return []
     case "rect":
-      // One page, one annotation, so there is nothing to wind back: the command
-      // either lands whole or leaves the page untouched. A translucent block is
-      // a drawn shape while a blur or a mosaic is built from the page's own
-      // pixels, so each takes the backend path that suits it.
+      // One page, one annotation, so there is nothing to wind back; a translucent
+      // block is a drawn shape, a blur or mosaic built from the page's own pixels.
       marks.set(entryId, [
         command.style.effect === "translucent"
           ? await invoke<number>("add_pdf_rect_annotation", {
@@ -188,7 +158,6 @@ async function applyCommand(
       ])
       return []
     case "textNote":
-      // One page and one annotation, as a rectangle is.
       marks.set(entryId, [
         await invoke<number>("add_pdf_text_note_annotation", {
           documentId,
@@ -200,8 +169,7 @@ async function applyCommand(
       ])
       return []
     case "eraseAnnotation":
-      // The marks go, the entry that made them is already out of the applied
-      // history, and what comes back is where they were — which is what puts
+      // What comes back is where the marks really were — which is what puts
       // them back in the right place should this be undone.
       return await removeMarks(documentId, command.target.id, marks)
     case "watermark":
@@ -275,9 +243,8 @@ async function applyCommand(
     case "insertFile":
     case "insertPages":
     case "duplicatePages":
-      // Only ever a redo here — the first apply reads the pages across through
-      // `insertFile`/`insertPages` below. A redo restores what the undo stashed
-      // rather than re-reading a file, or a document, that may have moved on.
+      // Only ever a redo here — the first apply reads the pages across below.
+      // A redo restores the stash rather than re-reading a source that moved on.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("restore_pdf_pages", {
@@ -289,14 +256,8 @@ async function applyCommand(
   }
 }
 
-/**
- * Runs one of the two owned-layer commands, which answer whether the change
- * landed rather than merely succeeding.
- *
- * `false` is the reader having stopped a long run: the backend has already put
- * the document back as it was, so the step must leave no history entry either —
- * which is what throwing gets, the queue committing nothing that threw.
- */
+/** `false` is a long run the reader stopped, the backend already rolled back —
+    so this throws, and the queue commits no history entry for what threw. */
 async function runOwnedLayerCommand(
   command: string,
   args: Record<string, unknown>,
@@ -306,7 +267,6 @@ async function runOwnedLayerCommand(
   }
 }
 
-/** The marks it made, one per page the selection ran across, in that order. */
 async function applyHighlight(documentId: number, command: HighlightCommand) {
   const written: number[] = []
 
@@ -336,12 +296,8 @@ async function applyHighlight(documentId: number, command: HighlightCommand) {
   return written
 }
 
-/**
- * The inverse of `applyCommand`: a mark is taken off by the ids its apply
- * recorded, so an undo finds its own annotations wherever the eraser has left
- * them sitting on the page. Reports the pages the backend touched, as an apply
- * does.
- */
+/** A mark is taken off by the ids its apply recorded, so an undo finds its own
+    annotations wherever the eraser has left them sitting on the page. */
 async function retractCommand(
   documentId: number,
   entryId: number,
@@ -391,8 +347,6 @@ async function retractCommand(
       )
       return []
     case "rotatePages":
-      // The rest of the way round, which is what puts each page back however
-      // far it was turned to begin with.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("rotate_pdf_pages", {
@@ -404,7 +358,6 @@ async function retractCommand(
       )
       return []
     case "deletePages":
-      // Not a re-creation but a restore: the stash holds the pages themselves.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("restore_pdf_pages", {
@@ -414,9 +367,8 @@ async function retractCommand(
       )
       return []
     case "insertBlankPage":
-      // The page is pristine at this point — LIFO undo has already taken back
-      // anything drawn on it — but it is stashed anyway, under this entry's
-      // id, which a redo's insert leaves behind and a later undo replaces.
+      // Pristine by now — LIFO undo has taken back anything drawn on it — but
+      // stashed under this entry's id, which a redo's insert leaves behind.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("delete_pdf_pages", {
@@ -440,7 +392,6 @@ async function retractCommand(
       return []
     case "insertPages":
     case "duplicatePages":
-      // The same undo, over the block the drag or the paste brought in.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("delete_pdf_pages", {
@@ -451,12 +402,8 @@ async function retractCommand(
       )
       return []
     case "eraseAnnotation":
-      // Undoing an erase is applying the mark's own command again, aimed at the
-      // pages the marks were really on rather than the ones the command was
-      // first made with. PDFium only appends, so it lands at the end of each
-      // page's annotations rather than back among them: the history is exact,
-      // and so is every other entry's undo — which knows its own marks by id —
-      // but a mark that was under another comes back over it.
+      // Applies the mark's own command again, aimed at the pages its marks were
+      // really on; PDFium only appends, so a mark under another comes back over it.
       await applyCommand(
         documentId,
         command.target.id,
@@ -471,13 +418,8 @@ async function retractCommand(
   }
 }
 
-/**
- * The document PDFium holds is the truth about what is on a page, so nothing
- * here mirrors the annotations. This keeps only what PDFium cannot answer: what
- * the reader did, in what order, how much they have taken back — and which of
- * PDFium's marks each of those steps is holding, which is a handle rather than
- * a copy.
- */
+/** PDFium's document is the truth about what is on a page, so nothing here
+    mirrors the annotations, only what it cannot answer about the reader's steps. */
 export function useAnnotations({
   documentId,
   onAnnotateError,
@@ -496,28 +438,20 @@ export function useAnnotations({
   // The synchronous counterpart to `pending`: guards cannot wait for React to
   // render before deciding whether a tab may be discarded.
   const pendingRef = useRef(0)
-  // How many page-moving edits are in flight — reorder, delete, insert, and
-  // undo/redo. Two gestures must wait on this. A screen-read one (a grid edit)
-  // must not start while one runs, since it would plan against positions the
-  // edit is about to change; `isStructureBusyNow` gates on that. And a drawing
-  // or note the reader finishes while one runs is dropped rather than
-  // misplaced: the page it is anchored to by number is about to become a
-  // different page.
+  // Page-moving edits in flight: a grid edit must not plan against positions one
+  // is about to change, and a mark made meanwhile would land on the wrong page.
   const structurePendingRef = useRef(0)
-  // React state does not move until a re-render, so an operation starting inside
-  // another's round trip would plan against a history a step out of date and
-  // overwrite its entry.
+  // React state lags until a re-render: an operation starting inside another's
+  // round trip would plan against a history a step out of date.
   const historyRef = useRef(emptyHistory)
   // Bumped when the document changes, so work still in flight against the last
   // one lands nowhere rather than on its successor.
   const generationRef = useRef(0)
   // PDFium serializes this work anyway; the queue makes the history move in the
-  // same order, so `undo` is never planned against a document a queued `commit`
-  // is about to change.
+  // same order, so no step plans against a document a queued one will change.
   const queueRef = useRef<Promise<unknown>>(Promise.resolve())
-  // The one thing about the annotations themselves this has to keep: which of
-  // the backend's marks each applied entry is holding, so an undo and the
-  // eraser can name them rather than count them off the end of a page.
+  // The one thing kept about the annotations themselves: which marks each
+  // applied entry holds, so an undo and the eraser can name them, not count them.
   const marksRef = useRef<MarkStore>(new Map())
 
   const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
@@ -543,16 +477,8 @@ export function useAnnotations({
     return next
   }, [])
 
-  /**
-   * `plan` reads the history the queue has reached and returns the work to do
-   * and the history to leave behind — both decided inside the queue, which is
-   * what makes them consistent with each other.
-   *
-   * `work` resolves with whether its step actually happened: an export can end
-   * with the reader cancelling the dialog, or writing somewhere other than the
-   * document's own file, and either way `next` must not be applied — the
-   * history would claim a save that never reached the source.
-   */
+  /** `plan` runs inside the queue, so work and the history left behind are decided
+      together; a `work` answering false — a cancelled export — commits nothing. */
   const enqueue = useCallback(
     (
       plan: (
@@ -562,14 +488,11 @@ export function useAnnotations({
         textPages: number[]
         work: () => Promise<boolean>
         next: AnnotationHistory
-        /** For a command whose own fields are known only once its work runs —
-            an insert learns the file's page count only after the backend reads
-            it: rebuilds the history to commit from what work resolved. `next` is
-            the placeholder used until then, and when this is absent. */
+        /** For a command whose fields are known only once its work runs — an
+            insert learns its count from the backend; `next` is the placeholder. */
         reconcile?: () => AnnotationHistory
-        /** Pages only the backend can name — the ones a mark turned out to be
-            on, which a structure edit may have renumbered since the command
-            that made it. Redrawn alongside `pages`. */
+        /** Pages only the backend can name — where a mark really was, which a
+            structure edit may have renumbered since. Redrawn alongside `pages`. */
         touched?: () => number[]
         /** Identifies the first bitmap request that includes this commit. */
         onApplied?: (epochs: RenderEpochs) => void
@@ -612,9 +535,8 @@ export function useAnnotations({
           }
           onSuccess()
         } catch (error) {
-          // Carried rather than swallowed: one refusal — nothing installed can
-          // draw this text — is the reader's to act on, and only the error
-          // itself says which one it was.
+          // Carried rather than swallowed: a refusal — nothing installed can
+          // draw this text — is the reader's to act on, per the error itself.
           if (generation === generationRef.current) {
             onFailure(error)
           }
@@ -650,10 +572,8 @@ export function useAnnotations({
         return false
       }
 
-      // A drawing or note carries the page it was made on; a page-moving edit
-      // in flight is about to move that page, so the mark would land on the
-      // wrong one. Dropped rather than misplaced — a rare gesture, one the
-      // reader can simply repeat.
+      // A drawing or note carries the page it was made on; a page-moving edit in
+      // flight would land it on the wrong page. Dropped rather than misplaced.
       if (structurePendingRef.current > 0) {
         return false
       }
@@ -688,17 +608,8 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
-  /**
-   * The one path every structure edit takes: its command is planned against
-   * the history the queue reached — which is what hands the stash its entry
-   * id — and a plan that answers null (an identity order, an empty selection)
-   * never occupies an undo step. Because the plan runs inside the queue, each
-   * step is decided from the history every prior edit, its own or another's,
-   * has already reached.
-   *
-   * Resolves with whether the edit actually *landed* — false for a plan that
-   * had nothing to do *and* for one whose work failed.
-   */
+  /** Every structure edit's one path: planned inside the queue, which hands the
+      stash its entry id. Resolves false for a no-op plan and failed work alike. */
   const commitStructure = useCallback(
     async (
       plan: (
@@ -770,19 +681,8 @@ export function useAnnotations({
     [commitStructure],
   )
 
-  /**
-   * Inserts another PDF's pages at `index`. Unlike every other structure edit
-   * this cannot go through `commitStructure`: the file's page count is unknown
-   * until the backend reads it, so the first apply reads the file here and
-   * `reconcile` writes what it learned back into the freshly committed command.
-   * A redo — the command already carries its count by then — restores the
-   * stashed pages through `applyCommand` like any other.
-   *
-   * Resolves with how many pages the file actually brought — 0 for a refused
-   * position and for a read that failed — which is what a caller inserting a
-   * run of files advances by. The document's own growth would answer the same
-   * question with anything else that landed in between folded in.
-   */
+  /** Cannot go through `commitStructure`: the file's page count is unknown
+      until the backend reads it, so `reconcile` writes back what it learned. */
   const insertFile = useCallback(
     async (path: string, index: number, pageCount: number) => {
       if (documentId === undefined) {
@@ -798,9 +698,8 @@ export function useAnnotations({
           const planned = planInsertFile(current, path, index, pageCount)
 
           if (!planned) {
-            // A position the document does not have — the grid the gap was read
-            // off has since been renumbered. Nothing to apply, so say so here:
-            // a null plan reaches neither the success nor the failure path.
+            // A position the document does not have — the grid has since been
+            // renumbered. A null plan reaches neither path, so it is said here.
             onAnnotateError()
             return null
           }
@@ -839,16 +738,8 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
-  /**
-   * Copies `sourcePages` out of another open document into this one at `index`
-   * — a thumbnail drag that crossed to this document's tab. Like `insertFile`
-   * it cannot go through `commitStructure`, whose apply path is the redo's:
-   * the first apply reads the pages across, and only a redo restores the stash.
-   *
-   * The pages are the source grid's own numbers and the position is this grid's,
-   * both read off the screen — which is why the caller, like every other grid
-   * gesture, declines a drop while a page-shifting edit is in flight.
-   */
+  /** Like `insertFile` it cannot go through `commitStructure`: the first apply
+      reads the pages across, and only a redo restores the undo's stash. */
   const insertPages = useCallback(
     async (
       sourceDocumentId: number,
@@ -875,9 +766,8 @@ export function useAnnotations({
           )
 
           if (!planned) {
-            // A position this document does not have — the grid the gap was
-            // read off has since been renumbered. A null plan reaches neither
-            // the success nor the failure path, so it is said here.
+            // A position this document does not have — the grid has since been
+            // renumbered. A null plan reaches neither path, so it is said here.
             onAnnotateError()
             return null
           }
@@ -915,12 +805,8 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
-  /**
-   * Copies this document's own `sourcePages` back into it at `index` — the
-   * grid's paste. It takes `insertPages`' path rather than `commitStructure`'s
-   * for the same reason: there the apply *is* the redo, and a redo of a paste
-   * restores the pages its undo stashed instead of copying them a second time.
-   */
+  /** Takes `insertPages`' path rather than `commitStructure`'s for the same
+      reason: there the apply *is* the redo, restoring the undo's stash. */
   const duplicatePages = useCallback(
     async (sourcePages: number[], index: number, pageCount: number) => {
       if (documentId === undefined) {
@@ -941,9 +827,8 @@ export function useAnnotations({
           )
 
           if (!planned) {
-            // A page or a position this document no longer has: the grid both
-            // were read off has since been renumbered. A null plan reaches
-            // neither the success nor the failure path, so it is said here.
+            // A page or position it no longer has — the grid has since been
+            // renumbered. A null plan reaches neither path, so it is said here.
             onAnnotateError()
             return null
           }
@@ -977,17 +862,8 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
-  /**
-   * Rubs out whichever of this session's marks lies under `point` on
-   * `pageNumber`; a point on nothing of the reader's own leaves the document
-   * alone, and so leaves the history alone too.
-   *
-   * The hit test is the backend's because the annotations are: the history
-   * records what was asked for, not the box PDFium gave it. It runs ahead of
-   * the queue rather than inside it — a mark another queued step takes away
-   * first simply no longer answers to its entry, and the plan finds nothing to
-   * erase.
-   */
+  /** Rubs out whichever of this session's marks the backend's hit test finds —
+      nothing of the document's own answers, and the history is left alone. */
   const eraseAt = useCallback(
     async (pageNumber: number, point: PagePoint) => {
       // The same guard a drawing takes: a page-moving edit in flight is about
@@ -1056,11 +932,8 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
-  /**
-   * Plans against the history the shared queue has actually reached, and
-   * reports whether the change landed — the dialog stays open on a refusal
-   * rather than closing over an error the reader would have to hunt for.
-   */
+  /** Planned against the history the queue has actually reached; the outcome
+      keeps the dialog open on a refusal rather than closing over an error. */
   const setWatermark = useCallback(
     async (
       config: WatermarkConfig | null,
@@ -1116,8 +989,6 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
-  /** The page-number counterpart of `setWatermark`, planned against the history
-      the shared queue has reached; reports how the change ended. */
   const setPageNumbers = useCallback(
     async (
       config: PageNumbersConfig | null,
@@ -1171,19 +1042,8 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange],
   )
 
-  /**
-   * Asks the backend to stop the watermark or page-number work now running on
-   * this document, which then rolls it back to the bytes it started from.
-   *
-   * The one gesture that reaches a rebuild already in flight: everything else
-   * the reader can do queues behind the PDFium lock that rebuild is holding,
-   * which on a long document is exactly the wait they are trying to leave.
-   *
-   * Answers whether the backend found a run to stop. `false` is not a failure
-   * but a miss — the ask arrived before the command listed itself, which the
-   * caller has to repeat rather than drop, or the reader's stop is silently
-   * spent and the run they walked out of lands anyway.
-   */
+  /** The one gesture that reaches a rebuild in flight. `false` is a miss, not a
+      failure — the ask came before the command listed itself, and is repeated. */
   const cancelOperation = useCallback(async () => {
     if (documentId === undefined) {
       return false
@@ -1198,10 +1058,8 @@ export function useAnnotations({
     }
   }, [documentId])
 
-  // Undo and redo count as page-shifting: the entry they take back may be a
-  // structure edit, and a page-numbered command queued behind it would go
-  // stale. Blocked conservatively rather than by peeking at the command, which
-  // a pending edit could still change before the queue reaches this step.
+  // Undo and redo count as page-shifting — the entry taken back may be a
+  // structure edit, and peeking at it is no better: a pending edit could change it.
   const undoCommand = useCallback(async () => {
     if (documentId === undefined) {
       return
@@ -1282,15 +1140,8 @@ export function useAnnotations({
     }
   }, [documentId, enqueue, onAnnotateError, onStructureChange])
 
-  /**
-   * Queued behind the reader's marks rather than racing them, so the file holds
-   * exactly what the history says was saved.
-   *
-   * The backend owns the destination dialog, so this only suggests how it
-   * reads; the history is marked saved only when the write landed on the
-   * document's own file — its source, or the destination a byte-opened
-   * document adopts on its first export.
-   */
+  /** Queued behind the reader's marks, so the file holds what the history says
+      was saved; marked saved only when the write landed on its own file. */
   const exportCopy = useCallback(
     async (suggestedName: string, filterLabel: string) => {
       if (documentId === undefined) {
@@ -1310,7 +1161,6 @@ export function useAnnotations({
               : await invoke<PdfExportOutcome | null>("export_pdf", args)
 
             if (!outcome) {
-              // The reader cancelled the dialog; nothing happened.
               return false
             }
 
@@ -1348,26 +1198,17 @@ export function useAnnotations({
     )
   }, [documentId, enqueue, onSaveError])
 
-  /**
-   * The dirty answer as of this instant, off the ref rather than the rendered
-   * state: a guard deciding whether marks may be discarded must not trust a
-   * value that can lag the queue by a render.
-   */
+  /** Off the ref, not the rendered state: a guard deciding whether marks may be
+      discarded must not trust a value that can lag the queue by a render. */
   const isDirtyNow = useCallback(() => isDirty(historyRef.current), [])
 
-  /** Whether any structure edit is in flight this instant. The guard a
-      screen-read gesture (a grid edit) checks so it never plans against
-      positions an edit is about to change. */
+  /** Whether a structure edit is in flight this instant — the guard a grid edit
+      checks so it never plans against positions one is about to change. */
   const hasPendingWorkNow = useCallback(() => pendingRef.current > 0, [])
   const isStructureBusyNow = useCallback(() => structurePendingRef.current > 0, [])
 
-  /**
-   * The applied history as of this instant, off the ref rather than the
-   * rendered state. Awaited file operations resolve after the ref moves but
-   * before the re-render, so a follow-up that needs the fresh history — the
-   * toolbar's undo, deciding whether the step it is about to take moves pages —
-   * has to read it here, not from `history`.
-   */
+  /** Off the ref: awaited operations resolve after it moves but before the
+      re-render, so a follow-up needing the fresh history has to read it here. */
   const historyNow = useCallback(() => historyRef.current, [])
 
   const reset = useCallback(() => {

@@ -6,27 +6,23 @@ import type {
 } from "@/lib/annotations"
 import { rememberSettings, storedSettings } from "@/lib/settings"
 
-/**
- * A marker pen's colours rather than a palette's: each is pale enough to read
- * black text through at the opacity below.
- */
+/** A marker pen's colours rather than a palette's: each pale enough to read
+    black text through at the opacity below. */
 export const highlightSwatches: readonly HexColor[] = [
   "#ffd54a",
   "#7bed9f",
   "#7ecbff",
   "#ff9ff3",
   "#ff8a65",
+  "#b2bec3",
 ]
 
 export const defaultHighlightColor: HexColor = highlightSwatches[0]!
 
-/**
- * Fixed rather than offered: a highlight dark enough to hide the words under it
- * has stopped being a highlight.
- */
+/** Fixed rather than offered: a highlight dark enough to hide the words under
+    it has stopped being a highlight. */
 export const HIGHLIGHT_OPACITY = 0.4
 
-/** Whether `value` is a colour this app could have written. */
 export function isHexColor(value: unknown): value is HexColor {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
 }
@@ -34,19 +30,19 @@ export function isHexColor(value: unknown): value is HexColor {
 export function readStoredHighlightColor(): HexColor | null {
   const stored = storedSettings().annotate?.highlightColor
 
-  return isHexColor(stored) ? stored : null
+  // Well-formed but off the row — an older schema's custom pick — has no
+  // swatch to check now that the picker offers none, so it falls back.
+  return isHexColor(stored) && highlightSwatches.includes(stored)
+    ? stored
+    : null
 }
 
 export function storeHighlightColor(color: HexColor) {
   rememberSettings({ annotate: { highlightColor: color } })
 }
 
-/**
- * A mark before a cover: the hues lead in spectrum order, at one shade level so
- * the row reads as a set rather than an assortment, and the neutrals close it,
- * palest first. These eight are the whole choice: a colour wheel here would be
- * a setting to get wrong rather than a mark to make.
- */
+/** A mark before a cover: hues in spectrum order at one shade level, neutrals
+    closing palest first. These eight are the whole choice, not a colour wheel. */
 export const rectSwatches: readonly HexColor[] = [
   "#ef4444",
   "#f97316",
@@ -82,19 +78,8 @@ export const defaultRectStyle: RectStyle = {
   strength: 8,
 }
 
-/**
- * Whether `value` is a rectangle style this app could have written. The ranges
- * and the palette are part of that: the swatches are the whole colour offer and
- * the sliders never emit a non-finite size or an opacity below
- * `RECT_MIN_OPACITY`, so a stored style outside them is tampered or from an
- * older schema — an off-palette colour would sit in the panel with no swatch
- * checked, and an invisible one would draw a mark that still records as an edit.
- * Rejected here so the caller falls back to the visible default.
- *
- * Both numbers are checked whichever effect is stored: the one the effect does
- * not use is still kept, and still becomes the mark as soon as the reader
- * switches to it.
- */
+/** Guards a stored style the controls could not have written — tampered or an
+    older schema; both numbers are checked whichever effect is stored. */
 export function isRectStyle(value: unknown): value is RectStyle {
   if (typeof value !== "object" || value === null) {
     return false
@@ -135,11 +120,8 @@ export const textNoteSwatches: readonly HexColor[] = [
   "#000000",
 ]
 
-/**
- * Slider ends, and the same double-edged contract as the rectangle constants
- * above: these mirror `MIN_/MAX_TEXT_NOTE_*` in `src-tauri/src/pdfium/geometry.rs`
- * and neither side clamps a value outside them.
- */
+/** Mirrors `MIN_/MAX_TEXT_NOTE_*` in `src-tauri/src/pdfium/geometry.rs`:
+    neither side clamps a value outside these ends. */
 export const TEXT_NOTE_MIN_FONT_SIZE = 6
 export const TEXT_NOTE_MAX_FONT_SIZE = 72
 export const TEXT_NOTE_MIN_OPACITY = 0.1
@@ -151,15 +133,10 @@ export const defaultTextNoteStyle: TextNoteStyle = {
   opacity: 1,
 }
 
-/**
- * What the backend answers with when nothing installed can draw a note and no
- * fallback face has been fetched. The one error the reader can act on, so it
- * travels as a value rather than a message — kept in step with
- * `FONT_MISSING_ERROR` in `src-tauri/src/pdfium/font.rs`.
- */
+/** The backend's answer when no installed face can draw a note, kept in step
+    with `FONT_MISSING_ERROR` in `src-tauri/src/pdfium/font.rs`. */
 export const NOTE_FONT_MISSING = "tfolio:font-missing"
 
-/** Whether a failed edit failed for want of a face to draw it in. */
 export function isNoteFontMissing(error: unknown): boolean {
   return (
     error === NOTE_FONT_MISSING ||
@@ -167,12 +144,8 @@ export function isNoteFontMissing(error: unknown): boolean {
   )
 }
 
-/**
- * Whether `value` is a note style this app could have written — the same guard
- * `isRectStyle` applies, for the same reason: a stored style outside the
- * controls' ranges is tampered or from an older schema, and the backend would
- * refuse it, so a note typed against it could never be added.
- */
+/** The same guard `isRectStyle` applies: a style outside the controls' ranges
+    is tampered or an older schema, and the backend would refuse it. */
 export function isTextNoteStyle(value: unknown): value is TextNoteStyle {
   if (typeof value !== "object" || value === null) {
     return false

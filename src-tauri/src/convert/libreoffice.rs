@@ -1,11 +1,7 @@
-//! LibreOffice, the chain's last engine and the only one on Linux.
-//!
-//! Headless, one process per file, with a profile of this run's own: the
-//! default profile belongs to whatever LibreOffice the reader may already
-//! have open, and two soffice processes on one profile block each other.
+//! One process per file, headless, with a profile of this run's own: two
+//! soffice processes sharing the default profile would block each other.
 
 use std::{
-    env,
     ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
@@ -108,7 +104,6 @@ pub(crate) fn libreoffice_args(profile: &Path, out_dir: &Path, input: &Path) -> 
         out_dir.to_path_buf().into_os_string(),
     ];
 
-    // A profile of this run's own, so a running LibreOffice cannot block it.
     // The flag and its URL are one argument, not two.
     args.push(format!("-env:UserInstallation={}", file_url(profile)).into());
     args.push(input.to_path_buf().into_os_string());
@@ -116,19 +111,11 @@ pub(crate) fn libreoffice_args(profile: &Path, out_dir: &Path, input: &Path) -> 
     args
 }
 
-/// A `file:` URL for LibreOffice's `-env:` argument, which takes a URL
-/// rather than a path. Only the URL grammar's unreserved characters and the
-/// separators go through as themselves; everything else is percent-encoded,
-/// so a path with spaces or either platform's non-ASCII names survives.
+/// A `file:` URL for `-env:`, which takes a URL, not a path: everything
+/// outside the grammar's unreserved set is percent-encoded.
 pub(crate) fn file_url(path: &Path) -> String {
-    let text = path.to_string_lossy().replace('\\', "/");
+    let text = path.to_string_lossy();
     let mut url = String::from("file://");
-
-    // A drive-prefixed Windows path is absolute without starting in '/', and
-    // the URL grammar wants three slashes before it.
-    if !text.starts_with('/') {
-        url.push('/');
-    }
 
     for byte in text.bytes() {
         match byte {
@@ -154,25 +141,12 @@ fn detail(output: &std::process::Output) -> String {
     }
 }
 
-/// Where LibreOffice installs, by platform. Passive: files are looked for,
-/// nothing is run. The PATH scan is last because distributions disagree
-/// about where the real binary lives and PATH may hold a wrapper. Unused in
-/// the e2e build, whose detection answers nothing at all.
+/// Passive: files are looked for, nothing is run. The PATH scan is last
+/// because PATH may hold a wrapper rather than the real binary.
+#[cfg(not(windows))]
 #[cfg_attr(feature = "e2e", allow(dead_code))]
 pub(crate) fn find_soffice() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-
-    #[cfg(windows)]
-    for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
-        if let Some(root) = env::var_os(variable) {
-            candidates.push(
-                PathBuf::from(root)
-                    .join("LibreOffice")
-                    .join("program")
-                    .join("soffice.exe"),
-            );
-        }
-    }
 
     #[cfg(target_os = "macos")]
     {
@@ -180,7 +154,7 @@ pub(crate) fn find_soffice() -> Option<PathBuf> {
             "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         ));
 
-        if let Some(home) = env::var_os("HOME") {
+        if let Some(home) = std::env::var_os("HOME") {
             candidates.push(
                 PathBuf::from(home)
                     .join("Applications")
@@ -201,29 +175,23 @@ pub(crate) fn find_soffice() -> Option<PathBuf> {
         candidates.push(PathBuf::from(fixed));
     }
 
-    candidates.extend(path_lookup(if cfg!(windows) {
-        "soffice.exe"
-    } else {
-        "soffice"
-    }));
+    candidates.extend(path_lookup("soffice"));
 
     candidates
         .into_iter()
         .find(|candidate| is_executable(candidate))
 }
 
-/// Every directory on the PATH, joined with `name`, in PATH order — the
-/// platform's own separator rules, which `split_paths` knows.
+#[cfg(not(windows))]
 fn path_lookup(name: &str) -> Vec<PathBuf> {
-    let path = env::var_os("PATH").unwrap_or_default();
+    let path = std::env::var_os("PATH").unwrap_or_default();
 
-    env::split_paths(&path)
+    std::env::split_paths(&path)
         .map(|directory| directory.join(name))
         .collect()
 }
 
-/// A file this process could run. The executable bit matters only where
-/// there is one; Windows answers for the extension.
+#[cfg(not(windows))]
 fn is_executable(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
@@ -233,15 +201,7 @@ fn is_executable(path: &Path) -> bool {
         return false;
     }
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::PermissionsExt;
 
-        metadata.permissions().mode() & 0o111 != 0
-    }
-
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    metadata.permissions().mode() & 0o111 != 0
 }

@@ -16,12 +16,8 @@ type RectDraftOverlayProps = {
   sourceRevision: number
 }
 
-/**
- * The live preview of the rectangle being dragged. It sits in the page's own
- * axis-aligned box and is positioned as fractions of it. A translucent block is
- * CSS; a blur or a mosaic copies the already-rendered page canvas into a local
- * preview, so pointer movement never crosses the IPC boundary.
- */
+/** Live preview of the dragged rectangle. A blur or mosaic copies the rendered
+    page canvas locally, so pointer movement never crosses the IPC boundary. */
 export function RectDraftOverlay({
   draft,
   pageWidth,

@@ -2,20 +2,18 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { e2eOverride } from "@/lib/e2e"
 import { fileNameFromPath, isPdfPath } from "@/lib/pdf"
-import { wordConversionEnabled } from "@/lib/settings"
+import { wordConversionAvailable } from "@/lib/wordConversion"
 
-/** What a merge reads one of its sources as. Mirrors `MergeSourceKind` in
-    `src-tauri/src/pdfium/mod.rs`. A Word document arrives as the PDF the
-    machine's own office suite made of it. */
+/** Mirrors `MergeSourceKind` in `src-tauri/src/pdfium/mod.rs`; a Word
+    document arrives as the PDF the machine's office suite made of it. */
 export type MergeSourceKind = "pdf" | "image" | "word"
 
-/** Why a Word document could not become a PDF. Mirrors `MergeSourceError`
-    in `src-tauri/src/pdfium/mod.rs`; the wizard words these itself. */
+/** Mirrors `MergeSourceError` in `src-tauri/src/pdfium/mod.rs`; the wizard
+    words these itself. */
 export type MergeSourceError = "converterMissing" | "conversionFailed"
 
-/** The image formats a merge can bring in as pages, mirroring
-    `MERGE_IMAGE_EXTENSIONS` in `engine.rs`. Both sides have to agree: this one
-    decides what the wizard offers to inspect, that one what it can read. */
+/** Mirrors `MERGE_IMAGE_EXTENSIONS` in `engine.rs`; this one decides what the
+    wizard offers to inspect, that one what it can read. */
 export const mergeImageExtensions = [
   "bmp",
   "gif",
@@ -35,8 +33,7 @@ export function isMergeImagePath(path: string) {
   )
 }
 
-/** The Word formats a merge brings in as converted pages, mirroring
-    `WORD_EXTENSIONS` in `src-tauri/src/convert/mod.rs`. */
+/** Mirrors `WORD_EXTENSIONS` in `src-tauri/src/convert/mod.rs`. */
 export const mergeWordExtensions = ["doc", "docx"] as const
 
 export function isMergeWordPath(path: string) {
@@ -47,10 +44,8 @@ export function isMergeWordPath(path: string) {
   )
 }
 
-/** Whether a merge can take this file at all — a PDF, an image it lays on a
-    page of its own, or a Word document the machine's own office suite turns
-    into one first. Word is behind its setting, because a reader who turned
-    the conversions off has already answered what should happen here. */
+/** Word follows the machine's own answer: where no office suite was detected,
+    the extension is not a source this run can accept. */
 export function isMergeSourcePath(path: string, word = true) {
   return (
     isPdfPath(path) || isMergeImagePath(path) || (word && isMergeWordPath(path))
@@ -58,12 +53,8 @@ export function isMergeSourcePath(path: string, word = true) {
 }
 
 /**
- * What the wizard produces, which decides both the backend route it takes and
- * the questions worth asking on the way.
- *
- * `onePdf` is the merge proper. The two archives are written to a file the
- * reader picks rather than opened as a tab: neither a folder of images nor a
- * pile of separate documents is a thing this app can hold open.
+ * The archives are written to a file the reader picks rather than opened as a
+ * tab: neither images nor separate documents is a thing this app can hold open.
  */
 export type MergeExportMode = "onePdf" | "pagePngZip" | "watermarkOnlyZip"
 
@@ -77,8 +68,6 @@ export function isMergeExportMode(value: unknown): value is MergeExportMode {
   return mergeExportModes.includes(value as MergeExportMode)
 }
 
-/** The steps a merge can ask about, named rather than numbered: which of them
-    it actually asks depends on what it is producing. */
 export type MergeWizardStep =
   | "files"
   | "bookmarks"
@@ -86,12 +75,8 @@ export type MergeWizardStep =
   | "watermark"
 
 /**
- * The steps `mode` asks, in order.
- *
- * A step is left out where its answer could not reach the result: an archive of
- * images carries no outline, and copies that were never merged have neither an
- * outline to build nor a page sequence to number — which is also the one
- * omission the wizard was asked for by name.
+ * A step is left out where its answer could not reach the result: image
+ * archives carry no outline, unmerged copies nothing to build or number.
  */
 export function mergeWizardSteps(
   mode: MergeExportMode,
@@ -133,10 +118,8 @@ export function isMergeBookmarksMode(
   return mergeBookmarksModes.includes(value as MergeBookmarksMode)
 }
 
-/** One file on the wizard's list, as the backend read it. `pageCount` is null
-    for a file that could not be read — the row stays, marked unusable, rather
-    than vanishing from a list the reader built. `error` says which of the two
-    Word failures a Word row carries, because "unreadable" undersells both. */
+/** `pageCount` null means unreadable: the row stays, marked unusable, rather
+    than vanishing from a list the reader built. */
 export type MergeFile = {
   error: MergeSourceError | null
   hasOutline: boolean
@@ -146,7 +129,6 @@ export type MergeFile = {
   path: string
 }
 
-/** What the backend reports for one candidate file. */
 type PdfFileSummary = {
   error?: MergeSourceError
   hasOutline: boolean
@@ -155,12 +137,10 @@ type PdfFileSummary = {
   path: string
 }
 
-/** The most files one merge takes, mirroring `MAX_MERGE_FILES` in
-    `engine.rs`; both sides refuse rather than trim, because the command stays
-    callable outside this UI. */
+/** Mirrors `MAX_MERGE_FILES` in `engine.rs`; both sides refuse rather than
+    trim, the command staying callable outside this UI. */
 export const MAX_MERGE_FILES = 64
 
-/** A file the merge can actually use — one the backend read pages from. */
 export function isUsableFile(
   file: MergeFile,
 ): file is MergeFile & { pageCount: number } {
@@ -172,13 +152,8 @@ export function usableFiles(files: MergeFile[]) {
 }
 
 /**
- * Where each usable file's pages land, and how long the merged document ends
- * up. Mirrors `merge_files` in `engine.rs`: with `smartPadding` on, a blank
- * goes in before any file that would otherwise open on an even page, so every
- * file begins on a right-hand leaf when the result is printed double-sided.
- *
- * `startsAt` is 1-based and names the file's own first page, never the pad in
- * front of it — which is what a per-file bookmark points at.
+ * Mirrors `merge_files` in `engine.rs`: a blank goes in before a file that
+ * would open on an even page, so printed double-sided every file starts right.
  */
 export function mergeLayout(files: MergeFile[], smartPadding: boolean) {
   let pages = 0
@@ -217,12 +192,8 @@ export function hasExistingBookmarks(files: MergeFile[]) {
 }
 
 /**
- * `files` with `incoming` added at the end, keeping the list's order and
- * dropping any path already on it: the same file twice is a gesture the reader
- * did not mean, and the wizard has no way to tell two copies apart.
- *
- * `dropped` counts what the ceiling turned away, so the wizard can say the list
- * is full rather than let files go missing without a word.
+ * Drops paths already on the list — the wizard cannot tell two copies of one
+ * file apart — and counts what the ceiling turned away so none go unmissed.
  */
 export function appendFiles(files: MergeFile[], incoming: MergeFile[]) {
   const seen = new Set(files.map((file) => file.path))
@@ -244,9 +215,6 @@ export function appendFiles(files: MergeFile[], incoming: MergeFile[]) {
   }
 }
 
-/** `files` with the one at `from` moved to `to`, both 0-based. An index outside
-    the list leaves the order alone, so a move past either end is simply not a
-    move. */
 export function moveFile(files: MergeFile[], from: number, to: number) {
   if (
     from === to ||
@@ -267,23 +235,16 @@ export function moveFile(files: MergeFile[], from: number, to: number) {
 }
 
 /**
- * Whether the first step is answered: enough files the backend can actually
- * read.
- *
- * Two, because a merge of one file is not a merge — except for the mode that
- * merges nothing, where watermarking a single file is a whole answer and
- * demanding a second one would be a rule with no reason behind it.
+ * Two files, because one is not a merge — except where nothing merges, and
+ * watermarking a single file is a whole answer.
  */
 export function canMerge(files: MergeFile[], mode: MergeExportMode) {
   return usableFiles(files).length >= (mergesIntoOneDocument(mode) ? 2 : 1)
 }
 
-/** Reads each path's page count and whether it brings bookmarks. Paths of a
-    kind no merge can take never reach the backend; the rest come back in the
-    order given. */
 export async function inspectFiles(paths: string[]): Promise<MergeFile[]> {
   const sourcePaths = paths.filter((path) =>
-    isMergeSourcePath(path, wordConversionEnabled()),
+    isMergeSourcePath(path, wordConversionAvailable()),
   )
 
   if (sourcePaths.length === 0) {

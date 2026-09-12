@@ -8,20 +8,11 @@ type PageOdometerProps = {
   value: number
 }
 
-/**
- * A number that turns to its new value the way an odometer does: the digits
- * that changed roll up when the number counts up and down when it counts down,
- * while the digits that did not change stay where they are.
- *
- * Decorative, and `aria-hidden` for it: the page status around this already
- * names the page in its own label and in a live region, which is where a reader
- * who cannot see the roll hears the same thing.
- */
+/** Digits roll odometer-style. Decorative, and `aria-hidden` for it: the page
+    status around this already names the page in a live region. */
 export function PageOdometer({ className, value }: PageOdometerProps) {
-  // The value being rolled to, the one it left, a counter of turns, and whether
-  // the roll is over. Updated during render rather than from an effect, because
-  // both digits have to be laid out in the same commit as the new value — an
-  // effect would land the number first and animate it a frame later.
+  // Set during render rather than from an effect: both digits must be laid out
+  // in the same commit as the new value — an effect would animate a frame late.
   const [roll, setRoll] = useState({
     from: value,
     settled: true,
@@ -39,10 +30,8 @@ export function PageOdometer({ className, value }: PageOdometerProps) {
   }
 
   const rising = roll.to > roll.from
-  // Once the roll is over the number stands alone: the digits it replaced are
-  // out of the DOM rather than parked out of sight, so what this reads is the
-  // page and nothing else. Reduced motion runs no animation and so ends none —
-  // there the digits left behind are the ones `motion-reduce:hidden` drops.
+  // Settled drops the replaced digits from the DOM; reduced motion ends no
+  // animation, so there `motion-reduce:hidden` is what takes them away.
   const columns = odometerColumns(roll.settled ? roll.to : roll.from, roll.to)
 
   return (
@@ -57,14 +46,8 @@ export function PageOdometer({ className, value }: PageOdometerProps) {
       }
     >
       {columns.map((column) => (
-        // One line box tall and one digit wide, which is what clips a rolling
-        // digit to its own place. Both digits sit on top of each other in it;
-        // only their animation tells them apart.
-        //
-        // A place the number is about to reach for the first time, or has just
-        // left, opens or closes over the same beat. Closing it matters: a place
-        // held open by nothing would leave 99 standing where 100 was, half a
-        // digit off centre, until the number next moved.
+        // The digit-sized box clips each roll; the open/close animations close
+        // a place nothing holds, else 99 would sit off-centre where 100 was.
         <span
           className={cn(
             "relative block h-5 w-[1ch] overflow-hidden leading-5",
@@ -75,11 +58,8 @@ export function PageOdometer({ className, value }: PageOdometerProps) {
           )}
           key={column.place}
         >
-          {/* Keyed by the turn, so a change remounts the pair and starts the
-              roll again from the top. The digit leaving holds where it ended
-              up — out of sight past the edge of the box — because an animation
-              that fell back to its resting place would drop it back over the
-              digit that replaced it. */}
+          {/* Keyed by the turn, so a change remounts the pair and restarts the
+              roll; the leaving digit must hold past the edge, not fall back. */}
           {column.rolls ? (
             <span
               className={cn(

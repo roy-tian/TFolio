@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react"
 
 /**
- * `value`, held back until it has gone `delayMs` without changing.
- *
- * This hook belongs at the viewer boundary, not inside every page. Layout can
- * follow the committed zoom immediately while the handful of near-viewport
- * surfaces keep stretching their existing canvases until one final render size
- * settles for the whole document.
+ * Belongs at the viewer boundary, not inside every page: layout follows the
+ * committed zoom while near-viewport canvases stretch until one size settles.
  */
 export function useDebouncedValue<T>(value: T, delayMs: number) {
   const [settled, setSettled] = useState(value)

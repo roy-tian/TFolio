@@ -19,10 +19,8 @@ export type ShortcutEvent = {
 }
 
 /**
- * Every chord the window answers, named once for both halves: the keydown that
- * runs the action and the hint that promises it. These belong to this window
- * while it holds the keyboard — none is registered with the OS, so nothing here
- * is taken from the desktop around it.
+ * Named once for both halves: the keydown that runs the action and the hint
+ * that promises it. None is registered with the OS.
  */
 export const shortcuts = {
   new: { key: "n" },
@@ -45,15 +43,13 @@ function namesLetter(event: ShortcutEvent, key: string) {
   }
 
   // An Alt chord can compose a character instead of reporting the letter — ⌥s
-  // on macOS, AltGr (which Windows reports as ctrl+alt) on the layouts that map
-  // it — and then the physical key is all that still names it.
+  // on macOS, AltGr on some Windows layouts — leaving the physical key to name it.
   return event.altKey && event.code === `Key${key.toUpperCase()}`
 }
 
 /**
- * Every modifier is matched exactly, never merely required: ctrl+s, ctrl+shift+s
- * and ctrl+alt+s are three different chords, and each must leave the other two
- * to their own actions.
+ * Every modifier is matched exactly, never merely required: ctrl+s,
+ * ctrl+shift+s and ctrl+alt+s are three different chords.
  */
 export function matchesShortcut(
   event: ShortcutEvent,
@@ -73,9 +69,8 @@ export function matchesShortcut(
 }
 
 /**
- * How the chord is written on screen. Not a translated string: every locale
- * writes these keys the way the keyboard does, in each platform's own order —
- * Apple's ⌥⇧⌘ before the letter, Ctrl+Alt+Shift+Letter everywhere else.
+ * Not a translated string: every locale writes these keys as the keyboard
+ * does, in each platform's own order.
  */
 export function formatShortcut(shortcut: Shortcut, macOS = isMacOS()) {
   const letter = shortcut.key.toUpperCase()
