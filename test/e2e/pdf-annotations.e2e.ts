@@ -18,6 +18,9 @@ describe("TFolio annotations", () => {
     await dropZoneButton().waitForExist({ timeout: 30_000 })
     await openPdfFromDisk("text.pdf", textPdf())
     await renderedPage()
+    await $("[data-page-number='1'] .pdf-text-layer span").waitForExist({
+      timeout: 15_000,
+    })
   })
 
   it("highlights the selected text, and undo takes it back", async () => {

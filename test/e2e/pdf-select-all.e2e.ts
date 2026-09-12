@@ -99,6 +99,7 @@ describe("TFolio select all", () => {
   it("selects the document's text in the page views, and Esc gives it back", async () => {
     await openPdfFromDisk("select-all.pdf", textPdf(20))
     await renderedPage()
+    await $(".pdf-text-layer span").waitForExist({ timeout: 15_000 })
 
     await browser.keys(["Control", "a"])
 
@@ -150,6 +151,7 @@ describe("TFolio select all", () => {
   it("copies the whole document from the page's own menu", async () => {
     await openPdfFromDisk("menu-all.pdf", textPdf(20))
     await renderedPage()
+    await $(".pdf-text-layer span").waitForExist({ timeout: 15_000 })
     await watchClipboard()
 
     await browser.keys(["Control", "a"])

@@ -10,6 +10,7 @@ import {
   openPdfFromDisk,
   pointPickerAt,
   refreshApp,
+  renderedPage,
   seedSettings,
   textPdf,
   tooltipOn,
@@ -46,17 +47,7 @@ async function renderedVisiblePage(fileName: string) {
     },
   )
 
-  // A settled-zoom re-render can follow the first bitmap at the same canvas
-  // size (see `renderedPage`), so the ink has to stop moving too.
-  await browser.pause(400)
-  await browser.waitUntil(
-    async () => {
-      const first = await visibleInk()
-      await browser.pause(400)
-      return (await visibleInk()) === first
-    },
-    { timeout: 15_000, timeoutMsg: "the visible page's paint never settled" },
-  )
+  await renderedPage(`${visible} [data-page-number='1']`)
 }
 
 function visibleInk() {
@@ -78,6 +69,7 @@ function visibleInk() {
 }
 
 async function highlightTheText() {
+  await $(`${visible} .pdf-text-layer span`).waitForExist({ timeout: 15_000 })
   // A Toggle: clicking the tool while it is active would put it away again.
   const tool = $(`${visible} button[aria-label='Highlight text']`)
 

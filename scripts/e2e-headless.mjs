@@ -2,6 +2,13 @@
 // window, which focus()-driven popups need. Keep the lane math with wdio.conf.ts.
 import { spawn } from "node:child_process"
 
+// Xvfb has no GPU; WebKit's compositor can otherwise stall animation frames
+// and the focus transitions that wait for them.
+process.env.WEBKIT_DISABLE_COMPOSITING_MODE = "1"
+process.env.WEBKIT_DISABLE_DMABUF_RENDERER = "1"
+process.env.LIBGL_ALWAYS_SOFTWARE = "1"
+process.env.GALLIUM_DRIVER = "llvmpipe"
+
 const shardCount = Math.min(
   Math.max(Number(process.env.TFOLIO_E2E_SHARDS) || 4, 1),
   8,
