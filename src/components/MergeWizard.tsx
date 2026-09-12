@@ -35,6 +35,7 @@ import {
   FieldTitle,
 } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import type { useMergeWizard } from "@/hooks/useMergeWizard"
@@ -425,14 +426,21 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                 {isBusy ? (
                   <div className="flex items-center justify-between gap-2">
                     <p
-                      className="text-xs text-muted-foreground"
+                      className="flex items-start gap-2 text-xs text-muted-foreground"
                       data-testid="merge-wizard-adding"
+                      role="status"
                     >
-                      {t(
-                        wordConversionAvailable()
-                          ? "mergeWizard.addingFiles"
-                          : "mergeWizard.addingFilesPlain",
-                      )}
+                      <Spinner
+                        aria-hidden="true"
+                        className="mt-0.5 size-3.5 shrink-0 motion-reduce:animate-none"
+                      />
+                      <span>
+                        {t(
+                          wordConversionAvailable()
+                            ? "mergeWizard.addingFiles"
+                            : "mergeWizard.addingFilesPlain",
+                        )}
+                      </span>
                     </p>
                     <Button
                       data-testid="merge-wizard-stop-adding"
