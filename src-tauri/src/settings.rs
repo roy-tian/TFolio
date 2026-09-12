@@ -27,8 +27,6 @@ pub struct Settings {
     watermark: Option<WatermarkConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     page_numbers: Option<PageNumbersPreferences>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    import: Option<ImportPreferences>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -74,14 +72,6 @@ struct TextNotePreferences {
     opacity: f64,
 }
 
-/// Which kinds of machine help the reader accepts; nothing here reaches a document.
-#[derive(Clone, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "camelCase")]
-struct ImportPreferences {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    word_conversion: Option<bool>,
-}
-
 impl Stored for Settings {
     const FILE_NAME: &'static str = "settings.toml";
 
@@ -95,7 +85,6 @@ impl Stored for Settings {
             annotate: section(&table, "annotate"),
             watermark: section(&table, "watermark"),
             page_numbers: section(&table, "pageNumbers"),
-            import: section(&table, "import"),
         }
     }
 
@@ -113,21 +102,8 @@ impl Settings {
             annotate: sent_section(document, "annotate"),
             watermark: sent_section(document, "watermark"),
             page_numbers: sent_section(document, "pageNumbers"),
-            import: sent_section(document, "import"),
         }
     }
-}
-
-/// Absent is `true`: the setting exists to opt out — invisible Office launches
-/// are not everyone's idea of an import.
-pub fn word_conversion_enabled(store: &Store<Settings>) -> bool {
-    store.read(|settings| {
-        settings
-            .import
-            .as_ref()
-            .and_then(|import| import.word_conversion)
-            .unwrap_or(true)
-    })
 }
 
 fn section<T: DeserializeOwned>(table: &toml::Table, key: &str) -> Option<T> {
@@ -231,9 +207,6 @@ mod tests {
             }),
             watermark: None,
             page_numbers: Some(page_numbers()),
-            import: Some(ImportPreferences {
-                word_conversion: Some(false),
-            }),
         }
     }
 
@@ -263,27 +236,7 @@ mod tests {
         assert!(rendered.contains("[pageNumbers]"));
         assert!(rendered.contains("fontSize"));
         assert!(!rendered.contains("[watermark]"));
-        assert!(rendered.contains("[import]"));
-        assert!(rendered.contains("wordConversion = false"));
-    }
-
-    /// The reader's own edit of the file is read back at the same grain as
-    /// the frontend's write: one section, by its wire name.
-    #[test]
-    fn word_conversion_reads_its_own_section() {
-        let settings = Settings::parse("[import]\nwordConversion = false\n");
-
-        assert_eq!(
-            settings.import.and_then(|import| import.word_conversion),
-            Some(false)
-        );
-
-        // Absent — the file an older version wrote — is the default, not a
-        // refusal the reader never made.
-        assert!(Settings::default()
-            .import
-            .and_then(|import| import.word_conversion)
-            .is_none());
+        assert!(!rendered.contains("[import]"));
     }
 
     /// An older schema's watermark is the likeliest stray in the frontend's copy;

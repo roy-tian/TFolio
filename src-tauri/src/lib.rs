@@ -7,6 +7,7 @@ mod store;
 mod update;
 mod windows;
 
+use convert::word_conversion_available;
 use launch::{take_launch_pdfs, LaunchQueue};
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
@@ -143,6 +144,7 @@ pub fn run() {
             cancel_pdf_operation,
             cancel_pdf_merge,
             cancel_word_conversion,
+            word_conversion_available,
             settings,
             set_settings,
             update_status,

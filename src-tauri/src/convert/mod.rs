@@ -126,6 +126,23 @@ fn detected() -> &'static Detected {
     DETECTED.get_or_init(probe)
 }
 
+/// Whether the wizard may promise Word conversion: the machine's own
+/// suites, detected passively — never a reader setting.
+pub(crate) fn word_available() -> bool {
+    // E2e answers yes with no engine behind it, so specs can drive the row
+    // a refused conversion leaves; a closed door would never show it.
+    if cfg!(feature = "e2e") {
+        return true;
+    }
+
+    !detected().engines.is_empty()
+}
+
+#[tauri::command]
+pub fn word_conversion_available() -> bool {
+    word_available()
+}
+
 /// Passive only: nothing here may start an office suite, because probing runs
 /// at first use, in the middle of a gesture the reader is waiting on.
 #[cfg(not(feature = "e2e"))]

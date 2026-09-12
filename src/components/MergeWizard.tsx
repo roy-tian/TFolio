@@ -55,6 +55,7 @@ import {
 } from "@/lib/mergeWizard"
 import { isWindows } from "@/lib/platform"
 import { cn } from "@/lib/utils"
+import { wordConversionAvailable } from "@/lib/wordConversion"
 
 const stepTitleKey = {
   files: "mergeWizard.stepFiles",
@@ -338,7 +339,11 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                 {t("viewer.dropNowMerge")}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                {t("mergeWizard.filesDescription")}
+                {t(
+                  wordConversionAvailable()
+                    ? "mergeWizard.filesDescription"
+                    : "mergeWizard.filesDescriptionPlain",
+                )}
               </p>
             </div>
           </div>
@@ -423,7 +428,11 @@ export function MergeWizard({ draggingFiles, wizard }: MergeWizardProps) {
                       className="text-xs text-muted-foreground"
                       data-testid="merge-wizard-adding"
                     >
-                      {t("mergeWizard.addingFiles")}
+                      {t(
+                        wordConversionAvailable()
+                          ? "mergeWizard.addingFiles"
+                          : "mergeWizard.addingFilesPlain",
+                      )}
                     </p>
                     <Button
                       data-testid="merge-wizard-stop-adding"

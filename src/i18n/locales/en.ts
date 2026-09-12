@@ -262,13 +262,7 @@ const en = {
     title: "Settings",
     description: "Adjust appearance, language, and other app settings.",
     appearance: "Appearance",
-    imports: "Import",
     about: "About",
-    wordConversion: "Convert Word documents with the installed office apps",
-    wordConversionHint:
-      "The import wizard asks Microsoft Word, WPS Office, or LibreOffice to turn Word documents into PDFs as they are added. When off, the wizard takes PDFs and images only.",
-    wordConversionHint_windows:
-      "The import wizard asks Microsoft Word or WPS Office to turn Word documents into PDFs as they are added. When off, the wizard takes PDFs and images only.",
     theme: "Theme",
     themeHint: "Choose a light or dark appearance.",
     themeLight: "Light",
@@ -341,11 +335,14 @@ const en = {
     stepWatermark: "Watermark",
     filesDescription:
       "PDFs, images, and Word documents join the wizard\u2019s list, in the order you drop them. A Word document is converted to PDF by your own Office apps as it is added.",
+    filesDescriptionPlain:
+      "PDFs and images join the wizard\u2019s list, in the order you drop them.",
     addFiles: "Add files",
     sourceFilter: "PDFs, images, and Word documents",
-    /** The same dialog with the Word conversions turned off in settings. */
+    /** The same dialog where no office suite was detected to convert Word. */
     sourceFilterPlain: "PDFs and images",
     addingFiles: "Adding files\u2026 Word documents convert as they arrive.",
+    addingFilesPlain: "Adding files\u2026",
     empty:
       "No files yet. Add at least two PDFs \u2014 images come in as pages of their own.",
     emptyCopies:
@@ -427,6 +424,8 @@ const en = {
     title: "TFolio",
     description: "A focused desktop workspace for reading and editing PDF files.",
     version: "Version {{version}}",
+    /** Only while releases are internal: a stable one drops this key and its use. */
+    prerelease: "(internal beta)",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const

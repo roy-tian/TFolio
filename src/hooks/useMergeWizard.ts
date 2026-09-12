@@ -27,7 +27,6 @@ import {
   type PageNumbersDraft,
 } from "@/lib/pageNumbers"
 import type { PdfDocumentInfo } from "@/lib/pdf"
-import { wordConversionEnabled } from "@/lib/settings"
 import type {
   PdfOwnedLayer,
   PdfOwnedLayerProgressHandler,
@@ -40,6 +39,7 @@ import {
   validateWatermarkConfig,
   type WatermarkConfig,
 } from "@/lib/watermark"
+import { wordConversionAvailable } from "@/lib/wordConversion"
 
 const MERGE_PROGRESS_PHASE_UNITS = 100
 
@@ -278,9 +278,9 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
         ? await pick()
         : await invoke<string[]>("pick_pdf_paths", {
             // The label promises what the dialog behind it accepts, and the
-            // backend omits the Word extensions when the setting is off.
+            // backend omits the Word extensions when no suite was detected.
             filterLabel: t(
-              wordConversionEnabled()
+              wordConversionAvailable()
                 ? "mergeWizard.sourceFilter"
                 : "mergeWizard.sourceFilterPlain",
             ),

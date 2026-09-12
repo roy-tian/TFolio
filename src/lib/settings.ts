@@ -8,15 +8,6 @@ export type Settings = {
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }
   watermark?: unknown
   pageNumbers?: unknown
-  import?: { wordConversion?: unknown }
-}
-
-/** Whether Word imports may drive the machine's own office suites. Absent is
-    yes: the setting is the reader's way of opting out. */
-export function wordConversionEnabled(): boolean {
-  const stored = storedSettings().import?.wordConversion
-
-  return typeof stored === "boolean" ? stored : true
 }
 
 let current: Settings = {}
@@ -127,7 +118,6 @@ function merged(base: Settings, patch: Settings): Settings {
     ...patch,
     ui: mergedSection(base.ui, patch.ui),
     annotate: mergedSection(base.annotate, patch.annotate),
-    import: mergedSection(base.import, patch.import),
   }
 }
 

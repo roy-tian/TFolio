@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { e2eOverride } from "@/lib/e2e"
 import { fileNameFromPath, isPdfPath } from "@/lib/pdf"
-import { wordConversionEnabled } from "@/lib/settings"
+import { wordConversionAvailable } from "@/lib/wordConversion"
 
 /** Mirrors `MergeSourceKind` in `src-tauri/src/pdfium/mod.rs`; a Word
     document arrives as the PDF the machine's office suite made of it. */
@@ -44,8 +44,8 @@ export function isMergeWordPath(path: string) {
   )
 }
 
-/** Word is behind its setting: a reader who turned the conversions off has
-    already answered what should happen here. */
+/** Word follows the machine's own answer: where no office suite was detected,
+    the extension is not a source this run can accept. */
 export function isMergeSourcePath(path: string, word = true) {
   return (
     isPdfPath(path) || isMergeImagePath(path) || (word && isMergeWordPath(path))
@@ -244,7 +244,7 @@ export function canMerge(files: MergeFile[], mode: MergeExportMode) {
 
 export async function inspectFiles(paths: string[]): Promise<MergeFile[]> {
   const sourcePaths = paths.filter((path) =>
-    isMergeSourcePath(path, wordConversionEnabled()),
+    isMergeSourcePath(path, wordConversionAvailable()),
   )
 
   if (sourcePaths.length === 0) {

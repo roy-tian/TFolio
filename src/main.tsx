@@ -7,6 +7,7 @@ import { initializeI18n } from "./i18n"
 import { suppressNativeContextMenu } from "./lib/contextMenu"
 import { loadSettings, watchSettings } from "./lib/settings"
 import { initializeTheme } from "./lib/theme"
+import { loadWordConversionAvailability } from "./lib/wordConversion"
 import "./index.css"
 
 async function bootstrap() {
@@ -14,6 +15,9 @@ async function bootstrap() {
   // have to be settled before the first paint is made in them.
   await loadSettings()
   watchSettings()
+  // The wizard's Word promise is the machine's own answer; it too is settled
+  // before the first window can act on it.
+  await loadWordConversionAvailability()
   initializeTheme()
   suppressNativeContextMenu()
 
