@@ -1,4 +1,4 @@
-use super::super::io::{archive_pdf_name, bookmark_title, remapped_outline};
+use super::super::io::{bookmark_title, remapped_outline};
 use super::support::*;
 use super::*;
 
@@ -550,48 +550,6 @@ fn rotated_image_source(directory: &Path, name: &str, width: u32, height: u32) -
     path
 }
 
-fn archive_entries(path: &Path) -> Vec<(String, Vec<u8>)> {
-    let file = fs::File::open(path).expect("the archive should be readable");
-    let mut archive = zip::ZipArchive::new(file).expect("the archive should be a zip");
-
-    (0..archive.len())
-        .map(|index| {
-            let mut entry = archive.by_index(index).expect("the entry should be listed");
-            let name = entry.name().to_string();
-            let mut bytes = Vec::new();
-
-            std::io::Read::read_to_end(&mut entry, &mut bytes)
-                .expect("the entry should be readable");
-            (name, bytes)
-        })
-        .collect()
-}
-
-#[test]
-fn an_archive_entry_is_named_after_its_file_and_never_repeats() {
-    let mut used = HashSet::new();
-
-    assert_eq!(
-        archive_pdf_name(Path::new("/tmp/report.pdf"), &mut used),
-        "report.pdf"
-    );
-    // A photo comes out as the page it was laid on, so it keeps its stem alone.
-    assert_eq!(
-        archive_pdf_name(Path::new("/tmp/scan.JPG"), &mut used),
-        "scan.pdf"
-    );
-    assert_eq!(
-        archive_pdf_name(Path::new("/elsewhere/report.pdf"), &mut used),
-        "report (2).pdf"
-    );
-    assert_eq!(
-        archive_pdf_name(Path::new("/third/report.pdf"), &mut used),
-        "report (3).pdf"
-    );
-    // A path that ends in no name of its own still has to say something.
-    assert_eq!(archive_pdf_name(Path::new("/"), &mut used), "document.pdf");
-}
-
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_merge_lays_an_image_on_a_sheet_of_its_own() {
@@ -612,7 +570,10 @@ fn a_merge_lays_an_image_on_a_sheet_of_its_own() {
         .expect("the files should inspect");
 
     assert!(matches!(summaries[0].kind, MergeSourceKind::Pdf));
+    assert_eq!(summaries[0].all_pages_a4, Some(false));
     assert!(matches!(summaries[1].kind, MergeSourceKind::Image));
+    assert_eq!(summaries[1].all_pages_a4, Some(true));
+    assert_eq!(summaries[2].all_pages_a4, Some(true));
     assert_eq!(summaries[1].page_count, Some(1));
     assert!(!summaries[1].has_outline);
 
@@ -709,135 +670,6 @@ fn a_file_that_is_no_image_is_reported_unusable_rather_than_dropped() {
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].page_count, None);
     assert!(matches!(summaries[0].kind, MergeSourceKind::Image));
-}
-
-#[test]
-#[ignore = "requires `bun run pdfium:download`"]
-fn a_merge_exported_as_images_holds_one_png_per_page() {
-    let _merges = merge_test_guard();
-    let engine = test_engine();
-    let directory = scratch_directory("merge-png-zip");
-    let paths = merge_sources(
-        &directory,
-        &[
-            ("first", banded_pdf(&[20, 60])),
-            ("second", banded_pdf(&[110])),
-        ],
-    );
-    let merged = engine
-        .merge_files(paths, false, MergeBookmarks::None)
-        .expect("PDFium should merge the files");
-    let archive = directory.join("pages.zip");
-
-    let mut progress = Vec::new();
-    let written = engine
-        .export_page_images(merged.id, &archive, |completed, total| {
-            progress.push((completed, total))
-        })
-        .expect("the pages should export");
-
-    assert!(written);
-    assert_eq!(progress.last(), Some(&(3, 3)));
-
-    let entries = archive_entries(&archive);
-
-    assert_eq!(
-        entries
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>(),
-        ["page-1.png", "page-2.png", "page-3.png"]
-    );
-
-    for (name, bytes) in &entries {
-        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "{name} should be a PNG");
-    }
-
-    engine.close(merged.id).expect("the merge should close");
-}
-
-#[test]
-#[ignore = "requires `bun run pdfium:download`"]
-fn watermarked_copies_are_written_one_per_source() {
-    let _merges = merge_test_guard();
-    let engine = test_engine();
-    let directory = scratch_directory("merge-watermark-zip");
-    let paths = merge_sources(
-        &directory,
-        &[("first", banded_pdf(&[20])), ("second", banded_pdf(&[110]))],
-    );
-    let archive = directory.join("marked.zip");
-    let watermark = watermark_config("DRAFT");
-
-    let written = engine
-        .export_watermarked_copies(
-            paths.clone(),
-            true,
-            Some(watermark),
-            false,
-            &archive,
-            |_, _| {},
-        )
-        .expect("the copies should export");
-
-    assert!(written);
-
-    let entries = archive_entries(&archive);
-
-    assert_eq!(
-        entries
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>(),
-        ["first.pdf", "second.pdf"]
-    );
-
-    for (name, bytes) in &entries {
-        assert_eq!(&bytes[..5], b"%PDF-", "{name} should be a PDF");
-
-        let opened = engine
-            .open(bytes.clone())
-            .expect("the copy should open as a PDF");
-
-        assert_eq!(opened.num_pages, 1);
-        assert!((opened.pages[0].width - A4_SHORT_POINTS).abs() < 1.0);
-        assert!(
-            opened.path.is_none(),
-            "a copy has no source to be written to"
-        );
-
-        engine.close(opened.id).expect("the copy should close");
-    }
-
-    for path in &paths {
-        assert_eq!(
-            fs::read(path).expect("the source should still be readable")[..5],
-            *b"%PDF-"
-        );
-    }
-}
-
-#[test]
-#[ignore = "requires `bun run pdfium:download`"]
-fn a_watermark_export_refuses_to_replace_one_of_its_own_sources() {
-    let _merges = merge_test_guard();
-    let engine = test_engine();
-    let directory = scratch_directory("merge-watermark-onto-source");
-    let paths = merge_sources(
-        &directory,
-        &[("first", banded_pdf(&[20])), ("second", banded_pdf(&[110]))],
-    );
-    let destination = paths[1].clone();
-
-    let refused = engine
-        .export_watermarked_copies(paths.clone(), false, None, false, &destination, |_, _| {})
-        .expect_err("an archive must not land on a file it reads");
-
-    assert!(refused.contains("built from"), "{refused}");
-    assert_eq!(
-        fs::read(&destination).expect("the source should still be readable"),
-        banded_pdf(&[110])
-    );
 }
 
 #[test]
@@ -1246,6 +1078,7 @@ fn a_word_document_that_cannot_convert_is_its_own_kind_of_unreadable() {
         .expect("the files should inspect");
 
     assert!(matches!(summaries[0].kind, MergeSourceKind::Pdf));
+    assert_eq!(summaries[0].all_pages_a4, Some(false));
     assert_eq!(summaries[0].page_count, Some(1));
     // The Word row keeps its kind and says which failure it carries, rather
     // than passing as an ordinary unreadable PDF.
@@ -1298,31 +1131,4 @@ fn a_merge_refuses_a_word_document_that_cannot_be_converted() {
     // The estimate promised one conversion; the refusal reconciles the bar
     // back to what the run will really do.
     assert_eq!(progress, vec![(0, 6), (0, 5)]);
-}
-
-#[test]
-#[ignore = "requires `bun run pdfium:download`"]
-fn the_copies_export_refuses_a_word_document_that_cannot_be_converted() {
-    let engine = test_engine();
-    let directory = scratch_directory("copies-word");
-    let word = directory.join("letter.docx");
-
-    fs::write(&word, b"not a document at all").expect("the source should write to disk");
-
-    let archive = directory.join("copies.zip");
-    let mut progress = Vec::new();
-    let error = engine
-        .export_watermarked_copies(
-            vec![word],
-            false,
-            None,
-            true,
-            &archive,
-            |completed, total| progress.push((completed, total)),
-        )
-        .expect_err("the conversion refusal should fail the export");
-
-    assert!(error.contains("could not be converted"), "{error}");
-    assert_eq!(progress, vec![(0, 2), (0, 1)]);
-    assert!(!archive.exists(), "a refused export writes nothing");
 }

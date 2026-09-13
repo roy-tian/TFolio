@@ -1,27 +1,28 @@
 import { describe, expect, it } from "bun:test"
 
 import {
+  a4Status,
   appendFiles,
   canMerge,
   hasExistingBookmarks,
   isMergeBookmarksMode,
-  isMergeExportMode,
   isMergeImagePath,
   isMergeSourcePath,
   isMergeWordPath,
   MAX_MERGE_FILES,
   mergeLayout,
   mergedPageCount,
-  mergesIntoOneDocument,
   mergeWizardSteps,
   moveFile,
   padPageCount,
   usableFiles,
   type MergeFile,
+  type MergeWizardStep,
 } from "@/lib/mergeWizard"
 
 function file(name: string, pageCount: number | null, hasOutline = false): MergeFile {
   return {
+    allPagesA4: false,
     error: null,
     hasOutline,
     kind: "pdf",
@@ -32,9 +33,9 @@ function file(name: string, pageCount: number | null, hasOutline = false): Merge
 }
 
 describe("isMergeBookmarksMode", () => {
-  it("accepts the four modes and nothing else", () => {
+  it("accepts the three enabled modes and nothing else", () => {
     expect(isMergeBookmarksMode("perFileWithExisting")).toBe(true)
-    expect(isMergeBookmarksMode("none")).toBe(true)
+    expect(isMergeBookmarksMode("none")).toBe(false)
     expect(isMergeBookmarksMode("perDocument")).toBe(false)
     expect(isMergeBookmarksMode(null)).toBe(false)
   })
@@ -152,53 +153,44 @@ describe("moveFile", () => {
 
 describe("canMerge", () => {
   it("needs two files the backend can actually read", () => {
-    expect(canMerge([file("a", 1)], "onePdf")).toBe(false)
-    expect(canMerge([file("a", 1), file("broken", null)], "onePdf")).toBe(false)
-    expect(canMerge([file("a", 1), file("b", 1)], "onePdf")).toBe(true)
-    expect(canMerge([file("a", 1), file("b", 1)], "pagePngZip")).toBe(true)
-  })
-
-  it("takes a single file for the export that merges nothing", () => {
-    expect(canMerge([file("a", 1)], "watermarkOnlyZip")).toBe(true)
-    expect(canMerge([file("broken", null)], "watermarkOnlyZip")).toBe(false)
-    expect(canMerge([], "watermarkOnlyZip")).toBe(false)
-  })
-})
-
-describe("isMergeExportMode", () => {
-  it("accepts the three modes and nothing else", () => {
-    expect(isMergeExportMode("onePdf")).toBe(true)
-    expect(isMergeExportMode("watermarkOnlyZip")).toBe(true)
-    expect(isMergeExportMode("pageJpgZip")).toBe(false)
-    expect(isMergeExportMode(null)).toBe(false)
+    expect(canMerge([])).toBe(false)
+    expect(canMerge([file("a", 1)])).toBe(false)
+    expect(canMerge([file("a", 1), file("broken", null)])).toBe(false)
+    expect(canMerge([file("a", 1), file("b", 1)])).toBe(true)
   })
 })
 
 describe("mergeWizardSteps", () => {
-  it("asks every step for a merge into one document", () => {
-    expect(mergeWizardSteps("onePdf")).toEqual([
-      "files",
-      "bookmarks",
-      "pageNumbers",
-      "watermark",
-    ])
+  it("asks only for enabled features, in a stable order", () => {
+    for (let mask = 0; mask < 8; mask++) {
+      const bookmarksOn = Boolean(mask & 1)
+      const pageNumbersOn = Boolean(mask & 2)
+      const watermarkOn = Boolean(mask & 4)
+      const expected: MergeWizardStep[] = ["files"]
+      if (bookmarksOn) expected.push("bookmarks")
+      if (pageNumbersOn) expected.push("pageNumbers")
+      if (watermarkOn) expected.push("watermark")
+      expect(mergeWizardSteps({ bookmarksOn, pageNumbersOn, watermarkOn })).toEqual(expected)
+    }
+  })
+})
+
+describe("smart option availability", () => {
+  it("distinguishes empty, unreadable, unknown and mixed page sizes", () => {
+    const a4 = { ...file("a4", 2), allPagesA4: true }
+    const unknown = { ...file("unknown", 1), allPagesA4: null }
+    expect(a4Status([])).toBe("empty")
+    expect(a4Status([file("broken", null)])).toBe("empty")
+    expect(a4Status([a4, file("broken", null)])).toBe("allA4")
+    expect(a4Status([a4, unknown])).toBe("unknown")
+    expect(a4Status([a4, file("letter", 2)])).toBe("needsA4")
   })
 
-  it("leaves out the steps whose answer could not reach the result", () => {
-    // A PNG carries no outline; copies that were never merged have neither an
-    // outline to build nor a page sequence to number.
-    expect(mergeWizardSteps("pagePngZip")).toEqual([
-      "files",
-      "pageNumbers",
-      "watermark",
-    ])
-    expect(mergeWizardSteps("watermarkOnlyZip")).toEqual(["files", "watermark"])
-  })
-
-  it("knows which modes make one page sequence out of the files", () => {
-    expect(mergesIntoOneDocument("onePdf")).toBe(true)
-    expect(mergesIntoOneDocument("pagePngZip")).toBe(true)
-    expect(mergesIntoOneDocument("watermarkOnlyZip")).toBe(false)
+  it("reconsiders padding after reordering and does not pad the final file", () => {
+    const files = [file("even", 2), file("odd", 3)]
+    expect(padPageCount(files, true)).toBe(0)
+    expect(padPageCount(moveFile(files, 0, 1), true)).toBe(1)
+    expect(padPageCount([file("odd", 3)], true)).toBe(0)
   })
 })
 

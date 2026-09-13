@@ -15,6 +15,7 @@ mod support;
 mod annotations;
 mod documents;
 mod insert_pages;
+mod inspection;
 mod merge;
 mod page_numbers;
 mod page_structure;

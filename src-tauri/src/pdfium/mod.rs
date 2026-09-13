@@ -14,10 +14,9 @@ pub use commands::{
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
     cancel_pdf_operation, cancel_pdf_search, cancel_word_conversion, close_pdf, create_pdf,
     delete_pdf_annotations, delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages,
-    export_pdf, export_pdf_page_images, export_watermarked_pdf_copies, extract_pdf_page_plain_text,
-    extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
-    insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_pdf,
-    open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
+    export_pdf, extract_pdf_page_plain_text, extract_pdf_page_text, insert_pdf_blank_page,
+    insert_pdf_from_path, insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files,
+    open_pdf, open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
     reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text,
 };
@@ -116,18 +115,6 @@ pub struct MergePlan {
     bookmarks: MergeBookmarks,
 }
 
-/// The watermarked export's counterpart: no order to keep and no outline to
-/// build, so it asks for less than a merge.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WatermarkCopiesPlan {
-    paths: Vec<String>,
-    normalize_a4: bool,
-    /// `None` writes the copies unmarked, which is what the export comes to when
-    /// the reader turns the watermark off.
-    watermark: Option<WatermarkConfig>,
-}
-
 /// An image is laid on a sheet of its own; a Word document arrives as the PDF
 /// this machine's office suite made of it — the only renderer it can be trusted to.
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -157,6 +144,7 @@ pub struct PdfFileSummary {
     /// `None` when the file could not be read, so the row shows as
     /// unusable rather than silently going missing from the list.
     page_count: Option<i32>,
+    all_pages_a4: Option<bool>,
     /// Whether the file brings bookmarks of its own — what makes the
     /// bookmark-keeping modes worth offering.
     has_outline: bool,

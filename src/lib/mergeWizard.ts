@@ -52,61 +52,33 @@ export function isMergeSourcePath(path: string, word = true) {
   )
 }
 
-/**
- * The archives are written to a file the reader picks rather than opened as a
- * tab: neither images nor separate documents is a thing this app can hold open.
- */
-export type MergeExportMode = "onePdf" | "pagePngZip" | "watermarkOnlyZip"
-
-export const mergeExportModes: readonly MergeExportMode[] = [
-  "onePdf",
-  "pagePngZip",
-  "watermarkOnlyZip",
-]
-
-export function isMergeExportMode(value: unknown): value is MergeExportMode {
-  return mergeExportModes.includes(value as MergeExportMode)
-}
-
 export type MergeWizardStep =
   | "files"
   | "bookmarks"
   | "pageNumbers"
   | "watermark"
 
-/**
- * A step is left out where its answer could not reach the result: image
- * archives carry no outline, unmerged copies nothing to build or number.
- */
-export function mergeWizardSteps(
-  mode: MergeExportMode,
-): readonly MergeWizardStep[] {
-  switch (mode) {
-    case "pagePngZip":
-      return ["files", "pageNumbers", "watermark"]
-    case "watermarkOnlyZip":
-      return ["files", "watermark"]
-    default:
-      return ["files", "bookmarks", "pageNumbers", "watermark"]
-  }
+export function mergeWizardSteps(options: {
+  bookmarksOn: boolean
+  pageNumbersOn: boolean
+  watermarkOn: boolean
+}): readonly MergeWizardStep[] {
+  const steps: MergeWizardStep[] = ["files"]
+
+  if (options.bookmarksOn) steps.push("bookmarks")
+  if (options.pageNumbersOn) steps.push("pageNumbers")
+  if (options.watermarkOn) steps.push("watermark")
+
+  return steps
 }
 
-/** Whether `mode` merges its sources into one page sequence — which is what
-    makes the blank-page rule, and an outline, mean anything. */
-export function mergesIntoOneDocument(mode: MergeExportMode) {
-  return mode !== "watermarkOnlyZip"
-}
-
-/** How the merged document's outline is built from its sources'. Mirrored by
-    `MergeBookmarks` in `src-tauri/src/pdfium/mod.rs`. */
+// The backend also accepts "none", supplied only when bookmarks are disabled.
 export type MergeBookmarksMode =
-  | "none"
   | "perFile"
   | "keepExisting"
   | "perFileWithExisting"
 
 export const mergeBookmarksModes: readonly MergeBookmarksMode[] = [
-  "none",
   "perFile",
   "keepExisting",
   "perFileWithExisting",
@@ -121,6 +93,7 @@ export function isMergeBookmarksMode(
 /** `pageCount` null means unreadable: the row stays, marked unusable, rather
     than vanishing from a list the reader built. */
 export type MergeFile = {
+  allPagesA4: boolean | null
   error: MergeSourceError | null
   hasOutline: boolean
   kind: MergeSourceKind
@@ -130,6 +103,7 @@ export type MergeFile = {
 }
 
 type PdfFileSummary = {
+  allPagesA4: boolean | null
   error?: MergeSourceError
   hasOutline: boolean
   kind: MergeSourceKind
@@ -234,12 +208,18 @@ export function moveFile(files: MergeFile[], from: number, to: number) {
   return next
 }
 
-/**
- * Two files, because one is not a merge — except where nothing merges, and
- * watermarking a single file is a whole answer.
- */
-export function canMerge(files: MergeFile[], mode: MergeExportMode) {
-  return usableFiles(files).length >= (mergesIntoOneDocument(mode) ? 2 : 1)
+export function canMerge(files: MergeFile[]) {
+  return usableFiles(files).length >= 2
+}
+
+export function a4Status(files: MergeFile[]): "empty" | "unknown" | "allA4" | "needsA4" {
+  const usable = usableFiles(files)
+
+  if (usable.length === 0) return "empty"
+  if (usable.some((file) => file.allPagesA4 === false)) return "needsA4"
+  if (usable.some((file) => file.allPagesA4 !== true)) return "unknown"
+
+  return "allA4"
 }
 
 export async function inspectFiles(paths: string[]): Promise<MergeFile[]> {
@@ -259,6 +239,7 @@ export async function inspectFiles(paths: string[]): Promise<MergeFile[]> {
       })
 
   return summaries.map((summary) => ({
+    allPagesA4: summary.allPagesA4,
     error: summary.error ?? null,
     hasOutline: summary.hasOutline,
     kind: summary.kind,

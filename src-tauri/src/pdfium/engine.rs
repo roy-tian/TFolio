@@ -12,7 +12,6 @@ use std::{
 use image::{imageops, metadata::Orientation, DynamicImage, ImageDecoder, ImageFormat};
 use pdfium_render::prelude::*;
 use tauri::AppHandle;
-use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
 use super::{
     font::{
@@ -923,6 +922,7 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
     items
 }
 
+mod inspection;
 mod io;
 mod marks;
 mod owned_content;

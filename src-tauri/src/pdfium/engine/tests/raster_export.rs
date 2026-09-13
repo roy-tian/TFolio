@@ -62,7 +62,7 @@ fn image_watermark_export_combines_content_and_preserves_display_geometry() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn batch_image_watermarks_preserve_bookmarks_and_leave_the_source_intact() {
+fn image_watermarks_preserve_bookmarks_and_leave_the_source_intact() {
     let engine = test_engine();
     let directory = scratch_directory("raster-watermark-batch");
     let source = directory.join("source.pdf");
@@ -70,11 +70,12 @@ fn batch_image_watermarks_preserve_bookmarks_and_leave_the_source_intact() {
     fs::write(&source, &original).unwrap();
     let mut config = watermark_config("ARCHIVE");
     config.rasterize = true;
-    let operation = engine.begin_operation(OperationTarget::Merge);
-    let bytes = engine
-        .watermarked_copy(&source, false, &Some(config), &operation)
-        .unwrap()
-        .unwrap();
+    let document = engine.open(original.clone()).unwrap();
+    engine.apply_watermark(document.id, config).unwrap();
+    let destination = directory.join("copy.pdf");
+    engine.export_to(document.id, &destination).unwrap();
+    let bytes = fs::read(&destination).unwrap();
+    engine.close(document.id).unwrap();
     assert_eq!(fs::read(&source).unwrap(), original);
     let reopened = engine.open(bytes).unwrap();
     assert_eq!(reopened.num_pages, 3);
