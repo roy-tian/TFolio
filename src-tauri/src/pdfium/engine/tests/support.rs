@@ -1,5 +1,7 @@
 use super::*;
+mod archive_links;
 use crate::pdfium::watermark::{WatermarkDirection, WatermarkLayout};
+pub(super) use archive_links::linked_chapters_pdf;
 
 pub(super) fn build_pdf(objects: &[String]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.4\n".to_vec();
@@ -177,6 +179,7 @@ pub(super) fn rotated_blank_pdf(rotation: i32) -> Vec<u8> {
 
 pub(super) fn watermark_config(text: &str) -> WatermarkConfig {
     WatermarkConfig {
+        rasterize: false,
         text: text.into(),
         width_ratio: 0.8,
         direction: WatermarkDirection::Ascending,
@@ -391,6 +394,22 @@ pub(super) fn outlined_three_page_pdf() -> Vec<u8> {
         "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
         "7 0 obj\n<< /Type /Outlines /First 8 0 R /Last 8 0 R /Count 1 >>\nendobj\n".to_string(),
         "8 0 obj\n<< /Title (Chapter) /Parent 7 0 R /Dest [5 0 R /XYZ null null null] >>\nendobj\n".to_string(),
+    ])
+}
+
+pub(super) fn archive_bookmarks_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 7 0 R >>\nendobj\n".into(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>\nendobj\n".into(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".into(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".into(),
+        "5 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".into(),
+        "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".into(),
+        "7 0 obj\n<< /Type /Outlines /First 8 0 R /Last 10 0 R /Count 4 >>\nendobj\n".into(),
+        "8 0 obj\n<< /Title (Part/one) /Parent 7 0 R /Next 9 0 R /Dest [5 0 R /Fit] >>\nendobj\n".into(),
+        "9 0 obj\n<< /Title (Part/one) /Parent 7 0 R /Prev 8 0 R /Next 10 0 R /First 11 0 R /Last 11 0 R /Count 1 /Dest [3 0 R /Fit] >>\nendobj\n".into(),
+        "10 0 obj\n<< /Title (Duplicate) /Parent 7 0 R /Prev 9 0 R /Dest [3 0 R /Fit] >>\nendobj\n".into(),
+        "11 0 obj\n<< /Title (Detail) /Parent 9 0 R /Dest [4 0 R /Fit] >>\nendobj\n".into(),
     ])
 }
 

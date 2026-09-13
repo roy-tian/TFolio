@@ -24,6 +24,22 @@ pub(super) fn write_outline(bytes: Vec<u8>, nodes: &[OutlineNode]) -> Result<Vec
 
     let mut document = Document::load_mem(&bytes)
         .map_err(|error| format!("the merged document could not be reread: {error}"))?;
+    install_outline(&mut document, nodes)?;
+
+    let mut written = Vec::with_capacity(bytes.len());
+    document
+        .save_to(&mut written)
+        .map_err(|error| format!("the outline could not be written: {error}"))?;
+    Ok(written)
+}
+
+pub(super) fn install_outline(
+    document: &mut Document,
+    nodes: &[OutlineNode],
+) -> Result<(), String> {
+    if nodes.is_empty() {
+        return Ok(());
+    }
     // 1-based page number to object id, which is what a bookmark's destination
     // is expressed in. Collected once: the map is the whole page tree walked.
     let pages: Vec<_> = document.get_pages().into_values().collect();
@@ -32,10 +48,10 @@ pub(super) fn write_outline(bytes: Vec<u8>, nodes: &[OutlineNode]) -> Result<Vec
         return Err("the merged document has no pages to bookmark".into());
     }
 
-    add_nodes(&mut document, &pages, nodes, None);
+    add_nodes(document, &pages, nodes, None);
 
     let Some(outline_id) = document.build_outline() else {
-        return Ok(bytes);
+        return Ok(());
     };
 
     document
@@ -43,13 +59,7 @@ pub(super) fn write_outline(bytes: Vec<u8>, nodes: &[OutlineNode]) -> Result<Vec
         .map_err(|error| format!("the merged document has no catalogue: {error}"))?
         .set("Outlines", Object::Reference(outline_id));
 
-    let mut written = Vec::with_capacity(bytes.len());
-
-    document
-        .save_to(&mut written)
-        .map_err(|error| format!("the outline could not be written: {error}"))?;
-
-    Ok(written)
+    Ok(())
 }
 
 fn add_nodes(

@@ -125,6 +125,9 @@ describe("TFolio save", () => {
     // on this same page lands the real two-page file, not the stale payload.
     await openPathViaDialog(writeScratchPdf("after-bytes.pdf", textPdf(2)))
     await expect(
+      $("//button[@role='tab'][normalize-space()='after-bytes.pdf']"),
+    ).toHaveAttribute("aria-selected", "true")
+    await expect(
       $("[data-active='true'] [data-slot='page-status']"),
     ).toHaveAttribute("aria-label", "Page 1 of 2")
   })

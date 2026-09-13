@@ -4,8 +4,13 @@
  */
 import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
+import type { ArchiveExportRequest } from "@/lib/archiveExport"
 
 export type E2eOverrides = {
+  exportPdfArchive?: (
+    args: ArchiveExportRequest & { documentId: number },
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<string | null>
   exportPdf?: (args: {
     documentId: number
     filterLabel: string
@@ -23,6 +28,7 @@ export type E2eOverrides = {
       cannot read on the wizard's list without writing one. */
   inspectPdfFiles?: (paths: string[]) => Promise<
     {
+      allPagesA4: boolean | null
       error?: "converterMissing" | "conversionFailed"
       hasOutline: boolean
       kind: "pdf" | "image" | "word"
@@ -41,12 +47,6 @@ export type E2eOverrides = {
     },
     onProgress: (progress: PdfProgress) => void,
   ) => Promise<PdfDocumentInfo>
-  /** Both archive exports put up a native save dialog no driver can answer. */
-  exportPdfArchive?: (
-    command: string,
-    args: Record<string, unknown>,
-    onProgress: (progress: PdfProgress) => void,
-  ) => Promise<string | null>
 }
 
 /** Compile-time constant; every `if (isE2eBuild)` body is dead code outside

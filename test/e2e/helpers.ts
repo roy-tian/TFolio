@@ -561,10 +561,10 @@ export function pageInk(pageNumber = 1) {
 }
 
 /** A position-sensitive digest of page 1's pixels. */
-export function pagePixelFingerprint() {
-  return browser.execute(() => {
+export function pagePixelFingerprint(pageSelector = "[data-page-number='1']") {
+  return browser.execute((selector: string) => {
     const canvas = document.querySelector<HTMLCanvasElement>(
-      "[data-page-number='1'] canvas",
+      `${selector} canvas`,
     )!
     const { data } = canvas.getContext("2d")!.getImageData(
       0,
@@ -580,27 +580,25 @@ export function pagePixelFingerprint() {
     }
 
     return hash >>> 0
-  })
+  }, pageSelector)
 }
 
-export async function renderedPage() {
-  const page = await $("[data-page-number='1']")
+export async function renderedPage(pageSelector = "[data-page-number='1']") {
+  const page = await $(pageSelector)
   await page.waitForDisplayed({ timeout: 30_000 })
 
   const canvas = await page.$("canvas")
-  await browser.waitUntil(
-    async () => Number(await canvas.getAttribute("width")) > 200,
-    { timeout: 30_000, timeoutMsg: "page 1 never finished rendering" },
-  )
+  // The canvas starts at the PDF's dimensions, before it contains any pixels.
+  await expect(canvas).toHaveAttribute("data-rendered", "true", { wait: 30_000 })
 
   // A zoom-settling re-render (150ms debounce) can follow the first bitmap at
   // the same canvas size, so width alone cannot say the paint is final.
   await browser.pause(400)
   await browser.waitUntil(
     async () => {
-      const first = await pagePixelFingerprint()
+      const first = await pagePixelFingerprint(pageSelector)
       await browser.pause(400)
-      return (await pagePixelFingerprint()) === first
+      return (await pagePixelFingerprint(pageSelector)) === first
     },
     { timeout: 15_000, timeoutMsg: "page 1's paint never settled" },
   )

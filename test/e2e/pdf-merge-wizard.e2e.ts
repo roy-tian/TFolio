@@ -67,10 +67,6 @@ function nextStep() {
   return $("[data-testid='merge-wizard-next']").click()
 }
 
-function chooseExportMode(mode: string) {
-  return $(`[data-testid='merge-wizard-export-${mode}']`).click()
-}
-
 function trailSteps() {
   return browser.execute(() =>
     Array.from(
@@ -202,10 +198,7 @@ describe("merge wizard", () => {
     )
     await expect($("[data-testid='merge-wizard-next']")).toBeEnabled()
 
-    await nextStep()
-    await $("[data-testid='merge-wizard-bookmarks-none']").click()
-    await nextStep()
-    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks']").click()
     await $("[data-testid='merge-wizard-merge']").click()
 
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
@@ -306,8 +299,6 @@ describe("merge wizard", () => {
     await openWizardWith([first, second])
     await addPickedFiles(2)
     await nextStep()
-    await nextStep()
-    await nextStep()
 
     // Holds the operation open to observe both states; the real backend's
     // progress sequence is the engine test's, without a timing race here.
@@ -357,12 +348,11 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
-    await nextStep()
-    await $("[data-testid='merge-wizard-bookmarks-none']").click()
-    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks']").click()
     await $("[data-testid='merge-wizard-page-numbers']").click()
-    await nextStep()
     await $("[data-testid='merge-wizard-watermark']").click()
+    await nextStep()
+    await nextStep()
     await $("[data-testid='merge-wizard-merge']").click()
 
     const progress = $("[data-testid='merge-wizard-progress']")
@@ -395,9 +385,7 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
-    await nextStep()
-    await $("[data-testid='merge-wizard-bookmarks-none']").click()
-    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks']").click()
     await $("[data-testid='merge-wizard-page-numbers']").click()
     await nextStep()
     await $("[data-testid='merge-wizard-merge']").click()
@@ -445,10 +433,7 @@ describe("merge wizard", () => {
       expect.stringContaining("3"),
     )
 
-    await nextStep()
-    await $("[data-testid='merge-wizard-bookmarks-none']").click()
-    await nextStep()
-    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks']").click()
     await $("[data-testid='merge-wizard-merge']").click()
 
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
@@ -490,10 +475,7 @@ describe("merge wizard", () => {
       }
     })
 
-    await nextStep()
-    await $("[data-testid='merge-wizard-bookmarks-none']").click()
-    await nextStep()
-    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks']").click()
     await $("[data-testid='merge-wizard-merge']").click()
 
     await browser.waitUntil(
@@ -507,80 +489,80 @@ describe("merge wizard", () => {
     )
   })
 
-  it("asks only the steps the chosen export can answer", async () => {
-    const first = writeScratchPdf("mode-first.pdf", minimalPdf(1))
-    const second = writeScratchPdf("mode-second.pdf", minimalPdf(1))
-
+  it("skips disabled features and preserves drafts without applying them", async () => {
+    const first = writeScratchPdf("options-first.pdf", minimalPdf(2))
+    const second = writeScratchPdf("options-second.pdf", minimalPdf(1))
     await openWizardWith([first, second])
     await addPickedFiles(2)
-    await expect(await trailSteps()).toEqual([
-      "Files",
-      "Bookmarks",
-      "Page numbers",
-      "Watermark",
-    ])
-
-    // An archive of images carries no outline, so the outline step goes.
-    await chooseExportMode("pagePngZip")
-    await expect(await trailSteps()).toEqual([
-      "Files",
-      "Page numbers",
-      "Watermark",
-    ])
-
-    // Copies that were never merged have no page sequence at all: no numbers
-    // to add, and no gap between files for a blank page to fill.
-    await chooseExportMode("watermarkOnlyZip")
-    await expect(await trailSteps()).toEqual(["Files", "Watermark"])
-    // Base UI renders a checkbox as a span with a role, so the disabled state
-    // is on `aria-disabled` rather than on a native attribute.
-    await expect(
-      $("[data-testid='merge-wizard-padding']"),
-    ).toHaveAttribute("aria-disabled", "true")
-
+    expect(await trailSteps()).toEqual(["Files", "Bookmarks"])
+    await $("[data-testid='merge-wizard-bookmarks']").click()
+    expect(await trailSteps()).toEqual(["Files"])
+    await expect($("[data-testid='merge-wizard-merge']")).toBeEnabled()
+    await expect($("[data-testid='merge-wizard-export-onePdf']")).not.toExist()
+    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await $("[data-testid='merge-wizard-watermark']").click()
+    expect(await trailSteps()).toEqual(["Files", "Page numbers", "Watermark"])
     await nextStep()
-    await expect($("[data-testid='merge-wizard-merge']")).toBeDisplayed()
-    await expect($("[data-testid='merge-wizard-watermark']")).toBeDisplayed()
+    await $("[data-testid='page-numbers-from']").setValue("99")
+    await $("//button[normalize-space()='Back']").click()
+    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await nextStep()
+    await $("[data-testid='watermark-text']").setValue("DRAFT")
+    await $("//button[normalize-space()='Back']").click()
+    await nextStep()
+    await expect($("[data-testid='watermark-text']")).toHaveValue("DRAFT")
+    await $("[data-testid='watermark-text']").setValue("")
+    await expect($("[data-testid='merge-wizard-merge']")).toBeDisabled()
+    await $("//button[normalize-space()='Back']").click()
+    await $("[data-testid='merge-wizard-watermark']").click()
+    await expect($("[data-testid='merge-wizard-merge']")).toBeEnabled()
+    await $("[data-testid='merge-wizard-merge']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 3, { timeout: 30_000 })
+    await $("[aria-label='Show bookmarks']").click()
+    await expect($("aside")).toHaveText(expect.stringContaining("no bookmarks"))
+    await $("button[aria-label='Page numbers']").click()
+    await expect($("//button[normalize-space()='Remove page numbers']")).not.toExist()
   })
 
-  it("writes an archive and closes, rather than opening a tab", async () => {
-    const first = writeScratchPdf("zip-first.pdf", minimalPdf(1))
-    const second = writeScratchPdf("zip-second.pdf", minimalPdf(1))
-
+  it("clears the list and recalculates smart options after reordering", async () => {
+    const first = writeScratchPdf("even.pdf", minimalPdf(2))
+    const second = writeScratchPdf("odd.pdf", minimalPdf(3))
     await openWizardWith([first, second])
+    await expect($("[data-testid='merge-wizard-clear']")).toBeDisabled()
+    await expect($("[data-testid='merge-wizard-total']")).toHaveText("No files yet. Add at least two files to merge.")
+    await $("[data-testid='merge-wizard-empty-add']").click()
+    await browser.waitUntil(async () => (await listedNames()).length === 2, { timeout: 15_000 })
+    await expect($("[data-testid='merge-wizard-padding']")).toHaveAttribute("aria-disabled", "true")
+    await expect($("[aria-label='PDF document']")).toExist()
+    await dragRow(1, 0, "above")
+    await expect($("[data-testid='merge-wizard-padding']")).not.toHaveAttribute("aria-disabled", "true")
+    await $("[data-testid='merge-wizard-padding']").click()
+    await expect($("[data-testid='merge-wizard-total']")).toHaveText(expect.stringContaining("6 pages (including 1 added blank page)"))
+    await dragRow(0, 1, "below")
+    await expect($("[data-testid='merge-wizard-padding']")).toHaveAttribute("aria-checked", "false")
+    await expect($("[data-testid='merge-wizard-padding']")).toHaveAttribute("aria-disabled", "true")
+    await $("[data-testid='merge-wizard-clear']").click()
+    expect(await listedNames()).toEqual([])
+    await expect($("[data-testid='merge-wizard-next']")).toBeDisabled()
+    await expect($("[data-testid='merge-wizard-clear']")).toBeDisabled()
+  })
+
+  it("disables A4 for portrait and landscape A4, then rechecks when files change", async () => {
+    const a4 = writeScratchPdf("portrait-a4.pdf", minimalPdf(1, "0 0 595 842"))
+    const landscape = writeScratchPdf("landscape-a4.pdf", minimalPdf(1, "0 0 842 595"))
+    const small = writeScratchPdf("small.pdf", minimalPdf(1))
+    await openWizardWith([a4, landscape])
     await addPickedFiles(2)
-
-    // The save dialog is the OS's own, which no driver can answer.
-    await browser.execute(() => {
-      const seam = window as unknown as {
-        __tfolioE2E?: Record<string, unknown>
-        __tfolioArchive?: string
-      }
-
-      seam.__tfolioE2E = {
-        ...seam.__tfolioE2E,
-        exportPdfArchive: (command: string) => {
-          seam.__tfolioArchive = command
-          return Promise.resolve("/tmp/exported.zip")
-        },
-      }
-    })
-
-    await chooseExportMode("watermarkOnlyZip")
-    await nextStep()
-    await $("[data-testid='merge-wizard-merge']").click()
-
-    await $("[data-testid='merge-wizard']").waitForDisplayed({
-      reverse: true,
-      timeout: 30_000,
-    })
-    await expect(
-      await browser.execute(
-        () => (window as unknown as { __tfolioArchive?: string }).__tfolioArchive,
-      ),
-    ).toBe("export_watermarked_pdf_copies")
-    // No tab: an archive is a file on disk, not a document to hold open.
-    await expect(dropZoneButton()).toBeDisplayed()
+    await expect($("[data-testid='merge-wizard-a4']")).toHaveAttribute("aria-disabled", "true")
+    await expect($("[data-testid='merge-wizard-files']")).toHaveText(expect.stringContaining("All pages are already A4"))
+    await pointMultiPickerAt([small])
+    await addPickedFiles(3)
+    await $("[data-testid='merge-wizard-a4']").click()
+    await expect($("[data-testid='merge-wizard-a4-warning']")).toBeDisplayed()
+    await $("button[aria-label='Remove small.pdf']").click()
+    await expect($("[data-testid='merge-wizard-a4']")).toHaveAttribute("aria-disabled", "true")
+    await expect($("[data-testid='merge-wizard-a4']")).toHaveAttribute("aria-checked", "false")
+    await expect($("[data-testid='merge-wizard-a4-warning']")).not.toExist()
   })
 
   it("uses the repeat pattern's starting watermark size", async () => {
@@ -589,10 +571,9 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
-    await nextStep()
-    await nextStep()
-    await nextStep()
+    await $("[data-testid='merge-wizard-bookmarks']").click()
     await $("[data-testid='merge-wizard-watermark']").click()
+    await nextStep()
 
     const size = $("[data-testid='watermark-size']")
     await expect(size).toHaveText(expect.stringContaining("80%"))
@@ -612,8 +593,6 @@ describe("merge wizard", () => {
     await addPickedFiles(2)
     await nextStep()
     await $("[data-testid='merge-wizard-bookmarks-perFileWithExisting']").click()
-    await nextStep()
-    await nextStep()
     await $("[data-testid='merge-wizard-merge']").click()
 
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
@@ -710,6 +689,8 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
+    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await $("[data-testid='merge-wizard-watermark']").click()
 
     // `offsetHeight`, not a rect: the dialog's opening zoom is a transform,
     // and a rect read inside its 100 ms would measure the scaled frame.
@@ -726,26 +707,18 @@ describe("merge wizard", () => {
     const heights = [await frameHeight()]
 
     await nextStep()
-    await $("[data-testid='merge-wizard-bookmarks-none']").waitForExist({
+    await $("[data-testid='merge-wizard-bookmarks-perFile']").waitForExist({
       timeout: 15_000,
     })
     heights.push(await frameHeight())
 
     await nextStep()
-    await $("[data-testid='merge-wizard-page-numbers']").waitForExist({
-      timeout: 15_000,
-    })
-    await $("[data-testid='merge-wizard-page-numbers']").click()
     await $("[data-testid='page-numbers-from']").waitForExist({
       timeout: 15_000,
     })
     heights.push(await frameHeight())
 
     await nextStep()
-    await $("[data-testid='merge-wizard-watermark']").waitForExist({
-      timeout: 15_000,
-    })
-    await $("[data-testid='merge-wizard-watermark']").click()
     await $("[data-testid='watermark-text']").waitForExist({
       timeout: 15_000,
     })

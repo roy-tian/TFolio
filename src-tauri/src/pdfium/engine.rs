@@ -12,7 +12,6 @@ use std::{
 use image::{imageops, metadata::Orientation, DynamicImage, ImageDecoder, ImageFormat};
 use pdfium_render::prelude::*;
 use tauri::AppHandle;
-use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
 use super::{
     font::{
@@ -215,6 +214,7 @@ fn open_entry_mut(
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum OperationTarget {
     Document(u64),
+    Archive(u64),
     Merge,
     Search(u64),
     /// The Word→PDF conversions behind a wizard inspection, which can outlast
@@ -389,6 +389,7 @@ impl PdfiumEngine {
     pub(super) fn cancel_document_work(&self, document_id: u64) {
         self.cancel_operation(OperationTarget::Document(document_id));
         self.cancel_operation(OperationTarget::Search(document_id));
+        self.cancel_operation(OperationTarget::Archive(document_id));
     }
 
     /// A new one-page A4 document, built in memory: no file of its own, so a
@@ -923,10 +924,13 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
     items
 }
 
+mod archive_export;
+mod inspection;
 mod io;
 mod marks;
 mod owned_content;
 mod page_ops;
+mod raster_export;
 use io::read_pdf_bytes;
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};

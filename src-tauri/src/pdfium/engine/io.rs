@@ -12,9 +12,6 @@ pub(super) const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 // real input while refusing a header claiming a bitmap no machine could hold.
 pub(super) const MAX_IMAGE_PIXELS: u64 = 80_000_000;
 
-// Print-readable, and the same resolution the rectangle effects capture at.
-pub(super) const PAGE_IMAGE_DPI: f32 = 150.0;
-
 /// Writes `path` via a temporary file beside it, renamed into place only once
 /// every byte is on disk; `false` abandons, leaving nothing half-written.
 pub(super) fn write_file_atomically(
@@ -91,27 +88,6 @@ pub(super) fn write_file_atomically(
     }
 
     renamed
-}
-
-/// A source's own name with `.pdf`, numbered when taken — an archive silently
-/// missing an entry would be worse than an odd name in it.
-pub(super) fn archive_pdf_name(path: &Path, used: &mut HashSet<String>) -> String {
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(|stem| stem.replace(['/', '\\'], "_"))
-        .filter(|stem| !stem.is_empty())
-        .unwrap_or_else(|| "document".to_string());
-    let stem = bounded_file_name(&stem).to_string();
-    let mut name = format!("{stem}.pdf");
-    let mut ordinal = 1;
-
-    while !used.insert(name.clone()) {
-        ordinal += 1;
-        name = format!("{stem} ({ordinal}).pdf");
-    }
-
-    name
 }
 
 /// At most 200 bytes, cut on a character boundary: the temporary adds a dot,
@@ -427,123 +403,6 @@ pub(super) fn remapped_outline(items: Vec<PdfOutlineItem>, start: usize) -> Vec<
 }
 
 impl PdfiumEngine {
-    /// Reads each merge candidate just far enough for the wizard's first step.
-    /// An unreadable file is reported as such, so its row stays and says why.
-    pub(in crate::pdfium) fn inspect_files(
-        &self,
-        paths: Vec<PathBuf>,
-        word_conversion: bool,
-    ) -> Result<Vec<PdfFileSummary>, String> {
-        if paths.len() > MAX_MERGE_FILES {
-            return Err(merge_file_limit_error());
-        }
-
-        // A Word file has no page count until an office suite makes a PDF of it
-        // — seconds, another process's — so it runs before the lock, stoppable.
-        let operation = self.begin_operation(OperationTarget::Convert);
-        let cancelled = || operation.is_cancelled();
-        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
-
-        // Decoded exactly as the merge will, so a usable row is really usable;
-        // only decoded, and before the lock, since a decode is no PDFium work.
-        let images: Vec<Option<bool>> = paths
-            .iter()
-            .map(|path| is_merge_image(path).then(|| read_image(path).is_ok()))
-            .collect();
-
-        // Loading a PDF is PDFium work like any other, so the whole sweep runs
-        // under the store's lock even though it inserts nothing into the store.
-        let _documents = self.lock_documents()?;
-
-        Ok(paths
-            .into_iter()
-            .zip(images)
-            .zip(word)
-            .map(|((path, image), word)| {
-                let path_text = path.to_string_lossy().into_owned();
-
-                // A converted Word file reads like any PDF, under the row's own
-                // name: the row says what the file is, not what conversion left.
-                if let crate::convert::Entry::Converted(pdf) = &word {
-                    let opened = load_merge_source(self.pdfium, pdf).ok();
-
-                    return match opened {
-                        Some(document) => {
-                            let page_count = document.pages().len();
-
-                            PdfFileSummary {
-                                path: path_text,
-                                kind: MergeSourceKind::Word,
-                                page_count: (page_count >= 1).then_some(page_count),
-                                has_outline: document.bookmarks().root().is_some(),
-                                error: None,
-                            }
-                        }
-                        // The conversion returned something this app's own
-                        // reader cannot open — rarer than a refusal, same wording.
-                        None => PdfFileSummary {
-                            path: path_text,
-                            kind: MergeSourceKind::Word,
-                            page_count: None,
-                            has_outline: false,
-                            error: Some(MergeSourceError::ConversionFailed),
-                        },
-                    };
-                }
-
-                if let crate::convert::Entry::Failed(error) = word {
-                    return PdfFileSummary {
-                        path: path_text,
-                        kind: MergeSourceKind::Word,
-                        page_count: None,
-                        has_outline: false,
-                        error: Some(match error {
-                            crate::convert::ConvertError::NoConverter => {
-                                MergeSourceError::ConverterMissing
-                            }
-                            crate::convert::ConvertError::Failed(_) => {
-                                MergeSourceError::ConversionFailed
-                            }
-                        }),
-                    };
-                }
-
-                if let Some(readable) = image {
-                    return PdfFileSummary {
-                        path: path_text,
-                        kind: MergeSourceKind::Image,
-                        page_count: readable.then_some(1),
-                        has_outline: false,
-                        error: None,
-                    };
-                }
-
-                let opened = load_merge_source(self.pdfium, &path).ok();
-
-                match opened {
-                    Some(document) => {
-                        let page_count = document.pages().len();
-
-                        PdfFileSummary {
-                            path: path_text,
-                            kind: MergeSourceKind::Pdf,
-                            page_count: (page_count >= 1).then_some(page_count),
-                            has_outline: document.bookmarks().root().is_some(),
-                            error: None,
-                        }
-                    }
-                    None => PdfFileSummary {
-                        path: path_text,
-                        kind: MergeSourceKind::Pdf,
-                        page_count: None,
-                        has_outline: false,
-                        error: None,
-                    },
-                }
-            })
-            .collect())
-    }
-
     /// Every Word document among `paths` as a PDF, or the refusal saying why
     /// not; the stop flag is the caller's, each pipeline under its own operation.
     pub(super) fn resolve_word_documents(
@@ -789,280 +648,6 @@ impl PdfiumEngine {
         Ok(Some(document))
     }
 
-    /// One page rendered at `dpi` as a PNG. The lock is taken per page, leaving
-    /// room between pages for the renders a viewer is asking for.
-    pub(super) fn page_png(
-        &self,
-        document_id: u64,
-        page_number: i32,
-        dpi: f32,
-    ) -> Result<Vec<u8>, String> {
-        let documents = self.lock_documents()?;
-        let entry = open_entry(&documents, document_id)?;
-        let page = entry
-            .document
-            .pages()
-            .get(page_number - 1)
-            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
-        let width = page.width().value;
-        let height = page.height().value;
-
-        // The contract `render_page_sample` states: a page whose size is not a
-        // usable number would scale to one that is not either.
-        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
-            return Err(format!("page {page_number} has no usable size"));
-        }
-
-        let image = Self::render_page_sample(&page, dpi)
-            .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))?;
-
-        drop(page);
-        drop(documents);
-
-        let mut png = Cursor::new(Vec::new());
-
-        image
-            .write_to(&mut png, ImageFormat::Png)
-            .map_err(|error| format!("could not encode page {page_number}: {error}"))?;
-
-        Ok(png.into_inner())
-    }
-
-    /// Writes every page into a zip at `destination`, one PNG per page; `false`
-    /// is the reader's stop, which leaves `destination` alone.
-    pub(in crate::pdfium) fn export_page_images(
-        &self,
-        document_id: u64,
-        destination: &Path,
-        mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<bool, String> {
-        let operation = self.begin_operation(OperationTarget::Document(document_id));
-        let page_count = {
-            let documents = self.lock_documents()?;
-
-            open_entry(&documents, document_id)?.page_ids.len()
-        };
-
-        if page_count == 0 {
-            return Err("this document has no pages to export".into());
-        }
-
-        on_progress(0, page_count);
-
-        // Already deflated: a PNG put through the archive's own compressor
-        // costs a second pass over every pixel and gives back nothing.
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-        let digits = page_count.to_string().len();
-
-        write_file_atomically(destination, |file| {
-            let mut archive = ZipWriter::new(file);
-
-            for page_number in 1..=page_count {
-                // Between pages, which is this loop's unit: a page is written
-                // whole or not at all, and an abandoned archive is removed.
-                if operation.is_cancelled() {
-                    return Ok(false);
-                }
-
-                let png = self.page_png(document_id, page_number as i32, PAGE_IMAGE_DPI)?;
-
-                archive
-                    .start_file(format!("page-{page_number:0digits$}.png"), options)
-                    .map_err(|error| format!("could not start page {page_number}: {error}"))?;
-                archive
-                    .write_all(&png)
-                    .map_err(|error| format!("could not write page {page_number}: {error}"))?;
-                on_progress(page_number, page_count);
-            }
-
-            archive
-                .finish()
-                .map_err(|error| format!("could not finish the archive: {error}"))?;
-
-            Ok(true)
-        })
-    }
-
-    /// One watermarked copy per path into a zip — the wizard's third export,
-    /// which merges nothing; the copies carry no source path, overwriting none.
-    pub(in crate::pdfium) fn export_watermarked_copies(
-        &self,
-        paths: Vec<PathBuf>,
-        normalize_a4: bool,
-        watermark: Option<WatermarkConfig>,
-        word_conversion: bool,
-        destination: &Path,
-        mut on_progress: impl FnMut(usize, usize),
-    ) -> Result<bool, String> {
-        if paths.is_empty() {
-            return Err("an export needs at least one file".into());
-        }
-
-        if paths.len() > MAX_MERGE_FILES {
-            return Err(merge_file_limit_error());
-        }
-
-        // A destination resolving onto a source would replace a reader's PDF
-        // with an archive; the dialog offers `.zip`, but the name is theirs.
-        for path in &paths {
-            if same_file(path, destination) {
-                return Err("the archive would replace one of the files it is built from".into());
-            }
-        }
-
-        let operation = self.begin_operation(OperationTarget::Merge);
-
-        // The Word conversions happen before the archive is begun, under the
-        // export's own stop, and count in its total — like the merge's.
-        let conversions = if word_conversion {
-            self.word.pending_count(&paths)
-        } else {
-            0
-        };
-        let mut total = paths.len() + conversions;
-
-        // Before the conversions, so the first of them — a minute of an
-        // office suite's time, on a cold start — is not the first news.
-        on_progress(0, total);
-
-        let cancelled = || operation.is_cancelled();
-        let mut converted = 0usize;
-        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {
-            converted += 1;
-            on_progress(converted, total);
-        });
-
-        if operation.is_cancelled() {
-            return Ok(false);
-        }
-
-        if converted != conversions {
-            total = paths.len() + converted;
-            on_progress(converted.min(total), total);
-        }
-
-        for (path, entry) in paths.iter().zip(&word) {
-            if let crate::convert::Entry::Failed(error) = entry {
-                return Err(format!(
-                    "{} could not be converted: {error}",
-                    path.display()
-                ));
-            }
-        }
-
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        let mut used = HashSet::new();
-
-        write_file_atomically(destination, |file| {
-            let mut archive = ZipWriter::new(file);
-
-            for (index, (path, word)) in paths.iter().zip(&word).enumerate() {
-                // Between files, which is this loop's unit — the same place the
-                // merge itself stops.
-                if operation.is_cancelled() {
-                    return Ok(false);
-                }
-
-                // A Word source is read from the PDF its conversion left; the
-                // archive entry still wears the reader's own file's name.
-                let read_from = match word {
-                    crate::convert::Entry::Converted(pdf) => pdf.as_path(),
-                    _ => path,
-                };
-                let bytes =
-                    self.watermarked_copy(read_from, normalize_a4, &watermark, &operation)?;
-                let Some(bytes) = bytes else {
-                    return Ok(false);
-                };
-
-                archive
-                    .start_file(archive_pdf_name(path, &mut used), options)
-                    .map_err(|error| format!("could not start {}: {error}", path.display()))?;
-                archive
-                    .write_all(&bytes)
-                    .map_err(|error| format!("could not write {}: {error}", path.display()))?;
-                on_progress(converted + index + 1, total);
-            }
-
-            archive
-                .finish()
-                .map_err(|error| format!("could not finish the archive: {error}"))?;
-
-            Ok(true)
-        })
-    }
-
-    /// One source built, watermarked if asked, returned as bytes; `None` is a
-    /// stop. The store entry lives only for the watermark, closed every way out.
-    pub(super) fn watermarked_copy(
-        &self,
-        path: &Path,
-        normalize_a4: bool,
-        watermark: &Option<WatermarkConfig>,
-        operation: &OperationGuard<'_>,
-    ) -> Result<Option<Vec<u8>>, String> {
-        let bytes = {
-            let _documents = self.lock_documents()?;
-            let source = load_merge_source(self.pdfium, path)?;
-
-            if source.pages().is_empty() {
-                return Err(format!("{} has no pages", path.display()));
-            }
-
-            if normalize_a4 {
-                let mut sheets = self
-                    .pdfium
-                    .create_new_pdf()
-                    .map_err(|error| format!("PDFium could not create a document: {error}"))?;
-
-                for index in 0..source.pages().len() {
-                    if operation.is_cancelled() {
-                        return Ok(None);
-                    }
-
-                    append_page_fitted_to_a4(&mut sheets, &source, index, path)?;
-                }
-
-                sheets.save_to_bytes()
-            } else {
-                source.save_to_bytes()
-            }
-            .map_err(|error| format!("PDFium could not build {}: {error}", path.display()))?
-        };
-
-        let Some(config) = watermark.clone() else {
-            return Ok(Some(bytes));
-        };
-
-        // Opened with no source path, so the copy can never be written back over
-        // the file it was built from.
-        let document = self.open_with_source(bytes, None)?;
-        let marked = (|| -> Result<Option<Vec<u8>>, String> {
-            // The reader's stop reaches the merge, not this document; passing it
-            // on is what keeps a long mark from running past their asking.
-            let applied = self.apply_watermark_with_progress(document.id, config, |_, _| {
-                if operation.is_cancelled() {
-                    self.cancel_document_work(document.id);
-                }
-            })?;
-
-            if !applied || operation.is_cancelled() {
-                return Ok(None);
-            }
-
-            let documents = self.lock_documents()?;
-
-            open_entry(&documents, document.id)?
-                .document
-                .save_to_bytes()
-                .map(Some)
-                .map_err(|error| format!("PDFium could not write {}: {error}", path.display()))
-        })();
-
-        self.close(document.id)?;
-        marked
-    }
-
     #[cfg(test)]
     pub(super) fn merge_files(
         &self,
@@ -1092,6 +677,7 @@ impl PdfiumEngine {
     }
 
     pub(in crate::pdfium) fn save(&self, document_id: u64) -> Result<(), String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -1121,7 +707,7 @@ impl PdfiumEngine {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
 
-        self.write_document(entry, &path)
+        self.write_document(entry, &path, &operation)
     }
 
     /// Writes to `path`, adopting it as the source of a byte-opened document —
@@ -1131,6 +717,7 @@ impl PdfiumEngine {
         document_id: u64,
         path: &Path,
     ) -> Result<ExportOutcome, String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -1152,7 +739,7 @@ impl PdfiumEngine {
             );
         }
 
-        self.write_document(entry, path)?;
+        self.write_document(entry, path, &operation)?;
 
         // Compared verbatim, not canonicalized: mistaking a symlinked twin for
         // a stranger only dirties the history — the safe direction.
@@ -1174,10 +761,11 @@ impl PdfiumEngine {
     /// moved into the commands.
     #[cfg(test)]
     pub(in crate::pdfium) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
-        self.write_document(entry, path)
+        self.write_document(entry, path, &operation)
     }
 
     /// Reloads off the document's saved bytes — the only place PDFium collects
@@ -1215,7 +803,25 @@ impl PdfiumEngine {
         &self,
         entry: &mut OpenDocument,
         path: &Path,
+        operation: &OperationGuard<'_>,
     ) -> Result<(), String> {
+        if entry
+            .owned_content
+            .as_ref()
+            .and_then(|state| state.watermark.as_ref())
+            .is_some_and(|config| config.rasterize)
+        {
+            let bytes = self
+                .rasterized_bytes(&entry.document, operation)?
+                .ok_or_else(|| "image PDF export was cancelled".to_string())?;
+            return write_file_atomically(path, |file| {
+                file.write_all(&bytes)
+                    .map_err(|error| format!("could not write the image PDF: {error}"))?;
+                Ok(true)
+            })
+            .map(|_| ());
+        }
+
         self.collect_orphans(entry)?;
 
         write_file_atomically(path, |file| {

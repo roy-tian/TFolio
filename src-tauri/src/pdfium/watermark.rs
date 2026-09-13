@@ -23,6 +23,8 @@ pub(super) const MAX_WATERMARK_FONT_SIZE: f32 = 1_000.0;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WatermarkConfig {
+    #[serde(default)]
+    pub(super) rasterize: bool,
     pub(super) text: String,
     pub(super) width_ratio: f32,
     pub(super) direction: WatermarkDirection,
@@ -228,6 +230,7 @@ mod tests {
 
     fn config() -> WatermarkConfig {
         WatermarkConfig {
+            rasterize: false,
             text: "CONFIDENTIAL".into(),
             width_ratio: 0.8,
             direction: WatermarkDirection::Ascending,

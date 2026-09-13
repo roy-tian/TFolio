@@ -227,6 +227,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
       >
         <canvas
           className="block h-full w-full"
+          data-rendered={hasRendered}
           height={Math.max(1, Math.round(page.height))}
           ref={canvasRef}
           width={Math.max(1, Math.round(page.width))}

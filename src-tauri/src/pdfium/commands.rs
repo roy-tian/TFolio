@@ -19,7 +19,7 @@ use super::{
     size_limit_error, ExportOutcome, InsertOutcome, MergePlan, PageNumbersConfig, PagePoint,
     PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfProgress, PdfSearchOutcome,
     PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle, TextNoteStyle,
-    WatermarkConfig, WatermarkCopiesPlan, MAX_PDF_BYTES,
+    WatermarkConfig, MAX_PDF_BYTES,
 };
 
 // Only the check below reaches into the engine's own type, and the e2e build
@@ -43,7 +43,7 @@ fn ensure_approved(engine: &PdfiumEngine, path: &Path) -> Result<(), String> {
 
 /// At most one channel message per whole percentage, or repainting the progress
 /// bar outpaces processing the pages.
-fn channel_progress(on_progress: Channel<PdfProgress>) -> impl FnMut(usize, usize) {
+pub(super) fn channel_progress(on_progress: Channel<PdfProgress>) -> impl FnMut(usize, usize) {
     let mut last_percentage = None;
 
     move |completed, total| {
@@ -723,7 +723,7 @@ pub async fn save_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result
 
 /// A suggestion carrying directories would start the reader in a place of the
 /// page's choosing.
-fn suggested_file_name(suggested: &str) -> String {
+pub(super) fn suggested_file_name(suggested: &str) -> String {
     Path::new(suggested)
         .file_name()
         .and_then(|name| name.to_str())
@@ -772,90 +772,6 @@ pub async fn export_pdf(
     }
 
     Ok(exported)
-}
-
-/// The dialog is this command's own, for the reason `export_pdf` states: a
-/// path argument would be an arbitrary-file write.
-async fn export_archive<F>(
-    suggested_name: String,
-    filter_label: String,
-    app: AppHandle,
-    write: F,
-) -> Result<Option<String>, String>
-where
-    F: FnOnce(&Path) -> Result<bool, String> + Send + 'static,
-{
-    tauri::async_runtime::spawn_blocking(move || {
-        let Some(picked) = app
-            .dialog()
-            .file()
-            .add_filter(filter_label, &["zip"])
-            .set_file_name(suggested_file_name(&suggested_name))
-            .blocking_save_file()
-        else {
-            return Ok(None);
-        };
-        let path = picked
-            .into_path()
-            .map_err(|error| format!("the chosen destination is unusable: {error}"))?;
-
-        write(&path).map(|written| written.then(|| path.to_string_lossy().into_owned()))
-    })
-    .await
-    .map_err(|error| format!("PDFium archive task failed: {error}"))?
-}
-
-/// The document is the merge's own result, so this only ever reads something
-/// this app just made.
-#[tauri::command]
-pub async fn export_pdf_page_images(
-    document_id: u64,
-    suggested_name: String,
-    filter_label: String,
-    on_progress: Channel<PdfProgress>,
-    app: AppHandle,
-    state: State<'_, PdfiumState>,
-) -> Result<Option<String>, String> {
-    let engine = Arc::clone(&state.0);
-
-    export_archive(suggested_name, filter_label, app, move |path| {
-        engine.export_page_images(document_id, path, channel_progress(on_progress))
-    })
-    .await
-}
-
-/// Every source is approved the way a merge's are: these are files the WebView
-/// named.
-#[tauri::command]
-pub async fn export_watermarked_pdf_copies(
-    plan: WatermarkCopiesPlan,
-    suggested_name: String,
-    filter_label: String,
-    on_progress: Channel<PdfProgress>,
-    app: AppHandle,
-    state: State<'_, PdfiumState>,
-) -> Result<Option<String>, String> {
-    let engine = Arc::clone(&state.0);
-    let word = convert::word_available();
-
-    export_archive(suggested_name, filter_label, app, move |path| {
-        let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
-
-        #[cfg(not(feature = "e2e"))]
-        for source in &paths {
-            ensure_approved(&engine, source)?;
-        }
-
-        engine.export_watermarked_copies(
-            paths,
-            plan.normalize_a4,
-            plan.watermark,
-            word,
-            path,
-            channel_progress(on_progress),
-        )
-    })
-    .await
 }
 
 // Async although the close is a map removal: a sync command runs on the main

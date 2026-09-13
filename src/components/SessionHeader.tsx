@@ -39,6 +39,7 @@ type SessionHeaderProps = {
   onRedo: () => void
   onSave: () => void
   onSaveAs: () => void
+  onExport: () => void
   onSearchClose: () => void
   onSearchOpen: () => void
   onToolChange: (tool: AnnotationTool) => void
@@ -90,6 +91,7 @@ export function SessionHeader({
   onRedo,
   onSave,
   onSaveAs,
+  onExport,
   onSearchClose,
   onSearchOpen,
   onToolChange,
@@ -125,6 +127,7 @@ export function SessionHeader({
             canSave={canSave}
             onSave={onSave}
             onSaveAs={onSaveAs}
+            onExport={pdfDocument ? onExport : undefined}
             saveHint={saveHint}
           />
         ) : null}
