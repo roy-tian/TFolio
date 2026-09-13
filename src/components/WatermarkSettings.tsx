@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { SliderRow } from "@/components/SliderRow"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WatermarkPreview } from "@/components/WatermarkPreview"
+import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -143,55 +144,59 @@ export function WatermarkSettings({
             </p>
           </Field>
 
-          <Field>
-            <FieldLabel id={directionId}>{t("watermark.direction")}</FieldLabel>
-            <ToggleGroup
-              aria-labelledby={directionId}
-              onValueChange={([value]) => {
-                if (isWatermarkDirection(value)) {
-                  onDraftChange({ ...draft, direction: value })
-                }
-              }}
-              spacing={0}
-              value={[draft.direction]}
-              variant="outline"
-            >
-              <ToggleGroupItem value="ascending">
-                {t("watermark.directionAscending")}
-              </ToggleGroupItem>
-              <ToggleGroupItem value="descending">
-                {t("watermark.directionDescending")}
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </Field>
+          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4">
+            <Field className="min-w-0">
+              <FieldLabel id={directionId}>{t("watermark.direction")}</FieldLabel>
+              <ToggleGroup
+                className="w-full"
+                aria-labelledby={directionId}
+                onValueChange={([value]) => {
+                  if (isWatermarkDirection(value)) {
+                    onDraftChange({ ...draft, direction: value })
+                  }
+                }}
+                spacing={0}
+                value={[draft.direction]}
+                variant="outline"
+              >
+                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="ascending">
+                  {t("watermark.directionAscending")}
+                </ToggleGroupItem>
+                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="descending">
+                  {t("watermark.directionDescending")}
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
 
-          <Field>
-            <FieldLabel id={layoutId}>{t("watermark.layout")}</FieldLabel>
-            <ToggleGroup
-              aria-labelledby={layoutId}
-              onValueChange={([value]) => {
-                if (isWatermarkLayout(value)) {
-                  onDraftChange({
-                    ...draft,
-                    layout: value,
-                    widthRatio: defaultWatermarkWidthRatio(value),
-                  })
-                }
-              }}
-              spacing={0}
-              value={[draft.layout]}
-              variant="outline"
-            >
-              <ToggleGroupItem value="single">
-                {t("watermark.layoutSingle")}
-              </ToggleGroupItem>
-              <ToggleGroupItem value="zebra">
-                {t("watermark.layoutZebra")}
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </Field>
+            <Field className="min-w-0">
+              <FieldLabel id={layoutId}>{t("watermark.layout")}</FieldLabel>
+              <ToggleGroup
+                className="w-full"
+                aria-labelledby={layoutId}
+                onValueChange={([value]) => {
+                  if (isWatermarkLayout(value)) {
+                    onDraftChange({
+                      ...draft,
+                      layout: value,
+                      widthRatio: defaultWatermarkWidthRatio(value),
+                    })
+                  }
+                }}
+                spacing={0}
+                value={[draft.layout]}
+                variant="outline"
+              >
+                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="single">
+                  {t("watermark.layoutSingle")}
+                </ToggleGroupItem>
+                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="zebra">
+                  {t("watermark.layoutZebra")}
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
+          </div>
 
-          <Field>
+          <Card className="gap-2 p-3">
             <div className="flex items-center gap-2">
               <Checkbox
                 checked={draft.rasterize}
@@ -206,7 +211,7 @@ export function WatermarkSettings({
             <p className="text-xs text-muted-foreground">
               {t("watermark.rasterizeHint")}
             </p>
-          </Field>
+          </Card>
 
           {validationError === "style" ? (
             <FieldError>{t("watermark.errorStyle")}</FieldError>
