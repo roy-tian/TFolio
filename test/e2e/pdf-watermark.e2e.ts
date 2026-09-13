@@ -57,6 +57,30 @@ describe("TFolio document watermark", () => {
     await renderedPage()
   })
 
+  it("remembers the image option and restores it through undo and redo", async () => {
+    await openWatermarkDialog()
+    const option = $("[data-testid='watermark-rasterize']")
+    await expect(option).toHaveAttribute("aria-checked", "false")
+    await option.click()
+    await browser.saveScreenshot("artifacts/e2e/watermark-rasterize.png")
+    await $("[data-testid='watermark-apply']").click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({ reverse: true })
+
+    await openWatermarkDialog()
+    await expect(option).toHaveAttribute("aria-checked", "true")
+    await option.click()
+    await $("[data-testid='watermark-apply']").click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({ reverse: true })
+    await $("button[aria-label^='Undo']").click()
+    await openWatermarkDialog()
+    await expect(option).toHaveAttribute("aria-checked", "true")
+    await $("//button[normalize-space()='Cancel']").click()
+    await $("button[aria-label^='Redo']").click()
+    await openWatermarkDialog()
+    await expect(option).toHaveAttribute("aria-checked", "false")
+    await $("//button[normalize-space()='Cancel']").click()
+  })
+
   it("applies tiled Chinese text, then undo and redo restore exact pixels", async () => {
     const clean = await pagePixelFingerprint()
 

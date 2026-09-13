@@ -182,6 +182,8 @@ const zhCN = {
     dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖放一次。",
   },
   watermark: {
+    rasterize: "将页面转为图片",
+    rasterizeHint: "导出时将页面内容与水印合成图片，文字将无法直接编辑、选择、搜索或复制，文件可能变大。",
     open: "水印",
     title: "文档水印",
     description: "为此 PDF 的每一页添加同一个文字水印。",

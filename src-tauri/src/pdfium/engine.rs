@@ -927,6 +927,7 @@ mod io;
 mod marks;
 mod owned_content;
 mod page_ops;
+mod raster_export;
 use io::read_pdf_bytes;
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};

@@ -180,6 +180,8 @@ const en = {
       "Another page edit is still running — try the drop again in a moment.",
   },
   watermark: {
+    rasterize: "Convert pages to images",
+    rasterizeHint: "On export, combine page content and watermarks into images. Text can no longer be directly edited, selected, searched or copied. File size may increase.",
     open: "Watermark",
     title: "Document watermark",
     description: "Add one text watermark across every page of this PDF.",

@@ -1052,7 +1052,12 @@ impl PdfiumEngine {
 
             let documents = self.lock_documents()?;
 
-            open_entry(&documents, document.id)?
+            let entry = open_entry(&documents, document.id)?;
+            if watermark.as_ref().is_some_and(|config| config.rasterize) {
+                return self.rasterized_bytes(&entry.document, operation);
+            }
+
+            entry
                 .document
                 .save_to_bytes()
                 .map(Some)
@@ -1092,6 +1097,7 @@ impl PdfiumEngine {
     }
 
     pub(in crate::pdfium) fn save(&self, document_id: u64) -> Result<(), String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -1121,7 +1127,7 @@ impl PdfiumEngine {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
 
-        self.write_document(entry, &path)
+        self.write_document(entry, &path, &operation)
     }
 
     /// Writes to `path`, adopting it as the source of a byte-opened document —
@@ -1131,6 +1137,7 @@ impl PdfiumEngine {
         document_id: u64,
         path: &Path,
     ) -> Result<ExportOutcome, String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -1152,7 +1159,7 @@ impl PdfiumEngine {
             );
         }
 
-        self.write_document(entry, path)?;
+        self.write_document(entry, path, &operation)?;
 
         // Compared verbatim, not canonicalized: mistaking a symlinked twin for
         // a stranger only dirties the history — the safe direction.
@@ -1174,10 +1181,11 @@ impl PdfiumEngine {
     /// moved into the commands.
     #[cfg(test)]
     pub(in crate::pdfium) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
-        self.write_document(entry, path)
+        self.write_document(entry, path, &operation)
     }
 
     /// Reloads off the document's saved bytes — the only place PDFium collects
@@ -1215,7 +1223,25 @@ impl PdfiumEngine {
         &self,
         entry: &mut OpenDocument,
         path: &Path,
+        operation: &OperationGuard<'_>,
     ) -> Result<(), String> {
+        if entry
+            .owned_content
+            .as_ref()
+            .and_then(|state| state.watermark.as_ref())
+            .is_some_and(|config| config.rasterize)
+        {
+            let bytes = self
+                .rasterized_bytes(&entry.document, operation)?
+                .ok_or_else(|| "image PDF export was cancelled".to_string())?;
+            return write_file_atomically(path, |file| {
+                file.write_all(&bytes)
+                    .map_err(|error| format!("could not write the image PDF: {error}"))?;
+                Ok(true)
+            })
+            .map(|_| ());
+        }
+
         self.collect_orphans(entry)?;
 
         write_file_atomically(path, |file| {
