@@ -43,7 +43,7 @@ fn ensure_approved(engine: &PdfiumEngine, path: &Path) -> Result<(), String> {
 
 /// At most one channel message per whole percentage, or repainting the progress
 /// bar outpaces processing the pages.
-fn channel_progress(on_progress: Channel<PdfProgress>) -> impl FnMut(usize, usize) {
+pub(super) fn channel_progress(on_progress: Channel<PdfProgress>) -> impl FnMut(usize, usize) {
     let mut last_percentage = None;
 
     move |completed, total| {
@@ -723,7 +723,7 @@ pub async fn save_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result
 
 /// A suggestion carrying directories would start the reader in a place of the
 /// page's choosing.
-fn suggested_file_name(suggested: &str) -> String {
+pub(super) fn suggested_file_name(suggested: &str) -> String {
     Path::new(suggested)
         .file_name()
         .and_then(|name| name.to_str())

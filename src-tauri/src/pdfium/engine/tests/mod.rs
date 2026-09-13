@@ -13,6 +13,7 @@ use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 mod support;
 
 mod annotations;
+mod archive_export;
 mod documents;
 mod insert_pages;
 mod inspection;

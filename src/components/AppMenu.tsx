@@ -2,6 +2,7 @@ import { useState } from "react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
   AppWindow,
+  FileArchive,
   FilePlus2,
   FolderOpen,
   History,
@@ -64,6 +65,7 @@ type AppMenuProps = AppMenuActions & {
   canSave?: boolean
   onSave?: () => void
   onSaveAs?: () => void
+  onExport?: () => void
   saveHint?: string
 }
 
@@ -80,6 +82,7 @@ export function AppMenu({
   onSave,
   onSaveAll,
   onSaveAs,
+  onExport,
   recentFiles,
   saveHint,
 }: AppMenuProps) {
@@ -163,6 +166,7 @@ export function AppMenu({
                 )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+            <DropdownMenuSeparator />
             <HintTooltip label={saveHint} side="right">
               <DropdownMenuItem
                 // A disabled item is `pointer-events: none`, which would leave
@@ -200,6 +204,14 @@ export function AppMenu({
               <DropdownMenuShortcut>
                 {formatShortcut(shortcuts.saveAll)}
               </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="export"
+              disabled={!onExport}
+              onClick={onExport}
+            >
+              <FileArchive />
+              {t("archiveExport.title")}
             </DropdownMenuItem>
             <DropdownMenuItem
               data-action="close-all"

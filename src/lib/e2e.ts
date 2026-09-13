@@ -4,8 +4,13 @@
  */
 import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
+import type { ArchiveExportRequest } from "@/lib/archiveExport"
 
 export type E2eOverrides = {
+  exportPdfArchive?: (
+    args: ArchiveExportRequest & { documentId: number },
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<string | null>
   exportPdf?: (args: {
     documentId: number
     filterLabel: string
