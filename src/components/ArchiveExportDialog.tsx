@@ -92,7 +92,7 @@ export function ArchiveExportDialog({
           className="gap-4 py-2"
         >
           {(["jpg", "png", "bookmarks"] as const).map((option) => (
-            <Label key={option} className="items-start gap-3">
+            <Label key={option} className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
               <RadioGroupItem
                 value={option}
                 disabled={option === "bookmarks" && !hasBookmarks}

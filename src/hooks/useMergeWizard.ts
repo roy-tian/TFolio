@@ -94,8 +94,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
   const [smartPadding, setSmartPadding] = useState(false)
   const [normalizeA4, setNormalizeA4] = useState(false)
   const [bookmarks, setBookmarks] = useState<MergeBookmarksMode>("perFile")
-  const [pageNumbersOn, setPageNumbersOn] = useState(false)
-  const [watermarkOn, setWatermarkOn] = useState(false)
+  const [pageNumbersOn, setPageNumbersOn] = useState(true)
+  const [watermarkOn, setWatermarkOn] = useState(true)
   const [pageNumbersDraft, setPageNumbersDraft] = useState<PageNumbersDraft>(() =>
     draftFromPreferences(defaultPageNumbersPreferences, 0),
   )
@@ -164,8 +164,8 @@ export function useMergeWizard({ onMerged }: UseMergeWizardOptions) {
     setSmartPadding(false)
     setNormalizeA4(false)
     setBookmarks("perFile")
-    setPageNumbersOn(false)
-    setWatermarkOn(false)
+    setPageNumbersOn(true)
+    setWatermarkOn(true)
     setPageNumbersDraft(draftFromPreferences(defaultPageNumbersPreferences, 0))
     setWatermarkDraft(
       readStoredWatermarkConfig() ??

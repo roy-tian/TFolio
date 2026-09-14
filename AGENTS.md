@@ -75,8 +75,8 @@
   and its password: the two workflows as repository secrets, and `tauri:bundle` from the environment —
   it fails without them. Regenerating the key strands every installed copy on its current version.
 - Installing an update restarts the process, discarding unsaved work in every window, not just the asking
-  one. Confirm before installing, and refuse outright in a debug build: nothing in `target/` carries a
-  bundle type, so the plugin falls back to replacing the running binary itself.
+  one. Confirm if any window has unsaved work (or cannot answer), and refuse outright in a debug build:
+  nothing in `target/` carries a bundle type, so the plugin falls back to replacing the running binary itself.
 - The downloaded installer lives in the cache directory, never beside `settings.toml`, with the release's
   signature saved next to it so it outlives the run. The plugin's own check is private, so those bytes are
   used only after that signature verifies against the compiled-in key — before the notice offers them, and

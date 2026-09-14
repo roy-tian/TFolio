@@ -4,6 +4,7 @@ import {
   File,
   FilePlus2,
   FileText,
+  FileUp,
   FileWarning,
   GripVertical,
   Image as ImageIcon,
@@ -14,6 +15,7 @@ import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
 import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import type { useMergeWizard } from "@/hooks/useMergeWizard"
@@ -188,11 +190,23 @@ export function MergeFileList({ wizard }: {
 
   return (
     <section
-      className="flex min-h-64 min-w-0 flex-col rounded-lg border border-dashed sm:min-h-0"
+      className="flex min-h-64 min-w-0 flex-col gap-3 sm:min-h-0"
       aria-label={t("mergeWizard.fileList")}
     >
-      <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 pt-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <span className="mr-auto text-sm font-medium">{t("mergeWizard.fileList")}</span>
+        {files.length > 0 ? (
+          <Button
+            data-testid="merge-wizard-clear"
+            disabled={isBusy}
+            onClick={clearFiles}
+            size="sm"
+            variant="destructive"
+          >
+            <Trash2 />
+            {t("mergeWizard.clearFiles")}
+          </Button>
+        ) : null}
         <Button
           data-testid="merge-wizard-add"
           disabled={isBusy}
@@ -203,19 +217,9 @@ export function MergeFileList({ wizard }: {
           <FilePlus2 />
           {t("mergeWizard.addFiles")}
         </Button>
-        <Button
-          data-testid="merge-wizard-clear"
-          disabled={isBusy || files.length === 0}
-          onClick={clearFiles}
-          size="sm"
-          variant="ghost"
-        >
-          <Trash2 />
-          {t("mergeWizard.clearFiles")}
-        </Button>
       </div>
       {isBusy ? (
-        <div className="flex items-center justify-between gap-2 px-3 pt-2">
+        <div className="flex shrink-0 items-center justify-between gap-2">
           <p
             className="flex items-center gap-2 text-xs text-muted-foreground"
             data-testid="merge-wizard-adding"
@@ -238,88 +242,93 @@ export function MergeFileList({ wizard }: {
           </Button>
         </div>
       ) : null}
-      {files.length === 0 ? (
-        <button
-          aria-label={t("mergeWizard.addFiles")}
-          className="min-h-24 flex-1 cursor-pointer rounded-lg focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
-          data-testid="merge-wizard-empty-add"
-          disabled={isBusy}
-          onClick={() => void chooseFiles()}
-          type="button"
-        />
-      ) : (
-        <ol
-          className="flex min-h-0 flex-1 select-none flex-col gap-1.5 overflow-y-auto p-3"
-          ref={listRef}
-          onPointerDown={(event) => {
-            pressedBlank.current = event.target === event.currentTarget
-          }}
-          onClick={(event) => {
-            if (pressedBlank.current && event.target === event.currentTarget && !isBusy && !drag) {
-              void chooseFiles()
-            }
-          }}
-        >
-          {files.map((file, index) => {
-            const rowOffset = drag?.rowOffsets[index] ?? 0
+      <Card className="min-h-0 flex-1 gap-0 rounded-lg border border-dashed p-0 ring-0">
+        {files.length === 0 ? (
+          <button
+            aria-label={t("mergeWizard.addFiles")}
+            className="flex min-h-24 flex-1 cursor-pointer flex-col items-center justify-center gap-3 rounded-lg p-6 text-center text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
+            data-testid="merge-wizard-empty-add"
+            disabled={isBusy}
+            onClick={() => void chooseFiles()}
+            type="button"
+          >
+            <FileUp aria-hidden className="size-9" />
+            <span className="text-sm">{t("mergeWizard.emptyDrop")}</span>
+          </button>
+        ) : (
+          <ol
+            className="flex min-h-0 flex-1 select-none flex-col gap-1.5 overflow-y-auto p-3"
+            ref={listRef}
+            onPointerDown={(event) => {
+              pressedBlank.current = event.target === event.currentTarget
+            }}
+            onClick={(event) => {
+              if (pressedBlank.current && event.target === event.currentTarget && !isBusy && !drag) {
+                void chooseFiles()
+              }
+            }}
+          >
+            {files.map((file, index) => {
+              const rowOffset = drag?.rowOffsets[index] ?? 0
 
-            return (
-              <li
-                className={cn(
-                  "relative flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 select-none",
-                  files.length > 1 && !isBusy && "cursor-grab",
-                  drag &&
-                    drag.index !== index &&
-                    "transition-transform duration-200 ease-out",
-                  // The portal ghost carries this file; the real row
-                  // stays as the hole the others move around to fill.
-                  drag?.index === index && "opacity-0",
-                )}
-                data-list-index={index}
-                data-slot="merge-file"
-                key={file.path}
-                style={{
-                  transform:
-                    rowOffset === 0
-                      ? undefined
-                      : `translateY(${rowOffset}px)`,
-                }}
-              >
-                {/* The equal, opposite transform keeps the landing
-                    line in the list's original coordinate space. */}
-                {drag &&
-                (drag.gap === index ||
-                  (drag.gap === files.length &&
-                    index === files.length - 1)) ? (
-                  <span
-                    className={cn(
-                      "pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-primary",
-                      drag.gap === index ? "-top-1" : "-bottom-1",
+              return (
+                <li
+                  className={cn(
+                    "relative flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 select-none",
+                    files.length > 1 && !isBusy && "cursor-grab",
+                    drag &&
                       drag.index !== index &&
-                        "transition-transform duration-200 ease-out",
-                    )}
-                    style={{
-                      transform:
-                        rowOffset === 0
-                          ? undefined
-                          : `translateY(${-rowOffset}px)`,
-                    }}
+                      "transition-transform duration-200 ease-out",
+                    // The portal ghost carries this file; the real row
+                    // stays as the hole the others move around to fill.
+                    drag?.index === index && "opacity-0",
+                  )}
+                  data-list-index={index}
+                  data-slot="merge-file"
+                  key={file.path}
+                  style={{
+                    transform:
+                      rowOffset === 0
+                        ? undefined
+                        : `translateY(${rowOffset}px)`,
+                  }}
+                >
+                  {/* The equal, opposite transform keeps the landing
+                      line in the list's original coordinate space. */}
+                  {drag &&
+                  (drag.gap === index ||
+                    (drag.gap === files.length &&
+                      index === files.length - 1)) ? (
+                    <span
+                      className={cn(
+                        "pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-primary",
+                        drag.gap === index ? "-top-1" : "-bottom-1",
+                        drag.index !== index &&
+                          "transition-transform duration-200 ease-out",
+                      )}
+                      style={{
+                        transform:
+                          rowOffset === 0
+                            ? undefined
+                            : `translateY(${-rowOffset}px)`,
+                      }}
+                    />
+                  ) : null}
+                  <MergeFileRowContent
+                    disabled={isBusy}
+                    file={file}
+                    index={index}
+                    onRemove={removeFile}
+                    showHandle={files.length > 1}
                   />
-                ) : null}
-                <MergeFileRowContent
-                  disabled={isBusy}
-                  file={file}
-                  index={index}
-                  onRemove={removeFile}
-                  showHandle={files.length > 1}
-                />
-              </li>
-            )
-          })}
-        </ol>
-      )}
+                </li>
+              )
+            })}
+          </ol>
+        )}
+      </Card>
       <div
-        className="min-h-14 shrink-0 px-3 pb-3 pt-2 text-xs text-muted-foreground"
+        className="shrink-0 text-xs text-muted-foreground"
         data-testid="merge-wizard-total"
         role="status"
       >
