@@ -23,6 +23,12 @@
   `changelog` groups the tag's conventional commit subjects as public release notes and omits
   `chore(release)` commits.
 
+## Release
+
+- Releases come only from the default branch; merge the working branch in with `--no-ff`.
+- Tag only after `bun run preflight` passes locally and `Bundle dry-run` is green for that
+  same commit.
+
 ## Persistence and windows
 
 - Persist TOML through `store.rs` in app data, never `localStorage`; feature-specific guards
