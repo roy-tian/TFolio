@@ -376,6 +376,7 @@ const zhCN = {
     addingFilesPlain: "正在添加文件……",
     sourceFilter: "PDF、图片和 Word 文档",
     sourceFilterPlain: "PDF 与图片",
+    emptyDrop: "点击打开或拖拽 PDF、Word 文档和图片到此处。",
     empty: "还没有文件。请至少添加两个文件以合并。",
     imageSource: "图片",
     wordSource: "Word 文档",

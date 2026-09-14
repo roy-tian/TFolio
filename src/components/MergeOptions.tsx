@@ -1,13 +1,23 @@
 import type { ReactNode } from "react"
-import { TriangleAlert } from "lucide-react"
+import { Bookmark, Hash, Stamp, TriangleAlert, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { FieldLabel } from "@/components/ui/field"
+import { Field, FieldLabel } from "@/components/ui/field"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import type { useMergeWizard } from "@/hooks/useMergeWizard"
 import { cn } from "@/lib/utils"
+
+type MergeOptionProps = {
+  id: string
+  title: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (checked: boolean) => void
+  children?: ReactNode
+}
 
 function MergeOption({
   id,
@@ -16,14 +26,7 @@ function MergeOption({
   disabled,
   onChange,
   children,
-}: {
-  id: string
-  title: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (checked: boolean) => void
-  children?: ReactNode
-}) {
+}: MergeOptionProps) {
   return (
     <Card
       className={cn(
@@ -47,6 +50,42 @@ function MergeOption({
           {title}
         </span>
       </FieldLabel>
+      {children ? (
+        <div className="px-2.5 pb-2.5 text-xs text-muted-foreground">{children}</div>
+      ) : null}
+    </Card>
+  )
+}
+
+function MergeFeatureSwitch({
+  id,
+  title,
+  icon: Icon,
+  checked,
+  disabled,
+  onChange,
+  children,
+}: MergeOptionProps & { icon: LucideIcon }) {
+  return (
+    <Card
+      className={cn(
+        "shrink-0 gap-0 p-0",
+        checked && "ring-primary/30 bg-primary/5",
+      )}
+    >
+      <Field className="p-2.5" data-disabled={disabled} orientation="horizontal">
+        <FieldLabel className={cn(!disabled && "cursor-pointer")} htmlFor={id}>
+          <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          {title}
+        </FieldLabel>
+        <Switch
+          checked={checked}
+          data-testid={id}
+          disabled={disabled}
+          id={id}
+          onCheckedChange={onChange}
+        />
+      </Field>
       {children ? (
         <div className="px-2.5 pb-2.5 text-xs text-muted-foreground">{children}</div>
       ) : null}
@@ -122,7 +161,8 @@ export function MergeOptions({ wizard }: {
         {paddingHint}
       </MergeOption>
       <Separator className="my-1" />
-      <MergeOption
+      <MergeFeatureSwitch
+        icon={Bookmark}
         id="merge-wizard-bookmarks"
         title={t("mergeWizard.bookmarksEnable")}
         checked={bookmarksOn}
@@ -130,15 +170,17 @@ export function MergeOptions({ wizard }: {
         onChange={setBookmarksOn}
       >
         {!bookmarksOn ? t("mergeWizard.bookmarksDisabledHint") : null}
-      </MergeOption>
-      <MergeOption
+      </MergeFeatureSwitch>
+      <MergeFeatureSwitch
+        icon={Hash}
         id="merge-wizard-page-numbers"
         title={t("mergeWizard.pageNumbersEnable")}
         checked={pageNumbersOn}
         disabled={isBusy}
         onChange={setPageNumbersOn}
       />
-      <MergeOption
+      <MergeFeatureSwitch
+        icon={Stamp}
         id="merge-wizard-watermark"
         title={t("mergeWizard.watermarkEnable")}
         checked={watermarkOn}

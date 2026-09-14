@@ -379,6 +379,7 @@ const en = {
     sourceFilterPlain: "PDFs and images",
     addingFiles: "Adding files\u2026 Word documents convert as they arrive.",
     addingFilesPlain: "Adding files\u2026",
+    emptyDrop: "Click to open or drag PDFs, Word documents, and images here.",
     empty: "No files yet. Add at least two files to merge.",
     imageSource: "Image",
     wordSource: "Word document",

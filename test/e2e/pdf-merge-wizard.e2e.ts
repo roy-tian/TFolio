@@ -63,6 +63,18 @@ async function addPickedFiles(expectedRows: number) {
   )
 }
 
+async function setPageLayers(pageNumbers: boolean, watermark: boolean) {
+  for (const [id, checked] of [
+    ["page-numbers", pageNumbers],
+    ["watermark", watermark],
+  ] as const) {
+    const checkbox = $(`[data-testid='merge-wizard-${id}']`)
+    if ((await checkbox.getAttribute("aria-checked")) !== String(checked)) {
+      await checkbox.click()
+    }
+  }
+}
+
 function nextStep() {
   return $("[data-testid='merge-wizard-next']").click()
 }
@@ -193,6 +205,7 @@ describe("merge wizard", () => {
     await expect($("[data-testid='merge-wizard-next']")).toBeDisabled()
 
     await addPickedFiles(2)
+    await setPageLayers(false, false)
     await expect($("[data-testid='merge-wizard-total']")).toHaveText(
       expect.stringContaining("3"),
     )
@@ -298,6 +311,7 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
+    await setPageLayers(false, false)
     await nextStep()
 
     // Holds the operation open to observe both states; the real backend's
@@ -349,8 +363,6 @@ describe("merge wizard", () => {
     await openWizardWith([first, second])
     await addPickedFiles(2)
     await $("[data-testid='merge-wizard-bookmarks']").click()
-    await $("[data-testid='merge-wizard-page-numbers']").click()
-    await $("[data-testid='merge-wizard-watermark']").click()
     await nextStep()
     await nextStep()
     await $("[data-testid='merge-wizard-merge']").click()
@@ -386,7 +398,7 @@ describe("merge wizard", () => {
     await openWizardWith([first, second])
     await addPickedFiles(2)
     await $("[data-testid='merge-wizard-bookmarks']").click()
-    await $("[data-testid='merge-wizard-page-numbers']").click()
+    await setPageLayers(true, false)
     await nextStep()
     await $("[data-testid='merge-wizard-merge']").click()
 
@@ -426,6 +438,7 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
+    await setPageLayers(false, false)
     await $("[data-testid='merge-wizard-padding']").click()
 
     // One blank before the second file, which would otherwise open on page 2.
@@ -448,6 +461,7 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
+    await setPageLayers(false, false)
 
     // What the option costs is said only once it has been chosen.
     const warning = $("[data-testid='merge-wizard-a4-warning']")
@@ -494,6 +508,7 @@ describe("merge wizard", () => {
     const second = writeScratchPdf("options-second.pdf", minimalPdf(1))
     await openWizardWith([first, second])
     await addPickedFiles(2)
+    await setPageLayers(false, false)
     expect(await trailSteps()).toEqual(["Files", "Bookmarks"])
     await $("[data-testid='merge-wizard-bookmarks']").click()
     expect(await trailSteps()).toEqual(["Files"])
@@ -528,7 +543,7 @@ describe("merge wizard", () => {
     const first = writeScratchPdf("even.pdf", minimalPdf(2))
     const second = writeScratchPdf("odd.pdf", minimalPdf(3))
     await openWizardWith([first, second])
-    await expect($("[data-testid='merge-wizard-clear']")).toBeDisabled()
+    await expect($("[data-testid='merge-wizard-clear']")).not.toExist()
     await expect($("[data-testid='merge-wizard-total']")).toHaveText("No files yet. Add at least two files to merge.")
     await $("[data-testid='merge-wizard-empty-add']").click()
     await browser.waitUntil(async () => (await listedNames()).length === 2, { timeout: 15_000 })
@@ -544,7 +559,7 @@ describe("merge wizard", () => {
     await $("[data-testid='merge-wizard-clear']").click()
     expect(await listedNames()).toEqual([])
     await expect($("[data-testid='merge-wizard-next']")).toBeDisabled()
-    await expect($("[data-testid='merge-wizard-clear']")).toBeDisabled()
+    await expect($("[data-testid='merge-wizard-clear']")).not.toExist()
   })
 
   it("disables A4 for portrait and landscape A4, then rechecks when files change", async () => {
@@ -572,7 +587,7 @@ describe("merge wizard", () => {
     await openWizardWith([first, second])
     await addPickedFiles(2)
     await $("[data-testid='merge-wizard-bookmarks']").click()
-    await $("[data-testid='merge-wizard-watermark']").click()
+    await setPageLayers(false, true)
     await nextStep()
 
     const size = $("[data-testid='watermark-size']")
@@ -591,6 +606,7 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
+    await setPageLayers(false, false)
     await nextStep()
     await $("[data-testid='merge-wizard-bookmarks-perFileWithExisting']").click()
     await $("[data-testid='merge-wizard-merge']").click()
@@ -689,8 +705,6 @@ describe("merge wizard", () => {
 
     await openWizardWith([first, second])
     await addPickedFiles(2)
-    await $("[data-testid='merge-wizard-page-numbers']").click()
-    await $("[data-testid='merge-wizard-watermark']").click()
 
     // `offsetHeight`, not a rect: the dialog's opening zoom is a transform,
     // and a rect read inside its 100 ms would measure the scaled frame.
