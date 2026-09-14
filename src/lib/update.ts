@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { e2eOverride } from "@/lib/e2e"
 
 /**
  * The whole check lives in `src-tauri/src/update.rs`: nothing here may name
@@ -82,5 +83,10 @@ export function downloadUpdate(): Promise<void> {
 }
 
 export function installUpdate(): Promise<void> {
+  const override = e2eOverride("installUpdate")
+  if (override) {
+    return override()
+  }
+
   return invoke("install_update")
 }

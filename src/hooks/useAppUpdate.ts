@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+
+import { updateNeedsConfirmation, watchUpdateUnsaved } from "@/lib/updateUnsaved"
 
 import {
   downloadUpdate,
@@ -16,6 +18,9 @@ export type AppUpdate = {
   dismiss: () => void
   download: () => void
   install: () => void
+  requestInstall: () => void
+  confirmingInstall: boolean
+  setConfirmingInstall: (open: boolean) => void
   status: AppUpdateStatus
   visible: boolean
 }
@@ -24,12 +29,23 @@ export type AppUpdate = {
  * The check, download and install are process-wide in the backend; this keeps
  * only what this window has been told and what its reader has waved away.
  */
-export function useAppUpdate(): AppUpdate {
+export function useAppUpdate(hasUnsavedWorkNow: () => boolean): AppUpdate {
   const [status, setStatus] = useState<AppUpdateStatus>({ state: "idle" })
   const [dismissedState, setDismissedState] = useState<
     AppUpdateStatus["state"] | null
   >(null)
   const [installFailed, setInstallFailed] = useState(false)
+  const [confirmingInstall, setConfirmingInstall] = useState(false)
+  const checkingInstall = useRef(false)
+
+  useEffect(() => {
+    const subscription = watchUpdateUnsaved(hasUnsavedWorkNow)
+    void subscription.catch(() => undefined)
+
+    return () => {
+      void subscription.then((unlisten) => unlisten()).catch(() => undefined)
+    }
+  }, [hasUnsavedWorkNow])
 
   useEffect(() => {
     let live = true
@@ -76,10 +92,29 @@ export function useAppUpdate(): AppUpdate {
     void installUpdate().catch(() => setInstallFailed(true))
   }, [])
 
+  const requestInstall = useCallback(() => {
+    if (checkingInstall.current) {
+      return
+    }
+
+    checkingInstall.current = true
+    void updateNeedsConfirmation(hasUnsavedWorkNow).then((confirm) => {
+      checkingInstall.current = false
+      if (confirm) {
+        setConfirmingInstall(true)
+      } else {
+        install()
+      }
+    })
+  }, [hasUnsavedWorkNow, install])
+
   return {
     dismiss,
     download,
     install,
+    requestInstall,
+    confirmingInstall,
+    setConfirmingInstall,
     installFailed,
     status,
     visible: shouldShowUpdate(status, dismissedState),

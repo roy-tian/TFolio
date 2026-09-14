@@ -145,7 +145,6 @@ export default function App() {
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
-  const [confirmingInstall, setConfirmingInstall] = useState(false)
   const { channel: notices, notices: raisedNotices } = useNotices()
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
@@ -429,8 +428,17 @@ export default function App() {
     [activateTab, notices, replaceTabs, t],
   )
   const mergeWizard = useMergeWizard({ onMerged: openMergeResult })
-  const appUpdate = useAppUpdate()
-  const { installFailed, status, visible } = appUpdate
+  const hasUnsavedWorkNow = useCallback(
+    () =>
+      tabsRef.current.some((tab) =>
+        sessionRefs.current.get(tab.id)?.hasUnsavedWorkNow() ?? tab.dirty,
+      ),
+    [],
+  )
+  const appUpdate = useAppUpdate(hasUnsavedWorkNow)
+  const {
+    confirmingInstall, setConfirmingInstall, installFailed, status, visible,
+  } = appUpdate
   const update = useMemo(
     () => updateNotice({ installFailed, status, visible }),
     [installFailed, status, visible],
@@ -451,7 +459,7 @@ export default function App() {
     if (update?.action?.kind !== "updateInstall") {
       setConfirmingInstall(false)
     }
-  }, [notices, update])
+  }, [notices, setConfirmingInstall, update])
 
   const runNoticeAction = useCallback(
     (notice: Notice) => {
@@ -460,7 +468,7 @@ export default function App() {
       if (kind === "updateDownload" || kind === "updateRetry") {
         appUpdate.download()
       } else if (kind === "updateInstall") {
-        setConfirmingInstall(true)
+        appUpdate.requestInstall()
       } else if (kind === "noteFont" && notice.owner.scope === "document") {
         sessionRefs.current.get(notice.owner.documentId)?.fetchNoteFont()
       }

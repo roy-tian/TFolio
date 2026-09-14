@@ -7,6 +7,7 @@ import type { PdfProgress } from "@/lib/progress"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 
 export type E2eOverrides = {
+  installUpdate?: () => Promise<void>
   exportPdfArchive?: (
     args: ArchiveExportRequest & { documentId: number },
     onProgress: (progress: PdfProgress) => void,
