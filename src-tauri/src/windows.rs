@@ -99,6 +99,21 @@ pub async fn open_new_window(app: AppHandle, window: WebviewWindow) -> Result<()
         .ok_or_else(|| "there is no configured window to copy".to_string())?;
 
     config.label = app.state::<AppWindows>().next_label();
+    // `visible: false` in the config is main's alone, waiting for its stored
+    // frame; a window built here has nothing waiting to show it.
+    config.visible = true;
+    // The window asked from is the frame the reader is using; a new one opens
+    // that size rather than the config's first-run default. A maximized frame
+    // is not one to inherit: the cascade cannot step past a whole work area,
+    // and the new window would land exactly over the old one.
+    if !window.is_maximized().unwrap_or(false) {
+        if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+            let size = size.to_logical::<f64>(scale);
+
+            config.width = size.width;
+            config.height = size.height;
+        }
+    }
     cascade_from(&window, &mut config);
 
     WebviewWindowBuilder::from_config(&app, &config)

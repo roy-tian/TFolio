@@ -5,6 +5,7 @@ mod recent;
 mod settings;
 mod store;
 mod update;
+mod window_state;
 mod windows;
 
 use convert::word_conversion_available;
@@ -25,6 +26,7 @@ use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
 use tauri::Manager;
 use update::{download_update, install_update, update_status, UpdateState};
+use window_state::WindowState;
 use windows::{focus_pdf_path, open_new_window, print_window, AppWindows, DocumentOwners};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -83,12 +85,16 @@ pub fn run() {
             app.manage(AppWindows::default());
             app.manage(DocumentOwners::default());
             app.manage(UpdateState::default());
+            app.manage(WindowState::load(app.handle()));
             // Not in the GUI suite: a spec may not reach the network, and
             // nothing a spec drives may install anything over this build.
             #[cfg(not(feature = "e2e"))]
             update::check_in_background(app.handle());
             // This run's launch files wait here for a workspace to open them.
             launch::queue_open(app.handle(), launch::pdf_paths_from_this_launch());
+            // Last, because it is what shows `main`: everything above runs
+            // behind the config's hidden first frame.
+            window_state::restore(app.handle());
             Ok(())
         })
         // Reloading replaces the page without destroying its window or closing documents.
@@ -106,7 +112,11 @@ pub fn run() {
                 }
             }
             tauri::WindowEvent::Focused(true) => {
-                windows::remember_focus(window.app_handle(), window.label())
+                windows::remember_focus(window.app_handle(), window.label());
+                window_state::remember(window.app_handle(), window)
+            }
+            tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                window_state::remember(window.app_handle(), window)
             }
             tauri::WindowEvent::Destroyed => {
                 windows::window_gone(window.app_handle(), window.label())
@@ -174,6 +184,11 @@ pub fn run() {
         // Built and run in two steps for the one event below, which no builder
         // hook reports.
         .run(|_app, _event| {
+            // The tail of a resize the write throttle may still be holding.
+            if let tauri::RunEvent::Exit = _event {
+                window_state::flush(_app);
+            }
+
             // Finder may raise a different window or leave the target minimized.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
