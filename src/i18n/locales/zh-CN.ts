@@ -86,6 +86,10 @@ const zhCN = {
   },
   home: {
     welcome: "欢迎使用 TFolio",
+    tagline: "你手边的 PDF 工作伴侣",
+    new: "新建",
+    newHint: "A4 尺寸单页 PDF",
+    open: "打开",
     recent: "最近打开",
     recentEmpty: "打开过的 PDF 会显示在这里。",
   },

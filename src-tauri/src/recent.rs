@@ -8,8 +8,9 @@ use tauri::{AppHandle, State};
 
 use crate::store::{Store, Stored};
 
-/// The home tab shows fewer; the surplus covers entries whose file has since gone.
-const RECENT_LIMIT: usize = 20;
+/// The home tab pages the list in as the user scrolls; the surplus covers
+/// entries whose file has since gone.
+const RECENT_LIMIT: usize = 255;
 
 /// What 0.1.3 and earlier wrote this list to.
 const REPLACED_FILE_NAME: &str = "recent-files.json";
@@ -331,7 +332,10 @@ mod tests {
         }
 
         assert_eq!(entries.len(), RECENT_LIMIT);
-        assert_eq!(entries.first(), Some(&PathBuf::from("/24.pdf")));
+        assert_eq!(
+            entries.first(),
+            Some(&PathBuf::from(format!("/{}.pdf", RECENT_LIMIT + 4)))
+        );
         assert_eq!(entries.last(), Some(&PathBuf::from("/5.pdf")));
     }
 

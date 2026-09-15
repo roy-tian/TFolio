@@ -40,6 +40,10 @@ import {
 import type { RecentFile } from "@/lib/recentFiles"
 import { formatShortcut, shortcuts } from "@/lib/shortcuts"
 
+/** The submenu's share of the recent list: a menu longer than the window
+    scrolls offscreen, and the home tab already owns the whole list. */
+const RECENT_MENU_LIMIT = 10
+
 /** The entries that act on the workspace rather than on one document, so the
     home tab's menu and every document's carry the same ones. */
 export type AppMenuActions = {
@@ -154,7 +158,7 @@ export function AppMenu({
                     {t("menu.recentEmpty")}
                   </DropdownMenuItem>
                 ) : (
-                  recentFiles.map((file) => (
+                  recentFiles.slice(0, RECENT_MENU_LIMIT).map((file) => (
                     <HintTooltip key={file.path} label={file.path} side="right">
                       <DropdownMenuItem
                         data-action="recent"

@@ -1153,6 +1153,7 @@ export default function App() {
 
       <HomePanel
         active={homeActive}
+        onNew={() => void createDocument()}
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
         opening={isOpening}

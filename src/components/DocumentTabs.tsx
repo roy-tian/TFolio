@@ -41,8 +41,10 @@ type DocumentTabsProps = {
   tabs: DocumentTabItem[]
 }
 
+// Document tabs pull `mb-[-1px]` over the strip's border so the selected one
+// melts into the white panel below it; see the home tab for the exception.
 const tabClassName =
-  "group/tab relative mb-[-1px] flex h-8 items-center rounded-t-md border border-b-0"
+  "group/tab relative flex h-8 items-center rounded-t-md border border-b-0"
 
 export function DocumentTabs({
   activeId,
@@ -120,6 +122,9 @@ export function DocumentTabs({
           aria-controls={panelElementId(HOME_TAB_ID)}
           aria-selected={homeSelected}
           className={cn(
+            // No overlap here, unlike document tabs: below the strip lies the
+            // home tab's zinc backdrop, and the selected tab eating the border
+            // row would leave a stray white pixel line under itself.
             tabClassName,
             "shrink-0 gap-1.5 px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
             homeSelected
@@ -156,7 +161,7 @@ export function DocumentTabs({
                 <div
                   className={cn(
                     tabClassName,
-                    "w-44 min-w-28 max-w-56",
+                    "mb-[-1px] w-44 min-w-28 max-w-56",
                     selected
                       ? "bg-background text-foreground"
                       : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",

@@ -1,7 +1,7 @@
-import { Clock, LoaderCircle } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Clock, FilePlus2, FolderOpen, LoaderCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import fileLargeIcon from "@/assets/brand/file-large.png"
 import fileSmallIcon from "@/assets/brand/file-small.png"
 import { HintTooltip } from "@/components/HintTooltip"
 import {
@@ -11,8 +11,13 @@ import {
 } from "@/lib/documentTabs"
 import type { RecentFile } from "@/lib/recentFiles"
 
+/** Rows rendered before the first scroll, and added per load; the list may
+    hold every entry the backend keeps, so it is paged in rather than rendered. */
+const RECENT_PAGE_SIZE = 20
+
 type HomePanelProps = {
   active: boolean
+  onNew: () => void
   onOpenFile: () => void
   onOpenRecent: (path: string) => void
   opening: boolean
@@ -21,12 +26,45 @@ type HomePanelProps = {
 
 export function HomePanel({
   active,
+  onNew,
   onOpenFile,
   onOpenRecent,
   opening,
   recentFiles,
 }: HomePanelProps) {
   const { t } = useTranslation()
+  const [visibleRecentCount, setVisibleRecentCount] = useState(
+    RECENT_PAGE_SIZE,
+  )
+  const recentEndRef = useRef<HTMLLIElement>(null)
+  const recentTotal = recentFiles.length
+
+  useEffect(() => {
+    const sentinel = recentEndRef.current
+
+    if (!sentinel) {
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleRecentCount((count) =>
+            Math.min(count + RECENT_PAGE_SIZE, recentTotal),
+          )
+        }
+      },
+      // Ahead of the viewport, so the next page is usually in before the
+      // scroll reaches the list's end.
+      { rootMargin: "300px" },
+    )
+    observer.observe(sentinel)
+
+    return () => observer.disconnect()
+  }, [recentTotal])
+
+  const visibleRecentFiles = recentFiles.slice(0, visibleRecentCount)
+  const moreRecentFiles = visibleRecentCount < recentTotal
 
   return (
     <div
@@ -42,32 +80,48 @@ export function HomePanel({
         <div className="mx-auto flex w-full max-w-4xl flex-col items-center">
           <h1 className="text-2xl font-semibold">{t("home.welcome")}</h1>
           <p className="mt-2 text-center text-sm text-muted-foreground">
-            {t("about.description")}
+            {t("home.tagline")}
           </p>
 
-          <div className="mt-8 grid w-full gap-6 sm:grid-cols-2 sm:items-start">
-            {/* A height of its own, rather than the grid row's: otherwise the
-                drop target grows with the recent list beside it. */}
-            <button
-              aria-label={t("viewer.chooseFile")}
-              className="group flex min-h-72 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-400 bg-background/75 px-8 py-12 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
-              data-slot="drop-zone"
-              disabled={opening}
-              onClick={onOpenFile}
-              type="button"
-            >
-              {opening ? (
-                <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
-              ) : (
-                <img alt="" className="mb-5 size-16 transition-transform group-hover:-translate-y-0.5" draggable={false} src={fileLargeIcon} />
-              )}
-              <span className="text-lg font-semibold">
-                {opening ? t("viewer.loading") : t("viewer.dropTitle")}
-              </span>
-              <span className="mt-2 text-sm text-muted-foreground">
-                {t("viewer.dropDescription")}
-              </span>
-            </button>
+          {/* `items-start` keeps the action column its own height; stretched to
+              the recent list's, the two buttons would grow with every load. */}
+          <div className="mt-8 grid w-full grid-cols-[2fr_8fr] items-start gap-6">
+            <div className="flex flex-col gap-6">
+              <button
+                className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+                data-slot="new-document"
+                disabled={opening}
+                onClick={onNew}
+                type="button"
+              >
+                <FilePlus2 className="mb-4 size-10 transition-transform group-hover:-translate-y-0.5" />
+                <span className="text-lg font-semibold">{t("home.new")}</span>
+                <span className="mt-2 text-sm text-muted-foreground">
+                  {t("home.newHint")}
+                </span>
+              </button>
+
+              <button
+                aria-label={t("viewer.chooseFile")}
+                className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+                data-slot="drop-zone"
+                disabled={opening}
+                onClick={onOpenFile}
+                type="button"
+              >
+                {opening ? (
+                  <LoaderCircle className="mb-4 size-10 animate-spin text-muted-foreground" />
+                ) : (
+                  <FolderOpen className="mb-4 size-10 transition-transform group-hover:-translate-y-0.5" />
+                )}
+                <span className="text-lg font-semibold">
+                  {opening ? t("viewer.loading") : t("home.open")}
+                </span>
+                <span className="mt-2 text-sm text-muted-foreground">
+                  {t("viewer.dropTitle")}
+                </span>
+              </button>
+            </div>
 
             <section
               aria-label={t("home.recent")}
@@ -84,7 +138,7 @@ export function HomePanel({
                 </p>
               ) : (
                 <ul className="mt-2 flex flex-col">
-                  {recentFiles.map((file) => (
+                  {visibleRecentFiles.map((file) => (
                     <li key={file.path}>
                       <HintTooltip label={file.path}>
                         <button
@@ -107,6 +161,9 @@ export function HomePanel({
                       </HintTooltip>
                     </li>
                   ))}
+                  {moreRecentFiles ? (
+                    <li aria-hidden className="h-px" ref={recentEndRef} />
+                  ) : null}
                 </ul>
               )}
             </section>

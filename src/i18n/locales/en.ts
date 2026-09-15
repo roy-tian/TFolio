@@ -79,6 +79,10 @@ const en = {
   },
   home: {
     welcome: "Welcome to TFolio",
+    tagline: "Put your PDFs in order",
+    new: "New",
+    newHint: "A4 single-page PDF",
+    open: "Open",
     recent: "Recent files",
     recentEmpty: "The PDFs you open will be listed here.",
   },
