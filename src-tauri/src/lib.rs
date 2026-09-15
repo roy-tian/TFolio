@@ -16,8 +16,8 @@ use pdfium::{
     create_pdf, delete_pdf_annotations, delete_pdf_pages, download_pdf_note_font,
     duplicate_pdf_pages, export_pdf, export_pdf_archive, extract_pdf_page_plain_text,
     extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
-    insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_pdf,
-    open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
+    insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_converted_from_path,
+    open_pdf, open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
     remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
     reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
 };
@@ -117,6 +117,7 @@ pub fn run() {
             create_pdf,
             open_pdf,
             open_pdf_from_path,
+            open_converted_from_path,
             pick_pdf_path,
             pick_pdf_paths,
             inspect_pdf_files,

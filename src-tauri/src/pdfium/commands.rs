@@ -485,6 +485,8 @@ pub async fn insert_pdf_blank_page(
 
 /// Shows the native open dialog and hands back the chosen path — recorded as
 /// approved, which is what entitles `open_pdf_from_path` to act on it later.
+/// Images and Word documents ride along, the merge's source list in miniature;
+/// they open converted, which needs no approval of their own.
 #[tauri::command]
 pub async fn pick_pdf_path(
     filter_label: String,
@@ -492,14 +494,23 @@ pub async fn pick_pdf_path(
     state: State<'_, PdfiumState>,
 ) -> Result<Option<String>, String> {
     let engine = Arc::clone(&state.0);
+    let word = convert::word_available();
 
-    // `blocking_pick_file` parks this thread until the reader answers; in
-    // `spawn_blocking` that is fine, as `export_pdf` already relies on.
     tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>, String> {
+        let mut extensions = vec!["pdf"];
+
+        extensions.extend_from_slice(&MERGE_IMAGE_EXTENSIONS);
+
+        // Word documents follow what the machine itself offers: a dialog
+        // offering a file the backend would then refuse is a worse promise.
+        if word {
+            extensions.extend_from_slice(&WORD_EXTENSIONS);
+        }
+
         let Some(picked) = app
             .dialog()
             .file()
-            .add_filter(filter_label, &["pdf"])
+            .add_filter(filter_label, &extensions)
             .blocking_pick_file()
         else {
             return Ok(None);
@@ -545,6 +556,34 @@ pub async fn open_pdf_from_path(
     .map_err(|error| format!("PDFium open task failed: {error}"))??;
 
     record_document(&owners, &window, document.id, Some(path));
+
+    Ok(document)
+}
+
+/// An image or Word document opened as a converted, in-memory PDF. Like
+/// `create_pdf` it binds no file behind it, so a save has nowhere to write —
+/// but reading the source still asks approval, as any path-based open does.
+#[tauri::command]
+pub async fn open_converted_from_path(
+    path: String,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfDocumentInfo, String> {
+    let engine = Arc::clone(&state.0);
+
+    let document = tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(path);
+
+        #[cfg(not(feature = "e2e"))]
+        ensure_approved(&engine, &path)?;
+
+        engine.open_converted(path)
+    })
+    .await
+    .map_err(|error| format!("conversion task failed: {error}"))??;
+
+    record_document(&owners, &window, document.id, None);
 
     Ok(document)
 }

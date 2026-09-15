@@ -428,6 +428,56 @@ impl PdfiumEngine {
         self.open_with_source(bytes, Some(path))
     }
 
+    /// An image or a Word document opened as its converted PDF. Built in
+    /// memory with no source binding, like `create_blank`: the file behind it
+    /// is only ever read, so there is no destination for approval to guard.
+    pub(super) fn open_converted(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
+        if is_merge_image(&path) {
+            let bytes = {
+                let _documents = self.lock_documents()?;
+                let document = image_page_document(self.pdfium, &path)?;
+
+                document
+                    .save_to_bytes()
+                    .map_err(|error| format!("PDFium could not build the image's PDF: {error}"))?
+            };
+
+            return self.open_with_source(bytes, None);
+        }
+
+        if crate::convert::is_word_document(&path) {
+            // Stoppable like the wizard's inspection of the same file: an
+            // office suite's startup is seconds the open flow must be able to
+            // walk away from, and `cancel_word_conversion` aims at this target.
+            let entry = {
+                let operation = self.begin_operation(OperationTarget::Convert);
+                let cancelled = || operation.is_cancelled();
+
+                self.resolve_word_documents(
+                    std::slice::from_ref(&path),
+                    true,
+                    &cancelled,
+                    &mut || {},
+                )
+                .into_iter()
+                .next()
+            };
+
+            return match entry {
+                Some(crate::convert::Entry::Converted(pdf)) => {
+                    self.open_with_source(read_pdf_bytes(&pdf)?, None)
+                }
+                Some(crate::convert::Entry::Failed(error)) => Err(format!(
+                    "{} could not be converted: {error}",
+                    path.display()
+                )),
+                _ => Err(format!("{} is not a convertible source", path.display())),
+            };
+        }
+
+        Err(format!("{} is not a convertible source", path.display()))
+    }
+
     fn open_with_source(
         &self,
         bytes: Vec<u8>,
@@ -931,7 +981,7 @@ mod marks;
 mod owned_content;
 mod page_ops;
 mod raster_export;
-use io::read_pdf_bytes;
+use io::{image_page_document, is_merge_image, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 
