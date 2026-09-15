@@ -11,6 +11,7 @@ const paths = {
   cargoToml: path.join(root, "src-tauri", "Cargo.toml"),
   cargoLock: path.join(root, "src-tauri", "Cargo.lock"),
   tauriConfig: path.join(root, "src-tauri", "tauri.conf.json"),
+  website: path.join(root, "website", "index.html"),
 }
 
 const semverPattern =
@@ -102,6 +103,27 @@ function replaceVersion(content, pattern, version, fileName) {
   })
 }
 
+// SVG path data is full of digit.digit.digit runs; only the page's text,
+// URLs, and script carry the project version.
+function websiteVersionTokens(content) {
+  const withoutSvg = content.replace(/<svg[\s\S]*?<\/svg>/g, "")
+  return [...withoutSvg.matchAll(/(?<![\d.])\d+\.\d+\.\d+(?![\d.])/g)].map(
+    (match) => match[0],
+  )
+}
+
+function replaceWebsiteVersion(content, currentVersion, version) {
+  const pattern = new RegExp(
+    `(?<![\\d.])${currentVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d.])`,
+    "g",
+  )
+  if (!pattern.test(content)) {
+    fail("could not find the project version in website/index.html")
+  }
+
+  return content.replace(pattern, version)
+}
+
 function readVersions() {
   const packageJson = readJson(paths.packageJson)
   const cargoToml = fs.readFileSync(paths.cargoToml, "utf8")
@@ -127,6 +149,7 @@ function readVersions() {
     cargoToml: cargoTomlMatch[1],
     cargoLock: cargoLockMatch[1],
     tauriConfig: tauriConfig.version,
+    website: websiteVersionTokens(fs.readFileSync(paths.website, "utf8")),
   }
 }
 
@@ -135,9 +158,11 @@ function checkVersions() {
   parseVersion(versions.packageJson)
 
   const expected = versions.packageJson
+  const websiteVersions = [...new Set(versions.website)]
   const mismatches = Object.entries({
     "src-tauri/Cargo.toml": versions.cargoToml,
     "src-tauri/Cargo.lock": versions.cargoLock,
+    "website/index.html": websiteVersions.join(", ") || null,
   }).filter(([, version]) => version !== expected)
 
   if (mismatches.length > 0) {
@@ -191,10 +216,16 @@ function updateVersions(requestedVersion) {
     version,
     "src-tauri/Cargo.lock",
   )
+  const website = replaceWebsiteVersion(
+    fs.readFileSync(paths.website, "utf8"),
+    currentVersion,
+    version,
+  )
 
   fs.writeFileSync(paths.packageJson, `${JSON.stringify(packageJson, null, 2)}\n`)
   fs.writeFileSync(paths.cargoToml, cargoToml)
   fs.writeFileSync(paths.cargoLock, cargoLock)
+  fs.writeFileSync(paths.website, website)
   syncBunLock()
   console.log(`Updated project version to ${version}.`)
 }

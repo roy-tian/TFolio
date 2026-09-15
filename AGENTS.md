@@ -19,7 +19,7 @@
   for settings that must survive refresh.
 - Before updating the patched `pdfium-render`, read its Cargo manifest note. CI takes Bun's
   version from `packageManager`, not the local toolchain.
-- Release tags must match `package.json`; use `version:bump` to align all four version files.
+- Release tags must match `package.json`; use `version:bump` to align all five version files.
   `changelog` groups the tag's conventional commit subjects as public release notes and omits
   `chore(release)` commits.
 
