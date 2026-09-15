@@ -4,6 +4,7 @@ import { Radio } from "@base-ui/react/radio"
 import { RadioGroup } from "@base-ui/react/radio-group"
 import { useTranslation } from "react-i18next"
 
+import appLargeIcon from "@/assets/brand/app-large.png"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -341,9 +342,7 @@ export function SettingsDialog({
             role="tabpanel"
           >
             <div className="flex h-full flex-col">
-              <div className="mb-5 grid size-12 place-items-center rounded-xl bg-foreground text-lg font-semibold text-background">
-                TF
-              </div>
+              <img alt="" className="mb-5 size-20" draggable={false} src={appLargeIcon} />
               <h3 className="text-lg font-semibold">{t("about.title")}</h3>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 {t("about.description")}

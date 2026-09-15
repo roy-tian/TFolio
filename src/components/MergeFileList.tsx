@@ -1,7 +1,6 @@
 import { memo, useRef } from "react"
 import { createPortal } from "react-dom"
 import {
-  File,
   FilePlus2,
   FileText,
   FileUp,
@@ -13,6 +12,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import fileTinyIcon from "@/assets/brand/file-tiny.png"
 import { HintTooltip } from "@/components/HintTooltip"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -73,9 +73,12 @@ const MergeFileRowContent = memo(function MergeFileRowContent({
           </HintTooltip>
         ) : (
           <HintTooltip label={t("mergeWizard.pdfSource")}>
-            <File
+            <img
+              alt={t("mergeWizard.pdfSource")}
               aria-label={t("mergeWizard.pdfSource")}
-              className="size-4 shrink-0 text-muted-foreground"
+              className="size-4 shrink-0"
+              draggable={false}
+              src={fileTinyIcon}
             />
           </HintTooltip>
         )

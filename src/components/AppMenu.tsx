@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import fileTinyIcon from "@/assets/brand/file-tiny.png"
 import { HintTooltip } from "@/components/HintTooltip"
 import {
   SettingsDialog,
@@ -159,6 +160,7 @@ export function AppMenu({
                         data-action="recent"
                         onClick={() => onOpenRecent(file.path)}
                       >
+                        <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
                         <span className="truncate">{file.name}</span>
                       </DropdownMenuItem>
                     </HintTooltip>

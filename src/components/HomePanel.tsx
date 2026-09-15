@@ -1,6 +1,8 @@
-import { Clock, FileText, FileUp, LoaderCircle } from "lucide-react"
+import { Clock, LoaderCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import fileLargeIcon from "@/assets/brand/file-large.png"
+import fileSmallIcon from "@/assets/brand/file-small.png"
 import { HintTooltip } from "@/components/HintTooltip"
 import {
   HOME_TAB_ID,
@@ -57,7 +59,7 @@ export function HomePanel({
               {opening ? (
                 <LoaderCircle className="mb-5 size-10 animate-spin text-muted-foreground" />
               ) : (
-                <FileUp className="mb-5 size-10 text-muted-foreground transition-transform group-hover:-translate-y-0.5" />
+                <img alt="" className="mb-5 size-16 transition-transform group-hover:-translate-y-0.5" draggable={false} src={fileLargeIcon} />
               )}
               <span className="text-lg font-semibold">
                 {opening ? t("viewer.loading") : t("viewer.dropTitle")}
@@ -92,7 +94,7 @@ export function HomePanel({
                           onClick={() => onOpenRecent(file.path)}
                           type="button"
                         >
-                          <FileText className="size-4 shrink-0 text-muted-foreground" />
+                          <img alt="" className="size-8 shrink-0" draggable={false} src={fileSmallIcon} />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm">
                               {file.name}

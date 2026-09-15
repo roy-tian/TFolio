@@ -20,6 +20,7 @@
     "test:e2e:types": "tsc --noEmit -p tsconfig.e2e.json",
     "pdfium:download": "bun scripts/download-pdfium.mjs",
     "fonts:download": "bun scripts/download-fonts.mjs",
+    "icons:generate": "bun scripts/generate-icons.mjs",
     "pretauri:dev": "bun run pdfium:download",
     "pretauri:build": "bun run pdfium:download",
     "pretauri:bundle": "bun run pdfium:download",

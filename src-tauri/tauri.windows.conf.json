@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "name": "TFolio.PDF",
+        "description": "PDF Document",
+        "mimeType": "application/pdf",
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ],
+    "resources": {
+      "icons/pdf.ico": "icons/pdf.ico"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": ["windows/pdf-icon.wxs"],
+        "componentRefs": ["PdfDocumentIcon"]
+      }
+    }
+  }
+}

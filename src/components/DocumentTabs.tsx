@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { ChevronDown, FolderOpen, House, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import fileTinyIcon from "@/assets/brand/file-tiny.png"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import {
@@ -182,6 +183,7 @@ export function DocumentTabs({
                       tabIndex={selected ? 0 : -1}
                       type="button"
                     >
+                      <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
                       {tab.dirty ? (
                         <span
                           aria-label={t("tabs.unsaved")}
@@ -263,7 +265,8 @@ export function DocumentTabs({
                 key={tab.id}
                 onClick={() => onActivate(tab.id)}
               >
-                <span className="truncate">{tab.name}</span>
+                <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
+                <span className="min-w-0 flex-1 truncate">{tab.name}</span>
                 {tab.dirty ? (
                   <span
                     aria-label={t("tabs.unsaved")}
