@@ -17,14 +17,15 @@ describe("recent files", () => {
   })
 
   test("shows the newest files first and no more than the limit", () => {
-    const paths = ["/1.pdf", "/2.pdf", "/3.pdf", "/4.pdf", "/5.pdf", "/6.pdf"]
+    const paths = Array.from({ length: 300 }, (_, index) => `/${index}.pdf`)
 
-    expect(describeRecentFiles(paths).map((file) => file.path)).toEqual([
+    const described = describeRecentFiles(paths)
+
+    expect(described).toHaveLength(255)
+    expect(described.map((file) => file.path).slice(0, 3)).toEqual([
+      "/0.pdf",
       "/1.pdf",
       "/2.pdf",
-      "/3.pdf",
-      "/4.pdf",
-      "/5.pdf",
     ])
   })
 

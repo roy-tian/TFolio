@@ -21,6 +21,9 @@ export type E2eOverrides = {
   /** Stands in for `open_pdf_from_path`, so a spec can hand the backend bytes
       with no path at all — the state the save key's disabled case needs. */
   openPdfFromPath?: (path: string) => Promise<unknown>
+  /** Stands in for `open_converted_from_path`, so a spec can answer an image
+      or Word open without a real conversion behind it. */
+  openConvertedFromPath?: (path: string) => Promise<unknown>
   pickPdfPaths?: () => Promise<string[]>
   /** Stands in for the OS print dialog, which no driver can answer: the real
       one blocks the window until a person closes it. */

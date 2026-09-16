@@ -144,7 +144,7 @@ export function WatermarkSettings({
             </p>
           </Field>
 
-          <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <Field className="min-w-0">
               <FieldLabel id={directionId}>{t("watermark.direction")}</FieldLabel>
               <ToggleGroup

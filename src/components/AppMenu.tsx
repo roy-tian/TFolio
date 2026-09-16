@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import fileTinyIcon from "@/assets/brand/file-tiny.png"
 import { HintTooltip } from "@/components/HintTooltip"
 import {
   SettingsDialog,
@@ -38,6 +39,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { RecentFile } from "@/lib/recentFiles"
 import { formatShortcut, shortcuts } from "@/lib/shortcuts"
+
+/** The submenu's share of the recent list: a menu longer than the window
+    scrolls offscreen, and the home tab already owns the whole list. */
+const RECENT_MENU_LIMIT = 10
 
 /** The entries that act on the workspace rather than on one document, so the
     home tab's menu and every document's carry the same ones. */
@@ -109,7 +114,7 @@ export function AppMenu({
             render={
               <Button
                 aria-label={t("menu.title")}
-                className="text-blue-600 hover:text-blue-700 aria-expanded:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 dark:aria-expanded:text-blue-300"
+                className="text-brand hover:text-brand-strong aria-expanded:text-brand-strong"
                 data-slot="app-menu"
                 size="icon"
                 variant="outline"
@@ -153,12 +158,13 @@ export function AppMenu({
                     {t("menu.recentEmpty")}
                   </DropdownMenuItem>
                 ) : (
-                  recentFiles.map((file) => (
+                  recentFiles.slice(0, RECENT_MENU_LIMIT).map((file) => (
                     <HintTooltip key={file.path} label={file.path} side="right">
                       <DropdownMenuItem
                         data-action="recent"
                         onClick={() => onOpenRecent(file.path)}
                       >
+                        <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
                         <span className="truncate">{file.name}</span>
                       </DropdownMenuItem>
                     </HintTooltip>

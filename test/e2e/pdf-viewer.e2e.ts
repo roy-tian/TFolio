@@ -132,14 +132,16 @@ describe("TFolio PDF viewer", () => {
     await expect(dropZoneButton()).toExist()
     await expect(dropZoneButton()).toHaveAttribute(
       "aria-label",
-      "Choose a PDF file",
+      "Choose a file to open",
     )
     expect(location).toContain("tauri")
   })
 
   it("rejects invalid input, renders a PDF, and exercises viewer controls", async () => {
     await openPdfFromDisk("not-a-pdf.txt", Buffer.from("not a PDF", "utf8"))
-    await expect($("[role='alert']")).toHaveText("Please choose a PDF file.")
+    await expect($("[role='alert']")).toHaveText(
+      "Please choose a PDF, image, or Word document.",
+    )
 
     const dismissAlert = $("button[aria-label='Dismiss notification']")
     await dismissAlert.waitForDisplayed()

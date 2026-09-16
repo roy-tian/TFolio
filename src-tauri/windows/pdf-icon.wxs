@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="PdfDocumentIcon" Guid="0ACBF5C7-9943-4119-BF10-3D748AB4E830">
+        <RegistryValue Root="HKLM"
+                       Key="Software\Classes\TFolio.pdf\DefaultIcon"
+                       Type="string"
+                       Value="&quot;[INSTALLDIR]icons\pdf.ico&quot;,0"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

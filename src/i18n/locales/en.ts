@@ -33,8 +33,8 @@ const en = {
     listAll: "All open documents",
     close: "Close {{name}}",
     unsaved: "Unsaved changes",
-    dropNow: "Drop to open PDF files",
-    dropHint: "PDF files open in separate tabs",
+    dropNow: "Drop to open files",
+    dropHint: "PDFs, images, and Word documents open in separate tabs",
     unsavedTabDescription:
       "This document has changes that are not saved. Closing its tab will discard them.",
     unsavedWindowDescription:
@@ -79,6 +79,10 @@ const en = {
   },
   home: {
     welcome: "Welcome to TFolio",
+    tagline: "Put your PDFs in order",
+    new: "New",
+    newHint: "A4 single-page PDF",
+    open: "Open",
     recent: "Recent files",
     recentEmpty: "The PDFs you open will be listed here.",
   },
@@ -196,6 +200,10 @@ const en = {
     failed: "That edit could not be applied.",
     dropWhileEditing:
       "Another page edit is still running — try the drop again in a moment.",
+    dropIgnoredFiles_one:
+      "{{count}} dropped file was not inserted: only PDFs insert as pages.",
+    dropIgnoredFiles_other:
+      "{{count}} dropped files were not inserted: only PDFs insert as pages.",
   },
   watermark: {
     rasterize: "Convert pages to images",
@@ -297,15 +305,17 @@ const en = {
     english: "English",
   },
   viewer: {
-    dropTitle: "Drop a PDF here",
-    dropDescription: "or click to choose a file",
-    chooseFile: "Choose a PDF file",
+    dropTitle: "PDF/Word/Images",
+    chooseFile: "Choose a file to open",
+    openFilter: "Openable files",
     loading: "Opening PDF…",
-    dropNow: "Drop to open this PDF",
-    dropNowMerge: "Drop to add these PDFs",
+    dropNow: "Drop to open files",
+    dropNowMerge: "Drop to add these files",
     fileTooLarge: "PDF files must be no larger than 512 MiB.",
-    invalidFile: "Please choose a PDF file.",
-    openFailed: "This PDF could not be opened.",
+    invalidFile: "Please choose a PDF, image, or Word document.",
+    openFailed: "This file could not be opened.",
+    wordUnavailable:
+      "Opening Word documents needs Word, WPS, or LibreOffice installed.",
     unsavedTitle: "Discard unsaved changes?",
     unsavedDescription:
       "The open document has annotations that are not saved. Opening another PDF will discard them.",

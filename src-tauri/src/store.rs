@@ -48,7 +48,7 @@ impl<T: Stored> Store<T> {
 
     /// `load` with the directory already resolved, so the tests can point a
     /// store at a scratch file instead of the reader's own.
-    fn at(file: Option<PathBuf>) -> Self {
+    pub(crate) fn at(file: Option<PathBuf>) -> Self {
         let value = file
             .as_deref()
             .and_then(|file| fs::read_to_string(file).ok())

@@ -76,6 +76,11 @@ export const noticeCatalogue = {
     textKey: "viewer.invalidFile",
     tone: "warning",
   },
+  insertIgnoredFiles: {
+    life: "transient",
+    textKey: "annotate.dropIgnoredFiles",
+    tone: "warning",
+  },
   newWindowFailed: {
     life: "transient",
     textKey: "menu.newWindowFailed",
@@ -173,6 +178,11 @@ export const noticeCatalogue = {
     textKey: "update.ready",
     tone: "success",
   },
+  wordUnavailable: {
+    life: "transient",
+    textKey: "viewer.wordUnavailable",
+    tone: "warning",
+  },
 } as const satisfies Record<string, NoticeEntry>
 
 export type NoticeKind = keyof typeof noticeCatalogue
@@ -207,6 +217,7 @@ export const openRefusals = [
   "fileTooLarge",
   "invalidFile",
   "openFailed",
+  "wordUnavailable",
 ] as const satisfies readonly NoticeKind[]
 
 export type NoticeValues = Record<string, number | string>

@@ -4,9 +4,8 @@ import { fileNameFromPath } from "@/lib/pdf"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 import { MAX_ZOOM, MIN_ZOOM, type ZoomMode, type ZoomState } from "@/lib/zoom"
 
-/** The home tab's share of the backend's list, which keeps more so the
-    shorter list still fills once files that have gone are left out. */
-export const RECENT_FILE_LIMIT = 5
+/** The backend's whole list, which the home tab pages in as the user scrolls. */
+export const RECENT_FILE_LIMIT = 255
 
 export type RecentFile = {
   /** The folder the file sits in, shown to tell apart two same-named files. */

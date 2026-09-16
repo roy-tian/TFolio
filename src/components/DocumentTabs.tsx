@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { ChevronDown, FolderOpen, House, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { HintTooltip } from "@/components/HintTooltip"
+import fileTinyIcon from "@/assets/brand/file-tiny.png"
+import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import {
   DropdownMenu,
@@ -40,8 +41,10 @@ type DocumentTabsProps = {
   tabs: DocumentTabItem[]
 }
 
+// Document tabs pull `mb-[-1px]` over the strip's border so the selected one
+// melts into the white panel below it; see the home tab for the exception.
 const tabClassName =
-  "group/tab relative mb-[-1px] flex h-8 items-center rounded-t-md border border-b-0"
+  "group/tab relative flex h-8 items-center rounded-t-md border border-b-0"
 
 export function DocumentTabs({
   activeId,
@@ -119,6 +122,9 @@ export function DocumentTabs({
           aria-controls={panelElementId(HOME_TAB_ID)}
           aria-selected={homeSelected}
           className={cn(
+            // No overlap here, unlike document tabs: below the strip lies the
+            // home tab's zinc backdrop, and the selected tab eating the border
+            // row would leave a stray white pixel line under itself.
             tabClassName,
             "shrink-0 gap-1.5 px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
             homeSelected
@@ -142,77 +148,80 @@ export function DocumentTabs({
           className="flex h-full min-w-0 items-end overflow-x-auto overflow-y-hidden"
           ref={scrollerRef}
         >
-          {tabs.map((tab, index) => {
-            const selected = tab.id === activeId
-            const armed = tab.id === armedTabId
-            // A selected tab is parted from its neighbours by its own border;
-            // between two unselected ones nothing marks where one ends.
-            const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
-            const divided = !selected && previousId !== activeId
+          <HintTooltipGroup>
+            {tabs.map((tab, index) => {
+              const selected = tab.id === activeId
+              const armed = tab.id === armedTabId
+              // A selected tab is parted from its neighbours by its own border;
+              // between two unselected ones nothing marks where one ends.
+              const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
+              const divided = !selected && previousId !== activeId
 
-            return (
-              <div
-                className={cn(
-                  tabClassName,
-                  "w-44 min-w-28 max-w-56",
-                  selected
-                    ? "bg-background text-foreground"
-                    : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
-                  divided &&
-                    "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
-                  // Held pages are over this tab: it reads as the one they are
-                  // about to be taken to, ahead of it actually opening.
-                  armed && "border-primary bg-background text-foreground",
-                )}
-                data-document-tab={tab.id}
-                key={tab.id}
-              >
-                {/* The workspace puts focus on this button after every open,
-                    and a hint opened by that would stand over the strip. */}
-                <HintTooltip label={tab.name} openOnFocus={false}>
-                  <button
-                    aria-controls={panelElementId(tab.id)}
-                    aria-selected={selected}
-                    className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    id={tabElementId(tab.id)}
-                    onClick={() => onActivate(tab.id)}
-                    onKeyDown={(event) => handleKeyDown(event, tab.id)}
-                    role="tab"
-                    tabIndex={selected ? 0 : -1}
-                    type="button"
-                  >
-                    {tab.dirty ? (
-                      <span
-                        aria-label={t("tabs.unsaved")}
-                        className="size-2 shrink-0 rounded-full bg-primary"
-                      />
-                    ) : null}
-                    <span className="truncate">{tab.name}</span>
-                  </button>
-                </HintTooltip>
-                {/* Runs the length of the wait the tab is about to end: the
-                    dwell itself, so the bar cannot promise a different one. */}
-                {armed ? (
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute inset-x-1 bottom-1 h-1 origin-left rounded-full animate-tab-spring bg-primary"
-                    style={{ animationDuration: `${TAB_SPRING_MS}ms` }}
-                  />
-                ) : null}
-                <HintTooltip label={t("tabs.close", { name: tab.name })}>
-                  <button
-                    aria-label={t("tabs.close", { name: tab.name })}
-                    className="mr-1 grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => onClose(tab.id)}
-                    tabIndex={selected ? 0 : -1}
-                    type="button"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </HintTooltip>
-              </div>
-            )
-          })}
+              return (
+                <div
+                  className={cn(
+                    tabClassName,
+                    "mb-[-1px] w-44 min-w-28 max-w-56",
+                    selected
+                      ? "bg-background text-foreground"
+                      : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                    divided &&
+                      "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
+                    // Held pages are over this tab: it reads as the one they are
+                    // about to be taken to, ahead of it actually opening.
+                    armed && "border-primary bg-background text-foreground",
+                  )}
+                  data-document-tab={tab.id}
+                  key={tab.id}
+                >
+                  {/* The workspace puts focus on this button after every open,
+                      and a hint opened by that would stand over the strip. */}
+                  <HintTooltip inDelayGroup label={tab.name} openOnFocus={false}>
+                    <button
+                      aria-controls={panelElementId(tab.id)}
+                      aria-selected={selected}
+                      className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      id={tabElementId(tab.id)}
+                      onClick={() => onActivate(tab.id)}
+                      onKeyDown={(event) => handleKeyDown(event, tab.id)}
+                      role="tab"
+                      tabIndex={selected ? 0 : -1}
+                      type="button"
+                    >
+                      <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
+                      {tab.dirty ? (
+                        <span
+                          aria-label={t("tabs.unsaved")}
+                          className="size-2 shrink-0 rounded-full bg-primary"
+                        />
+                      ) : null}
+                      <span className="truncate">{tab.name}</span>
+                    </button>
+                  </HintTooltip>
+                  {/* Runs the length of the wait the tab is about to end: the
+                      dwell itself, so the bar cannot promise a different one. */}
+                  {armed ? (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute inset-x-1 bottom-1 h-1 origin-left rounded-full animate-tab-spring bg-primary"
+                      style={{ animationDuration: `${TAB_SPRING_MS}ms` }}
+                    />
+                  ) : null}
+                  <HintTooltip label={t("tabs.close", { name: tab.name })}>
+                    <button
+                      aria-label={t("tabs.close", { name: tab.name })}
+                      className="mr-1 grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => onClose(tab.id)}
+                      tabIndex={selected ? 0 : -1}
+                      type="button"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </HintTooltip>
+                </div>
+              )
+            })}
+          </HintTooltipGroup>
         </div>
       </div>
 
@@ -261,7 +270,8 @@ export function DocumentTabs({
                 key={tab.id}
                 onClick={() => onActivate(tab.id)}
               >
-                <span className="truncate">{tab.name}</span>
+                <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
+                <span className="min-w-0 flex-1 truncate">{tab.name}</span>
                 {tab.dirty ? (
                   <span
                     aria-label={t("tabs.unsaved")}

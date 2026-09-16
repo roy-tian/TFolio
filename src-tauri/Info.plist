@@ -7,5 +7,22 @@
 	     The bundler merges this file over the Info.plist it generates. -->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>TFolio asks Microsoft Word to convert the Word documents you bring into the import wizard.</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PDF</string>
+			<key>CFBundleTypeExtensions</key>
+			<array><string>pdf</string></array>
+			<key>LSItemContentTypes</key>
+			<array><string>com.adobe.pdf</string></array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>pdf.icns</string>
+		</dict>
+	</array>
 </dict>
 </plist>

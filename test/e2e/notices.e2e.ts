@@ -52,7 +52,7 @@ describe("TFolio notices", () => {
     await pointPickerAt(notPdf)
     await openFileButton().click()
     await expect($("[data-notice='invalidFile']")).toHaveText(
-      "Please choose a PDF file.",
+      "Please choose a PDF, image, or Word document.",
     )
 
     await cutPage(2)

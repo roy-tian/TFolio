@@ -100,7 +100,16 @@ export function useGridDrop({
       if (annotations.isStructureBusyNow()) {
         notice.raise("editInFlight")
       } else {
-        void insertFiles(event.paths.filter(isPdfPath), index)
+        // Only PDFs become pages; a mixed drag's other files are said so, not
+        // silently gone.
+        const insertable = event.paths.filter(isPdfPath)
+        const ignored = event.paths.length - insertable.length
+
+        if (ignored > 0) {
+          notice.raise("insertIgnoredFiles", { values: { count: ignored } })
+        }
+
+        void insertFiles(insertable, index)
       }
 
       return true

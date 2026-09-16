@@ -57,10 +57,14 @@ import {
 } from "@/lib/notices"
 import {
   fileNameFromPath,
-  isPdfPath,
   type PdfDocumentInfo,
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
+import {
+  classifyOpenSource,
+  pdfNameFromSource,
+  type OpenSourceKind,
+} from "@/lib/openSources"
 import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
 import {
   readRecentFiles,
@@ -112,6 +116,12 @@ type PendingClose =
 const OPEN_REQUESTED_EVENT = "launch://open-requested"
 
 const FOCUS_DOCUMENT_EVENT = "workspace://focus-document"
+
+/** The notice an open refusal becomes, whichever door the file came through:
+ * the size ceiling words its own refusal, and every other failure is one. */
+function noticeForOpenError(error: unknown): NoticeKind {
+  return String(error).includes("MiB limit") ? "fileTooLarge" : "openFailed"
+}
 
 function hasUsableFocus() {
   const focused = document.activeElement
@@ -228,9 +238,14 @@ export default function App() {
 
   const openPaths = useCallback(
     (paths: string[], activate: "first" | "last" = "last") => {
-      const pdfPaths = paths.filter(isPdfPath)
+      const sources = paths
+        .map((path) => ({ kind: classifyOpenSource(path), path }))
+        .filter(
+          (source): source is { kind: OpenSourceKind; path: string } =>
+            source.kind !== null,
+        )
 
-      if (pdfPaths.length === 0) {
+      if (sources.length === 0) {
         notices.raise({ kind: "invalidFile", owner: workspaceOwner })
         return Promise.resolve()
       }
@@ -238,8 +253,60 @@ export default function App() {
       return runOpenBatch(async () => {
         const openedIds: number[] = []
         let firstError: NoticeKind | null = null
+        // Asked once per batch, when a Word source first needs the answer.
+        let wordAvailable: boolean | null = null
 
-        for (const path of pdfPaths) {
+        for (const { kind, path } of sources) {
+          if (kind !== "pdf") {
+            if (kind === "word") {
+              if (wordAvailable === null) {
+                wordAvailable = await invoke<boolean>(
+                  "word_conversion_available",
+                ).catch(() => false)
+              }
+
+              if (!wordAvailable) {
+                firstError ??= "wordUnavailable"
+                continue
+              }
+            }
+
+            // A converted source opens like a created document: nothing on
+            // disk to bind as a save destination, match a tab by, or remember.
+            try {
+              const override = e2eOverride("openConvertedFromPath")
+              const document = override
+                ? ((await override(path)) as PdfDocumentInfo)
+                : await invoke<PdfDocumentInfo>(
+                    "open_converted_from_path",
+                    { path },
+                  )
+
+              if (!mountedRef.current) {
+                void invoke("close_pdf", { documentId: document.id }).catch(
+                  () => undefined,
+                )
+                continue
+              }
+
+              const tab: OpenTab = {
+                dirty: false,
+                document,
+                id: document.id,
+                name: fileNameFromPath(path),
+                path: "",
+                saveAsDefaultName: pdfNameFromSource(path),
+                savable: false,
+              }
+              replaceTabs((current) => [...current, tab])
+              openedIds.push(tab.id)
+            } catch (error) {
+              firstError ??= noticeForOpenError(error)
+            }
+
+            continue
+          }
+
           const existingId = tabIdForPath(tabsRef.current, path)
 
           if (existingId !== null) {
@@ -302,9 +369,7 @@ export default function App() {
             replaceTabs((current) => [...current, tab])
             openedIds.push(tab.id)
           } catch (error) {
-            firstError ??= String(error).includes("MiB limit")
-              ? "fileTooLarge"
-              : "openFailed"
+            firstError ??= noticeForOpenError(error)
           }
         }
 
@@ -505,7 +570,7 @@ export default function App() {
       const path = pick
         ? await pick()
         : await invoke<string | null>("pick_pdf_path", {
-            filterLabel: t("annotate.exportFilter"),
+            filterLabel: t("viewer.openFilter"),
           })
 
       if (typeof path === "string") {
@@ -1008,14 +1073,14 @@ export default function App() {
     }
   }, [dragToSession, openPaths])
 
-  // A double-clicked PDF reaches the app before this workspace exists, so Rust
-  // holds it: the event carries no paths, only that a take will find some.
+  // A double-clicked file reaches the app before this workspace exists, so
+  // Rust holds it: the event carries no paths, only that a take will find some.
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
 
     const openWhatTheOsNamed = () =>
-      invoke<string[]>("take_launch_pdfs")
+      invoke<string[]>("take_launch_files")
         .then((paths) => {
           // Not conditioned on `cancelled`: a take that emptied the queue is
           // the only chance these paths get; `openPaths` guards unmounted itself.
@@ -1153,6 +1218,7 @@ export default function App() {
 
       <HomePanel
         active={homeActive}
+        onNew={() => void createDocument()}
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
         opening={isOpening}
