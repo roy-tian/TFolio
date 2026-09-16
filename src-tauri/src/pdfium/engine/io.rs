@@ -156,7 +156,7 @@ pub(super) fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub(super) fn is_merge_image(path: &Path) -> bool {
+pub(crate) fn is_merge_image(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {

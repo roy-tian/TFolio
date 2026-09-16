@@ -33,8 +33,8 @@ const en = {
     listAll: "All open documents",
     close: "Close {{name}}",
     unsaved: "Unsaved changes",
-    dropNow: "Drop to open PDF files",
-    dropHint: "PDF files open in separate tabs",
+    dropNow: "Drop to open files",
+    dropHint: "PDFs, images, and Word documents open in separate tabs",
     unsavedTabDescription:
       "This document has changes that are not saved. Closing its tab will discard them.",
     unsavedWindowDescription:

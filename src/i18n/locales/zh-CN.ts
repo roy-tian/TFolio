@@ -41,8 +41,8 @@ const zhCN = {
     listAll: "全部已打开的文档",
     close: "关闭 {{name}}",
     unsaved: "有未保存的修改",
-    dropNow: "松开以打开 PDF 文件",
-    dropHint: "PDF 文件将在独立标签页中打开",
+    dropNow: "松开以打开文件",
+    dropHint: "PDF、图片和 Word 文档将在独立标签页中打开",
     unsavedTabDescription: "此文档尚有未保存的修改，关闭标签页将丢弃这些修改。",
     unsavedWindowDescription:
       "一个或多个已打开文档尚有未保存的修改，关闭窗口将丢弃这些修改。",

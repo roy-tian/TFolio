@@ -25,6 +25,8 @@ pub use commands::{
     search_pdf_text,
 };
 pub use engine::PdfiumState;
+// `launch.rs` reads the image kinds for its own launch test.
+pub(crate) use engine::is_merge_image;
 pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};
 pub use watermark::WatermarkConfig;
 

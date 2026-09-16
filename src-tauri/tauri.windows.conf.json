@@ -9,6 +9,70 @@
         "mimeType": "application/pdf",
         "role": "Editor",
         "rank": "Alternate"
+      },
+      {
+        "ext": ["doc"],
+        "name": "Word Document",
+        "description": "Word Document",
+        "mimeType": "application/msword",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["docx"],
+        "name": "Word Document",
+        "description": "Word Document",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["bmp"],
+        "name": "Bitmap Image",
+        "description": "Bitmap Image",
+        "mimeType": "image/bmp",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["gif"],
+        "name": "GIF Image",
+        "description": "GIF Image",
+        "mimeType": "image/gif",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["jpg", "jpeg"],
+        "name": "JPEG Image",
+        "description": "JPEG Image",
+        "mimeType": "image/jpeg",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["png"],
+        "name": "PNG Image",
+        "description": "PNG Image",
+        "mimeType": "image/png",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["tif", "tiff"],
+        "name": "TIFF Image",
+        "description": "TIFF Image",
+        "mimeType": "image/tiff",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["webp"],
+        "name": "WebP Image",
+        "description": "WebP Image",
+        "mimeType": "image/webp",
+        "role": "Editor",
+        "rank": "Alternate"
       }
     ],
     "resources": {

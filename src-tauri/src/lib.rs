@@ -9,7 +9,7 @@ mod window_state;
 mod windows;
 
 use convert::word_conversion_available;
-use launch::{take_launch_pdfs, LaunchQueue};
+use launch::{take_launch_files, LaunchQueue};
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_archive,
@@ -41,7 +41,7 @@ pub fn run() {
             tauri_plugin_single_instance::Builder::new().callback(|app, argv, cwd| {
                 let target = launch::queue_open(
                     app,
-                    launch::pdf_paths_from_args(
+                    launch::open_paths_from_args(
                         argv.into_iter().skip(1),
                         std::path::Path::new(&cwd),
                     ),
@@ -91,7 +91,7 @@ pub fn run() {
             #[cfg(not(feature = "e2e"))]
             update::check_in_background(app.handle());
             // This run's launch files wait here for a workspace to open them.
-            launch::queue_open(app.handle(), launch::pdf_paths_from_this_launch());
+            launch::queue_open(app.handle(), launch::open_paths_from_this_launch());
             // Last, because it is what shows `main`: everything above runs
             // behind the config's hidden first frame.
             window_state::restore(app.handle());
@@ -161,7 +161,7 @@ pub fn run() {
             update_status,
             download_update,
             install_update,
-            take_launch_pdfs,
+            take_launch_files,
             open_new_window,
             print_window,
             focus_pdf_path,
@@ -192,7 +192,8 @@ pub fn run() {
             // Finder may raise a different window or leave the target minimized.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
-                if let Some(window) = launch::queue_open(_app, launch::pdf_paths_from_urls(&urls)) {
+                if let Some(window) = launch::queue_open(_app, launch::open_paths_from_urls(&urls))
+                {
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }

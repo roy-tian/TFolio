@@ -246,7 +246,8 @@ fn promote(entries: &mut Vec<PathBuf>, path: &Path) {
 }
 
 /// Absolute and named as a PDF — the same guarantees the OS's own dialogs give
-/// what reaches `open_pdf_from_path`. `launch.rs` holds launch paths to this test.
+/// what reaches `open_pdf_from_path`. `launch.rs` reads this for a launch's
+/// PDFs, beside its images and Word documents.
 pub(crate) fn is_recordable(path: &Path) -> bool {
     path.is_absolute()
         && path

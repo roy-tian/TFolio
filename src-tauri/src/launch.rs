@@ -1,4 +1,4 @@
-//! The OS names a PDF before there is a workspace to put it in, so it waits here
+//! The OS names a file before there is a workspace to put it in, so it waits here
 //! until asked — approved like a dialog pick, since the OS named it, not page code.
 
 use std::{
@@ -9,7 +9,12 @@ use std::{
 
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
-use crate::{pdfium::PdfiumState, windows::focus_target};
+use crate::{
+    convert::is_word_document,
+    pdfium::{is_merge_image, PdfiumState},
+    recent::is_recordable,
+    windows::focus_target,
+};
 
 /// Carries nothing: the paths cross the boundary once, by the command that
 /// drains the queue. Spelled again in `App.tsx`, which listens for it.
@@ -64,9 +69,9 @@ pub fn queue_open(app: &AppHandle, paths: Vec<PathBuf>) -> Option<WebviewWindow>
     target
 }
 
-/// Non-PDF arguments are left alone rather than refused — a launch carries
-/// switches this app never reads — and the path test is the recent list's own.
-pub fn pdf_paths_from_args<I: IntoIterator<Item = String>>(args: I, cwd: &Path) -> Vec<PathBuf> {
+/// Arguments this app cannot open are left alone rather than refused — a
+/// launch carries switches this app never reads.
+pub fn open_paths_from_args<I: IntoIterator<Item = String>>(args: I, cwd: &Path) -> Vec<PathBuf> {
     args.into_iter()
         .filter(|argument| !argument.starts_with('-'))
         .map(|argument| {
@@ -81,38 +86,42 @@ pub fn pdf_paths_from_args<I: IntoIterator<Item = String>>(args: I, cwd: &Path) 
             // paths verbatim, so a `.` would open a second edit history on one file.
             path.components().collect::<PathBuf>()
         })
-        .filter(|path| is_pdf_file(path))
+        .filter(|path| is_openable_file(path))
         .collect()
 }
 
 /// `args_os`, not `args`: `std::env::args` panics on non-UTF-8, which could not
 /// survive the trip to the frontend anyway.
-pub fn pdf_paths_from_this_launch() -> Vec<PathBuf> {
+pub fn open_paths_from_this_launch() -> Vec<PathBuf> {
     let arguments = std::env::args_os()
         .skip(1)
         .filter_map(|argument| argument.into_string().ok());
 
-    pdf_paths_from_args(arguments, &std::env::current_dir().unwrap_or_default())
+    open_paths_from_args(arguments, &std::env::current_dir().unwrap_or_default())
 }
 
-/// The PDFs among the `file://` URLs macOS names in an open event. A URL of
-/// any other scheme has no file behind it, and this app registers none.
+/// The openable files among the `file://` URLs macOS names in an open event.
+/// A URL of any other scheme has no file behind it, and this app registers none.
 #[cfg(target_os = "macos")]
-pub fn pdf_paths_from_urls(urls: &[tauri::Url]) -> Vec<PathBuf> {
+pub fn open_paths_from_urls(urls: &[tauri::Url]) -> Vec<PathBuf> {
     urls.iter()
         .filter_map(|url| url.to_file_path().ok())
-        .filter(|path| is_pdf_file(path))
+        .filter(|path| is_openable_file(path))
         .collect()
 }
 
-/// The recent list's test, plus the file being there. Absolute is load-bearing:
-/// a relative name would resolve against the running process's own directory.
-fn is_pdf_file(path: &Path) -> bool {
-    crate::recent::is_recordable(path) && path.is_file()
+/// A PDF, an image, or a Word document. The dialog offers Word only with a
+/// converter installed, but the OS already named this file: the open flow
+/// refuses it in words rather than silently. Absolute is load-bearing: a
+/// relative name would resolve against the running process's own directory.
+fn is_openable_file(path: &Path) -> bool {
+    path.is_absolute()
+        && path.is_file()
+        && (is_recordable(path) || is_merge_image(path) || is_word_document(path))
 }
 
 #[tauri::command]
-pub async fn take_launch_pdfs(
+pub async fn take_launch_files(
     state: State<'_, LaunchQueue>,
     window: WebviewWindow,
 ) -> Result<Vec<String>, String> {
@@ -147,21 +156,26 @@ mod tests {
     }
 
     #[test]
-    fn takes_the_pdfs_a_launch_names() {
+    fn takes_the_files_a_launch_names() {
         let directory = scratch("named");
         let first = write_file(&directory, "first.pdf");
         // Named as a PDF is a question about the name, not its case.
         let second = write_file(&directory, "second.PDF");
+        // The dialog's convertible offer: images and Word documents queue too.
+        let photo = write_file(&directory, "photo.png");
+        let letter = write_file(&directory, "letter.docx");
 
-        let paths = pdf_paths_from_args(
+        let paths = open_paths_from_args(
             [
                 first.to_string_lossy().into_owned(),
                 second.to_string_lossy().into_owned(),
+                photo.to_string_lossy().into_owned(),
+                letter.to_string_lossy().into_owned(),
             ],
             &directory,
         );
 
-        assert_eq!(paths, vec![first, second]);
+        assert_eq!(paths, vec![first, second, photo, letter]);
 
         let _ = fs::remove_dir_all(&directory);
     }
@@ -172,7 +186,7 @@ mod tests {
         let file = write_file(&directory, "relative.pdf");
 
         assert_eq!(
-            pdf_paths_from_args(["relative.pdf".to_string()], &directory),
+            open_paths_from_args(["relative.pdf".to_string()], &directory),
             vec![file]
         );
 
@@ -187,7 +201,7 @@ mod tests {
         // Compared as strings, because that is what crosses to the frontend and
         // `Path`'s own equality reads `.` away before a test could see it.
         assert_eq!(
-            pdf_paths_from_args(["./dotted.pdf".to_string()], &directory)
+            open_paths_from_args(["./dotted.pdf".to_string()], &directory)
                 .iter()
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect::<Vec<_>>(),
@@ -201,16 +215,16 @@ mod tests {
     fn refuses_a_name_no_launch_directory_can_make_absolute() {
         // A second instance that could not read its working directory hands this
         // over; resolving it here would open — and approve — a different file.
-        assert!(pdf_paths_from_args(["some.pdf".to_string()], Path::new("")).is_empty());
+        assert!(open_paths_from_args(["some.pdf".to_string()], Path::new("")).is_empty());
     }
 
     #[test]
-    fn leaves_everything_that_is_not_a_readable_pdf() {
+    fn leaves_everything_a_launch_cannot_open() {
         let directory = scratch("other");
         write_file(&directory, "notes.txt");
         fs::create_dir(directory.join("folder.pdf")).expect("scratch directory");
 
-        let paths = pdf_paths_from_args(
+        let paths = open_paths_from_args(
             [
                 "--flag".to_string(),
                 "notes.txt".to_string(),

@@ -1073,14 +1073,14 @@ export default function App() {
     }
   }, [dragToSession, openPaths])
 
-  // A double-clicked PDF reaches the app before this workspace exists, so Rust
-  // holds it: the event carries no paths, only that a take will find some.
+  // A double-clicked file reaches the app before this workspace exists, so
+  // Rust holds it: the event carries no paths, only that a take will find some.
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
 
     const openWhatTheOsNamed = () =>
-      invoke<string[]>("take_launch_pdfs")
+      invoke<string[]>("take_launch_files")
         .then((paths) => {
           // Not conditioned on `cancelled`: a take that emptied the queue is
           // the only chance these paths get; `openPaths` guards unmounted itself.
