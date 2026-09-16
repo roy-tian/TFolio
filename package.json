@@ -1,7 +1,7 @@
 {
   "name": "tfolio",
   "private": true,
-  "version": "0.1.8",
+  "version": "0.1.9",
   "packageManager": "bun@1.4.2",
   "description": "A PDF editor built with Tauri and Rust.",
   "author": "Roy Tian",

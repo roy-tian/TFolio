@@ -1,6 +1,6 @@
 [package]
 name = "tfolio"
-version = "0.1.8"
+version = "0.1.9"
 description = "TFolio PDF Editor"
 authors = ["Roy Tian"]
 license = "MIT"
