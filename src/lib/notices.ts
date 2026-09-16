@@ -76,6 +76,11 @@ export const noticeCatalogue = {
     textKey: "viewer.invalidFile",
     tone: "warning",
   },
+  insertIgnoredFiles: {
+    life: "transient",
+    textKey: "annotate.dropIgnoredFiles",
+    tone: "warning",
+  },
   newWindowFailed: {
     life: "transient",
     textKey: "menu.newWindowFailed",

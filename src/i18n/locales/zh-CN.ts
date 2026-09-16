@@ -202,6 +202,10 @@ const zhCN = {
     exportFailed: "无法导出此 PDF。",
     failed: "无法应用该修改。",
     dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖放一次。",
+    dropIgnoredFiles_one:
+      "{{count}} 个拖入的文件未插入：只有 PDF 可以作为页面插入。",
+    dropIgnoredFiles_other:
+      "{{count}} 个拖入的文件未插入：只有 PDF 可以作为页面插入。",
   },
   watermark: {
     rasterize: "将页面转为图片",

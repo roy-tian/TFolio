@@ -200,6 +200,10 @@ const en = {
     failed: "That edit could not be applied.",
     dropWhileEditing:
       "Another page edit is still running — try the drop again in a moment.",
+    dropIgnoredFiles_one:
+      "{{count}} dropped file was not inserted: only PDFs insert as pages.",
+    dropIgnoredFiles_other:
+      "{{count}} dropped files were not inserted: only PDFs insert as pages.",
   },
   watermark: {
     rasterize: "Convert pages to images",
