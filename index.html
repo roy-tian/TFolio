@@ -1,0 +1,1075 @@
+<!doctype html>
+<html lang="zh-CN" data-lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TFolio — 你手边的 PDF 工作伴侣</title>
+<meta name="description" content="TFolio 是一款轻快的开源 PDF 桌面工具：阅读批注、水印页码、遮盖合订都在本机完成。MIT 开源，支持 Windows、macOS 与 Linux。">
+<meta property="og:title" content="TFolio — 你手边的 PDF 工作伴侣">
+<meta property="og:description" content="轻快的开源 PDF 桌面工具：水印、国标页码、全文搜索、遮盖方框、合订成册，全在本机完成。">
+<meta property="og:image" content="https://roy-tian.github.io/TFolio/assets/zh/hero.png">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<link rel="icon" type="image/png" href="assets/favicon-64.png">
+<script>
+(function () {
+  var lang = "zh"
+  try {
+    var saved = localStorage.getItem("tfolio-lang")
+    if (saved === "en" || saved === "zh") {
+      lang = saved
+    } else if ((navigator.language || "").toLowerCase().indexOf("zh") !== 0) {
+      lang = "en"
+    }
+  } catch (error) { /* private mode keeps zh */ }
+  document.documentElement.dataset.lang = lang
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
+  // hero src is assigned per-language at the end of <body>; preload the right
+  // file from here so the fetch outruns the parser
+  var preload = document.createElement("link")
+  preload.rel = "preload"
+  preload.as = "image"
+  preload.href = "assets/" + lang + "/hero.png"
+  preload.setAttribute("fetchpriority", "high")
+  document.head.appendChild(preload)
+})()
+</script>
+<style>
+:root {
+  --paper: #fafbfd;
+  --ink: #0b1b33;
+  --blue: #155dfb;
+  --blue-deep: #0a3bbf;
+  --blue-wash: #e8f0fe;
+  --slate: #5a6b85;
+  --hairline: #d8e0ec;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Noto Sans SC", "MiSans", "Microsoft YaHei", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 语言开关：只显示当前语言的文本 */
+html[data-lang="zh"] [lang="en"],
+html[data-lang="en"] [lang="zh"] { display: none; }
+
+::selection { background: var(--blue); color: #fff; }
+
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+.mono { font-family: var(--mono); }
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 12px;
+  background: var(--blue);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  z-index: 100;
+}
+.skip-link:focus { left: 12px; }
+
+/* ---------- 顶部导航 ---------- */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(250, 251, 253, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--hairline);
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 60px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.brand img { width: 26px; height: 26px; display: block; }
+.nav-links {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 0.92rem;
+}
+.nav-links a { color: var(--slate); }
+.nav-links a:hover { color: var(--blue); }
+.lang-toggle {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 5px 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.lang-toggle:hover { border-color: var(--blue); color: var(--blue); }
+.nav-star {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 5px 12px;
+  color: var(--ink);
+  background: #fff;
+}
+.nav-star:hover { border-color: var(--blue); color: var(--blue); text-decoration: none; }
+.nav-star svg { width: 15px; height: 15px; fill: #e8a90c; }
+
+/* ---------- 英雄区 ---------- */
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--hairline);
+}
+.hero-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.02fr 1fr;
+  gap: 48px;
+  align-items: center;
+  padding: 72px 0 84px;
+}
+/* 签名元素：平铺水印背景——产品最标志性功能的自我引用 */
+.hero-watermark {
+  position: absolute;
+  inset: -40% -20%;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='340' height='300'%3E%3Ctext x='170' y='150' font-family='Helvetica,Arial,sans-serif' font-size='38' font-weight='700' fill='%23155dfb' fill-opacity='0.055' text-anchor='middle' transform='rotate(-22 170 150)'%3ETFolio%3C/text%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+.hero-copy { position: relative; z-index: 1; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  color: var(--blue);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.eyebrow::before {
+  content: "";
+  width: 22px;
+  height: 2px;
+  background: var(--blue);
+}
+.hero h1 {
+  font-size: clamp(2.35rem, 5.2vw, 3.55rem);
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  font-weight: 750;
+  margin: 0 0 20px;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--blue);
+}
+.hero-sub {
+  font-size: 1.08rem;
+  color: var(--slate);
+  max-width: 34em;
+  margin: 0 0 30px;
+}
+.hero-sub strong { color: var(--ink); font-weight: 600; }
+
+.cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--blue);
+  color: #fff;
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 13px 22px;
+  border-radius: 10px;
+  border: 1px solid var(--blue);
+  box-shadow: 0 8px 20px -8px rgba(21, 93, 251, 0.55);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.btn-primary:hover { background: var(--blue-deep); text-decoration: none; }
+.btn-primary svg { width: 17px; height: 17px; }
+.btn-primary small {
+  font-weight: 400;
+  opacity: 0.85;
+  font-size: 0.82em;
+}
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 500;
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: #fff;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.btn-ghost:hover { border-color: var(--blue); color: var(--blue); text-decoration: none; }
+.platform-note {
+  margin: 14px 0 0;
+  font-size: 0.85rem;
+  color: var(--slate);
+}
+.platform-note .mono { font-size: 0.8rem; }
+
+/* 窗框截图 */
+.hero-shot {
+  position: relative;
+  z-index: 1;
+  transform: rotate(1.15deg);
+}
+.window {
+  background: #fff;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 2px 6px rgba(11, 27, 51, 0.06),
+    0 30px 60px -18px rgba(11, 27, 51, 0.28);
+}
+.window-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hairline);
+  background: #f4f6fa;
+}
+.window-dot { width: 11px; height: 11px; border-radius: 50%; background: #cbd5e4; }
+.window-dot:first-child { background: #b7c4d8; }
+.window-title {
+  margin: 0 auto;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--slate);
+  transform: translateX(-21px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+.window img { display: block; width: 100%; height: auto; }
+.hero-shot-badge {
+  position: absolute;
+  left: -14px;
+  bottom: 26px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  padding: 7px 12px;
+  border-radius: 7px;
+  box-shadow: 0 8px 18px -6px rgba(11, 27, 51, 0.5);
+  transform: rotate(-2deg);
+}
+
+/* ---------- 目录 ---------- */
+.toc { border-bottom: 1px solid var(--hairline); padding: 40px 0 44px; }
+.toc-head {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  color: var(--slate);
+  margin: 0 0 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.toc-head::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 40px;
+}
+.toc-list a {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 10px;
+  margin: 0 -10px;
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+.toc-list a:hover { background: var(--blue-wash); text-decoration: none; color: var(--blue-deep); }
+.toc-num {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--blue);
+  white-space: nowrap;
+}
+
+/* ---------- 功能条目 ---------- */
+.feature {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 26px;
+  padding: 58px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.feature-num {
+  font-family: var(--mono);
+  color: var(--blue);
+  font-size: 0.95rem;
+  text-align: center;
+  padding-top: 8px;
+  white-space: nowrap;
+}
+.feature-num::after {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 46px;
+  background: var(--hairline);
+  margin: 14px auto 0;
+}
+.feature-body { min-width: 0; }
+.feature-body h2 {
+  font-size: 1.62rem;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  margin: 0 0 12px;
+  font-weight: 700;
+}
+.feature-body h2 .zh-sub {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--slate);
+  letter-spacing: 0;
+  margin-top: 2px;
+}
+.feature-body p { margin: 0 0 26px; color: var(--slate); max-width: 40em; }
+.feature-body p strong { color: var(--ink); font-weight: 600; }
+
+.feature-figure { margin: 0; }
+.feature-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  box-shadow: 0 22px 44px -20px rgba(11, 27, 51, 0.25);
+}
+.feature-figure figcaption {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--slate);
+  margin-top: 10px;
+  text-align: center;
+}
+
+.feature.split .feature-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 34px;
+  align-items: center;
+}
+.feature.split .feature-body > p { margin-bottom: 0; align-self: start; padding-top: 6px; }
+.feature.split .feature-body > div { min-width: 0; }
+
+.quick-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.quick-facts li {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  background: #fff;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 13px 16px;
+}
+.quick-facts .fact-word { font-weight: 700; color: var(--blue); white-space: nowrap; }
+.quick-facts .fact-note { color: var(--slate); font-size: 0.93rem; }
+
+/* ---------- 开源节 ---------- */
+.open-source { padding: 64px 0 76px; }
+.os-card {
+  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-deep) 100%);
+  border-radius: 18px;
+  color: #fff;
+  padding: 52px 56px;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 44px;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.os-card::before {
+  content: "MIT";
+  position: absolute;
+  right: -30px;
+  bottom: -58px;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 13rem;
+  letter-spacing: -0.04em;
+  color: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+.os-card h2 {
+  margin: 0 0 12px;
+  font-size: 1.9rem;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.os-card p { margin: 0; opacity: 0.92; max-width: 30em; }
+.os-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+.os-actions .btn-white {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: #fff;
+  color: var(--blue-deep);
+  font-weight: 650;
+  padding: 13px 20px;
+  border-radius: 10px;
+  transition: transform 0.15s ease;
+}
+.os-actions .btn-white:hover { transform: translateY(-1px); text-decoration: none; }
+.os-actions .btn-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  color: #fff;
+  font-weight: 500;
+  padding: 12px 20px;
+  border-radius: 10px;
+}
+.os-actions .btn-line:hover { border-color: #fff; text-decoration: none; }
+.os-actions svg { width: 17px; height: 17px; }
+
+/* ---------- 页脚 ---------- */
+.footer {
+  border-top: 1px solid var(--hairline);
+  padding: 48px 0 96px;
+  font-size: 0.9rem;
+  color: var(--slate);
+}
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 36px;
+}
+.footer h3 {
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  margin: 0 0 14px;
+  font-weight: 600;
+}
+.footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.footer a { color: var(--slate); }
+.footer a:hover { color: var(--blue); }
+.footer-brand p { margin: 10px 0 0; max-width: 26em; }
+.footer-bottom {
+  margin-top: 44px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  justify-content: space-between;
+  font-size: 0.82rem;
+}
+
+/* ---------- 阅读页码指示（— n —） ---------- */
+.page-ticker {
+  position: fixed;
+  right: 22px;
+  bottom: 20px;
+  z-index: 40;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 6px 14px;
+  box-shadow: 0 8px 20px -10px rgba(11, 27, 51, 0.3);
+  pointer-events: none;
+}
+.page-ticker span { color: var(--blue); }
+
+/* ---------- 滚动入场 ---------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+.reveal.is-in { opacity: 1; transform: none; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; padding: 52px 0 64px; gap: 40px; }
+  .hero-shot { max-width: 560px; }
+  .cta-row .btn-primary, .cta-row .btn-ghost { width: 100%; justify-content: center; }
+  .feature { grid-template-columns: 1fr; gap: 8px; padding: 44px 0; }
+  .feature-num { text-align: left; display: flex; align-items: center; gap: 14px; }
+  .feature-num::after { height: 1px; width: 44px; margin: 0; flex: 1; }
+  .feature.split .feature-body { grid-template-columns: 1fr; }
+  .toc-list { grid-template-columns: 1fr; }
+  .os-card { grid-template-columns: 1fr; padding: 40px 32px; }
+  .footer-grid { grid-template-columns: 1fr; gap: 26px; }
+  .nav-links a:not(.nav-star) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .btn-primary, .btn-ghost, .os-actions .btn-white { transition: none; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#features"><span lang="zh">跳到功能目录</span><span lang="en">Skip to contents</span></a>
+
+<nav class="nav" aria-label="站点导航">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#">
+      <img src="assets/icon.png" alt="TFolio" width="26" height="26">
+      TFolio
+    </a>
+    <div class="nav-links">
+      <a href="#features"><span lang="zh">功能</span><span lang="en">Features</span></a>
+      <a href="#download"><span lang="zh">下载</span><span lang="en">Download</span></a>
+      <button class="lang-toggle" id="lang-toggle" type="button">
+        <span lang="zh">EN</span><span lang="en">中文</span>
+      </button>
+      <a class="nav-star" href="https://github.com/roy-tian/TFolio" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .25a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .25Z"/></svg>
+        Star
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-watermark" aria-hidden="true"></div>
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow"><span lang="zh">MIT 开源 · 全程本地处理 · Win / macOS / Linux</span><span lang="en">MIT licensed · local-first · Windows / macOS / Linux</span></p>
+      <h1><span lang="zh">你手边的 PDF <em>工作伴侣</em></span><span lang="en">Put your PDFs <em>in order</em></span></h1>
+      <p class="hero-sub">
+        <span lang="zh">TFolio 是一款<strong>轻快的开源 PDF 桌面工具</strong>：整篇水印、国标式页码、跨行全文搜索、三种遮盖方框，再把 PDF、图片与 Word 文档<strong>合订成册</strong>——一切都在你的电脑上完成，文件不出本机。</span>
+        <span lang="en">TFolio is a <strong>nimble open-source desktop PDF app</strong>: whole-document watermarks, GB/T 9704-style page numbers, line-break-proof search, and three kinds of redaction boxes — then bind PDFs, images, and Word files into <strong>one tidy volume</strong>. Everything runs on your machine; nothing is uploaded.</span>
+      </p>
+      <div class="cta-row">
+        <a class="btn-primary js-download" href="https://github.com/roy-tian/TFolio/releases">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span class="js-download-label"></span>
+        </a>
+        <a class="btn-ghost" href="https://github.com/roy-tian/TFolio/releases" target="_blank" rel="noopener">
+          <span lang="zh">其他系统与历史版本</span><span lang="en">All platforms &amp; past releases</span>
+        </a>
+      </div>
+      <p class="platform-note">
+        <span lang="zh">已按你的系统选择安装包，当前版本 <span class="mono">v0.1.9</span>。</span>
+        <span lang="en">The button picks your system's installer · <span class="mono">v0.1.9</span>.</span>
+      </p>
+    </div>
+    <figure class="hero-shot reveal">
+      <div class="window">
+        <div class="window-bar" aria-hidden="true">
+          <span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span>
+          <span class="window-title"><span lang="zh">十五五规划纲要.pdf — TFolio</span><span lang="en">Attention Is All You Need.pdf — TFolio</span></span>
+        </div>
+        <img id="hero-shot-img"
+             data-lang-src-zh="assets/zh/hero.png" data-lang-src-en="assets/en/hero.png"
+             data-lang-alt-zh="TFolio 主界面：正在阅读《十五五规划纲要》PDF" data-lang-alt-en="TFolio main window reading the Attention Is All You Need paper"
+             width="1100" height="760" fetchpriority="high" alt="">
+        <noscript><img src="assets/zh/hero.png" alt="TFolio 主界面：正在阅读《十五五规划纲要》PDF" width="1100" height="760"></noscript>
+      </div>
+      <span class="hero-shot-badge"><span lang="zh">实机截图 · Linux 版</span><span lang="en">Live capture · Linux build</span></span>
+    </figure>
+  </div>
+</header>
+
+<section class="toc" id="features" aria-labelledby="toc-heading">
+  <div class="wrap">
+    <h2 class="toc-head" id="toc-heading"><span lang="zh">目 录</span><span lang="en">CONTENTS</span></h2>
+    <ul class="toc-list">
+      <li><a href="#f-fast"><span class="toc-num">— 01 —</span><span lang="zh">快而轻</span><span lang="en">Fast and light</span></a></li>
+      <li><a href="#f-watermark"><span class="toc-num">— 02 —</span><span lang="zh">整篇水印</span><span lang="en">Watermarks</span></a></li>
+      <li><a href="#f-numbers"><span class="toc-num">— 03 —</span><span lang="zh">国标页码</span><span lang="en">Page numbers</span></a></li>
+      <li><a href="#f-search"><span class="toc-num">— 04 —</span><span lang="zh">跨行搜索</span><span lang="en">Search</span></a></li>
+      <li><a href="#f-rect"><span class="toc-num">— 05 —</span><span lang="zh">遮盖方框</span><span lang="en">Redaction boxes</span></a></li>
+      <li><a href="#f-merge"><span class="toc-num">— 06 —</span><span lang="zh">合订成册</span><span lang="en">Bound volumes</span></a></li>
+      <li><a href="#f-bookmarks"><span class="toc-num">— 07 —</span><span lang="zh">书签与整览</span><span lang="en">Bookmarks</span></a></li>
+      <li><a href="#f-open"><span class="toc-num">— 08 —</span><span lang="zh">开源共建</span><span lang="en">Open source</span></a></li>
+    </ul>
+  </div>
+</section>
+
+<main>
+  <div class="wrap">
+
+  <section class="feature split" id="f-fast" aria-labelledby="f-fast-h">
+    <div class="feature-num" aria-hidden="true">— 01 —</div>
+    <div class="feature-body">
+      <div>
+        <h2 id="f-fast-h">
+          <span lang="zh">快而轻<span class="zh-sub">启动、翻页、安装包，三处都不拖沓</span></span>
+          <span lang="en">Fast and light<span class="zh-sub">Quick to start, smooth to scroll, small to download</span></span>
+        </h2>
+        <ul class="quick-facts">
+          <li>
+            <span class="fact-word"><span lang="zh">启动迅速</span><span lang="en">Instant launch</span></span>
+            <span class="fact-note"><span lang="zh">点开即用，不必等进度条走完</span><span lang="en">ready before any progress bar could finish</span></span>
+          </li>
+          <li>
+            <span class="fact-word"><span lang="zh">翻页如纸</span><span lang="en">Paper-like paging</span></span>
+            <span class="fact-note"><span lang="zh">本地引擎渲染，滚动缩放都跟手</span><span lang="en">native rendering keeps scrolling and zooming fluid</span></span>
+          </li>
+          <li>
+            <span class="fact-word"><span lang="zh">体积精简</span><span lang="en">Compact</span></span>
+            <span class="fact-note"><span lang="zh">安装包只有几十 MB，不捆绑任何东西</span><span lang="en">a few dozen MB, nothing bundled</span></span>
+          </li>
+        </ul>
+      </div>
+      <figure class="feature-figure reveal">
+        <img src="assets/zh/book.png"
+             data-lang-src-zh="assets/zh/book.png" data-lang-src-en="assets/en/book.png"
+             data-lang-alt-zh="TFolio 书籍视图：《傲慢与偏见》第一章对开页" data-lang-alt-en="TFolio book view: the opening spread of Pride and Prejudice"
+             width="1100" height="760" loading="lazy">
+        <figcaption><span lang="zh">《傲慢与偏见》· 书籍视图</span><span lang="en">Pride and Prejudice · book spread</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="feature split" id="f-watermark" aria-labelledby="f-watermark-h">
+    <div class="feature-num" aria-hidden="true">— 02 —</div>
+    <div class="feature-body">
+      <div>
+        <h2 id="f-watermark-h">
+          <span lang="zh">整篇水印<span class="zh-sub">盖得快，也留得住</span></span>
+          <span lang="en">Whole-document watermarks<span class="zh-sub">Stamped in one go, hard to peel off</span></span>
+        </h2>
+        <p>
+          <span lang="zh">输入一句话，整份文档每一页同时盖印，预览所见即所得。导出时选择<strong>把页面合成图片</strong>，水印便不再是能单独选中、一键删除的文字层——这份“盖了章”的版本，适合直接外发。</span>
+          <span lang="en">Type once and every page is stamped, exactly as the preview shows. Export with pages <strong>rasterized to images</strong>, and the watermark is no longer a text layer someone can select and delete — that stamped copy is safe to send on.</span>
+        </p>
+      </div>
+      <figure class="feature-figure reveal">
+        <img src="assets/zh/watermark.png"
+             data-lang-src-zh="assets/zh/watermark.png" data-lang-src-en="assets/en/watermark.png"
+             data-lang-alt-zh="《民营经济促进法》首页盖满平铺的“内部资料”水印" data-lang-alt-en="The Promotion of Private Economy Law title page under a tiled CONFIDENTIAL watermark"
+             width="1100" height="760" loading="lazy">
+        <figcaption><span lang="zh">《民营经济促进法》· 平铺水印「内部资料」</span><span lang="en">Tiled CONFIDENTIAL watermark · one setting, every page</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="feature split" id="f-numbers" aria-labelledby="f-numbers-h">
+    <div class="feature-num" aria-hidden="true">— 03 —</div>
+    <div class="feature-body">
+      <figure class="feature-figure reveal">
+        <img src="assets/zh/page-numbers.png"
+             data-lang-src-zh="assets/zh/page-numbers.png" data-lang-src-en="assets/en/page-numbers.png"
+             data-lang-alt-zh="页码设置对话框：预览“— 1 —”样式，支持奇偶页自动镜像" data-lang-alt-en="Page-number dialog: “— 1 —” preview with automatic odd/even mirroring"
+             width="1100" height="760" loading="lazy">
+        <figcaption><span lang="zh">在 GB/T 9704 标准文本上设置页码</span><span lang="en">Numbering the GB/T 9704 standard itself</span></figcaption>
+      </figure>
+      <div>
+        <h2 id="f-numbers-h">
+          <span lang="zh">国标页码<span class="zh-sub">按 GB/T 9704 公文格式排版</span></span>
+          <span lang="en">Official-format page numbers<span class="zh-sub">the “— n —” style of GB/T 9704</span></span>
+        </h2>
+        <p>
+          <span lang="zh">页码采用公文通用的 <strong>“— 1 —”样式</strong>。打开“自动匹配”，奇数页落右下、偶数页落左下，<strong>双面装订各归其位</strong>；空白页计不计号、印不印号，也都由你决定。</span>
+          <span lang="en">Numbers take the <strong>“— 1 —” form</strong> used in Chinese official documents. Auto-match mirrors them — odd pages bottom-right, even pages bottom-left — so <strong>double-sided binding lines up</strong>; whether blank pages count, or print at all, is your call.</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature split" id="f-search" aria-labelledby="f-search-h">
+    <div class="feature-num" aria-hidden="true">— 04 —</div>
+    <div class="feature-body">
+      <div>
+        <h2 id="f-search-h">
+          <span lang="zh">跨行搜索<span class="zh-sub">换行不拆词，粘贴即可搜</span></span>
+          <span lang="en">Search that spans line breaks<span class="zh-sub">paste a paragraph, find it whole</span></span>
+        </h2>
+        <p>
+          <span lang="zh">全文检索只认 PDF 里的真实文字：正文里被排版折行的短语照样一击命中，<strong>带着换行粘进搜索框的整段话</strong>也能连起来匹配。140 页的纲要、200 多处结果，转眼就到。</span>
+          <span lang="en">Full-text search reads the PDF's real text: phrases wrapped mid-line still match in <strong>one hit</strong>, and a query pasted with its line breaks intact matches too. All 46 “attention” hits across the Transformer paper — results land in the blink of an eye.</span>
+        </p>
+      </div>
+      <figure class="feature-figure reveal">
+        <img src="assets/zh/search.png"
+             data-lang-src-zh="assets/zh/search.png" data-lang-src-en="assets/en/search.png"
+             data-lang-alt-zh="在《十五五规划纲要》中搜索“发展”，200+ 处命中并高亮" data-lang-alt-en="Searching “attention” across the paper, hits highlighted one by one"
+             width="1100" height="760" loading="lazy">
+        <figcaption><span lang="zh">140 页《十五五规划纲要》· 搜索「发展」· 200+ 处</span><span lang="en">“attention” across the Transformer paper · 46 hits</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="feature split" id="f-rect" aria-labelledby="f-rect-h">
+    <div class="feature-num" aria-hidden="true">— 05 —</div>
+    <div class="feature-body">
+      <figure class="feature-figure reveal">
+        <img src="assets/zh/rect-effects.png"
+             data-lang-src-zh="assets/zh/rect-effects.png" data-lang-src-en="assets/en/rect-effects.png"
+             data-lang-alt-zh="《Attention Is All You Need》首页：半透明、高斯模糊、马赛克三种方框" data-lang-alt-en="Three box effects on the paper's first page: translucent, blur, mosaic"
+             width="1100" height="760" loading="lazy">
+        <figcaption><span lang="zh">同页三种效果 · 半透明 / 高斯模糊 / 马赛克</span><span lang="en">Translucent / Gaussian blur / mosaic, one page</span></figcaption>
+      </figure>
+      <div>
+        <h2 id="f-rect-h">
+          <span lang="zh">遮盖方框<span class="zh-sub">半透明、高斯模糊、马赛克</span></span>
+          <span lang="en">Redaction boxes<span class="zh-sub">translucent, Gaussian blur, mosaic</span></span>
+        </h2>
+        <p>
+          <span lang="zh">选中效果，在页面上<strong>拖一个框就位</strong>：半透明色块用于提醒，模糊与马赛克用于挡住敏感内容。配合图片化导出，<strong>PDF 底层的原文字层一并抹去</strong>，复制粘贴也取不回来。</span>
+          <span lang="en">Pick an effect and <strong>drag a box</strong>: translucent flags a spot, blur and mosaic hide sensitive content. Export rasterized and <strong>the underlying text layer goes with it</strong> — no copy-paste recovery.</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature split" id="f-merge" aria-labelledby="f-merge-h">
+    <div class="feature-num" aria-hidden="true">— 06 —</div>
+    <div class="feature-body">
+      <div>
+        <h2 id="f-merge-h">
+          <span lang="zh">合订成册<span class="zh-sub">PDF、图片、Word，来者不拒</span></span>
+          <span lang="en">Bound volumes<span class="zh-sub">PDFs, images, Word — all welcome</span></span>
+        </h2>
+        <p>
+          <span lang="zh">把材料按顺序拖进合并向导：PDF、图片、Word 文档（<span class="mono">.doc / .docx</span>）一律并入。可以<strong>插入空白页让每份材料从奇数页起</strong>，统一为 A4，再自动编页码、立书签——装订厂级别的整齐。</span>
+          <span lang="en">Drop materials into the merge wizard in order: PDFs, images, and Word documents (<span class="mono">.doc / .docx</span>) all join. <strong>Insert blank pages so each source starts on an odd leaf</strong>, normalize to A4, then add page numbers and bookmarks — bindery-grade tidiness.</span>
+        </p>
+      </div>
+      <figure class="feature-figure reveal">
+        <img src="assets/zh/merge-wizard.png"
+             data-lang-src-zh="assets/zh/merge-wizard.png" data-lang-src-en="assets/en/merge-wizard.png"
+             data-lang-alt-zh="合并向导：五个文件按序列出，可勾选书签、页码、水印" data-lang-alt-en="Merge wizard: five sources listed in order with bookmark, page-number, and watermark switches"
+             width="1100" height="760" loading="lazy">
+        <figcaption><span lang="zh">合并向导 · 五份公开文献 · 一路点到底</span><span lang="en">Five public documents, one wizard</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="feature split" id="f-bookmarks" aria-labelledby="f-bookmarks-h">
+    <div class="feature-num" aria-hidden="true">— 07 —</div>
+    <div class="feature-body">
+      <figure class="feature-figure reveal">
+        <img src="assets/zh/merged-bookmarks.png"
+             data-lang-src-zh="assets/zh/merged-bookmarks.png" data-lang-src-en="assets/en/merged-bookmarks.png"
+             data-lang-alt-zh="合订后的 623 页文档：左侧书签即目录，右侧缩略图整览" data-lang-alt-en="The 623-page compilation: bookmarks as a table of contents, thumbnails for the whole volume"
+             width="1100" height="760" loading="lazy">
+        <figcaption><span lang="zh">623 页合订本 · 每个源文件一条书签</span><span lang="en">623 pages · a bookmark per source</span></figcaption>
+      </figure>
+      <div>
+        <h2 id="f-bookmarks-h">
+          <span lang="zh">书签与整览<span class="zh-sub">厚厚一册，也井井有条</span></span>
+          <span lang="en">Bookmarks at a glance<span class="zh-sub">six hundred pages, still tidy</span></span>
+        </h2>
+        <p>
+          <span lang="zh">合订完成后每个源文件自动生成一条书签，侧栏即成目录；缩略图视图整册过目，随时拖动调序、插入空白页。成品可存为 PDF，或<strong>逐页导出 PNG</strong> 打包带走。</span>
+          <span lang="en">Every source becomes a bookmark, so the sidebar doubles as a table of contents; the thumbnail grid surveys the whole volume, and pages drag to reorder or slot in blanks. Save as PDF, or <strong>export page-by-page PNGs</strong>.</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  </div>
+
+  <section class="open-source" id="f-open" aria-labelledby="f-open-h">
+    <div class="wrap">
+      <div class="os-card">
+        <div>
+          <h2 id="f-open-h">
+            <span lang="zh">开源，欢迎光临</span>
+            <span lang="en">Open source, come say hi</span>
+          </h2>
+          <p>
+            <span lang="zh">TFolio 以 MIT 许可发布，代码托管在 GitHub。用得顺手，请赏一颗 Star；用着别扭，欢迎提个 issue——每一条反馈都会被认真读。</span>
+            <span lang="en">TFolio ships under the MIT license on GitHub. If it works for you, a Star helps others find it; if it doesn't, file an issue — every report gets read.</span>
+          </p>
+        </div>
+        <div class="os-actions">
+          <a class="btn-white" href="https://github.com/roy-tian/TFolio" target="_blank" rel="noopener">
+            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .25Z"/></svg>
+            <span lang="zh">给 TFolio 加 Star</span><span lang="en">Star TFolio on GitHub</span>
+          </a>
+          <a class="btn-line" href="https://github.com/roy-tian/TFolio/issues" target="_blank" rel="noopener">
+            <span lang="zh">提交 issue</span><span lang="en">File an issue</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer" id="download">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="#">
+          <img src="assets/icon.png" alt="TFolio" width="26" height="26">
+          TFolio
+        </a>
+        <p>
+          <span lang="zh">轻快的开源 PDF 桌面工具。阅读、批注、合订与排版都在本机完成，文档不会上传。</span>
+          <span lang="en">A nimble open-source PDF desk. Read, mark up, compile, and typeset locally — your files never leave the machine.</span>
+        </p>
+      </div>
+      <div>
+        <h3><span lang="zh">下载 v0.1.9</span><span lang="en">DOWNLOAD v0.1.9</span></h3>
+        <ul>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_x64-setup.exe"><span lang="zh">Windows x64（.exe）</span><span lang="en">Windows x64 (.exe)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_x64_en-US.msi"><span lang="zh">Windows x64（.msi）</span><span lang="en">Windows x64 (.msi)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_aarch64.dmg"><span lang="zh">macOS Apple Silicon（.dmg）</span><span lang="en">macOS Apple Silicon (.dmg)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_x64.dmg"><span lang="zh">macOS Intel（.dmg）</span><span lang="en">macOS Intel (.dmg)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_amd64.deb"><span lang="zh">Linux x64（.deb）</span><span lang="en">Linux x64 (.deb)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_amd64.AppImage"><span lang="zh">Linux x64（.AppImage）</span><span lang="en">Linux x64 (.AppImage)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio-0.1.9-1.x86_64.rpm"><span lang="zh">Linux x64（.rpm）</span><span lang="en">Linux x64 (.rpm)</span></a></li>
+        </ul>
+      </div>
+      <div>
+        <h3><span lang="zh">链 接</span><span lang="en">LINKS</span></h3>
+        <ul>
+          <li><a href="https://github.com/roy-tian/TFolio/releases"><span lang="zh">全部版本与更新日志</span><span lang="en">All releases &amp; changelog</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/issues"><span lang="zh">问题反馈</span><span lang="en">Feedback</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/blob/master/LICENSE"><span lang="zh">MIT 许可证</span><span lang="en">MIT license</span></a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span><span lang="zh">© 2026 Roy Tian · TFolio 以 MIT 许可开源</span><span lang="en">© 2026 Roy Tian · TFolio, MIT licensed</span></span>
+      <span class="mono">— END —</span>
+    </div>
+  </div>
+</footer>
+
+<div class="page-ticker" aria-hidden="true">— <span id="ticker-page">01</span> —</div>
+
+<script>
+(function () {
+  "use strict"
+
+  var VERSION = "0.1.9"
+  var BASE = "https://github.com/roy-tian/TFolio/releases/download/v" + VERSION + "/"
+
+  var TARGETS = {
+    windows: {
+      url: BASE + "TFolio_" + VERSION + "_x64-setup.exe",
+      ext: ".exe",
+      label: { zh: "Windows 版", en: "Windows" }
+    },
+    macArm: {
+      url: BASE + "TFolio_" + VERSION + "_aarch64.dmg",
+      ext: ".dmg",
+      label: { zh: "macOS · Apple Silicon", en: "macOS · Apple Silicon" }
+    },
+    macIntel: {
+      url: BASE + "TFolio_" + VERSION + "_x64.dmg",
+      ext: ".dmg",
+      label: { zh: "macOS · Intel", en: "macOS · Intel" }
+    },
+    linux: {
+      url: BASE + "TFolio_" + VERSION + "_amd64.deb",
+      ext: ".deb",
+      label: { zh: "Linux 版", en: "Linux" }
+    }
+  }
+
+  var COPY = {
+    zh: {
+      title: "TFolio — 你手边的 PDF 工作伴侣",
+      download: "下载 TFolio " + VERSION + " · ",
+      fallback: "前往下载页",
+      toggleHint: "切换到 English",
+      navLabel: "站点导航"
+    },
+    en: {
+      title: "TFolio — Put your PDFs in order",
+      download: "Download TFolio " + VERSION + " · ",
+      fallback: "Go to releases",
+      toggleHint: "Switch to Chinese",
+      navLabel: "Main navigation"
+    }
+  }
+
+  var lang = document.documentElement.dataset.lang === "en" ? "en" : "zh"
+  var button = document.querySelector(".js-download")
+  var label = document.querySelector(".js-download-label")
+  var toggle = document.getElementById("lang-toggle")
+  var nav = document.querySelector(".nav")
+
+  function detect() {
+    var ua = navigator.userAgent
+    var data = navigator.userAgentData
+    var platform = (data && data.platform) || navigator.platform || ""
+
+    if (/Win/i.test(platform) || /Windows/i.test(ua)) return "windows"
+    if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) {
+      var arm = /arm|aarch/i.test(navigator.platform || "") ||
+        (function () {
+          try {
+            var canvas = document.createElement("canvas")
+            var gl = canvas.getContext("webgl")
+            var renderer = gl && gl.getParameter(gl.RENDERER) || ""
+            return /apple|m1|m2|m3/i.test(String(renderer))
+          } catch (error) {
+            return false
+          }
+        })()
+      // WebGL can't tell on Safari; Apple Silicon is the sensible default now.
+      return arm ? "macArm" : "macIntel"
+    }
+    if (/Linux|X11|CrOS/i.test(platform) || /Linux/i.test(ua)) {
+      return /Android/i.test(ua) ? null : "linux"
+    }
+    return null
+  }
+
+  var targetKey = detect()
+  var target = targetKey ? TARGETS[targetKey] : null
+
+  function renderDownload() {
+    document.title = COPY[lang].title
+    toggle.setAttribute("aria-label", COPY[lang].toggleHint)
+    nav.setAttribute("aria-label", COPY[lang].navLabel)
+    if (target && button && label) {
+      button.href = target.url
+      label.innerHTML = ""
+      label.append(
+        COPY[lang].download + target.label[lang] + " ",
+        Object.assign(document.createElement("small"), {
+          textContent: "(" + target.ext + ")"
+        })
+      )
+    } else if (label) {
+      label.textContent = COPY[lang].fallback
+    }
+  }
+
+  function applyLang(next) {
+    lang = next
+    document.documentElement.dataset.lang = lang
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
+    document.querySelectorAll("img[data-lang-src-zh]").forEach(function (img) {
+      var src = img.getAttribute("data-lang-src-" + lang)
+      if (src) img.setAttribute("src", src)
+      var alt = img.getAttribute("data-lang-alt-" + lang)
+      if (alt) img.setAttribute("alt", alt)
+    })
+    renderDownload()
+    try {
+      localStorage.setItem("tfolio-lang", lang)
+    } catch (error) { /* private mode */ }
+  }
+
+  toggle.addEventListener("click", function () {
+    applyLang(lang === "zh" ? "en" : "zh")
+  })
+
+  applyLang(lang)
+
+  // 滚动入场
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  var revealables = document.querySelectorAll(".reveal")
+  if (reduce || !("IntersectionObserver" in window)) {
+    revealables.forEach(function (node) { node.classList.add("is-in") })
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("is-in")
+          io.unobserve(entry.target)
+        }
+      })
+    }, { rootMargin: "0px 0px -12% 0px", threshold: 0.1 })
+    revealables.forEach(function (node) { io.observe(node) })
+  }
+
+  // — n — 阅读页码：落在哪个功能节，就翻到第几页
+  var sections = Array.prototype.slice.call(
+    document.querySelectorAll(".feature, .open-source")
+  )
+  var ticker = document.getElementById("ticker-page")
+  if (sections.length && ticker && "IntersectionObserver" in window) {
+    var spy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return
+        var index = sections.indexOf(entry.target)
+        if (index >= 0) {
+          ticker.textContent = String(index + 1).padStart(2, "0")
+        }
+      })
+    }, { rootMargin: "-45% 0px -45% 0px" })
+    sections.forEach(function (node) { spy.observe(node) })
+  }
+})()
+</script>
+
+</body>
+</html>
