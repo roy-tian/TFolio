@@ -15,7 +15,7 @@ mkdirSync(output, { recursive: true })
 
 for (const name of ["app-large", "app-small", "file-large", "file-small", "file-tiny"]) {
   const result = spawnSync(process.execPath, [
-    "run", "tauri", "icon", path.join(masters, name + ".png"),
+    "run", "tauri", "icon", path.join(masters, name + ".svg"),
     "--output", path.join(scratch, name),
     ...sizes.flatMap((size) => ["--png", String(size)]),
   ], { cwd: root, stdio: "inherit" })
@@ -83,8 +83,7 @@ writeIco("file", "pdf.ico")
 writeIcns("file", "pdf.icns")
 
 const websiteAssets = path.join(root, "website/assets")
-// The website is optional in checkouts; its two brand images share these masters.
+// The website is optional in checkouts; it uses the vector master directly.
 if (existsSync(websiteAssets)) {
-  copyFileSync(path.join(output, "64x64.png"), path.join(websiteAssets, "icon.png"))
-  copyFileSync(path.join(output, "64x64.png"), path.join(websiteAssets, "favicon-64.png"))
+  copyFileSync(path.join(masters, "app-small.svg"), path.join(websiteAssets, "icon.svg"))
 }

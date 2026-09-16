@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Clock, FilePlus2, FolderOpen, LoaderCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import fileSmallIcon from "@/assets/brand/file-small.png"
+import fileSmallIcon from "@/assets/brand/file-small.svg"
 import { HintTooltip } from "@/components/HintTooltip"
 import {
   HOME_TAB_ID,

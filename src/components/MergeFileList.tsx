@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import fileTinyIcon from "@/assets/brand/file-tiny.png"
+import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip } from "@/components/HintTooltip"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"

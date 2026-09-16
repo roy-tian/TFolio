@@ -4,7 +4,7 @@ import { Radio } from "@base-ui/react/radio"
 import { RadioGroup } from "@base-ui/react/radio-group"
 import { useTranslation } from "react-i18next"
 
-import appLargeIcon from "@/assets/brand/app-large.png"
+import appLargeIcon from "@/assets/brand/app-large.svg"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
