@@ -7,22 +7,31 @@
 <meta name="description" content="TFolio 是一款轻快的开源 PDF 桌面工具：阅读批注、水印页码、遮盖合订都在本机完成。MIT 开源，支持 Windows、macOS 与 Linux。">
 <meta property="og:title" content="TFolio — 你手边的 PDF 工作伴侣">
 <meta property="og:description" content="轻快的开源 PDF 桌面工具：水印、国标页码、全文搜索、遮盖方框、合订成册，全在本机完成。">
-<meta property="og:image" content="assets/zh/hero.png">
+<meta property="og:image" content="https://roy-tian.github.io/TFolio/assets/zh/hero.png">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
 <link rel="icon" type="image/png" href="assets/favicon-64.png">
 <script>
 (function () {
+  var lang = "zh"
   try {
     var saved = localStorage.getItem("tfolio-lang")
-    var lang = saved === "en" || saved === "zh"
-      ? saved
-      : (navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"
-    document.documentElement.dataset.lang = lang
-    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
-  } catch (error) {
-    document.documentElement.dataset.lang = "zh"
-  }
+    if (saved === "en" || saved === "zh") {
+      lang = saved
+    } else if ((navigator.language || "").toLowerCase().indexOf("zh") !== 0) {
+      lang = "en"
+    }
+  } catch (error) { /* private mode keeps zh */ }
+  document.documentElement.dataset.lang = lang
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
+  // hero src is assigned per-language at the end of <body>; preload the right
+  // file from here so the fetch outruns the parser
+  var preload = document.createElement("link")
+  preload.rel = "preload"
+  preload.as = "image"
+  preload.href = "assets/" + lang + "/hero.png"
+  preload.setAttribute("fetchpriority", "high")
+  document.head.appendChild(preload)
 })()
 </script>
 <style>
@@ -619,8 +628,8 @@ a:hover { text-decoration: underline; }
         </a>
       </div>
       <p class="platform-note">
-        <span lang="zh">已按你的系统选择安装包，当前版本 <span class="mono">v0.1.8</span>。</span>
-        <span lang="en">The button picks your system's installer · <span class="mono">v0.1.8</span>.</span>
+        <span lang="zh">已按你的系统选择安装包，当前版本 <span class="mono">v0.1.9</span>。</span>
+        <span lang="en">The button picks your system's installer · <span class="mono">v0.1.9</span>.</span>
       </p>
     </div>
     <figure class="hero-shot reveal">
@@ -630,10 +639,10 @@ a:hover { text-decoration: underline; }
           <span class="window-title"><span lang="zh">十五五规划纲要.pdf — TFolio</span><span lang="en">Attention Is All You Need.pdf — TFolio</span></span>
         </div>
         <img id="hero-shot-img"
-             src="assets/zh/hero.png"
              data-lang-src-zh="assets/zh/hero.png" data-lang-src-en="assets/en/hero.png"
              data-lang-alt-zh="TFolio 主界面：正在阅读《十五五规划纲要》PDF" data-lang-alt-en="TFolio main window reading the Attention Is All You Need paper"
-             width="1100" height="760" fetchpriority="high">
+             width="1100" height="760" fetchpriority="high" alt="">
+        <noscript><img src="assets/zh/hero.png" alt="TFolio 主界面：正在阅读《十五五规划纲要》PDF" width="1100" height="760"></noscript>
       </div>
       <span class="hero-shot-badge"><span lang="zh">实机截图 · Linux 版</span><span lang="en">Live capture · Linux build</span></span>
     </figure>
@@ -748,7 +757,7 @@ a:hover { text-decoration: underline; }
         </h2>
         <p>
           <span lang="zh">全文检索只认 PDF 里的真实文字：正文里被排版折行的短语照样一击命中，<strong>带着换行粘进搜索框的整段话</strong>也能连起来匹配。140 页的纲要、200 多处结果，转眼就到。</span>
-          <span lang="en">Full-text search reads the PDF's real text: phrases wrapped mid-line still match in <strong>one hit</strong>, and a query pasted with its line breaks intact matches too. A 140-page outline, 200+ hits — results land in the blink of an eye.</span>
+          <span lang="en">Full-text search reads the PDF's real text: phrases wrapped mid-line still match in <strong>one hit</strong>, and a query pasted with its line breaks intact matches too. All 46 “attention” hits across the Transformer paper — results land in the blink of an eye.</span>
         </p>
       </div>
       <figure class="feature-figure reveal">
@@ -873,15 +882,15 @@ a:hover { text-decoration: underline; }
         </p>
       </div>
       <div>
-        <h3><span lang="zh">下载 v0.1.8</span><span lang="en">DOWNLOAD v0.1.8</span></h3>
+        <h3><span lang="zh">下载 v0.1.9</span><span lang="en">DOWNLOAD v0.1.9</span></h3>
         <ul>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.8/TFolio_0.1.8_x64-setup.exe"><span lang="zh">Windows x64（.exe）</span><span lang="en">Windows x64 (.exe)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.8/TFolio_0.1.8_x64_en-US.msi"><span lang="zh">Windows x64（.msi）</span><span lang="en">Windows x64 (.msi)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.8/TFolio_0.1.8_aarch64.dmg"><span lang="zh">macOS Apple Silicon（.dmg）</span><span lang="en">macOS Apple Silicon (.dmg)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.8/TFolio_0.1.8_x64.dmg"><span lang="zh">macOS Intel（.dmg）</span><span lang="en">macOS Intel (.dmg)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.8/TFolio_0.1.8_amd64.deb"><span lang="zh">Linux x64（.deb）</span><span lang="en">Linux x64 (.deb)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.8/TFolio_0.1.8_amd64.AppImage"><span lang="zh">Linux x64（.AppImage）</span><span lang="en">Linux x64 (.AppImage)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.8/TFolio-0.1.8-1.x86_64.rpm"><span lang="zh">Linux x64（.rpm）</span><span lang="en">Linux x64 (.rpm)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_x64-setup.exe"><span lang="zh">Windows x64（.exe）</span><span lang="en">Windows x64 (.exe)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_x64_en-US.msi"><span lang="zh">Windows x64（.msi）</span><span lang="en">Windows x64 (.msi)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_aarch64.dmg"><span lang="zh">macOS Apple Silicon（.dmg）</span><span lang="en">macOS Apple Silicon (.dmg)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_x64.dmg"><span lang="zh">macOS Intel（.dmg）</span><span lang="en">macOS Intel (.dmg)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_amd64.deb"><span lang="zh">Linux x64（.deb）</span><span lang="en">Linux x64 (.deb)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio_0.1.9_amd64.AppImage"><span lang="zh">Linux x64（.AppImage）</span><span lang="en">Linux x64 (.AppImage)</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.9/TFolio-0.1.9-1.x86_64.rpm"><span lang="zh">Linux x64（.rpm）</span><span lang="en">Linux x64 (.rpm)</span></a></li>
         </ul>
       </div>
       <div>
@@ -906,8 +915,7 @@ a:hover { text-decoration: underline; }
 (function () {
   "use strict"
 
-  var VERSION = "0.1.8"
-  var RELEASES = "https://github.com/roy-tian/TFolio/releases"
+  var VERSION = "0.1.9"
   var BASE = "https://github.com/roy-tian/TFolio/releases/download/v" + VERSION + "/"
 
   var TARGETS = {
@@ -938,13 +946,15 @@ a:hover { text-decoration: underline; }
       title: "TFolio — 你手边的 PDF 工作伴侣",
       download: "下载 TFolio " + VERSION + " · ",
       fallback: "前往下载页",
-      toggleHint: "切换到 English"
+      toggleHint: "切换到 English",
+      navLabel: "站点导航"
     },
     en: {
       title: "TFolio — Put your PDFs in order",
       download: "Download TFolio " + VERSION + " · ",
       fallback: "Go to releases",
-      toggleHint: "Switch to Chinese"
+      toggleHint: "Switch to Chinese",
+      navLabel: "Main navigation"
     }
   }
 
@@ -952,6 +962,7 @@ a:hover { text-decoration: underline; }
   var button = document.querySelector(".js-download")
   var label = document.querySelector(".js-download-label")
   var toggle = document.getElementById("lang-toggle")
+  var nav = document.querySelector(".nav")
 
   function detect() {
     var ua = navigator.userAgent
@@ -986,6 +997,7 @@ a:hover { text-decoration: underline; }
   function renderDownload() {
     document.title = COPY[lang].title
     toggle.setAttribute("aria-label", COPY[lang].toggleHint)
+    nav.setAttribute("aria-label", COPY[lang].navLabel)
     if (target && button && label) {
       button.href = target.url
       label.innerHTML = ""
