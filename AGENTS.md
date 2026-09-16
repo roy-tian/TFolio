@@ -75,9 +75,9 @@
   verify bytes before writing and write the compiled-in OFL license before the font.
 - Check updates once per process in Rust, never in e2e; no command takes a URL. Keep the
   endpoint and verifying key in `tauri.conf.json`; exclude updater commands from WebView capabilities.
-- `createUpdaterArtifacts` signs every bundle. Bundling requires `TAURI_SIGNING_PRIVATE_KEY`
-  and its password: repository secrets in both workflows, environment variables for `tauri:bundle`.
-  Regenerating the key strands installed copies on their current version.
+- `preflight` uses `tauri:build` (`--no-bundle`) so private signing keys stay out of local
+  environments. Bundle dry-run and Release alone sign installers with both `TAURI_SIGNING_*`
+  repository secrets. Regenerating the key strands installed copies on their current version.
 - Installing an update restarts the process and discards unsaved work in every window. Confirm
   if any window has unsaved work or cannot answer. Refuse in debug builds: without a bundle type
   under `target/`, the plugin falls back to replacing the running binary itself.

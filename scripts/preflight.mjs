@@ -1,5 +1,5 @@
-// Run before tagging a release: every single-platform check CI runs, plus a real
-// bundle for this OS. Cross-platform bundles are the Bundle dry-run workflow's job.
+// Run before tagging a release: every single-platform check CI runs, plus a
+// production build. Signed bundles are the Bundle dry-run workflow's job.
 import path from "node:path"
 import process from "node:process"
 import { spawnSync } from "node:child_process"
@@ -44,9 +44,9 @@ const steps = [
     args: ["test", "--manifest-path", manifest, "--locked"],
   },
   {
-    label: "Bundle installers (current OS only)",
+    label: "Production application build (no installers)",
     bin: "bun",
-    args: ["run", "tauri:bundle"],
+    args: ["run", "tauri:build"],
   },
 ]
 
@@ -69,16 +69,16 @@ if (failed) {
   console.error(`\u2717 Pre-flight failed at: ${failed.label}`)
   console.error("  Fix the above, then re-run `bun run preflight`.")
   console.error(
-    "  This only covers the current OS. Cross-platform bundling (Windows MSI,",
+    "  Signed installer bundling (Windows MSI, macOS dmg, and Linux packages)",
   )
   console.error(
-    "  macOS dmg, Linux packages) is checked by the Bundle dry-run workflow.",
+    "  is checked by the Bundle dry-run workflow with repository secrets.",
   )
   process.exit(1)
 }
 
 console.log("\u2713 All pre-flight checks passed locally.")
 console.log(
-  "  Before tagging, also run the Bundle dry-run workflow to cover the other",
+  "  Before tagging, run the Bundle dry-run workflow to build and sign every",
 )
-console.log('  operating systems: Actions \u2192 "Bundle dry-run" \u2192 Run workflow.')
+console.log('  platform: Actions \u2192 "Bundle dry-run" \u2192 Run workflow.')
