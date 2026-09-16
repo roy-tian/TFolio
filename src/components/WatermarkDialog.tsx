@@ -54,7 +54,7 @@ export function WatermarkDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         aria-busy={isApplying}
-        className="flex max-h-[calc(100svh-2rem)] w-[40rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[40rem]"
+        className="flex max-h-[calc(100svh-2rem)] w-[44rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[44rem]"
         data-testid="watermark-dialog"
         showCloseButton={!isApplying}
       >
