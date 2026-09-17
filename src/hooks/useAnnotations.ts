@@ -39,6 +39,7 @@ import {
 import type { PagePoint } from "@/lib/annotationGeometry"
 import { e2eOverride } from "@/lib/e2e"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
+import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
   PdfExportOutcome,
@@ -1201,6 +1202,34 @@ export function useAnnotations({
     [documentId, enqueue],
   )
 
+  /** A compressed copy never touches this tab's history: like the archive
+      export, it leaves for a destination the backend's own dialog picked. */
+  const exportCompressed = useCallback(
+    async (request: CompressedExportRequest, onProgress: ProgressHandler) => {
+      let outcome: "saved" | "cancelled" | "failed" = "cancelled"
+      if (documentId === undefined) return outcome
+      await enqueue((current) => ({
+        next: current,
+        pages: [],
+        textPages: [],
+        work: async () => {
+          const args = { ...request, documentId }
+          const override = e2eOverride("exportCompressedPdf")
+          const path = override
+            ? await override(args, onProgress)
+            : await invoke<string | null>("export_compressed_pdf", {
+                ...args,
+                onProgress: progressChannel(onProgress),
+              })
+          outcome = path ? "saved" : "cancelled"
+          return false
+        },
+      }), () => { outcome = "failed" })
+      return outcome as "saved" | "cancelled" | "failed"
+    },
+    [documentId, enqueue],
+  )
+
   /** Writes the document back over its own file. A clean history is a no-op —
       judged inside the queue, against the history it has actually reached. */
   const save = useCallback(async () => {
@@ -1261,6 +1290,7 @@ export function useAnnotations({
       eraseAt,
       exportCopy,
       exportArchive,
+      exportCompressed,
       hasPendingWorkNow,
       historyNow,
       insertBlankPage,
@@ -1292,6 +1322,7 @@ export function useAnnotations({
       eraseAt,
       exportCopy,
       exportArchive,
+      exportCompressed,
       hasPendingWorkNow,
       history,
       historyNow,

@@ -1,6 +1,7 @@
 mod archive;
 mod archive_links;
 mod commands;
+mod compress;
 mod engine;
 mod font;
 mod geometry;
@@ -24,6 +25,7 @@ pub use commands::{
     render_pdf_page_thumbnail, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf,
     search_pdf_text,
 };
+pub use compress::{cancel_pdf_compression, estimate_pdf_compression, export_compressed_pdf};
 pub use engine::PdfiumState;
 // `launch.rs` reads the image kinds for its own launch test.
 pub(crate) use engine::is_merge_image;

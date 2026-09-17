@@ -144,7 +144,9 @@ impl PdfiumEngine {
                         on_progress((page + 1) as usize, total);
                     }
                     let bytes = if rasterize {
-                        let Some(bytes) = self.rasterized_bytes(&part, &operation)? else {
+                        let Some(bytes) =
+                            self.rasterized_bytes(&part, &operation, &FLATTEN_LEVELS, |_, _| {})?
+                        else {
                             return Ok(false);
                         };
                         bytes

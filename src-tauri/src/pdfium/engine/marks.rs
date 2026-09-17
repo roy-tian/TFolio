@@ -724,7 +724,7 @@ impl PdfiumEngine {
                 marks.remove(position);
             }
 
-            *entry.revisions.entry(page_id).or_insert(0) += 1;
+            entry.bump_page_revision(page_id);
         }
 
         Ok(located

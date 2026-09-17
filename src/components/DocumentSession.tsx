@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next"
 
 import type { AppMenuActions } from "@/components/AppMenu"
 import { ArchiveExportDialog } from "@/components/ArchiveExportDialog"
+import { CompressExportDialog } from "@/components/CompressExportDialog"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
@@ -245,6 +246,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
     const [bookmarksOpen, setBookmarksOpen] = useState(false)
     const [archiveExportOpen, setArchiveExportOpen] = useState(false)
+    const [compressOpen, setCompressOpen] = useState(false)
     // The one notice this session holds rather than raises: it stands until the
     // reader answers it, and the held edit below is what the answer is for.
     const [noteFontOffer, setNoteFontOffer] = useState<
@@ -1299,6 +1301,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
           onExport={() => setArchiveExportOpen(true)}
+          onCompress={() => setCompressOpen(true)}
           onSearchClose={search.closeSearch}
           onSearchOpen={search.openSearch}
           onToolChange={setActiveTool}
@@ -1336,6 +1339,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             suggestedName={fileName}
             onExport={annotations.exportArchive}
             onClose={() => setArchiveExportOpen(false)}
+          />
+        ) : null}
+
+        {active && compressOpen && pdfDocument ? (
+          <CompressExportDialog
+            document={pdfDocument}
+            suggestedName={fileName}
+            onExport={annotations.exportCompressed}
+            onClose={() => setCompressOpen(false)}
           />
         ) : null}
 

@@ -12,6 +12,7 @@ import {
   Save,
   SaveAll,
   Settings,
+  Shrink,
   SquareX,
   Upload,
 } from "lucide-react"
@@ -71,6 +72,7 @@ type AppMenuProps = AppMenuActions & {
   onSave?: () => void
   onSaveAs?: () => void
   onExport?: () => void
+  onCompress?: () => void
   saveHint?: string
 }
 
@@ -88,6 +90,7 @@ export function AppMenu({
   onSaveAll,
   onSaveAs,
   onExport,
+  onCompress,
   recentFiles,
   saveHint,
 }: AppMenuProps) {
@@ -218,6 +221,14 @@ export function AppMenu({
             >
               <FileArchive />
               {t("archiveExport.title")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="compress"
+              disabled={!onCompress}
+              onClick={onCompress}
+            >
+              <Shrink />
+              {t("compressExport.menuLabel")}
             </DropdownMenuItem>
             <DropdownMenuItem
               data-action="close-all"

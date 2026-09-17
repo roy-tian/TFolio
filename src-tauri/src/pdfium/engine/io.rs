@@ -812,7 +812,7 @@ impl PdfiumEngine {
             .is_some_and(|config| config.rasterize)
         {
             let bytes = self
-                .rasterized_bytes(&entry.document, operation)?
+                .rasterized_bytes(&entry.document, operation, &FLATTEN_LEVELS, |_, _| {})?
                 .ok_or_else(|| "image PDF export was cancelled".to_string())?;
             return write_file_atomically(path, |file| {
                 file.write_all(&bytes)

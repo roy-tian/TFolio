@@ -5,11 +5,16 @@
 import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
+import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
   installUpdate?: () => Promise<void>
   exportPdfArchive?: (
     args: ArchiveExportRequest & { documentId: number },
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<string | null>
+  exportCompressedPdf?: (
+    args: CompressedExportRequest & { documentId: number },
     onProgress: (progress: PdfProgress) => void,
   ) => Promise<string | null>
   exportPdf?: (args: {

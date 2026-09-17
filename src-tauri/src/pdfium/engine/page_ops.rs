@@ -281,7 +281,7 @@ impl PdfiumEngine {
             // The one edit that re-shapes a page: it writes the geometry memo,
             // others only fill it, and bumps the revision, page by page.
             entry.page_geometry.insert(page_id, measured);
-            *entry.revisions.entry(page_id).or_insert(0) += 1;
+            entry.bump_page_revision(page_id);
         }
 
         Ok(structure_update(entry))
