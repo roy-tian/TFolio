@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -13,6 +13,7 @@ import {
   openFileButton,
   openPathViaDialog,
   openPdfFromDisk,
+  recentFilesStore,
   refreshApp,
   seedSettings,
 } from "./helpers"
@@ -196,6 +197,60 @@ describe("independent document tabs", () => {
     await expect(tabButton("recent.pdf")).toHaveAttribute(
       "aria-selected",
       "true",
+    )
+  })
+
+  it("removes one entry from the home tab's recent list", async () => {
+    // Each open waits for the one before: the strip's open button is disabled
+    // while an open is in flight, so a second click that lands early is lost.
+    const removedPath = await openPdfFromDisk("removed-recent.pdf", minimalPdf(1))
+    await expect(tabButton("removed-recent.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await openPdfFromDisk("kept-recent.pdf", minimalPdf(1))
+    await expect(tabButton("kept-recent.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    await $("#workspace-tab-home").click()
+    const removedEntry = recentEntry(removedPath)
+    await removedEntry.waitForDisplayed()
+
+    // The remove key is hover-revealed and, hidden, holds no pointer events,
+    // and the WebDriver can flip CSS :hover for neither, so the click is
+    // dispatched in-page against the row's own button.
+    await browser.execute((name: string) => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-slot='recent-file']"),
+      ).find((entry) => entry.textContent?.includes(name))
+      const remove = row
+        ?.closest("li")
+        ?.querySelector<HTMLElement>("[data-slot='remove-recent-file']")
+
+      remove?.click()
+    }, "removed-recent.pdf")
+
+    await browser.waitUntil(async () => !(await removedEntry.isExisting()), {
+      timeout: 15_000,
+      timeoutMsg: "the removed entry never left the list",
+    })
+
+    // The store, not the page, is what the next run's home tab reads: the
+    // removal must reach it while its neighbour survives.
+    const store = recentFilesStore()
+    await browser.waitUntil(
+      () => {
+        if (!existsSync(store)) {
+          return false
+        }
+
+        const written = readFileSync(store, "utf8")
+
+        return !written.includes(removedPath) && written.includes("kept-recent.pdf")
+      },
+      { timeout: 15_000, timeoutMsg: "the removal never reached the store" },
     )
   })
 

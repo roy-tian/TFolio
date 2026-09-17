@@ -142,6 +142,7 @@ const zhCN = {
     open: "打开",
     recent: "最近打开",
     recentEmpty: "打开过的 PDF 会显示在这里。",
+    removeRecent: "从最近打开中移除 {{name}}",
   },
   toolbar: {
     saveAsMenu: "更多保存方式",

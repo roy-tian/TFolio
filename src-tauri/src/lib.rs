@@ -23,7 +23,7 @@ use pdfium::{
     remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail, reorder_pdf_pages,
     restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
 };
-use recent::{recent_pdf_view, recent_pdfs, set_recent_pdf_view, RecentFiles};
+use recent::{recent_pdf_view, recent_pdfs, remove_recent_pdf, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
 use tauri::Manager;
 use update::{download_update, install_update, update_status, UpdateState};
@@ -136,6 +136,7 @@ pub fn run() {
             recent_pdfs,
             recent_pdf_view,
             set_recent_pdf_view,
+            remove_recent_pdf,
             render_pdf_page,
             render_pdf_page_thumbnail,
             extract_pdf_page_text,

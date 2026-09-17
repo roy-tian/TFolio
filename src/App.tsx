@@ -69,6 +69,7 @@ import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
 import {
   readRecentFiles,
   readRecentPdfView,
+  removeRecentFile,
   type RecentFile,
   type RecentPdfView,
 } from "@/lib/recentFiles"
@@ -181,6 +182,15 @@ export default function App() {
       }
     })
   }, [])
+
+  // The list is re-read rather than spliced: the backend's answer is the one
+  // that also dropped the path's saved view and next-run approval.
+  const removeRecent = useCallback(
+    (path: string) => {
+      void removeRecentFile(path).then(refreshRecentFiles)
+    },
+    [refreshRecentFiles],
+  )
 
   const activateTab = useCallback((tabId: TabId) => {
     if (
@@ -1221,6 +1231,7 @@ export default function App() {
         onNew={() => void createDocument()}
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
+        onRemoveRecent={removeRecent}
         opening={isOpening}
         recentFiles={recentFiles}
       />

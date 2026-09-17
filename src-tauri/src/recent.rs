@@ -193,6 +193,21 @@ impl RecentFiles {
         });
     }
 
+    /// Forgets one entry, withdrawing the next run's approval of the path with
+    /// it. This run's granted approval stays: removing from a list is not an
+    /// accusation against a document the reader may still have open.
+    pub fn remove(&self, path: &Path) {
+        // Checked first, as in `record_view`, so an unknown path rewrites nothing.
+        if !self
+            .0
+            .read(|document| document.files.iter().any(|entry| entry == path))
+        {
+            return;
+        }
+
+        self.0.write(|document| forget(document, path));
+    }
+
     pub fn view(&self, path: &Path) -> Option<RecentPdfView> {
         self.0.read(|document| {
             document
@@ -255,6 +270,15 @@ fn promote(entries: &mut Vec<PathBuf>, path: &Path) {
     entries.truncate(RECENT_LIMIT);
 }
 
+/// A view cannot outlive the bounded path list that authorises and identifies
+/// it, so the removed path's view goes with the path.
+fn forget(document: &mut RecentFilesDocument, path: &Path) {
+    document.files.retain(|entry| entry != path);
+    document
+        .views
+        .retain(|entry| document.files.contains(&entry.path));
+}
+
 /// Absolute and named as a PDF — the same guarantees the OS's own dialogs give
 /// what reaches `open_pdf_from_path`. `launch.rs` reads this for a launch's
 /// PDFs, beside its images and Word documents.
@@ -288,6 +312,14 @@ pub async fn recent_pdf_view(
     state: State<'_, RecentFiles>,
 ) -> Result<Option<RecentPdfView>, String> {
     Ok(state.view(Path::new(&path)))
+}
+
+/// A convenience like the list itself: an unknown path changes nothing, and the
+/// home tab re-reads the list rather than trusting the removal to matter.
+#[tauri::command]
+pub async fn remove_recent_pdf(path: String, state: State<'_, RecentFiles>) -> Result<(), String> {
+    state.remove(Path::new(&path));
+    Ok(())
 }
 
 /// Bounded here even though the frontend checks too: commands are callable by
@@ -377,6 +409,36 @@ mod tests {
         promote(&mut entries, Path::new("/docs/./a.pdf"));
 
         assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn removal_takes_the_paths_view_with_it() {
+        let mut document = RecentFilesDocument {
+            files: vec![PathBuf::from("/docs/a.pdf"), PathBuf::from("/docs/b.pdf")],
+            views: Vec::new(),
+        };
+        assert!(remember_view(
+            &mut document,
+            Path::new("/docs/a.pdf"),
+            view()
+        ));
+
+        forget(&mut document, Path::new("/docs/./a.pdf"));
+
+        assert_eq!(paths(&document.files), ["/docs/b.pdf"]);
+        assert!(document.views.is_empty());
+    }
+
+    #[test]
+    fn forgetting_an_unknown_path_leaves_the_list_alone() {
+        let mut document = RecentFilesDocument {
+            files: vec![PathBuf::from("/docs/a.pdf")],
+            views: Vec::new(),
+        };
+
+        forget(&mut document, Path::new("/docs/other.pdf"));
+
+        assert_eq!(paths(&document.files), ["/docs/a.pdf"]);
     }
 
     #[test]

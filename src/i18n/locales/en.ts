@@ -137,6 +137,7 @@ const en = {
     open: "Open",
     recent: "Recent files",
     recentEmpty: "The PDFs you open will be listed here.",
+    removeRecent: "Remove {{name}} from recent files",
   },
   toolbar: {
     saveAsMenu: "More save options",
