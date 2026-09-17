@@ -15,33 +15,34 @@ import {
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { useAnnotations } from "@/hooks/useAnnotations"
-import type { ArchiveFormat } from "@/lib/archiveExport"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
-type ArchiveExportDialogProps = {
+type SplitMode = "bookmarks" | "pages"
+
+type SplitPdfDialogProps = {
   document: PdfDocumentInfo
   suggestedName: string
   onExport: ReturnType<typeof useAnnotations>["exportArchive"]
   onClose: () => void
 }
 
-export function ArchiveExportDialog({
+export function SplitPdfDialog({
   document,
   suggestedName,
   onExport,
   onClose,
-}: ArchiveExportDialogProps) {
+}: SplitPdfDialogProps) {
   const { t } = useTranslation()
-  const [format, setFormat] = useState<ArchiveFormat>("jpg")
+  const hasBookmarks = document.outline.some((item) =>
+    item.pageNumber !== null && item.pageNumber >= 1 && item.pageNumber <= document.numPages,
+  )
+  const [mode, setMode] = useState<SplitMode>(hasBookmarks ? "bookmarks" : "pages")
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [failed, setFailed] = useState(false)
   const [progress, setProgress] = useState<PdfProgress | null>(null)
   const stopRequested = useRef(false)
-  const hasBookmarks = document.outline.some((item) =>
-    item.pageNumber !== null && item.pageNumber >= 1 && item.pageNumber <= document.numPages,
-  )
 
   const cancel = async () => {
     if (await invoke<boolean>("cancel_pdf_archive", { documentId: document.id }).catch(() => false)) {
@@ -55,9 +56,9 @@ export function ArchiveExportDialog({
     setProgress(null)
     stopRequested.current = false
     const outcome = await onExport({
-      format,
-      filterLabel: t("archiveExport.filter"),
-      suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${format}.zip`,
+      options: mode === "bookmarks" ? { format: "bookmarks" } : { format: "pages" },
+      filterLabel: t("splitExport.filter"),
+      suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("splitExport.suffix")}.zip`,
     }, (next) => {
       setProgress(next)
       if (stopRequested.current) void cancel()
@@ -76,54 +77,59 @@ export function ArchiveExportDialog({
       }}
     >
       <DialogContent
-        data-testid="archive-export-dialog"
+        data-testid="split-dialog"
         showCloseButton={!busy}
         aria-busy={busy}
       >
         <DialogHeader>
-          <DialogTitle>{t("archiveExport.title")}</DialogTitle>
-          <DialogDescription>{t("archiveExport.description")}</DialogDescription>
+          <DialogTitle>{t("splitExport.title")}</DialogTitle>
+          <DialogDescription>{t("splitExport.description")}</DialogDescription>
         </DialogHeader>
         <RadioGroup
-          aria-label={t("archiveExport.format")}
+          aria-label={t("splitExport.mode")}
           disabled={busy}
-          value={format}
-          onValueChange={(value) => setFormat(value as ArchiveFormat)}
+          value={mode}
+          onValueChange={(value) => setMode(value as SplitMode)}
           className="gap-4 py-2"
         >
-          {(["jpg", "png", "bookmarks"] as const).map((option) => (
-            <Label key={option} className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
-              <RadioGroupItem
-                value={option}
-                disabled={option === "bookmarks" && !hasBookmarks}
-                data-testid={`archive-format-${option}`}
-              />
-              <span className="grid gap-1.5">
-                <span>{t(`archiveExport.${option}`)}</span>
-                <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                  {option === "bookmarks"
-                    ? t(hasBookmarks ? "archiveExport.bookmarksHint" : "archiveExport.noBookmarks")
-                    : t("archiveExport.imagesHint")}
-                </span>
+          <Label className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
+            <RadioGroupItem
+              value="bookmarks"
+              disabled={!hasBookmarks}
+              data-testid="split-mode-bookmarks"
+            />
+            <span className="grid gap-1.5">
+              <span>{t("splitExport.bookmarks")}</span>
+              <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+                {t(hasBookmarks ? "splitExport.bookmarksHint" : "splitExport.noBookmarks")}
               </span>
-            </Label>
-          ))}
+            </span>
+          </Label>
+          <Label className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
+            <RadioGroupItem value="pages" data-testid="split-mode-pages" />
+            <span className="grid gap-1.5">
+              <span>{t("splitExport.pages")}</span>
+              <span className="text-xs font-normal leading-relaxed text-muted-foreground">
+                {t("splitExport.pagesHint")}
+              </span>
+            </span>
+          </Label>
         </RadioGroup>
-        {format === "bookmarks" ? (
+        {mode === "bookmarks" ? (
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {t("archiveExport.bookmarksSizeHint")}
+            {t("splitExport.bookmarksSizeHint")}
           </p>
         ) : null}
         {failed ? (
           <p role="alert" className="text-sm text-destructive">
-            {t("archiveExport.failed")}
+            {t("splitExport.failed")}
           </p>
         ) : null}
         {busy ? (
           <OperationProgress
-            label={t("archiveExport.preparing")}
+            label={t("splitExport.preparing")}
             progress={progress}
-            testId="archive-export-progress"
+            testId="split-export-progress"
           />
         ) : null}
         <DialogFooter>
@@ -139,16 +145,16 @@ export function ArchiveExportDialog({
               setStopping(true)
               void cancel()
             }}
-            data-testid="archive-export-cancel"
+            data-testid="split-export-cancel"
           >
-            {t(stopping ? "archiveExport.stopping" : "archiveExport.cancel")}
+            {t(stopping ? "splitExport.stopping" : "splitExport.cancel")}
           </Button>
           <Button
-            disabled={busy || (format === "bookmarks" && !hasBookmarks)}
+            disabled={busy || (mode === "bookmarks" && !hasBookmarks)}
             onClick={() => void start()}
-            data-testid="archive-export-start"
+            data-testid="split-export-start"
           >
-            {t("archiveExport.save")}
+            {t("splitExport.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

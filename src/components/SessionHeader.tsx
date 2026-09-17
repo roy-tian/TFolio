@@ -1,4 +1,15 @@
-import { Bookmark, Printer, RotateCw, Save, Search } from "lucide-react"
+import {
+  Bookmark,
+  ChevronDown,
+  FileImage,
+  Printer,
+  RotateCw,
+  Save,
+  Scissors,
+  Search,
+  Shrink,
+  Upload,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
@@ -11,13 +22,21 @@ import { WindowControls } from "@/components/WindowControls"
 import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import type { usePrint } from "@/hooks/usePrint"
 import type { useZoom } from "@/hooks/useZoom"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import type { PdfDocumentInfo } from "@/lib/pdf"
-import { shortcuts } from "@/lib/shortcuts"
+import { formatShortcut, shortcuts } from "@/lib/shortcuts"
+import { splitMenuButtonClassName } from "@/lib/toolbarStyles"
 import type { ViewMode } from "@/lib/viewMode"
 import { cn } from "@/lib/utils"
 
@@ -39,7 +58,8 @@ type SessionHeaderProps = {
   onRedo: () => void
   onSave: () => void
   onSaveAs: () => void
-  onExport: () => void
+  onExportImages: () => void
+  onSplit: () => void
   onCompress: () => void
   onSearchClose: () => void
   onSearchOpen: () => void
@@ -92,7 +112,8 @@ export function SessionHeader({
   onRedo,
   onSave,
   onSaveAs,
-  onExport,
+  onExportImages,
+  onSplit,
   onCompress,
   onSearchClose,
   onSearchOpen,
@@ -129,7 +150,8 @@ export function SessionHeader({
             canSave={canSave}
             onSave={onSave}
             onSaveAs={onSaveAs}
-            onExport={pdfDocument ? onExport : undefined}
+            onExportImages={pdfDocument ? onExportImages : undefined}
+            onSplit={pdfDocument ? onSplit : undefined}
             onCompress={pdfDocument ? onCompress : undefined}
             saveHint={saveHint}
           />
@@ -147,17 +169,9 @@ export function SessionHeader({
           </Toggle>
         </ToolbarTooltip>
         <ButtonGroup>
-          {/* The chord is named only when it works: a disabled save
-              spends the tooltip on why it cannot. */}
-          <ToolbarTooltip
-            label={saveLabel}
-            shortcut={canSave ? shortcuts.save : undefined}
-          >
+          <ToolbarTooltip label={saveLabel} shortcut={shortcuts.save}>
             <Button
               aria-label={t("annotate.save")}
-              // A disabled control takes no pointer, and the hint saying why
-              // saving is unavailable has to have a hover to open on.
-              className="disabled:pointer-events-auto"
               data-slot="pdf-save-trigger"
               disabled={!canSave}
               onClick={onSave}
@@ -167,6 +181,45 @@ export function SessionHeader({
               <Save />
             </Button>
           </ToolbarTooltip>
+          <DropdownMenu>
+            <ToolbarTooltip label={t("toolbar.saveAsMenu")}>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    aria-label={t("toolbar.saveAsMenu")}
+                    className={splitMenuButtonClassName}
+                    data-slot="pdf-save-menu-trigger"
+                    disabled={!pdfDocument}
+                    size="icon"
+                    variant="outline"
+                  />
+                }
+              >
+                <ChevronDown className="size-3" />
+              </DropdownMenuTrigger>
+            </ToolbarTooltip>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuItem data-action="save-as" onClick={onSaveAs}>
+                <Upload />
+                {t("menu.saveAs")}
+                <DropdownMenuShortcut>
+                  {formatShortcut(shortcuts.saveAs)}
+                </DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem data-action="export-images" onClick={onExportImages}>
+                <FileImage />
+                {t("imageExport.menuLabel")}
+              </DropdownMenuItem>
+              <DropdownMenuItem data-action="split" onClick={onSplit}>
+                <Scissors />
+                {t("splitExport.menuLabel")}
+              </DropdownMenuItem>
+              <DropdownMenuItem data-action="compress" onClick={onCompress}>
+                <Shrink />
+                {t("compressExport.menuLabel")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ToolbarTooltip label={t("print.open")} shortcut={shortcuts.print}>
             <Button
               aria-label={t("print.open")}

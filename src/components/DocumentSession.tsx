@@ -12,8 +12,9 @@ import { invoke } from "@tauri-apps/api/core"
 import { useTranslation } from "react-i18next"
 
 import type { AppMenuActions } from "@/components/AppMenu"
-import { ArchiveExportDialog } from "@/components/ArchiveExportDialog"
 import { CompressExportDialog } from "@/components/CompressExportDialog"
+import { ImageExportDialog } from "@/components/ImageExportDialog"
+import { SplitPdfDialog } from "@/components/SplitPdfDialog"
 import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
@@ -245,7 +246,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       openedDocument.pages.map(() => 0),
     )
     const [bookmarksOpen, setBookmarksOpen] = useState(false)
-    const [archiveExportOpen, setArchiveExportOpen] = useState(false)
+    const [imageExportOpen, setImageExportOpen] = useState(false)
+    const [splitOpen, setSplitOpen] = useState(false)
     const [compressOpen, setCompressOpen] = useState(false)
     // The one notice this session holds rather than raises: it stands until the
     // reader answers it, and the held edit below is what the answer is for.
@@ -734,7 +736,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
 
       await annotations.exportCopy(
-        saveAsDefaultName ?? t("annotate.exportDefaultName"),
+        saveAsDefaultName ?? t("menu.untitled"),
         t("annotate.exportFilter"),
       )
     }, [annotations, pdfDocument, saveAsDefaultName, t])
@@ -1300,7 +1302,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }}
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
-          onExport={() => setArchiveExportOpen(true)}
+          onExportImages={() => setImageExportOpen(true)}
+          onSplit={() => setSplitOpen(true)}
           onCompress={() => setCompressOpen(true)}
           onSearchClose={search.closeSearch}
           onSearchOpen={search.openSearch}
@@ -1333,12 +1336,21 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           zoomApplies={zoomApplies}
         />
 
-        {active && archiveExportOpen && pdfDocument ? (
-          <ArchiveExportDialog
+        {active && imageExportOpen && pdfDocument ? (
+          <ImageExportDialog
             document={pdfDocument}
             suggestedName={fileName}
             onExport={annotations.exportArchive}
-            onClose={() => setArchiveExportOpen(false)}
+            onClose={() => setImageExportOpen(false)}
+          />
+        ) : null}
+
+        {active && splitOpen && pdfDocument ? (
+          <SplitPdfDialog
+            document={pdfDocument}
+            suggestedName={fileName}
+            onExport={annotations.exportArchive}
+            onClose={() => setSplitOpen(false)}
           />
         ) : null}
 

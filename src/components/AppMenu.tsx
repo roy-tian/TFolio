@@ -2,7 +2,7 @@ import { useState } from "react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
   AppWindow,
-  FileArchive,
+  FileImage,
   FilePlus2,
   FolderOpen,
   History,
@@ -11,6 +11,7 @@ import {
   Menu,
   Save,
   SaveAll,
+  Scissors,
   Settings,
   Shrink,
   SquareX,
@@ -71,7 +72,8 @@ type AppMenuProps = AppMenuActions & {
   canSave?: boolean
   onSave?: () => void
   onSaveAs?: () => void
-  onExport?: () => void
+  onExportImages?: () => void
+  onSplit?: () => void
   onCompress?: () => void
   saveHint?: string
 }
@@ -89,7 +91,8 @@ export function AppMenu({
   onSave,
   onSaveAll,
   onSaveAs,
-  onExport,
+  onExportImages,
+  onSplit,
   onCompress,
   recentFiles,
   saveHint,
@@ -215,12 +218,20 @@ export function AppMenu({
               </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem
-              data-action="export"
-              disabled={!onExport}
-              onClick={onExport}
+              data-action="export-images"
+              disabled={!onExportImages}
+              onClick={onExportImages}
             >
-              <FileArchive />
-              {t("archiveExport.title")}
+              <FileImage />
+              {t("imageExport.menuLabel")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="split"
+              disabled={!onSplit}
+              onClick={onSplit}
+            >
+              <Scissors />
+              {t("splitExport.menuLabel")}
             </DropdownMenuItem>
             <DropdownMenuItem
               data-action="compress"

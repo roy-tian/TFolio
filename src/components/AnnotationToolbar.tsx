@@ -26,16 +26,12 @@ import type { HexColor, RectStyle } from "@/lib/annotations"
 import { highlightSwatches } from "@/lib/annotationStyles"
 import { shortcuts } from "@/lib/shortcuts"
 import {
+  splitMenuButtonClassName,
   toolbarCenteredStripButtonClassName,
   toolbarInkBarClassName,
   toolbarSelectionBarClassName,
 } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
-
-/** A sliver rather than a second button's width, its chevron in the bottom
-    corner: the tool beside it is what the reader aims at, not this. */
-const splitMenuButtonClassName =
-  "relative w-3.5 items-end border-input px-0 pb-1 before:pointer-events-none before:absolute before:inset-y-1.5 before:left-0 before:w-px before:bg-border before:opacity-0 before:transition-opacity hover:before:opacity-100"
 
 export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 
