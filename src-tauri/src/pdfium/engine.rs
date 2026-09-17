@@ -364,6 +364,12 @@ impl PdfiumEngine {
             .map_err(|_| "PDFium document store is unavailable".to_string())
     }
 
+    /// The same store without waiting: a caller that must not queue behind a
+    /// running edit — the save dialog's default folder — takes `None` instead.
+    fn try_lock_documents(&self) -> Option<MutexGuard<'_, HashMap<u64, OpenDocument>>> {
+        self.documents.try_lock().ok()
+    }
+
     /// Lists a cancellable operation and hands back its guard. Called *before*
     /// the documents lock, so a cancel arriving while queued is still seen.
     fn begin_operation(&self, target: OperationTarget) -> OperationGuard<'_> {

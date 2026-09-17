@@ -203,6 +203,16 @@ impl RecentFiles {
         })
     }
 
+    /// The folder of the most recently opened PDF that still exists: where a
+    /// document that has never been saved offers itself, beside the last thing
+    /// the reader opened. A dialog pointed at a missing folder opens nowhere.
+    pub fn last_opened_dir(&self) -> Option<PathBuf> {
+        self.stored().into_iter().find_map(|path| {
+            let directory = path.parent()?.to_path_buf();
+            (!directory.as_os_str().is_empty() && directory.is_dir()).then_some(directory)
+        })
+    }
+
     /// Only for a path already recent: a view never promotes a WebView-provided
     /// path, and the check runs before `Store::write` so an unknown path rewrites nothing.
     pub fn record_view(&self, path: &Path, view: RecentPdfView) -> bool {
