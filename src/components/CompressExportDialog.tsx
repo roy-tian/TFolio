@@ -18,9 +18,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import {
   MAX_JPEG_QUALITY,
-  MAX_RASTER_DPI,
   MIN_JPEG_QUALITY,
-  MIN_RASTER_DPI,
+  RASTER_DPI_CHOICES,
   type CompressionEstimate,
   type CompressionOptions,
 } from "@/lib/compressExport"
@@ -212,16 +211,26 @@ export function CompressExportDialog({
         </RadioGroup>
         {mode === "rasterized" ? (
           <div className="grid gap-4 pl-7">
-            <SliderRow
-              disabled={busy}
-              label={t("compressExport.dpi")}
-              display={`${dpi} dpi`}
-              min={MIN_RASTER_DPI}
-              max={MAX_RASTER_DPI}
-              step={6}
-              value={dpi}
-              onChange={setDpi}
-            />
+            <div className="grid gap-2">
+              <span className="text-sm font-medium">{t("compressExport.dpi")}</span>
+              <RadioGroup
+                aria-label={t("compressExport.dpi")}
+                disabled={busy}
+                value={String(dpi)}
+                onValueChange={(value) => setDpi(Number(value))}
+                className="gap-3"
+              >
+                {RASTER_DPI_CHOICES.map((choice) => (
+                  <Label key={choice} className="gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
+                    <RadioGroupItem
+                      value={String(choice)}
+                      data-testid={`compress-dpi-${choice}`}
+                    />
+                    <span>{choice} dpi</span>
+                  </Label>
+                ))}
+              </RadioGroup>
+            </div>
             <SliderRow
               disabled={busy}
               label={t("compressExport.quality")}

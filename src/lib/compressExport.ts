@@ -24,3 +24,6 @@ export const MIN_RASTER_DPI = 72
 export const MAX_RASTER_DPI = 300
 export const MIN_JPEG_QUALITY = 10
 export const MAX_JPEG_QUALITY = 100
+
+/** The named densities the rasterized mode offers, inside those bounds. */
+export const RASTER_DPI_CHOICES = [75, 150, 300] as const
