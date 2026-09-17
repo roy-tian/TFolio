@@ -638,3 +638,92 @@ fn a_child_answers_on_captured_stdout() {
         "probe-answer",
     );
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn versioned_opt_installs_are_listed_newest_first() {
+    let scratch = Scratch::new("opt");
+
+    for name in ["libreoffice7.6", "libreoffice24.8", "libreoffice26.2"] {
+        let program = scratch.path().join(name).join("program");
+        fs::create_dir_all(&program).expect("a program dir should be creatable");
+
+        // Listing only: the caller checks executability, so plain files do.
+        fs::write(program.join("soffice"), b"").expect("a soffice should be writable");
+    }
+
+    // Neither a TDF versioned install: the distro layout's own name, a
+    // non-numeric suffix, and an unrelated directory that merely contains one.
+    for name in ["libreoffice", "libreoffice-server", "writer-suite/program"] {
+        let directory = scratch.path().join(name);
+        fs::create_dir_all(&directory).expect("a dir should be creatable");
+    }
+
+    let versions: Vec<String> = libreoffice::versioned_opt_candidates(scratch.path())
+        .iter()
+        .filter_map(|soffice| {
+            soffice
+                .parent()
+                .and_then(Path::parent)
+                .and_then(|install| install.file_name())
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .collect();
+
+    // Numeric, not lexicographic: 7.6 sorts below both 2x versions.
+    assert_eq!(
+        versions,
+        ["libreoffice26.2", "libreoffice24.8", "libreoffice7.6"]
+    );
+}
+
+#[test]
+fn a_script_that_never_answered_names_why_on_stderr() {
+    fn output(stderr: Vec<u8>) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::default(),
+            stdout: Vec::new(),
+            stderr,
+        }
+    }
+
+    // A quiet, successful silence is nobody's note.
+    assert_eq!(super::unanswered_note(&output(Vec::new()), false), "");
+
+    let refused = output(b"New-Object : COM class factory failed\r\n".to_vec());
+    assert_eq!(
+        super::unanswered_note(&refused, false),
+        ": New-Object : COM class factory failed"
+    );
+
+    // A wall of red is trimmed to the first readable stretch.
+    let wall = output(vec![b'x'; 500]);
+    assert_eq!(super::unanswered_note(&wall, false).chars().count(), 202);
+}
+
+#[test]
+fn a_killed_run_names_no_exit_status_of_its_own() {
+    fn failure() -> std::process::ExitStatus {
+        #[cfg(unix)]
+        {
+            std::os::unix::process::ExitStatusExt::from_raw(1 << 8)
+        }
+
+        #[cfg(windows)]
+        {
+            std::os::windows::process::ExitStatusExt::from_raw(1)
+        }
+    }
+
+    let killed = std::process::Output {
+        status: failure(),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    };
+
+    // The status a kill leaves behind is this app's doing, not the script's
+    // reason; a run that died on its own still gets to name its exit status.
+    assert_eq!(super::unanswered_note(&killed, true), "");
+    assert_eq!(super::unanswered_note(&killed, false), ": exit status 1");
+}
