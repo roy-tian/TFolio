@@ -133,6 +133,11 @@ struct OpenDocument {
     /// Monotonic per-page version: rectangle effects release the PDFium lock
     /// while processing pixels, and this detects a page that changed meanwhile.
     revisions: HashMap<u64, u64>,
+    /// The current revision's whole-document serialization length, memoized
+    /// for the compress estimates: a rasterized one re-asks on every slider
+    /// settle, and the rewrite it measures with is the expensive half. Retired
+    /// by every content change, alongside the page revision it bumps.
+    serialized_len: Option<u64>,
     /// Page ids inserted from another file and still present: while any remain
     /// the document holds another file's pages, so it may only export to a copy.
     merged_page_ids: HashSet<u64>,
@@ -159,7 +164,7 @@ impl OpenDocument {
 
         self.next_mark_id += 1;
         self.marks.entry(page_id).or_default().push(mark_id);
-        *self.revisions.entry(page_id).or_insert(0) += 1;
+        self.bump_page_revision(page_id);
 
         mark_id
     }
@@ -182,12 +187,20 @@ impl OpenDocument {
             .ok_or_else(|| format!("mark {mark_id} is not one of this session's"))
     }
 
+    /// Bumps a page's revision, retiring the memoized serialization length
+    /// with it: content changed, so the document it measured is gone.
+    fn bump_page_revision(&mut self, page_id: u64) {
+        *self.revisions.entry(page_id).or_insert(0) += 1;
+        self.serialized_len = None;
+    }
+
     /// Bumps every page's revision so an effect captured before a structure
     /// change fails its check: no capture survives a permuted page list.
     fn invalidate_all_page_revisions(&mut self) {
         for &page_id in &self.page_ids {
             *self.revisions.entry(page_id).or_insert(0) += 1;
         }
+        self.serialized_len = None;
     }
 }
 
@@ -217,6 +230,9 @@ pub(super) enum OperationTarget {
     Archive(u64),
     Merge,
     Search(u64),
+    /// A compressed copy being estimated or written, whose page loop must
+    /// stop when the reader walks away from the dialog.
+    Compress(u64),
     /// The Word→PDF conversions behind a wizard inspection, which can outlast
     /// a reader's patience alone; a merge's stay under its own target.
     Convert,
@@ -348,6 +364,12 @@ impl PdfiumEngine {
             .map_err(|_| "PDFium document store is unavailable".to_string())
     }
 
+    /// The same store without waiting: a caller that must not queue behind a
+    /// running edit — the save dialog's default folder — takes `None` instead.
+    fn try_lock_documents(&self) -> Option<MutexGuard<'_, HashMap<u64, OpenDocument>>> {
+        self.documents.try_lock().ok()
+    }
+
     /// Lists a cancellable operation and hands back its guard. Called *before*
     /// the documents lock, so a cancel arriving while queued is still seen.
     fn begin_operation(&self, target: OperationTarget) -> OperationGuard<'_> {
@@ -390,6 +412,7 @@ impl PdfiumEngine {
         self.cancel_operation(OperationTarget::Document(document_id));
         self.cancel_operation(OperationTarget::Search(document_id));
         self.cancel_operation(OperationTarget::Archive(document_id));
+        self.cancel_operation(OperationTarget::Compress(document_id));
     }
 
     /// A new one-page A4 document, built in memory: no file of its own, so a
@@ -521,6 +544,7 @@ impl PdfiumEngine {
                 page_geometry: (0..num_pages as u64).zip(pages.iter().copied()).collect(),
                 page_ids: (0..num_pages as u64).collect(),
                 revisions: HashMap::new(),
+                serialized_len: None,
                 source_path,
                 stashes: HashMap::new(),
             },
@@ -975,6 +999,7 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
 }
 
 mod archive_export;
+mod compress;
 mod inspection;
 mod io;
 mod marks;
@@ -985,6 +1010,7 @@ pub(crate) use io::is_merge_image;
 use io::{image_page_document, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
+use raster_export::{page_jpeg, RasterLevels, FLATTEN_LEVELS};
 
 #[cfg(test)]
 mod tests;

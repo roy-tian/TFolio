@@ -780,16 +780,25 @@ pub async fn export_pdf(
     app: AppHandle,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
+    recent: State<'_, RecentFiles>,
 ) -> Result<Option<ExportOutcome>, String> {
     let engine = Arc::clone(&state.0);
+    let recent = recent.inner().clone();
 
     // `blocking_save_file` would deadlock the main thread outside
     // `spawn_blocking`; the document lock is not taken until the reader chooses.
     let exported = tauri::async_runtime::spawn_blocking(move || {
-        let Some(picked) = app
-            .dialog()
-            .file()
-            .add_filter(filter_label, &["pdf"])
+        // The folder the dialog opens in is Rust's to choose, never the
+        // WebView's: the document's own for a file it came from, the last
+        // opened PDF's for one that has never been saved.
+        let default_directory = engine
+            .document_source_dir(document_id)
+            .or_else(|| recent.last_opened_dir());
+        let mut dialog = app.dialog().file().add_filter(filter_label, &["pdf"]);
+        if let Some(directory) = default_directory {
+            dialog = dialog.set_directory(directory);
+        }
+        let Some(picked) = dialog
             .set_file_name(suggested_file_name(&suggested_name))
             .blocking_save_file()
         else {
@@ -820,7 +829,15 @@ pub async fn close_pdf(
     document_id: u64,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
 ) -> Result<(), String> {
+    // A moved tab's session still unmounts here and asks to close; the window
+    // that kept the document is the one whose close counts, and any other's is
+    // a no-op rather than a close under the new holder's feet.
+    if !owners.owns(document_id, window.label()) {
+        return Ok(());
+    }
+
     let engine = Arc::clone(&state.0);
 
     engine.cancel_document_work(document_id);

@@ -2,7 +2,7 @@ import { useState } from "react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
   AppWindow,
-  FileArchive,
+  FileImage,
   FilePlus2,
   FolderOpen,
   History,
@@ -11,13 +11,15 @@ import {
   Menu,
   Save,
   SaveAll,
+  Scissors,
   Settings,
+  Shrink,
   SquareX,
   Upload,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import fileTinyIcon from "@/assets/brand/file-tiny.png"
+import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip } from "@/components/HintTooltip"
 import {
   SettingsDialog,
@@ -70,7 +72,9 @@ type AppMenuProps = AppMenuActions & {
   canSave?: boolean
   onSave?: () => void
   onSaveAs?: () => void
-  onExport?: () => void
+  onExportImages?: () => void
+  onSplit?: () => void
+  onCompress?: () => void
   saveHint?: string
 }
 
@@ -87,7 +91,9 @@ export function AppMenu({
   onSave,
   onSaveAll,
   onSaveAs,
-  onExport,
+  onExportImages,
+  onSplit,
+  onCompress,
   recentFiles,
   saveHint,
 }: AppMenuProps) {
@@ -212,12 +218,28 @@ export function AppMenu({
               </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem
-              data-action="export"
-              disabled={!onExport}
-              onClick={onExport}
+              data-action="export-images"
+              disabled={!onExportImages}
+              onClick={onExportImages}
             >
-              <FileArchive />
-              {t("archiveExport.title")}
+              <FileImage />
+              {t("imageExport.menuLabel")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="split"
+              disabled={!onSplit}
+              onClick={onSplit}
+            >
+              <Scissors />
+              {t("splitExport.menuLabel")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="compress"
+              disabled={!onCompress}
+              onClick={onCompress}
+            >
+              <Shrink />
+              {t("compressExport.menuLabel")}
             </DropdownMenuItem>
             <DropdownMenuItem
               data-action="close-all"

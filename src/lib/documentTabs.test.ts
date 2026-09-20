@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
+  reorderedTabs,
   selectOpenedTabId,
   tabIdForKey,
   tabIdForPath,
@@ -45,5 +46,19 @@ describe("document tabs", () => {
     expect(tabIdForKey(ids, 7, "Home")).toBe(HOME_TAB_ID)
     expect(tabIdForKey(ids, 7, "End")).toBe(9)
     expect(tabIdForKey(ids, 7, "Enter")).toBeNull()
+  })
+
+  test("a strip drag moves a tab forward and backward", () => {
+    expect(reorderedTabs(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"])
+    expect(reorderedTabs(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"])
+  })
+
+  test("a strip drag that lands nowhere changes nothing", () => {
+    const tabs = ["a", "b", "c"]
+
+    expect(reorderedTabs(tabs, 1, 1)).toBe(tabs)
+    expect(reorderedTabs(tabs, -1, 0)).toBe(tabs)
+    expect(reorderedTabs(tabs, 0, 3)).toBe(tabs)
+    expect(reorderedTabs([], 0, 0)).toEqual([])
   })
 })

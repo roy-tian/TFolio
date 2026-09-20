@@ -55,6 +55,33 @@ export function activeTabAfterClose(
   return tabIds[closingIndex + 1] ?? tabIds[closingIndex - 1] ?? HOME_TAB_ID
 }
 
+/** The document tabs' order after a strip drag of the one at `from` onto
+    `to`, both indices among the documents — home leads and never moves. An
+    out-of-range or same-place move returns the same list, reference and all. */
+export function reorderedTabs<T>(
+  tabs: T[],
+  from: number,
+  to: number,
+): T[] {
+  if (
+    from === to ||
+    !Number.isInteger(from) ||
+    !Number.isInteger(to) ||
+    from < 0 ||
+    to < 0 ||
+    from >= tabs.length ||
+    to >= tabs.length
+  ) {
+    return tabs
+  }
+
+  const next = [...tabs]
+  const [moved] = next.splice(from, 1)
+
+  next.splice(to, 0, moved)
+  return next
+}
+
 export function tabIdForKey(
   tabIds: readonly TabId[],
   activeId: TabId,

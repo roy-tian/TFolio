@@ -664,6 +664,29 @@ pub(crate) struct Ran {
     pub(crate) timed_out: bool,
 }
 
+/// `: <stderr>` for a script that answered fewer files than it was given —
+/// the red text says why it died; without it the refusal blames a stop.
+/// A run this code killed has no reason of its own to add: its status is the
+/// kill's, so `timed_out` keeps even a failure status out of the note.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn unanswered_note(output: &Output, timed_out: bool) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = stderr.trim();
+
+    // A refusal worth reading is short; a PowerShell error wall is not.
+    let mut note: String = stderr.chars().take(200).collect();
+
+    if note.is_empty() && !timed_out && !output.status.success() {
+        note = format!("exit status {}", output.status.code().unwrap_or(0));
+    }
+
+    if note.is_empty() {
+        String::new()
+    } else {
+        format!(": {note}")
+    }
+}
+
 /// Kills only the child this process spawned, never a process by name: a
 /// reader's own Word or LibreOffice must never die over an import.
 pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std::io::Result<Ran> {

@@ -5,11 +5,16 @@
 import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
+import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
   installUpdate?: () => Promise<void>
   exportPdfArchive?: (
     args: ArchiveExportRequest & { documentId: number },
+    onProgress: (progress: PdfProgress) => void,
+  ) => Promise<string | null>
+  exportCompressedPdf?: (
+    args: CompressedExportRequest & { documentId: number },
     onProgress: (progress: PdfProgress) => void,
   ) => Promise<string | null>
   exportPdf?: (args: {
@@ -24,6 +29,18 @@ export type E2eOverrides = {
   /** Stands in for `open_converted_from_path`, so a spec can answer an image
       or Word open without a real conversion behind it. */
   openConvertedFromPath?: (path: string) => Promise<unknown>
+  /** Stand in for the tab-move commands, so a spec can answer a tear-off or a
+      cross-window drop without a second window on the single lane it drives. */
+  moveDocument?: (args: {
+    documentId: number
+    destLabel: string
+    tab: unknown
+  }) => Promise<void>
+  moveDocumentNewWindow?: (args: {
+    at: { x: number; y: number } | null
+    documentId: number
+    tab: unknown
+  }) => Promise<void>
   pickPdfPaths?: () => Promise<string[]>
   /** Stands in for the OS print dialog, which no driver can answer: the real
       one blocks the window until a person closes it. */

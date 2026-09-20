@@ -154,6 +154,18 @@ export async function readRecentPdfView(
 }
 
 /**
+ * The other convenience's mirror: a failed removal must not disturb the home
+ * tab, and the caller re-reads the list rather than trusting either outcome.
+ */
+export async function removeRecentFile(path: string): Promise<void> {
+  try {
+    await invoke("remove_recent_pdf", { path })
+  } catch {
+    // A stale entry stays until the next visit; forgetting is not worth a notice.
+  }
+}
+
+/**
  * A convenience, like the list itself: a failed write must not interrupt
  * scrolling or closing, and the backend ignores paths no open recorded.
  */

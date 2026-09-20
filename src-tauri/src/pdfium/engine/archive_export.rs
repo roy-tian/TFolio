@@ -1,7 +1,7 @@
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
 use super::*;
-use crate::pdfium::archive::ArchiveFormat;
+use crate::pdfium::archive::{ArchiveOptions, ImageFormat};
 use crate::pdfium::archive_links::{collect_links, write_navigation};
 
 struct Section {
@@ -74,12 +74,52 @@ fn section_outline(items: &[PdfOutlineItem], start: i32, end: i32) -> Vec<Outlin
         .collect()
 }
 
+// The bounds the engine enforces on its own: the dialog offers a few named
+// densities, but a command's arguments are anyone's to send.
+const MIN_IMAGE_DPI: u32 = 72;
+const MAX_IMAGE_DPI: u32 = 600;
+
+/// The viewer's render cap keeps a page under a bitmap any screen needs; an
+/// export the reader explicitly aimed at print may grow to this, still bounded
+/// so a poster page at 600 dpi cannot ask for pixels no desktop can hold.
+const MAX_EXPORT_RENDER_WIDTH: i32 = 8192;
+const MAX_EXPORT_RENDER_HEIGHT: i32 = 8192;
+
+fn image_dpi(dpi: u32) -> Result<u32, String> {
+    if (MIN_IMAGE_DPI..=MAX_IMAGE_DPI).contains(&dpi) {
+        Ok(dpi)
+    } else {
+        Err(format!(
+            "an image export needs between {MIN_IMAGE_DPI} and {MAX_IMAGE_DPI} dpi, not {dpi}"
+        ))
+    }
+}
+
+/// The zero-based page indices the reader's selection names, sorted and free of
+/// repeats whatever order the sender listed them in.
+fn selected_pages(pages: &[u32], total: i32) -> Result<Vec<usize>, String> {
+    if pages.is_empty() {
+        return Err("an image export needs at least one page".into());
+    }
+    let mut named: Vec<u32> = pages.to_vec();
+    named.sort_unstable();
+    named.dedup();
+    if named[0] < 1 || named[named.len() - 1] > total as u32 {
+        return Err(format!(
+            "a page between 1 and {total} must be named, not {} to {}",
+            named[0],
+            named[named.len() - 1]
+        ));
+    }
+    Ok(named.into_iter().map(|page| (page - 1) as usize).collect())
+}
+
 impl PdfiumEngine {
     pub(in crate::pdfium) fn export_archive(
         &self,
         document_id: u64,
         path: &Path,
-        format: ArchiveFormat,
+        options: ArchiveOptions,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<bool, String> {
         let operation = self.begin_operation(OperationTarget::Archive(document_id));
@@ -97,7 +137,17 @@ impl PdfiumEngine {
         let source = &entry.document;
         let total = source.pages().len() as usize;
         let outline = collect_bookmark_siblings(source.bookmarks().root());
-        let parts = if format == ArchiveFormat::Bookmarks {
+        let dpi = if let ArchiveOptions::Images { dpi, .. } = options {
+            image_dpi(dpi)?
+        } else {
+            POINTS_PER_INCH as u32
+        };
+        let selected = if let ArchiveOptions::Images { pages, .. } = &options {
+            Some(selected_pages(pages, total as i32)?)
+        } else {
+            None
+        };
+        let parts = if options == ArchiveOptions::Bookmarks {
             sections(&outline, total as i32)?
         } else {
             Vec::new()
@@ -107,107 +157,160 @@ impl PdfiumEngine {
             .as_ref()
             .and_then(|state| state.watermark.as_ref())
             .is_some_and(|config| config.rasterize);
-        on_progress(0, total);
+        // Progress counts what the archive will hold: every page for the two
+        // document splits, the reader's own selection for images.
+        let progress_total = selected.as_ref().map_or(total, Vec::len);
+        on_progress(0, progress_total);
         io::write_file_atomically(path, |file| {
             let mut zip = ZipWriter::new(file);
             // Images and PDF streams are already compressed; store them without another buffer.
-            let options = SimpleFileOptions::default()
+            let entry_options = SimpleFileOptions::default()
                 .compression_method(CompressionMethod::Stored)
                 .large_file(true);
             let failed = |error| format!("could not write ZIP archive: {error}");
-            if format == ArchiveFormat::Bookmarks {
-                for (index, section) in parts.iter().enumerate() {
-                    if operation.is_cancelled() {
-                        return Ok(false);
-                    }
-                    let mut part = self
-                        .pdfium
-                        .create_new_pdf()
-                        .map_err(|error| format!("could not create a split PDF: {error}"))?;
-                    let mut links = Vec::new();
-                    for page in section.start..section.end {
+            match options {
+                ArchiveOptions::Bookmarks => {
+                    for (index, section) in parts.iter().enumerate() {
                         if operation.is_cancelled() {
                             return Ok(false);
                         }
-                        if !rasterize {
-                            let source_page = source
-                                .pages()
-                                .get(page)
-                                .map_err(|error| format!("could not read page links: {error}"))?;
-                            links.push(collect_links(&source_page)?);
+                        let mut part = self
+                            .pdfium
+                            .create_new_pdf()
+                            .map_err(|error| format!("could not create a split PDF: {error}"))?;
+                        let mut links = Vec::new();
+                        for page in section.start..section.end {
+                            if operation.is_cancelled() {
+                                return Ok(false);
+                            }
+                            if !rasterize {
+                                let source_page = source.pages().get(page).map_err(|error| {
+                                    format!("could not read page links: {error}")
+                                })?;
+                                links.push(collect_links(&source_page)?);
+                            }
+                            part.pages_mut()
+                                .copy_page_from_document(source, page, page - section.start)
+                                .map_err(|error| {
+                                    format!("could not copy page {}: {error}", page + 1)
+                                })?;
+                            on_progress((page + 1) as usize, total);
                         }
+                        let bytes = if rasterize {
+                            let Some(bytes) = self.rasterized_bytes(
+                                &part,
+                                &operation,
+                                &FLATTEN_LEVELS,
+                                |_, _| {},
+                            )?
+                            else {
+                                return Ok(false);
+                            };
+                            bytes
+                        } else {
+                            part.save_to_bytes()
+                                .map_err(|error| format!("could not save a split PDF: {error}"))?
+                        };
+                        let Some(bytes) = write_navigation(
+                            bytes,
+                            &section_outline(&outline, section.start, section.end),
+                            &links,
+                            section.start,
+                            || operation.is_cancelled(),
+                        )?
+                        else {
+                            return Ok(false);
+                        };
+                        zip.start_file(section_name(index, &section.title), entry_options)
+                            .map_err(failed)?;
+                        zip.write_all(&bytes)
+                            .map_err(|error| format!("could not write split PDF: {error}"))?;
+                    }
+                }
+                ArchiveOptions::Pages => {
+                    for page in 0..source.pages().len() {
+                        if operation.is_cancelled() {
+                            return Ok(false);
+                        }
+                        let mut part = self
+                            .pdfium
+                            .create_new_pdf()
+                            .map_err(|error| format!("could not create a split PDF: {error}"))?;
                         part.pages_mut()
-                            .copy_page_from_document(source, page, page - section.start)
+                            .copy_page_from_document(source, page, 0)
                             .map_err(|error| {
                                 format!("could not copy page {}: {error}", page + 1)
                             })?;
-                        on_progress((page + 1) as usize, total);
-                    }
-                    let bytes = if rasterize {
-                        let Some(bytes) = self.rasterized_bytes(&part, &operation)? else {
-                            return Ok(false);
+                        let bytes = if rasterize {
+                            let Some(bytes) = self.rasterized_bytes(
+                                &part,
+                                &operation,
+                                &FLATTEN_LEVELS,
+                                |_, _| {},
+                            )?
+                            else {
+                                return Ok(false);
+                            };
+                            bytes
+                        } else {
+                            part.save_to_bytes()
+                                .map_err(|error| format!("could not save a split PDF: {error}"))?
                         };
-                        bytes
-                    } else {
-                        part.save_to_bytes()
-                            .map_err(|error| format!("could not save a split PDF: {error}"))?
-                    };
-                    let Some(bytes) = write_navigation(
-                        bytes,
-                        &section_outline(&outline, section.start, section.end),
-                        &links,
-                        section.start,
-                        || operation.is_cancelled(),
-                    )?
-                    else {
-                        return Ok(false);
-                    };
-                    zip.start_file(section_name(index, &section.title), options)
-                        .map_err(failed)?;
-                    zip.write_all(&bytes)
-                        .map_err(|error| format!("could not write split PDF: {error}"))?;
+                        // No navigation to restore: a single page carries no
+                        // outline of its own, and every link off it is dropped.
+                        zip.start_file(format!("{:04}.pdf", page + 1), entry_options)
+                            .map_err(failed)?;
+                        zip.write_all(&bytes)
+                            .map_err(|error| format!("could not write split PDF: {error}"))?;
+                        on_progress(page as usize + 1, total);
+                    }
                 }
-            } else {
-                for index in 0..source.pages().len() {
-                    if operation.is_cancelled() {
-                        return Ok(false);
+                ArchiveOptions::Images { image_format, .. } => {
+                    // Names follow the document's own numbering, so a selection
+                    // keeps the numbers the reader sees under each thumbnail.
+                    for (done, &page) in selected.as_deref().unwrap_or_default().iter().enumerate()
+                    {
+                        if operation.is_cancelled() {
+                            return Ok(false);
+                        }
+                        let page_handle = source.pages().get(page as i32).map_err(|error| {
+                            format!("could not load page {}: {error}", page + 1)
+                        })?;
+                        let config = PdfRenderConfig::new()
+                            .scale_page_by_factor(dpi as f32 / POINTS_PER_INCH)
+                            .set_maximum_width(MAX_EXPORT_RENDER_WIDTH)
+                            .set_maximum_height(MAX_EXPORT_RENDER_HEIGHT)
+                            .render_annotations(true)
+                            .render_form_data(true);
+                        let pixels = page_handle
+                            .render_with_config(&config)
+                            .and_then(|bitmap| bitmap.as_image())
+                            .map_err(|error| {
+                                format!("could not render page {}: {error}", page + 1)
+                            })?
+                            .into_rgb8();
+                        let extension = if image_format == ImageFormat::Jpg {
+                            "jpg"
+                        } else {
+                            "png"
+                        };
+                        zip.start_file(format!("{:04}.{extension}", page + 1), entry_options)
+                            .map_err(failed)?;
+                        if image_format == ImageFormat::Jpg {
+                            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut zip, 95)
+                                .encode_image(&pixels)
+                        } else {
+                            image::ImageEncoder::write_image(
+                                image::codecs::png::PngEncoder::new(&mut zip),
+                                &pixels,
+                                pixels.width(),
+                                pixels.height(),
+                                image::ExtendedColorType::Rgb8,
+                            )
+                        }
+                        .map_err(|error| format!("could not encode page {}: {error}", page + 1))?;
+                        on_progress(done + 1, progress_total);
                     }
-                    let page = source
-                        .pages()
-                        .get(index)
-                        .map_err(|error| format!("could not load page {}: {error}", index + 1))?;
-                    let config = PdfRenderConfig::new()
-                        .scale_page_by_factor(300.0 / POINTS_PER_INCH)
-                        .set_maximum_width(MAX_RENDER_WIDTH)
-                        .set_maximum_height(MAX_RENDER_HEIGHT)
-                        .render_annotations(true)
-                        .render_form_data(true);
-                    let pixels = page
-                        .render_with_config(&config)
-                        .and_then(|bitmap| bitmap.as_image())
-                        .map_err(|error| format!("could not render page {}: {error}", index + 1))?
-                        .into_rgb8();
-                    let extension = if format == ArchiveFormat::Jpg {
-                        "jpg"
-                    } else {
-                        "png"
-                    };
-                    zip.start_file(format!("{:04}.{extension}", index + 1), options)
-                        .map_err(failed)?;
-                    if format == ArchiveFormat::Jpg {
-                        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut zip, 95)
-                            .encode_image(&pixels)
-                    } else {
-                        image::ImageEncoder::write_image(
-                            image::codecs::png::PngEncoder::new(&mut zip),
-                            &pixels,
-                            pixels.width(),
-                            pixels.height(),
-                            image::ExtendedColorType::Rgb8,
-                        )
-                    }
-                    .map_err(|error| format!("could not encode page {}: {error}", index + 1))?;
-                    on_progress(index as usize + 1, total);
                 }
             }
             if operation.is_cancelled() {

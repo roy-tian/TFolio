@@ -1,8 +1,12 @@
 # Icon assets
 
-The five approved masters live in `src/assets/brand/`. Regenerate these desktop
+The five SVG masters live in `src/assets/brand/`. Regenerate these desktop
 assets with `bun run icons:generate`; Bun and the pinned Tauri CLI are sufficient.
 The command also refreshes the website icons when `website/assets/` exists.
+
+The masters use paths and flat fills, with no embedded bitmaps or font dependency.
+The frontend and website load SVG directly. Native bundles still require PNG
+(Linux), ICO (Windows), and ICNS (macOS), generated from these SVG sources.
 
 | Display size | Application | PDF document |
 | --- | --- | --- |

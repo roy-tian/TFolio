@@ -14,6 +14,7 @@ mod support;
 
 mod annotations;
 mod archive_export;
+mod compress;
 mod documents;
 mod insert_pages;
 mod inspection;

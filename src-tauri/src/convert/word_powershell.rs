@@ -9,8 +9,8 @@ use std::{
 };
 
 use super::{
-    run_with_timeout, BatchOutcome, ConvertJob, ConvertSession, EngineKind, CONVERT_TIMEOUT,
-    START_TIMEOUT,
+    run_with_timeout, unanswered_note, BatchOutcome, ConvertJob, ConvertSession, EngineKind,
+    CONVERT_TIMEOUT, START_TIMEOUT,
 };
 
 pub(crate) const WORD_PROG_ID: &str = "Word.Application";
@@ -23,8 +23,10 @@ param([string]$ProgId, [string]$Pairs)
 $ErrorActionPreference = 'Stop'
 # Redirected output is otherwise the OEM code page on Windows PowerShell 5.1,
 # and a path with a non-ASCII character in it — the cache dir lives under the
-# user's profile — would echo back as something else entirely.
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# user's profile — would echo back as something else entirely. Some hosts
+# refuse the switch on a redirected pipe; the per-file protocol must outlive
+# that refusal, so a garbled path beats a script that never answers.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 $application = $null
 try {
     $application = New-Object -ComObject $ProgId
@@ -132,6 +134,14 @@ impl ConvertSession for Session {
         // unfinished below — refusals for the next engine, in order.
         let stdout = String::from_utf8_lossy(&finished.output.stdout);
 
+        // A script that dies before its first file answers nothing on stdout;
+        // its reason is PowerShell's own stderr (COM activation, a refused
+        // encoding switch), and without it every file says only "stopped".
+        let unanswered = format!(
+            "did not finish before the engine was stopped{}",
+            unanswered_note(&finished.output, finished.timed_out)
+        );
+
         BatchOutcome::Done(
             jobs.iter()
                 .zip(stdout.lines())
@@ -139,7 +149,7 @@ impl ConvertSession for Session {
                 .chain(
                     jobs.iter()
                         .skip(stdout.lines().count())
-                        .map(|_| Err("did not finish before the engine was stopped".into())),
+                        .map(|_| Err(unanswered.clone())),
                 )
                 .collect(),
         )

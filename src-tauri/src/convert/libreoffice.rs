@@ -141,6 +141,40 @@ fn detail(output: &std::process::Output) -> String {
     }
 }
 
+/// The versioned installs under an `/opt` directory, newest version first:
+/// more than one TDF package can coexist, and the binary worth trying first
+/// is the one the user most recently installed.
+#[cfg(target_os = "linux")]
+pub(crate) fn versioned_opt_candidates(opt: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(opt) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<(Vec<u64>, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let numbers: Vec<u64> = name
+                .to_str()?
+                .strip_prefix("libreoffice")?
+                .split('.')
+                .map(|part| part.parse::<u64>().ok())
+                .collect::<Option<_>>()?;
+
+            // The bare unversioned name is the fixed candidates' business.
+            if numbers.is_empty() {
+                return None;
+            }
+
+            Some((numbers, entry.path().join("program").join("soffice")))
+        })
+        .collect();
+
+    found.sort_by(|(left, _), (right, _)| right.cmp(left));
+
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
 /// Passive: files are looked for, nothing is run. The PATH scan is last
 /// because PATH may hold a wrapper rather than the real binary.
 #[cfg(not(windows))]
@@ -174,6 +208,11 @@ pub(crate) fn find_soffice() -> Option<PathBuf> {
     ] {
         candidates.push(PathBuf::from(fixed));
     }
+
+    // TDF's own packages (deb and rpm alike) install under a versioned
+    // /opt/libreofficeX.Y, which the unversioned fixed paths above miss.
+    #[cfg(target_os = "linux")]
+    candidates.extend(versioned_opt_candidates(Path::new("/opt")));
 
     candidates.extend(path_lookup("soffice"));
 

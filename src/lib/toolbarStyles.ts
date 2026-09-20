@@ -13,3 +13,8 @@ export const toolbarInkBarClassName = `${selectionBarShape} after:bg-(--tool-ink
     skewing the padding box the strip centres in — a transparent one restores it. */
 export const toolbarCenteredStripButtonClassName =
   "not-first:border-l! not-first:border-l-transparent"
+
+/** A sliver rather than a second button's width, its chevron in the bottom
+    corner: the control beside it is what the reader aims at, not this. */
+export const splitMenuButtonClassName =
+  "relative w-3.5 items-end border-input px-0 pb-1 before:pointer-events-none before:absolute before:inset-y-1.5 before:left-0 before:w-px before:bg-border before:opacity-0 before:transition-opacity hover:before:opacity-100"

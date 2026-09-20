@@ -710,6 +710,20 @@ impl PdfiumEngine {
         self.write_document(entry, &path, &operation)
     }
 
+    /// The folder a save-as dialog should open in for this document: its own
+    /// file's, when it has one. `None` — no file, or the store busy with an
+    /// edit — tells the caller to fall back elsewhere.
+    pub(in crate::pdfium) fn document_source_dir(&self, document_id: u64) -> Option<PathBuf> {
+        let documents = self.try_lock_documents()?;
+        open_entry(&documents, document_id)
+            .ok()?
+            .source_path
+            .as_deref()
+            .and_then(|source| source.parent())
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(|parent| parent.to_path_buf())
+    }
+
     /// Writes to `path`, adopting it as the source of a byte-opened document —
     /// a true save-as. The flag tells the frontend the file matches the history.
     pub(in crate::pdfium) fn export_to(
@@ -812,7 +826,7 @@ impl PdfiumEngine {
             .is_some_and(|config| config.rasterize)
         {
             let bytes = self
-                .rasterized_bytes(&entry.document, operation)?
+                .rasterized_bytes(&entry.document, operation, &FLATTEN_LEVELS, |_, _| {})?
                 .ok_or_else(|| "image PDF export was cancelled".to_string())?;
             return write_file_atomically(path, |file| {
                 file.write_all(&bytes)

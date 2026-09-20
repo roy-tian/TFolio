@@ -26,6 +26,16 @@ function settingsFile() {
   )
 }
 
+/** The recent-file list the same backend keeps, beside those settings: what
+    the next run's home tab reads, so a removal must reach it. */
+export function recentFilesStore() {
+  return path.join(
+    process.env.XDG_DATA_HOME || path.join(homedir(), ".local/share"),
+    "com.roytian.tfolio.e2e",
+    "recent-files.toml",
+  )
+}
+
 export function minimalPdf(
   pageCount = 1,
   mediaBox: string | ((index: number) => string) = "0 0 200 300",

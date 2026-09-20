@@ -143,6 +143,21 @@ export const noticeCatalogue = {
     textKey: "annotate.saveFailed",
     tone: "danger",
   },
+  tabMoveBusy: {
+    life: "transient",
+    textKey: "tabs.moveBusy",
+    tone: "warning",
+  },
+  tabMoveFailed: {
+    life: "transient",
+    textKey: "tabs.moveFailed",
+    tone: "danger",
+  },
+  tabMoveNoteOpen: {
+    life: "transient",
+    textKey: "tabs.moveNoteOpen",
+    tone: "warning",
+  },
   // The release check is one slot the backend's status moves through, so a
   // download that starts replaces the offer to start it.
   updateAvailable: {
@@ -217,6 +232,8 @@ export const openRefusals = [
   "fileTooLarge",
   "invalidFile",
   "openFailed",
+  "tabMoveBusy",
+  "tabMoveFailed",
   "wordUnavailable",
 ] as const satisfies readonly NoticeKind[]
 
