@@ -272,7 +272,7 @@ export function MergeFileList({ wizard }: {
             }}
           >
             {files.map((file, index) => {
-              const rowOffset = drag?.rowOffsets[index] ?? 0
+              const rowOffset = drag?.cellOffsets[index] ?? 0
 
               return (
                 <li

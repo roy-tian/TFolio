@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { ChevronDown, FolderOpen, House, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -12,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
+import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -37,6 +39,8 @@ type DocumentTabsProps = {
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
   onOpenFile: () => void
+  /** Reorders the document tabs, both indices among them; home stays first. */
+  onReorder: (from: number, to: number) => void
   opening: boolean
   tabs: DocumentTabItem[]
 }
@@ -46,12 +50,41 @@ type DocumentTabsProps = {
 const tabClassName =
   "group/tab relative flex h-8 items-center rounded-t-md border border-b-0"
 
+/** The tab in hand, portalled above the strip and its clipped scroller so it
+    follows the pointer past either edge. */
+function TabDragGhost({ drag, tab }: {
+  drag: ListDragState
+  tab: DocumentTabItem
+}) {
+  return createPortal(
+    <div
+      aria-hidden
+      className="pointer-events-none fixed z-60 flex select-none items-center gap-1.5 rounded-md border bg-background px-3 text-sm text-foreground shadow-lg"
+      data-slot="tab-drag-ghost"
+      style={{
+        height: drag.height,
+        left: drag.pointer.x + drag.grip.x,
+        top: drag.pointer.y + drag.grip.y,
+        width: drag.width,
+      }}
+    >
+      <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
+      {tab.dirty ? (
+        <span className="size-2 shrink-0 rounded-full bg-primary" />
+      ) : null}
+      <span className="truncate">{tab.name}</span>
+    </div>,
+    document.body,
+  )
+}
+
 export function DocumentTabs({
   activeId,
   armedTabId,
   onActivate,
   onClose,
   onOpenFile,
+  onReorder,
   opening,
   tabs,
 }: DocumentTabsProps) {
@@ -59,6 +92,38 @@ export function DocumentTabs({
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [scrolls, setScrolls] = useState(false)
   const tabIds: TabId[] = [HOME_TAB_ID, ...tabs.map((tab) => tab.id)]
+  const reorderable = tabs.length > 1
+  // The strip's handle is the tab itself; only its close button is pressed.
+  const { drag } = useListDrag({
+    active: reorderable,
+    axis: "x",
+    listRef: scrollerRef,
+    onReorder,
+    pressOnly: (target) => target.closest("[data-tab-close]") !== null,
+  })
+  // A finished drag ends in a click-shaped burst on the tab it lifted, which
+  // must not read as an activation — for that one tab only, so a pressless
+  // click (WebDriver's) on any other still activates. The next real press,
+  // anywhere, ends the drag's claim outright.
+  const draggedClickRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (drag) {
+      draggedClickRef.current = tabs[drag.index]?.id ?? null
+    }
+  }, [drag, tabs])
+
+  useEffect(() => {
+    const clearDraggedClick = () => {
+      draggedClickRef.current = null
+    }
+
+    document.addEventListener("pointerdown", clearDraggedClick, true)
+    return () =>
+      document.removeEventListener("pointerdown", clearDraggedClick, true)
+  }, [])
+
+  const draggedTab = drag ? tabs[drag.index] : undefined
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -156,6 +221,7 @@ export function DocumentTabs({
               // between two unselected ones nothing marks where one ends.
               const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
               const divided = !selected && previousId !== activeId
+              const wayOffset = drag?.cellOffsets[index] ?? 0
 
               return (
                 <div
@@ -170,9 +236,22 @@ export function DocumentTabs({
                     // Held pages are over this tab: it reads as the one they are
                     // about to be taken to, ahead of it actually opening.
                     armed && "border-primary bg-background text-foreground",
+                    drag &&
+                      drag.index !== index &&
+                      "transition-transform duration-200 ease-out",
+                    // The portal ghost carries this tab; the real one stays as
+                    // the hole the others slide around to fill.
+                    drag?.index === index && "opacity-0",
                   )}
                   data-document-tab={tab.id}
+                  data-list-index={index}
                   key={tab.id}
+                  style={{
+                    transform:
+                      wayOffset === 0
+                        ? undefined
+                        : `translateX(${wayOffset}px)`,
+                  }}
                 >
                   {/* The workspace puts focus on this button after every open,
                       and a hint opened by that would stand over the strip. */}
@@ -180,9 +259,22 @@ export function DocumentTabs({
                     <button
                       aria-controls={panelElementId(tab.id)}
                       aria-selected={selected}
-                      className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      className={cn(
+                        "flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                        reorderable && "cursor-grab",
+                      )}
                       id={tabElementId(tab.id)}
-                      onClick={() => onActivate(tab.id)}
+                      onClick={(event) => {
+                        if (draggedClickRef.current === tab.id) {
+                          draggedClickRef.current = null
+                          return
+                        }
+
+                        // Starting a drag cancels the press's native focus, so
+                        // the click that survives puts it back itself.
+                        event.currentTarget.focus()
+                        onActivate(tab.id)
+                      }}
                       onKeyDown={(event) => handleKeyDown(event, tab.id)}
                       role="tab"
                       tabIndex={selected ? 0 : -1}
@@ -211,6 +303,7 @@ export function DocumentTabs({
                     <button
                       aria-label={t("tabs.close", { name: tab.name })}
                       className="mr-1 grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      data-tab-close
                       onClick={() => onClose(tab.id)}
                       tabIndex={selected ? 0 : -1}
                       type="button"
@@ -288,6 +381,8 @@ export function DocumentTabs({
         className="h-full min-w-8 flex-1 self-stretch"
         data-tauri-drag-region="deep"
       />
+
+      {drag && draggedTab ? <TabDragGhost drag={drag} tab={draggedTab} /> : null}
     </div>
   )
 }

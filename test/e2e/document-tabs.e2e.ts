@@ -33,6 +33,96 @@ function tabButton(name: string) {
   return $(`//button[@role='tab'][normalize-space()='${name}']`)
 }
 
+function tabNames() {
+  return browser.execute(() =>
+    Array.from(document.querySelectorAll("[data-document-tab]"), (tab) =>
+      tab.querySelector("button[role='tab']")?.textContent?.trim() ?? "",
+    ),
+  )
+}
+
+/**
+ * Drags the document tab at `from` onto `across` (0–1) of the tab at `to`,
+ * 0-based among the documents — pointer events, the only press semantics a
+ * test has under WebKitGTK. Held drags stash their release point: the strip
+ * translates under the pointer mid-gesture, so a later release must restate
+ * the coordinates the gesture actually rests at.
+ */
+function dragTab(from: number, to: number, across: number, release = true) {
+  return browser.execute(
+    (f: number, t: number, span: number, shouldRelease: boolean) => {
+      const tab = (index: number) =>
+        document.querySelector(`[data-list-index='${index}']`)!
+      const fromBox = tab(f).getBoundingClientRect()
+      const toBox = tab(t).getBoundingClientRect()
+      // Over the tab's title, clear of its close button.
+      const start = {
+        x: fromBox.left + fromBox.width * 0.3,
+        y: fromBox.top + fromBox.height / 2,
+      }
+      const dest = {
+        x: toBox.left + toBox.width * span,
+        y: toBox.top + toBox.height / 2,
+      }
+
+      tab(f).dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: start.x,
+          clientY: start.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: start.x + 12,
+          clientY: start.y,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: dest.x,
+          clientY: dest.y,
+        }),
+      )
+
+      if (shouldRelease) {
+        document.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            clientX: dest.x,
+            clientY: dest.y,
+          }),
+        )
+      } else {
+        ;(window as unknown as { __tabDragDest?: { x: number; y: number } }).__tabDragDest = dest
+      }
+    },
+    from,
+    to,
+    across,
+    release,
+  )
+}
+
+function releaseHeldTab() {
+  return browser.execute(() => {
+    const dest = (window as unknown as { __tabDragDest: { x: number; y: number } })
+      .__tabDragDest
+
+    document.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        clientX: dest.x,
+        clientY: dest.y,
+      }),
+    )
+  })
+}
+
 function recentEntry(filePath: string) {
   return $(
     `//button[@data-slot='recent-file'][contains(., '${path.basename(filePath)}')]`,
@@ -318,6 +408,62 @@ describe("independent document tabs", () => {
     await browser.waitUntil(
       async () => Math.abs((await activeScrollTop()) - readingOffset) <= 2,
       { timeoutMsg: "the recent file opened at a different reading position" },
+    )
+  })
+
+  it("reorders tabs by dragging along the strip", async () => {
+    await openPdfFromDisk("drag-a.pdf", minimalPdf(1))
+    await openPdfFromDisk("drag-b.pdf", minimalPdf(1))
+    await openPdfFromDisk("drag-c.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(4)
+
+    // Held over the first tab, the dragged one rides the pointer as a ghost
+    // while the strip itself still shows the order it started with.
+    await dragTab(2, 0, 0.25, false)
+    await expect(await tabNames()).toEqual([
+      "drag-a.pdf",
+      "drag-b.pdf",
+      "drag-c.pdf",
+    ])
+    await browser.waitUntil(
+      async () => (await $("[data-slot='tab-drag-ghost']").isExisting()),
+      { timeoutMsg: "the dragged tab never appeared as a ghost" },
+    )
+
+    await releaseHeldTab()
+    await browser.waitUntil(
+      async () =>
+        (await tabNames()).join() === "drag-c.pdf,drag-a.pdf,drag-b.pdf",
+      { timeoutMsg: "the dragged tab never took the front place" },
+    )
+    // Home still leads the strip, ahead of the reordered documents.
+    await expect((await tabButtons())[0]).toHaveAttribute(
+      "id",
+      "workspace-tab-home",
+    )
+    // Dragging is not activating: the tab that led the workspace still does.
+    await expect(tabButton("drag-c.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    // The click a real press makes still activates, whatever dragged before it.
+    await tabButton("drag-b.pdf").click()
+    await expect(tabButton("drag-b.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    // And the other way: front to back.
+    await dragTab(0, 2, 0.75)
+    await browser.waitUntil(
+      async () =>
+        (await tabNames()).join() === "drag-a.pdf,drag-b.pdf,drag-c.pdf",
+      { timeoutMsg: "the dragged tab never took the back place" },
+    )
+    await expect(tabButton("drag-b.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
     )
   })
 

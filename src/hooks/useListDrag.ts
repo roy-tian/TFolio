@@ -7,24 +7,38 @@ import {
 } from "@/lib/pageDrag"
 
 type UseListDragOptions = {
+  /** Vertical lists (the default) drop by y; horizontal strips like the tab
+      bar by x. Decided once at measurement so the rest is axis-free. */
+  axis?: "x" | "y"
   active: boolean
   listRef: RefObject<HTMLElement | null>
   onReorder: (from: number, to: number) => void
+  /** Targets that are pressed, not dragged. A row's own buttons by default;
+      the tab strip overrides it to the close button alone, its title button
+      being the handle. */
+  pressOnly?: (target: Element) => boolean
 }
+
+const pressedButton = (target: Element) => target.closest("button") !== null
 
 /**
  * Rects, not `offsetTop`, and in the list's scrolled content space — the space
- * `contentY` answers in — so the two agree whatever the offset parent is.
+ * `contentCoordinate` answers in — so the two agree whatever the offset parent
+ * is. A horizontal strip's cells are normalised into the vertical `{top,
+ * height}` shape the drop-gap and way-offset math already speaks.
  */
-function measureRows(list: HTMLElement) {
-  const listTop = list.getBoundingClientRect().top
+function measureCells(list: HTMLElement, axis: "x" | "y") {
+  const listRect = list.getBoundingClientRect()
+  const listStart = axis === "x" ? listRect.left : listRect.top
 
   return Array.from(
     list.querySelectorAll<HTMLElement>("[data-list-index]"),
     (element) => {
       const rect = element.getBoundingClientRect()
 
-      return { height: rect.height, top: rect.top - listTop + list.scrollTop }
+      return axis === "x"
+        ? { height: rect.width, top: rect.left - listStart + list.scrollLeft }
+        : { height: rect.height, top: rect.top - listStart + list.scrollTop }
     },
   )
 }
@@ -35,25 +49,25 @@ export type ListDragState = {
   grip: { x: number; y: number }
   height: number
   pointer: { x: number; y: number }
-  rowOffsets: number[]
+  cellOffsets: number[]
   width: number
 }
 
 function makeWayOffsets(
   index: number,
   gap: number,
-  rows: { height: number; top: number }[],
+  cells: { height: number; top: number }[],
 ) {
-  const offsets = Array.from({ length: rows.length }, () => 0)
+  const offsets = Array.from({ length: cells.length }, () => 0)
   const destination = indexAfterMove(index, gap)
 
   if (destination < index) {
-    for (let row = destination; row < index; row += 1) {
-      offsets[row] = rows[row + 1]!.top - rows[row]!.top
+    for (let cell = destination; cell < index; cell += 1) {
+      offsets[cell] = cells[cell + 1]!.top - cells[cell]!.top
     }
   } else if (destination > index) {
-    for (let row = index + 1; row <= destination; row += 1) {
-      offsets[row] = rows[row - 1]!.top - rows[row]!.top
+    for (let cell = index + 1; cell <= destination; cell += 1) {
+      offsets[cell] = cells[cell - 1]!.top - cells[cell]!.top
     }
   }
 
@@ -61,13 +75,16 @@ function makeWayOffsets(
 }
 
 /**
- * Rows are measured in the list's scrolled content space, not the viewport's,
- * so scrolling mid-drag still answers about the row under the pointer.
+ * Cells are measured in the list's scrolled content space, not the viewport's,
+ * so scrolling mid-drag still answers about the cell under the pointer. The
+ * offsets the state carries are along the list's axis; the caller knows which.
  */
 export function useListDrag({
   active,
+  axis = "y",
   listRef,
   onReorder,
+  pressOnly = pressedButton,
 }: UseListDragOptions): { drag: ListDragState | null } {
   const [drag, setDrag] = useState<ListDragState | null>(null)
   // Read through a ref so an owner re-render mid-gesture cannot resubscribe the
@@ -88,19 +105,23 @@ export function useListDrag({
       from: { x: number; y: number }
       grip: { x: number; y: number }
       height: number
-      rows: { height: number; top: number }[]
+      cells: { height: number; top: number }[]
       dragging: boolean
       width: number
     } | null = null
 
-    const contentY = (event: PointerEvent) => {
+    const contentCoordinate = (event: PointerEvent) => {
       const list = listRef.current
 
       if (!list) {
         return null
       }
 
-      return event.clientY - list.getBoundingClientRect().top + list.scrollTop
+      const rect = list.getBoundingClientRect()
+
+      return axis === "x"
+        ? event.clientX - rect.left + list.scrollLeft
+        : event.clientY - rect.top + list.scrollTop
     }
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -118,41 +139,40 @@ export function useListDrag({
         return
       }
 
-      // The row's own buttons — move, remove — are pressed, not dragged.
-      if (target.closest("button")) {
+      if (pressOnly(target)) {
         return
       }
 
-      const row = target.closest("[data-list-index]")
+      const cell = target.closest("[data-list-index]")
 
-      if (!row) {
+      if (!cell) {
         return
       }
 
-      const index = Number(row.getAttribute("data-list-index"))
+      const index = Number(cell.getAttribute("data-list-index"))
 
       if (!Number.isInteger(index) || index < 0) {
         return
       }
 
-      const rowRect = row.getBoundingClientRect()
+      const cellRect = cell.getBoundingClientRect()
 
       // Text and image selection are never an alternate meaning for a press on
       // a reorderable row; WebKit must not start a native text drag here.
       event.preventDefault()
 
       gesture = {
+        cells: measureCells(list, axis),
         dragging: false,
         from: { x: event.clientX, y: event.clientY },
         grip: {
-          x: rowRect.left - event.clientX,
-          y: rowRect.top - event.clientY,
+          x: cellRect.left - event.clientX,
+          y: cellRect.top - event.clientY,
         },
-        height: rowRect.height,
+        height: cellRect.height,
         index,
         pointerId: event.pointerId,
-        rows: measureRows(list),
-        width: rowRect.width,
+        width: cellRect.width,
       }
     }
 
@@ -176,21 +196,21 @@ export function useListDrag({
 
       event.preventDefault()
 
-      const y = contentY(event)
+      const coordinate = contentCoordinate(event)
 
-      if (y === null) {
+      if (coordinate === null) {
         return
       }
 
-      const gap = dropGapForRow(y, gesture.rows)
+      const gap = dropGapForRow(coordinate, gesture.cells)
 
       setDrag({
+        cellOffsets: makeWayOffsets(gesture.index, gap, gesture.cells),
         gap,
         grip: gesture.grip,
         height: gesture.height,
         index: gesture.index,
         pointer: { x: event.clientX, y: event.clientY },
-        rowOffsets: makeWayOffsets(gesture.index, gap, gesture.rows),
         width: gesture.width,
       })
     }
@@ -211,15 +231,15 @@ export function useListDrag({
 
       event.preventDefault()
 
-      const y = contentY(event)
+      const coordinate = contentCoordinate(event)
 
-      if (y === null) {
+      if (coordinate === null) {
         return
       }
 
       const to = indexAfterMove(
         current.index,
-        dropGapForRow(y, current.rows),
+        dropGapForRow(coordinate, current.cells),
       )
 
       if (to !== current.index) {

@@ -42,6 +42,7 @@ import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
+  reorderedTabs,
   selectOpenedTabId,
   tabElementId,
   tabIdForPath,
@@ -212,6 +213,15 @@ export default function App() {
     setActiveId(tabId)
     focusWorkspaceTarget(tabId)
   }, [])
+
+  // The strip's drag reorder: pure order among documents, touching nothing
+  // behind the tabs it moves.
+  const reorderTabs = useCallback(
+    (from: number, to: number) => {
+      replaceTabs((current) => reorderedTabs(current, from, to))
+    },
+    [replaceTabs],
+  )
 
   const { armedTabId, handoff } = usePageHandoff({
     activeIdRef,
@@ -1273,6 +1283,7 @@ export default function App() {
         onActivate={activateTab}
         onClose={requestCloseTab}
         onOpenFile={() => void chooseFile()}
+        onReorder={reorderTabs}
         opening={isOpening}
         tabs={tabs}
       />
