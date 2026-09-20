@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ChevronDown, FolderOpen, House, LoaderCircle, X } from "lucide-react"
+import { ChevronDown, ExternalLink, FolderOpen, House, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,6 +37,10 @@ export type DocumentTabItem = {
   name: string
 }
 
+/** A dragged tab's ghost stays in sight at the window's edge, where the
+    pointer has gone past it: the drag is still this window's to answer. */
+const GHOST_EDGE_MARGIN = 4
+
 type DocumentTabsProps = {
   activeId: TabId
   /** The tab a page drag is resting on, which the workspace is about to open
@@ -41,6 +51,15 @@ type DocumentTabsProps = {
   onOpenFile: () => void
   /** Reorders the document tabs, both indices among them; home stays first. */
   onReorder: (from: number, to: number) => void
+  /** A release the strip did not keep: the workspace owns where the tab goes —
+      another window, or a new one of its own. */
+  onTabDropOutside?: (documentId: number, point: { x: number; y: number }) => void
+  /** Follows a drag that has left the strip by the dragged tab's name, so the
+      windows it passes over can say so; a null name reports the drag over
+      wherever it went. */
+  onTabDragMove?: (name: string | null, point: { x: number; y: number }) => void
+  /** The context menu's ask: the tab becomes a window of its own. */
+  onMoveToNewWindow?: (documentId: number) => void
   opening: boolean
   tabs: DocumentTabItem[]
 }
@@ -63,8 +82,14 @@ function TabDragGhost({ drag, tab }: {
       data-slot="tab-drag-ghost"
       style={{
         height: drag.height,
-        left: drag.pointer.x + drag.grip.x,
-        top: drag.pointer.y + drag.grip.y,
+        left: Math.min(
+          Math.max(drag.pointer.x + drag.grip.x, GHOST_EDGE_MARGIN),
+          window.innerWidth - drag.width - GHOST_EDGE_MARGIN,
+        ),
+        top: Math.min(
+          Math.max(drag.pointer.y + drag.grip.y, GHOST_EDGE_MARGIN),
+          window.innerHeight - drag.height - GHOST_EDGE_MARGIN,
+        ),
         width: drag.width,
       }}
     >
@@ -85,11 +110,15 @@ export function DocumentTabs({
   onClose,
   onOpenFile,
   onReorder,
+  onTabDropOutside,
+  onTabDragMove,
+  onMoveToNewWindow,
   opening,
   tabs,
 }: DocumentTabsProps) {
   const { t } = useTranslation()
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const stripRef = useRef<HTMLDivElement>(null)
   const [scrolls, setScrolls] = useState(false)
   const tabIds: TabId[] = [HOME_TAB_ID, ...tabs.map((tab) => tab.id)]
   const reorderable = tabs.length > 1
@@ -99,6 +128,18 @@ export function DocumentTabs({
     axis: "x",
     listRef: scrollerRef,
     onReorder,
+    onDropOutside: onTabDropOutside
+      ? (point, index) => {
+          const tab = tabs[index]
+
+          if (tab) {
+            onTabDropOutside(tab.id, point)
+          }
+        }
+      : undefined,
+    // The strip, not the scroller, bounds the drop: its trailing spacer and
+    // the actions beside the list read as strip rather than as out.
+    dropAreaRef: stripRef,
     pressOnly: (target) => target.closest("[data-tab-close]") !== null,
   })
   // A finished drag ends in a click-shaped burst on the tab it lifted, which
@@ -124,6 +165,22 @@ export function DocumentTabs({
   }, [])
 
   const draggedTab = drag ? tabs[drag.index] : undefined
+
+  // Where the drag has gone is the workspace's to answer for: it owns the
+  // other windows the tab could land on and the highlighting they show. Only
+  // the moves that leave the strip are worth a word, and the drag's end is.
+  const dragOutside = drag?.outside ? drag.pointer : null
+  const reportedDragRef = useRef(false)
+
+  useEffect(() => {
+    if (dragOutside && draggedTab) {
+      reportedDragRef.current = true
+      onTabDragMove?.(draggedTab.name, dragOutside)
+    } else if (reportedDragRef.current) {
+      reportedDragRef.current = false
+      onTabDragMove?.(null, { x: 0, y: 0 })
+    }
+  }, [dragOutside, draggedTab, onTabDragMove])
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -175,6 +232,7 @@ export function DocumentTabs({
     <div
       className="fixed inset-x-0 top-12 z-40 flex h-9 items-end gap-1 border-b bg-muted/70 px-2 backdrop-blur"
       data-tab-strip
+      ref={stripRef}
     >
       {/* The open and list actions sit outside the tablist: they are not tabs,
           and arrow-key tab navigation must not land on them. */}
@@ -224,35 +282,41 @@ export function DocumentTabs({
               const wayOffset = drag?.cellOffsets[index] ?? 0
 
               return (
-                <div
-                  className={cn(
-                    tabClassName,
-                    "mb-[-1px] w-44 min-w-28 max-w-56",
-                    selected
-                      ? "bg-background text-foreground"
-                      : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
-                    divided &&
-                      "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
-                    // Held pages are over this tab: it reads as the one they are
-                    // about to be taken to, ahead of it actually opening.
-                    armed && "border-primary bg-background text-foreground",
-                    drag &&
-                      drag.index !== index &&
-                      "transition-transform duration-200 ease-out",
-                    // The portal ghost carries this tab; the real one stays as
-                    // the hole the others slide around to fill.
-                    drag?.index === index && "opacity-0",
-                  )}
-                  data-document-tab={tab.id}
-                  data-list-index={index}
-                  key={tab.id}
-                  style={{
-                    transform:
-                      wayOffset === 0
-                        ? undefined
-                        : `translateX(${wayOffset}px)`,
-                  }}
-                >
+                <ContextMenu key={tab.id}>
+                  {/* A tab is its own menu trigger: the entries below act on
+                      this tab alone, and no other surface here has any. */}
+                  <ContextMenuTrigger
+                    render={
+                      <div
+                        className={cn(
+                          tabClassName,
+                          "mb-[-1px] w-44 min-w-28 max-w-56",
+                          selected
+                            ? "bg-background text-foreground"
+                            : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                          divided &&
+                            "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
+                          // Held pages are over this tab: it reads as the one they are
+                          // about to be taken to, ahead of it actually opening.
+                          armed && "border-primary bg-background text-foreground",
+                          drag &&
+                            drag.index !== index &&
+                            "transition-transform duration-200 ease-out",
+                          // The portal ghost carries this tab; the real one stays as
+                          // the hole the others slide around to fill.
+                          drag?.index === index && "opacity-0",
+                        )}
+                        data-document-tab={tab.id}
+                        data-list-index={index}
+                        style={{
+                          transform:
+                            wayOffset === 0
+                              ? undefined
+                              : `translateX(${wayOffset}px)`,
+                        }}
+                      />
+                    }
+                  >
                   {/* The workspace puts focus on this button after every open,
                       and a hint opened by that would stand over the strip. */}
                   <HintTooltip inDelayGroup label={tab.name} openOnFocus={false}>
@@ -311,7 +375,24 @@ export function DocumentTabs({
                       <X className="size-3.5" />
                     </button>
                   </HintTooltip>
-                </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem
+                      data-action="tab-move-new-window"
+                      onClick={() => onMoveToNewWindow?.(tab.id)}
+                    >
+                      <ExternalLink />
+                      {t("tabs.moveToNewWindow")}
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      data-action="tab-close"
+                      onClick={() => onClose(tab.id)}
+                    >
+                      <X />
+                      {t("tabs.close", { name: tab.name })}
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })}
           </HintTooltipGroup>

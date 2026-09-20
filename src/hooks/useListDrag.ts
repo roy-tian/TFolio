@@ -17,6 +17,14 @@ type UseListDragOptions = {
       the tab strip overrides it to the close button alone, its title button
       being the handle. */
   pressOnly?: (target: Element) => boolean
+  /** Answers a release outside the drop area instead of the clamped reorder.
+      Its presence is what switches the gesture over: the insertion preview
+      stops at the drop area's edge, and leaving it means the drop went. */
+  onDropOutside?: (point: { x: number; y: number }, index: number) => void
+  /** The area a release stays a reorder inside — the list itself by default.
+      The tab strip passes the whole strip, so its trailing spacer and the
+      actions beside the list read as strip rather than as out. */
+  dropAreaRef?: RefObject<HTMLElement | null>
 }
 
 const pressedButton = (target: Element) => target.closest("button") !== null
@@ -43,11 +51,32 @@ function measureCells(list: HTMLElement, axis: "x" | "y") {
   )
 }
 
+/** The pointer against an element's viewport rect. Out-of-window coordinates
+    answer here too: the platform keeps delivering a held pointer's events to
+    the window the press happened in, and the capture below keeps the page
+    seeing them. */
+function outsideElement(
+  event: PointerEvent,
+  element: HTMLElement,
+): boolean {
+  const rect = element.getBoundingClientRect()
+
+  return (
+    event.clientX < rect.left ||
+    event.clientX > rect.right ||
+    event.clientY < rect.top ||
+    event.clientY > rect.bottom
+  )
+}
+
 export type ListDragState = {
   index: number
   gap: number
   grip: { x: number; y: number }
   height: number
+  /** The pointer has left the drop area, so this drag is no longer a reorder:
+      no insertion gap is shown and the release goes to `onDropOutside`. */
+  outside: boolean
   pointer: { x: number; y: number }
   cellOffsets: number[]
   width: number
@@ -85,13 +114,17 @@ export function useListDrag({
   listRef,
   onReorder,
   pressOnly = pressedButton,
+  onDropOutside,
+  dropAreaRef,
 }: UseListDragOptions): { drag: ListDragState | null } {
   const [drag, setDrag] = useState<ListDragState | null>(null)
-  // Read through a ref so an owner re-render mid-gesture cannot resubscribe the
+  // Read through refs so an owner re-render mid-gesture cannot resubscribe the
   // listeners and drop the gesture in flight, as in `usePageDrag`.
   const onReorderRef = useRef(onReorder)
+  const onDropOutsideRef = useRef(onDropOutside)
 
   onReorderRef.current = onReorder
+  onDropOutsideRef.current = onDropOutside
 
   useEffect(() => {
     if (!active) {
@@ -100,6 +133,7 @@ export function useListDrag({
     }
 
     let gesture: {
+      cell: HTMLElement | null
       pointerId: number
       index: number
       from: { x: number; y: number }
@@ -162,6 +196,7 @@ export function useListDrag({
       event.preventDefault()
 
       gesture = {
+        cell: cell instanceof HTMLElement ? cell : null,
         cells: measureCells(list, axis),
         dragging: false,
         from: { x: event.clientX, y: event.clientY },
@@ -192,6 +227,21 @@ export function useListDrag({
         }
 
         gesture.dragging = true
+
+        // Held pointers stay this window's until release on every platform, but
+        // only a capture hands the page the events beyond its own viewport —
+        // where a strip drag is headed. Taken only now that this is a drag and
+        // not a press: a capture taken on the press would retarget the click
+        // that follows it onto the cell, and the pressed control would never
+        // hear it. Synthetic pointers have none to take.
+        if (gesture.cell) {
+          try {
+            gesture.cell.setPointerCapture(event.pointerId)
+          } catch {
+            // A dispatched event names no active pointer; the drag tracks it
+            // through the document listeners alone, as it did before.
+          }
+        }
       }
 
       event.preventDefault()
@@ -202,14 +252,25 @@ export function useListDrag({
         return
       }
 
-      const gap = dropGapForRow(coordinate, gesture.cells)
+      const dropArea = dropAreaRef?.current ?? listRef.current
+      const outside =
+        onDropOutsideRef.current !== undefined &&
+        dropArea !== null &&
+        outsideElement(event, dropArea)
+
+      // Outside the drop area there is no gap to point at: the neighbours come
+      // home, and the release answers to `onDropOutside` instead.
+      const gap = outside ? gesture.index : dropGapForRow(coordinate, gesture.cells)
 
       setDrag({
-        cellOffsets: makeWayOffsets(gesture.index, gap, gesture.cells),
+        cellOffsets: outside
+          ? Array.from({ length: gesture.cells.length }, () => 0)
+          : makeWayOffsets(gesture.index, gap, gesture.cells),
         gap,
         grip: gesture.grip,
         height: gesture.height,
         index: gesture.index,
+        outside,
         pointer: { x: event.clientX, y: event.clientY },
         width: gesture.width,
       })
@@ -230,6 +291,18 @@ export function useListDrag({
       }
 
       event.preventDefault()
+
+      const dropArea = dropAreaRef?.current ?? listRef.current
+      const onDropOutside = onDropOutsideRef.current
+
+      if (
+        onDropOutside &&
+        dropArea !== null &&
+        outsideElement(event, dropArea)
+      ) {
+        onDropOutside({ x: event.clientX, y: event.clientY }, current.index)
+        return
+      }
 
       const coordinate = contentCoordinate(event)
 
@@ -267,7 +340,7 @@ export function useListDrag({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, listRef])
+  }, [active, dropAreaRef, listRef])
 
   return { drag }
 }

@@ -43,6 +43,14 @@ const en = {
       "One or more open documents have changes that are not saved. Closing them all will discard those changes.",
     discardAndCloseTab: "Discard and close tab",
     discardAndCloseAll: "Discard and close all",
+    moveToNewWindow: "Move to new window",
+    hoverTitle: "Drop to move \u201c{{name}}\u201d here",
+    hoverHint: "Its pages, edits, and history come with it",
+    moveFailed: "The tab could not be moved.",
+    moveBusy:
+      "Wait for the current work on this tab to finish before moving it.",
+    moveNoteOpen:
+      "Finish or discard the note being typed before moving this tab.",
   },
   imageExport: {
     menuLabel: "Export images…",

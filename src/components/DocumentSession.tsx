@@ -85,6 +85,10 @@ import {
   rotationsAfterRotate,
 } from "@/lib/pageRotation"
 import { isMacOS } from "@/lib/platform"
+import type {
+  MovedSessionSnapshot,
+  MovedTabSeed,
+} from "@/lib/tabMove"
 import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
 import {
@@ -133,6 +137,10 @@ export type DocumentSessionHandle = {
   openWatermark: () => void
   print: () => void
   rememberViewNow: () => Promise<void>
+  /** Everything only this session knows about the tab it shows, for a move to
+      another window — or why the move must wait, and null where there is no
+      document behind the tab. */
+  snapshotForMove: () => MovedSessionSnapshot | null
   /** Refuses wherever the toolbar's button is greyed out, so no key can write
       what it will not. */
   save: () => void
@@ -188,6 +196,9 @@ type DocumentSessionProps = {
   pageHandoff: PageHandoffTarget
   recentPath?: string
   saveAsDefaultName?: string
+  /** A tab that arrived from another window, replayed here: the state the
+      strip could not carry, read once at the first mount. */
+  movedSeed?: MovedTabSeed
 }
 
 function closePdf(documentId: number) {
@@ -215,6 +226,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       pageHandoff,
       recentPath,
       saveAsDefaultName,
+      movedSeed,
     },
     ref,
   ) {
@@ -231,7 +243,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     }))
     // Pages another file brought in leave the document export-only, like a
     // watermark. The backend answers with every structure update, so no replay.
-    const [hasMergedPages, setHasMergedPages] = useState(false)
+    const [hasMergedPages, setHasMergedPages] = useState(
+      () => movedSeed?.hasMergedPages ?? false,
+    )
     const [currentPage, setCurrentPage] = useState(() =>
       Math.min(
         Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
@@ -242,8 +256,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // The odometer stands in for the field's own text, and has to stand aside
     // while what the field holds is no longer the page being read.
     const [pageInputFocused, setPageInputFocused] = useState(false)
-    const [pageRotations, setPageRotations] = useState(() =>
-      openedDocument.pages.map(() => 0),
+    const [pageRotations, setPageRotations] = useState<number[]>(
+      () => movedSeed?.pageRotations ?? openedDocument.pages.map(() => 0),
     )
     const [bookmarksOpen, setBookmarksOpen] = useState(false)
     const [imageExportOpen, setImageExportOpen] = useState(false)
@@ -441,6 +455,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     }, [selectAllPages, selectAllText, viewMode])
     const annotations = useAnnotations({
       documentId: pdfDocument?.id,
+      initial: movedSeed && { history: movedSeed.history, marks: movedSeed.marks },
       onAnnotateError: useCallback(
         (error?: unknown, command?: AnnotationCommand) => {
           // The one refusal with a way out: nothing installed can draw this text,
@@ -1065,6 +1080,50 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [flushAndRememberView, sampleCurrentView],
     )
 
+    // What the tab takes with it: the structure as this session holds it (the
+    // tab's own copy went stale with every edit), the view it is being read in,
+    // the first-save wait as the session — not the tab it was opened with —
+    // now stands, and the history-backed state a fresh session cannot derive.
+    // A move waits while a note draft is open (its text lives nowhere else)
+    // or work is in flight.
+    const snapshotForMove = useCallback((): MovedSessionSnapshot | null => {
+      const document = documentRef.current
+
+      if (!document) {
+        return null
+      }
+
+      if (isNoteWorthKeeping(textNote.draft?.text ?? "")) {
+        return { blocked: "note" }
+      }
+
+      const annotationsSeed = annotations.snapshotForMove()
+
+      if (!annotationsSeed) {
+        return { blocked: "busy" }
+      }
+
+      return {
+        document,
+        recentView: sampleCurrentView(),
+        saveRequired: saveRequiredRef.current,
+        seed: {
+          hasMergedPages,
+          history: annotationsSeed.history,
+          marks: annotationsSeed.marks,
+          pageRotations,
+          viewMode: preferredViewMode,
+        },
+      }
+    }, [
+      annotations,
+      hasMergedPages,
+      pageRotations,
+      preferredViewMode,
+      sampleCurrentView,
+      textNote.draft?.text,
+    ])
+
     useEffect(() => {
       const viewer = viewerRef.current
 
@@ -1196,6 +1255,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         saveAs: () => void exportPdf(),
         selectAll,
         showThumbnails,
+        snapshotForMove,
         undo: () => {
           if (annotations.canUndo) {
             undoStep()
@@ -1217,6 +1277,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         search.openSearch,
         selectAll,
         showThumbnails,
+        snapshotForMove,
         startPrint,
         undoStep,
       ],

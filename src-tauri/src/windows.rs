@@ -12,6 +12,7 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
+use crate::handoff::{return_pending, HandoffQueue};
 use crate::pdfium::PdfiumState;
 
 pub const FOCUS_DOCUMENT_EVENT: &str = "workspace://focus-document";
@@ -90,6 +91,23 @@ pub fn focus_target(app: &AppHandle) -> Option<WebviewWindow> {
 
 #[tauri::command]
 pub async fn open_new_window(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    let mut config = window_config_from(&app, &window)?;
+    cascade_from(&window, &mut config);
+
+    WebviewWindowBuilder::from_config(&app, &config)
+        .and_then(|builder| builder.build())
+        .map(|_| ())
+        .map_err(|error| format!("a new window could not be opened: {error}"))
+}
+
+/// The config any new window opens from: the configured first window's chrome,
+/// a label of its own, and the asking window's size — a maximized frame is not
+/// one to inherit: the cascade cannot step past a whole work area, and the new
+/// window would land exactly over the old one.
+pub fn window_config_from(
+    app: &AppHandle,
+    reference: &WebviewWindow,
+) -> Result<WindowConfig, String> {
     let mut config = app
         .config()
         .app
@@ -102,27 +120,20 @@ pub async fn open_new_window(app: AppHandle, window: WebviewWindow) -> Result<()
     // `visible: false` in the config is main's alone, waiting for its stored
     // frame; a window built here has nothing waiting to show it.
     config.visible = true;
-    // The window asked from is the frame the reader is using; a new one opens
-    // that size rather than the config's first-run default. A maximized frame
-    // is not one to inherit: the cascade cannot step past a whole work area,
-    // and the new window would land exactly over the old one.
-    if !window.is_maximized().unwrap_or(false) {
-        if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+
+    if !reference.is_maximized().unwrap_or(false) {
+        if let (Ok(size), Ok(scale)) = (reference.inner_size(), reference.scale_factor()) {
             let size = size.to_logical::<f64>(scale);
 
             config.width = size.width;
             config.height = size.height;
         }
     }
-    cascade_from(&window, &mut config);
 
-    WebviewWindowBuilder::from_config(&app, &config)
-        .and_then(|builder| builder.build())
-        .map(|_| ())
-        .map_err(|error| format!("a new window could not be opened: {error}"))
+    Ok(config)
 }
 
-fn cascade_from(reference: &WebviewWindow, config: &mut WindowConfig) {
+pub fn cascade_from(reference: &WebviewWindow, config: &mut WindowConfig) {
     let (Ok(scale), Ok(position)) = (reference.scale_factor(), reference.outer_position()) else {
         return;
     };
@@ -196,6 +207,22 @@ impl DocumentOwners {
         })
     }
 
+    /// Moves a document to another window whole, under one lock, or not at all:
+    /// `None` means the sending window did not hold it. The answer is the path
+    /// the record keeps standing for, which the move carries beside its payload.
+    pub fn transfer(&self, document_id: u64, from: &str, to: &str) -> Option<Option<PathBuf>> {
+        let mut owners = self.0.lock().ok()?;
+
+        let owner = owners.get_mut(&document_id)?;
+
+        if owner.window != from {
+            return None;
+        }
+
+        owner.window = to.to_string();
+        Some(owner.path.clone())
+    }
+
     /// The caller already checked its tabs; its own match may be a close still in flight.
     fn holder_of(&self, path: &Path, asking: &str) -> Option<(String, u64)> {
         let owners = self.0.lock().ok()?;
@@ -206,14 +233,17 @@ impl DocumentOwners {
             .map(|(document_id, owner)| (owner.window.clone(), *document_id))
     }
 
-    fn take_window(&self, window: &str) -> Vec<u64> {
+    /// The ids a window stood for, minus the kept ones, which stay standing:
+    /// a handoff still waiting on the window keeps its record, so the take
+    /// after a reload completes the move rather than the close a destroy does.
+    fn take_window_except(&self, window: &str, keep: &[u64]) -> Vec<u64> {
         let Ok(mut owners) = self.0.lock() else {
             return Vec::new();
         };
 
         let mut taken = Vec::new();
         owners.retain(|document_id, owner| {
-            if owner.window == window {
+            if owner.window == window && !keep.contains(document_id) {
                 taken.push(*document_id);
                 false
             } else {
@@ -237,16 +267,20 @@ pub fn record_document(
     let app = window.app_handle();
 
     if app.get_webview_window(window.label()).is_none() {
-        release_window(app, window.label());
+        window_gone(app, window.label());
     }
 }
 
 pub fn window_gone(app: &AppHandle, label: &str) {
+    // Untaken handoffs first: their documents go home rather than under.
+    return_pending(app, label);
     release_window(app, label);
     forget_focus(app, label);
 }
 
 /// Destroy and reload cannot wait for frontend unmount handlers to close documents.
+/// A handoff still waiting on this window keeps its documents: the window is
+/// only reloading, and its take after boot completes what the move began.
 pub fn release_window(app: &AppHandle, label: &str) {
     let (Some(owners), Some(pdfium)) = (
         app.try_state::<DocumentOwners>(),
@@ -255,7 +289,12 @@ pub fn release_window(app: &AppHandle, label: &str) {
         return;
     };
 
-    for document_id in owners.take_window(label) {
+    let pending = app
+        .try_state::<HandoffQueue>()
+        .map(|handoff| handoff.pending_ids(label))
+        .unwrap_or_default();
+
+    for document_id in owners.take_window_except(label, &pending) {
         pdfium.close_document_detached(document_id);
     }
 }
@@ -273,7 +312,7 @@ pub async fn focus_pdf_path(
     };
 
     let Some(window) = app.get_webview_window(&label) else {
-        release_window(&app, &label);
+        window_gone(&app, &label);
         return Ok(false);
     };
 
@@ -361,15 +400,52 @@ mod tests {
         owners.record(2, "window-2", None);
         owners.record(3, "window-2", Some(PathBuf::from("/tmp/b.pdf")));
 
-        let mut taken = owners.take_window("window-2");
+        let mut taken = owners.take_window_except("window-2", &[]);
         taken.sort_unstable();
 
         assert_eq!(taken, vec![2, 3]);
-        assert!(owners.take_window("window-2").is_empty());
+        assert!(owners.take_window_except("window-2", &[]).is_empty());
         assert_eq!(
             owners.holder_of(Path::new("/tmp/a.pdf"), "window-2"),
             Some(("main".to_string(), 1))
         );
+    }
+
+    #[test]
+    fn a_release_keeps_what_a_handoff_is_still_waiting_on() {
+        let owners = DocumentOwners::default();
+        owners.record(1, "window-2", Some(PathBuf::from("/tmp/a.pdf")));
+        owners.record(2, "window-2", None);
+        owners.record(3, "window-2", None);
+
+        assert_eq!(owners.take_window_except("window-2", &[1, 3]), vec![2]);
+        assert!(owners.owns(1, "window-2"), "the pending handoff stands");
+        assert!(owners.owns(3, "window-2"), "the pending handoff stands");
+        assert!(!owners.owns(2, "window-2"), "the rest went");
+    }
+
+    #[test]
+    fn a_transfer_moves_only_what_the_sender_holds() {
+        let owners = DocumentOwners::default();
+        owners.record(1, "main", Some(PathBuf::from("/tmp/a.pdf")));
+
+        assert_eq!(
+            owners.transfer(1, "main", "window-2"),
+            Some(Some(PathBuf::from("/tmp/a.pdf")))
+        );
+        assert!(owners.owns(1, "window-2"));
+        assert!(!owners.owns(1, "main"));
+
+        // The record now answers to window-2 alone; main cannot send it again.
+        assert_eq!(owners.transfer(1, "main", "window-3"), None);
+        assert!(owners.owns(1, "window-2"));
+
+        // A path-less document moves the same, carrying its emptiness.
+        owners.record(2, "main", None);
+        assert_eq!(owners.transfer(2, "main", "window-2"), Some(None));
+
+        // Nobody's document goes nowhere.
+        assert_eq!(owners.transfer(7, "main", "window-2"), None);
     }
 
     #[test]

@@ -75,6 +75,10 @@ type StructureChangeHandler = (
 
 type UseAnnotationsOptions = {
   documentId: number | undefined
+  /** A moved tab's history and marks, replayed as this session's own: undo,
+      the dirty flag, and the export-only refusals keep answering as they did
+      in the window the tab came from. Read once, at the first mount. */
+  initial?: { history: AnnotationHistory; marks: [entryId: number, markIds: number[]][] }
   /** `command` is the edit that failed, where re-running it is the recovery —
       a note otherwise lost with the editor that held it. Absent for a refusal. */
   onAnnotateError: (error?: unknown, command?: AnnotationCommand) => void
@@ -424,6 +428,7 @@ async function retractCommand(
     mirrors the annotations, only what it cannot answer about the reader's steps. */
 export function useAnnotations({
   documentId,
+  initial,
   onAnnotateError,
   onExportError,
   onExported,
@@ -431,7 +436,9 @@ export function useAnnotations({
   onStructureChange,
   onSuccess,
 }: UseAnnotationsOptions) {
-  const [history, setHistory] = useState<AnnotationHistory>(emptyHistory)
+  const [history, setHistory] = useState<AnnotationHistory>(
+    () => initial?.history ?? emptyHistory,
+  )
   const [renderEpochs, setRenderEpochs] = useState<RenderEpochs>({})
   // Commit receipts need the queue's exact epoch, before React renders it.
   const renderEpochsRef = useRef<RenderEpochs>({})
@@ -445,7 +452,7 @@ export function useAnnotations({
   const structurePendingRef = useRef(0)
   // React state lags until a re-render: an operation starting inside another's
   // round trip would plan against a history a step out of date.
-  const historyRef = useRef(emptyHistory)
+  const historyRef = useRef<AnnotationHistory>(initial?.history ?? emptyHistory)
   // Bumped when the document changes, so work still in flight against the last
   // one lands nowhere rather than on its successor.
   const generationRef = useRef(0)
@@ -454,7 +461,7 @@ export function useAnnotations({
   const queueRef = useRef<Promise<unknown>>(Promise.resolve())
   // The one thing kept about the annotations themselves: which marks each
   // applied entry holds, so an undo and the eraser can name them, not count them.
-  const marksRef = useRef<MarkStore>(new Map())
+  const marksRef = useRef<MarkStore>(new Map(initial?.marks ?? []))
 
   const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
     const next = { ...renderEpochsRef.current }
@@ -1267,6 +1274,20 @@ export function useAnnotations({
       re-render, so a follow-up needing the fresh history has to read it here. */
   const historyNow = useCallback(() => historyRef.current, [])
 
+  /** What a tab move carries, or nothing while work is in flight: a command
+      settling after the snapshot would change a document its history no longer
+      describes — a watermarked save guard is not a place to find that out. */
+  const snapshotForMove = useCallback(() => {
+    if (pendingRef.current > 0) {
+      return null
+    }
+
+    return {
+      history: historyRef.current,
+      marks: [...marksRef.current.entries()],
+    }
+  }, [])
+
   const reset = useCallback(() => {
     generationRef.current += 1
     historyRef.current = emptyHistory
@@ -1310,6 +1331,7 @@ export function useAnnotations({
       save,
       setPageNumbers,
       setWatermark,
+      snapshotForMove,
       textEpochs,
       undo: undoCommand,
       watermarkConfig: currentWatermarkConfig(history),
@@ -1340,6 +1362,7 @@ export function useAnnotations({
       save,
       setPageNumbers,
       setWatermark,
+      snapshotForMove,
       textEpochs,
       undoCommand,
     ],

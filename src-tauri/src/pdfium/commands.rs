@@ -829,7 +829,15 @@ pub async fn close_pdf(
     document_id: u64,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
 ) -> Result<(), String> {
+    // A moved tab's session still unmounts here and asks to close; the window
+    // that kept the document is the one whose close counts, and any other's is
+    // a no-op rather than a close under the new holder's feet.
+    if !owners.owns(document_id, window.label()) {
+        return Ok(());
+    }
+
     let engine = Arc::clone(&state.0);
 
     engine.cancel_document_work(document_id);

@@ -1,4 +1,5 @@
 mod convert;
+mod handoff;
 mod launch;
 mod pdfium;
 mod recent;
@@ -9,6 +10,7 @@ mod window_state;
 mod windows;
 
 use convert::word_conversion_available;
+use handoff::{move_document, move_document_new_window, take_moved_tabs, HandoffQueue};
 use launch::{take_launch_files, LaunchQueue};
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
@@ -83,6 +85,7 @@ pub fn run() {
             app.manage(recent);
             app.manage(settings::load(app.handle()));
             app.manage(LaunchQueue::default());
+            app.manage(HandoffQueue::default());
             app.manage(AppWindows::default());
             app.manage(DocumentOwners::default());
             app.manage(UpdateState::default());
@@ -167,6 +170,9 @@ pub fn run() {
             open_new_window,
             print_window,
             focus_pdf_path,
+            move_document,
+            move_document_new_window,
+            take_moved_tabs,
             reorder_pdf_pages,
             rotate_pdf_pages,
             delete_pdf_pages,

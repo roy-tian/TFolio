@@ -50,6 +50,12 @@ const zhCN = {
       "一个或多个已打开文档尚有未保存的修改，全部关闭将丢弃这些修改。",
     discardAndCloseTab: "丢弃并关闭标签页",
     discardAndCloseAll: "丢弃并全部关闭",
+    moveToNewWindow: "移到新窗口",
+    hoverTitle: "松开将“{{name}}”移到此窗口",
+    hoverHint: "页面、编辑和撤销历史都会一并跟随",
+    moveFailed: "标签页移动失败。",
+    moveBusy: "此标签页仍有操作进行中，请稍候再移动。",
+    moveNoteOpen: "此标签页有正在输入的便签，请先完成或取消再移动。",
   },
   imageExport: {
     menuLabel: "导出图片…",

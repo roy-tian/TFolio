@@ -5,6 +5,8 @@ import path from "node:path"
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
+import type { E2eOverrides } from "../../src/lib/e2e"
+
 import {
   dropZoneButton,
   emitDrag,
@@ -121,6 +123,124 @@ function releaseHeldTab() {
       }),
     )
   })
+}
+
+/**
+ * Drags the document tab at `from` past the strip's bottom edge and lets it
+ * go there — the tear-off release, still inside the window as a real one
+ * almost always is. The move command the release calls is the spec's own to
+ * answer: a second window is not this lane's to drive.
+ */
+function dragTabOut(from: number) {
+  return browser.execute((f: number) => {
+    const tab = (index: number) =>
+      document.querySelector(`[data-list-index='${index}']`)!
+    const strip = document.querySelector("[data-tab-strip]")!
+    const fromBox = tab(f).getBoundingClientRect()
+    const stripBox = strip.getBoundingClientRect()
+    const start = {
+      x: fromBox.left + fromBox.width * 0.3,
+      y: fromBox.top + fromBox.height / 2,
+    }
+    const dest = { x: start.x, y: stripBox.bottom + 160 }
+
+    tab(f).dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: start.x,
+        clientY: start.y,
+        isPrimary: true,
+      }),
+    )
+    document.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: start.x + 12,
+        clientY: start.y,
+      }),
+    )
+    document.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: dest.x,
+        clientY: dest.y,
+      }),
+    )
+    document.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        clientX: dest.x,
+        clientY: dest.y,
+      }),
+    )
+  }, from)
+}
+
+type RecordedMove = {
+  at: { x: number; y: number } | null
+  command: "document" | "newWindow"
+  destLabel: string | null
+  documentId: number
+  name: string
+}
+
+type TabMoveSeam = Window & {
+  __tfolioE2E?: E2eOverrides
+  __tfolioMoves?: RecordedMove[]
+}
+
+/** Records the move commands the strip asks for instead of running them,
+ * keeping which command ran and where it pointed, so a regression that calls
+ * the wrong one or drops the release point cannot pass for a move. */
+async function stubTabMoves() {
+  await browser.execute(() => {
+    const seam = window as TabMoveSeam
+
+    seam.__tfolioMoves = []
+
+    const record =
+      (command: RecordedMove["command"]) =>
+      (args: {
+        at?: { x: number; y: number } | null
+        destLabel?: string
+        documentId: number
+        tab: unknown
+      }) => {
+        seam.__tfolioMoves!.push({
+          at: args.at ?? null,
+          command,
+          destLabel: args.destLabel ?? null,
+          documentId: args.documentId,
+          name: (args.tab as { name: string }).name,
+        })
+
+        return Promise.resolve()
+      }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      moveDocument: record("document"),
+      moveDocumentNewWindow: record("newWindow"),
+    }
+  })
+}
+
+async function recordedMoves() {
+  return browser.execute(
+    () => (window as TabMoveSeam).__tfolioMoves ?? [],
+  )
+}
+
+/** The document id a tab stands for, read off the strip before it goes. */
+function tabDocumentId(name: string) {
+  return browser.execute((tabName: string) => {
+    const tab = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-document-tab]"),
+    ).find((element) => element.textContent?.includes(tabName))
+
+    return tab ? Number(tab.getAttribute("data-document-tab")) : null
+  }, name)
 }
 
 function recentEntry(filePath: string) {
@@ -464,6 +584,94 @@ describe("independent document tabs", () => {
     await expect(tabButton("drag-b.pdf")).toHaveAttribute(
       "aria-selected",
       "true",
+    )
+  })
+
+  it("tears a tab dragged off the strip into a new window", async () => {
+    await stubTabMoves()
+    await openPdfFromDisk("tear-a.pdf", minimalPdf(1))
+    await openPdfFromDisk("tear-b.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
+
+    const movedId = await tabDocumentId("tear-a.pdf")
+
+    await dragTabOut(0)
+    await browser.waitUntil(
+      async () => (await recordedMoves()).length === 1,
+      { timeoutMsg: "the release outside the strip never asked for a window" },
+    )
+
+    const [move] = await recordedMoves()
+    expect(move.command).toBe("newWindow")
+    expect(move.at).not.toBeNull()
+    expect(move.documentId).toBe(movedId)
+    expect(move.name).toBe("tear-a.pdf")
+    // The tab left with the move; its document and the rest stayed.
+    await browser.waitUntil(
+      async () => (await tabNames()).join() === "tear-b.pdf",
+      { timeoutMsg: "the torn-off tab never left the strip" },
+    )
+    await expect(tabButton("tear-b.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+  })
+
+  it("keeps a release inside the strip a reorder, spacer included", async () => {
+    await stubTabMoves()
+    await openPdfFromDisk("keep-a.pdf", minimalPdf(1))
+    await openPdfFromDisk("keep-b.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
+
+    // The strip's trailing spacer is past the list but not out of the strip:
+    // a release there sends the tab to the end, not to a window.
+    await dragTab(0, 1, 1.6)
+    await browser.waitUntil(
+      async () => (await tabNames()).join() === "keep-b.pdf,keep-a.pdf",
+      { timeoutMsg: "the drag into the spacer never reordered" },
+    )
+    expect(await recordedMoves()).toEqual([])
+  })
+
+  it("moves a tab to a new window from its context menu", async () => {
+    await stubTabMoves()
+    await openPdfFromDisk("menu-a.pdf", minimalPdf(1))
+    await openPdfFromDisk("menu-b.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
+
+    const movedId = await tabDocumentId("menu-a.pdf")
+
+    await browser.execute(() => {
+      const tab = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-document-tab]"),
+      ).find((element) => element.textContent?.includes("menu-a.pdf"))!
+      const box = tab.getBoundingClientRect()
+
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          button: 2,
+          clientX: box.left + 20,
+          clientY: box.top + 10,
+        }),
+      )
+    })
+    await $("[data-action='tab-move-new-window']").click()
+
+    await browser.waitUntil(
+      async () => (await recordedMoves()).length === 1,
+      { timeoutMsg: "the menu item never asked for a window" },
+    )
+
+    const [move] = await recordedMoves()
+    // The menu has no drop point to place a window at: cascade, not a point.
+    expect(move.command).toBe("newWindow")
+    expect(move.at).toBeNull()
+    expect(move.documentId).toBe(movedId)
+    expect(move.name).toBe("menu-a.pdf")
+    await browser.waitUntil(
+      async () => (await tabNames()).join() === "menu-b.pdf",
+      { timeoutMsg: "the moved tab never left the strip" },
     )
   })
 

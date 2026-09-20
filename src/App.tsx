@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { listen } from "@tauri-apps/api/event"
+import { emitTo, listen } from "@tauri-apps/api/event"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
-import { FileUp } from "lucide-react"
+import { AppWindow, FileUp } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
@@ -75,6 +75,17 @@ import {
   type RecentPdfView,
 } from "@/lib/recentFiles"
 import { matchesShortcut, shortcuts, type Shortcut } from "@/lib/shortcuts"
+import {
+  fetchWindowRects,
+  globalPointFrom,
+  moveTabToNewWindow,
+  moveTabToWindow,
+  takeMovedTabs,
+  windowAtPoint,
+  type MovedTabPayload,
+  type MovedTabSeed,
+  type WindowRect,
+} from "@/lib/tabMove"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { cn } from "@/lib/utils"
 import type { ViewMode } from "@/lib/viewMode"
@@ -85,6 +96,9 @@ type OpenTab = {
   document: PdfDocumentInfo
   id: number
   initialSaveRequired?: boolean
+  /** A tab that arrived from another window: what its session replays, which
+      no fresh open could derive. Read once, at the session's first mount. */
+  movedSeed?: MovedTabSeed
   name: string
   path: string
   /** A document-specific name for Save As; ordinary PDFs use the annotation
@@ -113,11 +127,29 @@ type PendingClose =
   | { kind: "tab"; documentId: number }
   | { kind: "window" }
 
+/** What a drag crossing out of this window navigates by: the viewport's place
+    on the screen, this window's own label, and every window a release could
+    land on — the dragger included, whose body means a tear-off. */
+type DragGeometry = {
+  origin: { x: number; y: number }
+  rects: WindowRect[]
+  scale: number
+  selfLabel: string
+}
+
 /** What `launch.rs` emits when the OS has a PDF for this window; named in both
     places, so the two have to be changed together. */
 const OPEN_REQUESTED_EVENT = "launch://open-requested"
 
 const FOCUS_DOCUMENT_EVENT = "workspace://focus-document"
+
+/** What `handoff.rs` emits when another window has sent a tab here; named in
+    both places, as the launch event above is. */
+const TAB_ARRIVED_EVENT = "workspace://tab-arrived"
+
+/** This window's own telling that a dragged tab is passing over it; the
+    dragging window emits it, and only the hovered one listens. */
+const TAB_HOVER_EVENT = "workspace://tab-hover"
 
 /** The notice an open refusal becomes, whichever door the file came through:
  * the size ceiling words its own refusal, and every other failure is one. */
@@ -157,6 +189,9 @@ export default function App() {
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
+  // Another window's tab is held over this one: the overlay it reads while it
+  // decides, gone the moment the drag does.
+  const [tabHover, setTabHover] = useState<{ name: string } | null>(null)
   const { channel: notices, notices: raisedNotices } = useNotices()
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
@@ -165,6 +200,11 @@ export default function App() {
   const choosingFileRef = useRef(false)
   const mountedRef = useRef(true)
   const activeIdRef = useRef<TabId>(HOME_TAB_ID)
+  // A tab drag that left the strip: where this window's viewport sits on the
+  // screen and which of the others the pointer is over. Loaded once per drag —
+  // windows cannot move under a pointer the drag is holding.
+  const dragGeometryRef = useRef<Promise<DragGeometry | null> | null>(null)
+  const hoverTargetRef = useRef<string | null>(null)
 
   const replaceTabs = useCallback(
     (update: (current: OpenTab[]) => OpenTab[]) => {
@@ -698,6 +738,202 @@ export default function App() {
     }
   }, [removeAllTabsNow])
 
+  // The tab's own half of a move: what the strip shows and where it was being
+  // read. The reading position reaches the recent list through the removal
+  // below, exactly as a close leaves it.
+  const detachTab = useCallback(
+    (
+      documentId: number,
+      target:
+        | { kind: "window"; label: string }
+        | { kind: "new"; at: { x: number; y: number } | null },
+    ) => {
+      return runOpenBatch(async () => {
+        const tab = tabsRef.current.find((item) => item.id === documentId)
+
+        if (!tab) {
+          return
+        }
+
+        const session = sessionRefs.current.get(documentId)
+        const snapshot = session?.snapshotForMove() ?? null
+
+        // Work still settling would change a document the move's history no
+        // longer describes; a note draft's text lives nowhere but the session
+        // it is open in. Either way the tab waits where it is.
+        if (!snapshot || "blocked" in snapshot) {
+          notices.raise({
+            kind: snapshot?.blocked === "note" ? "tabMoveNoteOpen" : "tabMoveBusy",
+            owner: workspaceOwner,
+          })
+          return
+        }
+
+        const payload: MovedTabPayload = {
+          document: snapshot.document,
+          dirty: tab.dirty,
+          name: tab.name,
+          path: tab.path,
+          recentPath: tab.recentPath,
+          recentView: snapshot.recentView ?? tab.recentView,
+          saveAsDefaultName: tab.saveAsDefaultName,
+          savable: tab.savable,
+          saveRequired: snapshot.saveRequired,
+          seed: snapshot.seed,
+        }
+
+        try {
+          if (target.kind === "window") {
+            const override = e2eOverride("moveDocument")
+
+            if (override) {
+              await override({
+                documentId,
+                destLabel: target.label,
+                tab: payload,
+              })
+            } else {
+              await moveTabToWindow(documentId, target.label, payload)
+            }
+          } else {
+            const override = e2eOverride("moveDocumentNewWindow")
+
+            if (override) {
+              await override({ at: target.at, documentId, tab: payload })
+            } else {
+              await moveTabToNewWindow(documentId, payload, target.at)
+            }
+          }
+        } catch {
+          notices.raise({ kind: "tabMoveFailed", owner: workspaceOwner })
+          return
+        }
+
+        // Ownership crossed in Rust before this: the unmounting session's own
+        // close finds the document no longer this window's and leaves it be.
+        removeTabNow(documentId)
+      })
+    },
+    [notices, removeTabNow, runOpenBatch],
+  )
+
+  // The context menu's ask, which has no drop point to place a window at.
+  const moveTabToNewWindowNow = useCallback(
+    (documentId: number) => {
+      void detachTab(documentId, { at: null, kind: "new" })
+    },
+    [detachTab],
+  )
+
+  const loadDragGeometry = useCallback(
+    () =>
+      Promise.all([
+        getCurrentWindow().innerPosition(),
+        getCurrentWindow().scaleFactor(),
+        fetchWindowRects(),
+      ])
+        .then(([origin, scale, rects]) => ({
+          origin: { x: origin.x, y: origin.y },
+          rects,
+          scale,
+          selfLabel: getCurrentWindow().label,
+        }))
+        .catch(() => null),
+    [],
+  )
+
+  const endTabHover = useCallback(() => {
+    const was = hoverTargetRef.current
+
+    hoverTargetRef.current = null
+    dragGeometryRef.current = null
+
+    if (was) {
+      void emitTo(was, TAB_HOVER_EVENT, { over: false }).catch(
+        () => undefined,
+      )
+    }
+  }, [])
+
+  // Follows a drag that has left the strip: the window under the pointer — if
+  // any — is told so it can say the tab would land there. The dragging
+  // window's own body is not one: the release there tears off, wherever an
+  // older window is stacked behind it.
+  const handleTabDragMove = useCallback(
+    (name: string | null, point: { x: number; y: number }) => {
+      if (name === null) {
+        endTabHover()
+        return
+      }
+
+      const geometry = (dragGeometryRef.current ??= loadDragGeometry())
+
+      void geometry.then((loaded) => {
+        // The drag ended before the screen answered, or another drag's
+        // geometry replaced this one's.
+        if (!loaded || dragGeometryRef.current !== geometry) {
+          return
+        }
+
+        const over = windowAtPoint(
+          globalPointFrom(point, loaded.origin, loaded.scale),
+          loaded.rects,
+          loaded.selfLabel,
+        )
+        const target = over && over.label !== loaded.selfLabel ? over.label : null
+
+        if (target === hoverTargetRef.current) {
+          return
+        }
+
+        const was = hoverTargetRef.current
+        hoverTargetRef.current = target
+
+        if (was) {
+          void emitTo(was, TAB_HOVER_EVENT, { over: false }).catch(
+            () => undefined,
+          )
+        }
+
+        if (target) {
+          void emitTo(target, TAB_HOVER_EVENT, {
+            name,
+            over: true,
+          }).catch(() => undefined)
+        }
+      })
+    },
+    [endTabHover, loadDragGeometry],
+  )
+
+  // A release the strip did not keep: another window takes the tab, or one
+  // opens where the reader let it go — including over this window's own body,
+  // which is a tear-off and never a landing in a window behind it.
+  const handleTabDropOutside = useCallback(
+    (documentId: number, point: { x: number; y: number }) => {
+      const geometry = (dragGeometryRef.current ??= loadDragGeometry())
+
+      void geometry.then((loaded) => {
+        // Unloaded geometry still decides: a new window opens by cascade
+        // rather than the move being lost.
+        if (!loaded) {
+          void detachTab(documentId, { at: null, kind: "new" })
+          return
+        }
+
+        const global = globalPointFrom(point, loaded.origin, loaded.scale)
+        const over = windowAtPoint(global, loaded.rects, loaded.selfLabel)
+
+        if (over && over.label !== loaded.selfLabel) {
+          void detachTab(documentId, { kind: "window", label: over.label })
+        } else {
+          void detachTab(documentId, { at: global, kind: "new" })
+        }
+      })
+    },
+    [detachTab, loadDragGeometry],
+  )
+
   // An adopted export destination gives the document its first file; the tab
   // follows with the reader's name and the duplicate-open check's path.
   const updateSource = useCallback(
@@ -1157,6 +1393,125 @@ export default function App() {
     }
   }, [activateTab])
 
+  // A tab another window sent here, as the launch flow hands its files over:
+  // bound before the first take, so a tab arriving between the two finds a
+  // listener already there rather than nobody.
+  const takeArrivedTabs = useCallback(() => {
+    return takeMovedTabs()
+      .then((payloads) => {
+        // Not conditioned on `cancelled`: a take that emptied the queue is
+        // these tabs' only chance, as it is a launch's files'.
+        if (payloads.length === 0) {
+          return
+        }
+
+        void runOpenBatch(async () => {
+          let arrived: number | null = null
+
+          for (const payload of payloads) {
+            // The move made this window the holder before the tab existed
+            // here; only a take answered twice could say so, and it cannot.
+            if (
+              tabsRef.current.some((tab) => tab.id === payload.document.id)
+            ) {
+              continue
+            }
+
+            const tab: OpenTab = {
+              dirty: payload.dirty,
+              document: payload.document,
+              id: payload.document.id,
+              initialSaveRequired: payload.saveRequired || undefined,
+              movedSeed: payload.seed,
+              name: payload.name,
+              path: payload.path,
+              recentPath: payload.recentPath,
+              recentView: payload.recentView,
+              saveAsDefaultName: payload.saveAsDefaultName,
+              savable: payload.savable,
+            }
+
+            replaceTabs((current) => [...current, tab])
+            arrived = tab.id
+          }
+
+          if (arrived !== null) {
+            activateTab(arrived)
+          }
+        })
+      })
+      .catch(() => undefined)
+  }, [activateTab, replaceTabs, runOpenBatch])
+
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    void listen(TAB_ARRIVED_EVENT, () => void takeArrivedTabs()).then(
+      (stop) => {
+        if (cancelled) {
+          stop()
+          return
+        }
+
+        unlisten = stop
+        // The window's own boot, or its reload: either way nothing announced
+        // this take, and only doing it finds what waited through the page.
+        void takeArrivedTabs()
+      },
+      // A subscription that never bound leaves the queue full all the same,
+      // and taking it is what shows the moved tab this run.
+      () => {
+        if (!cancelled) {
+          void takeArrivedTabs()
+        }
+      },
+    )
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [takeArrivedTabs])
+
+  // The dragged-over window's half of a hover: show it, and stop showing it —
+  // a drag that ended with its window left this standing otherwise.
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+
+    const clear = () => setTabHover(null)
+
+    void listen<{
+      name?: string
+      over: boolean
+    }>(TAB_HOVER_EVENT, (event) => {
+      if (event.payload.over && typeof event.payload.name === "string") {
+        setTabHover({ name: event.payload.name })
+      } else {
+        setTabHover(null)
+      }
+    }).then((stop) => {
+      if (cancelled) {
+        stop()
+      } else {
+        unlisten = stop
+      }
+    })
+
+    // A real interaction here means no drag is held over another window
+    // anymore, whatever became of the window that was dragging.
+    window.addEventListener("pointerdown", clear)
+    window.addEventListener("focus", clear)
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+      window.removeEventListener("pointerdown", clear)
+      window.removeEventListener("focus", clear)
+    }
+  }, [])
+
   useEffect(() => {
     if (isE2eBuild) {
       return
@@ -1254,10 +1609,14 @@ export default function App() {
           initialSaveRequired={tab.initialSaveRequired}
           initialPageNumbers={tab.opensWith?.pageNumbers}
           initialRecentView={tab.recentView}
-          initialViewMode={tab.opensWith?.viewMode}
+          // A moved tab keeps the view it was being read in even where no
+          // recent view could be sampled for it — a background tab, a document
+          // with no file of its own yet.
+          initialViewMode={tab.opensWith?.viewMode ?? tab.movedSeed?.viewMode}
           initialWatermark={tab.opensWith?.watermark}
           key={tab.id}
           menu={menuActions}
+          movedSeed={tab.movedSeed}
           notices={notices}
           onDirtyChange={updateDirty}
           onInitialLayerProgress={tab.opensWith?.onLayerProgress}
@@ -1284,9 +1643,31 @@ export default function App() {
         onClose={requestCloseTab}
         onOpenFile={() => void chooseFile()}
         onReorder={reorderTabs}
+        onTabDragMove={handleTabDragMove}
+        onTabDropOutside={handleTabDropOutside}
+        onMoveToNewWindow={moveTabToNewWindowNow}
         opening={isOpening}
         tabs={tabs}
       />
+
+      {tabHover ? (
+        // Never in the way: the drag's pointer is over another window, and
+        // this only says where a release would leave its tab.
+        <div
+          className="pointer-events-none fixed inset-2 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/70 bg-background/90 backdrop-blur-sm"
+          data-testid="tab-hover-overlay"
+        >
+          <div className="flex flex-col items-center text-center">
+            <AppWindow className="mb-4 size-12" />
+            <p className="text-lg font-semibold">
+              {t("tabs.hoverTitle", { name: tabHover.name })}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {t("tabs.hoverHint")}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {isDragging && !mergeWizard.open ? (
         <div
