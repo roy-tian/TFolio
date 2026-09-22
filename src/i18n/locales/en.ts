@@ -506,7 +506,7 @@ const en = {
   },
   about: {
     title: "TFolio",
-    description: "A focused desktop workspace for reading and editing PDF files.",
+    description: "Your PDF work companion, always at hand",
     version: "Version {{version}}",
     /** Only while releases are internal: a stable one drops this key and its use. */
     prerelease: "(internal beta)",

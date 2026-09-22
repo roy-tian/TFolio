@@ -499,7 +499,7 @@ const zhCN = {
   },
   about: {
     title: "TFolio",
-    description: "专注于阅读和编辑 PDF 文件的桌面工作空间。",
+    description: "你手边的 PDF 工作伴侣",
     version: "版本 {{version}}",
     prerelease: "(内部测试版)",
     copyright: "版权所有 © 2026 Roy Tian",
