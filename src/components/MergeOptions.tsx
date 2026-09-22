@@ -35,7 +35,7 @@ function MergeOption({
       )}
     >
       <FieldLabel
-        className={cn("w-full items-start p-2.5 has-data-checked:bg-transparent dark:has-data-checked:bg-transparent", !disabled && "cursor-pointer")}
+        className="w-full items-start p-2.5 has-data-checked:bg-transparent dark:has-data-checked:bg-transparent"
         htmlFor={id}
       >
         <Checkbox
@@ -74,7 +74,7 @@ function MergeFeatureSwitch({
       )}
     >
       <Field className="p-2.5" data-disabled={disabled} orientation="horizontal">
-        <FieldLabel className={cn(!disabled && "cursor-pointer")} htmlFor={id}>
+        <FieldLabel htmlFor={id}>
           <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
           {title}
         </FieldLabel>
