@@ -114,6 +114,8 @@ type LayoutProps = {
   scale: number
   searchMatchesByPage: ReadonlyMap<number, IndexedPdfSearchMatch[]>
   textEpochs: RenderEpochs
+  /** The app's own select-all stands, so every page paints its bands. */
+  textSelectAll: boolean
   /** Freeze the current heavy-page window during compositor-only zoom. */
   virtualizationPaused: boolean
   virtualizationRetainExited: boolean
@@ -133,6 +135,7 @@ function SingleLayout({
   scale,
   searchMatchesByPage,
   textEpochs,
+  textSelectAll,
   virtualizationPaused,
   virtualizationRetainExited,
 }: LayoutProps) {
@@ -153,6 +156,7 @@ function SingleLayout({
       searchMatches={searchMatchesByPage.get(index + 1) ?? NO_SEARCH_MATCHES}
       activeSearchIndex={activeSearchIndex}
       textEpoch={textEpochs[index + 1] ?? 0}
+      textSelectAll={textSelectAll}
       virtualizationPaused={virtualizationPaused}
       virtualizationRetainExited={virtualizationRetainExited}
     />
@@ -174,6 +178,7 @@ function BookLayout({
   scale,
   searchMatchesByPage,
   textEpochs,
+  textSelectAll,
   virtualizationPaused,
   virtualizationRetainExited,
 }: LayoutProps) {
@@ -208,6 +213,7 @@ function BookLayout({
           searchMatches={searchMatchesByPage.get(pageNumber) ?? NO_SEARCH_MATCHES}
           activeSearchIndex={activeSearchIndex}
           textEpoch={textEpochs[pageNumber] ?? 0}
+          textSelectAll={textSelectAll}
           virtualizationPaused={virtualizationPaused}
           virtualizationRetainExited={virtualizationRetainExited}
           width={columnWidth}
@@ -904,6 +910,7 @@ export function PdfViewerLayout({
     scale,
     searchMatchesByPage,
     textEpochs,
+    textSelectAll,
     virtualizationPaused: zoomPreviewing,
     virtualizationRetainExited: textSelectionDragging,
   }

@@ -8,8 +8,10 @@ import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { TextNotePreview } from "@/components/TextNotePreview"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
+import { useSelectionBands } from "@/hooks/useSelectionBands"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview as HeldNote } from "@/hooks/useTextNoteTool"
+import { mergeRectsByLine } from "@/lib/annotationGeometry"
 import {
   dimensionsForRotation,
   MAX_RENDER_WIDTH,
@@ -64,6 +66,8 @@ type PdfPageProps = {
   renderScale: number
   searchMatches: IndexedSearchMatch[]
   textEpoch: number
+  /** The app's own select-all stands: its bands paint here, not per-span. */
+  textSelectAll: boolean
   rotation: number
   scale: number
   /** Keep the current heavy-page window fixed during a compositor zoom preview. */
@@ -92,6 +96,7 @@ type PdfPageSurfaceProps = {
   rotation: number
   searchMatches: IndexedSearchMatch[]
   textEpoch: number
+  textSelectAll: boolean
 }
 
 /** Exists only around the viewport: leaving a page releases its canvas backing
@@ -112,9 +117,11 @@ const PdfPageSurface = memo(function PdfPageSurface({
   rotation,
   searchMatches,
   textEpoch,
+  textSelectAll,
 }: PdfPageSurfaceProps) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const [textSpans, setTextSpans] = useState<PdfTextSpan[]>([])
 
   const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
@@ -201,7 +208,10 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const positionedSearchRects = useMemo(
     () =>
       searchMatches.flatMap(({ index, match }) =>
-        match.rects.map((rect, rectIndex) => ({
+        // Merged per match, so a hit reads as one mark a line — a gap the
+        // page's spacing left between runs is inside the hit, not a slit —
+        // while its cross-line boxes stay one per line.
+        mergeRectsByLine(match.rects).map((rect, rectIndex) => ({
           height: `${(rect.height / layoutHeight) * 100}%`,
           index,
           key: `${index}-${rectIndex}`,
@@ -212,11 +222,19 @@ const PdfPageSurface = memo(function PdfPageSurface({
       ),
     [layoutHeight, layoutWidth, searchMatches],
   )
+  const selectionBands = useSelectionBands({
+    anchorRef: surfaceRef,
+    page,
+    rotation,
+    selectAll: textSelectAll,
+    spans: textSpans,
+  })
 
   return (
     <>
       <div
         className="absolute"
+        ref={surfaceRef}
         style={{
           height: `${(page.height / footprintHeight) * 100}%`,
           left: "50%",
@@ -260,6 +278,25 @@ const PdfPageSurface = memo(function PdfPageSurface({
                   left: rect.left,
                   top: rect.top,
                   width: rect.width,
+                }}
+              />
+            ))}
+          </div>
+        ) : null}
+        {hasRendered && selectionBands.length > 0 ? (
+          <div
+            aria-hidden
+            className="pdf-selection-layer"
+            style={pageLayerStyle}
+          >
+            {selectionBands.map((band, index) => (
+              <span
+                key={index}
+                style={{
+                  height: `${(band.height / layoutHeight) * 100}%`,
+                  left: `${(band.left / layoutWidth) * 100}%`,
+                  top: `${(band.top / layoutHeight) * 100}%`,
+                  width: `${(band.width / layoutWidth) * 100}%`,
                 }}
               />
             ))}
@@ -326,6 +363,7 @@ export function PdfPage({
   scale,
   searchMatches,
   textEpoch,
+  textSelectAll,
   virtualizationPaused,
   virtualizationRetainExited,
   width,
@@ -397,6 +435,7 @@ export function PdfPage({
             rotation={rotation}
             searchMatches={searchMatches}
             textEpoch={textEpoch}
+            textSelectAll={textSelectAll}
           />
         </div>
       ) : null}

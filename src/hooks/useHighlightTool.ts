@@ -1,12 +1,8 @@
 import { useEffect, useState, type RefObject } from "react"
 
-import {
-  clampFraction,
-  clientPointToFraction,
-  fractionsToPageRect,
-  type PagePointsRect,
-} from "@/lib/annotationGeometry"
+import type { PagePointsRect } from "@/lib/annotationGeometry"
 import type { HighlightCommand, HighlightTarget } from "@/lib/annotations"
+import { selectedLineRectsOnPage } from "@/lib/textSelection"
 import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 
@@ -21,31 +17,8 @@ type UseHighlightToolOptions = {
   viewerRef: RefObject<HTMLElement | null>
 }
 
-// Below this a run is a stray click through the text layer, not a mark.
+// Below this a line is a stray click through the text layer, not a mark.
 const MIN_QUAD_POINTS = 0.5
-
-/**
- * Clipped to the span, not `Range.getClientRects`, which reports a rect for
- * every element the range encloses whole — e.g. the next page's whole canvas.
- */
-function selectedRectOfSpan(selection: Selection, span: Element) {
-  const range = selection.getRangeAt(0)
-  const spanRange = document.createRange()
-
-  spanRange.selectNodeContents(span)
-
-  const overlap = range.cloneRange()
-
-  if (overlap.compareBoundaryPoints(Range.START_TO_START, spanRange) < 0) {
-    overlap.setStart(spanRange.startContainer, spanRange.startOffset)
-  }
-
-  if (overlap.compareBoundaryPoints(Range.END_TO_END, spanRange) > 0) {
-    overlap.setEnd(spanRange.endContainer, spanRange.endOffset)
-  }
-
-  return overlap.collapsed ? null : overlap.getBoundingClientRect()
-}
 
 function quadsOnPage(
   selection: Selection,
@@ -53,37 +26,11 @@ function quadsOnPage(
   page: PdfPageInfo,
   rotation: number,
 ): PagePointsRect[] {
-  const box = pageElement.getBoundingClientRect()
-  const quads: PagePointsRect[] = []
-
-  // A quad per run, which is the shape a PDF highlight wants: one per line
-  // rather than a box around the lot.
-  for (const span of pageElement.querySelectorAll(".pdf-text-layer span")) {
-    if (!selection.containsNode(span, true)) {
-      continue
-    }
-
-    const rect = selectedRectOfSpan(selection, span)
-
-    if (!rect) {
-      continue
-    }
-
-    // A span stretched to the width PDFium reported can reach past the page's
-    // edge, and a quad written outside it would be carried into the file.
-    const quad = fractionsToPageRect(
-      clampFraction(clientPointToFraction(box, rect.left, rect.top)),
-      clampFraction(clientPointToFraction(box, rect.right, rect.bottom)),
-      page,
-      rotation,
-    )
-
-    if (quad.width > MIN_QUAD_POINTS && quad.height > MIN_QUAD_POINTS) {
-      quads.push(quad)
-    }
-  }
-
-  return quads
+  // A band per line, which is the shape a PDF highlight wants: one per line
+  // rather than a box around the lot — and what the drag previewed.
+  return selectedLineRectsOnPage(selection, pageElement, page, rotation).filter(
+    (quad) => quad.width > MIN_QUAD_POINTS && quad.height > MIN_QUAD_POINTS,
+  )
 }
 
 /**

@@ -6,11 +6,13 @@ import {
   fractionsToPageRect,
   fractionToClientPoint,
   fractionToPagePoint,
+  mergeRectsByLine,
   pagePointToFraction,
   rotateFraction,
   totalPageRotation,
   unrotateFraction,
   type BoxFraction,
+  type PagePointsRect,
 } from "@/lib/annotationGeometry"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 
@@ -315,5 +317,95 @@ describe("fractionToClientPoint", () => {
     const box = { height: 200, left: 50, top: 100, width: 400 }
 
     expect(fractionToClientPoint(box, { x: 0.5, y: 0.5 })).toEqual({ x: 250, y: 200 })
+  })
+})
+
+describe("mergeRectsByLine", () => {
+  function rect(
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+  ): PagePointsRect {
+    return { height, left, top, width }
+  }
+
+  it("leaves fewer than two runs alone", () => {
+    expect(mergeRectsByLine([])).toEqual([])
+    expect(mergeRectsByLine([rect(10, 20, 5, 8)])).toEqual([
+      rect(10, 20, 5, 8),
+    ])
+  })
+
+  it("spans one band across a line's runs, gaps included", () => {
+    // CJK run, a justified gap, then a narrower Latin run, all on one line.
+    const runs = [
+      rect(100, 40, 160, 10.5),
+      rect(275, 40, 24, 8),
+      rect(100, 60, 120, 10.5),
+    ]
+
+    expect(mergeRectsByLine(runs)).toEqual([rect(100, 40, 199, 10.5), rect(100, 60, 120, 10.5)])
+  })
+
+  it("keeps a column gutter out of the band", () => {
+    // Two columns, two lines: sorting pairs column one's line with column
+    // two's at the same height, and only the gutter tells them apart.
+    const columns = [
+      rect(50, 100, 200, 10),
+      rect(310, 100, 200, 10),
+      rect(50, 114, 200, 10),
+      rect(310, 114, 200, 10),
+    ]
+
+    expect(mergeRectsByLine(columns)).toEqual(columns)
+  })
+
+  it("keeps the gutter whichever column's run sorts first", () => {
+    // The right column's ink box starts a point higher, so sorting places it
+    // before the left column's run — the separation reads the same both ways.
+    const columns = [
+      rect(310, 100, 200, 10),
+      rect(50, 101, 200, 9),
+    ]
+
+    expect(mergeRectsByLine(columns)).toEqual(columns)
+  })
+
+  it("levels a line whose runs sit at different heights", () => {
+    // Punctuation boxes hug the baseline while ideographs stand full height.
+    const runs = [rect(50, 43, 10, 4), rect(60, 40, 100, 10)]
+
+    expect(mergeRectsByLine(runs)).toEqual([rect(50, 40, 110, 10)])
+  })
+
+  it("keeps neighbouring lines apart whose boxes merely touch", () => {
+    // Line pitch 14 over 10-high ink: the boxes abut without overlapping.
+    const runs = [rect(72, 100, 200, 10), rect(72, 114, 200, 10)]
+
+    expect(mergeRectsByLine(runs)).toEqual(runs)
+  })
+
+  it("keeps a footnote marker that barely climbs the line as its own band", () => {
+    // The marker overlaps the line by a third of its own height, not half.
+    const line = rect(72, 100, 200, 10)
+    const marker = rect(280, 98, 3, 3)
+    const next = rect(72, 114, 200, 10)
+
+    expect(mergeRectsByLine([line, marker, next])).toEqual([
+      marker,
+      line,
+      next,
+    ])
+  })
+
+  it("takes a marker sitting far enough onto the line with it", () => {
+    // Two thirds of the marker stand inside the line: one band, level with it.
+    const line = rect(72, 100, 200, 10)
+    const marker = rect(280, 99, 3, 3)
+
+    expect(mergeRectsByLine([line, marker])).toEqual([
+      rect(72, 99, 211, 11),
+    ])
   })
 })

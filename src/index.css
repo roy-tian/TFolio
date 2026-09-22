@@ -238,7 +238,23 @@ body {
   font-family: sans-serif;
 }
 
+/* The selection is painted by the band layer, one rectangle per line; the
+   WebView's own would tint run by run, each to its run's ink box, leaving a
+   line in slivers of varying height wherever the page's spacing broke runs. */
 .pdf-text-layer ::selection {
+  background: transparent;
+}
+
+/* A band per text line — `mergeRectsByLine` — under the tint the runs' own
+   selection had, covering the gaps between runs on the line. */
+.pdf-selection-layer {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pdf-selection-layer span {
+  position: absolute;
   background: rgb(56 132 255 / 0.35);
 }
 
@@ -246,12 +262,6 @@ body {
    viewport is changing; keeping every page promoted would waste GPU memory. */
 [data-resize-compositing] [data-pdf-page-surface] {
   will-change: transform;
-}
-
-/* The app's own select-all, which a range in the document could not stand for:
-   only the pages near the reader hold a text layer to put a range over. */
-[data-select-all="true"] .pdf-text-layer span {
-  background: rgb(56 132 255 / 0.35);
 }
 
 /* Highlights are geometry from PDFium, not text re-rendered in a proxy font:

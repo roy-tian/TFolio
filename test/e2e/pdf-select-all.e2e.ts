@@ -107,11 +107,12 @@ describe("TFolio select all", () => {
       "data-select-all",
       "true",
     )
-    // The highlight is the app's own, laid on the runs; whatever the WebView
+    // The highlight is the app's own, one band per line; whatever the WebView
     // did with the key, it is not left holding a selection of its own.
+    await $(".pdf-selection-layer span").waitForExist({ timeout: 5_000 })
     const painted = await browser.execute(
       () =>
-        getComputedStyle(document.querySelector(".pdf-text-layer span")!)
+        getComputedStyle(document.querySelector(".pdf-selection-layer span")!)
           .backgroundColor,
     )
     expect(painted).not.toBe("rgba(0, 0, 0, 0)")
