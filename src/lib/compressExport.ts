@@ -1,16 +1,16 @@
-/** Mirrors `CompressionOptions` in `src-tauri/src/pdfium/compress.rs`, tagged
-    so one variant carries the rasterized copy's levels. */
-export type CompressionOptions =
-  | { mode: "lossless" }
-  | { mode: "rasterized"; dpi: number; quality: number }
+/** Mirrors `CompressionOptions` in `src-tauri/src/pdfium/compress.rs`: the
+    resolution images are resampled toward, in pixels per inch of their drawn
+    size. `null` leaves images untouched. */
+export type CompressionOptions = {
+  imageDpi: number | null
+}
 
-/** Mirrors `CompressionEstimate`; `exact` says whether the figure is the
-    pipeline's own output or an extrapolation across sampled pages. The
-    invoke resolves to null when the run was stopped. */
+/** Mirrors `CompressionEstimate`; `estimatedBytes` is exactly what the export
+    writes, `originalBytes` the opened file until an edit. The invoke resolves
+    to null when the run was stopped. */
 export type CompressionEstimate = {
   originalBytes: number
   estimatedBytes: number
-  exact: boolean
 }
 
 export type CompressedExportRequest = {
@@ -19,11 +19,14 @@ export type CompressedExportRequest = {
   filterLabel: string
 }
 
-// The bounds the engine enforces on its own; the sliders stay inside them.
-export const MIN_RASTER_DPI = 72
-export const MAX_RASTER_DPI = 300
-export const MIN_JPEG_QUALITY = 10
-export const MAX_JPEG_QUALITY = 100
+/** The dialog's choices, inside the 72–300 dpi the engine enforces on its own. */
+export const IMAGE_QUALITY_LEVELS = [
+  { level: "original", imageDpi: null },
+  { level: "high", imageDpi: 220 },
+  { level: "medium", imageDpi: 150 },
+  { level: "low", imageDpi: 96 },
+] as const
 
-/** The named densities the rasterized mode offers, inside those bounds. */
-export const RASTER_DPI_CHOICES = [75, 150, 300] as const
+export type ImageQualityLevel = (typeof IMAGE_QUALITY_LEVELS)[number]["level"]
+
+export const DEFAULT_IMAGE_QUALITY: ImageQualityLevel = "medium"

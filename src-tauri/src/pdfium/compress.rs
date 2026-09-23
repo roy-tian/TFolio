@@ -20,39 +20,47 @@ pub async fn cancel_pdf_compression(
         .cancel_operation(OperationTarget::Compress(document_id)))
 }
 
-/// The levels are bounded by the engine, not by the sliders that usually pick
-/// them: a command's arguments are anyone's to send.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(
-    rename_all = "camelCase",
-    tag = "mode",
-    rename_all_fields = "camelCase"
-)]
-pub enum CompressionOptions {
-    /// PDFium's own rewrite, then object and cross-reference streams: every
-    /// page keeps its text and vectors.
-    Lossless,
-    /// Every page redrawn as one JPEG at the given density and quality —
-    /// what the text layer loses.
-    Rasterized { dpi: u32, quality: u32 },
+/// The dialog's cache holds a copy or two of the document; once it closes,
+/// nothing will ask for them again.
+#[tauri::command]
+pub async fn release_pdf_compression(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.0);
+    // The store's lock may be held by a long edit; waiting belongs off the
+    // IPC thread.
+    tauri::async_runtime::spawn_blocking(move || engine.release_compression(document_id))
+        .await
+        .map_err(|error| format!("compression release task failed: {error}"))?
 }
 
-/// The dialog's bottom line. `exact` tells the reader whether the figure is
-/// the pipeline's own output or an extrapolation across sampled pages.
+/// The level is bounded by the engine, not by the choices that usually pick
+/// it: a command's arguments are anyone's to send.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompressionOptions {
+    /// The resolution images are resampled toward, in pixels per inch of
+    /// their drawn size. `None` leaves the images' bytes untouched and
+    /// compresses structure alone.
+    pub image_dpi: Option<u32>,
+}
+
+/// The dialog's bottom line. `estimated_bytes` is the pipeline's own output,
+/// exactly what the export will write; `original_bytes` is the opened file's
+/// length until an edit or a write, then PDFium's rewrite of the document.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompressionEstimate {
     pub(in crate::pdfium) original_bytes: u64,
     pub(in crate::pdfium) estimated_bytes: u64,
-    pub(in crate::pdfium) exact: bool,
 }
 
 impl CompressionEstimate {
-    pub(in crate::pdfium) fn new(original_bytes: u64, estimated_bytes: u64, exact: bool) -> Self {
+    pub(in crate::pdfium) fn new(original_bytes: u64, estimated_bytes: u64) -> Self {
         Self {
             original_bytes,
             estimated_bytes,
-            exact,
         }
     }
 }

@@ -16,6 +16,7 @@ mod annotations;
 mod archive_export;
 mod compress;
 mod documents;
+mod image_dpi;
 mod insert_pages;
 mod inspection;
 mod merge;

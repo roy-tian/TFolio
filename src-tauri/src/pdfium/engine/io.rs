@@ -844,7 +844,10 @@ impl PdfiumEngine {
                 .save_to_writer(file)
                 .map_err(|error| format!("PDFium could not write the document: {error}"))
                 .map(|()| true)
-        })
-        .map(|_| ())
+        })?;
+        // The source may now be PDFium's rewrite, not the bytes first opened.
+        entry.loaded_len = None;
+
+        Ok(())
     }
 }

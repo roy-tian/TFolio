@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
 
 import { OperationProgress } from "@/components/OperationProgress"
-import { SliderRow } from "@/components/SliderRow"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -17,22 +16,18 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import {
-  MAX_JPEG_QUALITY,
-  MIN_JPEG_QUALITY,
-  RASTER_DPI_CHOICES,
+  DEFAULT_IMAGE_QUALITY,
+  IMAGE_QUALITY_LEVELS,
   type CompressionEstimate,
   type CompressionOptions,
+  type ImageQualityLevel,
 } from "@/lib/compressExport"
 import { formatBytes } from "@/lib/formatBytes"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
-const DEFAULT_DPI = 150
-const DEFAULT_QUALITY = 75
-/** Long enough for a slider drag to settle, short enough to feel live. */
+/** Long enough for a run of arrow keys to settle, short enough to feel live. */
 const ESTIMATE_DEBOUNCE_MS = 300
-
-type CompressMode = "lossless" | "rasterized"
 
 type CompressExportDialogProps = {
   document: PdfDocumentInfo
@@ -48,9 +43,7 @@ export function CompressExportDialog({
   onClose,
 }: CompressExportDialogProps) {
   const { t } = useTranslation()
-  const [mode, setMode] = useState<CompressMode>("lossless")
-  const [dpi, setDpi] = useState(DEFAULT_DPI)
-  const [quality, setQuality] = useState(DEFAULT_QUALITY)
+  const [imageQuality, setImageQuality] = useState<ImageQualityLevel>(DEFAULT_IMAGE_QUALITY)
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -61,16 +54,26 @@ export function CompressExportDialog({
   const stopRequested = useRef(false)
   // An export must outlive this dialog: it shares the estimate's cancel
   // target, so a cancel sent from an unmounting dialog would kill it between
-  // pages with nothing mounted left to report that.
+  // images with nothing mounted left to report that.
   const exportingRef = useRef(false)
   // Only the newest estimate may answer: a slower run for abandoned levels
   // must not overwrite the one the reader is looking at.
   const estimateRun = useRef(0)
+  // Answers already had, by level: the dialog is modal, so the document they
+  // measured cannot change while it is open.
+  const estimates = useRef(new Map<ImageQualityLevel, CompressionEstimate>())
+  // Every estimate and export still in flight. A run that reaches the engine
+  // after the release would rebuild its cache with nothing left to free it.
+  const inflight = useRef<Promise<unknown>>(Promise.resolve())
+  const track = <T,>(pending: Promise<T>) => {
+    inflight.current = Promise.allSettled([inflight.current, pending])
+    return pending
+  }
 
-  const options: CompressionOptions =
-    mode === "lossless"
-      ? { mode: "lossless" }
-      : { mode: "rasterized", dpi, quality }
+  const options: CompressionOptions = {
+    imageDpi:
+      IMAGE_QUALITY_LEVELS.find(({ level }) => level === imageQuality)?.imageDpi ?? null,
+  }
 
   /** Stops any estimate still running for superseded levels. An estimate
       holds the process-wide PDFium lock to its end otherwise, stalling every
@@ -81,10 +84,14 @@ export function CompressExportDialog({
     }).catch(() => {})
   }
 
-  // A closing dialog must not strand its last estimate on that lock either.
+  // A closing dialog must not strand its last estimate on that lock either,
+  // nor leave the engine holding copies of the document for it.
   useEffect(
     () => () => {
       if (!exportingRef.current) stopEstimates()
+      void inflight.current.then(() =>
+        invoke("release_pdf_compression", { documentId: document.id }),
+      ).catch(() => {})
     },
     [document.id],
   )
@@ -95,16 +102,27 @@ export function CompressExportDialog({
     }
 
     const run = ++estimateRun.current
-    setEstimating(true)
     setEstimateFailed(false)
+    const known = estimates.current.get(imageQuality)
+    if (known) {
+      stopEstimates()
+      setEstimate(known)
+      setEstimating(false)
+      return
+    }
+
+    setEstimating(true)
     const timer = setTimeout(async () => {
       // The run this one replaces would otherwise hold the lock to its end.
       stopEstimates()
       try {
-        const next = await invoke<CompressionEstimate | null>(
+        const next = await track(invoke<CompressionEstimate | null>(
           "estimate_pdf_compression",
           { documentId: document.id, options },
-        )
+        ))
+        if (next !== null) {
+          estimates.current.set(imageQuality, next)
+        }
         if (estimateRun.current === run && next !== null) {
           setEstimate(next)
         }
@@ -120,7 +138,7 @@ export function CompressExportDialog({
     }, ESTIMATE_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [busy, document.id, mode, dpi, quality])
+  }, [busy, document.id, imageQuality])
 
   const cancel = async () => {
     if (await invoke<boolean>("cancel_pdf_compression", { documentId: document.id }).catch(() => false)) {
@@ -136,14 +154,14 @@ export function CompressExportDialog({
     stopRequested.current = false
     // The export must not queue behind an estimate for levels just left.
     stopEstimates()
-    const outcome = await onExport({
+    const outcome = await track(onExport({
       options,
       filterLabel: t("compressExport.filter"),
       suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("compressExport.suffix")}.pdf`,
     }, (next) => {
       setProgress(next)
       if (stopRequested.current) void cancel()
-    })
+    }))
     setBusy(false)
     setStopping(false)
     exportingRef.current = false
@@ -162,8 +180,7 @@ export function CompressExportDialog({
     : !estimate || estimating
       ? t("compressExport.estimating")
       : t(savedPercent > 0 ? "compressExport.estimate" : "compressExport.estimateNoSaving", {
-          size: `${estimate.exact ? "" : "≈"}${formatBytes(estimate.estimatedBytes)}`,
-          original: formatBytes(estimate.originalBytes),
+          size: formatBytes(estimate.estimatedBytes),
           percent: savedPercent,
         })
 
@@ -183,66 +200,29 @@ export function CompressExportDialog({
           <DialogTitle>{t("compressExport.title")}</DialogTitle>
           <DialogDescription>{t("compressExport.description")}</DialogDescription>
         </DialogHeader>
-        <RadioGroup
-          aria-label={t("compressExport.mode")}
-          disabled={busy}
-          value={mode}
-          onValueChange={(value) => setMode(value as CompressMode)}
-          className="gap-4 py-2"
-        >
-          <Label className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
-            <RadioGroupItem value="lossless" data-testid="compress-mode-lossless" />
-            <span className="grid gap-1.5">
-              <span>{t("compressExport.lossless")}</span>
-              <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                {t("compressExport.losslessHint")}
-              </span>
-            </span>
-          </Label>
-          <Label className="items-start gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
-            <RadioGroupItem value="rasterized" data-testid="compress-mode-rasterized" />
-            <span className="grid gap-1.5">
-              <span>{t("compressExport.rasterized")}</span>
-              <span className="text-xs font-normal leading-relaxed text-muted-foreground">
-                {t("compressExport.rasterizedHint")}
-              </span>
-            </span>
-          </Label>
-        </RadioGroup>
-        {mode === "rasterized" ? (
-          <div className="grid gap-4 pl-7">
-            <div className="grid gap-2">
-              <span className="text-sm font-medium">{t("compressExport.dpi")}</span>
-              <RadioGroup
-                aria-label={t("compressExport.dpi")}
-                disabled={busy}
-                value={String(dpi)}
-                onValueChange={(value) => setDpi(Number(value))}
-                className="gap-3"
+        <div className="grid gap-2 py-2">
+          <span className="text-sm font-medium">{t("compressExport.imageQuality")}</span>
+          <RadioGroup
+            aria-label={t("compressExport.imageQuality")}
+            disabled={busy}
+            value={imageQuality}
+            onValueChange={(value) => setImageQuality(value as ImageQualityLevel)}
+            className="gap-3"
+          >
+            {IMAGE_QUALITY_LEVELS.map(({ level }) => (
+              <Label
+                key={level}
+                className="gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50"
               >
-                {RASTER_DPI_CHOICES.map((choice) => (
-                  <Label key={choice} className="gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50">
-                    <RadioGroupItem
-                      value={String(choice)}
-                      data-testid={`compress-dpi-${choice}`}
-                    />
-                    <span>{choice} dpi</span>
-                  </Label>
-                ))}
-              </RadioGroup>
-            </div>
-            <SliderRow
-              disabled={busy}
-              label={t("compressExport.quality")}
-              display={`${quality}%`}
-              min={MIN_JPEG_QUALITY}
-              max={MAX_JPEG_QUALITY}
-              step={5}
-              value={quality}
-              onChange={setQuality}
-            />
-          </div>
-        ) : null}
+                <RadioGroupItem value={level} data-testid={`compress-image-${level}`} />
+                <span>{t(`compressExport.imageLevels.${level}`)}</span>
+              </Label>
+            ))}
+          </RadioGroup>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {t("compressExport.imageQualityHint")}
+          </p>
+        </div>
         <p
           data-testid="compress-estimate"
           className="text-xs leading-relaxed tabular-nums text-muted-foreground"

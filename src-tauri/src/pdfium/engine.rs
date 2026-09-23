@@ -133,11 +133,19 @@ struct OpenDocument {
     /// Monotonic per-page version: rectangle effects release the PDFium lock
     /// while processing pixels, and this detects a page that changed meanwhile.
     revisions: HashMap<u64, u64>,
-    /// The current revision's whole-document serialization length, memoized
-    /// for the compress estimates: a rasterized one re-asks on every slider
-    /// settle, and the rewrite it measures with is the expensive half. Retired
-    /// by every content change, alongside the page revision it bumps.
-    serialized_len: Option<u64>,
+    /// The length of the bytes this document was opened from, while its
+    /// content still matches them: the compress dialog's baseline. PDFium's
+    /// rewrite can differ widely from a file with object streams, so measuring
+    /// against it could promise savings the copy never has. Retired by every
+    /// content change and every write, after which the rewrite is the file.
+    loaded_len: Option<u64>,
+    /// Bumped by every content change, so work done outside the PDFium lock
+    /// can tell whether the document it measured still stands.
+    content_version: u64,
+    /// The compress dialog's reusable work for `content_version`: PDFium's
+    /// rewrite, where images are drawn, and the latest output. Retired with
+    /// every content change, and released when the dialog closes.
+    compress_cache: Option<compress::CompressCache>,
     /// Page ids inserted from another file and still present: while any remain
     /// the document holds another file's pages, so it may only export to a copy.
     merged_page_ids: HashSet<u64>,
@@ -187,11 +195,11 @@ impl OpenDocument {
             .ok_or_else(|| format!("mark {mark_id} is not one of this session's"))
     }
 
-    /// Bumps a page's revision, retiring the memoized serialization length
-    /// with it: content changed, so the document it measured is gone.
+    /// Bumps a page's revision: content changed, so an effect captured before
+    /// must fail its check.
     fn bump_page_revision(&mut self, page_id: u64) {
         *self.revisions.entry(page_id).or_insert(0) += 1;
-        self.serialized_len = None;
+        self.content_changed();
     }
 
     /// Bumps every page's revision so an effect captured before a structure
@@ -200,7 +208,13 @@ impl OpenDocument {
         for &page_id in &self.page_ids {
             *self.revisions.entry(page_id).or_insert(0) += 1;
         }
-        self.serialized_len = None;
+        self.content_changed();
+    }
+
+    fn content_changed(&mut self) {
+        self.loaded_len = None;
+        self.content_version += 1;
+        self.compress_cache = None;
     }
 }
 
@@ -516,6 +530,7 @@ impl PdfiumEngine {
 
         // Before PDFium is touched, not just around the insert: reading the new
         // document's pages and bookmarks is PDFium work like any other.
+        let bytes_len = bytes.len() as u64;
         let mut documents = self.lock_documents()?;
         let document = self
             .pdfium
@@ -543,8 +558,10 @@ impl PdfiumEngine {
                 owned_content: None,
                 page_geometry: (0..num_pages as u64).zip(pages.iter().copied()).collect(),
                 page_ids: (0..num_pages as u64).collect(),
+                loaded_len: Some(bytes_len),
+                content_version: 0,
+                compress_cache: None,
                 revisions: HashMap::new(),
-                serialized_len: None,
                 source_path,
                 stashes: HashMap::new(),
             },
@@ -1000,6 +1017,7 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
 
 mod archive_export;
 mod compress;
+mod image_dpi;
 mod inspection;
 mod io;
 mod marks;
@@ -1010,7 +1028,7 @@ pub(crate) use io::is_merge_image;
 use io::{image_page_document, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
-use raster_export::{page_jpeg, RasterLevels, FLATTEN_LEVELS};
+use raster_export::FLATTEN_LEVELS;
 
 #[cfg(test)]
 mod tests;
