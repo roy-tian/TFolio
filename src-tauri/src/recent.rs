@@ -15,7 +15,8 @@ const RECENT_LIMIT: usize = 255;
 /// What 0.1.3 and earlier wrote this list to.
 const REPLACED_FILE_NAME: &str = "recent-files.json";
 
-const MIN_ZOOM: f64 = 0.25;
+// The floor the viewer can zoom to; mirrors MIN_ZOOM in src/lib/zoom.ts.
+const MIN_ZOOM: f64 = 0.1;
 const MAX_ZOOM: f64 = 8.0;
 const MAX_PAGE_NUMBER: u32 = i32::MAX as u32;
 const MAX_ANCHOR_FRACTION: f64 = 100.0;
@@ -481,6 +482,17 @@ mod tests {
         ));
         assert!(document.views.is_empty());
         assert_eq!(paths(&document.files), ["/docs/a.pdf"]);
+    }
+
+    #[test]
+    fn accepts_zooms_the_viewer_can_reach() {
+        let mut at_floor = view();
+        at_floor.zoom.custom_scale = MIN_ZOOM;
+
+        assert!(at_floor.is_valid());
+
+        at_floor.zoom.custom_scale = 0.05;
+        assert!(!at_floor.is_valid());
     }
 
     #[test]

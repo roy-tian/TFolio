@@ -474,13 +474,13 @@ describe("independent document tabs", () => {
       "true",
     )
 
-    // Land on a known custom zoom: down to the floor, then three rungs back to
-    // actual size (50%, 75%, 100%).
+    // Land on a known custom zoom: down to the floor, then six rungs back to
+    // actual size (15%, 20%, 25%, 50%, 75%, 100%).
     const zoomOut = () => $("button[aria-label='Zoom out']")
     while (await zoomOut().isEnabled()) {
       await zoomOut().click()
     }
-    for (let rung = 0; rung < 3; rung += 1) {
+    for (let rung = 0; rung < 6; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
     }
     await expect(
