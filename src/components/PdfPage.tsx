@@ -347,7 +347,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
   )
 })
 
-export function PdfPage({
+export const PdfPage = memo(function PdfPage({
   activeSearchIndex,
   documentId,
   drafts,
@@ -441,4 +441,4 @@ export function PdfPage({
       ) : null}
     </div>
   )
-}
+})

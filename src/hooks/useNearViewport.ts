@@ -7,6 +7,62 @@ type NearViewportOptions = {
   retainSelection?: boolean
 }
 
+type SharedObserver = {
+  callbacks: Map<Element, (intersecting: boolean) => void>
+  observer: IntersectionObserver
+}
+
+const observers = new Map<Element | null, Map<string, SharedObserver>>()
+
+function observeNearViewport(
+  element: Element,
+  rootMargin: string,
+  onChange: (intersecting: boolean) => void,
+) {
+  // The pages scroll inside the viewer, not the window. Rooting the observer
+  // there makes its margin reach pages before the viewer clips them.
+  const root = element.closest("[data-pdf-scroll-root]")
+  let margins = observers.get(root)
+
+  if (!margins) {
+    margins = new Map()
+    observers.set(root, margins)
+  }
+
+  let shared = margins.get(rootMargin)
+
+  if (!shared) {
+    const callbacks = new Map<Element, (intersecting: boolean) => void>()
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          callbacks.get(entry.target)?.(entry.isIntersecting)
+        }
+      },
+      { root, rootMargin },
+    )
+    shared = { callbacks, observer }
+    margins.set(rootMargin, shared)
+  }
+
+  shared.callbacks.set(element, onChange)
+  shared.observer.observe(element)
+
+  return () => {
+    shared.observer.unobserve(element)
+    shared.callbacks.delete(element)
+
+    if (shared.callbacks.size === 0) {
+      shared.observer.disconnect()
+      margins.delete(rootMargin)
+
+      if (margins.size === 0) {
+        observers.delete(root)
+      }
+    }
+  }
+}
+
 export function useNearViewport(
   ref: RefObject<Element | null>,
   rootMargin = "800px 0px",
@@ -55,18 +111,7 @@ export function useNearViewport(
       )
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        settleMountedState(entries.some((entry) => entry.isIntersecting))
-      },
-      { rootMargin },
-    )
-
-    observer.observe(element)
-
-    return () => {
-      observer.disconnect()
-    }
+    return observeNearViewport(element, rootMargin, settleMountedState)
   }, [paused, ref, retainExited, retainSelection, rootMargin])
 
   useEffect(() => {

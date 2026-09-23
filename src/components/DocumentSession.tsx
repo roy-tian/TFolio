@@ -299,6 +299,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       () => readStoredTextNoteStyle() ?? defaultTextNoteStyle,
     )
     const viewerRef = useRef<HTMLElement>(null)
+    const recentPageRef = useRef<HTMLElement | null>(null)
     const documentRef = useRef<PdfDocumentInfo | null>(openedDocument)
     const initialRecentPositionRef = useRef(
       initialRecentView
@@ -1025,9 +1026,20 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         return null
       }
 
-      const page = viewer.querySelector<HTMLElement>(
-        `[data-page-number="${currentPage}"]`,
-      )
+      // A scroll only moves this node; find it again when tracking switches
+      // pages or the layout replaces it.
+      let page = recentPageRef.current
+
+      if (
+        !page ||
+        page.dataset.pageNumber !== String(currentPage) ||
+        !viewer.contains(page)
+      ) {
+        page = viewer.querySelector<HTMLElement>(
+          `[data-page-number="${currentPage}"]`,
+        )
+        recentPageRef.current = page
+      }
       const viewerRect = viewer.getBoundingClientRect()
       const pageRect = page?.getBoundingClientRect()
       const anchor = pageRect
@@ -1131,11 +1143,27 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         return
       }
 
-      viewer.addEventListener("scroll", rememberCurrentView, { passive: true })
+      // Wheel events can outnumber paints. Read page geometry once per frame.
+      let frame = 0
+      const scheduleRememberCurrentView = () => {
+        if (frame) {
+          return
+        }
+
+        frame = requestAnimationFrame(() => {
+          frame = 0
+          rememberCurrentView()
+        })
+      }
+
+      viewer.addEventListener("scroll", scheduleRememberCurrentView, {
+        passive: true,
+      })
       rememberCurrentView()
 
       return () => {
-        viewer.removeEventListener("scroll", rememberCurrentView)
+        viewer.removeEventListener("scroll", scheduleRememberCurrentView)
+        cancelAnimationFrame(frame)
       }
     }, [rememberCurrentView])
 
@@ -1454,6 +1482,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           <div className="relative min-w-0 flex-1">
             <main
               className="relative size-full overflow-auto bg-zinc-200/70 dark:bg-zinc-950"
+              data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}
             >

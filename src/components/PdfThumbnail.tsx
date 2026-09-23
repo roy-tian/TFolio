@@ -10,9 +10,9 @@ import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT } from "@/lib/viewMode"
 
-// A cell is a fraction of a page's height, so the page-sized prefetch margin
-// would burst dozens of renders through PDFium at once. Stay closer.
-const THUMBNAIL_ROOT_MARGIN = "400px 0px"
+// Many cells share a row; preloading whole rows would queue dozens of PDFium
+// renders at once. Keep the grid's window to what is visible.
+const THUMBNAIL_ROOT_MARGIN = "0px"
 
 type PdfThumbnailProps = {
   /** Whether the keep-one-page rule forbids this delete — the sole page, or a
