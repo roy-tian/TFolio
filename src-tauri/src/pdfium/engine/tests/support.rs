@@ -179,7 +179,6 @@ pub(super) fn rotated_blank_pdf(rotation: i32) -> Vec<u8> {
 
 pub(super) fn watermark_config(text: &str) -> WatermarkConfig {
     WatermarkConfig {
-        rasterize: false,
         text: text.into(),
         width_ratio: 0.8,
         direction: WatermarkDirection::Ascending,

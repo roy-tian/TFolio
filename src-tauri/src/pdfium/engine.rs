@@ -1023,12 +1023,10 @@ mod io;
 mod marks;
 mod owned_content;
 mod page_ops;
-mod raster_export;
 pub(crate) use io::is_merge_image;
 use io::{image_page_document, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
-use raster_export::FLATTEN_LEVELS;
 
 #[cfg(test)]
 mod tests;

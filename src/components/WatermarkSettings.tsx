@@ -4,8 +4,6 @@ import { useTranslation } from "react-i18next"
 import { SliderRow } from "@/components/SliderRow"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WatermarkPreview } from "@/components/WatermarkPreview"
-import { Card } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -195,23 +193,6 @@ export function WatermarkSettings({
               </ToggleGroup>
             </Field>
           </div>
-
-          <Card className="gap-2 p-3">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={draft.rasterize}
-                data-testid="watermark-rasterize"
-                id={`${idPrefix}-rasterize`}
-                onCheckedChange={(rasterize) => onDraftChange({ ...draft, rasterize })}
-              />
-              <FieldLabel htmlFor={`${idPrefix}-rasterize`}>
-                {t("watermark.rasterize")}
-              </FieldLabel>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t("watermark.rasterizeHint")}
-            </p>
-          </Card>
 
           {validationError === "style" ? (
             <FieldError>{t("watermark.errorStyle")}</FieldError>

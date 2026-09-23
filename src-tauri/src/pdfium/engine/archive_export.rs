@@ -152,11 +152,6 @@ impl PdfiumEngine {
         } else {
             Vec::new()
         };
-        let rasterize = entry
-            .owned_content
-            .as_ref()
-            .and_then(|state| state.watermark.as_ref())
-            .is_some_and(|config| config.rasterize);
         // Progress counts what the archive will hold: every page for the two
         // document splits, the reader's own selection for images.
         let progress_total = selected.as_ref().map_or(total, Vec::len);
@@ -183,12 +178,11 @@ impl PdfiumEngine {
                             if operation.is_cancelled() {
                                 return Ok(false);
                             }
-                            if !rasterize {
-                                let source_page = source.pages().get(page).map_err(|error| {
-                                    format!("could not read page links: {error}")
-                                })?;
-                                links.push(collect_links(&source_page)?);
-                            }
+                            let source_page = source
+                                .pages()
+                                .get(page)
+                                .map_err(|error| format!("could not read page links: {error}"))?;
+                            links.push(collect_links(&source_page)?);
                             part.pages_mut()
                                 .copy_page_from_document(source, page, page - section.start)
                                 .map_err(|error| {
@@ -196,21 +190,9 @@ impl PdfiumEngine {
                                 })?;
                             on_progress((page + 1) as usize, total);
                         }
-                        let bytes = if rasterize {
-                            let Some(bytes) = self.rasterized_bytes(
-                                &part,
-                                &operation,
-                                &FLATTEN_LEVELS,
-                                |_, _| {},
-                            )?
-                            else {
-                                return Ok(false);
-                            };
-                            bytes
-                        } else {
-                            part.save_to_bytes()
-                                .map_err(|error| format!("could not save a split PDF: {error}"))?
-                        };
+                        let bytes = part
+                            .save_to_bytes()
+                            .map_err(|error| format!("could not save a split PDF: {error}"))?;
                         let Some(bytes) = write_navigation(
                             bytes,
                             &section_outline(&outline, section.start, section.end),
@@ -241,21 +223,9 @@ impl PdfiumEngine {
                             .map_err(|error| {
                                 format!("could not copy page {}: {error}", page + 1)
                             })?;
-                        let bytes = if rasterize {
-                            let Some(bytes) = self.rasterized_bytes(
-                                &part,
-                                &operation,
-                                &FLATTEN_LEVELS,
-                                |_, _| {},
-                            )?
-                            else {
-                                return Ok(false);
-                            };
-                            bytes
-                        } else {
-                            part.save_to_bytes()
-                                .map_err(|error| format!("could not save a split PDF: {error}"))?
-                        };
+                        let bytes = part
+                            .save_to_bytes()
+                            .map_err(|error| format!("could not save a split PDF: {error}"))?;
                         // No navigation to restore: a single page carries no
                         // outline of its own, and every link off it is dropped.
                         zip.start_file(format!("{:04}.pdf", page + 1), entry_options)

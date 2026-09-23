@@ -45,7 +45,6 @@ const payload: MovedTabPayload = {
             config: {
               direction: "ascending",
               layout: "single",
-              rasterize: false,
               text: "draft",
               widthRatio: 0.5,
             },

@@ -22,7 +22,6 @@ mod inspection;
 mod merge;
 mod page_numbers;
 mod page_structure;
-mod raster_export;
 mod rect_effect;
 mod save_export;
 mod text_notes;

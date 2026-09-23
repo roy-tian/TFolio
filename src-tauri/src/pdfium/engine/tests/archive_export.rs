@@ -218,11 +218,10 @@ fn archive_cancellation_preserves_destination_and_removes_temporary_file() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn archive_split_orders_unique_boundaries_and_preserves_raster_watermarks() {
+fn archive_split_orders_unique_boundaries_and_preserves_watermarks() {
     let engine = test_engine();
     let document = engine.open(archive_bookmarks_pdf()).unwrap();
-    let mut config = watermark_config("COPY");
-    config.rasterize = true;
+    let config = watermark_config("COPY");
     engine.apply_watermark(document.id, config).unwrap();
     let directory = scratch_directory("archive-nested-bookmarks");
     let destination = directory.join("split.zip");
@@ -250,9 +249,7 @@ fn archive_split_orders_unique_boundaries_and_preserves_raster_watermarks() {
         {
             let documents = engine.lock_documents().unwrap();
             for page in documents[&reopened.id].document.pages().iter() {
-                assert_eq!(page.text().unwrap().all(), "");
-                assert_eq!(page.objects().len(), 1);
-                assert!(page.objects().get(0).unwrap().as_image_object().is_some());
+                assert!(page.text().unwrap().all().contains("COPY"));
             }
         }
         engine.close(reopened.id).unwrap();

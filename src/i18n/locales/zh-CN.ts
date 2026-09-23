@@ -266,8 +266,6 @@ const zhCN = {
       "{{count}} 个拖入的文件未插入：只有 PDF 可以作为页面插入。",
   },
   watermark: {
-    rasterize: "将页面转为图片",
-    rasterizeHint: "导出时将页面内容与水印合成图片，文字将无法直接编辑、选择、搜索或复制，文件可能变大。",
     open: "水印",
     title: "文档水印",
     description: "为此 PDF 的每一页添加同一个文字水印。",

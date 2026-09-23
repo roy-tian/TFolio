@@ -141,7 +141,6 @@ describe("watermark geometry", () => {
 describe("watermark settings", () => {
   it("starts a new watermark as a single 80% mark", () => {
     expect(defaultWatermarkConfig("CONFIDENTIAL")).toEqual({
-      rasterize: false,
       direction: "ascending",
       layout: "single",
       text: "CONFIDENTIAL",
@@ -163,7 +162,6 @@ describe("watermark settings", () => {
       false,
     )
     expect(sameWatermarkConfig(value, { ...value, layout: "zebra" })).toBe(false)
-    expect(sameWatermarkConfig(value, { ...value, rasterize: true })).toBe(false)
     expect(sameWatermarkConfig(null, null)).toBe(true)
   })
 
@@ -175,12 +173,12 @@ describe("watermark settings", () => {
     )
   })
 
-  it("restores the image option and defaults older settings to editable", async () => {
-    const stored = config({ rasterize: true })
-    expect(await withStoredWatermark(stored, readStoredWatermarkConfig)).toEqual(stored)
-    const { rasterize: _, ...legacy } = stored
-    expect(await withStoredWatermark(legacy, readStoredWatermarkConfig)).toEqual(config())
-    expect(await withStoredWatermark({ ...stored, rasterize: "true" }, readStoredWatermarkConfig)).toBeNull()
+  it("drops fields this version no longer reads from a stored watermark", async () => {
+    const stored = config({ layout: "zebra" })
+
+    expect(
+      await withStoredWatermark({ ...stored, rasterize: true }, readStoredWatermarkConfig),
+    ).toEqual(stored)
   })
 
   it("drops a stored record this version cannot use", async () => {
