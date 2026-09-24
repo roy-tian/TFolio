@@ -2,12 +2,9 @@ name: Bundle dry-run
 
 # Builds and signs every release target's installers WITHOUT publishing. Local
 # preflight deliberately uses --no-bundle, keeping the private key in repository
-# secrets while this workflow catches cross-platform packaging failures before
-# a tag is pushed rather than halfway through a real release.
-#
-# Trigger it manually from the Actions tab after `bun run preflight` is green:
-# Actions -> "Bundle dry-run" -> Run workflow. When all four jobs pass, it is
-# safe to tag and let the Release workflow publish for real.
+# secrets. This is an optional check of cross-platform packaging on any branch;
+# it is not a release gate, because Release itself publishes only after every
+# build passes. Trigger it from Actions -> "Bundle dry-run" -> Run workflow.
 
 on:
   workflow_dispatch:
@@ -82,10 +79,13 @@ jobs:
         with:
           targets: ${{ matrix.rust_targets }}
 
+      # Keyed by target rather than job id: both macOS builds share one runner
+      # OS, and Release restores these caches on the default branch.
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
+          shared-key: bundle-${{ matrix.pdfium_target }}
 
       - name: Install frontend dependencies
         run: bun ci
@@ -96,7 +96,7 @@ jobs:
       - name: Download PDFium runtime
         run: bun run pdfium:download --target ${{ matrix.pdfium_target }}
 
-      # Build the bundles but DO NOT publish: omitting tagName/releaseName tells
+      # Build the bundles but DO NOT publish: omitting releaseId/tagName tells
       # tauri-action to run the bundlers and stop there, exercising exactly the
       # same matrix and args as the Release workflow without touching releases.
       - name: Build bundles (no publish)

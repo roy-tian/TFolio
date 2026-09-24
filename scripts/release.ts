@@ -243,22 +243,17 @@ function main() {
       `- bump synchronized package and Cargo metadata to ${version}`,
     ])
   }
-  git(["tag", "-a", tag, "-m", `TFolio ${version}`])
-
+  // No local tag: the Release workflow creates it when it publishes, so a
+  // failed build never leaves a tag pointing at an unreleased commit.
   if (push) {
-    git([
-      "push",
-      "--atomic",
-      "origin",
-      `refs/heads/${branch}`,
-      `refs/tags/${tag}`,
-    ])
+    git(["push", "origin", `refs/heads/${branch}`])
   }
 
+  const dispatch = `gh workflow run release.yml --ref ${branch}`
   console.log(
     push
-      ? `Released ${tag} from ${branch} and pushed it to origin.`
-      : `Created ${tag} from ${branch}. Push the branch and tag when ready.`,
+      ? `Pushed ${branch} for ${tag}. Publish it with: ${dispatch}`
+      : `Prepared ${tag} on ${branch}. Push it, then publish with: ${dispatch}`,
   )
 }
 

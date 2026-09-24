@@ -1,5 +1,5 @@
-// Run before tagging a release: every single-platform check CI runs, plus a
-// production build. Signed bundles are the Bundle dry-run workflow's job.
+// Run before pushing a release commit: every single-platform check CI runs,
+// plus a production build. Signed bundles are the Release workflow's job.
 import path from "node:path"
 import process from "node:process"
 import { spawnSync } from "node:child_process"
@@ -67,13 +67,13 @@ if (failed) {
     "  Signed installer bundling (Windows MSI, macOS dmg, and Linux packages)",
   )
   console.error(
-    "  is checked by the Bundle dry-run workflow with repository secrets.",
+    "  is checked by the Release workflow with repository secrets.",
   )
   process.exit(1)
 }
 
 console.log("\u2713 All pre-flight checks passed locally.")
 console.log(
-  "  Before tagging, run the Bundle dry-run workflow to build and sign every",
+  "  Push the release commit, then run the Release workflow to build, sign,",
 )
-console.log('  platform: Actions \u2192 "Bundle dry-run" \u2192 Run workflow.')
+console.log('  and publish every platform: Actions \u2192 "Release" \u2192 Run workflow.')

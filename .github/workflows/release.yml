@@ -1,22 +1,39 @@
 name: Release
 
+# Run on the default branch after pushing the release commit: Actions ->
+# "Release" -> Run workflow, or `gh workflow run release.yml`. Every platform
+# is built and signed once into a draft. Publishing the draft creates the tag,
+# so a failed build leaves no tag behind and the version can be retried.
+
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  validate-version:
-    name: Validate version tag
+  prepare:
+    name: Prepare draft release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      release_id: ${{ steps.draft.outputs.release_id }}
     steps:
+      - name: Require the default branch
+        if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "::error::Releases come only from $DEFAULT_BRANCH, not $REF_NAME."
+          exit 1
+
       - name: Check out repository
         uses: actions/checkout@v5
 
@@ -24,13 +41,52 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Check synchronized version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: bun run version:check
+
+      - name: Read release tag
+        id: version
+        run: echo "tag=v$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      # The draft is created here, before the matrix, so the four builds upload
+      # to one release instead of racing to create it. It targets this exact
+      # commit even if the default branch moves on during the build.
+      - name: Create draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists; bump the version before releasing."
+            exit 1
+          fi
+
+          # A failed run leaves its draft behind, holding assets built from an
+          # older commit. It was never public, so replace it.
+          stale=$(gh api --paginate "repos/$GH_REPO/releases" \
+            --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id")
+          for id in $stale; do
+            echo "Deleting stale draft release $id for $TAG"
+            gh api -X DELETE "repos/$GH_REPO/releases/$id"
+          done
+
+          prerelease=false
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=true
+          fi
+          release_id=$(gh api -X POST "repos/$GH_REPO/releases" \
+            -f tag_name="$TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="TFolio $TAG" \
+            -F draft=true \
+            -F prerelease="$prerelease" \
+            --jq .id)
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Build ${{ matrix.name }}
-    needs: validate-version
+    needs: prepare
     permissions:
       contents: write
     strategy:
@@ -76,10 +132,13 @@ jobs:
         with:
           targets: ${{ matrix.rust_targets }}
 
+      # Keyed by target rather than job id: both macOS builds share one runner
+      # OS, and the Bundle dry-run warms the same caches on the default branch.
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
+          shared-key: bundle-${{ matrix.pdfium_target }}
 
       - name: Install frontend dependencies
         run: bun ci
@@ -92,7 +151,9 @@ jobs:
       - name: Download PDFium runtime
         run: bun run pdfium:download --target ${{ matrix.pdfium_target }}
 
-      - name: Build and publish Tauri bundles
+      # latest.json addresses assets by id, which survives publishing, so the
+      # updater feed stays valid although the tag does not exist yet.
+      - name: Build and upload Tauri bundles
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,17 +164,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: TFolio ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          releaseId: ${{ needs.prepare.outputs.release_id }}
           args: ${{ matrix.args }}
 
   publish-release:
     name: Publish GitHub Release
-    needs: publish
+    needs: [prepare, publish]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
       # The notes are written once the bundles are in place, because every
@@ -126,17 +185,34 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
+      # Release may be dispatched as soon as the commit is pushed, so the
+      # builds overlap CI; only publishing waits for it.
+      - name: Wait for CI on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          run_id=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --event push \
+            --limit 1 --json databaseId --jq '.[0].databaseId')
+          if [ -z "$run_id" ]; then
+            echo "::error::No CI run exists for $GITHUB_SHA; push a commit that CI does not skip."
+            exit 1
+          fi
+          gh run watch "$run_id" --exit-status --interval 30
+
+      # The tag does not exist yet, so the notes read the checked-out history.
       - name: Build the release notes
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: bun run changelog > "$RUNNER_TEMP/release-notes.md"
 
       - name: Publish completed release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
         run: |
-          gh release edit "$RELEASE_TAG" \
-            --notes-file "$RUNNER_TEMP/release-notes.md" \
-            --draft=false
+          gh api -X PATCH "repos/$GH_REPO/releases/$RELEASE_ID" \
+            -F "body=@$RUNNER_TEMP/release-notes.md" \
+            -F draft=false \
+            --silent
