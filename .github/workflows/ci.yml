@@ -64,10 +64,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      # The ignored PDFium tests can fall back to system fonts; give them the
+      # same CJK face the E2E job installs.
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev fonts-wqy-zenhei
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -82,14 +87,17 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+      # Clippy type-checks the same targets, so a separate `cargo check` adds nothing.
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked -- -D warnings
 
-      - name: Check Rust
-        run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+      # Running the ignored tests here reuses this job's test build; the
+      # download scripts need only Bun, not the frontend dependencies.
+      - name: Download PDFium runtime and test fonts
+        run: bun run pdfium:download && bun run fonts:download
 
-      - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Run Rust tests, including PDFium integration tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --include-ignored
 
   e2e:
     name: GUI E2E
@@ -121,9 +129,6 @@ jobs:
 
       - name: Build GUI test application
         run: bun run test:e2e:build
-
-      - name: Exercise PDFium integration test
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --ignored
 
       - name: Run GUI tests with Xvfb
         env:

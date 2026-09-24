@@ -34,11 +34,6 @@ const steps = [
     ],
   },
   {
-    label: "Rust check",
-    bin: "cargo",
-    args: ["check", "--manifest-path", manifest, "--locked"],
-  },
-  {
     label: "Rust unit tests",
     bin: "cargo",
     args: ["test", "--manifest-path", manifest, "--locked"],

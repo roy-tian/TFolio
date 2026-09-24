@@ -17,7 +17,7 @@
 ## Validation
 
 - Before a PR, run `bun run version:check`, `bun run test`, `bun run build`, and Cargo
-  `fmt -- --check`, `clippy --locked -- -D warnings`, `check --locked`, and `test --locked`
+  `fmt -- --check`, `clippy --locked -- -D warnings` (which subsumes `check`), and `test --locked`
   against `src-tauri/Cargo.toml`. Backend or GUI changes also require `bun run test:all`.
 - Run overlapping checks once; `test:all` satisfies the `bun run test` and Cargo `test --locked` requirements.
 - PDFium test fonts are not bundled. PDFium-dependent ignored Rust tests require `fonts:download`;
