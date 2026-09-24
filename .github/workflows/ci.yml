@@ -1,19 +1,31 @@
 name: CI
 
+# A branch with an open pull request would otherwise run twice per push, once
+# for each event, in concurrency groups that never cancel each other. Changes
+# confined to the ignored paths cannot affect anything these jobs check.
 on:
   push:
     branches:
       - master
-      - "feat/**"
-      - "fix/**"
-      - "perf/**"
-      - "refactor/**"
-      - "docs/**"
-      - "test/**"
-      - "build/**"
-      - "ci/**"
-      - "chore/**"
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "website/**"
+      - ".agents/**"
+      - ".claude/**"
+      - ".github/workflows/bundle-dry-run.yml"
+      - ".github/workflows/release.yml"
   pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - "website/**"
+      - ".agents/**"
+      - ".claude/**"
+      - ".github/workflows/bundle-dry-run.yml"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
