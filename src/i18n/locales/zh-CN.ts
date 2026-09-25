@@ -110,7 +110,7 @@ const zhCN = {
     imageQualityHint: "清晰度高于所选分辨率的图片会被降采样，文字与矢量图形不受影响。",
     imageLevels: {
       original: "保留原图",
-      high: "高 · 220 dpi",
+      high: "高 · 300 dpi",
       medium: "中 · 150 dpi",
       low: "低 · 96 dpi",
     },

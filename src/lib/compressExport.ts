@@ -22,7 +22,7 @@ export type CompressedExportRequest = {
 /** The dialog's choices, inside the 72–300 dpi the engine enforces on its own. */
 export const IMAGE_QUALITY_LEVELS = [
   { level: "original", imageDpi: null },
-  { level: "high", imageDpi: 220 },
+  { level: "high", imageDpi: 300 },
   { level: "medium", imageDpi: 150 },
   { level: "low", imageDpi: 96 },
 ] as const

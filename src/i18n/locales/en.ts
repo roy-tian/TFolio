@@ -107,7 +107,7 @@ const en = {
     imageQualityHint: "Images sharper than the chosen resolution are downsampled. Text and vector graphics are never affected.",
     imageLevels: {
       original: "Keep original images",
-      high: "High · 220 dpi",
+      high: "High · 300 dpi",
       medium: "Medium · 150 dpi",
       low: "Low · 96 dpi",
     },
