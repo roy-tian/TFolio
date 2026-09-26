@@ -335,8 +335,12 @@ pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), Str
     let suffix = getrandom::u64().map_err(|error| format!("could not name a download: {error}"))?;
     let temporary = directory.join(format!(".{CJK_FONT_NAME}.{suffix:016x}.download"));
 
-    fs::write(&temporary, &bytes)
-        .map_err(|error| format!("the font could not be written: {error}"))?;
+    fs::write(&temporary, &bytes).map_err(|error| {
+        // A disk that filled mid-write leaves part of a 17 MB file behind.
+        let _ = fs::remove_file(&temporary);
+
+        format!("the font could not be written: {error}")
+    })?;
     fs::rename(&temporary, destination).map_err(|error| {
         let _ = fs::remove_file(&temporary);
 
