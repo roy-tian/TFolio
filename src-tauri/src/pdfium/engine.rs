@@ -614,6 +614,51 @@ impl PdfiumEngine {
         })
     }
 
+    /// Every render queues on the one documents lock, so only PDFium's work
+    /// and a copy of its buffer happen under it; the conversion comes after.
+    fn render_rgb(
+        &self,
+        document_id: u64,
+        page_number: i32,
+        width: i32,
+        max_width: i32,
+    ) -> Result<image::RgbImage, String> {
+        if !(MIN_RENDER_WIDTH..=max_width).contains(&width) {
+            return Err(format!(
+                "render width must be between {MIN_RENDER_WIDTH} and {max_width} pixels"
+            ));
+        }
+
+        let raw = {
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
+
+            entry.page_id(page_number)?;
+
+            let page = entry
+                .document
+                .pages()
+                .get(page_number - 1)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+            let render_config = PdfRenderConfig::new()
+                .set_target_width(width)
+                .set_maximum_width(max_width)
+                .set_maximum_height(MAX_RENDER_HEIGHT)
+                .render_annotations(true)
+                .render_form_data(true)
+                // What `RawBitmap::into_rgb` reads; pdfium-render's default, stated.
+                .set_reverse_byte_order(true);
+            let bitmap = page
+                .render_with_config(&render_config)
+                .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))?;
+
+            RawBitmap::copy_of(&bitmap)?
+        };
+
+        raw.into_rgb()
+    }
+
+    #[cfg(test)]
     fn render_bitmap(
         &self,
         document_id: u64,
@@ -621,32 +666,8 @@ impl PdfiumEngine {
         width: i32,
         max_width: i32,
     ) -> Result<DynamicImage, String> {
-        if !(MIN_RENDER_WIDTH..=max_width).contains(&width) {
-            return Err(format!(
-                "render width must be between {MIN_RENDER_WIDTH} and {max_width} pixels"
-            ));
-        }
-
-        let documents = self.lock_documents()?;
-        let entry = open_entry(&documents, document_id)?;
-
-        entry.page_id(page_number)?;
-
-        let page = entry
-            .document
-            .pages()
-            .get(page_number - 1)
-            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
-        let render_config = PdfRenderConfig::new()
-            .set_target_width(width)
-            .set_maximum_width(max_width)
-            .set_maximum_height(MAX_RENDER_HEIGHT)
-            .render_annotations(true)
-            .render_form_data(true);
-
-        page.render_with_config(&render_config)
-            .and_then(|bitmap| bitmap.as_image())
-            .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))
+        self.render_rgb(document_id, page_number, width, max_width)
+            .map(DynamicImage::ImageRgb8)
     }
 
     pub(super) fn render_page(
@@ -655,14 +676,9 @@ impl PdfiumEngine {
         page_number: i32,
         width: i32,
     ) -> Result<Vec<u8>, String> {
-        let image = self.render_bitmap(document_id, page_number, width, MAX_RENDER_WIDTH)?;
-        let mut png = Cursor::new(Vec::new());
+        let image = self.render_rgb(document_id, page_number, width, MAX_RENDER_WIDTH)?;
 
-        image
-            .write_to(&mut png, ImageFormat::Png)
-            .map_err(|error| format!("could not encode page {page_number}: {error}"))?;
-
-        Ok(png.into_inner())
+        encode_png(&image).map_err(|error| format!("could not encode page {page_number}: {error}"))
     }
 
     pub(super) fn render_thumbnail(
@@ -671,12 +687,10 @@ impl PdfiumEngine {
         page_number: i32,
         width: i32,
     ) -> Result<Vec<u8>, String> {
-        let image = self.render_bitmap(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)?;
+        let image = self.render_rgb(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)?;
         let mut webp = Cursor::new(Vec::new());
 
-        // The WebP encoder is lossless and accepts only Rgb8/Rgba8, but PDFium
-        // reports Luma8 for grayscale bitmaps, so normalize before encoding.
-        DynamicImage::ImageRgba8(image.into_rgba8())
+        DynamicImage::ImageRgb8(image)
             .write_to(&mut webp, ImageFormat::WebP)
             .map_err(|error| format!("could not encode page {page_number} thumbnail: {error}"))?;
 
@@ -1061,10 +1075,13 @@ mod io;
 mod marks;
 mod owned_content;
 mod page_ops;
+mod raster;
+
 pub(crate) use io::is_merge_image;
 use io::{image_page_document, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
+use raster::{encode_png, RawBitmap};
 
 #[cfg(test)]
 mod tests;

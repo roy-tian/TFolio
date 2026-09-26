@@ -106,3 +106,24 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Every page the reader sees is encoded by these on the way out; at the size
+# profile's "s" the PNG encode measured about 1.7 times slower than at 3.
+[profile.release.package.png]
+opt-level = 3
+
+[profile.release.package.fdeflate]
+opt-level = 3
+
+[profile.release.package.crc32fast]
+opt-level = 3
+
+[profile.release.package.simd-adler32]
+opt-level = 3
+
+[profile.release.package.image]
+opt-level = 3
+
+# Every thumbnail goes out through its WebP encoder, the same hot path.
+[profile.release.package.image-webp]
+opt-level = 3
