@@ -54,11 +54,22 @@ export type PdfDocumentInfo = {
   path: string | null
 }
 
-/** Whether the export landed on the document's own file: that, not the
-    operation's name, is what decides the history counts as saved. */
+/** Whether the document is now bound to the file the export wrote: that, not
+    the operation's name, is what decides the history counts as saved. */
 export type PdfExportOutcome = {
   path: string
   savedToSource: boolean
+}
+
+/** The backend's refusal to write over a file another tab holds, kept in step
+    with `EXPORT_TARGET_OPEN_ERROR` in `src-tauri/src/pdfium/engine/io.rs`. */
+export const EXPORT_TARGET_OPEN = "tfolio:export-target-open"
+
+export function isExportTargetOpen(error: unknown): boolean {
+  return (
+    error === EXPORT_TARGET_OPEN ||
+    (error instanceof Error && error.message === EXPORT_TARGET_OPEN)
+  )
 }
 
 /** Nothing here is patched into place: the page list and outline are

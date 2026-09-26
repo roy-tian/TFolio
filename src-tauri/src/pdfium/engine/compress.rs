@@ -451,12 +451,7 @@ fn refuse_open_destination(
     documents: &HashMap<u64, OpenDocument>,
     path: &Path,
 ) -> Result<(), String> {
-    if documents.values().any(|document| {
-        document
-            .source_path
-            .as_deref()
-            .is_some_and(|source| io::same_file(source, path))
-    }) {
+    if io::is_open_document_file(documents, path, None) {
         return Err("a compressed copy cannot replace an open PDF".into());
     }
 

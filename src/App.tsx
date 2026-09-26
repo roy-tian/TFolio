@@ -101,14 +101,15 @@ type OpenTab = {
   movedSeed?: MovedTabSeed
   name: string
   path: string
-  /** A document-specific name for Save As; ordinary PDFs use the annotation
+  /** A document-specific name for Save As — a converted or merged document's,
+      then the file Save As bound it to; ordinary PDFs use the annotation
       export name. */
   saveAsDefaultName?: string
   /** What the session says: a file behind it, changes to write, and no
       session-owned page content that makes it export-only. */
   savable: boolean
-  /** The path whose Rust-side open put it in the recent list; unlike `path`,
-      absent when an app-created document adopts its first export destination. */
+  /** The path whose Rust-side open or Save As put it in the recent list —
+      absent while an app-created document has no file of its own. */
   recentPath?: string
   recentView?: RecentPdfView
   /** What an app-built document opens with over and above its file — the
@@ -934,14 +935,16 @@ export default function App() {
     [detachTab, loadDragGeometry],
   )
 
-  // An adopted export destination gives the document its first file; the tab
-  // follows with the reader's name and the duplicate-open check's path.
+  // Save As binds the document to its destination; the tab follows with the
+  // reader's name, the duplicate-open check's path, and the next suggestion.
   const updateSource = useCallback(
     (documentId: number, path: string) => {
+      const name = fileNameFromPath(path)
+
       replaceTabs((current) =>
         current.map((tab) =>
           tab.id === documentId
-            ? { ...tab, name: fileNameFromPath(path), path }
+            ? { ...tab, name, path, recentPath: path, saveAsDefaultName: name }
             : tab,
         ),
       )

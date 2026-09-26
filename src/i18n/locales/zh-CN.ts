@@ -258,6 +258,7 @@ const zhCN = {
     saveFailed: "无法保存此 PDF。",
     exportFilter: "PDF 文件",
     exportFailed: "无法导出此 PDF。",
+    exportTargetOpen: "该文件已在另一个标签页中打开。请先在那里关闭它，或换个文件名保存。",
     failed: "无法应用该修改。",
     dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖放一次。",
     dropIgnoredFiles_one:

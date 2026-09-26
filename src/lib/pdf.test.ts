@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 
 import {
   dimensionsForRotation,
+  EXPORT_TARGET_OPEN,
   fileNameFromPath,
+  isExportTargetOpen,
   isPdfPath,
   MIN_PAGE_OUTPUT_SCALE,
   pickCurrentPage,
@@ -18,6 +20,19 @@ describe("isPdfPath", () => {
   test("rejects other extensions", () => {
     expect(isPdfPath("/home/roy/notes.txt")).toBe(false)
     expect(isPdfPath("/home/roy/document.pdf.png")).toBe(false)
+  })
+})
+
+describe("isExportTargetOpen", () => {
+  test("names the backend's code, rejected bare or wrapped", () => {
+    expect(isExportTargetOpen(EXPORT_TARGET_OPEN)).toBe(true)
+    expect(isExportTargetOpen(new Error(EXPORT_TARGET_OPEN))).toBe(true)
+  })
+
+  test("leaves any other failure to the generic notice", () => {
+    expect(isExportTargetOpen("could not write to /tmp/a.pdf")).toBe(false)
+    expect(isExportTargetOpen(`${EXPORT_TARGET_OPEN} and more`)).toBe(false)
+    expect(isExportTargetOpen(undefined)).toBe(false)
   })
 })
 

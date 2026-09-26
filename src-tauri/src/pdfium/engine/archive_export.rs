@@ -126,12 +126,7 @@ impl PdfiumEngine {
         let documents = self.lock_documents()?;
         let entry = open_entry(&documents, document_id)?;
         // A ZIP can never replace an open PDF, including one reached through an alias.
-        if documents.values().any(|document| {
-            document
-                .source_path
-                .as_deref()
-                .is_some_and(|source| io::same_file(source, path))
-        }) {
+        if io::is_open_document_file(&documents, path, None) {
             return Err("an archive cannot replace an open PDF".into());
         }
         let source = &entry.document;

@@ -259,6 +259,8 @@ const en = {
     saveFailed: "This PDF could not be saved.",
     exportFilter: "PDF file",
     exportFailed: "This PDF could not be exported.",
+    exportTargetOpen:
+      "That file is open in another tab. Close it there first, or save under another name.",
     failed: "That edit could not be applied.",
     dropWhileEditing:
       "Another page edit is still running — try the drop again in a moment.",

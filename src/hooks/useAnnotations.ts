@@ -82,7 +82,7 @@ type UseAnnotationsOptions = {
   /** `command` is the edit that failed, where re-running it is the recovery —
       a note otherwise lost with the editor that held it. Absent for a refusal. */
   onAnnotateError: (error?: unknown, command?: AnnotationCommand) => void
-  onExportError: () => void
+  onExportError: (error: unknown) => void
   onExported: (documentId: number, outcome: PdfExportOutcome) => void
   onSaveError: () => void
   onStructureChange: StructureChangeHandler
@@ -1150,7 +1150,7 @@ export function useAnnotations({
   }, [documentId, enqueue, onAnnotateError, onStructureChange])
 
   /** Queued behind the reader's marks, so the file holds what the history says
-      was saved; marked saved only when the write landed on its own file. */
+      was saved; marked saved only when the document is now bound to that file. */
   const exportCopy = useCallback(
     async (suggestedName: string, filterLabel: string) => {
       if (documentId === undefined) {

@@ -5,7 +5,7 @@ use std::{
 
 use tauri::{
     ipc::{Channel, InvokeBody, Request, Response},
-    AppHandle, State, WebviewWindow,
+    AppHandle, Manager, State, WebviewWindow,
 };
 use tauri_plugin_dialog::DialogExt;
 
@@ -13,7 +13,7 @@ use crate::convert::{self, WORD_EXTENSIONS};
 use crate::recent::RecentFiles;
 use crate::windows::{record_document, DocumentOwners};
 
-use super::engine::{OperationTarget, MERGE_IMAGE_EXTENSIONS};
+use super::engine::{OperationTarget, PdfiumEngine, MERGE_IMAGE_EXTENSIONS};
 use super::font::{download_fallback_font, fallback_font_destination};
 use super::{
     size_limit_error, ExportOutcome, InsertOutcome, MergePlan, PageNumbersConfig, PagePoint,
@@ -21,11 +21,6 @@ use super::{
     PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle, TextNoteStyle,
     WatermarkConfig, MAX_PDF_BYTES,
 };
-
-// Only the check below reaches into the engine's own type, and the e2e build
-// drops the check.
-#[cfg(not(feature = "e2e"))]
-use super::engine::PdfiumEngine;
 
 /// A path is a string any page code can make up, so only paths the OS produced
 /// in this process's sight are acted on; the e2e build waives the check.
@@ -779,7 +774,6 @@ pub async fn export_pdf(
     filter_label: String,
     app: AppHandle,
     state: State<'_, PdfiumState>,
-    owners: State<'_, DocumentOwners>,
     recent: State<'_, RecentFiles>,
 ) -> Result<Option<ExportOutcome>, String> {
     let engine = Arc::clone(&state.0);
@@ -787,7 +781,7 @@ pub async fn export_pdf(
 
     // `blocking_save_file` would deadlock the main thread outside
     // `spawn_blocking`; the document lock is not taken until the reader chooses.
-    let exported = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         // The folder the dialog opens in is Rust's to choose, never the
         // WebView's: the document's own for a file it came from, the last
         // opened PDF's for one that has never been saved.
@@ -808,18 +802,52 @@ pub async fn export_pdf(
             .into_path()
             .map_err(|error| format!("the chosen destination is unusable: {error}"))?;
 
-        engine.export_to(document_id, &path).map(Some)
+        export_and_bind(&app, &engine, document_id, path).map(Some)
     })
     .await
-    .map_err(|error| format!("PDFium export task failed: {error}"))??;
+    .map_err(|error| format!("PDFium export task failed: {error}"))?
+}
 
-    if let Some(outcome) = &exported {
-        if outcome.saved_to_source {
-            owners.adopt_path(document_id, PathBuf::from(&outcome.path));
-        }
+/// A document bound to its destination becomes that file's tab, as an open
+/// would make it: listed as recent, approved for this run, and owned under the
+/// path `focus_pdf_path` looks it up by — the OS's own, as the outcome's string
+/// is lossy. Moved straight after the write, so the gap an open could slip
+/// through is as short as it can be outside the documents lock.
+fn export_and_bind(
+    app: &AppHandle,
+    engine: &PdfiumEngine,
+    document_id: u64,
+    path: PathBuf,
+) -> Result<ExportOutcome, String> {
+    let outcome = engine.export_to(document_id, &path)?;
+
+    if outcome.saved_to_source {
+        engine.approve_paths([&path]);
+        app.state::<RecentFiles>().record(&path);
+        app.state::<DocumentOwners>().adopt_path(document_id, path);
     }
 
-    Ok(exported)
+    Ok(outcome)
+}
+
+/// `export_pdf` past its dialog, which no driver can answer. Taking the path
+/// is the arbitrary-file write that command exists to prevent, so this is
+/// compiled into the e2e build alone.
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub async fn export_pdf_to(
+    document_id: u64,
+    path: String,
+    app: AppHandle,
+    state: State<'_, PdfiumState>,
+) -> Result<ExportOutcome, String> {
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        export_and_bind(&app, &engine, document_id, PathBuf::from(path))
+    })
+    .await
+    .map_err(|error| format!("PDFium export task failed: {error}"))?
 }
 
 // Async although the close is a map removal: a sync command runs on the main

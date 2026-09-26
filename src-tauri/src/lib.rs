@@ -12,6 +12,8 @@ mod windows;
 use convert::word_conversion_available;
 use handoff::{move_document, move_document_new_window, take_moved_tabs, HandoffQueue};
 use launch::{take_launch_files, LaunchQueue};
+#[cfg(feature = "e2e")]
+use pdfium::export_pdf_to;
 use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_archive,
@@ -183,6 +185,8 @@ pub fn run() {
             duplicate_pdf_pages,
             save_pdf,
             export_pdf,
+            #[cfg(feature = "e2e")]
+            export_pdf_to,
             export_pdf_archive,
             cancel_pdf_archive,
             export_compressed_pdf,

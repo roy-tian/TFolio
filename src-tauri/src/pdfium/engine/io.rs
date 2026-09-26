@@ -108,25 +108,48 @@ pub(super) fn bounded_file_name(name: &str) -> &str {
     &name[..end]
 }
 
-/// Whether two paths name one file. A fresh destination resolves through its
-/// parent; the unresolvable compare literally, erring towards "different".
-pub(super) fn same_file(left: &Path, right: &Path) -> bool {
-    fn resolved(path: &Path) -> PathBuf {
-        if let Ok(canonical) = path.canonicalize() {
-            return canonical;
-        }
-
-        match (path.parent(), path.file_name()) {
-            (Some(parent), Some(name)) => match parent.canonicalize() {
-                Ok(parent) => parent.join(name),
-                Err(_) => path.to_path_buf(),
-            },
-            _ => path.to_path_buf(),
-        }
+/// A path as the filesystem names it. A fresh destination resolves through its
+/// parent; the unresolvable stay literal, erring towards "different".
+fn resolved(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
     }
 
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => match parent.canonicalize() {
+            Ok(parent) => parent.join(name),
+            Err(_) => path.to_path_buf(),
+        },
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Whether two paths name one file.
+pub(super) fn same_file(left: &Path, right: &Path) -> bool {
     resolved(left) == resolved(right)
 }
+
+/// Whether `path` is the file of an open document other than `except`, aliases
+/// included. The destination resolves once: the scan runs under the documents lock.
+pub(super) fn is_open_document_file(
+    documents: &HashMap<u64, OpenDocument>,
+    path: &Path,
+    except: Option<u64>,
+) -> bool {
+    let target = resolved(path);
+
+    documents.iter().any(|(id, document)| {
+        Some(*id) != except
+            && document
+                .source_path
+                .as_deref()
+                .is_some_and(|source| resolved(source) == target)
+    })
+}
+
+/// A wire value the frontend matches verbatim (`EXPORT_TARGET_OPEN` in
+/// `src/lib/pdf.ts`), not a message.
+pub(super) const EXPORT_TARGET_OPEN_ERROR: &str = "tfolio:export-target-open";
 
 /// A PDF read into memory under the app's ceiling, sized from metadata first so
 /// an oversized file is refused before it is read — and checked again after.
@@ -724,8 +747,10 @@ impl PdfiumEngine {
             .map(|parent| parent.to_path_buf())
     }
 
-    /// Writes to `path`, adopting it as the source of a byte-opened document —
-    /// a true save-as. The flag tells the frontend the file matches the history.
+    /// Writes to `path` and binds the document to it — a true save-as, after
+    /// which `save` writes there and the old file stays as it was. A copy-only
+    /// document with a file stays bound to it: `save` refuses that file, so
+    /// binding the copy would refuse the next write to the copy as well.
     pub(in crate::pdfium) fn export_to(
         &self,
         document_id: u64,
@@ -733,15 +758,23 @@ impl PdfiumEngine {
     ) -> Result<ExportOutcome, String> {
         let _operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut documents = self.lock_documents()?;
-        let entry = open_entry_mut(&mut documents, document_id)?;
 
-        // The same refusal `save` makes, at the other exit. Unlike the flag
-        // below, this resolves aliases: a missed twin would destroy the original.
-        if (entry
+        // Two documents bound to one file would each save over the other's
+        // edits, and a copy landing there would leave the holder's history lying.
+        if is_open_document_file(&documents, path, Some(document_id)) {
+            return Err(EXPORT_TARGET_OPEN_ERROR.into());
+        }
+
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let copy_only = entry
             .owned_content
             .as_ref()
             .is_some_and(OwnedContentState::has_active_layer)
-            || !entry.merged_page_ids.is_empty())
+            || !entry.merged_page_ids.is_empty();
+
+        // The same refusal `save` makes, at the other exit. This resolves
+        // aliases: a missed twin would destroy the original.
+        if copy_only
             && entry
                 .source_path
                 .as_deref()
@@ -755,15 +788,11 @@ impl PdfiumEngine {
 
         self.write_document(entry, path)?;
 
-        // Compared verbatim, not canonicalized: mistaking a symlinked twin for
-        // a stranger only dirties the history — the safe direction.
-        let saved_to_source = match &entry.source_path {
-            Some(source) => source.as_path() == path,
-            None => {
-                entry.source_path = Some(path.to_path_buf());
-                true
-            }
-        };
+        // A copy-only document reaching here wrote somewhere other than its file.
+        let saved_to_source = !(copy_only && entry.source_path.is_some());
+        if saved_to_source {
+            entry.source_path = Some(path.to_path_buf());
+        }
 
         Ok(ExportOutcome {
             path: path.to_string_lossy().into_owned(),

@@ -75,6 +75,7 @@ import {
 import type { PageHandoff } from "@/lib/pageDrag"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
+  isExportTargetOpen,
   type PdfDocumentInfo,
   type PdfExportOutcome,
   type PdfStructureUpdate,
@@ -472,11 +473,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         [notice],
       ),
       onExportError: useCallback(
-        () => notice.raise("exportFailed"),
+        (error: unknown) =>
+          notice.raise(
+            isExportTargetOpen(error) ? "exportTargetOpen" : "exportFailed",
+          ),
         [notice],
       ),
-      // A byte-opened document adopts its first export's destination as its
-      // source, which is when `path` appears and the save key comes alive.
+      // Save As moves the document to its destination, the tab's name and the
+      // save key with it — for a byte-opened document, the file it never had.
       onExported: useCallback(
         (documentId: number, outcome: PdfExportOutcome) => {
           if (!outcome.savedToSource) {

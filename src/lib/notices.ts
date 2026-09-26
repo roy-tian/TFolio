@@ -66,6 +66,11 @@ export const noticeCatalogue = {
     textKey: "annotate.exportFailed",
     tone: "danger",
   },
+  exportTargetOpen: {
+    life: "transient",
+    textKey: "annotate.exportTargetOpen",
+    tone: "warning",
+  },
   fileTooLarge: {
     life: "transient",
     textKey: "viewer.fileTooLarge",
@@ -221,6 +226,7 @@ export const documentRefusals = [
   "annotateFailed",
   "editInFlight",
   "exportFailed",
+  "exportTargetOpen",
   "noteFontFailed",
   "noteFontMissing",
   "printFailed",

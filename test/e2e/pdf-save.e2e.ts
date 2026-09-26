@@ -1,8 +1,11 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import path from "node:path"
 
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
+import type { E2eOverrides } from "../../src/lib/e2e"
+import type { PdfExportOutcome } from "../../src/lib/pdf"
 import {
   appMenuItem,
   appMenuItemEnabled,
@@ -23,7 +26,11 @@ import {
 /** Selects the page's one text run and lets go, the way the reader highlights:
     the press has to land on the text for the release to commit. */
 async function highlightTheText() {
-  await $("button[aria-label='Highlight text']").click()
+  // The tool stays on after a highlight, and a second press would turn it off.
+  const tool = $("button[aria-label='Highlight text']")
+  if ((await tool.getAttribute("aria-pressed")) !== "true") {
+    await tool.click()
+  }
 
   const selected = await browser.execute(() => {
     const span = document.querySelector(".pdf-text-layer span")
@@ -47,6 +54,32 @@ async function highlightTheText() {
   await browser.execute(() => {
     document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
   })
+}
+
+/** Answers Save As's dialog with `destination` and runs the real write behind
+    it, through the command the e2e build keeps for this. */
+async function pointSaveAsAt(destination: string) {
+  await browser.execute((target: string) => {
+    const seam = window as unknown as Window & {
+      __tfolioE2E?: E2eOverrides
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args?: unknown) => Promise<unknown>
+      }
+    }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      exportPdf: ({ documentId }) =>
+        seam.__TAURI_INTERNALS__.invoke("export_pdf_to", {
+          documentId,
+          path: target,
+        }) as Promise<PdfExportOutcome>,
+    }
+  }, destination)
+}
+
+function tabNamed(name: string) {
+  return $(`//button[@role='tab'][normalize-space()='${name}']`)
 }
 
 describe("TFolio save", () => {
@@ -130,5 +163,96 @@ describe("TFolio save", () => {
     await expect(
       $("[data-active='true'] [data-slot='page-status']"),
     ).toHaveAttribute("aria-label", "Page 1 of 2")
+  })
+
+  it("moves a document to the file Save As wrote, where the next save lands", async () => {
+    const sourcePath = await openPdfFromDisk("source.pdf", textPdf())
+    const original = readFileSync(sourcePath)
+    const renamedPath = path.join(path.dirname(sourcePath), "renamed.pdf")
+    await renderedPage()
+
+    const clean = await pageInk()
+    await highlightTheText()
+    await browser.waitUntil(async () => (await pageInk()) > clean, {
+      timeout: 15_000,
+      timeoutMsg: "the highlight never reached the page",
+    })
+
+    await pointSaveAsAt(renamedPath)
+    await clickAppMenuItem("save-as")
+
+    const renamedTab = tabNamed("renamed.pdf")
+    await expect(renamedTab).toHaveAttribute("aria-selected", "true")
+    await browser.waitUntil(
+      async () =>
+        !(await renamedTab.$("[aria-label='Unsaved changes']").isExisting()),
+      { timeout: 15_000, timeoutMsg: "Save As never marked the history saved" },
+    )
+    expect(existsSync(renamedPath)).toBe(true)
+    expect(await appMenuItemEnabled("save")).toBe(false)
+
+    // A second highlight over the same run need not darken it further; the
+    // save item coming alive is what proves the edit landed.
+    const savedAs = readFileSync(renamedPath)
+    await highlightTheText()
+    await browser.waitUntil(() => appMenuItemEnabled("save"), {
+      timeout: 15_000,
+      timeoutMsg: "the second highlight never reached the history",
+    })
+
+    await browser.keys(["Control", "s"])
+    await browser.waitUntil(
+      () => Promise.resolve(!readFileSync(renamedPath).equals(savedAs)),
+      { timeout: 15_000, timeoutMsg: "the save never reached the new file" },
+    )
+    await browser.waitUntil(
+      async () => !(await appMenuItemEnabled("save")),
+      { timeout: 15_000, timeoutMsg: "the save never marked the history clean" },
+    )
+
+    // Neither write may touch the file the document was opened from.
+    expect(readFileSync(sourcePath).equals(original)).toBe(true)
+
+    // The next Save As starts from the file the document is now bound to.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __saveAsName?: string
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: ({ suggestedName }) => {
+          page.__saveAsName = suggestedName
+          return Promise.resolve(null)
+        },
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () =>
+            (window as Window & { __saveAsName?: string }).__saveAsName ===
+            "renamed.pdf",
+        ),
+      { timeoutMsg: "the next Save As did not suggest the bound file's name" },
+    )
+  })
+
+  it("refuses Save As over a file another tab has open", async () => {
+    const heldPath = await openPdfFromDisk("held.pdf", textPdf())
+    const held = readFileSync(heldPath)
+    await openPdfFromDisk("other.pdf", textPdf())
+    await expect(tabNamed("other.pdf")).toHaveAttribute("aria-selected", "true")
+
+    await pointSaveAsAt(heldPath)
+    await clickAppMenuItem("save-as")
+
+    await expect($("[data-notice='exportTargetOpen']")).toHaveText(
+      "That file is open in another tab. Close it there first, or save under another name.",
+    )
+    await expect(tabNamed("other.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(readFileSync(heldPath).equals(held)).toBe(true)
   })
 })
