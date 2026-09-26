@@ -82,7 +82,7 @@ fn opens_a_converted_source_with_no_file_of_its_own() {
         .expect("the test image should save");
 
     let document = engine
-        .open_converted(image_path.clone())
+        .open_converted("main", image_path.clone())
         .expect("the image should open as its converted PDF");
 
     assert_eq!(document.num_pages, 1);
@@ -109,12 +109,12 @@ fn opens_a_converted_source_with_no_file_of_its_own() {
         .expect("the fake Word document should save");
 
     let refused = engine
-        .open_converted(word_path.clone())
+        .open_converted("main", word_path.clone())
         .expect_err("the Word document should refuse to convert");
     assert!(refused.contains("could not be converted"));
 
     let other = engine
-        .open_converted(directory.join("archive.zip"))
+        .open_converted("main", directory.join("archive.zip"))
         .expect_err("a non-source extension is not the command's to take");
     assert!(other.contains("not a convertible source"));
 

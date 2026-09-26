@@ -1,5 +1,4 @@
 import { useState } from "react"
-import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
   AppWindow,
   FileImage,
@@ -52,6 +51,8 @@ export type AppMenuActions = {
   canCloseAll: boolean
   canSaveAll: boolean
   onCloseAll: () => void
+  /** Quits the app, every window with it, after one unsaved check for all. */
+  onExit: () => void
   /** Not a menu entry: it is a toolbar button (`MergeWizardButton`), and this
       bag is how it reaches every header. */
   onMergeWizard: () => void
@@ -83,6 +84,7 @@ export function AppMenu({
   canSave = false,
   canSaveAll,
   onCloseAll,
+  onExit,
   onNew,
   onNewWindow,
   onOpen,
@@ -268,12 +270,7 @@ export function AppMenu({
               <Info />
               {t("settings.about")}
             </DropdownMenuItem>
-            {/* `close`, unlike `destroy`, emits close-requested, so App's
-                unsaved-work guard gets to stop it and ask. */}
-            <DropdownMenuItem
-              data-action="exit"
-              onClick={() => void getCurrentWindow().close()}
-            >
+            <DropdownMenuItem data-action="exit" onClick={onExit}>
               <LogOut />
               {t("menu.exit")}
             </DropdownMenuItem>

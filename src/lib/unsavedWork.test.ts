@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { clearMocks } from "@tauri-apps/api/mocks"
 
 import { mockUpdateWindows } from "./test-support/updateWindows"
-import { updateNeedsConfirmation } from "./updateUnsaved"
+import { unsavedWorkElsewhere, updateNeedsConfirmation } from "./unsavedWork"
 
 afterEach(() => {
   clearMocks()
@@ -45,5 +45,23 @@ describe("update confirmation across windows", () => {
     mockUpdateWindows({ "window-1": false })
     let reads = 0
     expect(await updateNeedsConfirmation(() => ++reads > 1)).toBe(true)
+  })
+})
+
+describe("unsaved work in other windows", () => {
+  test("finds none where every other window answers clean", async () => {
+    mockUpdateWindows({ "window-1": false })
+    expect(await unsavedWorkElsewhere()).toBe(false)
+  })
+
+  test("asks nobody in a single window", async () => {
+    const { requests } = mockUpdateWindows({})
+    expect(await unsavedWorkElsewhere()).toBe(false)
+    expect(requests).toEqual([])
+  })
+
+  test("finds it in the window that holds it", async () => {
+    mockUpdateWindows({ "window-1": false, "window-2": true })
+    expect(await unsavedWorkElsewhere()).toBe(true)
   })
 })

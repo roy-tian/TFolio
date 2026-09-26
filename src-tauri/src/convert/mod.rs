@@ -14,7 +14,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, OnceLock, TryLockError},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -304,12 +304,26 @@ impl WordConverter {
         on_converted: &mut dyn FnMut(),
         open_session: &SessionOpener<'_>,
     ) -> Result<Vec<Entry>, Cancelled> {
-        // A poisoned gate is opened rather than refused: refusing it would
-        // ban conversion process-wide.
-        let _batch = self
-            .gate
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Polled rather than waited on: a stop, or this window closing, must
+        // reach a batch queued behind another window's minutes-long one.
+        let _batch = loop {
+            match self.gate.try_lock() {
+                Ok(batch) => break batch,
+                // A poisoned gate is opened rather than refused: refusing it
+                // would ban conversion process-wide.
+                Err(TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+                Err(TryLockError::WouldBlock) => {
+                    if cancelled() {
+                        return Err(Cancelled);
+                    }
+
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        };
+        // Declared after the gate, so dropped before it opens: the next batch
+        // may stage the same file under the same name.
+        let mut staged = StagedCopies(Vec::new());
 
         let mut entries: Vec<Entry> = vec![Entry::NotWord; paths.len()];
         let mut pending: Vec<(usize, SourceFacts, ConvertJob)> = Vec::new();
@@ -353,7 +367,10 @@ impl WordConverter {
                 // Staging is the chain's, not an engine's: a staging failure
                 // is final, because no engine fixes an unread copy.
                 match stage(run_dir, &facts) {
-                    Ok(job) => pending.push((index, facts, job)),
+                    Ok(job) => {
+                        staged.0.push(job.staged.clone());
+                        pending.push((index, facts, job));
+                    }
                     Err(error) => entries[index] = Entry::Failed(ConvertError::Failed(error)),
                 }
             }
@@ -464,6 +481,29 @@ impl WordConverter {
         let facts = source_facts(path)?;
 
         cached_pdf(&self.cache, &facts)
+    }
+}
+
+impl WordConverter {
+    /// This run's directory and all it holds — staged copies, the PDFs the
+    /// cache points at, a LibreOffice profile — go with the process, rather
+    /// than waiting a day for a later launch's sweep.
+    pub(crate) fn remove_run_dir(&self) {
+        if let Some(directory) = &self.run_dir {
+            let _ = fs::remove_dir_all(directory);
+        }
+    }
+}
+
+/// A batch's staged copies, which only its engines read: the converted PDFs
+/// the cache keeps are separate files, so these go however the batch ends.
+struct StagedCopies(Vec<PathBuf>);
+
+impl Drop for StagedCopies {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
@@ -662,6 +702,8 @@ fn open_session(
 pub(crate) struct Ran {
     pub(crate) output: Output,
     pub(crate) timed_out: bool,
+    /// Killed because the reader stopped the run, not for time.
+    pub(crate) stopped: bool,
 }
 
 /// `: <stderr>` for a script that answered fewer files than it was given —
@@ -687,9 +729,14 @@ pub(crate) fn unanswered_note(output: &Output, timed_out: bool) -> String {
     }
 }
 
-/// Kills only the child this process spawned, never a process by name: a
-/// reader's own Word or LibreOffice must never die over an import.
-pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std::io::Result<Ran> {
+/// Kills only what this process spawned, never a process by name: a reader's
+/// own Word or LibreOffice must never die over an import. A stop is polled
+/// with the deadline, so the reader's Stop does not wait out a suite's start.
+pub(crate) fn run_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+    cancelled: &dyn Fn() -> bool,
+) -> std::io::Result<Ran> {
     // A converter is never the reader's console: this app has none to give,
     // and Windows would otherwise flash one for every script or soffice run.
     #[cfg(windows)]
@@ -699,6 +746,15 @@ pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std:
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 
+    // A group of its own, so a kill reaches what the child forks: soffice
+    // hands the document to a soffice.bin that outlives its launcher.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        command.process_group(0);
+    }
+
     // Piped, else `wait_with_output` reads nothing back — a few short lines
     // per file cannot fill the pipe's 64KB buffer while the deadline polls.
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -706,13 +762,19 @@ pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std:
     let mut child = command.spawn()?;
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
+    let mut stopped = false;
 
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
+            Ok(None) if cancelled() => {
+                stopped = true;
+                kill_spawned(&mut child);
+                break;
+            }
             Ok(None) if Instant::now() >= deadline => {
                 timed_out = true;
-                let _ = child.kill();
+                kill_spawned(&mut child);
                 break;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
@@ -720,8 +782,8 @@ pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std:
         }
     }
 
-    if timed_out {
-        // The pipes are abandoned, not drained: a grandchild holds their
+    if timed_out || stopped {
+        // The pipes are abandoned, not drained: a grandchild may hold their
         // ends, and the partial answers die with it — files, never liveness.
         let status = child.wait()?;
 
@@ -731,13 +793,38 @@ pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> std:
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             },
-            timed_out: true,
+            timed_out,
+            stopped,
         });
     }
 
     let output = child.wait_with_output()?;
 
-    Ok(Ran { output, timed_out })
+    Ok(Ran {
+        output,
+        timed_out,
+        stopped,
+    })
+}
+
+#[cfg(unix)]
+fn kill_spawned(child: &mut std::process::Child) {
+    // The group's id is the child's own pid (`process_group(0)`), and it
+    // names only processes this run started.
+    let Ok(group) = libc::pid_t::try_from(child.id()) else {
+        let _ = child.kill();
+        return;
+    };
+
+    // SAFETY: `kill` takes plain integers and touches no memory of ours.
+    if unsafe { libc::kill(-group, libc::SIGKILL) } != 0 {
+        let _ = child.kill();
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_spawned(child: &mut std::process::Child) {
+    let _ = child.kill();
 }
 
 #[cfg(test)]

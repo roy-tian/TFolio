@@ -27,14 +27,16 @@ export type FitScales = {
  */
 export const POINT_TO_PX = 96 / 72
 
-export const MIN_ZOOM = 0.25
+// Large-format pages — A0 posters, CAD plots — can still dwarf a window at a
+// 25% floor, so the range bottoms out where browser viewers do.
+export const MIN_ZOOM = 0.1
 // Past this a re-render stops buying detail: the render width saturates at
 // MAX_RENDER_WIDTH and the page only gets softer.
 export const MAX_ZOOM = 8
 
 /** Rungs `+`/`-` land on, in percent. The ends match MIN_ZOOM and MAX_ZOOM. */
 export const zoomSteps = [
-  25, 50, 75, 100, 125, 150, 200, 300, 400, 600, 800,
+  10, 15, 20, 25, 50, 75, 100, 125, 150, 200, 300, 400, 600, 800,
 ] as const
 
 export const defaultZoomState: ZoomState = {

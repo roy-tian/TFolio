@@ -62,6 +62,12 @@ export function useDocumentSearch({
   const [limitReached, setLimitReached] = useState(false)
   const generationRef = useRef(0)
   const cancellationRef = useRef<Promise<void>>(Promise.resolve())
+  // The match the reader was last brought to. Entering the grid, or coming
+  // back to this tab, is not a request to be taken there again.
+  const revealedRef = useRef<{
+    index: number
+    matches: PdfSearchMatch[]
+  } | null>(null)
 
   const focusInput = useCallback(() => {
     requestAnimationFrame(() => {
@@ -92,6 +98,8 @@ export function useDocumentSearch({
 
   // PDFium's page text, not the DOM's: it reaches virtualized pages whose text
   // layer is not mounted. Debounced, so IME compositions do not launch passes.
+  // Not keyed to `active`: a tab sent to the background keeps its results and
+  // the match it stood on, and comes back without a new search moving the page.
   useEffect(() => {
     const generation = generationRef.current + 1
     generationRef.current = generation
@@ -104,7 +112,7 @@ export function useDocumentSearch({
 
     const trimmed = query.trim()
 
-    if (!active || !searchOpen || trimmed.length === 0 || !documentId) {
+    if (!searchOpen || trimmed.length === 0 || !documentId) {
       setSearching(false)
 
       return
@@ -169,7 +177,6 @@ export function useDocumentSearch({
       }
     }
   }, [
-    active,
     documentId,
     documentPages,
     searchOpen,
@@ -216,6 +223,12 @@ export function useDocumentSearch({
       return
     }
 
+    const revealed = revealedRef.current
+
+    if (revealed?.index === activeIndex && revealed.matches === matches) {
+      return
+    }
+
     currentPageRef.current = match.pageNumber
     setCurrentPage(match.pageNumber)
 
@@ -224,6 +237,8 @@ export function useDocumentSearch({
 
       return
     }
+
+    revealedRef.current = { index: activeIndex, matches }
 
     const interruptScroll = () => viewer.scrollTo({
       behavior: "instant",

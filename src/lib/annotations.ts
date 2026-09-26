@@ -795,6 +795,38 @@ export function redo(history: AnnotationHistory) {
   }
 }
 
+/** The stashes a step leaves nothing to restore: an undone insert holds its
+    pages in one until its redo, and a new branch drops that redo for good.
+    An undone delete holds none — its undo already took its stash back. */
+export function droppedStashIds(
+  before: AnnotationHistory,
+  after: AnnotationHistory,
+): number[] {
+  if (before.future.length === 0) {
+    return []
+  }
+
+  const kept = new Set(
+    [...after.past, ...after.future].map((entry) => entry.id),
+  )
+
+  return before.future.flatMap((entry) => {
+    if (kept.has(entry.id)) {
+      return []
+    }
+
+    switch (entry.command.kind) {
+      case "insertBlankPage":
+      case "insertFile":
+      case "insertPages":
+      case "duplicatePages":
+        return [entry.command.stashId]
+      default:
+        return []
+    }
+  })
+}
+
 export function markSaved(history: AnnotationHistory): AnnotationHistory {
   return { ...history, savedId: historyHead(history) }
 }

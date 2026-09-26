@@ -6,7 +6,6 @@ export type WatermarkLayout = "single" | "zebra"
 
 export type WatermarkConfig = {
   direction: WatermarkDirection
-  rasterize: boolean
   layout: WatermarkLayout
   text: string
   /** The mark's width as a share of the page's displayed width. */
@@ -49,7 +48,6 @@ export function defaultWatermarkWidthRatio(layout: WatermarkLayout): number {
 }
 
 const defaultWatermarkSettings = {
-  rasterize: false,
   direction: "ascending",
   layout: "single",
   widthRatio: defaultWatermarkWidthRatio("single"),
@@ -134,7 +132,6 @@ export function validateWatermarkConfig(
   }
 
   const usable =
-    typeof config.rasterize === "boolean" &&
     isWatermarkDirection(config.direction) &&
     isWatermarkLayout(config.layout) &&
     typeof config.widthRatio === "number" &&
@@ -154,7 +151,6 @@ export function sameWatermarkConfig(
   }
 
   return (
-    left.rasterize === right.rasterize &&
     left.text === right.text &&
     left.direction === right.direction &&
     left.layout === right.layout &&
@@ -173,14 +169,15 @@ export function readStoredWatermarkConfig(): WatermarkConfig | null {
     return null
   }
 
-  const config = { rasterize: false, ...stored } as WatermarkConfig
+  const config = stored as WatermarkConfig
 
   // The file may be older than this app or hand-edited, so a stored mark
-  // earns its way back through the same check the dialog applies.
+  // earns its way back through the same check the dialog applies. Extra
+  // fields older versions kept — the removed image option among them — are
+  // dropped by the reconstruction below rather than rejecting the section.
   return typeof config.text === "string" &&
     validateWatermarkConfig(config) === null
     ? {
-        rasterize: config.rasterize,
         direction: config.direction,
         layout: config.layout,
         text: config.text,

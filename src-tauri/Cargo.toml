@@ -73,6 +73,13 @@ zip = { version = "4.6.1", default-features = false }
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
+# A timed-out or stopped converter is killed with its whole process group:
+# LibreOffice's launcher forks the real soffice.bin, which killing the
+# launcher alone would orphan along with its profile lock. Already in the
+# tree (the Tauri stack pulls it in), so naming it adds a direct use.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # The Windows Word-import engine's probe: whether Word's and WPS's
 # automation classes are registered, read straight from the merged HKCR
 # view. Already in the tree (the Tauri stack pulls it in), so naming it here
@@ -99,3 +106,24 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Every page the reader sees is encoded by these on the way out; at the size
+# profile's "s" the PNG encode measured about 1.7 times slower than at 3.
+[profile.release.package.png]
+opt-level = 3
+
+[profile.release.package.fdeflate]
+opt-level = 3
+
+[profile.release.package.crc32fast]
+opt-level = 3
+
+[profile.release.package.simd-adler32]
+opt-level = 3
+
+[profile.release.package.image]
+opt-level = 3
+
+# Every thumbnail goes out through its WebP encoder, the same hot path.
+[profile.release.package.image-webp]
+opt-level = 3

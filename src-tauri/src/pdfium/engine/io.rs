@@ -12,82 +12,127 @@ pub(super) const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 // real input while refusing a header claiming a bitmap no machine could hold.
 pub(super) const MAX_IMAGE_PIXELS: u64 = 80_000_000;
 
+/// A file written beside its destination and put in place by `commit` —
+/// every byte on disk first — or, dropped uncommitted, removed again: a
+/// destination is never left half-written. Split so a caller can let the
+/// documents lock go between the write PDFium does and the disk's own wait.
+pub(super) struct StagedFile {
+    path: PathBuf,
+    directory: PathBuf,
+    temporary: PathBuf,
+    file: Option<fs::File>,
+}
+
+impl StagedFile {
+    pub(super) fn beside(path: &Path) -> Result<Self, String> {
+        // A fresh export has nothing to canonicalize; the given path is it.
+        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        // A bare name has `""` for a parent, which would put the temporary file in
+        // the start directory — losing the atomic rename, which needs one filesystem.
+        let directory = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => return Err(format!("{} is not a usable destination", path.display())),
+        };
+        // Random, and created only if absent: a guessable name could sit as a
+        // symlink, and a launch-reset counter would hit a crash's leftover forever.
+        let suffix = getrandom::u64()
+            .map_err(|error| format!("could not name a temporary file: {error}"))?;
+        let temporary = directory.join(format!(
+            ".{}.{suffix:016x}.tfolio-save",
+            bounded_file_name(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("document.pdf")
+            ),
+        ));
+
+        let file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .map_err(|error| {
+                write_error(
+                    &error,
+                    format!("could not write beside {}: {error}", path.display()),
+                )
+            })?;
+
+        Ok(Self {
+            path,
+            directory,
+            temporary,
+            file: Some(file),
+        })
+    }
+
+    /// Through the handle `create_new` proved ours, never by name again: in
+    /// that gap the path could be swapped for a symlink.
+    pub(super) fn file(&mut self) -> &mut fs::File {
+        self.file
+            .as_mut()
+            .expect("a staged file keeps its handle until it is committed")
+    }
+
+    pub(super) fn commit(mut self) -> Result<(), String> {
+        let file = self
+            .file
+            .take()
+            .expect("a staged file keeps its handle until it is committed");
+
+        // The rename only orders the replacement; a crash between an unsynced
+        // rename and the writeback would leave a hollow file behind the name.
+        file.sync_all()
+            .map_err(|error| format!("could not flush the document: {error}"))?;
+        drop(file);
+
+        // The temporary was born with default permissions; the file it replaces may
+        // be tighter (a 0600 document must not come back 0644). Best effort.
+        if let Ok(metadata) = fs::metadata(&self.path) {
+            let _ = fs::set_permissions(&self.temporary, metadata.permissions());
+        }
+
+        fs::rename(&self.temporary, &self.path).map_err(|error| {
+            write_error(
+                &error,
+                format!("could not write to {}: {error}", self.path.display()),
+            )
+        })?;
+        // In place: nothing for the drop to take back.
+        self.temporary = PathBuf::new();
+
+        // The rename itself lives in the directory; flush that too, best
+        // effort, so the replacement survives a crash.
+        if let Ok(handle) = fs::File::open(&self.directory) {
+            let _ = handle.sync_all();
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for StagedFile {
+    fn drop(&mut self) {
+        // Hidden, so one left behind is one the reader would never find.
+        if !self.temporary.as_os_str().is_empty() {
+            self.file = None;
+            let _ = fs::remove_file(&self.temporary);
+        }
+    }
+}
+
 /// Writes `path` via a temporary file beside it, renamed into place only once
 /// every byte is on disk; `false` abandons, leaving nothing half-written.
 pub(super) fn write_file_atomically(
     path: &Path,
     write: impl FnOnce(&mut fs::File) -> Result<bool, String>,
 ) -> Result<bool, String> {
-    // A fresh export has nothing to canonicalize; the given path is it.
-    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = path.as_path();
-    // A bare name has `""` for a parent, which would put the temporary file in
-    // the start directory — losing the atomic rename, which needs one filesystem.
-    let directory = match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => return Err(format!("{} is not a usable destination", path.display())),
-    };
-    // Random, and created only if absent: a guessable name could sit as a
-    // symlink, and a launch-reset counter would hit a crash's leftover forever.
-    let suffix =
-        getrandom::u64().map_err(|error| format!("could not name a temporary file: {error}"))?;
-    let temporary = directory.join(format!(
-        ".{}.{suffix:016x}.tfolio-save",
-        bounded_file_name(
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("document.pdf")
-        ),
-    ));
+    let mut staged = StagedFile::beside(path)?;
 
-    let mut file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|error| format!("could not write beside {}: {error}", path.display()))?;
-
-    // Through the handle `create_new` proved ours, never by name again: in that
-    // gap the path could be swapped for a symlink, and save_to_file opens by path.
-    let written = write(&mut file).and_then(|keep| {
-        if !keep {
-            return Ok(false);
-        }
-
-        // The rename only orders the replacement; a crash between an unsynced
-        // rename and the writeback would leave a hollow file behind the name.
-        file.sync_all()
-            .map_err(|error| format!("could not flush the document: {error}"))
-            .map(|()| true)
-    });
-
-    drop(file);
-
-    // The temporary was born with default permissions; the file it replaces may
-    // be tighter (a 0600 document must not come back 0644). Best effort.
-    if let Ok(metadata) = fs::metadata(path) {
-        let _ = fs::set_permissions(&temporary, metadata.permissions());
+    if !write(staged.file())? {
+        return Ok(false);
     }
 
-    let renamed = written.and_then(|keep| {
-        if !keep {
-            return Ok(false);
-        }
-
-        fs::rename(&temporary, path)
-            .map_err(|error| format!("could not write to {}: {error}", path.display()))
-            .map(|()| true)
-    });
-
-    if !matches!(renamed, Ok(true)) {
-        // Hidden, so one left behind is one the reader would never find.
-        let _ = fs::remove_file(&temporary);
-    } else if let Ok(handle) = fs::File::open(directory) {
-        // The rename itself lives in the directory; flush that too, best
-        // effort, so the replacement survives a crash.
-        let _ = handle.sync_all();
-    }
-
-    renamed
+    staged.commit().map(|()| true)
 }
 
 /// At most 200 bytes, cut on a character boundary: the temporary adds a dot,
@@ -108,24 +153,69 @@ pub(super) fn bounded_file_name(name: &str) -> &str {
     &name[..end]
 }
 
-/// Whether two paths name one file. A fresh destination resolves through its
-/// parent; the unresolvable compare literally, erring towards "different".
-pub(super) fn same_file(left: &Path, right: &Path) -> bool {
-    fn resolved(path: &Path) -> PathBuf {
-        if let Ok(canonical) = path.canonicalize() {
-            return canonical;
-        }
-
-        match (path.parent(), path.file_name()) {
-            (Some(parent), Some(name)) => match parent.canonicalize() {
-                Ok(parent) => parent.join(name),
-                Err(_) => path.to_path_buf(),
-            },
-            _ => path.to_path_buf(),
-        }
+/// A path as the filesystem names it. A fresh destination resolves through its
+/// parent; the unresolvable stay literal, erring towards "different".
+fn resolved(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
     }
 
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => match parent.canonicalize() {
+            Ok(parent) => parent.join(name),
+            Err(_) => path.to_path_buf(),
+        },
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Whether two paths name one file.
+pub(super) fn same_file(left: &Path, right: &Path) -> bool {
     resolved(left) == resolved(right)
+}
+
+/// Whether `path` is the file of an open document other than `except`, aliases
+/// included. The destination resolves once: the scan runs under the documents lock.
+pub(super) fn is_open_document_file(
+    documents: &HashMap<u64, OpenDocument>,
+    path: &Path,
+    except: Option<u64>,
+) -> bool {
+    let target = resolved(path);
+
+    documents.iter().any(|(id, document)| {
+        Some(*id) != except
+            && document
+                .source_path
+                .as_deref()
+                .is_some_and(|source| resolved(source) == target)
+    })
+}
+
+/// A wire value the frontend matches verbatim (`EXPORT_TARGET_OPEN` in
+/// `src/lib/pdf.ts`), not a message.
+pub(super) const EXPORT_TARGET_OPEN_ERROR: &str = "tfolio:export-target-open";
+
+/// A copy-only document asked to write over its own file — the one a
+/// sourceless document adopted on its first export included. Matched as
+/// `EXPORT_COPY_ONLY` in `src/lib/pdf.ts`.
+pub(super) const EXPORT_COPY_ONLY_ERROR: &str = "tfolio:export-copy-only";
+
+/// A destination the OS will not let this process write: a read-only file,
+/// folder or volume — or, on Windows, a file another program holds open,
+/// which fails the rename the same way. Matched as `EXPORT_DENIED` in
+/// `src/lib/pdf.ts`.
+pub(super) const EXPORT_DENIED_ERROR: &str = "tfolio:export-denied";
+
+/// A refusal the reader can act on travels as a code the frontend words;
+/// anything else keeps its message for the log.
+fn write_error(error: &std::io::Error, message: String) -> String {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
+            EXPORT_DENIED_ERROR.into()
+        }
+        _ => message,
+    }
 }
 
 /// A PDF read into memory under the app's ceiling, sized from metadata first so
@@ -216,9 +306,9 @@ pub(super) fn read_image(path: &Path) -> Result<DynamicImage, String> {
 /// size of its own, so it is always fitted, whatever the merge's A4 option says.
 pub(super) fn image_page_document<'a>(
     pdfium: &'a Pdfium,
+    image: &DynamicImage,
     path: &Path,
 ) -> Result<PdfDocument<'a>, String> {
-    let image = read_image(path)?;
     let pixel_width = image.width() as f32;
     let pixel_height = image.height() as f32;
 
@@ -239,7 +329,7 @@ pub(super) fn image_page_document<'a>(
         .map_err(|error| format!("PDFium could not create a document: {error}"))?;
     let mut object = PdfPageImageObject::new_with_size(
         &document,
-        &image,
+        image,
         PdfPoints::new(width),
         PdfPoints::new(height),
     )
@@ -270,19 +360,80 @@ pub(super) fn image_page_document<'a>(
     Ok(document)
 }
 
+/// A merge source as read off the disk: a PDF's bytes or an image's pixels,
+/// read and decoded before PDFium, and the lock its work needs, is involved.
+pub(super) enum SourceFile {
+    Pdf(Vec<u8>),
+    Image(DynamicImage),
+}
+
+pub(super) fn read_merge_source(path: &Path) -> Result<SourceFile, String> {
+    if is_merge_image(path) {
+        read_image(path).map(SourceFile::Image)
+    } else {
+        read_pdf_bytes(path).map(SourceFile::Pdf)
+    }
+}
+
+/// PDFium's half of loading a source, for the caller to run under the lock.
 pub(super) fn load_merge_source<'a>(
     pdfium: &'a Pdfium,
+    source: SourceFile,
     path: &Path,
 ) -> Result<PdfDocument<'a>, String> {
-    if is_merge_image(path) {
-        return image_page_document(pdfium, path);
+    match source {
+        SourceFile::Image(image) => image_page_document(pdfium, &image, path),
+        // The error wording matches `open`'s, so an encrypted file is refused
+        // the same way whichever door it comes through.
+        SourceFile::Pdf(bytes) => pdfium
+            .load_pdf_from_byte_vec(bytes, None)
+            .map_err(|error| format!("PDFium could not open the document: {error}")),
+    }
+}
+
+/// A merge's document between imports, which each take the lock for their
+/// own PDFium work. Closed under the lock however the run ends — early
+/// returns included — since closing is PDFium work too. Callers declare their
+/// lock guards after it, so a guard is always given back before this takes one.
+struct MergeDraft<'a> {
+    engine: &'a PdfiumEngine,
+    document: Option<PdfDocument<'static>>,
+}
+
+impl<'a> MergeDraft<'a> {
+    fn new(engine: &'a PdfiumEngine) -> Result<Self, String> {
+        let _documents = engine.lock_documents()?;
+        let document = engine
+            .pdfium
+            .create_new_pdf()
+            .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+
+        Ok(Self {
+            engine,
+            document: Some(document),
+        })
     }
 
-    // The error wording matches `open`'s, so an encrypted file is refused the
-    // same way whichever door it comes through.
-    pdfium
-        .load_pdf_from_byte_vec(read_pdf_bytes(path)?, None)
-        .map_err(|error| format!("PDFium could not open the document: {error}"))
+    /// Only while the caller holds the lock.
+    fn document(&mut self) -> &mut PdfDocument<'static> {
+        self.document
+            .as_mut()
+            .expect("a merge draft keeps its document until it is closed")
+    }
+
+    /// Also only while the caller holds the lock.
+    fn close(&mut self) {
+        self.document = None;
+    }
+}
+
+impl Drop for MergeDraft<'_> {
+    fn drop(&mut self) {
+        if let Some(document) = self.document.take() {
+            let _documents = self.engine.lock_documents();
+            drop(document);
+        }
+    }
 }
 
 /// Page `index` onto a fresh A4 sheet as a form XObject: PDFium cannot resize
@@ -444,13 +595,18 @@ impl PdfiumEngine {
     /// only ever be exported to a copy, never written back over a source.
     pub(in crate::pdfium) fn merge_files_with_progress(
         &self,
+        window: &str,
         paths: Vec<PathBuf>,
-        smart_padding: bool,
-        normalize_a4: bool,
-        bookmarks: MergeBookmarks,
-        word_conversion: bool,
+        options: MergeOptions,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<Option<PdfDocumentInfo>, String> {
+        let MergeOptions {
+            smart_padding,
+            normalize_a4,
+            bookmarks,
+            word_conversion,
+        } = options;
+
         if paths.len() < 2 {
             return Err("a merge needs at least two files".into());
         }
@@ -461,7 +617,7 @@ impl PdfiumEngine {
 
         // Stoppable like an owned-layer rebuild, whose loop holds the one lock
         // for the whole pile; nothing needs rollback — the store is joined last.
-        let operation = self.begin_operation(OperationTarget::Merge);
+        let operation = self.begin_operation(OperationTarget::Merge(window.to_string()));
 
         // One unit per source, plus the conversions this run will really do
         // (a cache hit adds none), then serialization, outline, and opening.
@@ -506,119 +662,120 @@ impl PdfiumEngine {
             }
         }
 
-        let (bytes, nodes) = {
-            // Building is PDFium work, so under the store's lock — given back
-            // before `open_with_source` takes it again, as `create_blank` does.
-            let _documents = self.lock_documents()?;
-            let mut merged = self
-                .pdfium
-                .create_new_pdf()
-                .map_err(|error| format!("PDFium could not create a document: {error}"))?;
-            let mut nodes = Vec::new();
+        // Each file is read and decoded off the lock; only PDFium's part of
+        // its import holds it, so a long merge never parks every render.
+        let mut draft = MergeDraft::new(self)?;
+        let mut nodes = Vec::new();
 
-            for (path, word) in paths.iter().zip(&word) {
-                // Between files, which is this loop's page: a source is copied
-                // whole or not at all.
-                if operation.is_cancelled() {
-                    return Ok(None);
-                }
-
-                // A Word source is read from the PDF its conversion left; its
-                // name — errors, bookmark title — stays the reader's own file's.
-                let read_from = match word {
-                    crate::convert::Entry::Converted(pdf) => pdf.as_path(),
-                    _ => path,
-                };
-
-                // Each source is opened only to be copied from and dropped at the
-                // end of this loop; none of them ever enters the document store.
-                let source = load_merge_source(self.pdfium, read_from)?;
-
-                if source.pages().is_empty() {
-                    return Err(format!("{} has no pages", path.display()));
-                }
-
-                if smart_padding && merged.pages().len() % 2 == 1 {
-                    // Sized like the file it precedes, so the blank reads as
-                    // that file's leading sheet — or its coming A4 sheet.
-                    let (width, height) = {
-                        let first = source.pages().get(0).map_err(|error| {
-                            format!(
-                                "PDFium could not load a page of {}: {error}",
-                                path.display()
-                            )
-                        })?;
-
-                        if normalize_a4 {
-                            let placement = a4_placement(first.width().value, first.height().value);
-
-                            (placement.sheet_width, placement.sheet_height)
-                        } else {
-                            unrotated_page_size(&first)
-                        }
-                    };
-                    let page = merged
-                        .pages_mut()
-                        .create_page_at_end(PdfPagePaperSize::Custom(
-                            PdfPoints::new(width),
-                            PdfPoints::new(height),
-                        ))
-                        .map_err(|error| {
-                            format!("PDFium could not create the blank page: {error}")
-                        })?;
-
-                    drop(page);
-                }
-
-                // Taken after the pad, so a bookmark points at the file's own
-                // first page rather than the blank in front of it.
-                let start = merged.pages().len().max(0) as usize;
-                // Read before the append, which imports pages alone: PDFium
-                // leaves the outline behind, hence the hand-written one after.
-                let outline = collect_bookmark_siblings(source.bookmarks().root());
-
-                if normalize_a4 {
-                    // Page by page rather than in one call: each sheet is sized
-                    // and its content placed on its own terms.
-                    for index in 0..source.pages().len() {
-                        // A long file's pages are this loop's unit under the one
-                        // lock, so the stop is read here too, not only between files.
-                        if operation.is_cancelled() {
-                            return Ok(None);
-                        }
-
-                        append_page_fitted_to_a4(&mut merged, &source, index, path)?;
-                    }
-                } else {
-                    merged.pages_mut().append(&source).map_err(|error| {
-                        format!("PDFium could not merge {}: {error}", path.display())
-                    })?;
-                }
-
-                nodes.extend(merge_bookmark_nodes(
-                    bookmarks,
-                    bookmark_title(path),
-                    start,
-                    outline,
-                ));
-                completed += 1;
-                on_progress(completed, total);
-            }
-
-            // The three steps below each walk the whole merge, so each is
-            // worth not starting once the reader has left.
+        for (path, word) in paths.iter().zip(&word) {
+            // Between files, which is this loop's page: a source is copied
+            // whole or not at all.
             if operation.is_cancelled() {
                 return Ok(None);
             }
 
-            let bytes = merged
-                .save_to_bytes()
-                .map_err(|error| format!("PDFium could not build the merged document: {error}"))?;
+            // A Word source is read from the PDF its conversion left; its
+            // name — errors, bookmark title — stays the reader's own file's.
+            let read_from = match word {
+                crate::convert::Entry::Converted(pdf) => pdf.as_path(),
+                _ => path,
+            };
+            let file = read_merge_source(read_from)?;
+            let _documents = self.lock_documents()?;
+            let merged = draft.document();
+
+            // Each source is opened only to be copied from and dropped at the
+            // end of this loop — before the guard above — and never enters
+            // the document store.
+            let source = load_merge_source(self.pdfium, file, read_from)?;
+
+            if source.pages().is_empty() {
+                return Err(format!("{} has no pages", path.display()));
+            }
+
+            if smart_padding && merged.pages().len() % 2 == 1 {
+                // Sized like the file it precedes, so the blank reads as
+                // that file's leading sheet — or its coming A4 sheet.
+                let (width, height) = {
+                    let first = source.pages().get(0).map_err(|error| {
+                        format!(
+                            "PDFium could not load a page of {}: {error}",
+                            path.display()
+                        )
+                    })?;
+
+                    if normalize_a4 {
+                        let placement = a4_placement(first.width().value, first.height().value);
+
+                        (placement.sheet_width, placement.sheet_height)
+                    } else {
+                        unrotated_page_size(&first)
+                    }
+                };
+                let page = merged
+                    .pages_mut()
+                    .create_page_at_end(PdfPagePaperSize::Custom(
+                        PdfPoints::new(width),
+                        PdfPoints::new(height),
+                    ))
+                    .map_err(|error| format!("PDFium could not create the blank page: {error}"))?;
+
+                drop(page);
+            }
+
+            // Taken after the pad, so a bookmark points at the file's own
+            // first page rather than the blank in front of it.
+            let start = merged.pages().len().max(0) as usize;
+            // Read before the append, which imports pages alone: PDFium
+            // leaves the outline behind, hence the hand-written one after.
+            let outline = collect_bookmark_siblings(source.bookmarks().root());
+
+            if normalize_a4 {
+                // Page by page rather than in one call: each sheet is sized
+                // and its content placed on its own terms.
+                for index in 0..source.pages().len() {
+                    // A long file's pages are this loop's unit under the one
+                    // lock, so the stop is read here too, not only between files.
+                    if operation.is_cancelled() {
+                        return Ok(None);
+                    }
+
+                    append_page_fitted_to_a4(merged, &source, index, path)?;
+                }
+            } else {
+                merged.pages_mut().append(&source).map_err(|error| {
+                    format!("PDFium could not merge {}: {error}", path.display())
+                })?;
+            }
+
+            nodes.extend(merge_bookmark_nodes(
+                bookmarks,
+                bookmark_title(path),
+                start,
+                outline,
+            ));
             completed += 1;
             on_progress(completed, total);
+        }
 
-            (bytes, nodes)
+        // The three steps below each walk the whole merge, so each is
+        // worth not starting once the reader has left.
+        if operation.is_cancelled() {
+            return Ok(None);
+        }
+
+        let bytes = {
+            let _documents = self.lock_documents()?;
+            let bytes = draft
+                .document()
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not build the merged document: {error}"))?;
+
+            draft.close();
+            bytes
         };
+        completed += 1;
+        on_progress(completed, total);
 
         if operation.is_cancelled() {
             return Ok(None);
@@ -655,8 +812,18 @@ impl PdfiumEngine {
         smart_padding: bool,
         bookmarks: MergeBookmarks,
     ) -> Result<PdfDocumentInfo, String> {
-        self.merge_files_with_progress(paths, smart_padding, false, bookmarks, false, |_, _| {})?
-            .ok_or_else(|| "the merge was stopped".to_string())
+        self.merge_files_with_progress(
+            "main",
+            paths,
+            MergeOptions {
+                smart_padding,
+                normalize_a4: false,
+                bookmarks,
+                word_conversion: false,
+            },
+            |_, _| {},
+        )?
+        .ok_or_else(|| "the merge was stopped".to_string())
     }
 
     #[cfg(test)]
@@ -666,18 +833,22 @@ impl PdfiumEngine {
         smart_padding: bool,
     ) -> Result<PdfDocumentInfo, String> {
         self.merge_files_with_progress(
+            "main",
             paths,
-            smart_padding,
-            true,
-            MergeBookmarks::None,
-            false,
+            MergeOptions {
+                smart_padding,
+                normalize_a4: true,
+                bookmarks: MergeBookmarks::None,
+                word_conversion: false,
+            },
             |_, _| {},
         )?
         .ok_or_else(|| "the merge was stopped".to_string())
     }
 
     pub(in crate::pdfium) fn save(&self, document_id: u64) -> Result<(), String> {
-        let operation = self.begin_operation(OperationTarget::Document(document_id));
+        let _operation = self.begin_operation(OperationTarget::Document(document_id));
+        let _commits = self.lock_commits()?;
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -706,8 +877,17 @@ impl PdfiumEngine {
         let path = entry.source_path.clone().ok_or_else(|| {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
+        let (version, loaded_len) = (entry.content_version, entry.loaded_len);
+        let staged = self.stage_document(entry, &path)?;
 
-        self.write_document(entry, &path, &operation)
+        drop(documents);
+        staged.commit().inspect_err(|_| {
+            self.after_failed_commit(document_id, |entry| {
+                if entry.content_version == version {
+                    entry.loaded_len = loaded_len;
+                }
+            });
+        })
     }
 
     /// The folder a save-as dialog should open in for this document: its own
@@ -724,46 +904,69 @@ impl PdfiumEngine {
             .map(|parent| parent.to_path_buf())
     }
 
-    /// Writes to `path`, adopting it as the source of a byte-opened document —
-    /// a true save-as. The flag tells the frontend the file matches the history.
+    /// Writes to `path` and binds the document to it — a true save-as, after
+    /// which `save` writes there and the old file stays as it was. A copy-only
+    /// document with a file stays bound to it: `save` refuses that file, so
+    /// binding the copy would refuse the next write to the copy as well.
     pub(in crate::pdfium) fn export_to(
         &self,
         document_id: u64,
         path: &Path,
     ) -> Result<ExportOutcome, String> {
-        let operation = self.begin_operation(OperationTarget::Document(document_id));
+        let _operation = self.begin_operation(OperationTarget::Document(document_id));
+        let _commits = self.lock_commits()?;
         let mut documents = self.lock_documents()?;
-        let entry = open_entry_mut(&mut documents, document_id)?;
 
-        // The same refusal `save` makes, at the other exit. Unlike the flag
-        // below, this resolves aliases: a missed twin would destroy the original.
-        if (entry
+        // Two documents bound to one file would each save over the other's
+        // edits, and a copy landing there would leave the holder's history lying.
+        if is_open_document_file(&documents, path, Some(document_id)) {
+            return Err(EXPORT_TARGET_OPEN_ERROR.into());
+        }
+
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let copy_only = entry
             .owned_content
             .as_ref()
             .is_some_and(OwnedContentState::has_active_layer)
-            || !entry.merged_page_ids.is_empty())
+            || !entry.merged_page_ids.is_empty();
+
+        // The same refusal `save` makes, at the other exit. This resolves
+        // aliases: a missed twin would destroy the original.
+        if copy_only
             && entry
                 .source_path
                 .as_deref()
                 .is_some_and(|source| same_file(source, path))
         {
-            return Err(
-                "this document may only be exported as a copy, not written back over its own file"
-                    .into(),
-            );
+            return Err(EXPORT_COPY_ONLY_ERROR.into());
         }
 
-        self.write_document(entry, path, &operation)?;
+        let (version, loaded_len) = (entry.content_version, entry.loaded_len);
+        let staged = self.stage_document(entry, path)?;
 
-        // Compared verbatim, not canonicalized: mistaking a symlinked twin for
-        // a stranger only dirties the history — the safe direction.
-        let saved_to_source = match &entry.source_path {
-            Some(source) => source.as_path() == path,
-            None => {
-                entry.source_path = Some(path.to_path_buf());
-                true
-            }
-        };
+        // A copy-only document reaching here wrote somewhere other than its file.
+        // Bound before the commit, under the lock that checked the destination;
+        // a commit that fails puts the old binding back.
+        let saved_to_source = !(copy_only && entry.source_path.is_some());
+        let previous_source = entry.source_path.clone();
+        if saved_to_source {
+            entry.source_path = Some(path.to_path_buf());
+        }
+
+        drop(documents);
+
+        if let Err(error) = staged.commit() {
+            self.after_failed_commit(document_id, |entry| {
+                if saved_to_source {
+                    entry.source_path = previous_source;
+                }
+                if entry.content_version == version {
+                    entry.loaded_len = loaded_len;
+                }
+            });
+
+            return Err(error);
+        }
 
         Ok(ExportOutcome {
             path: path.to_string_lossy().into_owned(),
@@ -775,11 +978,31 @@ impl PdfiumEngine {
     /// moved into the commands.
     #[cfg(test)]
     pub(in crate::pdfium) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
-        let operation = self.begin_operation(OperationTarget::Document(document_id));
+        let _operation = self.begin_operation(OperationTarget::Document(document_id));
+        let _commits = self.lock_commits()?;
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        let staged = self.stage_document(entry, path)?;
 
-        self.write_document(entry, path, &operation)
+        drop(documents);
+        staged.commit()
+    }
+
+    fn lock_commits(&self) -> Result<MutexGuard<'_, ()>, String> {
+        self.commits
+            .lock()
+            .map_err(|_| "PDFium document store is unavailable".to_string())
+    }
+
+    /// A commit that never landed left the file as it was, so `undo` puts back
+    /// what staging retired — the compress baseline only while no edit since
+    /// has retired it anyway.
+    fn after_failed_commit(&self, document_id: u64, undo: impl FnOnce(&mut OpenDocument)) {
+        if let Ok(mut documents) = self.lock_documents() {
+            if let Ok(entry) = open_entry_mut(&mut documents, document_id) {
+                undo(entry);
+            }
+        }
     }
 
     /// Reloads off the document's saved bytes — the only place PDFium collects
@@ -800,9 +1023,11 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not reload the document: {error}"))?;
 
         if let Some(state) = &entry.owned_content {
-            Self::verify_owned_tail(&reloaded, &entry.page_ids, state).map_err(|error| {
-                format!("PDFium did not preserve the owned content during compaction: {error}")
-            })?;
+            // Part of a save, which has no Stop: checked in one pass.
+            Self::verify_owned_tail(&reloaded, &entry.page_ids, state, None, &mut |_, _| {})
+                .map_err(|error| {
+                    format!("PDFium did not preserve the owned content during compaction: {error}")
+                })?;
         }
 
         entry.document = reloaded;
@@ -812,39 +1037,24 @@ impl PdfiumEngine {
     }
 
     /// The one write path under every save and export, so their files come out
-    /// identical — collected of orphans, and landed whole.
-    pub(super) fn write_document(
+    /// identical — collected of orphans, and landed whole. Staged only: the
+    /// caller commits once the documents lock is let go, so the fsync is no
+    /// render's wait.
+    pub(super) fn stage_document(
         &self,
         entry: &mut OpenDocument,
         path: &Path,
-        operation: &OperationGuard<'_>,
-    ) -> Result<(), String> {
-        if entry
-            .owned_content
-            .as_ref()
-            .and_then(|state| state.watermark.as_ref())
-            .is_some_and(|config| config.rasterize)
-        {
-            let bytes = self
-                .rasterized_bytes(&entry.document, operation, &FLATTEN_LEVELS, |_, _| {})?
-                .ok_or_else(|| "image PDF export was cancelled".to_string())?;
-            return write_file_atomically(path, |file| {
-                file.write_all(&bytes)
-                    .map_err(|error| format!("could not write the image PDF: {error}"))?;
-                Ok(true)
-            })
-            .map(|_| ());
-        }
-
+    ) -> Result<StagedFile, String> {
         self.collect_orphans(entry)?;
 
-        write_file_atomically(path, |file| {
-            entry
-                .document
-                .save_to_writer(file)
-                .map_err(|error| format!("PDFium could not write the document: {error}"))
-                .map(|()| true)
-        })
-        .map(|_| ())
+        let mut staged = StagedFile::beside(path)?;
+        entry
+            .document
+            .save_to_writer(staged.file())
+            .map_err(|error| format!("PDFium could not write the document: {error}"))?;
+        // The source may now be PDFium's rewrite, not the bytes first opened.
+        entry.loaded_len = None;
+
+        Ok(staged)
     }
 }

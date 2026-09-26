@@ -89,7 +89,9 @@ pub(crate) fn open_session(kind: EngineKind, run_dir: &Path) -> Result<Session, 
 impl ConvertSession for Session {
     fn convert(&mut self, jobs: &[ConvertJob], cancelled: &dyn Fn() -> bool) -> BatchOutcome {
         // One script run is the whole batch: an already-landed stop spends
-        // nothing starting one; one during it waits for the deadline.
+        // nothing starting one; one during it waits for the script to end.
+        // Killing PowerShell would skip the `finally` that quits the suite,
+        // leaving a hidden Word holding the staged copy open.
         if cancelled() {
             return BatchOutcome::Done(
                 jobs.iter()
@@ -125,7 +127,7 @@ impl ConvertSession for Session {
         // owed in full however many files follow it.
         let timeout = START_TIMEOUT + CONVERT_TIMEOUT.saturating_mul(jobs.len() as u32);
 
-        let finished = match run_with_timeout(&mut command, timeout) {
+        let finished = match run_with_timeout(&mut command, timeout, &|| false) {
             Ok(finished) => finished,
             Err(error) => return BatchOutcome::Engine(format!("PowerShell did not run: {error}")),
         };

@@ -256,6 +256,8 @@ describe("stepZoomPercent", () => {
   test("moves to the next rung up or down", () => {
     expect(stepZoomPercent(100, 1)).toBe(125)
     expect(stepZoomPercent(100, -1)).toBe(75)
+    expect(stepZoomPercent(25, -1)).toBe(20)
+    expect(stepZoomPercent(15, -1)).toBe(10)
   })
 
   // The point of stepping from the live percent: a fit lands between rungs.
@@ -266,14 +268,14 @@ describe("stepZoomPercent", () => {
 
   test("clamps at the ends instead of wrapping", () => {
     expect(stepZoomPercent(800, 1)).toBe(800)
-    expect(stepZoomPercent(25, -1)).toBe(25)
+    expect(stepZoomPercent(10, -1)).toBe(10)
     expect(stepZoomPercent(2000, 1)).toBe(800)
-    expect(stepZoomPercent(5, -1)).toBe(25)
+    expect(stepZoomPercent(5, -1)).toBe(10)
   })
 
   test("returns to the ladder from a zoom above or below it", () => {
     expect(stepZoomPercent(2000, -1)).toBe(800)
-    expect(stepZoomPercent(5, 1)).toBe(25)
+    expect(stepZoomPercent(5, 1)).toBe(10)
   })
 })
 

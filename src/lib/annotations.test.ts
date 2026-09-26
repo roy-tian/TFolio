@@ -6,6 +6,7 @@ import {
   commandPages,
   commandTextPages,
   commit,
+  droppedStashIds,
   emptyHistory,
   fillErasedPages,
   fillInsertFileOutcome,
@@ -637,6 +638,52 @@ describe("pasting the document's own pages", () => {
     const command = planDuplicatePages(emptyHistory, [1, 3, 4], 3, 5)!.command
 
     expect(insertPagesRange(command)).toEqual([3, 4, 5])
+  })
+})
+
+describe("stashes a new branch strands", () => {
+  function undoAll(history: AnnotationHistory) {
+    let current = history
+
+    for (let step = undo(current); step; step = undo(current)) {
+      current = step.history
+    }
+
+    return current
+  }
+
+  it("names the undone inserts a commit drops, and nothing else", () => {
+    let history = historyOf(highlight(1))
+    history = planInsertBlankPage(history, 1, 4)!.history
+    history = planDuplicatePages(history, [1], 2, 4)!.history
+    history = planDeletePages(history, [1], 5)!.history
+    const inserted = history.past
+      .filter((entry) => entry.command.kind !== "deletePages")
+      .slice(1)
+      .map((entry) => entry.id)
+
+    const undone = undoAll(history)
+    const branched = commit(undone, highlight(2))
+
+    expect(droppedStashIds(undone, branched).sort()).toEqual(inserted.sort())
+  })
+
+  it("drops nothing for an undo, a redo, or a commit with no undone steps", () => {
+    const history = planInsertBlankPage(historyOf(highlight(1)), 1, 2)!.history
+    const undone = undo(history)!.history
+
+    expect(droppedStashIds(history, undone)).toEqual([])
+    expect(droppedStashIds(undone, redo(undone)!.history)).toEqual([])
+    expect(droppedStashIds(history, commit(history, highlight(1)))).toEqual([])
+  })
+
+  it("strands the stash of an undone insert when an erase branches", () => {
+    let history = historyOf(highlight(1))
+    history = planInsertBlankPage(history, 1, 2)!.history
+    const undone = undo(history)!.history
+    const erased = planEraseAnnotation(undone, undone.past[0]!.id)!.history
+
+    expect(droppedStashIds(undone, erased)).toEqual([history.past[1]!.id])
   })
 })
 

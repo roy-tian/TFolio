@@ -22,6 +22,8 @@ type SplitMode = "bookmarks" | "pages"
 
 type SplitPdfDialogProps = {
   document: PdfDocumentInfo
+  /** Its tab is not the one showing: out of sight, with its state kept. */
+  hidden?: boolean
   suggestedName: string
   onExport: ReturnType<typeof useAnnotations>["exportArchive"]
   onClose: () => void
@@ -29,6 +31,7 @@ type SplitPdfDialogProps = {
 
 export function SplitPdfDialog({
   document,
+  hidden = false,
   suggestedName,
   onExport,
   onClose,
@@ -71,7 +74,7 @@ export function SplitPdfDialog({
 
   return (
     <Dialog
-      open
+      open={!hidden}
       onOpenChange={(open) => {
         if (!open && !busy) onClose()
       }}

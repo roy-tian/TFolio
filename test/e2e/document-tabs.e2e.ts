@@ -8,6 +8,7 @@ import "@wdio/tauri-service"
 import type { E2eOverrides } from "../../src/lib/e2e"
 
 import {
+  clickAppMenuItem,
   dropZoneButton,
   emitDrag,
   gapPoint,
@@ -474,13 +475,13 @@ describe("independent document tabs", () => {
       "true",
     )
 
-    // Land on a known custom zoom: down to the floor, then three rungs back to
-    // actual size (50%, 75%, 100%).
+    // Land on a known custom zoom: down to the floor, then six rungs back to
+    // actual size (15%, 20%, 25%, 50%, 75%, 100%).
     const zoomOut = () => $("button[aria-label='Zoom out']")
     while (await zoomOut().isEnabled()) {
       await zoomOut().click()
     }
-    for (let rung = 0; rung < 3; rung += 1) {
+    for (let rung = 0; rung < 6; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
     }
     await expect(
@@ -672,6 +673,29 @@ describe("independent document tabs", () => {
     await browser.waitUntil(
       async () => (await tabNames()).join() === "menu-b.pdf",
       { timeoutMsg: "the moved tab never left the strip" },
+    )
+  })
+
+  it("keeps a tab that arrives under a dialog behind it until it closes", async () => {
+    await openPdfFromDisk("under-dialog.pdf", minimalPdf())
+    await tabButton("under-dialog.pdf").waitForDisplayed()
+    await clickAppMenuItem("settings")
+    await $("[role='dialog']").waitForDisplayed()
+
+    await emitDrag("drag-drop", { x: 400, y: 400 }, [
+      writePdf("arrived.pdf", 1),
+    ])
+    await tabButton("arrived.pdf").waitForExist({ timeout: 20_000 })
+    await expect(tabButton("under-dialog.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    await browser.keys(["Escape"])
+    await $("[role='dialog']").waitForExist({ reverse: true })
+    await expect(tabButton("arrived.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
     )
   })
 

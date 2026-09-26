@@ -1,13 +1,14 @@
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window"
 
-const REQUEST_EVENT = "update://unsaved-request"
-const RESPONSE_EVENT = "update://unsaved-response"
+const REQUEST_EVENT = "workspace://unsaved-request"
+const RESPONSE_EVENT = "workspace://unsaved-response"
 
 type Request = { id: string; requester: string }
 type Response = { id: string; label: string; unsaved: boolean }
 
-export function watchUpdateUnsaved(hasUnsavedWorkNow: () => boolean) {
+/** Answers other windows' asks — an update install, a quit — for this one. */
+export function watchUnsavedWork(hasUnsavedWorkNow: () => boolean) {
   const label = getCurrentWindow().label
 
   return listen<Request>(REQUEST_EVENT, ({ payload }) => {
@@ -19,13 +20,8 @@ export function watchUpdateUnsaved(hasUnsavedWorkNow: () => boolean) {
   }, { target: label })
 }
 
-export async function updateNeedsConfirmation(
-  hasUnsavedWorkNow: () => boolean,
-): Promise<boolean> {
-  if (hasUnsavedWorkNow()) {
-    return true
-  }
-
+/** Whether any window but this one holds unsaved work. */
+export async function unsavedWorkElsewhere(): Promise<boolean> {
   let unlisten: UnlistenFn | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -38,7 +34,7 @@ export async function updateNeedsConfirmation(
     )
 
     if (pending.size === 0) {
-      return hasUnsavedWorkNow()
+      return false
     }
 
     const id = crypto.randomUUID()
@@ -67,11 +63,21 @@ export async function updateNeedsConfirmation(
         .catch(() => finish(true))
     }
 
-    return (await answer) || hasUnsavedWorkNow()
+    return await answer
   } catch {
     return true
   } finally {
     clearTimeout(timer)
     unlisten?.()
   }
+}
+
+export async function updateNeedsConfirmation(
+  hasUnsavedWorkNow: () => boolean,
+): Promise<boolean> {
+  return (
+    hasUnsavedWorkNow() ||
+    (await unsavedWorkElsewhere()) ||
+    hasUnsavedWorkNow()
+  )
 }

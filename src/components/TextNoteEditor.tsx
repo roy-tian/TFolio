@@ -33,7 +33,8 @@ type TextNoteEditorProps = {
   editorRef: RefObject<HTMLElement | null>
   onCancel: () => void
   onCommit: () => void
-  onStyleChange: (style: TextNoteStyle) => void
+  /** `transient` for a slider's drag, which is shown but not stored. */
+  onStyleChange: (style: TextNoteStyle, transient?: boolean) => void
   onTextChange: (text: string) => void
   page: PdfPageInfo
   rotation: number
@@ -198,7 +199,9 @@ export function TextNoteEditor({
           label={t("annotate.textNoteSize")}
           max={TEXT_NOTE_MAX_FONT_SIZE}
           min={TEXT_NOTE_MIN_FONT_SIZE}
-          onChange={(fontSize) => onStyleChange({ ...style, fontSize })}
+          onChange={(fontSize, transient) =>
+            onStyleChange({ ...style, fontSize }, transient)
+          }
           step={1}
           value={style.fontSize}
         />
@@ -208,7 +211,9 @@ export function TextNoteEditor({
           label={t("annotate.opacity")}
           max={100}
           min={TEXT_NOTE_MIN_OPACITY * 100}
-          onChange={(value) => onStyleChange({ ...style, opacity: value / 100 })}
+          onChange={(value, transient) =>
+            onStyleChange({ ...style, opacity: value / 100 }, transient)
+          }
           step={5}
           value={Math.round(style.opacity * 100)}
         />

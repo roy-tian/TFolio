@@ -144,31 +144,175 @@ fn export_adopts_the_destination_of_a_byte_opened_document() {
     fs::remove_dir_all(&directory).ok();
 }
 
+// Save As moves the document to the new file: the next save lands there, and
+// the file it was opened from keeps what it held.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn export_beside_the_source_is_not_a_save() {
+fn save_as_binds_a_plain_pdf_to_the_new_file() {
     let engine = test_engine();
-    let directory = scratch_directory("beside");
+    let directory = scratch_directory("save-as");
     let source = directory.join("source.pdf");
-    fs::write(&source, minimal_pdf()).expect("the fixture should be writable");
+    fs::write(&source, text_pdf()).expect("the fixture should be writable");
+    let original = fs::read(&source).expect("the fixture should be readable");
 
     let document = engine
         .open_from_path(source.clone())
         .expect("PDFium should open the PDF by path");
 
-    let copy = engine
-        .export_to(document.id, &directory.join("copy.pdf"))
-        .expect("the export should write the copy");
+    let destination = directory.join("renamed.pdf");
+    let outcome = engine
+        .export_to(document.id, &destination)
+        .expect("the save-as should write the new file");
     assert!(
-        !copy.saved_to_source,
-        "a copy elsewhere leaves the source behind the history"
+        outcome.saved_to_source,
+        "a plain PDF's save-as makes the new file its own"
+    );
+    let saved_as = fs::read(&destination).expect("the new file should be readable");
+
+    engine
+        .add_highlight(
+            document.id,
+            1,
+            &[quad(45.0, 40.0, 110.0, 30.0)],
+            "#ffd54a",
+            0.4,
+        )
+        .expect("PDFium should create the highlight");
+    engine
+        .save(document.id)
+        .expect("the document should save over its new file");
+
+    assert_ne!(
+        fs::read(&destination).expect("the new file should be readable"),
+        saved_as,
+        "the save should land on the save-as destination"
+    );
+    assert_eq!(
+        fs::read(&source).expect("the source should still be readable"),
+        original,
+        "the file opened first should keep what it held"
     );
 
-    // Exporting *onto* the source is exactly a save, whatever the button was called.
+    // Exporting onto the bound file is exactly a save, whatever the button was called.
     let onto_source = engine
-        .export_to(document.id, &source)
-        .expect("the export should overwrite the source");
+        .export_to(document.id, &destination)
+        .expect("the export should overwrite the bound file");
     assert!(onto_source.saved_to_source);
+
+    fs::remove_dir_all(&directory).ok();
+}
+
+// Bound to its copy, a copy-only document would refuse the next write to that
+// copy as its own file; it stays on the file `save` already refuses.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_copy_only_export_leaves_the_document_on_its_source() {
+    let engine = test_engine();
+    let directory = scratch_directory("copy-only-export");
+
+    let watermarked_source = directory.join("watermarked.pdf");
+    fs::write(&watermarked_source, minimal_pdf()).expect("the fixture should be writable");
+    let watermarked = engine
+        .open_from_path(watermarked_source.clone())
+        .expect("PDFium should open the PDF by path");
+    engine
+        .apply_watermark(watermarked.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply the watermark");
+
+    let merged_source = directory.join("merged.pdf");
+    let inserted = directory.join("inserted.pdf");
+    fs::write(&merged_source, minimal_pdf()).expect("the fixture should be writable");
+    fs::write(&inserted, minimal_pdf()).expect("the fixture should be writable");
+    let merged = engine
+        .open_from_path(merged_source.clone())
+        .expect("PDFium should open the PDF by path");
+    engine
+        .insert_from_path(merged.id, inserted, 1)
+        .expect("PDFium should insert the other file's page");
+
+    for (document_id, source) in [
+        (watermarked.id, &watermarked_source),
+        (merged.id, &merged_source),
+    ] {
+        let original = fs::read(source).expect("the source should be readable");
+        let copy = directory.join(format!("copy-{document_id}.pdf"));
+
+        for attempt in 1..=2 {
+            let outcome = engine
+                .export_to(document_id, &copy)
+                .unwrap_or_else(|error| panic!("copy {attempt} should be written: {error}"));
+            assert!(
+                !outcome.saved_to_source,
+                "a copy-only document's copy leaves the history unsaved"
+            );
+        }
+
+        let error = engine
+            .export_to(document_id, source)
+            .expect_err("the source should still be the file refused");
+        assert_eq!(
+            error,
+            io::EXPORT_COPY_ONLY_ERROR,
+            "the refusal should say why"
+        );
+        assert_eq!(
+            fs::read(source).expect("the source should still be readable"),
+            original
+        );
+    }
+
+    fs::remove_dir_all(&directory).ok();
+}
+
+// Another document's file is that document's to save: two bound to one file
+// would each overwrite the other's edits.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn save_as_refuses_a_file_open_in_another_document() {
+    let engine = test_engine();
+    let directory = scratch_directory("save-as-open");
+    let held = directory.join("held.pdf");
+    let other = directory.join("other.pdf");
+    fs::write(&held, text_pdf()).expect("the fixture should be writable");
+    fs::write(&other, minimal_pdf()).expect("the fixture should be writable");
+    let original = fs::read(&held).expect("the fixture should be readable");
+
+    let holder = engine
+        .open_from_path(held.clone())
+        .expect("PDFium should open the PDF by path");
+    let from_path = engine
+        .open_from_path(other)
+        .expect("PDFium should open the PDF by path");
+    let from_bytes = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+
+    fs::create_dir_all(directory.join("sub")).expect("the scratch subdirectory should be made");
+    let alias = directory.join("sub").join("..").join("held.pdf");
+
+    for document_id in [from_path.id, from_bytes.id] {
+        for destination in [&held, &alias] {
+            let error = engine
+                .export_to(document_id, destination)
+                .expect_err("another document's file must not be written over");
+            assert_eq!(
+                error,
+                io::EXPORT_TARGET_OPEN_ERROR,
+                "the refusal should be the code the frontend names"
+            );
+        }
+    }
+
+    assert_eq!(
+        fs::read(&held).expect("the held file should still be readable"),
+        original,
+        "the refusal has to come before the write"
+    );
+
+    // Its own document may still write it.
+    engine
+        .export_to(holder.id, &held)
+        .expect("a document's own file takes its save-as");
 
     fs::remove_dir_all(&directory).ok();
 }
@@ -194,9 +338,10 @@ fn a_watermarked_export_will_not_overwrite_the_source() {
     let error = engine
         .export_to(document.id, &source)
         .expect_err("a watermarked export must not land on the source");
-    assert!(
-        error.contains("exported as a copy"),
-        "the refusal should say why: {error}"
+    assert_eq!(
+        error,
+        io::EXPORT_COPY_ONLY_ERROR,
+        "the refusal should be the code the frontend words"
     );
     assert_eq!(
         fs::read(&source).expect("the source should still be readable"),
@@ -234,9 +379,10 @@ fn a_watermarked_export_resolves_aliases_of_the_source() {
     let error = engine
         .export_to(document.id, &alias)
         .expect_err("an alias of the source is the source");
-    assert!(
-        error.contains("exported as a copy"),
-        "the refusal should say why: {error}"
+    assert_eq!(
+        error,
+        io::EXPORT_COPY_ONLY_ERROR,
+        "the refusal should say why"
     );
 
     fs::remove_dir_all(&directory).ok();
@@ -304,4 +450,77 @@ fn a_save_after_deletions_collects_what_they_left_behind() {
         delete_last_mark(engine, document.id, 1).is_err(),
         "the guard should still refuse the document's own annotations"
     );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_export_to_a_folder_it_cannot_write_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let engine = test_engine();
+    let directory = scratch_directory("export-denied");
+    let locked = directory.join("locked");
+    fs::create_dir_all(&locked).expect("the scratch folder should be made");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555))
+        .expect("the folder should be lockable");
+
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+    let result = engine.export_to(document.id, &locked.join("copy.pdf"));
+
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).ok();
+    engine.close(document.id).ok();
+    fs::remove_dir_all(&directory).ok();
+
+    // Root writes anywhere, which leaves nothing for this test to see.
+    if let Err(error) = result {
+        assert_eq!(error, io::EXPORT_DENIED_ERROR);
+    }
+}
+
+#[test]
+fn a_staged_file_lands_only_when_committed() {
+    let directory = scratch_directory("staged-file");
+    let destination = directory.join("staged.pdf");
+    fs::write(&destination, b"before").expect("the fixture should be writable");
+    let leftovers = || {
+        fs::read_dir(&directory)
+            .expect("the scratch folder should be readable")
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tfolio-save")
+            })
+            .count()
+    };
+
+    let mut abandoned = io::StagedFile::beside(&destination).expect("staging should work");
+    abandoned
+        .file()
+        .write_all(b"abandoned")
+        .expect("the staged file should take bytes");
+    drop(abandoned);
+
+    assert_eq!(fs::read(&destination).unwrap(), b"before");
+    assert_eq!(
+        leftovers(),
+        0,
+        "a dropped stage leaves nothing beside the file"
+    );
+
+    let mut committed = io::StagedFile::beside(&destination).expect("staging should work");
+    committed
+        .file()
+        .write_all(b"after")
+        .expect("the staged file should take bytes");
+    committed.commit().expect("the commit should land");
+
+    assert_eq!(fs::read(&destination).unwrap(), b"after");
+    assert_eq!(leftovers(), 0);
+
+    fs::remove_dir_all(&directory).ok();
 }

@@ -494,7 +494,7 @@ describe("TFolio page editing", () => {
     // Reading views go on turning the view alone, on top of whatever the pages
     // now carry of their own.
     await $("button[aria-label='Single page']").click()
-    await rotate()
+    await $("button[aria-label='Rotate the view clockwise']").click()
     expect(await pageRotations()).toEqual([90, 90, 90, 90])
   })
 

@@ -336,7 +336,7 @@ describe("TFolio PDF viewer", () => {
     while (await zoomOut().isEnabled()) {
       await zoomOut().click()
     }
-    for (let rung = 0; rung < 2; rung += 1) {
+    for (let rung = 0; rung < 5; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
     }
     await expect(
@@ -449,7 +449,7 @@ describe("TFolio PDF viewer", () => {
       $("[data-document-session][data-active='true'] [data-slot='zoom-indicator']")
 
     // No button names a level now, so the ladder is the only way back: out until
-    // `-` gives up at the 25% floor, then in along the rungs to 100%.
+    // `-` gives up at the 10% floor, then in along the rungs to 100%.
     const zoomToActualSize = async () => {
       const zoomOut = () => $("button[aria-label='Zoom out']")
 
@@ -457,7 +457,7 @@ describe("TFolio PDF viewer", () => {
         await zoomOut().click()
       }
 
-      for (let rung = 0; rung < 3; rung += 1) {
+      for (let rung = 0; rung < 6; rung += 1) {
         await $("button[aria-label='Zoom in']").click()
       }
     }

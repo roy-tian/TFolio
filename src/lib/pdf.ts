@@ -54,11 +54,43 @@ export type PdfDocumentInfo = {
   path: string | null
 }
 
-/** Whether the export landed on the document's own file: that, not the
-    operation's name, is what decides the history counts as saved. */
+/** Whether the document is now bound to the file the export wrote: that, not
+    the operation's name, is what decides the history counts as saved. */
 export type PdfExportOutcome = {
   path: string
   savedToSource: boolean
+}
+
+/** The backend's refusal to write over a file another tab holds, kept in step
+    with `EXPORT_TARGET_OPEN_ERROR` in `src-tauri/src/pdfium/engine/io.rs`. */
+export const EXPORT_TARGET_OPEN = "tfolio:export-target-open"
+
+/** A copy-only document's export aimed at its own file, kept in step with
+    `EXPORT_COPY_ONLY_ERROR` in `src-tauri/src/pdfium/engine/io.rs`. */
+export const EXPORT_COPY_ONLY = "tfolio:export-copy-only"
+
+/** A destination the OS would not let the app write, kept in step with
+    `EXPORT_DENIED_ERROR` in `src-tauri/src/pdfium/engine/io.rs`. */
+export const EXPORT_DENIED = "tfolio:export-denied"
+
+function isRefusal(error: unknown, code: string): boolean {
+  return error === code || (error instanceof Error && error.message === code)
+}
+
+/** The notice a failed Save As becomes: the refusals the reader can act on
+    are named, and anything else is the generic failure. */
+export function exportFailureNotice(
+  error: unknown,
+): "exportCopyOnly" | "exportDenied" | "exportFailed" | "exportTargetOpen" {
+  if (isRefusal(error, EXPORT_TARGET_OPEN)) {
+    return "exportTargetOpen"
+  }
+
+  if (isRefusal(error, EXPORT_COPY_ONLY)) {
+    return "exportCopyOnly"
+  }
+
+  return isRefusal(error, EXPORT_DENIED) ? "exportDenied" : "exportFailed"
 }
 
 /** Nothing here is patched into place: the page list and outline are

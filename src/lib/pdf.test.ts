@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test"
 
 import {
   dimensionsForRotation,
+  EXPORT_COPY_ONLY,
+  EXPORT_DENIED,
+  EXPORT_TARGET_OPEN,
+  exportFailureNotice,
   fileNameFromPath,
   isPdfPath,
   MIN_PAGE_OUTPUT_SCALE,
@@ -18,6 +22,27 @@ describe("isPdfPath", () => {
   test("rejects other extensions", () => {
     expect(isPdfPath("/home/roy/notes.txt")).toBe(false)
     expect(isPdfPath("/home/roy/document.pdf.png")).toBe(false)
+  })
+})
+
+describe("exportFailureNotice", () => {
+  test("names each backend code, rejected bare or wrapped", () => {
+    expect(exportFailureNotice(EXPORT_TARGET_OPEN)).toBe("exportTargetOpen")
+    expect(exportFailureNotice(new Error(EXPORT_TARGET_OPEN))).toBe(
+      "exportTargetOpen",
+    )
+    expect(exportFailureNotice(EXPORT_COPY_ONLY)).toBe("exportCopyOnly")
+    expect(exportFailureNotice(new Error(EXPORT_DENIED))).toBe("exportDenied")
+  })
+
+  test("leaves any other failure to the generic notice", () => {
+    expect(exportFailureNotice("could not write to /tmp/a.pdf")).toBe(
+      "exportFailed",
+    )
+    expect(exportFailureNotice(`${EXPORT_TARGET_OPEN} and more`)).toBe(
+      "exportFailed",
+    )
+    expect(exportFailureNotice(undefined)).toBe("exportFailed")
   })
 })
 

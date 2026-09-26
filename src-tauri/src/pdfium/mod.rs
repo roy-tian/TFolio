@@ -13,19 +13,24 @@ mod watermark;
 use serde::{Deserialize, Serialize};
 
 pub use archive::{cancel_pdf_archive, export_pdf_archive};
+#[cfg(feature = "e2e")]
+pub use commands::export_pdf_to;
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
-    cancel_pdf_operation, cancel_pdf_search, cancel_word_conversion, close_pdf, create_pdf,
-    delete_pdf_annotations, delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages,
-    export_pdf, extract_pdf_page_plain_text, extract_pdf_page_text, insert_pdf_blank_page,
-    insert_pdf_from_path, insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files,
-    open_converted_from_path, open_pdf, open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path,
-    pick_pdf_paths, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
-    render_pdf_page_thumbnail, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf,
-    search_pdf_text,
+    cancel_pdf_operation, cancel_pdf_search, cancel_word_conversion, cancel_word_open, close_pdf,
+    create_pdf, delete_pdf_annotations, delete_pdf_pages, discard_pdf_stashes,
+    download_pdf_note_font, duplicate_pdf_pages, export_pdf, extract_pdf_page_plain_text,
+    extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
+    insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_converted_from_path,
+    open_pdf, open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
+    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
+    reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text,
 };
-pub use compress::{cancel_pdf_compression, estimate_pdf_compression, export_compressed_pdf};
+pub use compress::{
+    cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
+    export_compressed_pdf, release_pdf_compression,
+};
 pub use engine::PdfiumState;
 // `launch.rs` reads the image kinds for its own launch test.
 pub(crate) use engine::is_merge_image;
@@ -166,8 +171,8 @@ pub struct PdfFileSummary {
 #[serde(rename_all = "camelCase")]
 pub struct ExportOutcome {
     path: String,
-    /// True for a byte-opened document's first export too, which adopts its
-    /// destination as the source; this, not the operation's name, marks saved.
+    /// Whether the document is now bound to `path` — false only for a copy-only
+    /// document's copy. This, not the operation's name, marks the history saved.
     saved_to_source: bool,
 }
 

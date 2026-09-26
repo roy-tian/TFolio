@@ -177,7 +177,7 @@ describe("TFolio PDF search", () => {
     while (await $("button[aria-label='Zoom out']").isEnabled()) {
       await $("button[aria-label='Zoom out']").click()
     }
-    for (let rung = 0; rung < 4; rung += 1) {
+    for (let rung = 0; rung < 7; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
     }
     await expect($("[data-slot='button-group'][aria-label^='Zoom ']"))
@@ -254,5 +254,24 @@ describe("TFolio PDF search", () => {
     expect(result.smoothCalls).toBe(1)
     expect(Math.abs(result.finishedAt - result.reversedAt)).toBeLessThanOrEqual(0.5)
     await expect(status).toHaveText("1 / 2")
+  })
+
+  it("lets the reader go to the grid while results stand", async () => {
+    const input = $("input[aria-label='Search text in current PDF']")
+
+    if (!(await input.isDisplayed())) {
+      await $("button[aria-label='Search this PDF']").click()
+    }
+
+    await input.setValue("wrapped phrase")
+    await expect($("[data-slot='pdf-search-status']")).toHaveText("1 / 2", {
+      wait: 10_000,
+    })
+
+    await $("button[aria-label='Thumbnails']").click()
+    await $("[data-view-mode='thumbnail']").waitForExist()
+    // The standing result is no reason to be sent back to the page view.
+    await browser.pause(1_000)
+    await expect($("[data-view-mode='thumbnail']")).toExist()
   })
 })

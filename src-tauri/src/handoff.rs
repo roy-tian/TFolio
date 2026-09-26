@@ -11,7 +11,7 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
-use crate::windows::{record_document, window_config_from, DocumentOwners};
+use crate::windows::{page_generation, record_document, window_config_from, DocumentOwners};
 
 /// Carries nothing but that a take will find something; spelled again in
 /// `App.tsx`, which listens for it.
@@ -104,6 +104,13 @@ pub async fn move_document(
         },
     );
 
+    // The destination may have gone between the check above and the push,
+    // its drain already run: this sender, still here, takes the tab back.
+    if app.get_webview_window(&dest_label).is_none() {
+        return_pending(&app, &dest_label);
+        return Err("the destination window is gone".to_string());
+    }
+
     let _ = app.emit_to(dest_label.as_str(), TAB_ARRIVED_EVENT, ());
 
     Ok(())
@@ -159,6 +166,13 @@ pub async fn move_document_new_window(
         },
     );
 
+    // As for an existing destination: a window closed before the push had
+    // nothing to hand back yet.
+    if app.get_webview_window(&label).is_none() {
+        return_pending(&app, &label);
+        return Err("the new window is gone".to_string());
+    }
+
     Ok(label)
 }
 
@@ -210,12 +224,13 @@ pub async fn take_moved_tabs(
     window: WebviewWindow,
 ) -> Result<Vec<Value>, String> {
     let label = window.label().to_string();
+    let page = page_generation(&window);
 
     Ok(handoff
         .take(&label)
         .into_iter()
         .map(|entry| {
-            record_document(&owners, &window, entry.document_id, entry.path);
+            record_document(&owners, &window, page, entry.document_id, entry.path);
             entry.tab
         })
         .collect())

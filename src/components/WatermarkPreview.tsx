@@ -12,9 +12,9 @@ import {
   type WatermarkLayout,
 } from "@/lib/watermark"
 
-/** A4 in points: the sheet the preview stands in for, so sizes read as pt. */
-const A4_WIDTH = 595.276
-const A4_HEIGHT = 841.89
+/** A4 in points: the sheet the preview stands in for where there is no page
+    yet to take one from — the merge wizard's. Sizes read as pt either way. */
+const A4_SHEET = { height: 841.89, width: 595.276 }
 
 /** Mirrors the backend's per-page ceiling so a dense grid cannot flood the DOM. */
 const MAX_PREVIEW_TILES = 512
@@ -77,9 +77,15 @@ function previewPlacements(
 type WatermarkPreviewProps = {
   config: WatermarkConfig
   placeholder: string
+  /** The page the mark is previewed on, as displayed, in points. */
+  page?: Box
 }
 
-export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps) {
+export function WatermarkPreview({
+  config,
+  page = A4_SHEET,
+  placeholder,
+}: WatermarkPreviewProps) {
   const sheetRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLSpanElement>(null)
   const [sheetWidth, setSheetWidth] = useState(0)
@@ -104,15 +110,15 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
     return () => observer.disconnect()
   }, [])
 
-  const scale = sheetWidth / A4_WIDTH
+  const scale = sheetWidth / page.width
   const sheet = {
-    height: sheetWidth * (A4_HEIGHT / A4_WIDTH),
+    height: sheetWidth * (page.height / page.width),
     width: sheetWidth,
   }
   const embedded = usesEmbeddedFont(config.text)
   const text = config.text || placeholder
   const fontFamily = embedded ? "sans-serif" : "Helvetica, Arial, sans-serif"
-  const rotation = `rotate(${watermarkRotation(config.direction, A4_WIDTH, A4_HEIGHT)}deg)`
+  const rotation = `rotate(${watermarkRotation(config.direction, page.width, page.height)}deg)`
   const referenceFontSize = WATERMARK_REFERENCE_FONT_SIZE * scale
 
   // The rotated box feeds both size and grid; a client rect already carries the
@@ -140,7 +146,7 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
 
   const fontSize = watermarkFontSize(
     config.widthRatio,
-    A4_WIDTH,
+    page.width,
     referenceBox.width / (scale || 1),
   )
   const drawn = fontSize / WATERMARK_REFERENCE_FONT_SIZE
@@ -153,9 +159,15 @@ export function WatermarkPreview({ config, placeholder }: WatermarkPreviewProps)
 
   return (
     <div
-      className="relative aspect-[210/297] w-full overflow-hidden rounded-md border bg-white shadow-sm"
+      className="relative mx-auto overflow-hidden rounded-md border bg-white shadow-sm"
       data-testid="watermark-sheet"
       ref={sheetRef}
+      style={{
+        aspectRatio: page.width / page.height,
+        // Never taller than A4 at full width: a receipt-thin page would
+        // otherwise stretch the dialog many screens down.
+        width: `${Math.min(1, (page.width / page.height) / (A4_SHEET.width / A4_SHEET.height)) * 100}%`,
+      }}
     >
       <span
         aria-hidden

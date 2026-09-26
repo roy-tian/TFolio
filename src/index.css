@@ -191,13 +191,11 @@ body {
     margin: 5mm;
   }
 
-  /* One page per sheet. The query container is what lets a quarter-turned page
-     be fitted into the sheet's own height before it is turned back. */
+  /* One page per sheet. */
   .pdf-print-page {
     position: relative;
     height: 100%;
     overflow: hidden;
-    container-type: size;
     break-after: page;
   }
 
@@ -205,12 +203,9 @@ body {
     break-after: auto;
   }
 
-  /* Centred by the transform PrintSheet.tsx completes: a turned page's box
-     outgrows the sheet, and every box centring falls back to one edge. */
   .pdf-print-page img {
     position: absolute;
-    top: 50%;
-    left: 50%;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: contain;
@@ -238,7 +233,23 @@ body {
   font-family: sans-serif;
 }
 
+/* The selection is painted by the band layer, one rectangle per line; the
+   WebView's own would tint run by run, each to its run's ink box, leaving a
+   line in slivers of varying height wherever the page's spacing broke runs. */
 .pdf-text-layer ::selection {
+  background: transparent;
+}
+
+/* A band per text line — `mergeRectsByLine` — under the tint the runs' own
+   selection had, covering the gaps between runs on the line. */
+.pdf-selection-layer {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.pdf-selection-layer span {
+  position: absolute;
   background: rgb(56 132 255 / 0.35);
 }
 
@@ -246,12 +257,6 @@ body {
    viewport is changing; keeping every page promoted would waste GPU memory. */
 [data-resize-compositing] [data-pdf-page-surface] {
   will-change: transform;
-}
-
-/* The app's own select-all, which a range in the document could not stand for:
-   only the pages near the reader hold a text layer to put a range over. */
-[data-select-all="true"] .pdf-text-layer span {
-  background: rgb(56 132 255 / 0.35);
 }
 
 /* Highlights are geometry from PDFium, not text re-rendered in a proxy font:

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -6,10 +6,14 @@ import { useTranslation } from "react-i18next"
 import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { TextNotePreview } from "@/components/TextNotePreview"
-import { useNearViewport } from "@/hooks/useNearViewport"
+import { useNearViewport, ViewportHoldContext } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
+import { useSelectionBands } from "@/hooks/useSelectionBands"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview as HeldNote } from "@/hooks/useTextNoteTool"
+import { mergeRectsByLine } from "@/lib/annotationGeometry"
+import { cachedPageText, rememberPageText } from "@/lib/pageText"
+import { distanceFromView, pageWork } from "@/lib/pageWork"
 import {
   dimensionsForRotation,
   MAX_RENDER_WIDTH,
@@ -49,9 +53,9 @@ type IndexedSearchMatch = {
 type PdfPageProps = {
   activeSearchIndex: number | null
   documentId: number
-  /** Live and released rectangles awaiting this page's pixels. */
+  /** Live and released rectangles awaiting this page's pixels: its own only. */
   drafts: RectDraft[]
-  /** Written notes awaiting this page's pixels. */
+  /** Written notes awaiting this page's pixels: its own only. */
   notes: HeldNote[]
   /** Present only while a select-all stands: the page's menu then offers the
       whole document, which is what is selected, and not this page alone. */
@@ -64,12 +68,10 @@ type PdfPageProps = {
   renderScale: number
   searchMatches: IndexedSearchMatch[]
   textEpoch: number
+  /** The app's own select-all stands: its bands paint here, not per-span. */
+  textSelectAll: boolean
   rotation: number
   scale: number
-  /** Keep the current heavy-page window fixed during a compositor zoom preview. */
-  virtualizationPaused: boolean
-  /** Do not evict mounted surfaces while a text-selection drag crosses pages. */
-  virtualizationRetainExited: boolean
   /** CSS pixels to lay the page out at, overriding `scale` — only for a layout
       sharing one column across pages of different sizes, as a book spread. */
   width?: number
@@ -92,6 +94,7 @@ type PdfPageSurfaceProps = {
   rotation: number
   searchMatches: IndexedSearchMatch[]
   textEpoch: number
+  textSelectAll: boolean
 }
 
 /** Exists only around the viewport: leaving a page releases its canvas backing
@@ -112,9 +115,11 @@ const PdfPageSurface = memo(function PdfPageSurface({
   rotation,
   searchMatches,
   textEpoch,
+  textSelectAll,
 }: PdfPageSurfaceProps) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const [textSpans, setTextSpans] = useState<PdfTextSpan[]>([])
 
   const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
@@ -140,16 +145,35 @@ const PdfPageSurface = memo(function PdfPageSurface({
   })
 
   useEffect(() => {
+    const cached = cachedPageText(documentId, pageNumber, textEpoch)
+
+    if (cached) {
+      setTextSpans(cached)
+      return
+    }
+
     let cancelled = false
+    const leaving = new AbortController()
     // A text epoch means these spans no longer describe the page's selectable
     // content; do not leave stale runs clickable while PDFium extracts anew.
     setTextSpans([])
 
-    void invoke<PdfTextSpan[]>("extract_pdf_page_text", {
-      documentId,
-      pageNumber,
-    })
+    // Just behind its own page's render, ahead of any page further away.
+    void pageWork
+      .schedule(
+        () =>
+          invoke<PdfTextSpan[]>("extract_pdf_page_text", {
+            documentId,
+            pageNumber,
+          }),
+        {
+          priority: () => distanceFromView(surfaceRef.current) + 1,
+          signal: leaving.signal,
+        },
+      )
       .then((spans) => {
+        rememberPageText(documentId, pageNumber, textEpoch, spans)
+
         if (!cancelled) {
           setTextSpans(spans)
         }
@@ -162,6 +186,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
 
     return () => {
       cancelled = true
+      leaving.abort()
     }
   }, [documentId, pageNumber, textEpoch])
 
@@ -201,7 +226,10 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const positionedSearchRects = useMemo(
     () =>
       searchMatches.flatMap(({ index, match }) =>
-        match.rects.map((rect, rectIndex) => ({
+        // Merged per match, so a hit reads as one mark a line — a gap the
+        // page's spacing left between runs is inside the hit, not a slit —
+        // while its cross-line boxes stay one per line.
+        mergeRectsByLine(match.rects).map((rect, rectIndex) => ({
           height: `${(rect.height / layoutHeight) * 100}%`,
           index,
           key: `${index}-${rectIndex}`,
@@ -212,11 +240,19 @@ const PdfPageSurface = memo(function PdfPageSurface({
       ),
     [layoutHeight, layoutWidth, searchMatches],
   )
+  const selectionBands = useSelectionBands({
+    anchorRef: surfaceRef,
+    page,
+    rotation,
+    selectAll: textSelectAll,
+    spans: textSpans,
+  })
 
   return (
     <>
       <div
         className="absolute"
+        ref={surfaceRef}
         style={{
           height: `${(page.height / footprintHeight) * 100}%`,
           left: "50%",
@@ -260,6 +296,25 @@ const PdfPageSurface = memo(function PdfPageSurface({
                   left: rect.left,
                   top: rect.top,
                   width: rect.width,
+                }}
+              />
+            ))}
+          </div>
+        ) : null}
+        {hasRendered && selectionBands.length > 0 ? (
+          <div
+            aria-hidden
+            className="pdf-selection-layer"
+            style={pageLayerStyle}
+          >
+            {selectionBands.map((band, index) => (
+              <span
+                key={index}
+                style={{
+                  height: `${(band.height / layoutHeight) * 100}%`,
+                  left: `${(band.left / layoutWidth) * 100}%`,
+                  top: `${(band.top / layoutHeight) * 100}%`,
+                  width: `${(band.width / layoutWidth) * 100}%`,
                 }}
               />
             ))}
@@ -310,7 +365,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
   )
 })
 
-export function PdfPage({
+export const PdfPage = memo(function PdfPage({
   activeSearchIndex,
   documentId,
   drafts,
@@ -326,21 +381,15 @@ export function PdfPage({
   scale,
   searchMatches,
   textEpoch,
-  virtualizationPaused,
-  virtualizationRetainExited,
+  textSelectAll,
   width,
 }: PdfPageProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLDivElement>(null)
-  const isNearViewport = useNearViewport(
-    wrapperRef,
-    "800px 0px",
-    {
-      paused: virtualizationPaused,
-      retainExited: virtualizationRetainExited,
-      retainSelection: true,
-    },
-  )
+  const isNearViewport = useNearViewport(wrapperRef, "800px 0px", {
+    hold: useContext(ViewportHoldContext),
+    retainSelection: true,
+  })
 
   // User rotation spins the whole page clockwise on top of the bitmap's own
   // rotation, so a 90°/270° page swaps the footprint it takes in the column.
@@ -350,15 +399,6 @@ export function PdfPage({
   const targetRenderWidth =
     renderWidth ?? footprintWidth * POINT_TO_PX * renderScale
   const surfaceScale = displayWidth / footprintWidth
-  // Keep the surface's props stable while only the outer page size changes.
-  const pageDrafts = useMemo(
-    () => drafts.filter((draft) => draft.pageNumber === pageNumber),
-    [drafts, pageNumber],
-  )
-  const pageNotes = useMemo(
-    () => notes.filter((note) => note.pageNumber === pageNumber),
-    [notes, pageNumber],
-  )
 
   return (
     <div
@@ -384,8 +424,8 @@ export function PdfPage({
           <PdfPageSurface
             activeSearchIndex={activeSearchIndex}
             documentId={documentId}
-            drafts={pageDrafts}
-            notes={pageNotes}
+            drafts={drafts}
+            notes={notes}
             onCopyAllText={onCopyAllText}
             onPagePaint={onPagePaint}
             footprintHeight={footprintHeight}
@@ -397,9 +437,10 @@ export function PdfPage({
             rotation={rotation}
             searchMatches={searchMatches}
             textEpoch={textEpoch}
+            textSelectAll={textSelectAll}
           />
         </div>
       ) : null}
     </div>
   )
-}
+})

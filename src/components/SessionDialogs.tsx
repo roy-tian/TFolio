@@ -12,6 +12,8 @@ type SessionDialogsProps = {
   active: boolean
   pageCount: number
   pageNumbers: ReturnType<typeof usePageNumbers>
+  /** What the watermark's preview is drawn on: the document's first page. */
+  previewPage?: { height: number; width: number }
   print: ReturnType<typeof usePrint>
   watermark: ReturnType<typeof useWatermark>
 }
@@ -22,6 +24,7 @@ export function SessionDialogs({
   active,
   pageCount,
   pageNumbers,
+  previewPage,
   print,
   watermark,
 }: SessionDialogsProps) {
@@ -38,6 +41,7 @@ export function SessionDialogs({
         onRemove={() => void watermark.remove()}
         onStop={watermark.stop}
         open={active && watermark.open}
+        previewPage={previewPage}
         progress={watermark.progress}
         validationError={watermark.validationError}
       />

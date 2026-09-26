@@ -17,7 +17,7 @@
 ## Validation
 
 - Before a PR, run `bun run version:check`, `bun run test`, `bun run build`, and Cargo
-  `fmt -- --check`, `clippy --locked -- -D warnings`, `check --locked`, and `test --locked`
+  `fmt -- --check`, `clippy --locked -- -D warnings` (which subsumes `check`), and `test --locked`
   against `src-tauri/Cargo.toml`. Backend or GUI changes also require `bun run test:all`.
 - Run overlapping checks once; `test:all` satisfies the `bun run test` and Cargo `test --locked` requirements.
 - PDFium test fonts are not bundled. PDFium-dependent ignored Rust tests require `fonts:download`;
@@ -32,14 +32,16 @@
 ## Release
 
 - Release tags must match `package.json`; use `version:bump` to align all five version files.
-  `changelog` groups the tag's conventional commit subjects as public release notes and omits
+  `changelog` groups the release's conventional commit subjects as public release notes and omits
   `chore(release)` commits.
 - Releases come only from the default branch; merge the working branch in with `--no-ff`.
-- Tag only after `bun run preflight` passes locally and `Bundle dry-run` is green for that
-  same commit.
+- Push the release commit only after `bun run preflight` passes locally, then dispatch the
+  `Release` workflow on it. Never push release tags: Release builds every platform once into a
+  draft and publishes, creating the tag, only after every build and that commit's CI pass.
 - `preflight` uses `tauri:build` (`--no-bundle`) so private signing keys stay out of local
-  environments. Bundle dry-run and Release alone sign installers with both `TAURI_SIGNING_*`
-  repository secrets. Regenerating the key strands installed copies on their current version.
+  environments. Release and the optional, non-gating `Bundle dry-run` alone sign installers with
+  both `TAURI_SIGNING_*` repository secrets. Regenerating the key strands installed copies on
+  their current version.
 
 ## Persistence and windows
 

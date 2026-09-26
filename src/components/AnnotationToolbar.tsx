@@ -42,7 +42,7 @@ type AnnotationToolbarProps = {
   highlightApplies: boolean
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
-  onRectStyleChange: (style: RectStyle) => void
+  onRectStyleChange: (style: RectStyle, transient?: boolean) => void
   /** Builds a document of its own rather than touching this one. */
   onMergeWizard: () => void
   onPageNumbers: () => void

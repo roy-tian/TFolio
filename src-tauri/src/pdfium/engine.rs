@@ -56,6 +56,9 @@ const MAX_THUMBNAIL_WIDTH: i32 = 512;
 // Each quad is a PDFium call made under the lock every render waits on, and no
 // page has this many runs of text.
 const MAX_HIGHLIGHT_QUADS: usize = 8192;
+// A search holds the one PDFium lock this many pages at a time, so a render
+// waits for a few pages of search at most, never for the whole document.
+const SEARCH_PAGES_PER_LOCK: usize = 8;
 // A search term arrives from the WebView and becomes a UTF-16 allocation in
 // PDFium, so bound it first; this length is already far past a useful query.
 const MAX_SEARCH_CHARS: usize = 256;
@@ -133,11 +136,19 @@ struct OpenDocument {
     /// Monotonic per-page version: rectangle effects release the PDFium lock
     /// while processing pixels, and this detects a page that changed meanwhile.
     revisions: HashMap<u64, u64>,
-    /// The current revision's whole-document serialization length, memoized
-    /// for the compress estimates: a rasterized one re-asks on every slider
-    /// settle, and the rewrite it measures with is the expensive half. Retired
-    /// by every content change, alongside the page revision it bumps.
-    serialized_len: Option<u64>,
+    /// The length of the bytes this document was opened from, while its
+    /// content still matches them: the compress dialog's baseline. PDFium's
+    /// rewrite can differ widely from a file with object streams, so measuring
+    /// against it could promise savings the copy never has. Retired by every
+    /// content change and every write, after which the rewrite is the file.
+    loaded_len: Option<u64>,
+    /// Bumped by every content change, so work done outside the PDFium lock
+    /// can tell whether the document it measured still stands.
+    content_version: u64,
+    /// The compress dialog's reusable work for `content_version`: PDFium's
+    /// rewrite, where images are drawn, and the latest output. Retired with
+    /// every content change, and released when the dialog closes.
+    compress_cache: Option<compress::CompressCache>,
     /// Page ids inserted from another file and still present: while any remain
     /// the document holds another file's pages, so it may only export to a copy.
     merged_page_ids: HashSet<u64>,
@@ -187,11 +198,11 @@ impl OpenDocument {
             .ok_or_else(|| format!("mark {mark_id} is not one of this session's"))
     }
 
-    /// Bumps a page's revision, retiring the memoized serialization length
-    /// with it: content changed, so the document it measured is gone.
+    /// Bumps a page's revision: content changed, so an effect captured before
+    /// must fail its check.
     fn bump_page_revision(&mut self, page_id: u64) {
         *self.revisions.entry(page_id).or_insert(0) += 1;
-        self.serialized_len = None;
+        self.content_changed();
     }
 
     /// Bumps every page's revision so an effect captured before a structure
@@ -200,7 +211,13 @@ impl OpenDocument {
         for &page_id in &self.page_ids {
             *self.revisions.entry(page_id).or_insert(0) += 1;
         }
-        self.serialized_len = None;
+        self.content_changed();
+    }
+
+    fn content_changed(&mut self) {
+        self.loaded_len = None;
+        self.content_version += 1;
+        self.compress_cache = None;
     }
 }
 
@@ -223,19 +240,35 @@ fn open_entry_mut(
 }
 
 /// What a cancellable operation works on. A merge names no document until it
-/// has built one, and the wizard is modal, so it is its own target.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// has built one, so it is named by the window whose modal wizard asked.
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum OperationTarget {
     Document(u64),
     Archive(u64),
-    Merge,
+    Merge(String),
     Search(u64),
-    /// A compressed copy being estimated or written, whose page loop must
-    /// stop when the reader walks away from the dialog.
+    /// A compressed copy being written, whose page loop must stop when the
+    /// reader walks away from the dialog.
     Compress(u64),
-    /// The Word→PDF conversions behind a wizard inspection, which can outlast
-    /// a reader's patience alone; a merge's stay under its own target.
-    Convert,
+    /// The dialog's size estimates, apart from the export: a dialog stopping
+    /// its superseded estimates must never stop a copy already being written.
+    CompressEstimate(u64),
+    /// The Word→PDF conversions behind a wizard inspection, by window, which
+    /// can outlast a reader's patience alone; a merge's stay under its own
+    /// target.
+    Convert(String),
+    /// A Word document opened as a tab, apart from the wizard's: the wizard
+    /// may be open over it, and neither's Stop is meant for the other.
+    OpenConverted(String),
+}
+
+/// A merge's layout choices, and whether its Word sources may be converted.
+#[derive(Clone, Copy)]
+pub(super) struct MergeOptions {
+    pub(super) smart_padding: bool,
+    pub(super) normalize_a4: bool,
+    pub(super) bookmarks: MergeBookmarks,
+    pub(super) word_conversion: bool,
 }
 
 struct RunningOperation {
@@ -278,6 +311,10 @@ pub(super) struct PdfiumEngine {
     /// The open documents, and the lock serializing PDFium itself: it is not
     /// thread-safe, so hold this across *all* PDFium work, opening included.
     documents: Mutex<HashMap<u64, OpenDocument>>,
+    /// Held from a save's staging through its commit, which lands off
+    /// `documents`: two writes to one file then land in the order they were
+    /// staged, never an older one over a newer.
+    commits: Mutex<()>,
     next_document_id: AtomicU64,
     /// Every place the downloadable fallback face may be, in trial order —
     /// resolved at startup, the only point an `AppHandle` reaches this module.
@@ -310,6 +347,7 @@ impl PdfiumState {
         Ok(Self(Arc::new(PdfiumEngine {
             pdfium,
             documents: Mutex::new(HashMap::new()),
+            commits: Mutex::new(()),
             next_document_id: AtomicU64::new(1),
             // Absent is not fatal here: it only fails the first note that needs
             // it, so a missing font cannot stop the app from opening PDFs.
@@ -326,6 +364,14 @@ impl PdfiumState {
 
     pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
         self.0.approve_paths(paths);
+    }
+
+    pub fn cancel_window_work(&self, label: &str) {
+        self.0.cancel_window_work(label);
+    }
+
+    pub fn remove_conversion_files(&self) {
+        self.0.word.remove_run_dir();
     }
 
     /// Closing takes the PDFium lock, so it must not block the window event loop.
@@ -407,12 +453,21 @@ impl PdfiumEngine {
         asked
     }
 
+    /// A window's merge and conversions have nowhere to land once it is gone
+    /// or reloading; a Word suite would otherwise run on for minutes.
+    pub(super) fn cancel_window_work(&self, label: &str) {
+        self.cancel_operation(OperationTarget::Merge(label.to_string()));
+        self.cancel_operation(OperationTarget::Convert(label.to_string()));
+        self.cancel_operation(OperationTarget::OpenConverted(label.to_string()));
+    }
+
     /// Cancel first so closing a document does not wait for its entire rebuild.
     pub(super) fn cancel_document_work(&self, document_id: u64) {
         self.cancel_operation(OperationTarget::Document(document_id));
         self.cancel_operation(OperationTarget::Search(document_id));
         self.cancel_operation(OperationTarget::Archive(document_id));
         self.cancel_operation(OperationTarget::Compress(document_id));
+        self.cancel_operation(OperationTarget::CompressEstimate(document_id));
     }
 
     /// A new one-page A4 document, built in memory: no file of its own, so a
@@ -454,11 +509,17 @@ impl PdfiumEngine {
     /// An image or a Word document opened as its converted PDF. Built in
     /// memory with no source binding, like `create_blank`: the file behind it
     /// is only ever read, so there is no destination for approval to guard.
-    pub(super) fn open_converted(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
+    pub(super) fn open_converted(
+        &self,
+        window: &str,
+        path: PathBuf,
+    ) -> Result<PdfDocumentInfo, String> {
         if is_merge_image(&path) {
+            // Decoded before the lock: a decode is no PDFium work.
+            let image = read_image(&path)?;
             let bytes = {
                 let _documents = self.lock_documents()?;
-                let document = image_page_document(self.pdfium, &path)?;
+                let document = image_page_document(self.pdfium, &image, &path)?;
 
                 document
                     .save_to_bytes()
@@ -473,7 +534,8 @@ impl PdfiumEngine {
             // office suite's startup is seconds the open flow must be able to
             // walk away from, and `cancel_word_conversion` aims at this target.
             let entry = {
-                let operation = self.begin_operation(OperationTarget::Convert);
+                let operation =
+                    self.begin_operation(OperationTarget::OpenConverted(window.to_string()));
                 let cancelled = || operation.is_cancelled();
 
                 self.resolve_word_documents(
@@ -516,6 +578,7 @@ impl PdfiumEngine {
 
         // Before PDFium is touched, not just around the insert: reading the new
         // document's pages and bookmarks is PDFium work like any other.
+        let bytes_len = bytes.len() as u64;
         let mut documents = self.lock_documents()?;
         let document = self
             .pdfium
@@ -543,8 +606,10 @@ impl PdfiumEngine {
                 owned_content: None,
                 page_geometry: (0..num_pages as u64).zip(pages.iter().copied()).collect(),
                 page_ids: (0..num_pages as u64).collect(),
+                loaded_len: Some(bytes_len),
+                content_version: 0,
+                compress_cache: None,
                 revisions: HashMap::new(),
-                serialized_len: None,
                 source_path,
                 stashes: HashMap::new(),
             },
@@ -559,6 +624,51 @@ impl PdfiumEngine {
         })
     }
 
+    /// Every render queues on the one documents lock, so only PDFium's work
+    /// and a copy of its buffer happen under it; the conversion comes after.
+    fn render_rgb(
+        &self,
+        document_id: u64,
+        page_number: i32,
+        width: i32,
+        max_width: i32,
+    ) -> Result<image::RgbImage, String> {
+        if !(MIN_RENDER_WIDTH..=max_width).contains(&width) {
+            return Err(format!(
+                "render width must be between {MIN_RENDER_WIDTH} and {max_width} pixels"
+            ));
+        }
+
+        let raw = {
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
+
+            entry.page_id(page_number)?;
+
+            let page = entry
+                .document
+                .pages()
+                .get(page_number - 1)
+                .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
+            let render_config = PdfRenderConfig::new()
+                .set_target_width(width)
+                .set_maximum_width(max_width)
+                .set_maximum_height(MAX_RENDER_HEIGHT)
+                .render_annotations(true)
+                .render_form_data(true)
+                // What `RawBitmap::into_rgb` reads; pdfium-render's default, stated.
+                .set_reverse_byte_order(true);
+            let bitmap = page
+                .render_with_config(&render_config)
+                .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))?;
+
+            RawBitmap::copy_of(&bitmap)?
+        };
+
+        raw.into_rgb()
+    }
+
+    #[cfg(test)]
     fn render_bitmap(
         &self,
         document_id: u64,
@@ -566,32 +676,8 @@ impl PdfiumEngine {
         width: i32,
         max_width: i32,
     ) -> Result<DynamicImage, String> {
-        if !(MIN_RENDER_WIDTH..=max_width).contains(&width) {
-            return Err(format!(
-                "render width must be between {MIN_RENDER_WIDTH} and {max_width} pixels"
-            ));
-        }
-
-        let documents = self.lock_documents()?;
-        let entry = open_entry(&documents, document_id)?;
-
-        entry.page_id(page_number)?;
-
-        let page = entry
-            .document
-            .pages()
-            .get(page_number - 1)
-            .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
-        let render_config = PdfRenderConfig::new()
-            .set_target_width(width)
-            .set_maximum_width(max_width)
-            .set_maximum_height(MAX_RENDER_HEIGHT)
-            .render_annotations(true)
-            .render_form_data(true);
-
-        page.render_with_config(&render_config)
-            .and_then(|bitmap| bitmap.as_image())
-            .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))
+        self.render_rgb(document_id, page_number, width, max_width)
+            .map(DynamicImage::ImageRgb8)
     }
 
     pub(super) fn render_page(
@@ -600,14 +686,9 @@ impl PdfiumEngine {
         page_number: i32,
         width: i32,
     ) -> Result<Vec<u8>, String> {
-        let image = self.render_bitmap(document_id, page_number, width, MAX_RENDER_WIDTH)?;
-        let mut png = Cursor::new(Vec::new());
+        let image = self.render_rgb(document_id, page_number, width, MAX_RENDER_WIDTH)?;
 
-        image
-            .write_to(&mut png, ImageFormat::Png)
-            .map_err(|error| format!("could not encode page {page_number}: {error}"))?;
-
-        Ok(png.into_inner())
+        encode_png(&image).map_err(|error| format!("could not encode page {page_number}: {error}"))
     }
 
     pub(super) fn render_thumbnail(
@@ -616,12 +697,10 @@ impl PdfiumEngine {
         page_number: i32,
         width: i32,
     ) -> Result<Vec<u8>, String> {
-        let image = self.render_bitmap(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)?;
+        let image = self.render_rgb(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)?;
         let mut webp = Cursor::new(Vec::new());
 
-        // The WebP encoder is lossless and accepts only Rgb8/Rgba8, but PDFium
-        // reports Luma8 for grayscale bitmaps, so normalize before encoding.
-        DynamicImage::ImageRgba8(image.into_rgba8())
+        DynamicImage::ImageRgb8(image)
             .write_to(&mut webp, ImageFormat::WebP)
             .map_err(|error| format!("could not encode page {page_number} thumbnail: {error}"))?;
 
@@ -649,16 +728,35 @@ impl PdfiumEngine {
             return Err("a PDF search needs some text".into());
         }
 
+        // A lock let go and taken straight back is usually taken back by this
+        // thread, ahead of the render woken for it; a yield gives that its turn.
+        self.search_in_batches(
+            document_id,
+            &query,
+            SEARCH_PAGES_PER_LOCK,
+            &mut std::thread::yield_now,
+        )
+    }
+
+    /// The pass behind `search_text`, `between` running each time the lock is
+    /// let go — a test's way into the gap a render or an edit takes.
+    fn search_in_batches(
+        &self,
+        document_id: u64,
+        query: &str,
+        pages_per_lock: usize,
+        between: &mut dyn FnMut(),
+    ) -> Result<PdfSearchOutcome, String> {
         // Register before taking the one PDFium lock. A replacement search can
         // therefore stop this one even while it is queued behind another job.
         let operation = self.begin_operation(OperationTarget::Search(document_id));
-        let documents = self.lock_documents()?;
-        let entry = open_entry(&documents, document_id)?;
         let options = PdfSearchOptions::new();
         let mut matches = Vec::new();
         let mut rectangle_count = 0usize;
+        let mut next_page = 0usize;
+        let mut searched_version = None;
 
-        for page_index in 0..entry.page_ids.len() {
+        loop {
             if operation.is_cancelled() {
                 return Ok(PdfSearchOutcome {
                     cancelled: true,
@@ -667,65 +765,95 @@ impl PdfiumEngine {
                 });
             }
 
-            let page_number = page_index as i32 + 1;
-            let page = entry
-                .document
-                .pages()
-                .get(page_index as i32)
-                .map_err(|error| {
-                    format!("PDFium could not load page {page_number} for search: {error}")
-                })?;
-            let unrotated_height = unrotated_page_height(&page);
-            let text = page.text().map_err(|error| {
-                format!("PDFium could not read text on page {page_number}: {error}")
-            })?;
-            let search = text
-                .search(&query, &options)
-                .map_err(|error| format!("PDFium could not search page {page_number}: {error}"))?;
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
 
-            for result in search.iter(PdfSearchDirection::SearchForward) {
-                let rects = result
-                    .iter()
-                    .filter_map(|segment| {
-                        let bounds = segment.bounds();
-                        let left = bounds.left().value;
-                        let top = bounds.top().value;
-                        let width = bounds.right().value - left;
-                        let height = top - bounds.bottom().value;
+            // An edit landed while the lock was let go: what was found may name
+            // pages that have since moved or changed, so the pass starts over.
+            if searched_version.is_some_and(|version| version != entry.content_version) {
+                matches.clear();
+                rectangle_count = 0;
+                next_page = 0;
+            }
 
-                        (width > 0.0 && height > 0.0).then_some(PagePointsRect {
-                            left,
-                            top: unrotated_height - top,
-                            width,
-                            height,
-                        })
-                    })
-                    .collect::<Vec<_>>();
+            searched_version = Some(entry.content_version);
+            let batch_end = (next_page + pages_per_lock).min(entry.page_ids.len());
 
-                if rects.is_empty() {
-                    continue;
-                }
-
-                if matches.len() >= MAX_SEARCH_MATCHES
-                    || rectangle_count.saturating_add(rects.len()) > MAX_SEARCH_RECTS
-                {
+            for page_index in next_page..batch_end {
+                if operation.is_cancelled() {
                     return Ok(PdfSearchOutcome {
-                        cancelled: false,
-                        limit_reached: true,
-                        matches,
+                        cancelled: true,
+                        limit_reached: false,
+                        matches: Vec::new(),
                     });
                 }
 
-                rectangle_count += rects.len();
-                matches.push(PdfSearchMatch { page_number, rects });
-            }
-        }
+                let page_number = page_index as i32 + 1;
+                let page = entry
+                    .document
+                    .pages()
+                    .get(page_index as i32)
+                    .map_err(|error| {
+                        format!("PDFium could not load page {page_number} for search: {error}")
+                    })?;
+                let unrotated_height = unrotated_page_height(&page);
+                let text = page.text().map_err(|error| {
+                    format!("PDFium could not read text on page {page_number}: {error}")
+                })?;
+                let search = text.search(query, &options).map_err(|error| {
+                    format!("PDFium could not search page {page_number}: {error}")
+                })?;
 
-        Ok(PdfSearchOutcome {
-            cancelled: false,
-            limit_reached: false,
-            matches,
-        })
+                for result in search.iter(PdfSearchDirection::SearchForward) {
+                    let rects = result
+                        .iter()
+                        .filter_map(|segment| {
+                            let bounds = segment.bounds();
+                            let left = bounds.left().value;
+                            let top = bounds.top().value;
+                            let width = bounds.right().value - left;
+                            let height = top - bounds.bottom().value;
+
+                            (width > 0.0 && height > 0.0).then_some(PagePointsRect {
+                                left,
+                                top: unrotated_height - top,
+                                width,
+                                height,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+
+                    if rects.is_empty() {
+                        continue;
+                    }
+
+                    if matches.len() >= MAX_SEARCH_MATCHES
+                        || rectangle_count.saturating_add(rects.len()) > MAX_SEARCH_RECTS
+                    {
+                        return Ok(PdfSearchOutcome {
+                            cancelled: false,
+                            limit_reached: true,
+                            matches,
+                        });
+                    }
+
+                    rectangle_count += rects.len();
+                    matches.push(PdfSearchMatch { page_number, rects });
+                }
+            }
+
+            if batch_end >= entry.page_ids.len() {
+                return Ok(PdfSearchOutcome {
+                    cancelled: false,
+                    limit_reached: false,
+                    matches,
+                });
+            }
+
+            next_page = batch_end;
+            drop(documents);
+            between();
+        }
     }
 
     /// The page's text as PDFium reconstructs it, line breaks included — unlike
@@ -1000,17 +1128,19 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
 
 mod archive_export;
 mod compress;
+mod image_dpi;
 mod inspection;
 mod io;
 mod marks;
 mod owned_content;
 mod page_ops;
-mod raster_export;
+mod raster;
+
 pub(crate) use io::is_merge_image;
-use io::{image_page_document, read_pdf_bytes};
+use io::{image_page_document, read_image, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
-use raster_export::{page_jpeg, RasterLevels, FLATTEN_LEVELS};
+use raster::{encode_png, RawBitmap};
 
 #[cfg(test)]
 mod tests;

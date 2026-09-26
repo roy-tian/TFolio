@@ -60,6 +60,7 @@ import {
   movesPages,
   type AnnotationCommand,
   type HexColor,
+  type RenderEpochs,
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
@@ -67,7 +68,8 @@ import { copyPlainText } from "@/lib/clipboard"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
-import { documentRefusals } from "@/lib/notices"
+import { forgetDocumentText } from "@/lib/pageText"
+import { transientDocumentRefusals } from "@/lib/notices"
 import {
   formatPageRanges,
   type PageClipboard,
@@ -75,6 +77,8 @@ import {
 import type { PageHandoff } from "@/lib/pageDrag"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
+  exportFailureNotice,
+  fileNameFromPath,
   type PdfDocumentInfo,
   type PdfExportOutcome,
   type PdfStructureUpdate,
@@ -89,7 +93,11 @@ import type {
   MovedSessionSnapshot,
   MovedTabSeed,
 } from "@/lib/tabMove"
-import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
+import type {
+  PdfOwnedLayer,
+  PdfOwnedLayerProgressHandler,
+  PdfProgress,
+} from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
 import {
   defaultViewMode,
@@ -131,6 +139,9 @@ export type DocumentSessionHandle = {
   /** Lets go of the edit it held: the note's text lives nowhere else by then. */
   dismissNoteFont: () => void
   fetchNoteFont: () => void
+  /** Edits and a typed note, which a save would keep; `hasUnsavedWorkNow`
+      also counts work still running, which no save can. */
+  hasUnsavedChangesNow: () => boolean
   hasUnsavedWorkNow: () => boolean
   openPageNumbers: () => void
   openSearch: () => void
@@ -145,6 +156,13 @@ export type DocumentSessionHandle = {
       what it will not. */
   save: () => void
   saveAs: () => void
+  /** The save key: Save As where there is no file, a notice where the
+      document is export-only. `save` is what Save all runs, silently. */
+  saveFromKey: () => void
+  /** The close prompt's Save; resolves true when the close may go ahead. */
+  saveForClose: () => Promise<boolean>
+  /** The Stop on a layer undo or redo's notice. */
+  stopLayerWork: () => void
   selectAll: () => void
   undo: () => void
   /** True only over this session's thumbnail grid, where a dropped PDF is
@@ -246,6 +264,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [hasMergedPages, setHasMergedPages] = useState(
       () => movedSeed?.hasMergedPages ?? false,
     )
+    // Read by a close's save, which runs after the queue and before a render.
+    const hasMergedPagesRef = useRef(hasMergedPages)
     const [currentPage, setCurrentPage] = useState(() =>
       Math.min(
         Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
@@ -299,6 +319,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       () => readStoredTextNoteStyle() ?? defaultTextNoteStyle,
     )
     const viewerRef = useRef<HTMLElement>(null)
+    const recentPageRef = useRef<HTMLElement | null>(null)
     const documentRef = useRef<PdfDocumentInfo | null>(openedDocument)
     const initialRecentPositionRef = useRef(
       initialRecentView
@@ -327,11 +348,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       setUnfontedEdit(null)
     }, [])
     // A refusal that outlived what it described would sit over every mark the
-    // reader went on to make successfully.
+    // reader went on to make successfully. The font offer is not one: it holds
+    // a note that exists nowhere else, and only the reader's answer ends it.
     const clearEditRefusals = useCallback(() => {
-      clearNoteFontOffer()
-      notice.retract(documentRefusals)
-    }, [clearNoteFontOffer, notice])
+      notice.retract(transientDocumentRefusals)
+    }, [notice])
+    // Every rebuild tick raises its notice anew; the reader's Stop must stay
+    // pressed through them rather than come back as a live button.
+    const layerStoppingRef = useRef(false)
 
     const bookApplies = hasBookSpread(pdfDocument.numPages)
     const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
@@ -421,27 +445,72 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
     // Fetched as the selection is made, not when the copy asks: the clipboard
     // write must land inside its keypress, and a long document's text is slow.
-    const selectedText = useRef<Promise<string> | null>(null)
-    const copyDocumentText = useCallback(() => {
-      const pending =
-        selectedText.current ??
-        documentPlainText(pdfDocument.id, pdfDocument.numPages)
+    // One read per text version: a repeated select-all reuses it, and a
+    // selection let go stops a read still under way — unless a copy waits on it.
+    const plainTextRead = useRef<{
+      controller: AbortController
+      copying: boolean
+      done: boolean
+      epochs: RenderEpochs | null
+      numPages: number
+      text: Promise<string>
+    } | null>(null)
+    // Written once the annotations below exist; read when a select-all asks.
+    const textEpochsRef = useRef<RenderEpochs | null>(null)
+    const readDocumentText = useCallback(() => {
+      const textEpochs = textEpochsRef.current
+      const last = plainTextRead.current
 
-      selectedText.current = pending
-      void pending.then(copyPlainText)
+      if (
+        last &&
+        last.epochs === textEpochs &&
+        last.numPages === pdfDocument.numPages &&
+        (last.done || !last.controller.signal.aborted)
+      ) {
+        return last
+      }
+
+      // A copy already asked for the older text: it still gets it.
+      if (last && !last.copying) {
+        last.controller.abort()
+      }
+
+      const controller = new AbortController()
+      const read = {
+        controller,
+        copying: false,
+        done: false,
+        epochs: textEpochs,
+        numPages: pdfDocument.numPages,
+        text: documentPlainText(
+          pdfDocument.id,
+          pdfDocument.numPages,
+          controller.signal,
+        ),
+      }
+
+      read.text.then(
+        () => {
+          read.done = true
+        },
+        () => undefined,
+      )
+      plainTextRead.current = read
+
+      return read
     }, [pdfDocument.id, pdfDocument.numPages])
+    const copyDocumentText = useCallback(() => {
+      const read = readDocumentText()
+
+      read.copying = true
+      void read.text.then(copyPlainText).catch(() => undefined)
+    }, [readDocumentText])
     // The page views' half of a select-all; the grid's half is the selection
     // above, and the view in front decides which of the two answers.
     const textSelectAll = useTextSelectAll({
       active: active && viewMode !== "thumbnail",
       onCopy: copyDocumentText,
     })
-
-    useEffect(() => {
-      selectedText.current = textSelectAll.selectedAll
-        ? documentPlainText(pdfDocument.id, pdfDocument.numPages)
-        : null
-    }, [pdfDocument.id, pdfDocument.numPages, textSelectAll.selectedAll])
     const selectAllPages = thumbnailSelection.selectAll
     const selectAllText = textSelectAll.selectAll
     // Where the workspace's select-all shortcut lands: the grid holds pages, and
@@ -471,11 +540,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         [notice],
       ),
       onExportError: useCallback(
-        () => notice.raise("exportFailed"),
+        (error: unknown) => notice.raise(exportFailureNotice(error)),
         [notice],
       ),
-      // A byte-opened document adopts its first export's destination as its
-      // source, which is when `path` appears and the save key comes alive.
+      // Save As moves the document to its destination, the tab's name and the
+      // save key with it — for a byte-opened document, the file it never had.
       onExported: useCallback(
         (documentId: number, outcome: PdfExportOutcome) => {
           if (!outcome.savedToSource) {
@@ -524,6 +593,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
           documentRef.current = next
           setPdfDocument(next)
+          hasMergedPagesRef.current = update.hasMergedPages
           setHasMergedPages(update.hasMergedPages)
 
           // Turned where it stands, so every position still holds its page — a
@@ -531,6 +601,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           if (movement === "inPlace") {
             return
           }
+
+          // A note held for its font names the page it was typed on, which
+          // now holds other content: gone is better than landing elsewhere.
+          clearNoteFontOffer()
 
           setThumbnailIdentity(({ keys, nextKey }) =>
             movement
@@ -551,10 +625,51 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             rotationsForPageCount(rotations, update.numPages),
           )
         },
-        [clearThumbnailSelection, pageClipboardStructureChanged],
+        [clearNoteFontOffer, clearThumbnailSelection, pageClipboardStructureChanged],
+      ),
+      onEditRefused: useCallback(
+        () => notice.raise("markWhileEditing"),
+        [notice],
+      ),
+      onLayerProgress: useCallback(
+        (layer: PdfOwnedLayer, progress: PdfProgress | null) => {
+          const kind =
+            layer === "watermark" ? "watermarkRebuilding" : "pageNumbersRebuilding"
+
+          if (progress) {
+            notice.raise(kind, {
+              action: { busy: layerStoppingRef.current, kind: "layerStop" },
+              progress,
+            })
+          } else {
+            layerStoppingRef.current = false
+            notice.retract([kind])
+          }
+        },
+        [notice],
       ),
       onSuccess: clearEditRefusals,
     })
+
+    useLayoutEffect(() => {
+      textEpochsRef.current = annotations.textEpochs
+    }, [annotations.textEpochs])
+
+    // Re-read when an edit changes the text under a standing select-all, so a
+    // copy never hands out the text as it was before the edit.
+    useEffect(() => {
+      if (textSelectAll.selectedAll) {
+        readDocumentText()
+        return
+      }
+
+      const read = plainTextRead.current
+
+      if (read && !read.done && !read.copying) {
+        read.controller.abort()
+        plainTextRead.current = null
+      }
+    }, [annotations.textEpochs, readDocumentText, textSelectAll.selectedAll])
 
     const search = useDocumentSearch({
       active,
@@ -622,17 +737,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // open the one dialog; both openers are stable.
     const openWatermarkDialog = watermark.openDialog
     const openPageNumbersDialog = pageNumbers.openDialog
-    // Printed as the reader has it turned: the rotation is the viewer's own, and
-    // the backend's render of a page knows nothing about it.
-    const rotationAt = useCallback(
-      (pageNumber: number) => rotationForPage(pageRotations, pageNumber),
-      [pageRotations],
-    )
     const print = usePrint({
       documentId: pdfDocument?.id,
       onError: () => notice.raise("printFailed"),
       pages: pdfDocument?.pages ?? [],
-      rotationAt,
     })
     const discardPrint = print.discard
     const startPrint = print.start
@@ -706,19 +814,25 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
 
     const draftDirty = isNoteWorthKeeping(textNote.draft?.text ?? "")
-    const hasUnsavedWorkNow = useCallback(
+    // Changes a save would keep, apart from work still running: a close
+    // prompt words the two differently, and only the first has a save.
+    const hasUnsavedChangesNow = useCallback(
       () =>
         saveRequiredRef.current ||
         annotations.isDirtyNow() ||
-        annotations.hasPendingWorkNow() ||
-        isNoteWorthKeeping(textNote.draft?.text ?? ""),
-      [annotations, textNote.draft?.text],
+        isNoteWorthKeeping(textNote.draft?.text ?? "") ||
+        unfontedEdit !== null,
+      [annotations, textNote.draft?.text, unfontedEdit],
+    )
+    const hasUnsavedWorkNow = useCallback(
+      () => hasUnsavedChangesNow() || annotations.hasPendingWorkNow(),
+      [annotations, hasUnsavedChangesNow],
     )
 
     useEffect(() => {
       onDirtyChange(
         openedDocument.id,
-        saveRequired || annotations.isDirty || draftDirty,
+        saveRequired || annotations.isDirty || draftDirty || unfontedEdit !== null,
       )
     }, [
       annotations.isDirty,
@@ -726,6 +840,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onDirtyChange,
       openedDocument.id,
       saveRequired,
+      unfontedEdit,
     ])
 
     const changeHighlightColor = useCallback((color: HexColor) => {
@@ -733,28 +848,48 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       storeHighlightColor(color)
     }, [])
 
-    const changeRectStyle = useCallback((style: RectStyle) => {
+    // A slider's drag changes the style on every step but is stored once, as
+    // it is let go: each store rewrites the settings file and wakes every window.
+    const changeRectStyle = useCallback((style: RectStyle, transient = false) => {
       setRectStyle(style)
-      storeRectStyle(style)
+
+      if (!transient) {
+        storeRectStyle(style)
+      }
     }, [])
 
-    const changeTextNoteStyle = useCallback((style: TextNoteStyle) => {
-      setTextNoteStyle(style)
-      storeTextNoteStyle(style)
-    }, [])
+    const changeTextNoteStyle = useCallback(
+      (style: TextNoteStyle, transient = false) => {
+        setTextNoteStyle(style)
+
+        if (!transient) {
+          storeTextNoteStyle(style)
+        }
+      },
+      [],
+    )
+
+    // What every export names its file after: a converted or merged
+    // document's own PDF name, else the file the document came from, else the
+    // tab's — never a Word or image source's name with its extension still on.
+    const exportBaseName =
+      saveAsDefaultName ??
+      (pdfDocument.path ? fileNameFromPath(pdfDocument.path) : fileName)
 
     // The destination dialog is the backend's own, so this only says *that* an
     // export happens; `onExportError` reports a failed write.
-    const exportPdf = useCallback(async () => {
-      if (!pdfDocument) {
-        return
-      }
+    const exportPdf = useCallback(() => {
+      // A copy-only document may not go over the file it came from, so its
+      // own name is the one suggestion bound to be refused.
+      const copyOnly =
+        Boolean(documentRef.current?.path) &&
+        (annotations.hasOwnedContentNow() || hasMergedPagesRef.current)
+      const name = copyOnly
+        ? `${exportBaseName.replace(/\.pdf$/i, "")}-${t("annotate.copySuffix")}.pdf`
+        : exportBaseName
 
-      await annotations.exportCopy(
-        saveAsDefaultName ?? t("menu.untitled"),
-        t("annotate.exportFilter"),
-      )
-    }, [annotations, pdfDocument, saveAsDefaultName, t])
+      return annotations.exportCopy(name, t("annotate.exportFilter"))
+    }, [annotations, exportBaseName, t])
 
     useEffect(() => {
       mountedRef.current = true
@@ -764,6 +899,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         queueMicrotask(() => {
           if (!mountedRef.current && documentRef.current) {
+            // Past a close, every page left would read as empty: a copy of that
+            // is worse than none.
+            plainTextRead.current?.controller.abort()
+            forgetDocumentText(documentRef.current.id)
             closePdf(documentRef.current.id)
             documentRef.current = null
           }
@@ -917,6 +1056,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewMode,
       setCurrentPage,
       zoom.zoomPreviewing || restoringRecentView,
+      pdfDocument.pages,
     )
 
     useEffect(() => {
@@ -1025,9 +1165,20 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         return null
       }
 
-      const page = viewer.querySelector<HTMLElement>(
-        `[data-page-number="${currentPage}"]`,
-      )
+      // A scroll only moves this node; find it again when tracking switches
+      // pages or the layout replaces it.
+      let page = recentPageRef.current
+
+      if (
+        !page ||
+        page.dataset.pageNumber !== String(currentPage) ||
+        !viewer.contains(page)
+      ) {
+        page = viewer.querySelector<HTMLElement>(
+          `[data-page-number="${currentPage}"]`,
+        )
+        recentPageRef.current = page
+      }
       const viewerRect = viewer.getBoundingClientRect()
       const pageRect = page?.getBoundingClientRect()
       const anchor = pageRect
@@ -1131,11 +1282,27 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         return
       }
 
-      viewer.addEventListener("scroll", rememberCurrentView, { passive: true })
+      // Wheel events can outnumber paints. Read page geometry once per frame.
+      let frame = 0
+      const scheduleRememberCurrentView = () => {
+        if (frame) {
+          return
+        }
+
+        frame = requestAnimationFrame(() => {
+          frame = 0
+          rememberCurrentView()
+        })
+      }
+
+      viewer.addEventListener("scroll", scheduleRememberCurrentView, {
+        passive: true,
+      })
       rememberCurrentView()
 
       return () => {
-        viewer.removeEventListener("scroll", rememberCurrentView)
+        viewer.removeEventListener("scroll", scheduleRememberCurrentView)
+        cancelAnimationFrame(frame)
       }
     }, [rememberCurrentView])
 
@@ -1198,13 +1365,65 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // disabled save names it there rather than repeating the action's name.
     const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
 
-    // The window's save key runs the button's action, refusal included: a
-    // watermarked or merged document may only ever be exported as a copy.
+    // The toolbar's and menu's action, refusal included: a watermarked or
+    // merged document may only ever be exported as a copy.
     const saveDocument = useCallback(() => {
       if (canSave) {
         void annotations.save()
       }
     }, [annotations, canSave])
+
+    // The save key where the button would be greyed out: a document with no
+    // file asks where to put one, as Save As does; an export-only one says why
+    // the key did nothing, which a tooltip no key press shows cannot.
+    const saveFromKey = useCallback(() => {
+      if (canSave) {
+        void annotations.save()
+      } else if (!hasSourceFile) {
+        void exportPdf()
+      } else if (hasOwnedContent) {
+        notice.raise("saveOwnedContentOnly")
+      } else if (hasMergedPages) {
+        notice.raise("saveMergedOnly")
+      }
+    }, [
+      annotations,
+      canSave,
+      exportPdf,
+      hasMergedPages,
+      hasOwnedContent,
+      hasSourceFile,
+      notice,
+    ])
+
+    // A close prompt's Save: back over the file where the document may be
+    // written there, otherwise Save As — a copy, for an export-only one. True
+    // when the close may go ahead; a cancelled or failed save keeps the tab.
+    const commitTextNote = textNote.commit
+    const saveForClose = useCallback(async () => {
+      // A note held for its missing font cannot be saved; the offer stands.
+      if (unfontedEdit) {
+        return false
+      }
+
+      // Closing the editor keeps what was typed, as clicking away from it does.
+      commitTextNote()
+      await annotations.settled()
+
+      if (!saveRequiredRef.current && !annotations.isDirtyNow()) {
+        return true
+      }
+
+      const writesBack =
+        Boolean(documentRef.current?.path) &&
+        !saveRequiredRef.current &&
+        !annotations.hasOwnedContentNow() &&
+        !hasMergedPagesRef.current
+
+      return writesBack
+        ? annotations.save()
+        : (await exportPdf()) === "saved"
+    }, [annotations, commitTextNote, exportPdf, unfontedEdit])
 
     // Only the session can answer this, so the workspace's save-all is told
     // rather than left to guess from the file name and the dirty flag.
@@ -1243,6 +1462,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       () => ({
         dismissNoteFont: clearNoteFontOffer,
         fetchNoteFont: () => void fetchNoteFont(),
+        hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         onFileDrag: gridDrop.handleFileDrag,
         onPageDrag: gridDrop.handlePageDrag,
@@ -1253,7 +1473,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         rememberViewNow,
         save: saveDocument,
         saveAs: () => void exportPdf(),
+        saveFromKey,
+        saveForClose,
         selectAll,
+        stopLayerWork: () => {
+          layerStoppingRef.current = true
+          void annotations.cancelOperation()
+        },
         showThumbnails,
         snapshotForMove,
         undo: () => {
@@ -1269,11 +1495,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         fetchNoteFont,
         gridDrop.handleFileDrag,
         gridDrop.handlePageDrag,
+        hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         openPageNumbersDialog,
         openWatermarkDialog,
         rememberViewNow,
         saveDocument,
+        saveForClose,
+        saveFromKey,
         search.openSearch,
         selectAll,
         showThumbnails,
@@ -1397,28 +1626,33 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           zoomApplies={zoomApplies}
         />
 
-        {active && imageExportOpen && pdfDocument ? (
+        {/* Mounted while their tab is away too, only hidden: an export still
+            running keeps its progress, its failure, and its busy guard. */}
+        {imageExportOpen && pdfDocument ? (
           <ImageExportDialog
             document={pdfDocument}
-            suggestedName={fileName}
+            hidden={!active}
+            suggestedName={exportBaseName}
             onExport={annotations.exportArchive}
             onClose={() => setImageExportOpen(false)}
           />
         ) : null}
 
-        {active && splitOpen && pdfDocument ? (
+        {splitOpen && pdfDocument ? (
           <SplitPdfDialog
             document={pdfDocument}
-            suggestedName={fileName}
+            hidden={!active}
+            suggestedName={exportBaseName}
             onExport={annotations.exportArchive}
             onClose={() => setSplitOpen(false)}
           />
         ) : null}
 
-        {active && compressOpen && pdfDocument ? (
+        {compressOpen && pdfDocument ? (
           <CompressExportDialog
             document={pdfDocument}
-            suggestedName={fileName}
+            hidden={!active}
+            suggestedName={exportBaseName}
             onExport={annotations.exportCompressed}
             onClose={() => setCompressOpen(false)}
           />
@@ -1454,6 +1688,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           <div className="relative min-w-0 flex-1">
             <main
               className="relative size-full overflow-auto bg-zinc-200/70 dark:bg-zinc-950"
+              data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}
             >
@@ -1491,6 +1726,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 scale={zoom.scale}
                 searchMatchesByPage={search.matchesByPage}
                 activeSearchIndex={search.activeIndex}
+                activeSearchPage={
+                  search.activeIndex === null
+                    ? null
+                    : (search.matches[search.activeIndex]?.pageNumber ?? null)
+                }
                 onCopyAllText={copyDocumentText}
                 textEpochs={annotations.textEpochs}
                 textSelectAll={textSelectAll.selectedAll}
@@ -1527,6 +1767,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           active={active}
           pageCount={pdfDocument?.numPages ?? 0}
           pageNumbers={pageNumbers}
+          previewPage={pdfDocument.pages[0]}
           print={print}
           watermark={watermark}
         />

@@ -7,6 +7,7 @@ import {
   commandPages,
   commandTextPages,
   commit,
+  droppedStashIds,
   emptyHistory,
   fillErasedPages,
   fillInsertFileOutcome,
@@ -14,6 +15,7 @@ import {
   insertPagesRange,
   isDirty,
   markSaved,
+  movesPages,
   nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig as currentPageNumbersConfig,
@@ -32,6 +34,7 @@ import {
   undo,
   watermarkConfig as currentWatermarkConfig,
   type AnnotationCommand,
+  type AnnotationEntry,
   type AnnotationHistory,
   type HighlightCommand,
   type RenderEpochs,
@@ -49,6 +52,7 @@ import type {
 import {
   PdfOperationCancelled,
   type PdfLayerOutcome,
+  type PdfOwnedLayer,
   type PdfProgress,
 } from "@/lib/progress"
 import type { WatermarkConfig } from "@/lib/watermark"
@@ -82,8 +86,14 @@ type UseAnnotationsOptions = {
   /** `command` is the edit that failed, where re-running it is the recovery —
       a note otherwise lost with the editor that held it. Absent for a refusal. */
   onAnnotateError: (error?: unknown, command?: AnnotationCommand) => void
-  onExportError: () => void
+  /** A mark refused because a page-shifting edit is still in flight: it was
+      drawn against pages that edit is about to move. */
+  onEditRefused?: () => void
+  onExportError: (error: unknown) => void
   onExported: (documentId: number, outcome: PdfExportOutcome) => void
+  /** A watermark or page-number undo or redo rebuilding the pages it covers;
+      `null` once it is over, however it ended. */
+  onLayerProgress?: (layer: PdfOwnedLayer, progress: PdfProgress | null) => void
   onSaveError: () => void
   onStructureChange: StructureChangeHandler
   onSuccess: () => void
@@ -310,6 +320,7 @@ async function retractCommand(
   command: AnnotationCommand,
   onStructureChange: StructureChangeHandler,
   marks: MarkStore,
+  onProgress?: ProgressHandler,
 ): Promise<number[]> {
   switch (command.kind) {
     case "watermark":
@@ -317,12 +328,12 @@ async function retractCommand(
         await runOwnedLayerCommand("apply_pdf_watermark", {
           config: command.previous,
           documentId,
-          onProgress: progressChannel(),
+          onProgress: progressChannel(onProgress),
         })
       } else {
         await runOwnedLayerCommand("remove_pdf_watermark", {
           documentId,
-          onProgress: progressChannel(),
+          onProgress: progressChannel(onProgress),
         })
       }
 
@@ -332,12 +343,12 @@ async function retractCommand(
         await runOwnedLayerCommand("apply_pdf_page_numbers", {
           config: command.previous,
           documentId,
-          onProgress: progressChannel(),
+          onProgress: progressChannel(onProgress),
         })
       } else {
         await runOwnedLayerCommand("remove_pdf_page_numbers", {
           documentId,
-          onProgress: progressChannel(),
+          onProgress: progressChannel(onProgress),
         })
       }
 
@@ -430,8 +441,10 @@ export function useAnnotations({
   documentId,
   initial,
   onAnnotateError,
+  onEditRefused,
   onExportError,
   onExported,
+  onLayerProgress,
   onSaveError,
   onStructureChange,
   onSuccess,
@@ -539,8 +552,17 @@ export function useAnnotations({
 
           if (happened) {
             const committed = step.reconcile ? step.reconcile() : step.next
+            const stranded = droppedStashIds(historyRef.current, committed)
             historyRef.current = committed
             setHistory(committed)
+
+            // Unqueued: no later step can name a stash its history dropped.
+            if (stranded.length > 0) {
+              void invoke("discard_pdf_stashes", {
+                documentId,
+                stashIds: stranded,
+              }).catch(() => undefined)
+            }
           }
           onSuccess()
         } catch (error) {
@@ -582,8 +604,10 @@ export function useAnnotations({
       }
 
       // A drawing or note carries the page it was made on; a page-moving edit in
-      // flight would land it on the wrong page. Dropped rather than misplaced.
+      // flight would land it on the wrong page. Refused rather than misplaced,
+      // and said so: the reader's stroke is gone.
       if (structurePendingRef.current > 0) {
+        onEditRefused?.()
         return false
       }
 
@@ -614,7 +638,7 @@ export function useAnnotations({
       )
       return applied
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onEditRefused, onStructureChange],
   )
 
   /** Every structure edit's one path: planned inside the queue, which hands the
@@ -1067,94 +1091,144 @@ export function useAnnotations({
     }
   }, [documentId])
 
-  // Undo and redo count as page-shifting — the entry taken back may be a
-  // structure edit, and peeking at it is no better: a pending edit could change it.
+  /** An undo or redo holds marks back only where its step may shift pages.
+      With the queue idle, the step it will take is the one in view now; with
+      work queued ahead, that work may change it, so it counts regardless. A
+      layer's undo leaves every page where it is — and may run for minutes. */
+  const mayShiftPages = useCallback(
+    (entry: AnnotationEntry | undefined) =>
+      pendingRef.current > 0 ||
+      (entry !== undefined &&
+        (movesPages(entry.command) || entry.command.kind === "rotatePages")),
+    [],
+  )
+
+  /** A layer step reports its rebuild and can be stopped; the stop is the
+      reader's own, so it is not reported back as a failure. */
+  const runHistoryStep = useCallback(
+    async (
+      step: (
+        current: AnnotationHistory,
+      ) => { entry: AnnotationEntry; history: AnnotationHistory } | null,
+      work: (
+        entry: AnnotationEntry,
+        onProgress: ProgressHandler | undefined,
+      ) => Promise<number[]>,
+      shifting: boolean,
+    ) => {
+      if (shifting) {
+        structurePendingRef.current += 1
+      }
+
+      try {
+        await enqueue((current) => {
+          const taken = step(current)
+
+          if (!taken) {
+            return null
+          }
+
+          const { command } = taken.entry
+          const layer =
+            command.kind === "watermark" || command.kind === "pageNumbers"
+              ? command.kind
+              : null
+          let reported: number[] = []
+
+          return {
+            next: taken.history,
+            pages: commandPages(command),
+            textPages: commandTextPages(command),
+            touched: () => reported,
+            work: async () => {
+              // A channel's messages can trail its command's answer; one landing
+              // after the end would put back a standing notice nothing retracts.
+              let over = false
+
+              try {
+                reported = await work(
+                  taken.entry,
+                  layer
+                    ? (progress) => {
+                        if (!over) {
+                          onLayerProgress?.(layer, progress)
+                        }
+                      }
+                    : undefined,
+                )
+              } finally {
+                over = true
+
+                if (layer) {
+                  onLayerProgress?.(layer, null)
+                }
+              }
+
+              return true
+            },
+          }
+        }, (error) => {
+          if (!(error instanceof PdfOperationCancelled)) {
+            onAnnotateError(error)
+          }
+        })
+      } finally {
+        if (shifting) {
+          structurePendingRef.current -= 1
+        }
+      }
+    },
+    [enqueue, onAnnotateError, onLayerProgress],
+  )
+
   const undoCommand = useCallback(async () => {
     if (documentId === undefined) {
       return
     }
 
-    structurePendingRef.current += 1
-
-    try {
-      await enqueue((current) => {
-        const step = undo(current)
-
-        if (!step) {
-          return null
-        }
-
-        let reported: number[] = []
-
-        return {
-          next: step.history,
-          pages: commandPages(step.entry.command),
-          textPages: commandTextPages(step.entry.command),
-          touched: () => reported,
-          work: async () => {
-            reported = await retractCommand(
-              documentId,
-              step.entry.id,
-              step.entry.command,
-              onStructureChange,
-              marksRef.current,
-            )
-
-            return true
-          },
-        }
-      }, onAnnotateError)
-    } finally {
-      structurePendingRef.current -= 1
-    }
-  }, [documentId, enqueue, onAnnotateError, onStructureChange])
+    await runHistoryStep(
+      undo,
+      (entry, onProgress) =>
+        retractCommand(
+          documentId,
+          entry.id,
+          entry.command,
+          onStructureChange,
+          marksRef.current,
+          onProgress,
+        ),
+      mayShiftPages(historyRef.current.past.at(-1)),
+    )
+  }, [documentId, mayShiftPages, onStructureChange, runHistoryStep])
 
   const redoCommand = useCallback(async () => {
     if (documentId === undefined) {
       return
     }
 
-    structurePendingRef.current += 1
-
-    try {
-      await enqueue((current) => {
-        const step = redo(current)
-
-        if (!step) {
-          return null
-        }
-
-        let reported: number[] = []
-
-        return {
-          next: step.history,
-          pages: commandPages(step.entry.command),
-          textPages: commandTextPages(step.entry.command),
-          touched: () => reported,
-          work: async () => {
-            reported = await applyCommand(
-              documentId,
-              step.entry.id,
-              step.entry.command,
-              onStructureChange,
-              marksRef.current,
-            )
-
-            return true
-          },
-        }
-      }, onAnnotateError)
-    } finally {
-      structurePendingRef.current -= 1
-    }
-  }, [documentId, enqueue, onAnnotateError, onStructureChange])
+    await runHistoryStep(
+      redo,
+      (entry, onProgress) =>
+        applyCommand(
+          documentId,
+          entry.id,
+          entry.command,
+          onStructureChange,
+          marksRef.current,
+          onProgress,
+        ),
+      mayShiftPages(historyRef.current.future.at(-1)),
+    )
+  }, [documentId, mayShiftPages, onStructureChange, runHistoryStep])
 
   /** Queued behind the reader's marks, so the file holds what the history says
-      was saved; marked saved only when the write landed on its own file. */
+      was saved; marked saved only when the document is now bound to that file. */
   const exportCopy = useCallback(
     async (suggestedName: string, filterLabel: string) => {
+      let result: "saved" | "cancelled" | "failed" = "cancelled"
+
       if (documentId === undefined) {
-        return
+        return result
       }
 
       await enqueue(
@@ -1173,12 +1247,18 @@ export function useAnnotations({
               return false
             }
 
+            result = "saved"
             onExported(documentId, outcome)
             return outcome.savedToSource
           },
         }),
-        onExportError,
+        (error) => {
+          result = "failed"
+          onExportError(error)
+        },
       )
+
+      return result as "saved" | "cancelled" | "failed"
     },
     [documentId, enqueue, onExported, onExportError],
   )
@@ -1240,8 +1320,10 @@ export function useAnnotations({
   /** Writes the document back over its own file. A clean history is a no-op —
       judged inside the queue, against the history it has actually reached. */
   const save = useCallback(async () => {
+    let saved = true
+
     if (documentId === undefined) {
-      return
+      return saved
     }
 
     await enqueue(
@@ -1257,9 +1339,33 @@ export function useAnnotations({
               },
             }
           : null,
-      onSaveError,
+      () => {
+        saved = false
+        onSaveError()
+      },
     )
+
+    return saved
   }, [documentId, enqueue, onSaveError])
+
+  /** The watermark or page numbers the queue's history holds this instant,
+      which leave the document export-only. */
+  const hasOwnedContentNow = useCallback(
+    () =>
+      currentWatermarkConfig(historyRef.current) !== null ||
+      currentPageNumbersConfig(historyRef.current) !== null,
+    [],
+  )
+
+  /** Resolves once everything queued so far has run: a close deciding what is
+      left to save must not decide against work still on its way. */
+  const settled = useCallback(
+    () => queueRef.current.then(
+      () => undefined,
+      () => undefined,
+    ),
+    [],
+  )
 
   /** Off the ref, not the rendered state: a guard deciding whether marks may be
       discarded must not trust a value that can lag the queue by a render. */
@@ -1312,6 +1418,7 @@ export function useAnnotations({
       exportCopy,
       exportArchive,
       exportCompressed,
+      hasOwnedContentNow,
       hasPendingWorkNow,
       historyNow,
       insertBlankPage,
@@ -1331,6 +1438,7 @@ export function useAnnotations({
       save,
       setPageNumbers,
       setWatermark,
+      settled,
       snapshotForMove,
       textEpochs,
       undo: undoCommand,
@@ -1345,6 +1453,7 @@ export function useAnnotations({
       exportCopy,
       exportArchive,
       exportCompressed,
+      hasOwnedContentNow,
       hasPendingWorkNow,
       history,
       historyNow,
@@ -1362,6 +1471,7 @@ export function useAnnotations({
       save,
       setPageNumbers,
       setWatermark,
+      settled,
       snapshotForMove,
       textEpochs,
       undoCommand,

@@ -13,6 +13,7 @@ use tauri::{
 };
 
 use crate::handoff::{return_pending, HandoffQueue};
+use crate::launch::reroute_launches;
 use crate::pdfium::PdfiumState;
 
 pub const FOCUS_DOCUMENT_EVENT: &str = "workspace://focus-document";
@@ -23,6 +24,7 @@ const CASCADE_STEP: f64 = 32.0;
 pub struct AppWindows {
     next_label: AtomicU64,
     last_focused: Mutex<Option<String>>,
+    pages: Mutex<HashMap<String, u64>>,
 }
 
 impl Default for AppWindows {
@@ -31,14 +33,61 @@ impl Default for AppWindows {
             // Reusing labels would let delayed events from a closed window target a new one.
             next_label: AtomicU64::new(2),
             last_focused: Mutex::new(None),
+            pages: Mutex::new(HashMap::new()),
         }
     }
 }
+
+/// Which of a window's page loads a command started under. A reload releases
+/// the window's documents as the new page starts, so a document an older page
+/// asked for would land in a page that no longer knows of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageGeneration(u64);
 
 impl AppWindows {
     fn next_label(&self) -> String {
         format!("window-{}", self.next_label.fetch_add(1, Ordering::Relaxed))
     }
+
+    fn page(&self, label: &str) -> PageGeneration {
+        PageGeneration(
+            self.pages
+                .lock()
+                .ok()
+                .and_then(|pages| pages.get(label).copied())
+                .unwrap_or(0),
+        )
+    }
+
+    fn start_page(&self, label: &str) {
+        if let Ok(mut pages) = self.pages.lock() {
+            *pages.entry(label.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    fn forget_page(&self, label: &str) {
+        if let Ok(mut pages) = self.pages.lock() {
+            pages.remove(label);
+        }
+    }
+}
+
+/// Captured when a command that opens a document starts, for `record_document`.
+pub fn page_generation(window: &WebviewWindow) -> PageGeneration {
+    window
+        .try_state::<AppWindows>()
+        .map(|windows| windows.page(window.label()))
+        .unwrap_or(PageGeneration(0))
+}
+
+/// The page before this one is gone with everything it held: counted first,
+/// so an open still in flight from it sees the change when it lands.
+pub fn page_started(app: &AppHandle, label: &str) {
+    if let Some(windows) = app.try_state::<AppWindows>() {
+        windows.start_page(label);
+    }
+
+    release_window(app, label);
 }
 
 pub fn remember_focus(app: &AppHandle, label: &str) {
@@ -61,7 +110,17 @@ fn set_last_focused(app: &AppHandle, next: impl FnOnce(Option<String>) -> Option
 }
 
 pub fn focus_target(app: &AppHandle) -> Option<WebviewWindow> {
-    let windows = app.webview_windows();
+    focus_target_except(app, None)
+}
+
+/// A window whose `Destroyed` is running may still be listed, and must not be
+/// the answer for what it leaves behind.
+pub fn focus_target_except(app: &AppHandle, gone: Option<&str>) -> Option<WebviewWindow> {
+    let mut windows = app.webview_windows();
+
+    if let Some(gone) = gone {
+        windows.remove(gone);
+    }
 
     if let Some(focused) = windows
         .values()
@@ -76,7 +135,7 @@ pub fn focus_target(app: &AppHandle) -> Option<WebviewWindow> {
             let last_focused = state.last_focused.lock().ok()?;
             last_focused.clone()
         })
-        .and_then(|label| app.get_webview_window(&label));
+        .and_then(|label| windows.get(&label).cloned());
 
     if last_focused.is_some() {
         return last_focused;
@@ -183,6 +242,26 @@ impl DocumentOwners {
         }
     }
 
+    /// Checks the page after recording, never before: a reload counted
+    /// between the two is then seen here, or its release finds the record.
+    fn record_for_page(
+        &self,
+        windows: &AppWindows,
+        label: &str,
+        page: PageGeneration,
+        document_id: u64,
+        path: Option<PathBuf>,
+    ) -> bool {
+        self.record(document_id, label, path);
+
+        if windows.page(label) == page {
+            return true;
+        }
+
+        self.release(document_id);
+        false
+    }
+
     pub fn release(&self, document_id: u64) {
         if let Ok(mut owners) = self.0.lock() {
             owners.remove(&document_id);
@@ -255,18 +334,25 @@ impl DocumentOwners {
     }
 }
 
-/// An open may finish after `Destroyed` has already released the window’s documents.
+/// An open may finish after `Destroyed` or a reload has already released the
+/// window’s documents; then it closes what it opened rather than leak it.
 pub fn record_document(
     owners: &DocumentOwners,
     window: &WebviewWindow,
+    page: PageGeneration,
     document_id: u64,
     path: Option<PathBuf>,
 ) {
-    owners.record(document_id, window.label(), path);
-
     let app = window.app_handle();
+    let recorded = app.try_state::<AppWindows>().is_none_or(|windows| {
+        owners.record_for_page(&windows, window.label(), page, document_id, path)
+    });
 
-    if app.get_webview_window(window.label()).is_none() {
+    if !recorded {
+        if let Some(pdfium) = app.try_state::<PdfiumState>() {
+            pdfium.close_document_detached(document_id);
+        }
+    } else if app.get_webview_window(window.label()).is_none() {
         window_gone(app, window.label());
     }
 }
@@ -276,18 +362,26 @@ pub fn window_gone(app: &AppHandle, label: &str) {
     return_pending(app, label);
     release_window(app, label);
     forget_focus(app, label);
+    reroute_launches(app, label);
+
+    if let Some(windows) = app.try_state::<AppWindows>() {
+        windows.forget_page(label);
+    }
 }
 
-/// Destroy and reload cannot wait for frontend unmount handlers to close documents.
+/// Destroy and reload cannot wait for frontend unmount handlers to close
+/// documents, nor stop the merge or conversion the page was waiting on.
 /// A handoff still waiting on this window keeps its documents: the window is
 /// only reloading, and its take after boot completes what the move began.
-pub fn release_window(app: &AppHandle, label: &str) {
+fn release_window(app: &AppHandle, label: &str) {
     let (Some(owners), Some(pdfium)) = (
         app.try_state::<DocumentOwners>(),
         app.try_state::<PdfiumState>(),
     ) else {
         return;
     };
+
+    pdfium.cancel_window_work(label);
 
     let pending = app
         .try_state::<HandoffQueue>()
@@ -446,6 +540,38 @@ mod tests {
 
         // Nobody's document goes nowhere.
         assert_eq!(owners.transfer(7, "main", "window-2"), None);
+    }
+
+    #[test]
+    fn a_document_landing_after_a_reload_is_not_recorded() {
+        let windows = AppWindows::default();
+        let owners = DocumentOwners::default();
+        windows.start_page("main");
+
+        let page = windows.page("main");
+        assert!(owners.record_for_page(&windows, "main", page, 1, None));
+        assert!(owners.owns(1, "main"));
+
+        windows.start_page("main");
+        assert!(
+            !owners.record_for_page(&windows, "main", page, 2, None),
+            "the page that asked for it is gone"
+        );
+        assert!(!owners.owns(2, "main"));
+        assert!(owners.owns(1, "main"), "a record made earlier stands");
+    }
+
+    #[test]
+    fn counts_each_window_s_pages_apart() {
+        let windows = AppWindows::default();
+        windows.start_page("main");
+        let main = windows.page("main");
+
+        windows.start_page("window-2");
+        assert_eq!(windows.page("main"), main);
+
+        windows.forget_page("main");
+        assert_ne!(windows.page("main"), main);
     }
 
     #[test]

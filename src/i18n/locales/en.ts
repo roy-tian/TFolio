@@ -43,6 +43,23 @@ const en = {
       "One or more open documents have changes that are not saved. Closing them all will discard those changes.",
     discardAndCloseTab: "Discard and close tab",
     discardAndCloseAll: "Discard and close all",
+    saveBeforeClose: "Save",
+    unsavedQuitDescription:
+      "Open documents have changes that are not saved. Quitting will discard them.",
+    unsavedQuitElsewhereDescription:
+      "Another window has changes that are not saved, or did not answer. Quitting will discard them.",
+    unsavedQuitHereAndElsewhereDescription:
+      "Open documents here have changes that are not saved, and another window has some too or did not answer. Quitting will discard them all.",
+    discardAndQuit: "Discard and quit",
+    busyTitle: "Stop the work in progress?",
+    busyTabDescription:
+      "An edit or export is still running on this document. Closing its tab stops it.",
+    busyAllDescription:
+      "An edit or export is still running on an open document. Closing stops it.",
+    busyQuitDescription:
+      "An edit or export is still running on an open document. Quitting stops it.",
+    stopAndClose: "Stop and close",
+    stopAndQuit: "Stop and quit",
     moveToNewWindow: "Move to new window",
     hoverTitle: "Drop to move \u201c{{name}}\u201d here",
     hoverHint: "Its pages, edits, and history come with it",
@@ -100,26 +117,27 @@ const en = {
     failed: "Export failed. Check the destination and available disk space, then try again.",
   },
   compressExport: {
-    menuLabel: "Compress and Save…",
-    title: "Compress and Save",
-    description: "Write a smaller copy of the current document.",
-    mode: "Compression",
-    lossless: "Lossless compression",
-    losslessHint: "Rewrites the file with a compressed structure. Text stays selectable; savings are usually modest.",
-    rasterized: "Rasterize pages (highest savings)",
-    rasterizedHint: "Redraws every page as a JPEG image. Much smaller, but text is no longer selectable or searchable.",
-    dpi: "Resolution",
-    quality: "Image quality",
+    menuLabel: "Reduce File Size…",
+    title: "Reduce File Size",
+    description: "Compresses the file's structure and images automatically. Text stays selectable and searchable.",
+    imageQuality: "Image resolution",
+    imageQualityHint: "Images sharper than the chosen resolution are downsampled. Text and vector graphics are never affected.",
+    imageLevels: {
+      original: "Keep original images",
+      high: "High · 300 dpi",
+      medium: "Medium · 150 dpi",
+      low: "Low · 96 dpi",
+    },
     filter: "PDF document",
     suffix: "compressed",
-    estimate: "Estimated size: {{size}} (currently {{original}}, about {{percent}}% smaller)",
-    estimateNoSaving: "Estimated size: {{size}} (currently {{original}}, may not be smaller)",
+    estimate: "Estimated size: {{size}} ({{percent}}% smaller)",
+    estimateNoSaving: "Estimated size: {{size}} (no smaller than the current file)",
     estimating: "Estimating size…",
     estimateFailed: "Could not estimate the size.",
     preparing: "Compressing…",
     cancel: "Cancel",
     stopping: "Cancelling…",
-    save: "Compress and Save",
+    save: "Save Copy",
     failed: "Compression failed. Check the destination and available disk space, then try again.",
   },
   menu: {
@@ -158,6 +176,7 @@ const en = {
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
     rotate: "Rotate clockwise",
+    rotateView: "Rotate the view clockwise",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
     zoomLevel: "Zoom {{percent}}%",
@@ -258,7 +277,20 @@ const en = {
     saveFailed: "This PDF could not be saved.",
     exportFilter: "PDF file",
     exportFailed: "This PDF could not be exported.",
+    exportTargetOpen:
+      "That file is open in another tab. Close it there first, or save under another name.",
     failed: "That edit could not be applied.",
+    copySuffix: "copy",
+    exportCopyOnly:
+      "This document can only be exported as a copy, so it cannot go over the file it was saved to. Choose another name.",
+    exportDenied:
+      "That location cannot be written — the file or folder may be read-only, or the file open in another program. Choose another.",
+    markWhileEditing:
+      "A page edit is still running — that mark was not kept. Try again in a moment.",
+    watermarkRebuilding: "Updating the watermark…",
+    pageNumbersRebuilding: "Updating the page numbers…",
+    layerStop: "Stop",
+    layerStopping: "Stopping…",
     dropWhileEditing:
       "Another page edit is still running — try the drop again in a moment.",
     dropIgnoredFiles_one:
@@ -267,8 +299,6 @@ const en = {
       "{{count}} dropped files were not inserted: only PDFs insert as pages.",
   },
   watermark: {
-    rasterize: "Convert pages to images",
-    rasterizeHint: "On export, combine page content and watermarks into images. Text can no longer be directly edited, selected, searched or copied. File size may increase.",
     open: "Watermark",
     title: "Document watermark",
     description: "Add one text watermark across every page of this PDF.",
@@ -377,6 +407,9 @@ const en = {
     openFailed: "This file could not be opened.",
     wordUnavailable:
       "Opening Word documents needs Word, WPS, or LibreOffice installed.",
+    wordConverting: "Converting {{name}} to PDF…",
+    wordConvertStop: "Stop",
+    wordConvertStopping: "Stopping…",
     unsavedTitle: "Discard unsaved changes?",
     unsavedDescription:
       "The open document has annotations that are not saved. Opening another PDF will discard them.",
@@ -506,7 +539,7 @@ const en = {
   },
   about: {
     title: "TFolio",
-    description: "A focused desktop workspace for reading and editing PDF files.",
+    description: "Your PDF work companion, always at hand",
     version: "Version {{version}}",
     /** Only while releases are internal: a stable one drops this key and its use. */
     prerelease: "(internal beta)",

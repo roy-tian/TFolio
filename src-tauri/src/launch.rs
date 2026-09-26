@@ -13,7 +13,7 @@ use crate::{
     convert::is_word_document,
     pdfium::{is_merge_image, PdfiumState},
     recent::is_recordable,
-    windows::focus_target,
+    windows::{focus_target, focus_target_except},
 };
 
 /// Carries nothing: the paths cross the boundary once, by the command that
@@ -41,6 +41,22 @@ impl LaunchQueue {
 
         taken
     }
+
+    /// Moves what waited on a window that is gone to `to`, or to whichever
+    /// window asks next; answers whether there was anything to move.
+    fn reroute(&self, from: &str, to: Option<String>) -> bool {
+        let Ok(mut queued) = self.0.lock() else {
+            return false;
+        };
+
+        match queued.remove(&Some(from.to_string())) {
+            Some(paths) if !paths.is_empty() => {
+                queued.entry(to).or_default().extend(paths);
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Return the queued target so a focus change cannot make the caller raise another window.
@@ -67,6 +83,22 @@ pub fn queue_open(app: &AppHandle, paths: Vec<PathBuf>) -> Option<WebviewWindow>
     }
 
     target
+}
+
+/// A launch queued for a window that closed before taking it goes where a
+/// new launch would go now, or else waits for the next window to ask.
+pub fn reroute_launches(app: &AppHandle, gone: &str) {
+    let Some(queue) = app.try_state::<LaunchQueue>() else {
+        return;
+    };
+
+    let label = focus_target_except(app, Some(gone)).map(|window| window.label().to_string());
+
+    if queue.reroute(gone, label.clone()) {
+        if let Some(label) = label {
+            let _ = app.emit_to(label.as_str(), OPEN_REQUESTED_EVENT, ());
+        }
+    }
 }
 
 /// Arguments this app cannot open are left alone rather than refused — a
@@ -269,6 +301,33 @@ mod tests {
             vec![PathBuf::from("/tmp/second.pdf")]
         );
         assert_eq!(queue.take("main"), vec![PathBuf::from("/tmp/first.pdf")]);
+    }
+
+    #[test]
+    fn hands_a_gone_window_s_launches_to_another() {
+        let queue = LaunchQueue::default();
+        queue.extend(Some("window-2".into()), vec![PathBuf::from("/tmp/a.pdf")]);
+        queue.extend(Some("main".into()), vec![PathBuf::from("/tmp/b.pdf")]);
+
+        assert!(queue.reroute("window-2", Some("main".into())));
+        assert!(queue.take("window-2").is_empty());
+        assert_eq!(
+            queue.take("main"),
+            vec![PathBuf::from("/tmp/b.pdf"), PathBuf::from("/tmp/a.pdf")]
+        );
+    }
+
+    #[test]
+    fn holds_a_gone_window_s_launches_for_the_next_asker() {
+        let queue = LaunchQueue::default();
+        queue.extend(Some("main".into()), vec![PathBuf::from("/tmp/a.pdf")]);
+
+        assert!(queue.reroute("main", None));
+        assert_eq!(queue.take("window-3"), vec![PathBuf::from("/tmp/a.pdf")]);
+        assert!(
+            !queue.reroute("window-4", None),
+            "a window with nothing queued moves nothing"
+        );
     }
 
     #[test]

@@ -5031,6 +5031,7 @@ dependencies = [
  "fontdb",
  "getrandom 0.4.3",
  "image",
+ "libc",
  "lopdf",
  "minisign-verify",
  "pdfium-render",

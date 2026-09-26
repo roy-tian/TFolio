@@ -172,6 +172,50 @@ fn a_stopped_replacement_keeps_the_numbers_it_had() {
 
 #[test]
 #[ignore = "requires `bun run fonts:download`"]
+fn a_replacement_checks_the_owned_tails_first_and_stops_there() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number every page");
+
+    let mut replacement = page_numbers_config();
+    replacement.start = Some(10);
+    let mut progress = Vec::new();
+
+    engine
+        .apply_page_numbers_with_progress(document.id, replacement.clone(), |completed, total| {
+            progress.push((completed, total))
+        })
+        .expect("PDFium should renumber every page");
+
+    // Two pages, checked once and rebuilt in two passes: one run of six.
+    assert_eq!(progress.first(), Some(&(0, 6)));
+    assert_eq!(progress.last(), Some(&(6, 6)));
+    assert!(progress.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+
+    // Stopped at once: the check is what it lands in, before any page moves.
+    replacement.start = Some(20);
+    let applied = engine
+        .apply_page_numbers_with_progress(document.id, replacement, |_, _| {
+            engine.cancel_operation(OperationTarget::Document(document.id));
+        })
+        .expect("a stopped check is not a failure");
+
+    assert!(!applied, "a stopped check reports that nothing landed");
+
+    let text = extracted_text(engine, document.id, 1);
+    assert!(
+        text.contains("10") && !text.contains("20"),
+        "page one should keep the numbering it had, got {text:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
 fn numbers_only_the_selected_range() {
     let engine = test_engine();
     let document = engine

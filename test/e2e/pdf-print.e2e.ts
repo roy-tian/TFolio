@@ -13,9 +13,8 @@ type PrintSeam = Window & {
 type SheetPage = {
   complete: boolean
   naturalWidth: number
+  naturalHeight: number
   src: string
-  transform: string
-  width: string
 }
 
 /** Counts the dialog requests instead of opening one: the real dialog is the
@@ -51,10 +50,9 @@ async function printAndReadSheet(): Promise<SheetPage[]> {
       ...document.querySelectorAll<HTMLImageElement>("[data-print-sheet] img"),
     ].map((image) => ({
       complete: image.complete,
+      naturalHeight: image.naturalHeight,
       naturalWidth: image.naturalWidth,
       src: image.src.slice(0, 22),
-      transform: image.style.transform,
-      width: image.style.width,
     })),
   )
 }
@@ -90,7 +88,6 @@ describe("TFolio printing", () => {
       expect(page.complete).toBe(true)
       expect(page.naturalWidth).toBeGreaterThan(100)
       expect(page.src).toBe("data:image/png;base64,")
-      expect(page.transform).toBe("translate(-50%, -50%) rotate(0deg)")
     }
   })
 
@@ -102,17 +99,39 @@ describe("TFolio printing", () => {
     expect(violations).toEqual([])
   })
 
-  it("carries the reader's own rotation onto the sheet", async () => {
-    await $("button[aria-label='Rotate clockwise']").click()
+  it("prints the document as saved, however the reading view is turned", async () => {
+    await $("button[aria-label='Rotate the view clockwise']").click()
 
     const sheet = await printAndReadSheet()
 
     expect(sheet).toHaveLength(3)
 
+    // The fixture's pages are portrait, and a view rotation is not the page's.
     for (const page of sheet) {
-      expect(page.transform).toBe("translate(-50%, -50%) rotate(90deg)")
-      // A quarter turn is fitted into the sheet's own height, then turned back.
-      expect(page.width).toBe("100cqh")
+      expect(page.naturalHeight).toBeGreaterThan(page.naturalWidth)
     }
+  })
+
+  it("lets the sheet go once the print is over and the reader is back", async () => {
+    expect(await printAndReadSheet()).toHaveLength(3)
+
+    const sheetImages = () =>
+      browser.execute(
+        () => document.querySelectorAll("[data-print-sheet] img").length,
+      )
+
+    // A press before the print has run is not the reader coming back from it.
+    await browser.execute(() =>
+      window.dispatchEvent(new PointerEvent("pointerdown")),
+    )
+    expect(await sheetImages()).toBe(3)
+
+    await browser.execute(() => {
+      window.dispatchEvent(new Event("afterprint"))
+      window.dispatchEvent(new PointerEvent("pointerdown"))
+    })
+    await browser.waitUntil(async () => (await sheetImages()) === 0, {
+      timeoutMsg: "the printed sheet outlived the print",
+    })
   })
 })
