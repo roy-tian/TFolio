@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { documentPlainText } from "@/lib/documentText"
+import { isAbortError } from "@/lib/pageWork"
 
 type Stub = {
   asked: number[]
@@ -69,6 +70,17 @@ describe("documentPlainText", () => {
   it("leaves out a page the backend refuses rather than losing the rest", async () => {
     await withPageText(["first", null, "third"], async () => {
       expect(await documentPlainText(7, 3)).toBe("first\n\nthird")
+    })
+  })
+  it("stops between pages once the selection is let go", async () => {
+    await withPageText(["first", "second", "third"], async (stub) => {
+      const letGo = new AbortController()
+      const reading = documentPlainText(7, 3, letGo.signal)
+
+      letGo.abort()
+
+      expect(isAbortError(await reading.catch((error) => error))).toBe(true)
+      expect(stub.asked.length).toBeLessThan(3)
     })
   })
 })

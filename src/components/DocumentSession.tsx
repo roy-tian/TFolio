@@ -60,6 +60,7 @@ import {
   movesPages,
   type AnnotationCommand,
   type HexColor,
+  type RenderEpochs,
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
@@ -67,6 +68,7 @@ import { copyPlainText } from "@/lib/clipboard"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
+import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals } from "@/lib/notices"
 import {
   formatPageRanges,
@@ -443,27 +445,72 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
     // Fetched as the selection is made, not when the copy asks: the clipboard
     // write must land inside its keypress, and a long document's text is slow.
-    const selectedText = useRef<Promise<string> | null>(null)
-    const copyDocumentText = useCallback(() => {
-      const pending =
-        selectedText.current ??
-        documentPlainText(pdfDocument.id, pdfDocument.numPages)
+    // One read per text version: a repeated select-all reuses it, and a
+    // selection let go stops a read still under way — unless a copy waits on it.
+    const plainTextRead = useRef<{
+      controller: AbortController
+      copying: boolean
+      done: boolean
+      epochs: RenderEpochs | null
+      numPages: number
+      text: Promise<string>
+    } | null>(null)
+    // Written once the annotations below exist; read when a select-all asks.
+    const textEpochsRef = useRef<RenderEpochs | null>(null)
+    const readDocumentText = useCallback(() => {
+      const textEpochs = textEpochsRef.current
+      const last = plainTextRead.current
 
-      selectedText.current = pending
-      void pending.then(copyPlainText)
+      if (
+        last &&
+        last.epochs === textEpochs &&
+        last.numPages === pdfDocument.numPages &&
+        (last.done || !last.controller.signal.aborted)
+      ) {
+        return last
+      }
+
+      // A copy already asked for the older text: it still gets it.
+      if (last && !last.copying) {
+        last.controller.abort()
+      }
+
+      const controller = new AbortController()
+      const read = {
+        controller,
+        copying: false,
+        done: false,
+        epochs: textEpochs,
+        numPages: pdfDocument.numPages,
+        text: documentPlainText(
+          pdfDocument.id,
+          pdfDocument.numPages,
+          controller.signal,
+        ),
+      }
+
+      read.text.then(
+        () => {
+          read.done = true
+        },
+        () => undefined,
+      )
+      plainTextRead.current = read
+
+      return read
     }, [pdfDocument.id, pdfDocument.numPages])
+    const copyDocumentText = useCallback(() => {
+      const read = readDocumentText()
+
+      read.copying = true
+      void read.text.then(copyPlainText).catch(() => undefined)
+    }, [readDocumentText])
     // The page views' half of a select-all; the grid's half is the selection
     // above, and the view in front decides which of the two answers.
     const textSelectAll = useTextSelectAll({
       active: active && viewMode !== "thumbnail",
       onCopy: copyDocumentText,
     })
-
-    useEffect(() => {
-      selectedText.current = textSelectAll.selectedAll
-        ? documentPlainText(pdfDocument.id, pdfDocument.numPages)
-        : null
-    }, [pdfDocument.id, pdfDocument.numPages, textSelectAll.selectedAll])
     const selectAllPages = thumbnailSelection.selectAll
     const selectAllText = textSelectAll.selectAll
     // Where the workspace's select-all shortcut lands: the grid holds pages, and
@@ -603,6 +650,26 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       ),
       onSuccess: clearEditRefusals,
     })
+
+    useLayoutEffect(() => {
+      textEpochsRef.current = annotations.textEpochs
+    }, [annotations.textEpochs])
+
+    // Re-read when an edit changes the text under a standing select-all, so a
+    // copy never hands out the text as it was before the edit.
+    useEffect(() => {
+      if (textSelectAll.selectedAll) {
+        readDocumentText()
+        return
+      }
+
+      const read = plainTextRead.current
+
+      if (read && !read.done && !read.copying) {
+        read.controller.abort()
+        plainTextRead.current = null
+      }
+    }, [annotations.textEpochs, readDocumentText, textSelectAll.selectedAll])
 
     const search = useDocumentSearch({
       active,
@@ -828,6 +895,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         queueMicrotask(() => {
           if (!mountedRef.current && documentRef.current) {
+            // Past a close, every page left would read as empty: a copy of that
+            // is worse than none.
+            plainTextRead.current?.controller.abort()
+            forgetDocumentText(documentRef.current.id)
             closePdf(documentRef.current.id)
             documentRef.current = null
           }

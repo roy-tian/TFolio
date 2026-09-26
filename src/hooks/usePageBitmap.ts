@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
+import { distanceFromView, pageWork } from "@/lib/pageWork"
 import { resolveOutputScale } from "@/lib/pdf"
 
 type PageBitmapOptions = {
@@ -24,6 +25,9 @@ type PageBitmapOptions = {
    * at the same width, which nothing else about the request would reveal.
    */
   renderEpoch: number
+  /** False once the page is far enough off screen to give its pixels back:
+      a canvas keeps its whole backing store while it stays mounted. */
+  retainBitmap?: boolean
   rotation: number
   targetWidth: number
 }
@@ -41,6 +45,7 @@ export function usePageBitmap({
   pageNumber,
   pageWidth,
   renderEpoch,
+  retainBitmap = true,
   rotation,
   targetWidth,
 }: PageBitmapOptions) {
@@ -90,12 +95,18 @@ export function usePageBitmap({
       return
     }
 
+    const leaving = new AbortController()
+
     const renderPage = async () => {
-      const bytes = await invoke<ArrayBuffer>(command, {
-        documentId,
-        pageNumber,
-        width: renderWidth,
-      })
+      const bytes = await pageWork.schedule(
+        () =>
+          invoke<ArrayBuffer>(command, {
+            documentId,
+            pageNumber,
+            width: renderWidth,
+          }),
+        { priority: () => distanceFromView(canvas), signal: leaving.signal },
+      )
 
       if (cancelled) {
         return
@@ -138,6 +149,7 @@ export function usePageBitmap({
 
     return () => {
       cancelled = true
+      leaving.abort()
     }
   }, [
     canvasRef,
@@ -154,6 +166,27 @@ export function usePageBitmap({
     rotation,
     targetWidth,
   ])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+
+    // A hidden tab reports every cell out of view; it is away, not far, and
+    // clearing would re-render the whole grid on the way back.
+    if (
+      retainBitmap ||
+      !canvas ||
+      lastRenderRef.current === null ||
+      canvas.getClientRects().length === 0
+    ) {
+      return
+    }
+
+    // Zero-sized drops the backing store; coming back renders it again.
+    canvas.width = 0
+    canvas.height = 0
+    lastRenderRef.current = null
+    setHasRendered(false)
+  }, [canvasRef, retainBitmap])
 
   return { bitmapRevision, hasRendered, renderFailed }
 }

@@ -12,6 +12,8 @@ import { useSelectionBands } from "@/hooks/useSelectionBands"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview as HeldNote } from "@/hooks/useTextNoteTool"
 import { mergeRectsByLine } from "@/lib/annotationGeometry"
+import { cachedPageText, rememberPageText } from "@/lib/pageText"
+import { distanceFromView, pageWork } from "@/lib/pageWork"
 import {
   dimensionsForRotation,
   MAX_RENDER_WIDTH,
@@ -147,16 +149,35 @@ const PdfPageSurface = memo(function PdfPageSurface({
   })
 
   useEffect(() => {
+    const cached = cachedPageText(documentId, pageNumber, textEpoch)
+
+    if (cached) {
+      setTextSpans(cached)
+      return
+    }
+
     let cancelled = false
+    const leaving = new AbortController()
     // A text epoch means these spans no longer describe the page's selectable
     // content; do not leave stale runs clickable while PDFium extracts anew.
     setTextSpans([])
 
-    void invoke<PdfTextSpan[]>("extract_pdf_page_text", {
-      documentId,
-      pageNumber,
-    })
+    // Just behind its own page's render, ahead of any page further away.
+    void pageWork
+      .schedule(
+        () =>
+          invoke<PdfTextSpan[]>("extract_pdf_page_text", {
+            documentId,
+            pageNumber,
+          }),
+        {
+          priority: () => distanceFromView(surfaceRef.current) + 1,
+          signal: leaving.signal,
+        },
+      )
       .then((spans) => {
+        rememberPageText(documentId, pageNumber, textEpoch, spans)
+
         if (!cancelled) {
           setTextSpans(spans)
         }
@@ -169,6 +190,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
 
     return () => {
       cancelled = true
+      leaving.abort()
     }
   }, [documentId, pageNumber, textEpoch])
 

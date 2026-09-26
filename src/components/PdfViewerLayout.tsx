@@ -364,7 +364,8 @@ function DragGhost({
     const canvas = canvasRef.current
     const context = canvas?.getContext("2d")
 
-    if (!source || !canvas || !context) {
+    // A cell far off screen has let its pixels go: nothing to copy.
+    if (!source || !canvas || !context || source.width === 0 || source.height === 0) {
       return
     }
 

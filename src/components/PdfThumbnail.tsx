@@ -13,6 +13,9 @@ import { THUMBNAIL_CAPTION_HEIGHT } from "@/lib/viewMode"
 // Many cells share a row; preloading whole rows would queue dozens of PDFium
 // renders at once. Keep the grid's window to what is visible.
 const THUMBNAIL_ROOT_MARGIN = "0px"
+// The grid is not virtualized, so a scrolled-past cell would keep its pixels
+// for as long as the tab is open; well away from the view it lets them go.
+const THUMBNAIL_RETAIN_MARGIN = "1500px 0px"
 
 type PdfThumbnailProps = {
   /** Whether the keep-one-page rule forbids this delete — the sole page, or a
@@ -61,6 +64,7 @@ export function PdfThumbnail({
   const wrapperRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const isNearViewport = useNearViewport(wrapperRef, THUMBNAIL_ROOT_MARGIN)
+  const retainBitmap = useNearViewport(wrapperRef, THUMBNAIL_RETAIN_MARGIN)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -73,6 +77,7 @@ export function PdfThumbnail({
     pageNumber,
     pageWidth,
     renderEpoch,
+    retainBitmap,
     rotation,
     targetWidth: width,
   })
