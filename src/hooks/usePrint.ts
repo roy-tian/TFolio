@@ -22,7 +22,9 @@ type PrintOptions = {
 
 /**
  * The sheet stays after the dialog opens: nothing reports when the job has
- * drawn, so taking the pages back out would print blank paper.
+ * drawn, so taking the pages back out would print blank paper. It goes once
+ * `afterprint` has fired and the reader is back in the window — the dialog,
+ * and the job it ran, are over by then.
  */
 export function usePrint({
   documentId,
@@ -144,10 +146,21 @@ export function usePrint({
       }
     })
 
+    const release = () => discard()
+    const releaseOnReturn = () => {
+      window.addEventListener("pointerdown", release, { capture: true, once: true })
+      window.addEventListener("keydown", release, { capture: true, once: true })
+    }
+
+    window.addEventListener("afterprint", releaseOnReturn, { once: true })
+
     return () => {
       cancelled = true
+      window.removeEventListener("afterprint", releaseOnReturn)
+      window.removeEventListener("pointerdown", release, { capture: true })
+      window.removeEventListener("keydown", release, { capture: true })
     }
-  }, [sheet])
+  }, [discard, sheet])
 
   return { discard, preparing, progress, sheet, start }
 }

@@ -115,4 +115,27 @@ describe("TFolio printing", () => {
       expect(page.width).toBe("100cqh")
     }
   })
+
+  it("lets the sheet go once the print is over and the reader is back", async () => {
+    expect(await printAndReadSheet()).toHaveLength(3)
+
+    const sheetImages = () =>
+      browser.execute(
+        () => document.querySelectorAll("[data-print-sheet] img").length,
+      )
+
+    // A press before the print has run is not the reader coming back from it.
+    await browser.execute(() =>
+      window.dispatchEvent(new PointerEvent("pointerdown")),
+    )
+    expect(await sheetImages()).toBe(3)
+
+    await browser.execute(() => {
+      window.dispatchEvent(new Event("afterprint"))
+      window.dispatchEvent(new PointerEvent("pointerdown"))
+    })
+    await browser.waitUntil(async () => (await sheetImages()) === 0, {
+      timeoutMsg: "the printed sheet outlived the print",
+    })
+  })
 })
