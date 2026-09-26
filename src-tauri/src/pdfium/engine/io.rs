@@ -44,7 +44,12 @@ pub(super) fn write_file_atomically(
         .create_new(true)
         .write(true)
         .open(&temporary)
-        .map_err(|error| format!("could not write beside {}: {error}", path.display()))?;
+        .map_err(|error| {
+            write_error(
+                &error,
+                format!("could not write beside {}: {error}", path.display()),
+            )
+        })?;
 
     // Through the handle `create_new` proved ours, never by name again: in that
     // gap the path could be swapped for a symlink, and save_to_file opens by path.
@@ -74,7 +79,12 @@ pub(super) fn write_file_atomically(
         }
 
         fs::rename(&temporary, path)
-            .map_err(|error| format!("could not write to {}: {error}", path.display()))
+            .map_err(|error| {
+                write_error(
+                    &error,
+                    format!("could not write to {}: {error}", path.display()),
+                )
+            })
             .map(|()| true)
     });
 
@@ -150,6 +160,28 @@ pub(super) fn is_open_document_file(
 /// A wire value the frontend matches verbatim (`EXPORT_TARGET_OPEN` in
 /// `src/lib/pdf.ts`), not a message.
 pub(super) const EXPORT_TARGET_OPEN_ERROR: &str = "tfolio:export-target-open";
+
+/// A copy-only document asked to write over its own file — the one a
+/// sourceless document adopted on its first export included. Matched as
+/// `EXPORT_COPY_ONLY` in `src/lib/pdf.ts`.
+pub(super) const EXPORT_COPY_ONLY_ERROR: &str = "tfolio:export-copy-only";
+
+/// A destination the OS will not let this process write: a read-only file,
+/// folder or volume — or, on Windows, a file another program holds open,
+/// which fails the rename the same way. Matched as `EXPORT_DENIED` in
+/// `src/lib/pdf.ts`.
+pub(super) const EXPORT_DENIED_ERROR: &str = "tfolio:export-denied";
+
+/// A refusal the reader can act on travels as a code the frontend words;
+/// anything else keeps its message for the log.
+fn write_error(error: &std::io::Error, message: String) -> String {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
+            EXPORT_DENIED_ERROR.into()
+        }
+        _ => message,
+    }
+}
 
 /// A PDF read into memory under the app's ceiling, sized from metadata first so
 /// an oversized file is refused before it is read — and checked again after.
@@ -798,10 +830,7 @@ impl PdfiumEngine {
                 .as_deref()
                 .is_some_and(|source| same_file(source, path))
         {
-            return Err(
-                "this document may only be exported as a copy, not written back over its own file"
-                    .into(),
-            );
+            return Err(EXPORT_COPY_ONLY_ERROR.into());
         }
 
         self.write_document(entry, path)?;

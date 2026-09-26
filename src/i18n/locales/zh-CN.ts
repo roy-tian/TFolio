@@ -273,6 +273,15 @@ const zhCN = {
     exportFailed: "无法导出此 PDF。",
     exportTargetOpen: "该文件已在另一个标签页中打开。请先在那里关闭它，或换个文件名保存。",
     failed: "无法应用该修改。",
+    copySuffix: "副本",
+    exportCopyOnly: "此文档只能导出为副本，不能覆盖它已保存到的文件，请换一个文件名。",
+    exportDenied:
+      "无法写入该位置——文件或文件夹可能是只读的，或文件正被其他程序占用，请另选位置。",
+    markWhileEditing: "页面编辑仍在进行，刚才的标注未保留，请稍后再试。",
+    watermarkRebuilding: "正在更新水印…",
+    pageNumbersRebuilding: "正在更新页码…",
+    layerStop: "停止",
+    layerStopping: "正在停止…",
     dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖放一次。",
     dropIgnoredFiles_one:
       "{{count}} 个拖入的文件未插入：只有 PDF 可以作为页面插入。",

@@ -172,7 +172,7 @@ fn a_merged_document_will_not_overwrite_its_source() {
     let error = engine
         .export_to(document.id, &source)
         .expect_err("a merged export must not land on the source");
-    assert!(error.contains("exported as a copy"), "why: {error}");
+    assert_eq!(error, io::EXPORT_COPY_ONLY_ERROR, "why: {error}");
     assert_eq!(
         fs::read(&source).expect("the source should still be readable"),
         original,

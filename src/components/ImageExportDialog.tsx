@@ -40,6 +40,8 @@ const DEFAULT_DPI = 150
 
 type ImageExportDialogProps = {
   document: PdfDocumentInfo
+  /** Its tab is not the one showing: out of sight, with its state kept. */
+  hidden?: boolean
   suggestedName: string
   onExport: ReturnType<typeof useAnnotations>["exportArchive"]
   onClose: () => void
@@ -47,6 +49,7 @@ type ImageExportDialogProps = {
 
 export function ImageExportDialog({
   document,
+  hidden = false,
   suggestedName,
   onExport,
   onClose,
@@ -102,7 +105,7 @@ export function ImageExportDialog({
 
   return (
     <Dialog
-      open
+      open={!hidden}
       onOpenChange={(open) => {
         if (!open && !busy) onClose()
       }}

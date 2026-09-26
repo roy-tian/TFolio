@@ -279,6 +279,17 @@ const en = {
     exportTargetOpen:
       "That file is open in another tab. Close it there first, or save under another name.",
     failed: "That edit could not be applied.",
+    copySuffix: "copy",
+    exportCopyOnly:
+      "This document can only be exported as a copy, so it cannot go over the file it was saved to. Choose another name.",
+    exportDenied:
+      "That location cannot be written — the file or folder may be read-only, or the file open in another program. Choose another.",
+    markWhileEditing:
+      "A page edit is still running — that mark was not kept. Try again in a moment.",
+    watermarkRebuilding: "Updating the watermark…",
+    pageNumbersRebuilding: "Updating the page numbers…",
+    layerStop: "Stop",
+    layerStopping: "Stopping…",
     dropWhileEditing:
       "Another page edit is still running — try the drop again in a moment.",
     dropIgnoredFiles_one:

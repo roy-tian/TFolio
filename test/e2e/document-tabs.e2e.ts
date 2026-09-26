@@ -8,6 +8,7 @@ import "@wdio/tauri-service"
 import type { E2eOverrides } from "../../src/lib/e2e"
 
 import {
+  clickAppMenuItem,
   dropZoneButton,
   emitDrag,
   gapPoint,
@@ -672,6 +673,29 @@ describe("independent document tabs", () => {
     await browser.waitUntil(
       async () => (await tabNames()).join() === "menu-b.pdf",
       { timeoutMsg: "the moved tab never left the strip" },
+    )
+  })
+
+  it("keeps a tab that arrives under a dialog behind it until it closes", async () => {
+    await openPdfFromDisk("under-dialog.pdf", minimalPdf())
+    await tabButton("under-dialog.pdf").waitForDisplayed()
+    await clickAppMenuItem("settings")
+    await $("[role='dialog']").waitForDisplayed()
+
+    await emitDrag("drag-drop", { x: 400, y: 400 }, [
+      writePdf("arrived.pdf", 1),
+    ])
+    await tabButton("arrived.pdf").waitForExist({ timeout: 20_000 })
+    await expect(tabButton("under-dialog.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    await browser.keys(["Escape"])
+    await $("[role='dialog']").waitForExist({ reverse: true })
+    await expect(tabButton("arrived.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
     )
   })
 

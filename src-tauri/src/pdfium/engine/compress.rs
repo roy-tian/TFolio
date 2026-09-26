@@ -502,7 +502,7 @@ impl PdfiumEngine {
         options: CompressionOptions,
     ) -> Result<Option<CompressionEstimate>, String> {
         let levels = image_levels(options)?;
-        let operation = self.begin_operation(OperationTarget::Compress(document_id));
+        let operation = self.begin_operation(OperationTarget::CompressEstimate(document_id));
         let basis = self.compress_basis(document_id)?;
 
         if let Some(latest) = basis.latest_for(options) {

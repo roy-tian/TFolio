@@ -531,6 +531,35 @@ fn a_stopped_export_abandons_without_failing() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn stopping_estimates_leaves_a_running_export_alone() {
+    let engine = test_engine();
+    let directory = scratch_directory("compress-estimate-stop");
+    let document = engine.open(jpeg_page_pdf()).unwrap();
+    let destination = directory.join("copy.pdf");
+
+    // What a dialog remounting mid-export sends: its superseded estimates' stop.
+    let completed = engine
+        .export_compressed(
+            document.id,
+            &destination,
+            CompressionOptions {
+                image_dpi: Some(96),
+            },
+            |_, _| {
+                engine.cancel_operation(OperationTarget::CompressEstimate(document.id));
+            },
+        )
+        .unwrap();
+
+    assert!(completed, "the export runs on through an estimate's stop");
+    assert!(destination.exists());
+
+    engine.close(document.id).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn compression_refuses_levels_out_of_bounds() {
     let engine = test_engine();
     let document = engine.open(two_page_pdf()).unwrap();

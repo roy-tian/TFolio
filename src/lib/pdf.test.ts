@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import {
   dimensionsForRotation,
+  EXPORT_COPY_ONLY,
+  EXPORT_DENIED,
   EXPORT_TARGET_OPEN,
+  exportFailureNotice,
   fileNameFromPath,
-  isExportTargetOpen,
   isPdfPath,
   MIN_PAGE_OUTPUT_SCALE,
   pickCurrentPage,
@@ -23,16 +25,24 @@ describe("isPdfPath", () => {
   })
 })
 
-describe("isExportTargetOpen", () => {
-  test("names the backend's code, rejected bare or wrapped", () => {
-    expect(isExportTargetOpen(EXPORT_TARGET_OPEN)).toBe(true)
-    expect(isExportTargetOpen(new Error(EXPORT_TARGET_OPEN))).toBe(true)
+describe("exportFailureNotice", () => {
+  test("names each backend code, rejected bare or wrapped", () => {
+    expect(exportFailureNotice(EXPORT_TARGET_OPEN)).toBe("exportTargetOpen")
+    expect(exportFailureNotice(new Error(EXPORT_TARGET_OPEN))).toBe(
+      "exportTargetOpen",
+    )
+    expect(exportFailureNotice(EXPORT_COPY_ONLY)).toBe("exportCopyOnly")
+    expect(exportFailureNotice(new Error(EXPORT_DENIED))).toBe("exportDenied")
   })
 
   test("leaves any other failure to the generic notice", () => {
-    expect(isExportTargetOpen("could not write to /tmp/a.pdf")).toBe(false)
-    expect(isExportTargetOpen(`${EXPORT_TARGET_OPEN} and more`)).toBe(false)
-    expect(isExportTargetOpen(undefined)).toBe(false)
+    expect(exportFailureNotice("could not write to /tmp/a.pdf")).toBe(
+      "exportFailed",
+    )
+    expect(exportFailureNotice(`${EXPORT_TARGET_OPEN} and more`)).toBe(
+      "exportFailed",
+    )
+    expect(exportFailureNotice(undefined)).toBe("exportFailed")
   })
 })
 

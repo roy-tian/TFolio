@@ -374,6 +374,25 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
+    /// Drops the stashes of undone inserts the reader has branched away from:
+    /// no redo can reach them, and each holds a copy of its pages. An id with
+    /// no stash is nothing to drop, which a repeated discard is.
+    pub(in crate::pdfium) fn discard_stashes(
+        &self,
+        document_id: u64,
+        stash_ids: &[u64],
+    ) -> Result<(), String> {
+        // Closing a stash's document is PDFium work, so under the store's lock.
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        for stash_id in stash_ids {
+            entry.stashes.remove(stash_id);
+        }
+
+        Ok(())
+    }
+
     pub(in crate::pdfium) fn restore_pages(
         &self,
         document_id: u64,

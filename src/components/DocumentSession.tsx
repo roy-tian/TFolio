@@ -67,7 +67,7 @@ import { copyPlainText } from "@/lib/clipboard"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
-import { documentRefusals } from "@/lib/notices"
+import { transientDocumentRefusals } from "@/lib/notices"
 import {
   formatPageRanges,
   type PageClipboard,
@@ -75,7 +75,8 @@ import {
 import type { PageHandoff } from "@/lib/pageDrag"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
-  isExportTargetOpen,
+  exportFailureNotice,
+  fileNameFromPath,
   type PdfDocumentInfo,
   type PdfExportOutcome,
   type PdfStructureUpdate,
@@ -90,7 +91,11 @@ import type {
   MovedSessionSnapshot,
   MovedTabSeed,
 } from "@/lib/tabMove"
-import type { PdfOwnedLayerProgressHandler } from "@/lib/progress"
+import type {
+  PdfOwnedLayer,
+  PdfOwnedLayerProgressHandler,
+  PdfProgress,
+} from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
 import {
   defaultViewMode,
@@ -149,8 +154,13 @@ export type DocumentSessionHandle = {
       what it will not. */
   save: () => void
   saveAs: () => void
+  /** The save key: Save As where there is no file, a notice where the
+      document is export-only. `save` is what Save all runs, silently. */
+  saveFromKey: () => void
   /** The close prompt's Save; resolves true when the close may go ahead. */
   saveForClose: () => Promise<boolean>
+  /** The Stop on a layer undo or redo's notice. */
+  stopLayerWork: () => void
   selectAll: () => void
   undo: () => void
   /** True only over this session's thumbnail grid, where a dropped PDF is
@@ -336,11 +346,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       setUnfontedEdit(null)
     }, [])
     // A refusal that outlived what it described would sit over every mark the
-    // reader went on to make successfully.
+    // reader went on to make successfully. The font offer is not one: it holds
+    // a note that exists nowhere else, and only the reader's answer ends it.
     const clearEditRefusals = useCallback(() => {
-      clearNoteFontOffer()
-      notice.retract(documentRefusals)
-    }, [clearNoteFontOffer, notice])
+      notice.retract(transientDocumentRefusals)
+    }, [notice])
+    // Every rebuild tick raises its notice anew; the reader's Stop must stay
+    // pressed through them rather than come back as a live button.
+    const layerStoppingRef = useRef(false)
 
     const bookApplies = hasBookSpread(pdfDocument.numPages)
     const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
@@ -480,10 +493,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         [notice],
       ),
       onExportError: useCallback(
-        (error: unknown) =>
-          notice.raise(
-            isExportTargetOpen(error) ? "exportTargetOpen" : "exportFailed",
-          ),
+        (error: unknown) => notice.raise(exportFailureNotice(error)),
         [notice],
       ),
       // Save As moves the document to its destination, the tab's name and the
@@ -545,6 +555,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
+          // A note held for its font names the page it was typed on, which
+          // now holds other content: gone is better than landing elsewhere.
+          clearNoteFontOffer()
+
           setThumbnailIdentity(({ keys, nextKey }) =>
             movement
               ? { keys: movement.map((page) => keys[page - 1]!), nextKey }
@@ -564,7 +578,28 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             rotationsForPageCount(rotations, update.numPages),
           )
         },
-        [clearThumbnailSelection, pageClipboardStructureChanged],
+        [clearNoteFontOffer, clearThumbnailSelection, pageClipboardStructureChanged],
+      ),
+      onEditRefused: useCallback(
+        () => notice.raise("markWhileEditing"),
+        [notice],
+      ),
+      onLayerProgress: useCallback(
+        (layer: PdfOwnedLayer, progress: PdfProgress | null) => {
+          const kind =
+            layer === "watermark" ? "watermarkRebuilding" : "pageNumbersRebuilding"
+
+          if (progress) {
+            notice.raise(kind, {
+              action: { busy: layerStoppingRef.current, kind: "layerStop" },
+              progress,
+            })
+          } else {
+            layerStoppingRef.current = false
+            notice.retract([kind])
+          }
+        },
+        [notice],
       ),
       onSuccess: clearEditRefusals,
     })
@@ -725,8 +760,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       () =>
         saveRequiredRef.current ||
         annotations.isDirtyNow() ||
-        isNoteWorthKeeping(textNote.draft?.text ?? ""),
-      [annotations, textNote.draft?.text],
+        isNoteWorthKeeping(textNote.draft?.text ?? "") ||
+        unfontedEdit !== null,
+      [annotations, textNote.draft?.text, unfontedEdit],
     )
     const hasUnsavedWorkNow = useCallback(
       () => hasUnsavedChangesNow() || annotations.hasPendingWorkNow(),
@@ -736,7 +772,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useEffect(() => {
       onDirtyChange(
         openedDocument.id,
-        saveRequired || annotations.isDirty || draftDirty,
+        saveRequired || annotations.isDirty || draftDirty || unfontedEdit !== null,
       )
     }, [
       annotations.isDirty,
@@ -744,6 +780,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onDirtyChange,
       openedDocument.id,
       saveRequired,
+      unfontedEdit,
     ])
 
     const changeHighlightColor = useCallback((color: HexColor) => {
@@ -761,16 +798,27 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       storeTextNoteStyle(style)
     }, [])
 
+    // What every export names its file after: a converted or merged
+    // document's own PDF name, else the file the document came from, else the
+    // tab's — never a Word or image source's name with its extension still on.
+    const exportBaseName =
+      saveAsDefaultName ??
+      (pdfDocument.path ? fileNameFromPath(pdfDocument.path) : fileName)
+
     // The destination dialog is the backend's own, so this only says *that* an
     // export happens; `onExportError` reports a failed write.
-    const exportPdf = useCallback(
-      () =>
-        annotations.exportCopy(
-          saveAsDefaultName ?? t("menu.untitled"),
-          t("annotate.exportFilter"),
-        ),
-      [annotations, saveAsDefaultName, t],
-    )
+    const exportPdf = useCallback(() => {
+      // A copy-only document may not go over the file it came from, so its
+      // own name is the one suggestion bound to be refused.
+      const copyOnly =
+        Boolean(documentRef.current?.path) &&
+        (annotations.hasOwnedContentNow() || hasMergedPagesRef.current)
+      const name = copyOnly
+        ? `${exportBaseName.replace(/\.pdf$/i, "")}-${t("annotate.copySuffix")}.pdf`
+        : exportBaseName
+
+      return annotations.exportCopy(name, t("annotate.exportFilter"))
+    }, [annotations, exportBaseName, t])
 
     useEffect(() => {
       mountedRef.current = true
@@ -1241,19 +1289,47 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // disabled save names it there rather than repeating the action's name.
     const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
 
-    // The window's save key runs the button's action, refusal included: a
-    // watermarked or merged document may only ever be exported as a copy.
+    // The toolbar's and menu's action, refusal included: a watermarked or
+    // merged document may only ever be exported as a copy.
     const saveDocument = useCallback(() => {
       if (canSave) {
         void annotations.save()
       }
     }, [annotations, canSave])
 
+    // The save key where the button would be greyed out: a document with no
+    // file asks where to put one, as Save As does; an export-only one says why
+    // the key did nothing, which a tooltip no key press shows cannot.
+    const saveFromKey = useCallback(() => {
+      if (canSave) {
+        void annotations.save()
+      } else if (!hasSourceFile) {
+        void exportPdf()
+      } else if (hasOwnedContent) {
+        notice.raise("saveOwnedContentOnly")
+      } else if (hasMergedPages) {
+        notice.raise("saveMergedOnly")
+      }
+    }, [
+      annotations,
+      canSave,
+      exportPdf,
+      hasMergedPages,
+      hasOwnedContent,
+      hasSourceFile,
+      notice,
+    ])
+
     // A close prompt's Save: back over the file where the document may be
     // written there, otherwise Save As — a copy, for an export-only one. True
     // when the close may go ahead; a cancelled or failed save keeps the tab.
     const commitTextNote = textNote.commit
     const saveForClose = useCallback(async () => {
+      // A note held for its missing font cannot be saved; the offer stands.
+      if (unfontedEdit) {
+        return false
+      }
+
       // Closing the editor keeps what was typed, as clicking away from it does.
       commitTextNote()
       await annotations.settled()
@@ -1271,7 +1347,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       return writesBack
         ? annotations.save()
         : (await exportPdf()) === "saved"
-    }, [annotations, commitTextNote, exportPdf])
+    }, [annotations, commitTextNote, exportPdf, unfontedEdit])
 
     // Only the session can answer this, so the workspace's save-all is told
     // rather than left to guess from the file name and the dirty flag.
@@ -1321,8 +1397,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         rememberViewNow,
         save: saveDocument,
         saveAs: () => void exportPdf(),
+        saveFromKey,
         saveForClose,
         selectAll,
+        stopLayerWork: () => {
+          layerStoppingRef.current = true
+          void annotations.cancelOperation()
+        },
         showThumbnails,
         snapshotForMove,
         undo: () => {
@@ -1345,6 +1426,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         rememberViewNow,
         saveDocument,
         saveForClose,
+        saveFromKey,
         search.openSearch,
         selectAll,
         showThumbnails,
@@ -1468,28 +1550,33 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           zoomApplies={zoomApplies}
         />
 
-        {active && imageExportOpen && pdfDocument ? (
+        {/* Mounted while their tab is away too, only hidden: an export still
+            running keeps its progress, its failure, and its busy guard. */}
+        {imageExportOpen && pdfDocument ? (
           <ImageExportDialog
             document={pdfDocument}
-            suggestedName={fileName}
+            hidden={!active}
+            suggestedName={exportBaseName}
             onExport={annotations.exportArchive}
             onClose={() => setImageExportOpen(false)}
           />
         ) : null}
 
-        {active && splitOpen && pdfDocument ? (
+        {splitOpen && pdfDocument ? (
           <SplitPdfDialog
             document={pdfDocument}
-            suggestedName={fileName}
+            hidden={!active}
+            suggestedName={exportBaseName}
             onExport={annotations.exportArchive}
             onClose={() => setSplitOpen(false)}
           />
         ) : null}
 
-        {active && compressOpen && pdfDocument ? (
+        {compressOpen && pdfDocument ? (
           <CompressExportDialog
             document={pdfDocument}
-            suggestedName={fileName}
+            hidden={!active}
+            suggestedName={exportBaseName}
             onExport={annotations.exportCompressed}
             onClose={() => setCompressOpen(false)}
           />

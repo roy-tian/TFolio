@@ -31,6 +31,8 @@ const ESTIMATE_DEBOUNCE_MS = 300
 
 type CompressExportDialogProps = {
   document: PdfDocumentInfo
+  /** Its tab is not the one showing: out of sight, with its state kept. */
+  hidden?: boolean
   suggestedName: string
   onExport: ReturnType<typeof useAnnotations>["exportCompressed"]
   onClose: () => void
@@ -38,6 +40,7 @@ type CompressExportDialogProps = {
 
 export function CompressExportDialog({
   document,
+  hidden = false,
   suggestedName,
   onExport,
   onClose,
@@ -52,10 +55,6 @@ export function CompressExportDialog({
   const [estimating, setEstimating] = useState(true)
   const [estimateFailed, setEstimateFailed] = useState(false)
   const stopRequested = useRef(false)
-  // An export must outlive this dialog: it shares the estimate's cancel
-  // target, so a cancel sent from an unmounting dialog would kill it between
-  // images with nothing mounted left to report that.
-  const exportingRef = useRef(false)
   // Only the newest estimate may answer: a slower run for abandoned levels
   // must not overwrite the one the reader is looking at.
   const estimateRun = useRef(0)
@@ -79,16 +78,17 @@ export function CompressExportDialog({
       holds the process-wide PDFium lock to its end otherwise, stalling every
       render behind it; with nothing running the cancel is a no-op. */
   const stopEstimates = () => {
-    void invoke<boolean>("cancel_pdf_compression", {
+    void invoke<boolean>("cancel_pdf_compression_estimate", {
       documentId: document.id,
     }).catch(() => {})
   }
 
   // A closing dialog must not strand its last estimate on that lock either,
-  // nor leave the engine holding copies of the document for it.
+  // nor leave the engine holding copies of the document for it. An export
+  // outlives it: its cancel target is not the estimates'.
   useEffect(
     () => () => {
-      if (!exportingRef.current) stopEstimates()
+      stopEstimates()
       void inflight.current.then(() =>
         invoke("release_pdf_compression", { documentId: document.id }),
       ).catch(() => {})
@@ -147,7 +147,6 @@ export function CompressExportDialog({
   }
 
   const start = async () => {
-    exportingRef.current = true
     setBusy(true)
     setFailed(false)
     setProgress(null)
@@ -164,7 +163,6 @@ export function CompressExportDialog({
     }))
     setBusy(false)
     setStopping(false)
-    exportingRef.current = false
     if (outcome === "failed") setFailed(true)
     else onClose()
   }
@@ -186,7 +184,7 @@ export function CompressExportDialog({
 
   return (
     <Dialog
-      open
+      open={!hidden}
       onOpenChange={(open) => {
         if (!open && !busy) onClose()
       }}

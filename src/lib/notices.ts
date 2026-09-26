@@ -33,6 +33,7 @@ export type NoticeActionKind =
   | "updateDownload"
   | "updateInstall"
   | "updateRetry"
+  | "layerStop"
   | "wordConvertStop"
 
 export type NoticeAction = {
@@ -62,6 +63,16 @@ export const noticeCatalogue = {
     textKey: "annotate.dropWhileEditing",
     tone: "warning",
   },
+  exportCopyOnly: {
+    life: "transient",
+    textKey: "annotate.exportCopyOnly",
+    tone: "warning",
+  },
+  exportDenied: {
+    life: "transient",
+    textKey: "annotate.exportDenied",
+    tone: "warning",
+  },
   exportFailed: {
     life: "transient",
     textKey: "annotate.exportFailed",
@@ -80,6 +91,11 @@ export const noticeCatalogue = {
   invalidFile: {
     life: "transient",
     textKey: "viewer.invalidFile",
+    tone: "warning",
+  },
+  markWhileEditing: {
+    life: "transient",
+    textKey: "annotate.markWhileEditing",
     tone: "warning",
   },
   insertIgnoredFiles: {
@@ -107,6 +123,13 @@ export const noticeCatalogue = {
     tone: "warning",
   },
   openFailed: { life: "transient", textKey: "viewer.openFailed", tone: "danger" },
+  // A layer undo or redo, standing while it rebuilds the pages it covers.
+  pageNumbersRebuilding: {
+    life: "standing",
+    slot: "layerRebuild",
+    textKey: "annotate.pageNumbersRebuilding",
+    tone: "info",
+  },
   pagesCopied: {
     life: "transient",
     slot: "pageClipboard",
@@ -148,6 +171,19 @@ export const noticeCatalogue = {
     life: "transient",
     textKey: "annotate.saveFailed",
     tone: "danger",
+  },
+  // The save key's answer on an export-only document; one slot, one reason.
+  saveMergedOnly: {
+    life: "transient",
+    slot: "saveCopyOnly",
+    textKey: "annotate.saveMerged",
+    tone: "warning",
+  },
+  saveOwnedContentOnly: {
+    life: "transient",
+    slot: "saveCopyOnly",
+    textKey: "annotate.saveOwnedContent",
+    tone: "warning",
   },
   tabMoveBusy: {
     life: "transient",
@@ -199,6 +235,12 @@ export const noticeCatalogue = {
     textKey: "update.ready",
     tone: "success",
   },
+  watermarkRebuilding: {
+    life: "standing",
+    slot: "layerRebuild",
+    textKey: "annotate.watermarkRebuilding",
+    tone: "info",
+  },
   // Standing for as long as the conversion runs; the open retracts it.
   wordConverting: {
     life: "standing",
@@ -222,6 +264,10 @@ export const noticeActions = {
   updateDownload: { labelKey: "update.download" },
   updateInstall: { labelKey: "update.install" },
   updateRetry: { labelKey: "update.retry" },
+  layerStop: {
+    busyLabelKey: "annotate.layerStopping",
+    labelKey: "annotate.layerStop",
+  },
   wordConvertStop: {
     busyLabelKey: "viewer.wordConvertStopping",
     labelKey: "viewer.wordConvertStop",
@@ -236,6 +282,8 @@ export const noticeActions = {
 export const documentRefusals = [
   "annotateFailed",
   "editInFlight",
+  "exportCopyOnly",
+  "exportDenied",
   "exportFailed",
   "exportTargetOpen",
   "noteFontFailed",
@@ -243,6 +291,12 @@ export const documentRefusals = [
   "printFailed",
   "saveFailed",
 ] as const satisfies readonly NoticeKind[]
+
+/** What a later mark that lands disproves; the font offer is not among them,
+    since it holds a note that exists nowhere else. */
+export const transientDocumentRefusals = documentRefusals.filter(
+  (kind) => noticeCatalogue[kind].life === "transient",
+)
 
 /** What a finished open batch disproves, whichever of them it raised. */
 export const openRefusals = [

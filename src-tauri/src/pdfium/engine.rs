@@ -244,9 +244,12 @@ pub(super) enum OperationTarget {
     Archive(u64),
     Merge(String),
     Search(u64),
-    /// A compressed copy being estimated or written, whose page loop must
-    /// stop when the reader walks away from the dialog.
+    /// A compressed copy being written, whose page loop must stop when the
+    /// reader walks away from the dialog.
     Compress(u64),
+    /// The dialog's size estimates, apart from the export: a dialog stopping
+    /// its superseded estimates must never stop a copy already being written.
+    CompressEstimate(u64),
     /// The Word→PDF conversions behind a wizard inspection, by window, which
     /// can outlast a reader's patience alone; a merge's stay under its own
     /// target.
@@ -456,6 +459,7 @@ impl PdfiumEngine {
         self.cancel_operation(OperationTarget::Search(document_id));
         self.cancel_operation(OperationTarget::Archive(document_id));
         self.cancel_operation(OperationTarget::Compress(document_id));
+        self.cancel_operation(OperationTarget::CompressEstimate(document_id));
     }
 
     /// A new one-page A4 document, built in memory: no file of its own, so a

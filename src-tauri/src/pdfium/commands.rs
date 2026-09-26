@@ -459,6 +459,27 @@ pub async fn delete_pdf_pages(
     .map_err(|error| format!("PDFium page deletion task failed: {error}"))?
 }
 
+/// Checked against the asking window: the ids are the page's to name, and a
+/// stash is the only copy of pages its document's redo would bring back.
+#[tauri::command]
+pub async fn discard_pdf_stashes(
+    document_id: u64,
+    stash_ids: Vec<u64>,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<(), String> {
+    if !owners.owns(document_id, window.label()) {
+        return Err("this window does not hold that document".to_string());
+    }
+
+    let engine = Arc::clone(&state.0);
+
+    tauri::async_runtime::spawn_blocking(move || engine.discard_stashes(document_id, &stash_ids))
+        .await
+        .map_err(|error| format!("PDFium stash discard task failed: {error}"))?
+}
+
 #[tauri::command]
 pub async fn restore_pdf_pages(
     document_id: u64,
@@ -798,6 +819,32 @@ pub(super) fn suggested_file_name(suggested: &str) -> String {
         .to_string()
 }
 
+/// Every export's save dialog, named and placed by Rust, never by the WebView:
+/// in the document's own folder for a file it came from, the last opened PDF's
+/// for one that has never been saved.
+pub(super) fn export_dialog(
+    app: &AppHandle,
+    engine: &PdfiumEngine,
+    document_id: u64,
+    filter_label: String,
+    extensions: &[&str],
+    suggested_name: &str,
+) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    let dialog = app
+        .dialog()
+        .file()
+        .add_filter(filter_label, extensions)
+        .set_file_name(suggested_file_name(suggested_name));
+
+    match engine
+        .document_source_dir(document_id)
+        .or_else(|| app.state::<RecentFiles>().last_opened_dir())
+    {
+        Some(directory) => dialog.set_directory(directory),
+        None => dialog,
+    }
+}
+
 /// The dialog is this command's own: Tauri's ACL does not cover custom commands,
 /// so a path argument would be an arbitrary-file write for any page code.
 #[tauri::command]
@@ -807,28 +854,21 @@ pub async fn export_pdf(
     filter_label: String,
     app: AppHandle,
     state: State<'_, PdfiumState>,
-    recent: State<'_, RecentFiles>,
 ) -> Result<Option<ExportOutcome>, String> {
     let engine = Arc::clone(&state.0);
-    let recent = recent.inner().clone();
 
     // `blocking_save_file` would deadlock the main thread outside
     // `spawn_blocking`; the document lock is not taken until the reader chooses.
     tauri::async_runtime::spawn_blocking(move || {
-        // The folder the dialog opens in is Rust's to choose, never the
-        // WebView's: the document's own for a file it came from, the last
-        // opened PDF's for one that has never been saved.
-        let default_directory = engine
-            .document_source_dir(document_id)
-            .or_else(|| recent.last_opened_dir());
-        let mut dialog = app.dialog().file().add_filter(filter_label, &["pdf"]);
-        if let Some(directory) = default_directory {
-            dialog = dialog.set_directory(directory);
-        }
-        let Some(picked) = dialog
-            .set_file_name(suggested_file_name(&suggested_name))
-            .blocking_save_file()
-        else {
+        let Some(picked) = export_dialog(
+            &app,
+            &engine,
+            document_id,
+            filter_label,
+            &["pdf"],
+            &suggested_name,
+        )
+        .blocking_save_file() else {
             return Ok(None);
         };
         let path = picked

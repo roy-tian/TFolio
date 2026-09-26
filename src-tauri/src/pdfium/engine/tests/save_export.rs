@@ -250,9 +250,10 @@ fn a_copy_only_export_leaves_the_document_on_its_source() {
         let error = engine
             .export_to(document_id, source)
             .expect_err("the source should still be the file refused");
-        assert!(
-            error.contains("exported as a copy"),
-            "the refusal should say why: {error}"
+        assert_eq!(
+            error,
+            io::EXPORT_COPY_ONLY_ERROR,
+            "the refusal should say why"
         );
         assert_eq!(
             fs::read(source).expect("the source should still be readable"),
@@ -337,9 +338,10 @@ fn a_watermarked_export_will_not_overwrite_the_source() {
     let error = engine
         .export_to(document.id, &source)
         .expect_err("a watermarked export must not land on the source");
-    assert!(
-        error.contains("exported as a copy"),
-        "the refusal should say why: {error}"
+    assert_eq!(
+        error,
+        io::EXPORT_COPY_ONLY_ERROR,
+        "the refusal should be the code the frontend words"
     );
     assert_eq!(
         fs::read(&source).expect("the source should still be readable"),
@@ -377,9 +379,10 @@ fn a_watermarked_export_resolves_aliases_of_the_source() {
     let error = engine
         .export_to(document.id, &alias)
         .expect_err("an alias of the source is the source");
-    assert!(
-        error.contains("exported as a copy"),
-        "the refusal should say why: {error}"
+    assert_eq!(
+        error,
+        io::EXPORT_COPY_ONLY_ERROR,
+        "the refusal should say why"
     );
 
     fs::remove_dir_all(&directory).ok();
@@ -447,4 +450,32 @@ fn a_save_after_deletions_collects_what_they_left_behind() {
         delete_last_mark(engine, document.id, 1).is_err(),
         "the guard should still refuse the document's own annotations"
     );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_export_to_a_folder_it_cannot_write_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let engine = test_engine();
+    let directory = scratch_directory("export-denied");
+    let locked = directory.join("locked");
+    fs::create_dir_all(&locked).expect("the scratch folder should be made");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555))
+        .expect("the folder should be lockable");
+
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+    let result = engine.export_to(document.id, &locked.join("copy.pdf"));
+
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).ok();
+    engine.close(document.id).ok();
+    fs::remove_dir_all(&directory).ok();
+
+    // Root writes anywhere, which leaves nothing for this test to see.
+    if let Err(error) = result {
+        assert_eq!(error, io::EXPORT_DENIED_ERROR);
+    }
 }

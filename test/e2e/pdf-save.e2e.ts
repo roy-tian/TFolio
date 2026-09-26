@@ -78,6 +78,32 @@ async function pointSaveAsAt(destination: string) {
   }, destination)
 }
 
+/** Stands in for Save As's dialog, cancelling it after noting the name it
+    was asked to suggest. */
+async function recordSaveAsAsks() {
+  await browser.execute(() => {
+    const seam = window as Window & {
+      __tfolioE2E?: E2eOverrides
+      __saveAsAsks?: string[]
+    }
+
+    seam.__saveAsAsks = []
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      exportPdf: async ({ suggestedName }) => {
+        seam.__saveAsAsks!.push(suggestedName)
+        return null
+      },
+    }
+  })
+}
+
+function saveAsAsks() {
+  return browser.execute(
+    () => (window as Window & { __saveAsAsks?: string[] }).__saveAsAsks ?? [],
+  )
+}
+
 function tabNamed(name: string) {
   return $(`//button[@role='tab'][normalize-space()='${name}']`)
 }
@@ -163,6 +189,34 @@ describe("TFolio save", () => {
     await expect(
       $("[data-active='true'] [data-slot='page-status']"),
     ).toHaveAttribute("aria-label", "Page 1 of 2")
+  })
+
+  it("asks where to save when the save key meets a document with no file", async () => {
+    await openPdfFromBytes("save-key.pdf", textPdf())
+    await renderedPage()
+    await recordSaveAsAsks()
+
+    await browser.keys(["Control", "s"])
+
+    await browser.waitUntil(async () => (await saveAsAsks()).length > 0, {
+      timeout: 15_000,
+      timeoutMsg: "the save key did nothing on a document with no file",
+    })
+    expect(await saveAsAsks()).toEqual(["save-key.pdf"])
+  })
+
+  it("suggests the opened file's own name for Save As", async () => {
+    await openPdfFromDisk("named-source.pdf", textPdf())
+    await renderedPage()
+    await recordSaveAsAsks()
+
+    await clickAppMenuItem("save-as")
+
+    await browser.waitUntil(async () => (await saveAsAsks()).length > 0, {
+      timeout: 15_000,
+      timeoutMsg: "Save As never asked for a destination",
+    })
+    expect(await saveAsAsks()).toEqual(["named-source.pdf"])
   })
 
   it("moves a document to the file Save As wrote, where the next save lands", async () => {

@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use tauri::{ipc::Channel, AppHandle, State};
-use tauri_plugin_dialog::DialogExt;
 
 use super::{
-    commands::{channel_progress, suggested_file_name},
+    commands::{channel_progress, export_dialog},
     engine::OperationTarget,
     PdfProgress, PdfiumState,
 };
@@ -62,13 +61,15 @@ pub async fn export_pdf_archive(
 ) -> Result<Option<String>, String> {
     let engine = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(picked) = app
-            .dialog()
-            .file()
-            .add_filter(filter_label, &["zip"])
-            .set_file_name(suggested_file_name(&suggested_name))
-            .blocking_save_file()
-        else {
+        let Some(picked) = export_dialog(
+            &app,
+            &engine,
+            document_id,
+            filter_label,
+            &["zip"],
+            &suggested_name,
+        )
+        .blocking_save_file() else {
             return Ok(None);
         };
         let path = picked

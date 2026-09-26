@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, AppHandle, State};
-use tauri_plugin_dialog::DialogExt;
 
 use super::{
-    commands::{channel_progress, suggested_file_name},
+    commands::{channel_progress, export_dialog},
     engine::OperationTarget,
     PdfProgress, PdfiumState,
 };
@@ -18,6 +17,18 @@ pub async fn cancel_pdf_compression(
     Ok(state
         .0
         .cancel_operation(OperationTarget::Compress(document_id)))
+}
+
+/// Stops the dialog's estimates alone, never the export: a dialog dropping
+/// superseded estimates must not stop a copy already being written.
+#[tauri::command]
+pub async fn cancel_pdf_compression_estimate(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<bool, String> {
+    Ok(state
+        .0
+        .cancel_operation(OperationTarget::CompressEstimate(document_id)))
 }
 
 /// The dialog's cache holds a copy or two of the document; once it closes,
@@ -89,13 +100,15 @@ pub async fn export_compressed_pdf(
 ) -> Result<Option<String>, String> {
     let engine = Arc::clone(&state.0);
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(picked) = app
-            .dialog()
-            .file()
-            .add_filter(filter_label, &["pdf"])
-            .set_file_name(suggested_file_name(&suggested_name))
-            .blocking_save_file()
-        else {
+        let Some(picked) = export_dialog(
+            &app,
+            &engine,
+            document_id,
+            filter_label,
+            &["pdf"],
+            &suggested_name,
+        )
+        .blocking_save_file() else {
             return Ok(None);
         };
         let path = picked

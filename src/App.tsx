@@ -258,14 +258,7 @@ export default function App() {
     [refreshRecentFiles],
   )
 
-  const activateTab = useCallback((tabId: TabId) => {
-    if (
-      tabId !== HOME_TAB_ID &&
-      !tabsRef.current.some((tab) => tab.id === tabId)
-    ) {
-      return
-    }
-
+  const showTab = useCallback((tabId: TabId) => {
     const leavingId = activeIdRef.current
 
     if (leavingId !== HOME_TAB_ID && leavingId !== tabId) {
@@ -278,6 +271,63 @@ export default function App() {
     setActiveId(tabId)
     focusWorkspaceTarget(tabId)
   }, [])
+
+  const tabStillOpen = (tabId: TabId) =>
+    tabId === HOME_TAB_ID || tabsRef.current.some((tab) => tab.id === tabId)
+
+  // A dialog or popup in front owns the screen, and its tab's export or edit
+  // with it: a tab arriving meanwhile — a launch, a drop, a move, an open
+  // finishing late — waits behind it and comes forward once it closes.
+  const pendingActivationRef = useRef<TabId | null>(null)
+  const layerWatchRef = useRef<MutationObserver | null>(null)
+
+  const activateTab = useCallback(
+    (tabId: TabId) => {
+      if (!tabStillOpen(tabId)) {
+        return
+      }
+
+      if (!hasLayerOverWorkspace()) {
+        pendingActivationRef.current = null
+        showTab(tabId)
+        return
+      }
+
+      pendingActivationRef.current = tabId
+
+      if (layerWatchRef.current) {
+        return
+      }
+
+      const watch = new MutationObserver(() => {
+        if (hasLayerOverWorkspace()) {
+          return
+        }
+
+        watch.disconnect()
+        layerWatchRef.current = null
+
+        const pending = pendingActivationRef.current
+        pendingActivationRef.current = null
+
+        if (pending !== null && tabStillOpen(pending)) {
+          showTab(pending)
+        }
+      })
+
+      layerWatchRef.current = watch
+      watch.observe(document.body, { childList: true, subtree: true })
+    },
+    [showTab],
+  )
+
+  useEffect(
+    () => () => {
+      layerWatchRef.current?.disconnect()
+      layerWatchRef.current = null
+    },
+    [],
+  )
 
   // The strip's drag reorder: pure order among documents, touching nothing
   // behind the tabs it moves.
@@ -709,6 +759,13 @@ export default function App() {
         appUpdate.requestInstall()
       } else if (kind === "noteFont" && notice.owner.scope === "document") {
         sessionRefs.current.get(notice.owner.documentId)?.fetchNoteFont()
+      } else if (
+        kind === "layerStop" &&
+        !notice.action?.busy &&
+        notice.owner.scope === "document"
+      ) {
+        notices.raise({ ...notice, action: { busy: true, kind } })
+        sessionRefs.current.get(notice.owner.documentId)?.stopLayerWork()
       } else if (kind === "wordConvertStop" && !notice.action?.busy) {
         wordStopRef.current = true
         notices.raise({ ...notice, action: { busy: true, kind } })
@@ -893,7 +950,9 @@ export default function App() {
           continue
         }
 
-        activateTab(id)
+        // Not `activateTab`: the prompt just answered is still mounted, and
+        // would hold the tab back until after its Save As had opened.
+        showTab(id)
 
         if (!(await session.saveForClose())) {
           return
@@ -902,7 +961,7 @@ export default function App() {
 
       closeNow(action)
     },
-    [activateTab, closeNow],
+    [closeNow, showTab],
   )
 
   // The tab's own half of a move: what the strip shows and where it was being
@@ -1356,7 +1415,7 @@ export default function App() {
     }> = [
       { run: () => void createDocument(), shortcut: shortcuts.new },
       { run: () => void chooseFile(), shortcut: shortcuts.open },
-      { run: () => activeSession()?.save(), shortcut: shortcuts.save },
+      { run: () => activeSession()?.saveFromKey(), shortcut: shortcuts.save },
       { run: () => activeSession()?.saveAs(), shortcut: shortcuts.saveAs },
       { run: saveAllDocuments, shortcut: shortcuts.saveAll },
       {

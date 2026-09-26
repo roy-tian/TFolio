@@ -232,6 +232,37 @@ fn reported_page_geometry_follows_the_pages_through_every_structure_edit() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn a_discarded_stash_is_gone_and_the_rest_stay() {
+    let engine = test_engine();
+    let document = engine
+        .open(three_size_pdf())
+        .expect("PDFium should open the three-size PDF");
+
+    // Two undone inserts' stashes; the reader branches away from the first.
+    engine
+        .delete_pages(document.id, &[1], 1)
+        .expect("PDFium should stash the first page");
+    engine
+        .delete_pages(document.id, &[1], 2)
+        .expect("PDFium should stash the next page");
+
+    engine
+        .discard_stashes(document.id, &[1, 99])
+        .expect("an unknown id is nothing to drop");
+
+    assert!(
+        engine.restore_pages(document.id, 1).is_err(),
+        "a discarded stash cannot come back"
+    );
+    engine
+        .restore_pages(document.id, 2)
+        .expect("a stash nobody discarded still restores");
+
+    engine.close(document.id).unwrap();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn turns_the_named_pages_and_reports_their_new_shape() {
     let engine = test_engine();
     let document = engine
