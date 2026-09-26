@@ -115,6 +115,27 @@ fn selected_pages(pages: &[u32], total: i32) -> Result<Vec<usize>, String> {
 }
 
 impl PdfiumEngine {
+    /// One page's or one section's PDFium work for an archive, under the lock
+    /// for that alone: encoding, the ZIP and its fsync happen without it, so
+    /// renders elsewhere never wait on a disk. The session's queue keeps this
+    /// document's own edits out; an edit that still lands is a refusal, never
+    /// a mix of two states in one archive.
+    fn with_archive_source<T>(
+        &self,
+        document_id: u64,
+        version: u64,
+        work: impl FnOnce(&PdfDocument<'static>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let documents = self.lock_documents()?;
+        let entry = open_entry(&documents, document_id)?;
+
+        if entry.content_version != version {
+            return Err("the document changed while it was being exported".into());
+        }
+
+        work(&entry.document)
+    }
+
     pub(in crate::pdfium) fn export_archive(
         &self,
         document_id: u64,
@@ -123,15 +144,19 @@ impl PdfiumEngine {
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<bool, String> {
         let operation = self.begin_operation(OperationTarget::Archive(document_id));
-        let documents = self.lock_documents()?;
-        let entry = open_entry(&documents, document_id)?;
-        // A ZIP can never replace an open PDF, including one reached through an alias.
-        if io::is_open_document_file(&documents, path, None) {
-            return Err("an archive cannot replace an open PDF".into());
-        }
-        let source = &entry.document;
-        let total = source.pages().len() as usize;
-        let outline = collect_bookmark_siblings(source.bookmarks().root());
+        let (version, total, outline) = {
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
+            // A ZIP can never replace an open PDF, including one reached through an alias.
+            if io::is_open_document_file(&documents, path, None) {
+                return Err("an archive cannot replace an open PDF".into());
+            }
+            (
+                entry.content_version,
+                entry.document.pages().len() as usize,
+                collect_bookmark_siblings(entry.document.bookmarks().root()),
+            )
+        };
         let dpi = if let ArchiveOptions::Images { dpi, .. } = options {
             image_dpi(dpi)?
         } else {
@@ -151,64 +176,70 @@ impl PdfiumEngine {
         // document splits, the reader's own selection for images.
         let progress_total = selected.as_ref().map_or(total, Vec::len);
         on_progress(0, progress_total);
-        io::write_file_atomically(path, |file| {
-            let mut zip = ZipWriter::new(file);
-            // Images and PDF streams are already compressed; store them without another buffer.
-            let entry_options = SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Stored)
-                .large_file(true);
-            let failed = |error| format!("could not write ZIP archive: {error}");
-            match options {
-                ArchiveOptions::Bookmarks => {
-                    for (index, section) in parts.iter().enumerate() {
-                        if operation.is_cancelled() {
-                            return Ok(false);
-                        }
-                        let mut part = self
-                            .pdfium
-                            .create_new_pdf()
-                            .map_err(|error| format!("could not create a split PDF: {error}"))?;
-                        let mut links = Vec::new();
-                        for page in section.start..section.end {
-                            if operation.is_cancelled() {
-                                return Ok(false);
-                            }
-                            let source_page = source
-                                .pages()
-                                .get(page)
-                                .map_err(|error| format!("could not read page links: {error}"))?;
-                            links.push(collect_links(&source_page)?);
-                            part.pages_mut()
-                                .copy_page_from_document(source, page, page - section.start)
-                                .map_err(|error| {
-                                    format!("could not copy page {}: {error}", page + 1)
-                                })?;
-                            on_progress((page + 1) as usize, total);
-                        }
-                        let bytes = part
-                            .save_to_bytes()
-                            .map_err(|error| format!("could not save a split PDF: {error}"))?;
-                        let Some(bytes) = write_navigation(
-                            bytes,
-                            &section_outline(&outline, section.start, section.end),
-                            &links,
-                            section.start,
-                            || operation.is_cancelled(),
-                        )?
-                        else {
-                            return Ok(false);
-                        };
-                        zip.start_file(section_name(index, &section.title), entry_options)
-                            .map_err(failed)?;
-                        zip.write_all(&bytes)
-                            .map_err(|error| format!("could not write split PDF: {error}"))?;
+        let mut staged = io::StagedFile::beside(path)?;
+        let mut zip = ZipWriter::new(staged.file());
+        // Images and PDF streams are already compressed; store them without another buffer.
+        let entry_options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .large_file(true);
+        let failed = |error| format!("could not write ZIP archive: {error}");
+        match options {
+            ArchiveOptions::Bookmarks => {
+                for (index, section) in parts.iter().enumerate() {
+                    if operation.is_cancelled() {
+                        return Ok(false);
                     }
+                    let copied =
+                        self.with_archive_source(document_id, version, |source| {
+                            let mut part = self.pdfium.create_new_pdf().map_err(|error| {
+                                format!("could not create a split PDF: {error}")
+                            })?;
+                            let mut links = Vec::new();
+                            for page in section.start..section.end {
+                                if operation.is_cancelled() {
+                                    return Ok(None);
+                                }
+                                let source_page = source.pages().get(page).map_err(|error| {
+                                    format!("could not read page links: {error}")
+                                })?;
+                                links.push(collect_links(&source_page)?);
+                                part.pages_mut()
+                                    .copy_page_from_document(source, page, page - section.start)
+                                    .map_err(|error| {
+                                        format!("could not copy page {}: {error}", page + 1)
+                                    })?;
+                                on_progress((page + 1) as usize, total);
+                            }
+                            let bytes = part
+                                .save_to_bytes()
+                                .map_err(|error| format!("could not save a split PDF: {error}"))?;
+                            Ok(Some((bytes, links)))
+                        })?;
+                    let Some((bytes, links)) = copied else {
+                        return Ok(false);
+                    };
+                    let Some(bytes) = write_navigation(
+                        bytes,
+                        &section_outline(&outline, section.start, section.end),
+                        &links,
+                        section.start,
+                        || operation.is_cancelled(),
+                    )?
+                    else {
+                        return Ok(false);
+                    };
+                    zip.start_file(section_name(index, &section.title), entry_options)
+                        .map_err(failed)?;
+                    zip.write_all(&bytes)
+                        .map_err(|error| format!("could not write split PDF: {error}"))?;
                 }
-                ArchiveOptions::Pages => {
-                    for page in 0..source.pages().len() {
-                        if operation.is_cancelled() {
-                            return Ok(false);
-                        }
+            }
+            ArchiveOptions::Pages => {
+                for page in 0..total as i32 {
+                    if operation.is_cancelled() {
+                        return Ok(false);
+                    }
+                    let bytes = self.with_archive_source(document_id, version, |source| {
                         let mut part = self
                             .pdfium
                             .create_new_pdf()
@@ -218,26 +249,26 @@ impl PdfiumEngine {
                             .map_err(|error| {
                                 format!("could not copy page {}: {error}", page + 1)
                             })?;
-                        let bytes = part
-                            .save_to_bytes()
-                            .map_err(|error| format!("could not save a split PDF: {error}"))?;
-                        // No navigation to restore: a single page carries no
-                        // outline of its own, and every link off it is dropped.
-                        zip.start_file(format!("{:04}.pdf", page + 1), entry_options)
-                            .map_err(failed)?;
-                        zip.write_all(&bytes)
-                            .map_err(|error| format!("could not write split PDF: {error}"))?;
-                        on_progress(page as usize + 1, total);
-                    }
+                        part.save_to_bytes()
+                            .map_err(|error| format!("could not save a split PDF: {error}"))
+                    })?;
+                    // No navigation to restore: a single page carries no
+                    // outline of its own, and every link off it is dropped.
+                    zip.start_file(format!("{:04}.pdf", page + 1), entry_options)
+                        .map_err(failed)?;
+                    zip.write_all(&bytes)
+                        .map_err(|error| format!("could not write split PDF: {error}"))?;
+                    on_progress(page as usize + 1, total);
                 }
-                ArchiveOptions::Images { image_format, .. } => {
-                    // Names follow the document's own numbering, so a selection
-                    // keeps the numbers the reader sees under each thumbnail.
-                    for (done, &page) in selected.as_deref().unwrap_or_default().iter().enumerate()
-                    {
-                        if operation.is_cancelled() {
-                            return Ok(false);
-                        }
+            }
+            ArchiveOptions::Images { image_format, .. } => {
+                // Names follow the document's own numbering, so a selection
+                // keeps the numbers the reader sees under each thumbnail.
+                for (done, &page) in selected.as_deref().unwrap_or_default().iter().enumerate() {
+                    if operation.is_cancelled() {
+                        return Ok(false);
+                    }
+                    let raw = self.with_archive_source(document_id, version, |source| {
                         let page_handle = source.pages().get(page as i32).map_err(|error| {
                             format!("could not load page {}: {error}", page + 1)
                         })?;
@@ -246,43 +277,72 @@ impl PdfiumEngine {
                             .set_maximum_width(MAX_EXPORT_RENDER_WIDTH)
                             .set_maximum_height(MAX_EXPORT_RENDER_HEIGHT)
                             .render_annotations(true)
-                            .render_form_data(true);
-                        let pixels = page_handle
-                            .render_with_config(&config)
-                            .and_then(|bitmap| bitmap.as_image())
-                            .map_err(|error| {
-                                format!("could not render page {}: {error}", page + 1)
-                            })?
-                            .into_rgb8();
-                        let extension = if image_format == ImageFormat::Jpg {
-                            "jpg"
-                        } else {
-                            "png"
-                        };
-                        zip.start_file(format!("{:04}.{extension}", page + 1), entry_options)
-                            .map_err(failed)?;
-                        if image_format == ImageFormat::Jpg {
-                            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut zip, 95)
-                                .encode_image(&pixels)
-                        } else {
-                            image::ImageEncoder::write_image(
-                                image::codecs::png::PngEncoder::new(&mut zip),
-                                &pixels,
-                                pixels.width(),
-                                pixels.height(),
-                                image::ExtendedColorType::Rgb8,
-                            )
-                        }
-                        .map_err(|error| format!("could not encode page {}: {error}", page + 1))?;
-                        on_progress(done + 1, progress_total);
+                            .render_form_data(true)
+                            // What `RawBitmap::into_rgb` reads.
+                            .set_reverse_byte_order(true);
+                        let bitmap = page_handle.render_with_config(&config).map_err(|error| {
+                            format!("could not render page {}: {error}", page + 1)
+                        })?;
+                        RawBitmap::copy_of(&bitmap)
+                    })?;
+                    let pixels = raw.into_rgb()?;
+                    let extension = if image_format == ImageFormat::Jpg {
+                        "jpg"
+                    } else {
+                        "png"
+                    };
+                    let encoded = if image_format == ImageFormat::Jpg {
+                        let mut jpeg = Vec::new();
+                        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+                            .encode_image(&pixels)
+                            .map(|()| jpeg)
+                            .map_err(|error| error.to_string())
+                    } else {
+                        // Adaptive, not the page transfer's fast filter: this is a
+                        // file the reader keeps, encoded off the lock anyway.
+                        let mut png = Vec::new();
+                        image::ImageEncoder::write_image(
+                            image::codecs::png::PngEncoder::new(&mut png),
+                            &pixels,
+                            pixels.width(),
+                            pixels.height(),
+                            image::ExtendedColorType::Rgb8,
+                        )
+                        .map(|()| png)
+                        .map_err(|error| error.to_string())
                     }
+                    .map_err(|error| format!("could not encode page {}: {error}", page + 1))?;
+                    zip.start_file(format!("{:04}.{extension}", page + 1), entry_options)
+                        .map_err(failed)?;
+                    zip.write_all(&encoded)
+                        .map_err(|error| format!("could not write page {}: {error}", page + 1))?;
+                    on_progress(done + 1, progress_total);
                 }
             }
-            if operation.is_cancelled() {
-                return Ok(false);
-            }
-            zip.finish().map_err(failed)?;
-            Ok(!operation.is_cancelled())
-        })
+        }
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+        zip.finish().map_err(failed)?;
+        // Flushed before the lock, so the commit's own flush under it finds
+        // nothing left: no render should wait on the disk taking an archive.
+        staged
+            .file()
+            .sync_all()
+            .map_err(|error| format!("could not flush the archive: {error}"))?;
+
+        // The lock was let go between pages, so another window may have opened
+        // or bound this very path since the check above: checked again under
+        // the lock the archive lands under, as a compressed copy is.
+        let documents = self.lock_documents()?;
+        if io::is_open_document_file(&documents, path, None) {
+            return Err("an archive cannot replace an open PDF".into());
+        }
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+        staged.commit()?;
+
+        Ok(true)
     }
 }

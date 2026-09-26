@@ -83,6 +83,40 @@ fn extracts_plain_page_text_with_its_line_breaks() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn a_search_lets_the_lock_go_and_starts_over_after_an_edit() {
+    let engine = test_engine();
+    let document = engine
+        .open(wrapped_search_pdf())
+        .expect("PDFium should open the search fixture");
+    let mut edited = false;
+
+    // One page a batch; the edit between them takes the lock itself, so a
+    // search still holding it would never return.
+    let outcome = engine
+        .search_in_batches(document.id, "wrapped phrase", 1, &mut || {
+            if !edited {
+                edited = true;
+                engine
+                    .delete_pages(document.id, &[1], 1)
+                    .expect("the edit should get the lock between batches");
+            }
+        })
+        .expect("PDFium should search the whole document");
+
+    assert!(edited);
+    assert!(!outcome.cancelled);
+    // Found again from the start: the first page and its match are gone, and
+    // the one left is on what is now page one.
+    assert_eq!(outcome.matches.len(), 1);
+    assert_eq!(outcome.matches[0].page_number, 1);
+
+    engine
+        .close(document.id)
+        .expect("the search fixture should close");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn searches_only_page_text_across_visual_line_breaks() {
     let engine = test_engine();
     let document = engine

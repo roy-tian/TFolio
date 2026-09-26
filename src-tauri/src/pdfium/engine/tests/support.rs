@@ -72,6 +72,7 @@ pub(super) fn test_engine() -> &'static PdfiumEngine {
         word: crate::convert::WordConverter::nowhere(),
         pdfium: test_pdfium(),
         documents: Mutex::new(HashMap::new()),
+        commits: Mutex::new(()),
         next_document_id: AtomicU64::new(1),
         // Straight from the source tree: the tests have no `AppHandle` to
         // resolve an app-data path through, and no business fetching a font.
@@ -338,6 +339,7 @@ pub(super) fn font_engine(
         word: crate::convert::WordConverter::at_directory(std::env::temp_dir()),
         pdfium: test_pdfium(),
         documents: Mutex::new(HashMap::new()),
+        commits: Mutex::new(()),
         next_document_id: AtomicU64::new(1),
         fallback_font_candidates: fallback,
         fallback_font: OnceLock::new(),

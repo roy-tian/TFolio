@@ -237,12 +237,16 @@ pub(super) fn place_text_object(
 
 impl PdfiumEngine {
     /// Whole-document preflight, run before anything is touched: every page
-    /// must still end with exactly the objects this session recorded.
+    /// must still end with exactly the objects this session recorded. It holds
+    /// the PDFium lock for the whole walk, so a guard makes it stoppable
+    /// between pages — `Ok(false)` — and each page is reported as it passes.
     pub(super) fn verify_owned_tail(
         document: &PdfDocument<'static>,
         page_ids: &[u64],
         state: &OwnedContentState,
-    ) -> Result<(), String> {
+        operation: Option<&OperationGuard<'_>>,
+        on_progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<bool, String> {
         let page_count = document.pages().len();
 
         // `page_ids` is the engine's own mirror of the page list; drifted from
@@ -256,6 +260,12 @@ impl PdfiumEngine {
         }
 
         for (index, page_id) in page_ids.iter().enumerate() {
+            if operation.is_some_and(OperationGuard::is_cancelled) {
+                return Ok(false);
+            }
+
+            on_progress(index, page_ids.len());
+
             let page_number = index as i32 + 1;
             let tail = state
                 .per_page
@@ -314,7 +324,49 @@ impl PdfiumEngine {
             }
         }
 
-        Ok(())
+        on_progress(page_ids.len(), page_ids.len());
+
+        Ok(true)
+    }
+
+    /// A layer change's two walks as one run of progress — the tails checked
+    /// once, then rebuilt in two passes — and one stop for either: nothing is
+    /// touched until the check has passed, and the rebuild rolls itself back.
+    fn verify_and_rebuild(
+        &self,
+        entry: &mut OpenDocument,
+        watermark: Option<WatermarkResources>,
+        page_numbers: Option<PageNumbersResources>,
+        on_progress: &mut dyn FnMut(usize, usize),
+        operation: &OperationGuard<'_>,
+    ) -> Result<bool, String> {
+        let pages = entry.page_ids.len();
+        let checked = match &entry.owned_content {
+            Some(state) => {
+                let verified = Self::verify_owned_tail(
+                    &entry.document,
+                    &entry.page_ids,
+                    state,
+                    Some(operation),
+                    &mut |done, _| on_progress(done, pages * 3),
+                )?;
+
+                if !verified {
+                    return Ok(false);
+                }
+
+                pages
+            }
+            None => 0,
+        };
+
+        self.rebuild_owned_content(
+            entry,
+            watermark,
+            page_numbers,
+            &mut |done, total| on_progress(checked + done, checked + total),
+            operation,
+        )
     }
 
     /// Reads back a just-written tail's identities, so a later guard compares
@@ -1187,13 +1239,9 @@ impl PdfiumEngine {
         {
             return Ok(true);
         }
-        if let Some(state) = &entry.owned_content {
-            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
-        }
-
         let page_numbers = self.existing_page_numbers(entry)?;
 
-        self.rebuild_owned_content(
+        self.verify_and_rebuild(
             entry,
             Some(watermark),
             page_numbers,
@@ -1234,13 +1282,9 @@ impl PdfiumEngine {
         {
             return Err("this session has no watermark to remove".into());
         }
-        if let Some(state) = &entry.owned_content {
-            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
-        }
-
         let page_numbers = self.existing_page_numbers(entry)?;
 
-        self.rebuild_owned_content(entry, None, page_numbers, &mut on_progress, &operation)
+        self.verify_and_rebuild(entry, None, page_numbers, &mut on_progress, &operation)
     }
 
     #[cfg(test)]
@@ -1277,16 +1321,12 @@ impl PdfiumEngine {
         {
             return Ok(true);
         }
-        if let Some(state) = &entry.owned_content {
-            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
-        }
-
         // The other layer rebuilds from its current config, its subset taken
         // under the lock — the accepted cost of stacking a second layer.
         let watermark = self.existing_watermark(entry)?;
         let page_numbers = self.page_numbers_resources(&config)?;
 
-        self.rebuild_owned_content(
+        self.verify_and_rebuild(
             entry,
             watermark,
             Some(page_numbers),
@@ -1327,13 +1367,9 @@ impl PdfiumEngine {
         {
             return Err("this session has no page numbers to remove".into());
         }
-        if let Some(state) = &entry.owned_content {
-            Self::verify_owned_tail(&entry.document, &entry.page_ids, state)?;
-        }
-
         let watermark = self.existing_watermark(entry)?;
 
-        self.rebuild_owned_content(entry, watermark, None, &mut on_progress, &operation)
+        self.verify_and_rebuild(entry, watermark, None, &mut on_progress, &operation)
     }
 
     #[cfg(test)]

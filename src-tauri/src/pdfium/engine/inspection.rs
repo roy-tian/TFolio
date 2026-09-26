@@ -1,5 +1,6 @@
 use super::io::{
-    is_merge_image, load_merge_source, merge_file_limit_error, read_image, MAX_MERGE_FILES,
+    is_merge_image, load_merge_source, merge_file_limit_error, read_image, read_pdf_bytes,
+    SourceFile, MAX_MERGE_FILES,
 };
 use super::*;
 
@@ -12,23 +13,50 @@ pub(super) fn is_a4_size(width: f32, height: f32) -> bool {
         && (width.max(height) - A4_LONG_POINTS).abs() <= TOLERANCE
 }
 
+/// Sized without loading a page: loading parses its content, which a size
+/// check has no use for and a 400-page file pays a hundred times over for.
 fn document_is_a4(document: &PdfDocument<'_>, cancelled: &impl Fn() -> bool) -> Option<bool> {
-    if document.pages().is_empty() {
+    let pages = document.pages();
+
+    if pages.is_empty() {
         return None;
     }
-    for index in 0..document.pages().len() {
+    for index in 0..pages.len() {
         if cancelled() {
             return None;
         }
-        let page = document.pages().get(index).ok()?;
-        if !is_a4_size(page.width().value, page.height().value) {
+        let size = pages.page_size(index).ok()?;
+        if !is_a4_size(size.width().value, size.height().value) {
             return Some(false);
         }
     }
     Some(true)
 }
 
+/// What the wizard's row needs of a PDF that opened.
+struct PdfFacts {
+    page_count: PdfPageIndex,
+    all_pages_a4: Option<bool>,
+    has_outline: bool,
+}
+
 impl PdfiumEngine {
+    /// Read off the disk without the lock, and measured under it — each file
+    /// taking it for itself, so an inspection of many parks no render for long.
+    /// `None` is a file PDFium cannot open.
+    fn inspect_pdf(&self, path: &Path, cancelled: &impl Fn() -> bool) -> Option<PdfFacts> {
+        let bytes = read_pdf_bytes(path).ok()?;
+        let _documents = self.lock_documents().ok()?;
+        // Declared after the guard, so closed before it is given back.
+        let document = load_merge_source(self.pdfium, SourceFile::Pdf(bytes), path).ok()?;
+
+        Some(PdfFacts {
+            page_count: document.pages().len(),
+            all_pages_a4: document_is_a4(&document, cancelled),
+            has_outline: document.bookmarks().root().is_some(),
+        })
+    }
+
     /// Reads each merge candidate just far enough for the wizard's first step.
     /// An unreadable file is reported as such, so its row stays and says why.
     pub(in crate::pdfium) fn inspect_files(
@@ -54,10 +82,6 @@ impl PdfiumEngine {
             .map(|path| is_merge_image(path).then(|| read_image(path).is_ok()))
             .collect();
 
-        // Loading a PDF is PDFium work like any other, so the whole sweep runs
-        // under the store's lock even though it inserts nothing into the store.
-        let _documents = self.lock_documents()?;
-
         Ok(paths
             .into_iter()
             .zip(images)
@@ -69,21 +93,15 @@ impl PdfiumEngine {
                 // A converted Word file reads like any PDF, under the row's own
                 // name: the row says what the file is, not what conversion left.
                 if let crate::convert::Entry::Converted(pdf) = &word {
-                    let opened = load_merge_source(self.pdfium, pdf).ok();
-
-                    return match opened {
-                        Some(document) => {
-                            let page_count = document.pages().len();
-
-                            PdfFileSummary {
-                                path: path_text,
-                                kind: MergeSourceKind::Word,
-                                page_count: (page_count >= 1).then_some(page_count),
-                                all_pages_a4: document_is_a4(&document, &cancelled),
-                                has_outline: document.bookmarks().root().is_some(),
-                                error: None,
-                            }
-                        }
+                    return match self.inspect_pdf(pdf, &cancelled) {
+                        Some(facts) => PdfFileSummary {
+                            path: path_text,
+                            kind: MergeSourceKind::Word,
+                            page_count: (facts.page_count >= 1).then_some(facts.page_count),
+                            all_pages_a4: facts.all_pages_a4,
+                            has_outline: facts.has_outline,
+                            error: None,
+                        },
                         // The conversion returned something this app's own
                         // reader cannot open — rarer than a refusal, same wording.
                         None => PdfFileSummary {
@@ -126,21 +144,15 @@ impl PdfiumEngine {
                     };
                 }
 
-                let opened = load_merge_source(self.pdfium, &path).ok();
-
-                match opened {
-                    Some(document) => {
-                        let page_count = document.pages().len();
-
-                        PdfFileSummary {
-                            path: path_text,
-                            kind: MergeSourceKind::Pdf,
-                            page_count: (page_count >= 1).then_some(page_count),
-                            all_pages_a4: document_is_a4(&document, &cancelled),
-                            has_outline: document.bookmarks().root().is_some(),
-                            error: None,
-                        }
-                    }
+                match self.inspect_pdf(&path, &cancelled) {
+                    Some(facts) => PdfFileSummary {
+                        path: path_text,
+                        kind: MergeSourceKind::Pdf,
+                        page_count: (facts.page_count >= 1).then_some(facts.page_count),
+                        all_pages_a4: facts.all_pages_a4,
+                        has_outline: facts.has_outline,
+                        error: None,
+                    },
                     None => PdfFileSummary {
                         path: path_text,
                         kind: MergeSourceKind::Pdf,

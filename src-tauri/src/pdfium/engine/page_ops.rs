@@ -464,7 +464,14 @@ impl PdfiumEngine {
             }
 
             if let Err(error) =
-                Self::verify_owned_tail(&entry.document, &next_page_ids, &prospective)
+                // An undo step, with no Stop to offer: checked in one pass.
+                Self::verify_owned_tail(
+                    &entry.document,
+                    &next_page_ids,
+                    &prospective,
+                    None,
+                    &mut |_, _| {},
+                )
             {
                 let cause = self.restore_document_snapshot(
                     entry,

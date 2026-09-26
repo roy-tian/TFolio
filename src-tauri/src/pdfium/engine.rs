@@ -56,6 +56,9 @@ const MAX_THUMBNAIL_WIDTH: i32 = 512;
 // Each quad is a PDFium call made under the lock every render waits on, and no
 // page has this many runs of text.
 const MAX_HIGHLIGHT_QUADS: usize = 8192;
+// A search holds the one PDFium lock this many pages at a time, so a render
+// waits for a few pages of search at most, never for the whole document.
+const SEARCH_PAGES_PER_LOCK: usize = 8;
 // A search term arrives from the WebView and becomes a UTF-16 allocation in
 // PDFium, so bound it first; this length is already far past a useful query.
 const MAX_SEARCH_CHARS: usize = 256;
@@ -308,6 +311,10 @@ pub(super) struct PdfiumEngine {
     /// The open documents, and the lock serializing PDFium itself: it is not
     /// thread-safe, so hold this across *all* PDFium work, opening included.
     documents: Mutex<HashMap<u64, OpenDocument>>,
+    /// Held from a save's staging through its commit, which lands off
+    /// `documents`: two writes to one file then land in the order they were
+    /// staged, never an older one over a newer.
+    commits: Mutex<()>,
     next_document_id: AtomicU64,
     /// Every place the downloadable fallback face may be, in trial order —
     /// resolved at startup, the only point an `AppHandle` reaches this module.
@@ -340,6 +347,7 @@ impl PdfiumState {
         Ok(Self(Arc::new(PdfiumEngine {
             pdfium,
             documents: Mutex::new(HashMap::new()),
+            commits: Mutex::new(()),
             next_document_id: AtomicU64::new(1),
             // Absent is not fatal here: it only fails the first note that needs
             // it, so a missing font cannot stop the app from opening PDFs.
@@ -507,9 +515,11 @@ impl PdfiumEngine {
         path: PathBuf,
     ) -> Result<PdfDocumentInfo, String> {
         if is_merge_image(&path) {
+            // Decoded before the lock: a decode is no PDFium work.
+            let image = read_image(&path)?;
             let bytes = {
                 let _documents = self.lock_documents()?;
-                let document = image_page_document(self.pdfium, &path)?;
+                let document = image_page_document(self.pdfium, &image, &path)?;
 
                 document
                     .save_to_bytes()
@@ -718,16 +728,35 @@ impl PdfiumEngine {
             return Err("a PDF search needs some text".into());
         }
 
+        // A lock let go and taken straight back is usually taken back by this
+        // thread, ahead of the render woken for it; a yield gives that its turn.
+        self.search_in_batches(
+            document_id,
+            &query,
+            SEARCH_PAGES_PER_LOCK,
+            &mut std::thread::yield_now,
+        )
+    }
+
+    /// The pass behind `search_text`, `between` running each time the lock is
+    /// let go — a test's way into the gap a render or an edit takes.
+    fn search_in_batches(
+        &self,
+        document_id: u64,
+        query: &str,
+        pages_per_lock: usize,
+        between: &mut dyn FnMut(),
+    ) -> Result<PdfSearchOutcome, String> {
         // Register before taking the one PDFium lock. A replacement search can
         // therefore stop this one even while it is queued behind another job.
         let operation = self.begin_operation(OperationTarget::Search(document_id));
-        let documents = self.lock_documents()?;
-        let entry = open_entry(&documents, document_id)?;
         let options = PdfSearchOptions::new();
         let mut matches = Vec::new();
         let mut rectangle_count = 0usize;
+        let mut next_page = 0usize;
+        let mut searched_version = None;
 
-        for page_index in 0..entry.page_ids.len() {
+        loop {
             if operation.is_cancelled() {
                 return Ok(PdfSearchOutcome {
                     cancelled: true,
@@ -736,65 +765,95 @@ impl PdfiumEngine {
                 });
             }
 
-            let page_number = page_index as i32 + 1;
-            let page = entry
-                .document
-                .pages()
-                .get(page_index as i32)
-                .map_err(|error| {
-                    format!("PDFium could not load page {page_number} for search: {error}")
-                })?;
-            let unrotated_height = unrotated_page_height(&page);
-            let text = page.text().map_err(|error| {
-                format!("PDFium could not read text on page {page_number}: {error}")
-            })?;
-            let search = text
-                .search(&query, &options)
-                .map_err(|error| format!("PDFium could not search page {page_number}: {error}"))?;
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
 
-            for result in search.iter(PdfSearchDirection::SearchForward) {
-                let rects = result
-                    .iter()
-                    .filter_map(|segment| {
-                        let bounds = segment.bounds();
-                        let left = bounds.left().value;
-                        let top = bounds.top().value;
-                        let width = bounds.right().value - left;
-                        let height = top - bounds.bottom().value;
+            // An edit landed while the lock was let go: what was found may name
+            // pages that have since moved or changed, so the pass starts over.
+            if searched_version.is_some_and(|version| version != entry.content_version) {
+                matches.clear();
+                rectangle_count = 0;
+                next_page = 0;
+            }
 
-                        (width > 0.0 && height > 0.0).then_some(PagePointsRect {
-                            left,
-                            top: unrotated_height - top,
-                            width,
-                            height,
-                        })
-                    })
-                    .collect::<Vec<_>>();
+            searched_version = Some(entry.content_version);
+            let batch_end = (next_page + pages_per_lock).min(entry.page_ids.len());
 
-                if rects.is_empty() {
-                    continue;
-                }
-
-                if matches.len() >= MAX_SEARCH_MATCHES
-                    || rectangle_count.saturating_add(rects.len()) > MAX_SEARCH_RECTS
-                {
+            for page_index in next_page..batch_end {
+                if operation.is_cancelled() {
                     return Ok(PdfSearchOutcome {
-                        cancelled: false,
-                        limit_reached: true,
-                        matches,
+                        cancelled: true,
+                        limit_reached: false,
+                        matches: Vec::new(),
                     });
                 }
 
-                rectangle_count += rects.len();
-                matches.push(PdfSearchMatch { page_number, rects });
-            }
-        }
+                let page_number = page_index as i32 + 1;
+                let page = entry
+                    .document
+                    .pages()
+                    .get(page_index as i32)
+                    .map_err(|error| {
+                        format!("PDFium could not load page {page_number} for search: {error}")
+                    })?;
+                let unrotated_height = unrotated_page_height(&page);
+                let text = page.text().map_err(|error| {
+                    format!("PDFium could not read text on page {page_number}: {error}")
+                })?;
+                let search = text.search(query, &options).map_err(|error| {
+                    format!("PDFium could not search page {page_number}: {error}")
+                })?;
 
-        Ok(PdfSearchOutcome {
-            cancelled: false,
-            limit_reached: false,
-            matches,
-        })
+                for result in search.iter(PdfSearchDirection::SearchForward) {
+                    let rects = result
+                        .iter()
+                        .filter_map(|segment| {
+                            let bounds = segment.bounds();
+                            let left = bounds.left().value;
+                            let top = bounds.top().value;
+                            let width = bounds.right().value - left;
+                            let height = top - bounds.bottom().value;
+
+                            (width > 0.0 && height > 0.0).then_some(PagePointsRect {
+                                left,
+                                top: unrotated_height - top,
+                                width,
+                                height,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+
+                    if rects.is_empty() {
+                        continue;
+                    }
+
+                    if matches.len() >= MAX_SEARCH_MATCHES
+                        || rectangle_count.saturating_add(rects.len()) > MAX_SEARCH_RECTS
+                    {
+                        return Ok(PdfSearchOutcome {
+                            cancelled: false,
+                            limit_reached: true,
+                            matches,
+                        });
+                    }
+
+                    rectangle_count += rects.len();
+                    matches.push(PdfSearchMatch { page_number, rects });
+                }
+            }
+
+            if batch_end >= entry.page_ids.len() {
+                return Ok(PdfSearchOutcome {
+                    cancelled: false,
+                    limit_reached: false,
+                    matches,
+                });
+            }
+
+            next_page = batch_end;
+            drop(documents);
+            between();
+        }
     }
 
     /// The page's text as PDFium reconstructs it, line breaks included — unlike
@@ -1078,7 +1137,7 @@ mod page_ops;
 mod raster;
 
 pub(crate) use io::is_merge_image;
-use io::{image_page_document, read_pdf_bytes};
+use io::{image_page_document, read_image, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::{encode_png, RawBitmap};

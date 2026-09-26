@@ -479,3 +479,48 @@ fn an_export_to_a_folder_it_cannot_write_says_so() {
         assert_eq!(error, io::EXPORT_DENIED_ERROR);
     }
 }
+
+#[test]
+fn a_staged_file_lands_only_when_committed() {
+    let directory = scratch_directory("staged-file");
+    let destination = directory.join("staged.pdf");
+    fs::write(&destination, b"before").expect("the fixture should be writable");
+    let leftovers = || {
+        fs::read_dir(&directory)
+            .expect("the scratch folder should be readable")
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tfolio-save")
+            })
+            .count()
+    };
+
+    let mut abandoned = io::StagedFile::beside(&destination).expect("staging should work");
+    abandoned
+        .file()
+        .write_all(b"abandoned")
+        .expect("the staged file should take bytes");
+    drop(abandoned);
+
+    assert_eq!(fs::read(&destination).unwrap(), b"before");
+    assert_eq!(
+        leftovers(),
+        0,
+        "a dropped stage leaves nothing beside the file"
+    );
+
+    let mut committed = io::StagedFile::beside(&destination).expect("staging should work");
+    committed
+        .file()
+        .write_all(b"after")
+        .expect("the staged file should take bytes");
+    committed.commit().expect("the commit should land");
+
+    assert_eq!(fs::read(&destination).unwrap(), b"after");
+    assert_eq!(leftovers(), 0);
+
+    fs::remove_dir_all(&directory).ok();
+}

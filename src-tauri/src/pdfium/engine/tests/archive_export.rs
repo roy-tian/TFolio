@@ -303,6 +303,33 @@ fn archive_refuses_missing_bookmarks_and_source_aliases() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn archive_refuses_a_destination_opened_while_it_was_written() {
+    let engine = test_engine();
+    let document = engine.open(outlined_three_page_pdf()).unwrap();
+    let directory = scratch_directory("archive-late-open");
+    let destination = directory.join("late.pdf");
+    fs::write(&destination, text_pdf()).unwrap();
+    let mut opened = None;
+
+    // Progress reports off the lock, where another window could open the very
+    // file the archive is about to replace.
+    let outcome =
+        engine.export_archive(document.id, &destination, ArchiveOptions::Pages, |_, _| {
+            if opened.is_none() {
+                opened = Some(engine.open_from_path(destination.clone()).unwrap());
+            }
+        });
+
+    assert!(outcome.is_err());
+    assert_eq!(fs::read(&destination).unwrap(), text_pdf());
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+    engine.close(opened.unwrap().id).unwrap();
+    engine.close(document.id).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn archive_split_restores_links_after_saving_and_reopening() {
     let engine = test_engine();
     let source = engine.open(linked_chapters_pdf()).unwrap();
