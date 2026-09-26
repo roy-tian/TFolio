@@ -8,6 +8,7 @@ import {
   blankPdf,
   closeAppMenu,
   dropZoneButton,
+  minimalPdf,
   openPdfFromDisk,
   pagePixelFingerprint,
   refreshApp,
@@ -172,6 +173,21 @@ describe("TFolio document watermark", () => {
       timeout: 20_000,
       timeoutMsg: "undo did not restore the explicitly removed watermark",
     })
+  })
+
+  it("previews the mark on the document's own page shape", async () => {
+    // Alone in the window, so the toolbar pressed below is this document's.
+    await refreshApp()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("landscape.pdf", minimalPdf(1, "0 0 400 200"))
+    await renderedPage()
+    await openWatermarkDialog()
+
+    const sheet = await $("[data-testid='watermark-sheet']").getSize()
+
+    // A landscape page, previewed as one rather than as portrait A4.
+    expect(sheet.width).toBeGreaterThan(sheet.height * 1.5)
+    await browser.keys(["Escape"])
   })
 
   it("applies from thumbnails and leaves the reader's own file alone", async () => {

@@ -45,6 +45,8 @@ type WatermarkSettingsProps = {
   className?: string
   draft: WatermarkConfig
   onDraftChange: (draft: WatermarkConfig) => void
+  /** The document's first page as displayed, in points; A4 without one. */
+  previewPage?: { height: number; width: number }
   validationError: WatermarkValidationError | null
 }
 
@@ -56,6 +58,7 @@ export function WatermarkSettings({
   draft,
   idPrefix = "watermark",
   onDraftChange,
+  previewPage,
   validationError,
 }: WatermarkSettingsProps) {
   const { t } = useTranslation()
@@ -100,6 +103,7 @@ export function WatermarkSettings({
         </div>
         <WatermarkPreview
           config={draft}
+          page={previewPage}
           placeholder={t("watermark.previewPlaceholder")}
         />
       </Field>

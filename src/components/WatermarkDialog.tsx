@@ -30,6 +30,7 @@ type WatermarkDialogProps = {
   onRemove: () => void
   onStop: () => void
   open: boolean
+  previewPage?: { height: number; width: number }
   progress: PdfProgress | null
   validationError: WatermarkValidationError | null
 }
@@ -45,6 +46,7 @@ export function WatermarkDialog({
   onRemove,
   onStop,
   open,
+  previewPage,
   progress,
   validationError,
 }: WatermarkDialogProps) {
@@ -93,6 +95,7 @@ export function WatermarkDialog({
             autoFocus
             className="min-h-0 flex-1 overflow-y-auto p-5"
             draft={draft}
+            previewPage={previewPage}
             onDraftChange={onDraftChange}
             validationError={validationError}
           />
