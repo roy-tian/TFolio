@@ -191,13 +191,11 @@ body {
     margin: 5mm;
   }
 
-  /* One page per sheet. The query container is what lets a quarter-turned page
-     be fitted into the sheet's own height before it is turned back. */
+  /* One page per sheet. */
   .pdf-print-page {
     position: relative;
     height: 100%;
     overflow: hidden;
-    container-type: size;
     break-after: page;
   }
 
@@ -205,12 +203,9 @@ body {
     break-after: auto;
   }
 
-  /* Centred by the transform PrintSheet.tsx completes: a turned page's box
-     outgrows the sheet, and every box centring falls back to one edge. */
   .pdf-print-page img {
     position: absolute;
-    top: 50%;
-    left: 50%;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: contain;

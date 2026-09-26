@@ -110,7 +110,7 @@ describe("TFolio annotations", () => {
     })
 
     await $("button[aria-label='Highlight text']").click()
-    await $("button[aria-label='Rotate clockwise']").click()
+    await $("button[aria-label='Rotate the view clockwise']").click()
     await browser.pause(2500)
 
     await expect($("button[aria-label^='Undo']")).toBeDisabled()

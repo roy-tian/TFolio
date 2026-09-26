@@ -130,6 +130,8 @@ export function SessionHeader({
   zoomApplies,
 }: SessionHeaderProps) {
   const { t } = useTranslation()
+  const rotateLabel =
+    viewMode === "thumbnail" ? t("toolbar.rotate") : t("toolbar.rotateView")
 
   return (
     // pb-px keeps the content box even: a 47px row centres a 32px control
@@ -270,9 +272,11 @@ export function SessionHeader({
             zoomPercent={zoom.zoomPercent}
           />
         ) : null}
-        <ToolbarTooltip label={t("toolbar.rotate")}>
+        {/* The grid turns the chosen pages in the document; the reading view
+            turns only the way they are looked at (D2). */}
+        <ToolbarTooltip label={rotateLabel}>
           <Button
-            aria-label={t("toolbar.rotate")}
+            aria-label={rotateLabel}
             disabled={!pdfDocument}
             onClick={onRotate}
             size="icon"

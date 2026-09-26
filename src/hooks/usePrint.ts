@@ -17,7 +17,6 @@ type PrintOptions = {
   documentId: number | undefined
   onError: () => void
   pages: PdfPageInfo[]
-  rotationAt: (pageNumber: number) => number
 }
 
 /**
@@ -30,7 +29,6 @@ export function usePrint({
   documentId,
   onError,
   pages,
-  rotationAt,
 }: PrintOptions) {
   const [preparing, setPreparing] = useState(false)
   const [progress, setProgress] = useState<PdfProgress>({
@@ -79,11 +77,7 @@ export function usePrint({
           return
         }
 
-        printed.push({
-          pageNumber,
-          rotation: rotationAt(pageNumber),
-          src: pngDataUrl(bytes),
-        })
+        printed.push({ pageNumber, src: pngDataUrl(bytes) })
         setProgress({ completed: pageNumber, total: pages.length })
       }
     } catch {
@@ -98,7 +92,7 @@ export function usePrint({
     // The dialog waits on the effect below, which cannot open it until React
     // has put these images in the document for the printer to draw.
     setSheet(printed)
-  }, [documentId, pages, rotationAt])
+  }, [documentId, pages])
 
   useEffect(() => {
     if (!sheet) {

@@ -175,6 +175,7 @@ const zhCN = {
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
     rotate: "顺时针旋转",
+    rotateView: "顺时针旋转视图",
     zoomOut: "缩小",
     zoomIn: "放大",
     zoomLevel: "缩放 {{percent}}%",

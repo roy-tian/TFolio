@@ -737,17 +737,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // open the one dialog; both openers are stable.
     const openWatermarkDialog = watermark.openDialog
     const openPageNumbersDialog = pageNumbers.openDialog
-    // Printed as the reader has it turned: the rotation is the viewer's own, and
-    // the backend's render of a page knows nothing about it.
-    const rotationAt = useCallback(
-      (pageNumber: number) => rotationForPage(pageRotations, pageNumber),
-      [pageRotations],
-    )
     const print = usePrint({
       documentId: pdfDocument?.id,
       onError: () => notice.raise("printFailed"),
       pages: pdfDocument?.pages ?? [],
-      rotationAt,
     })
     const discardPrint = print.discard
     const startPrint = print.start
@@ -1052,6 +1045,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewMode,
       setCurrentPage,
       zoom.zoomPreviewing || restoringRecentView,
+      pdfDocument.pages,
     )
 
     useEffect(() => {
@@ -1721,6 +1715,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 scale={zoom.scale}
                 searchMatchesByPage={search.matchesByPage}
                 activeSearchIndex={search.activeIndex}
+                activeSearchPage={
+                  search.activeIndex === null
+                    ? null
+                    : (search.matches[search.activeIndex]?.pageNumber ?? null)
+                }
                 onCopyAllText={copyDocumentText}
                 textEpochs={annotations.textEpochs}
                 textSelectAll={textSelectAll.selectedAll}
@@ -1757,6 +1756,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           active={active}
           pageCount={pdfDocument?.numPages ?? 0}
           pageNumbers={pageNumbers}
+          previewPage={pdfDocument.pages[0]}
           print={print}
           watermark={watermark}
         />

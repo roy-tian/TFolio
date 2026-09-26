@@ -1,9 +1,60 @@
-import { useEffect, useRef, useState, type RefObject } from "react"
+import {
+  createContext,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react"
+
+type HoldFlags = { paused: boolean; retainExited: boolean }
+
+/**
+ * A viewer's gesture state — a zoom preview holding the page window still, a
+ * selection drag keeping the pages it has crossed — read by each page's
+ * observer when it fires. Kept out of props: a flag flipping per gesture
+ * would re-render every page and re-observe each one.
+ */
+export class ViewportHold {
+  private flags: HoldFlags = { paused: false, retainExited: false }
+  private readonly listeners = new Set<() => void>()
+
+  get paused() {
+    return this.flags.paused
+  }
+
+  get retainExited() {
+    return this.flags.retainExited
+  }
+
+  set(next: HoldFlags) {
+    if (
+      next.paused === this.flags.paused &&
+      next.retainExited === this.flags.retainExited
+    ) {
+      return
+    }
+
+    this.flags = next
+
+    for (const listener of this.listeners) {
+      listener()
+    }
+  }
+
+  subscribe(listener: () => void) {
+    this.listeners.add(listener)
+
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+}
+
+export const ViewportHoldContext = createContext<ViewportHold | null>(null)
 
 type NearViewportOptions = {
-  /** Disconnect completely while compositor geometry differs from layout. */
-  paused?: boolean
-  retainExited?: boolean
+  /** The viewer's gesture flags; none holds the answer back. */
+  hold?: ViewportHold | null
   retainSelection?: boolean
 }
 
@@ -66,21 +117,23 @@ function observeNearViewport(
 export function useNearViewport(
   ref: RefObject<Element | null>,
   rootMargin = "800px 0px",
-  {
-    paused = false,
-    retainExited = false,
-    retainSelection = false,
-  }: NearViewportOptions = {},
+  { hold = null, retainSelection = false }: NearViewportOptions = {},
 ) {
   const [isNearViewport, setIsNearViewport] = useState(false)
   const intersectingRef = useRef(false)
+  const mountedRef = useRef(false)
+  // A page kept mounted off screen — by a selection or a hold — changes no
+  // state as it leaves, yet the selection listener below must re-check then.
+  const [offscreenTick, setOffscreenTick] = useState(0)
+
+  useEffect(() => {
+    mountedRef.current = isNearViewport
+  }, [isNearViewport])
 
   useEffect(() => {
     const element = ref.current
 
-    // A compositor-only zoom moves the page without changing its layout box;
-    // freezing the window keeps mount/evict work off the gesture's critical path.
-    if (!element || paused) {
+    if (!element) {
       return
     }
 
@@ -101,18 +154,42 @@ export function useNearViewport(
       )
     }
 
+    // A compositor-only zoom moves the page without changing its layout box;
+    // holding the answer keeps mount/evict work off the gesture's critical path.
     const settleMountedState = (intersecting: boolean) => {
       intersectingRef.current = intersecting
+
+      if (hold?.paused) {
+        return
+      }
+
       setIsNearViewport(
         (mounted) =>
           intersecting ||
-          (retainExited && mounted) ||
+          (Boolean(hold?.retainExited) && mounted) ||
           selectionTouchesElement(),
       )
+
+      if (retainSelection && !intersecting && mountedRef.current) {
+        setOffscreenTick((tick) => tick + 1)
+      }
     }
 
-    return observeNearViewport(element, rootMargin, settleMountedState)
-  }, [paused, ref, retainExited, retainSelection, rootMargin])
+    const stopObserving = observeNearViewport(
+      element,
+      rootMargin,
+      settleMountedState,
+    )
+    // A hold let go: settle on where the page stands now.
+    const stopHolding = hold?.subscribe(() => {
+      settleMountedState(intersectingRef.current)
+    })
+
+    return () => {
+      stopObserving()
+      stopHolding?.()
+    }
+  }, [hold, ref, retainSelection, rootMargin])
 
   useEffect(() => {
     const element = ref.current
@@ -121,9 +198,9 @@ export function useNearViewport(
     // listener per page would recreate the scale problem this hook avoids.
     if (
       !element ||
-      paused ||
+      hold?.paused ||
       !retainSelection ||
-      retainExited ||
+      hold?.retainExited ||
       intersectingRef.current ||
       !isNearViewport
     ) {
@@ -131,6 +208,12 @@ export function useNearViewport(
     }
 
     const handleSelectionChange = () => {
+      // Registered off screen, the page may have come back since, or a hold
+      // begun: neither changes state that would have taken this listener down.
+      if (hold?.paused || hold?.retainExited || intersectingRef.current) {
+        return
+      }
+
       const selection = window.getSelection()
       const stillSelected = Boolean(
         selection &&
@@ -147,7 +230,7 @@ export function useNearViewport(
     document.addEventListener("selectionchange", handleSelectionChange)
 
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
-  }, [isNearViewport, paused, ref, retainExited, retainSelection])
+  }, [hold, isNearViewport, offscreenTick, ref, retainSelection])
 
   return isNearViewport
 }

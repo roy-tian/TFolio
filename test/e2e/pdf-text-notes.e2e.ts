@@ -440,7 +440,7 @@ describe("TFolio text notes", () => {
         return `${Math.round(box.width)}x${Math.round(box.height)}`
       })
     const beforeRotate = await pageBox()
-    await pressControl("button[aria-label='Rotate clockwise']")
+    await pressControl("button[aria-label='Rotate the view clockwise']")
     await browser.waitUntil(
       async () => (await pageBox()) !== beforeRotate,
       { timeout: 10_000, timeoutMsg: "the rotation never relaid out the page" },

@@ -176,6 +176,7 @@ const en = {
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
     rotate: "Rotate clockwise",
+    rotateView: "Rotate the view clockwise",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
     zoomLevel: "Zoom {{percent}}%",

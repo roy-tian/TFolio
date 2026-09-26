@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next"
 import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { TextNotePreview } from "@/components/TextNotePreview"
-import { useNearViewport } from "@/hooks/useNearViewport"
+import { useNearViewport, ViewportHoldContext } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { useSelectionBands } from "@/hooks/useSelectionBands"
 import type { RectDraft } from "@/hooks/useRectTool"
@@ -53,9 +53,9 @@ type IndexedSearchMatch = {
 type PdfPageProps = {
   activeSearchIndex: number | null
   documentId: number
-  /** Live and released rectangles awaiting this page's pixels. */
+  /** Live and released rectangles awaiting this page's pixels: its own only. */
   drafts: RectDraft[]
-  /** Written notes awaiting this page's pixels. */
+  /** Written notes awaiting this page's pixels: its own only. */
   notes: HeldNote[]
   /** Present only while a select-all stands: the page's menu then offers the
       whole document, which is what is selected, and not this page alone. */
@@ -72,10 +72,6 @@ type PdfPageProps = {
   textSelectAll: boolean
   rotation: number
   scale: number
-  /** Keep the current heavy-page window fixed during a compositor zoom preview. */
-  virtualizationPaused: boolean
-  /** Do not evict mounted surfaces while a text-selection drag crosses pages. */
-  virtualizationRetainExited: boolean
   /** CSS pixels to lay the page out at, overriding `scale` — only for a layout
       sharing one column across pages of different sizes, as a book spread. */
   width?: number
@@ -386,21 +382,14 @@ export const PdfPage = memo(function PdfPage({
   searchMatches,
   textEpoch,
   textSelectAll,
-  virtualizationPaused,
-  virtualizationRetainExited,
   width,
 }: PdfPageProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLDivElement>(null)
-  const isNearViewport = useNearViewport(
-    wrapperRef,
-    "800px 0px",
-    {
-      paused: virtualizationPaused,
-      retainExited: virtualizationRetainExited,
-      retainSelection: true,
-    },
-  )
+  const isNearViewport = useNearViewport(wrapperRef, "800px 0px", {
+    hold: useContext(ViewportHoldContext),
+    retainSelection: true,
+  })
 
   // User rotation spins the whole page clockwise on top of the bitmap's own
   // rotation, so a 90°/270° page swaps the footprint it takes in the column.
@@ -410,15 +399,6 @@ export const PdfPage = memo(function PdfPage({
   const targetRenderWidth =
     renderWidth ?? footprintWidth * POINT_TO_PX * renderScale
   const surfaceScale = displayWidth / footprintWidth
-  // Keep the surface's props stable while only the outer page size changes.
-  const pageDrafts = useMemo(
-    () => drafts.filter((draft) => draft.pageNumber === pageNumber),
-    [drafts, pageNumber],
-  )
-  const pageNotes = useMemo(
-    () => notes.filter((note) => note.pageNumber === pageNumber),
-    [notes, pageNumber],
-  )
 
   return (
     <div
@@ -444,8 +424,8 @@ export const PdfPage = memo(function PdfPage({
           <PdfPageSurface
             activeSearchIndex={activeSearchIndex}
             documentId={documentId}
-            drafts={pageDrafts}
-            notes={pageNotes}
+            drafts={drafts}
+            notes={notes}
             onCopyAllText={onCopyAllText}
             onPagePaint={onPagePaint}
             footprintHeight={footprintHeight}

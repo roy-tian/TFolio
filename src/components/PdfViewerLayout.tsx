@@ -22,6 +22,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import { ViewportHold, ViewportHoldContext } from "@/hooks/useNearViewport"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview } from "@/hooks/useTextNoteTool"
@@ -92,14 +93,38 @@ export type IndexedPdfSearchMatch = {
 }
 
 const NO_SEARCH_MATCHES: IndexedPdfSearchMatch[] = []
+// Shared, so a page with nothing of its own keeps the same prop through every
+// pointermove of a drag on another page, and its memo holds.
+const NO_DRAFTS: RectDraft[] = []
+const NO_NOTES: TextNotePreview[] = []
+
+function groupByPage<Item extends { pageNumber: number }>(
+  items: Item[],
+): ReadonlyMap<number, Item[]> {
+  const byPage = new Map<number, Item[]>()
+
+  for (const item of items) {
+    const onPage = byPage.get(item.pageNumber)
+
+    if (onPage) {
+      onPage.push(item)
+    } else {
+      byPage.set(item.pageNumber, [item])
+    }
+  }
+
+  return byPage
+}
 
 type LayoutProps = {
   activeSearchIndex: number | null
+  /** The page holding the active match, the one page told which it is. */
+  activeSearchPage: number | null
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
-  drafts: RectDraft[]
-  notes: TextNotePreview[]
+  draftsByPage: ReadonlyMap<number, RectDraft[]>
+  notesByPage: ReadonlyMap<number, TextNotePreview[]>
   /** Copies the whole document, and stands for a select-all being in force:
       absent, a page's menu falls back to whatever the reader dragged over. */
   onCopyAllText?: () => void
@@ -116,16 +141,14 @@ type LayoutProps = {
   textEpochs: RenderEpochs
   /** The app's own select-all stands, so every page paints its bands. */
   textSelectAll: boolean
-  /** Freeze the current heavy-page window during compositor-only zoom. */
-  virtualizationPaused: boolean
-  virtualizationRetainExited: boolean
 }
 
 function SingleLayout({
   activeSearchIndex,
+  activeSearchPage,
   documentId,
-  drafts,
-  notes,
+  draftsByPage,
+  notesByPage,
   onCopyAllText,
   onPagePaint,
   pages,
@@ -136,14 +159,12 @@ function SingleLayout({
   searchMatchesByPage,
   textEpochs,
   textSelectAll,
-  virtualizationPaused,
-  virtualizationRetainExited,
 }: LayoutProps) {
   return pages.map((page, index) => (
     <PdfPage
       documentId={documentId}
-      drafts={drafts}
-      notes={notes}
+      drafts={draftsByPage.get(index + 1) ?? NO_DRAFTS}
+      notes={notesByPage.get(index + 1) ?? NO_NOTES}
       onCopyAllText={onCopyAllText}
       onPagePaint={onPagePaint}
       key={`${documentId}-${index + 1}`}
@@ -154,20 +175,19 @@ function SingleLayout({
       rotation={rotationForPage(rotations, index + 1)}
       scale={scale}
       searchMatches={searchMatchesByPage.get(index + 1) ?? NO_SEARCH_MATCHES}
-      activeSearchIndex={activeSearchIndex}
+      activeSearchIndex={activeSearchPage === index + 1 ? activeSearchIndex : null}
       textEpoch={textEpochs[index + 1] ?? 0}
       textSelectAll={textSelectAll}
-      virtualizationPaused={virtualizationPaused}
-      virtualizationRetainExited={virtualizationRetainExited}
     />
   ))
 }
 
 function BookLayout({
   activeSearchIndex,
+  activeSearchPage,
   documentId,
-  drafts,
-  notes,
+  draftsByPage,
+  notesByPage,
   onCopyAllText,
   onPagePaint,
   pages,
@@ -179,8 +199,6 @@ function BookLayout({
   searchMatchesByPage,
   textEpochs,
   textSelectAll,
-  virtualizationPaused,
-  virtualizationRetainExited,
 }: LayoutProps) {
   // Both halves of a spread share one width: two columns of visibly different
   // widths would read as broken.
@@ -198,8 +216,8 @@ function BookLayout({
       {row.map((pageNumber) => (
         <PdfPage
           documentId={documentId}
-          drafts={drafts}
-          notes={notes}
+          drafts={draftsByPage.get(pageNumber) ?? NO_DRAFTS}
+          notes={notesByPage.get(pageNumber) ?? NO_NOTES}
           onCopyAllText={onCopyAllText}
           onPagePaint={onPagePaint}
           key={`${documentId}-${pageNumber}`}
@@ -211,11 +229,9 @@ function BookLayout({
           rotation={rotationForPage(rotations, pageNumber)}
           scale={scale}
           searchMatches={searchMatchesByPage.get(pageNumber) ?? NO_SEARCH_MATCHES}
-          activeSearchIndex={activeSearchIndex}
+          activeSearchIndex={activeSearchPage === pageNumber ? activeSearchIndex : null}
           textEpoch={textEpochs[pageNumber] ?? 0}
           textSelectAll={textSelectAll}
-          virtualizationPaused={virtualizationPaused}
-          virtualizationRetainExited={virtualizationRetainExited}
           width={columnWidth}
         />
       ))}
@@ -620,7 +636,6 @@ function ThumbnailLayout({
   pageEdit,
   pages,
   renderEpochs,
-  rotations,
 }: LayoutProps & {
   currentPage: number
   pageEdit: PageEditProps
@@ -792,7 +807,9 @@ function ThumbnailLayout({
               pageWidth={page.width}
               released={drag?.released ?? false}
               renderEpoch={renderEpochs[pageNumber] ?? 0}
-              rotation={rotationForPage(rotations, pageNumber)}
+              // The grid shows the document as it will be saved (D2): a view
+              // rotation from the reading view is not the page's.
+              rotation={0}
               // Only a page the delete would take the selection with needs the
               // count; the rest would re-render the grid on every selection change.
               selectedCount={isSelected ? selectedPages.size : 1}
@@ -813,7 +830,7 @@ function ThumbnailLayout({
                 drag={drag}
                 gridRef={gridRef}
                 page={ghostPage}
-                rotation={rotationForPage(rotations, drag.lead)}
+                rotation={0}
               />,
               document.body,
             )
@@ -842,6 +859,8 @@ function ThumbnailLayout({
 
 type PdfViewerLayoutProps = {
   activeSearchIndex: number | null
+  /** The page holding the active match, the one page told which it is. */
+  activeSearchPage: number | null
   currentPage: number
   documentId: number
   drafts: RectDraft[]
@@ -872,6 +891,7 @@ type PdfViewerLayoutProps = {
  */
 export function PdfViewerLayout({
   activeSearchIndex,
+  activeSearchPage,
   currentPage,
   documentId,
   drafts,
@@ -895,12 +915,22 @@ export function PdfViewerLayout({
 }: PdfViewerLayoutProps) {
   const contentWidth = Math.max(0, viewerWidth - CONTENT_PADDING_X)
   const renderScale = useDebouncedValue(scale, RENDER_SETTLE_MS)
+  // A zoom preview holds the page window still; a selection drag keeps what it
+  // crossed mounted. Told to the pages' observers, never as a prop to each.
+  const [hold] = useState(() => new ViewportHold())
+
+  useLayoutEffect(() => {
+    hold.set({ paused: zoomPreviewing, retainExited: textSelectionDragging })
+  }, [hold, textSelectionDragging, zoomPreviewing])
+  const draftsByPage = useMemo(() => groupByPage(drafts), [drafts])
+  const notesByPage = useMemo(() => groupByPage(notes), [notes])
   const layoutProps = {
     activeSearchIndex,
+    activeSearchPage,
     contentWidth,
     documentId,
-    drafts,
-    notes,
+    draftsByPage,
+    notesByPage,
     onCopyAllText: textSelectAll ? onCopyAllText : undefined,
     onPagePaint,
     pages,
@@ -912,8 +942,6 @@ export function PdfViewerLayout({
     searchMatchesByPage,
     textEpochs,
     textSelectAll,
-    virtualizationPaused: zoomPreviewing,
-    virtualizationRetainExited: textSelectionDragging,
   }
 
   return (
@@ -942,17 +970,19 @@ export function PdfViewerLayout({
       // box would split the overflow, its left half at an unreachable offset.
       className="flex min-h-full min-w-fit flex-col items-center gap-5 px-8 py-8"
     >
-      {viewMode === "book" ? (
-        <BookLayout {...layoutProps} />
-      ) : viewMode === "thumbnail" ? (
-        <ThumbnailLayout
-          {...layoutProps}
-          currentPage={currentPage}
-          pageEdit={pageEdit}
-        />
-      ) : (
-        <SingleLayout {...layoutProps} />
-      )}
+      <ViewportHoldContext.Provider value={hold}>
+        {viewMode === "book" ? (
+          <BookLayout {...layoutProps} />
+        ) : viewMode === "thumbnail" ? (
+          <ThumbnailLayout
+            {...layoutProps}
+            currentPage={currentPage}
+            pageEdit={pageEdit}
+          />
+        ) : (
+          <SingleLayout {...layoutProps} />
+        )}
+      </ViewportHoldContext.Provider>
     </div>
   )
 }
