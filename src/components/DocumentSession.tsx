@@ -848,15 +848,26 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       storeHighlightColor(color)
     }, [])
 
-    const changeRectStyle = useCallback((style: RectStyle) => {
+    // A slider's drag changes the style on every step but is stored once, as
+    // it is let go: each store rewrites the settings file and wakes every window.
+    const changeRectStyle = useCallback((style: RectStyle, transient = false) => {
       setRectStyle(style)
-      storeRectStyle(style)
+
+      if (!transient) {
+        storeRectStyle(style)
+      }
     }, [])
 
-    const changeTextNoteStyle = useCallback((style: TextNoteStyle) => {
-      setTextNoteStyle(style)
-      storeTextNoteStyle(style)
-    }, [])
+    const changeTextNoteStyle = useCallback(
+      (style: TextNoteStyle, transient = false) => {
+        setTextNoteStyle(style)
+
+        if (!transient) {
+          storeTextNoteStyle(style)
+        }
+      },
+      [],
+    )
 
     // What every export names its file after: a converted or merged
     // document's own PDF name, else the file the document came from, else the

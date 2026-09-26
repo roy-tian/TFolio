@@ -34,7 +34,8 @@ const amountLabelKey = {
 } as const
 
 type RectStylePopoverProps = {
-  onChange: (style: RectStyle) => void
+  /** `transient` for a slider's drag, which is shown but not stored. */
+  onChange: (style: RectStyle, transient?: boolean) => void
   style: RectStyle
 }
 
@@ -126,7 +127,9 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
             label={t(amountLabelKey.translucent)}
             max={100}
             min={RECT_MIN_OPACITY * 100}
-            onChange={(value) => onChange({ ...style, opacity: value / 100 })}
+            onChange={(value, transient) =>
+              onChange({ ...style, opacity: value / 100 }, transient)
+            }
             step={5}
             value={Math.round(style.opacity * 100)}
           />
@@ -138,7 +141,9 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
             label={t(amountLabelKey[style.effect])}
             max={RECT_MAX_EFFECT_STRENGTH}
             min={RECT_MIN_EFFECT_STRENGTH}
-            onChange={(strength) => onChange({ ...style, strength })}
+            onChange={(strength, transient) =>
+              onChange({ ...style, strength }, transient)
+            }
             step={1}
             value={style.strength}
           />

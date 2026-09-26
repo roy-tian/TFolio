@@ -172,10 +172,11 @@ export async function removeRecentFile(path: string): Promise<void> {
 export async function storeRecentPdfView(
   path: string,
   view: RecentPdfView,
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await invoke("set_recent_pdf_view", { path, view })
+    return await invoke<boolean>("set_recent_pdf_view", { path, view })
   } catch {
     // The document stays fully usable when its convenience write fails.
+    return false
   }
 }

@@ -82,7 +82,7 @@ type SessionHeaderProps = {
     highlightColor: HexColor
     onHighlightColorChange: (color: HexColor) => void
     onPageNumbers: () => void
-    onRectStyleChange: (style: RectStyle) => void
+    onRectStyleChange: (style: RectStyle, transient?: boolean) => void
     onWatermark: () => void
     rectStyle: RectStyle
     textNoteColor: string

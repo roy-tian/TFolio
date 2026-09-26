@@ -331,7 +331,12 @@ pub async fn set_recent_pdf_view(
     view: RecentPdfView,
     state: State<'_, RecentFiles>,
 ) -> Result<bool, String> {
-    Ok(state.record_view(Path::new(&path), view))
+    let recent = state.inner().clone();
+
+    // A blocking file write, kept off the async workers commands share.
+    tauri::async_runtime::spawn_blocking(move || recent.record_view(Path::new(&path), view))
+        .await
+        .map_err(|error| format!("recent view write task failed: {error}"))
 }
 
 #[cfg(test)]

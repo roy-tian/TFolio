@@ -22,6 +22,9 @@ export function useRecentView({ recentPath }: UseRecentViewOptions) {
     view: RecentPdfView
   } | null>(null)
   const writtenRecentViewVersionRef = useRef(0)
+  // What the last write sent: a scroll that came back to rest where it was,
+  // or a flush with nothing new, rewrites nothing.
+  const writtenRecentViewRef = useRef<string | null>(null)
   const recentViewTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   )
@@ -35,10 +38,27 @@ export function useRecentView({ recentPath }: UseRecentViewOptions) {
     }
 
     writtenRecentViewVersionRef.current = pending.version
+
+    const written = JSON.stringify([pending.path, pending.view])
+
+    if (written === writtenRecentViewRef.current) {
+      return recentViewWriteChainRef.current
+    }
+
+    writtenRecentViewRef.current = written
     // Tauri calls are asynchronous: without this chain a slower older write
     // could land after a newer one and put the document back too far.
-    recentViewWriteChainRef.current = recentViewWriteChainRef.current.then(() =>
-      storeRecentPdfView(pending.path, pending.view),
+    recentViewWriteChainRef.current = recentViewWriteChainRef.current.then(
+      async () => {
+        // One that did not land — a failed call, or a path the recent list no
+        // longer holds — must not stop the same view being sent again.
+        if (
+          !(await storeRecentPdfView(pending.path, pending.view)) &&
+          writtenRecentViewRef.current === written
+        ) {
+          writtenRecentViewRef.current = null
+        }
+      },
     )
 
     return recentViewWriteChainRef.current
@@ -53,13 +73,13 @@ export function useRecentView({ recentPath }: UseRecentViewOptions) {
       const version = (pendingRecentViewRef.current?.version ?? 0) + 1
       pendingRecentViewRef.current = { path: recentPath, version, view }
 
-      // Leading and trailing samples, one trailing timer: a long scroll is
-      // durable as it goes, its resting point written a quarter second later.
+      // Trailing samples only, one timer: a long scroll is written at most
+      // four times a second as it goes, and its resting point a quarter second
+      // after it stops; a tab switch, a close or a page hide flushes at once.
       if (recentViewTimerRef.current !== undefined) {
         return
       }
 
-      flushRecentView()
       recentViewTimerRef.current = setTimeout(() => {
         recentViewTimerRef.current = undefined
         flushRecentView()

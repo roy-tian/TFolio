@@ -162,8 +162,12 @@ pub async fn set_settings(
 ) -> Result<(), String> {
     let sent = Settings::sent(&settings);
     let written = sent.clone();
+    let store = store.inner().clone();
 
-    store.write(|stored| *stored = sent);
+    // The write is a blocking `fs::write`, which an async worker must not wait on.
+    tauri::async_runtime::spawn_blocking(move || store.write(|stored| *stored = sent))
+        .await
+        .map_err(|error| format!("settings write task failed: {error}"))?;
 
     // Other windows write whole snapshots; a stale copy would overwrite these changes.
     for label in app.webview_windows().into_keys() {

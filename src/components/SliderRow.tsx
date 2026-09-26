@@ -8,7 +8,9 @@ type SliderRowProps = {
   label: string
   max: number
   min: number
-  onChange: (value: number) => void
+  /** `transient` for each step of a drag, which is shown but not stored;
+      the value the drag lets go on comes again, not transient. */
+  onChange: (value: number, transient: boolean) => void
   step: number
   value: number
 }
@@ -41,7 +43,13 @@ export function SliderRow({
         max={max}
         min={min}
         onValueChange={(next) =>
-          onChange(Array.isArray(next) ? (next[0] ?? min) : (next as number))
+          onChange(Array.isArray(next) ? (next[0] ?? min) : (next as number), true)
+        }
+        onValueCommitted={(next) =>
+          onChange(
+            Array.isArray(next) ? (next[0] ?? min) : (next as number),
+            false,
+          )
         }
         step={step}
         value={[value]}
