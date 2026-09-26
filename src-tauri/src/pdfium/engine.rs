@@ -237,19 +237,32 @@ fn open_entry_mut(
 }
 
 /// What a cancellable operation works on. A merge names no document until it
-/// has built one, and the wizard is modal, so it is its own target.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// has built one, so it is named by the window whose modal wizard asked.
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum OperationTarget {
     Document(u64),
     Archive(u64),
-    Merge,
+    Merge(String),
     Search(u64),
     /// A compressed copy being estimated or written, whose page loop must
     /// stop when the reader walks away from the dialog.
     Compress(u64),
-    /// The Word→PDF conversions behind a wizard inspection, which can outlast
-    /// a reader's patience alone; a merge's stay under its own target.
-    Convert,
+    /// The Word→PDF conversions behind a wizard inspection, by window, which
+    /// can outlast a reader's patience alone; a merge's stay under its own
+    /// target.
+    Convert(String),
+    /// A Word document opened as a tab, apart from the wizard's: the wizard
+    /// may be open over it, and neither's Stop is meant for the other.
+    OpenConverted(String),
+}
+
+/// A merge's layout choices, and whether its Word sources may be converted.
+#[derive(Clone, Copy)]
+pub(super) struct MergeOptions {
+    pub(super) smart_padding: bool,
+    pub(super) normalize_a4: bool,
+    pub(super) bookmarks: MergeBookmarks,
+    pub(super) word_conversion: bool,
 }
 
 struct RunningOperation {
@@ -342,6 +355,14 @@ impl PdfiumState {
         self.0.approve_paths(paths);
     }
 
+    pub fn cancel_window_work(&self, label: &str) {
+        self.0.cancel_window_work(label);
+    }
+
+    pub fn remove_conversion_files(&self) {
+        self.0.word.remove_run_dir();
+    }
+
     /// Closing takes the PDFium lock, so it must not block the window event loop.
     pub fn close_document_detached(&self, document_id: u64) {
         let engine = Arc::clone(&self.0);
@@ -421,6 +442,14 @@ impl PdfiumEngine {
         asked
     }
 
+    /// A window's merge and conversions have nowhere to land once it is gone
+    /// or reloading; a Word suite would otherwise run on for minutes.
+    pub(super) fn cancel_window_work(&self, label: &str) {
+        self.cancel_operation(OperationTarget::Merge(label.to_string()));
+        self.cancel_operation(OperationTarget::Convert(label.to_string()));
+        self.cancel_operation(OperationTarget::OpenConverted(label.to_string()));
+    }
+
     /// Cancel first so closing a document does not wait for its entire rebuild.
     pub(super) fn cancel_document_work(&self, document_id: u64) {
         self.cancel_operation(OperationTarget::Document(document_id));
@@ -468,7 +497,11 @@ impl PdfiumEngine {
     /// An image or a Word document opened as its converted PDF. Built in
     /// memory with no source binding, like `create_blank`: the file behind it
     /// is only ever read, so there is no destination for approval to guard.
-    pub(super) fn open_converted(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
+    pub(super) fn open_converted(
+        &self,
+        window: &str,
+        path: PathBuf,
+    ) -> Result<PdfDocumentInfo, String> {
         if is_merge_image(&path) {
             let bytes = {
                 let _documents = self.lock_documents()?;
@@ -487,7 +520,8 @@ impl PdfiumEngine {
             // office suite's startup is seconds the open flow must be able to
             // walk away from, and `cancel_word_conversion` aims at this target.
             let entry = {
-                let operation = self.begin_operation(OperationTarget::Convert);
+                let operation =
+                    self.begin_operation(OperationTarget::OpenConverted(window.to_string()));
                 let cancelled = || operation.is_cancelled();
 
                 self.resolve_word_documents(

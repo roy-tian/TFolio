@@ -33,6 +33,7 @@ impl PdfiumEngine {
     /// An unreadable file is reported as such, so its row stays and says why.
     pub(in crate::pdfium) fn inspect_files(
         &self,
+        window: &str,
         paths: Vec<PathBuf>,
         word_conversion: bool,
     ) -> Result<Vec<PdfFileSummary>, String> {
@@ -42,7 +43,7 @@ impl PdfiumEngine {
 
         // A Word file has no page count until an office suite makes a PDF of it
         // — seconds, another process's — so it runs before the lock, stoppable.
-        let operation = self.begin_operation(OperationTarget::Convert);
+        let operation = self.begin_operation(OperationTarget::Convert(window.to_string()));
         let cancelled = || operation.is_cancelled();
         let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
 

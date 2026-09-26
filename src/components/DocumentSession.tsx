@@ -132,6 +132,9 @@ export type DocumentSessionHandle = {
   /** Lets go of the edit it held: the note's text lives nowhere else by then. */
   dismissNoteFont: () => void
   fetchNoteFont: () => void
+  /** Edits and a typed note, which a save would keep; `hasUnsavedWorkNow`
+      also counts work still running, which no save can. */
+  hasUnsavedChangesNow: () => boolean
   hasUnsavedWorkNow: () => boolean
   openPageNumbers: () => void
   openSearch: () => void
@@ -146,6 +149,8 @@ export type DocumentSessionHandle = {
       what it will not. */
   save: () => void
   saveAs: () => void
+  /** The close prompt's Save; resolves true when the close may go ahead. */
+  saveForClose: () => Promise<boolean>
   selectAll: () => void
   undo: () => void
   /** True only over this session's thumbnail grid, where a dropped PDF is
@@ -247,6 +252,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [hasMergedPages, setHasMergedPages] = useState(
       () => movedSeed?.hasMergedPages ?? false,
     )
+    // Read by a close's save, which runs after the queue and before a render.
+    const hasMergedPagesRef = useRef(hasMergedPages)
     const [currentPage, setCurrentPage] = useState(() =>
       Math.min(
         Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
@@ -529,6 +536,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
           documentRef.current = next
           setPdfDocument(next)
+          hasMergedPagesRef.current = update.hasMergedPages
           setHasMergedPages(update.hasMergedPages)
 
           // Turned where it stands, so every position still holds its page — a
@@ -711,13 +719,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
 
     const draftDirty = isNoteWorthKeeping(textNote.draft?.text ?? "")
-    const hasUnsavedWorkNow = useCallback(
+    // Changes a save would keep, apart from work still running: a close
+    // prompt words the two differently, and only the first has a save.
+    const hasUnsavedChangesNow = useCallback(
       () =>
         saveRequiredRef.current ||
         annotations.isDirtyNow() ||
-        annotations.hasPendingWorkNow() ||
         isNoteWorthKeeping(textNote.draft?.text ?? ""),
       [annotations, textNote.draft?.text],
+    )
+    const hasUnsavedWorkNow = useCallback(
+      () => hasUnsavedChangesNow() || annotations.hasPendingWorkNow(),
+      [annotations, hasUnsavedChangesNow],
     )
 
     useEffect(() => {
@@ -750,16 +763,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     // The destination dialog is the backend's own, so this only says *that* an
     // export happens; `onExportError` reports a failed write.
-    const exportPdf = useCallback(async () => {
-      if (!pdfDocument) {
-        return
-      }
-
-      await annotations.exportCopy(
-        saveAsDefaultName ?? t("menu.untitled"),
-        t("annotate.exportFilter"),
-      )
-    }, [annotations, pdfDocument, saveAsDefaultName, t])
+    const exportPdf = useCallback(
+      () =>
+        annotations.exportCopy(
+          saveAsDefaultName ?? t("menu.untitled"),
+          t("annotate.exportFilter"),
+        ),
+      [annotations, saveAsDefaultName, t],
+    )
 
     useEffect(() => {
       mountedRef.current = true
@@ -1238,6 +1249,30 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [annotations, canSave])
 
+    // A close prompt's Save: back over the file where the document may be
+    // written there, otherwise Save As — a copy, for an export-only one. True
+    // when the close may go ahead; a cancelled or failed save keeps the tab.
+    const commitTextNote = textNote.commit
+    const saveForClose = useCallback(async () => {
+      // Closing the editor keeps what was typed, as clicking away from it does.
+      commitTextNote()
+      await annotations.settled()
+
+      if (!saveRequiredRef.current && !annotations.isDirtyNow()) {
+        return true
+      }
+
+      const writesBack =
+        Boolean(documentRef.current?.path) &&
+        !saveRequiredRef.current &&
+        !annotations.hasOwnedContentNow() &&
+        !hasMergedPagesRef.current
+
+      return writesBack
+        ? annotations.save()
+        : (await exportPdf()) === "saved"
+    }, [annotations, commitTextNote, exportPdf])
+
     // Only the session can answer this, so the workspace's save-all is told
     // rather than left to guess from the file name and the dirty flag.
     useEffect(() => {
@@ -1275,6 +1310,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       () => ({
         dismissNoteFont: clearNoteFontOffer,
         fetchNoteFont: () => void fetchNoteFont(),
+        hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         onFileDrag: gridDrop.handleFileDrag,
         onPageDrag: gridDrop.handlePageDrag,
@@ -1285,6 +1321,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         rememberViewNow,
         save: saveDocument,
         saveAs: () => void exportPdf(),
+        saveForClose,
         selectAll,
         showThumbnails,
         snapshotForMove,
@@ -1301,11 +1338,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         fetchNoteFont,
         gridDrop.handleFileDrag,
         gridDrop.handlePageDrag,
+        hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         openPageNumbersDialog,
         openWatermarkDialog,
         rememberViewNow,
         saveDocument,
+        saveForClose,
         search.openSearch,
         selectAll,
         showThumbnails,

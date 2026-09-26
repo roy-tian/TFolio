@@ -35,19 +35,23 @@ impl ConvertSession for Session {
                 continue;
             }
 
-            results.push(convert_one(&self.soffice, job));
+            results.push(convert_one(&self.soffice, job, cancelled));
         }
 
         BatchOutcome::Done(results)
     }
 
     fn finish(&mut self) {
-        // Nothing to close: each file was a process of its own, and the
-        // profile lives and dies with the run directory.
+        // Nothing to close: each file was a process group of its own, and
+        // the profile lives and dies with the run directory.
     }
 }
 
-fn convert_one(soffice: &Path, job: &ConvertJob) -> Result<(), String> {
+fn convert_one(
+    soffice: &Path,
+    job: &ConvertJob,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), String> {
     // LibreOffice writes the input's stem plus .pdf beside it, under the
     // staged name only this source hashes to — no two can collide.
     let run_dir = job
@@ -69,12 +73,21 @@ fn convert_one(soffice: &Path, job: &ConvertJob) -> Result<(), String> {
         &job.staged,
     ));
 
-    let finished = match run_with_timeout(&mut command, LIBREOFFICE_TIMEOUT) {
+    let finished = match run_with_timeout(&mut command, LIBREOFFICE_TIMEOUT, cancelled) {
         Ok(finished) => finished,
         Err(error) => {
             return Err(format!("LibreOffice could not be started: {error}"));
         }
     };
+
+    if finished.stopped || finished.timed_out {
+        // A killed run may have left a partial PDF under the staged name.
+        let _ = fs::remove_file(&written);
+    }
+
+    if finished.stopped {
+        return Err("stopped by the reader".into());
+    }
 
     if finished.timed_out {
         return Err("LibreOffice did not finish in time".into());

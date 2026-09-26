@@ -87,6 +87,7 @@ import {
   type WindowRect,
 } from "@/lib/tabMove"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
+import { unsavedWorkElsewhere } from "@/lib/unsavedWork"
 import { cn } from "@/lib/utils"
 import type { ViewMode } from "@/lib/viewMode"
 import type { WatermarkConfig } from "@/lib/watermark"
@@ -123,10 +124,17 @@ type OpenTab = {
   }
 }
 
-type PendingClose =
+/** `changes` is whether a save here could keep anything; without them, what
+    the close would cost here is only work still running, which no save can
+    keep. */
+type PendingClose = (
   | { kind: "all" }
+  /** `elsewhere`: another window holds unsaved work, or did not answer —
+      nothing this window can save. */
+  | { kind: "quit"; elsewhere: boolean }
   | { kind: "tab"; documentId: number }
   | { kind: "window" }
+) & { changes: boolean }
 
 /** What a drag crossing out of this window navigates by: the viewport's place
     on the screen, this window's own label, and every window a release could
@@ -143,6 +151,11 @@ type DragGeometry = {
 const OPEN_REQUESTED_EVENT = "launch://open-requested"
 
 const FOCUS_DOCUMENT_EVENT = "workspace://focus-document"
+
+/** What `quit.rs` emits: the macOS menu's Quit, asking this window to run the
+    unsaved check, and every window's order to close once it has. */
+const QUIT_REQUESTED_EVENT = "app://quit-requested"
+const QUIT_EVENT = "app://quit"
 
 /** What `handoff.rs` emits when another window has sent a tab here; named in
     both places, as the launch event above is. */
@@ -190,6 +203,8 @@ export default function App() {
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
+  // What the prompt keeps showing while it fades out after an answer.
+  const [shownClose, setShownClose] = useState<PendingClose | null>(null)
   // Another window's tab is held over this one: the overlay it reads while it
   // decides, gone the moment the drag does.
   const [tabHover, setTabHover] = useState<{ name: string } | null>(null)
@@ -206,6 +221,10 @@ export default function App() {
   // windows cannot move under a pointer the drag is holding.
   const dragGeometryRef = useRef<Promise<DragGeometry | null> | null>(null)
   const hoverTargetRef = useRef<string | null>(null)
+  // Set by the notice's Stop, so the conversion's refusal reads as the stop it is.
+  const wordStopRef = useRef(false)
+  const wordConvertingRef = useRef(false)
+  const quitCheckRef = useRef(false)
 
   const replaceTabs = useCallback(
     (update: (current: OpenTab[]) => OpenTab[]) => {
@@ -216,6 +235,11 @@ export default function App() {
     },
     [],
   )
+
+  const askToClose = useCallback((close: PendingClose) => {
+    setShownClose(close)
+    setPendingClose(close)
+  }, [])
 
   const refreshRecentFiles = useCallback(() => {
     void readRecentFiles().then((files) => {
@@ -316,10 +340,17 @@ export default function App() {
         let firstError: NoticeKind | null = null
         // Asked once per batch, when a Word source first needs the answer.
         let wordAvailable: boolean | null = null
+        // A Stop is the way out of the queue, not out of one file: the batch's
+        // later Word files would hold it just as long.
+        let wordStopped = false
 
         for (const { kind, path } of sources) {
           if (kind !== "pdf") {
             if (kind === "word") {
+              if (wordStopped) {
+                continue
+              }
+
               if (wordAvailable === null) {
                 wordAvailable = await invoke<boolean>(
                   "word_conversion_available",
@@ -330,6 +361,19 @@ export default function App() {
                 firstError ??= "wordUnavailable"
                 continue
               }
+            }
+
+            // An office suite may take minutes, holding every open queued
+            // behind it; the corner says so and offers the way out.
+            if (kind === "word") {
+              wordStopRef.current = false
+              wordConvertingRef.current = true
+              notices.raise({
+                action: { kind: "wordConvertStop" },
+                kind: "wordConverting",
+                owner: workspaceOwner,
+                values: { name: fileNameFromPath(path) },
+              })
             }
 
             // A converted source opens like a created document: nothing on
@@ -362,7 +406,15 @@ export default function App() {
               replaceTabs((current) => [...current, tab])
               openedIds.push(tab.id)
             } catch (error) {
-              firstError ??= noticeForOpenError(error)
+              if (!(kind === "word" && wordStopRef.current)) {
+                firstError ??= noticeForOpenError(error)
+              }
+            } finally {
+              if (kind === "word") {
+                wordConvertingRef.current = false
+                wordStopped ||= wordStopRef.current
+                notices.retract(workspaceOwner, ["wordConverting"])
+              }
             }
 
             continue
@@ -561,7 +613,49 @@ export default function App() {
       ),
     [],
   )
+  const hasUnsavedChangesNow = useCallback(
+    (ids: number[]) =>
+      ids.some((id) => {
+        const session = sessionRefs.current.get(id)
+
+        return session
+          ? session.hasUnsavedChangesNow()
+          : tabsRef.current.some((tab) => tab.id === id && tab.dirty)
+      }),
+    [],
+  )
   const appUpdate = useAppUpdate(hasUnsavedWorkNow)
+
+  const quitNow = useCallback(() => {
+    const override = e2eOverride("quitApp")
+
+    void (override ? override() : invoke("quit_app")).catch(() => undefined)
+  }, [])
+
+  // One question for every window, asked here: the reader is in this one.
+  const requestQuit = useCallback(async () => {
+    if (quitCheckRef.current) {
+      return
+    }
+
+    quitCheckRef.current = true
+
+    try {
+      const elsewhere = await unsavedWorkElsewhere()
+
+      if (elsewhere || hasUnsavedWorkNow()) {
+        askToClose({
+          changes: hasUnsavedChangesNow(tabsRef.current.map((tab) => tab.id)),
+          elsewhere,
+          kind: "quit",
+        })
+      } else {
+        quitNow()
+      }
+    } finally {
+      quitCheckRef.current = false
+    }
+  }, [askToClose, hasUnsavedChangesNow, hasUnsavedWorkNow, quitNow])
   const {
     confirmingInstall, setConfirmingInstall, installFailed, status, visible,
   } = appUpdate
@@ -587,6 +681,24 @@ export default function App() {
     }
   }, [notices, setConfirmingInstall, update])
 
+  // A Stop pressed before the backend has listed the conversion finds nothing
+  // to stop, so it asks again until one listens or the conversion is over.
+  const stopWordOpen = useCallback(async () => {
+    const override = e2eOverride("cancelWordOpen")
+
+    while (wordConvertingRef.current) {
+      const listened = await (
+        override ? override() : invoke<boolean>("cancel_word_open")
+      ).catch(() => false)
+
+      if (listened) {
+        return
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+  }, [])
+
   const runNoticeAction = useCallback(
     (notice: Notice) => {
       const kind = notice.action?.kind
@@ -597,9 +709,13 @@ export default function App() {
         appUpdate.requestInstall()
       } else if (kind === "noteFont" && notice.owner.scope === "document") {
         sessionRefs.current.get(notice.owner.documentId)?.fetchNoteFont()
+      } else if (kind === "wordConvertStop" && !notice.action?.busy) {
+        wordStopRef.current = true
+        notices.raise({ ...notice, action: { busy: true, kind } })
+        void stopWordOpen()
       }
     },
-    [appUpdate],
+    [appUpdate, notices, stopWordOpen],
   )
 
   // Two notices own their dismissal: the update, waved away while it says the
@@ -696,12 +812,16 @@ export default function App() {
   const requestCloseTab = useCallback(
     (documentId: number) => {
       if (sessionRefs.current.get(documentId)?.hasUnsavedWorkNow()) {
-        setPendingClose({ kind: "tab", documentId })
+        askToClose({
+          changes: hasUnsavedChangesNow([documentId]),
+          documentId,
+          kind: "tab",
+        })
       } else {
         void removeTabNow(documentId)
       }
     },
-    [removeTabNow],
+    [askToClose, hasUnsavedChangesNow, removeTabNow],
   )
 
   const removeAllTabsNow = useCallback(() => {
@@ -733,11 +853,57 @@ export default function App() {
     )
 
     if (anyUnsaved) {
-      setPendingClose({ kind: "all" })
+      askToClose({
+        changes: hasUnsavedChangesNow(tabsRef.current.map((tab) => tab.id)),
+        kind: "all",
+      })
     } else {
       void removeAllTabsNow()
     }
-  }, [removeAllTabsNow])
+  }, [askToClose, hasUnsavedChangesNow, removeAllTabsNow])
+
+  const closeNow = useCallback(
+    (action: PendingClose) => {
+      if (action.kind === "tab") {
+        void removeTabNow(action.documentId)
+      } else if (action.kind === "all") {
+        void removeAllTabsNow()
+      } else if (action.kind === "window") {
+        void removeAllTabsNow().then(() => getCurrentWindow().destroy())
+      } else {
+        quitNow()
+      }
+    },
+    [quitNow, removeAllTabsNow, removeTabNow],
+  )
+
+  // Each document with changes in turn, in front, so a Save As dialog is
+  // plainly about the tab it shows; the first one not saved keeps them all.
+  const saveThenClose = useCallback(
+    async (action: PendingClose) => {
+      const ids =
+        action.kind === "tab"
+          ? [action.documentId]
+          : tabsRef.current.map((tab) => tab.id)
+
+      for (const id of ids) {
+        const session = sessionRefs.current.get(id)
+
+        if (!session?.hasUnsavedWorkNow()) {
+          continue
+        }
+
+        activateTab(id)
+
+        if (!(await session.saveForClose())) {
+          return
+        }
+      }
+
+      closeNow(action)
+    },
+    [activateTab, closeNow],
+  )
 
   // The tab's own half of a move: what the strip shows and where it was being
   // read. The reading position reaches the recent list through the removal
@@ -1001,6 +1167,7 @@ export default function App() {
       canCloseAll: tabs.length > 0,
       canSaveAll,
       onCloseAll: requestCloseAll,
+      onExit: () => void requestQuit(),
       onMergeWizard: mergeWizard.openWizard,
       onNew: () => void createDocument(),
       onNewWindow: openNewWindow,
@@ -1020,6 +1187,7 @@ export default function App() {
       recentFiles,
       refreshRecentFiles,
       requestCloseAll,
+      requestQuit,
       saveAllDocuments,
       tabs.length,
     ],
@@ -1534,7 +1702,10 @@ export default function App() {
         event.preventDefault()
 
         if (hasUnsaved) {
-          setPendingClose({ kind: "window" })
+          askToClose({
+            changes: hasUnsavedChangesNow(tabsRef.current.map((tab) => tab.id)),
+            kind: "window",
+          })
         } else {
           void removeAllTabsNow().then(() => getCurrentWindow().destroy())
         }
@@ -1551,7 +1722,35 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [removeAllTabsNow])
+  }, [askToClose, hasUnsavedChangesNow, removeAllTabsNow])
+
+  // Addressed to this window alone: a quit is asked about once, where the
+  // reader is, and each window closes only itself.
+  useEffect(() => {
+    const label = getCurrentWindow().label
+    let cancelled = false
+    const stops: Array<() => void> = []
+    const bind = (event: string, handler: () => void) =>
+      void listen(event, handler, { target: label }).then((stop) => {
+        if (cancelled) {
+          stop()
+        } else {
+          stops.push(stop)
+        }
+      })
+
+    bind(QUIT_REQUESTED_EVENT, () => void requestQuit())
+    // Asked already, for every window: this one writes its reading positions
+    // and goes, as a clean close of its own would.
+    bind(QUIT_EVENT, () => {
+      void removeAllTabsNow().then(() => getCurrentWindow().destroy())
+    })
+
+    return () => {
+      cancelled = true
+      stops.forEach((stop) => stop())
+    }
+  }, [removeAllTabsNow, requestQuit])
 
   useEffect(() => {
     mountedRef.current = true
@@ -1562,6 +1761,57 @@ export default function App() {
   }, [])
 
   const homeActive = activeId === HOME_TAB_ID
+
+  const shown = pendingClose ?? shownClose
+
+  // Nothing here can save another window's work, nor keep work still running.
+  const offerSave =
+    shown !== null &&
+    shown.changes &&
+    !(shown.kind === "quit" && shown.elsewhere)
+
+  const closeLoses = (action: PendingClose) =>
+    action.changes || (action.kind === "quit" && action.elsewhere)
+
+  const closeDescription = (action: PendingClose) => {
+    if (action.kind === "quit") {
+      return action.elsewhere
+        ? action.changes
+          ? t("tabs.unsavedQuitHereAndElsewhereDescription")
+          : t("tabs.unsavedQuitElsewhereDescription")
+        : action.changes
+          ? t("tabs.unsavedQuitDescription")
+          : t("tabs.busyQuitDescription")
+    }
+
+    if (!action.changes) {
+      return action.kind === "tab"
+        ? t("tabs.busyTabDescription")
+        : t("tabs.busyAllDescription")
+    }
+
+    return action.kind === "tab"
+      ? t("tabs.unsavedTabDescription")
+      : action.kind === "all"
+        ? t("tabs.unsavedAllDescription")
+        : t("tabs.unsavedWindowDescription")
+  }
+
+  const closeConfirmLabel = (action: PendingClose) => {
+    if (action.kind === "quit") {
+      return closeLoses(action) ? t("tabs.discardAndQuit") : t("tabs.stopAndQuit")
+    }
+
+    if (!action.changes) {
+      return t("tabs.stopAndClose")
+    }
+
+    return action.kind === "tab"
+      ? t("tabs.discardAndCloseTab")
+      : action.kind === "all"
+        ? t("tabs.discardAndCloseAll")
+        : t("viewer.unsavedCloseConfirm")
+  }
 
   // Read again on every visit, not just at startup: a file the list points at
   // may have been moved or deleted since, and the backend leaves those out.
@@ -1714,15 +1964,15 @@ export default function App() {
         }}
         open={pendingClose !== null}
       >
-        <AlertDialogContent size="sm">
+        <AlertDialogContent size={offerSave ? "default" : "sm"}>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("viewer.unsavedTitle")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {shown && !closeLoses(shown)
+                ? t("tabs.busyTitle")
+                : t("viewer.unsavedTitle")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingClose?.kind === "tab"
-                ? t("tabs.unsavedTabDescription")
-                : pendingClose?.kind === "all"
-                  ? t("tabs.unsavedAllDescription")
-                  : t("tabs.unsavedWindowDescription")}
+              {shown ? closeDescription(shown) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1732,23 +1982,28 @@ export default function App() {
                 const action = pendingClose
                 setPendingClose(null)
 
-                if (action?.kind === "tab") {
-                  void removeTabNow(action.documentId)
-                } else if (action?.kind === "all") {
-                  void removeAllTabsNow()
-                } else if (action?.kind === "window") {
-                  void removeAllTabsNow().then(() =>
-                    getCurrentWindow().destroy(),
-                  )
+                if (action) {
+                  closeNow(action)
                 }
               }}
+              variant={offerSave ? "destructive" : "default"}
             >
-              {pendingClose?.kind === "tab"
-                ? t("tabs.discardAndCloseTab")
-                : pendingClose?.kind === "all"
-                  ? t("tabs.discardAndCloseAll")
-                  : t("viewer.unsavedCloseConfirm")}
+              {shown ? closeConfirmLabel(shown) : null}
             </AlertDialogAction>
+            {offerSave ? (
+              <AlertDialogAction
+                onClick={() => {
+                  const action = pendingClose
+                  setPendingClose(null)
+
+                  if (action) {
+                    void saveThenClose(action)
+                  }
+                }}
+              >
+                {t("tabs.saveBeforeClose")}
+              </AlertDialogAction>
+            ) : null}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

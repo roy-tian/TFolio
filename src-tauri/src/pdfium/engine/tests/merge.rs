@@ -430,11 +430,14 @@ fn merge_files_appends_every_file_in_order() {
     let mut progress = Vec::new();
     let merged = engine
         .merge_files_with_progress(
+            "main",
             paths,
-            false,
-            false,
-            MergeBookmarks::None,
-            false,
+            MergeOptions {
+                smart_padding: false,
+                normalize_a4: false,
+                bookmarks: MergeBookmarks::None,
+                word_conversion: false,
+            },
             |completed, total| progress.push((completed, total)),
         )
         .expect("PDFium should merge the files")
@@ -474,14 +477,17 @@ fn a_stopped_merge_hands_back_nothing() {
     // while the merge holds the document lock.
     let merged = engine
         .merge_files_with_progress(
+            "main",
             paths,
-            false,
-            false,
-            MergeBookmarks::None,
-            false,
+            MergeOptions {
+                smart_padding: false,
+                normalize_a4: false,
+                bookmarks: MergeBookmarks::None,
+                word_conversion: false,
+            },
             |completed, _| {
                 if completed > 0 {
-                    engine.cancel_operation(OperationTarget::Merge);
+                    engine.cancel_operation(OperationTarget::Merge("main".into()));
                 }
             },
         )
@@ -491,8 +497,54 @@ fn a_stopped_merge_hands_back_nothing() {
     // and the shared engine's size is not this test's to read.
     assert!(merged.is_none(), "a stopped merge produces no document");
     assert!(
-        !engine.cancel_operation(OperationTarget::Merge),
+        !engine.cancel_operation(OperationTarget::Merge("main".into())),
         "the merge is off the list once it has returned"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_released_window_stops_its_own_merge_and_no_other() {
+    let _merges = merge_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("merge-files-window-released");
+    let paths = merge_sources(
+        &directory,
+        &[
+            ("first", banded_pdf(&[20, 60])),
+            ("second", banded_pdf(&[110, 150])),
+        ],
+    );
+    let options = MergeOptions {
+        smart_padding: false,
+        normalize_a4: false,
+        bookmarks: MergeBookmarks::None,
+        word_conversion: false,
+    };
+    let merge_releasing = |released: &str| {
+        engine
+            .merge_files_with_progress("window-2", paths.clone(), options, |completed, _| {
+                if completed > 0 {
+                    engine.cancel_window_work(released);
+                }
+            })
+            .expect("a stopped merge is not a failure")
+    };
+
+    // Not `main`: the engine is shared, and releasing `main` would stop the
+    // conversions other tests run under that label at the same moment.
+    let untouched = merge_releasing("window-3");
+    assert!(
+        untouched.is_some(),
+        "another window going leaves this window's merge running"
+    );
+    let _ = engine.close(untouched.map(|document| document.id).unwrap_or_default());
+
+    assert!(
+        merge_releasing("window-2").is_none(),
+        "the window's own release stops its merge"
     );
 
     fs::remove_dir_all(directory).ok();
@@ -566,7 +618,7 @@ fn a_merge_lays_an_image_on_a_sheet_of_its_own() {
     // Each image is read the way the merge will read it, so the row the wizard
     // shows and the pages it gets cannot disagree.
     let summaries = engine
-        .inspect_files(vec![pdf.clone(), wide.clone(), tall.clone()], false)
+        .inspect_files("main", vec![pdf.clone(), wide.clone(), tall.clone()], false)
         .expect("the files should inspect");
 
     assert!(matches!(summaries[0].kind, MergeSourceKind::Pdf));
@@ -664,7 +716,7 @@ fn a_file_that_is_no_image_is_reported_unusable_rather_than_dropped() {
     fs::write(&path, b"not a PNG at all").expect("the file should write to disk");
 
     let summaries = engine
-        .inspect_files(vec![path.clone()], false)
+        .inspect_files("main", vec![path.clone()], false)
         .expect("the inspection should still answer");
 
     assert_eq!(summaries.len(), 1);
@@ -1012,7 +1064,7 @@ fn inspecting_files_reports_page_counts_and_leaves_unreadable_ones_in_place() {
     );
 
     let summaries = engine
-        .inspect_files(paths.clone(), false)
+        .inspect_files("main", paths.clone(), false)
         .expect("the sweep should not fail over one bad file");
 
     assert_eq!(summaries.len(), 3, "every row the reader added stays");
@@ -1074,7 +1126,7 @@ fn a_word_document_that_cannot_convert_is_its_own_kind_of_unreadable() {
     fs::write(&word, b"not a document at all").expect("the source should write to disk");
 
     let summaries = engine
-        .inspect_files(vec![pdf, word.clone()], true)
+        .inspect_files("main", vec![pdf, word.clone()], true)
         .expect("the files should inspect");
 
     assert!(matches!(summaries[0].kind, MergeSourceKind::Pdf));
@@ -1092,7 +1144,7 @@ fn a_word_document_that_cannot_convert_is_its_own_kind_of_unreadable() {
     // With the conversions off, the same file is unreadable the plain way —
     // the behaviour a reader who turned the setting off has chosen.
     let off = engine
-        .inspect_files(vec![word], false)
+        .inspect_files("main", vec![word], false)
         .expect("the file should still inspect");
 
     assert!(matches!(off[0].kind, MergeSourceKind::Pdf));
@@ -1117,11 +1169,14 @@ fn a_merge_refuses_a_word_document_that_cannot_be_converted() {
     let mut progress = Vec::new();
     let error = engine
         .merge_files_with_progress(
+            "main",
             vec![word, pdf],
-            false,
-            false,
-            MergeBookmarks::None,
-            true,
+            MergeOptions {
+                smart_padding: false,
+                normalize_a4: false,
+                bookmarks: MergeBookmarks::None,
+                word_conversion: true,
+            },
             |completed, total| progress.push((completed, total)),
         )
         .expect_err("the conversion refusal should fail the merge");

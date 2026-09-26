@@ -11,9 +11,9 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::convert::{self, WORD_EXTENSIONS};
 use crate::recent::RecentFiles;
-use crate::windows::{record_document, DocumentOwners};
+use crate::windows::{page_generation, record_document, DocumentOwners};
 
-use super::engine::{OperationTarget, PdfiumEngine, MERGE_IMAGE_EXTENSIONS};
+use super::engine::{MergeOptions, OperationTarget, PdfiumEngine, MERGE_IMAGE_EXTENSIONS};
 use super::font::{download_fallback_font, fallback_font_destination};
 use super::{
     size_limit_error, ExportOutcome, InsertOutcome, MergePlan, PageNumbersConfig, PagePoint,
@@ -73,12 +73,13 @@ pub async fn open_pdf(
 
     let bytes = bytes.clone();
     let engine = Arc::clone(&state.0);
+    let page = page_generation(&window);
 
     let document = tauri::async_runtime::spawn_blocking(move || engine.open(bytes))
         .await
         .map_err(|error| format!("PDFium open task failed: {error}"))??;
 
-    record_document(&owners, &window, document.id, None);
+    record_document(&owners, &window, page, document.id, None);
 
     Ok(document)
 }
@@ -90,12 +91,13 @@ pub async fn create_pdf(
     window: WebviewWindow,
 ) -> Result<PdfDocumentInfo, String> {
     let engine = Arc::clone(&state.0);
+    let page = page_generation(&window);
 
     let document = tauri::async_runtime::spawn_blocking(move || engine.create_blank())
         .await
         .map_err(|error| format!("PDFium create task failed: {error}"))??;
 
-    record_document(&owners, &window, document.id, None);
+    record_document(&owners, &window, page, document.id, None);
 
     Ok(document)
 }
@@ -345,17 +347,38 @@ pub async fn cancel_pdf_operation(
         .cancel_operation(OperationTarget::Document(document_id)))
 }
 
-/// Takes no argument: a merge has no document to name until it finishes. Not
-/// `spawn_blocking`, for the reason above.
+/// A merge has no document to name until it finishes, so it is the asking
+/// window's. Not `spawn_blocking`, for the reason above.
 #[tauri::command]
-pub async fn cancel_pdf_merge(state: State<'_, PdfiumState>) -> Result<bool, String> {
-    Ok(state.0.cancel_operation(OperationTarget::Merge))
+pub async fn cancel_pdf_merge(
+    state: State<'_, PdfiumState>,
+    window: WebviewWindow,
+) -> Result<bool, String> {
+    Ok(state
+        .0
+        .cancel_operation(OperationTarget::Merge(window.label().to_string())))
+}
+
+/// The Word open's own Stop; like the one below, it waits for nothing.
+#[tauri::command]
+pub async fn cancel_word_open(
+    state: State<'_, PdfiumState>,
+    window: WebviewWindow,
+) -> Result<bool, String> {
+    Ok(state
+        .0
+        .cancel_operation(OperationTarget::OpenConverted(window.label().to_string())))
 }
 
 /// The conversions run outside every PDFium lock, so this waits for nothing.
 #[tauri::command]
-pub async fn cancel_word_conversion(state: State<'_, PdfiumState>) -> Result<bool, String> {
-    Ok(state.0.cancel_operation(OperationTarget::Convert))
+pub async fn cancel_word_conversion(
+    state: State<'_, PdfiumState>,
+    window: WebviewWindow,
+) -> Result<bool, String> {
+    Ok(state
+        .0
+        .cancel_operation(OperationTarget::Convert(window.label().to_string())))
 }
 
 /// Removes only marks this session made, by the ids their adds handed back;
@@ -533,6 +556,7 @@ pub async fn open_pdf_from_path(
     let recent = recent.inner().clone();
     let path = PathBuf::from(path);
     let opened = path.clone();
+    let page = page_generation(&window);
 
     let document = tauri::async_runtime::spawn_blocking(move || {
         // Opening a path binds it as the file `save_pdf` will overwrite, which
@@ -550,7 +574,7 @@ pub async fn open_pdf_from_path(
     .await
     .map_err(|error| format!("PDFium open task failed: {error}"))??;
 
-    record_document(&owners, &window, document.id, Some(path));
+    record_document(&owners, &window, page, document.id, Some(path));
 
     Ok(document)
 }
@@ -566,6 +590,8 @@ pub async fn open_converted_from_path(
     window: WebviewWindow,
 ) -> Result<PdfDocumentInfo, String> {
     let engine = Arc::clone(&state.0);
+    let page = page_generation(&window);
+    let label = window.label().to_string();
 
     let document = tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(path);
@@ -573,12 +599,12 @@ pub async fn open_converted_from_path(
         #[cfg(not(feature = "e2e"))]
         ensure_approved(&engine, &path)?;
 
-        engine.open_converted(path)
+        engine.open_converted(&label, path)
     })
     .await
     .map_err(|error| format!("conversion task failed: {error}"))??;
 
-    record_document(&owners, &window, document.id, None);
+    record_document(&owners, &window, page, document.id, None);
 
     Ok(document)
 }
@@ -686,9 +712,11 @@ pub async fn pick_pdf_paths(
 pub async fn inspect_pdf_files(
     paths: Vec<String>,
     state: State<'_, PdfiumState>,
+    window: WebviewWindow,
 ) -> Result<Vec<PdfFileSummary>, String> {
     let engine = Arc::clone(&state.0);
     let word = convert::word_available();
+    let label = window.label().to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
         let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
@@ -700,7 +728,7 @@ pub async fn inspect_pdf_files(
             ensure_approved(&engine, path)?;
         }
 
-        engine.inspect_files(paths, word)
+        engine.inspect_files(&label, paths, word)
     })
     .await
     .map_err(|error| format!("PDFium inspection task failed: {error}"))?
@@ -718,6 +746,8 @@ pub async fn merge_pdf_files(
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&state.0);
     let word = convert::word_available();
+    let page = page_generation(&window);
+    let label = window.label().to_string();
 
     let merged = tauri::async_runtime::spawn_blocking(move || {
         let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
@@ -728,11 +758,14 @@ pub async fn merge_pdf_files(
         }
 
         engine.merge_files_with_progress(
+            &label,
             paths,
-            plan.smart_padding,
-            plan.normalize_a4,
-            plan.bookmarks,
-            word,
+            MergeOptions {
+                smart_padding: plan.smart_padding,
+                normalize_a4: plan.normalize_a4,
+                bookmarks: plan.bookmarks,
+                word_conversion: word,
+            },
             channel_progress(on_progress),
         )
     })
@@ -740,7 +773,7 @@ pub async fn merge_pdf_files(
     .map_err(|error| format!("PDFium merge task failed: {error}"))??;
 
     if let Some(document) = &merged {
-        record_document(&owners, &window, document.id, None);
+        record_document(&owners, &window, page, document.id, None);
     }
 
     Ok(merged)

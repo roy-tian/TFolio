@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { updateNeedsConfirmation, watchUpdateUnsaved } from "@/lib/updateUnsaved"
+import { updateNeedsConfirmation, watchUnsavedWork } from "@/lib/unsavedWork"
 
 import {
   downloadUpdate,
@@ -39,7 +39,7 @@ export function useAppUpdate(hasUnsavedWorkNow: () => boolean): AppUpdate {
   const checkingInstall = useRef(false)
 
   useEffect(() => {
-    const subscription = watchUpdateUnsaved(hasUnsavedWorkNow)
+    const subscription = watchUnsavedWork(hasUnsavedWorkNow)
     void subscription.catch(() => undefined)
 
     return () => {

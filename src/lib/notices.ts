@@ -33,6 +33,7 @@ export type NoticeActionKind =
   | "updateDownload"
   | "updateInstall"
   | "updateRetry"
+  | "wordConvertStop"
 
 export type NoticeAction = {
   busy?: boolean
@@ -198,6 +199,12 @@ export const noticeCatalogue = {
     textKey: "update.ready",
     tone: "success",
   },
+  // Standing for as long as the conversion runs; the open retracts it.
+  wordConverting: {
+    life: "standing",
+    textKey: "viewer.wordConverting",
+    tone: "info",
+  },
   wordUnavailable: {
     life: "transient",
     textKey: "viewer.wordUnavailable",
@@ -215,6 +222,10 @@ export const noticeActions = {
   updateDownload: { labelKey: "update.download" },
   updateInstall: { labelKey: "update.install" },
   updateRetry: { labelKey: "update.retry" },
+  wordConvertStop: {
+    busyLabelKey: "viewer.wordConvertStopping",
+    labelKey: "viewer.wordConvertStop",
+  },
 } as const satisfies Record<
   NoticeActionKind,
   { busyLabelKey?: ParseKeys; labelKey: ParseKeys }

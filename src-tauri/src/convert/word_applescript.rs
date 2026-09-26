@@ -99,8 +99,13 @@ impl ConvertSession for Session {
                         .arg(&job.staged)
                         .arg(&job.output),
                     WORD_START_TIMEOUT,
+                    cancelled,
                 )
                 .map_err(|error| format!("AppleScript did not run: {error}"))?;
+
+                if finished.stopped {
+                    return Ok(Err("stopped by the reader".into()));
+                }
 
                 if finished.timed_out {
                     // The first automation's permission prompt can outlast
@@ -153,6 +158,7 @@ impl ConvertSession for Session {
                 &format!("tell application id \"{WORD_BUNDLE_ID}\" to quit"),
             ]),
             CONVERT_TIMEOUT,
+            &|| false,
         );
     }
 }

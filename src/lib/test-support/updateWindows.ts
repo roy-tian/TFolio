@@ -32,7 +32,7 @@ export function mockUpdateWindows(answers: Record<string, boolean | null>) {
       if (unsaved === null) {
         return
       }
-      const handler = listeners.get("update://unsaved-response")!
+      const handler = listeners.get("workspace://unsaved-response")!
       const internals = (window as unknown as {
         __TAURI_INTERNALS__: { runCallback: (id: number, value: unknown) => void }
       }).__TAURI_INTERNALS__

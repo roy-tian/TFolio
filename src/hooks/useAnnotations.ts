@@ -1153,8 +1153,10 @@ export function useAnnotations({
       was saved; marked saved only when the document is now bound to that file. */
   const exportCopy = useCallback(
     async (suggestedName: string, filterLabel: string) => {
+      let result: "saved" | "cancelled" | "failed" = "cancelled"
+
       if (documentId === undefined) {
-        return
+        return result
       }
 
       await enqueue(
@@ -1173,12 +1175,18 @@ export function useAnnotations({
               return false
             }
 
+            result = "saved"
             onExported(documentId, outcome)
             return outcome.savedToSource
           },
         }),
-        onExportError,
+        (error) => {
+          result = "failed"
+          onExportError(error)
+        },
       )
+
+      return result as "saved" | "cancelled" | "failed"
     },
     [documentId, enqueue, onExported, onExportError],
   )
@@ -1240,8 +1248,10 @@ export function useAnnotations({
   /** Writes the document back over its own file. A clean history is a no-op —
       judged inside the queue, against the history it has actually reached. */
   const save = useCallback(async () => {
+    let saved = true
+
     if (documentId === undefined) {
-      return
+      return saved
     }
 
     await enqueue(
@@ -1257,9 +1267,33 @@ export function useAnnotations({
               },
             }
           : null,
-      onSaveError,
+      () => {
+        saved = false
+        onSaveError()
+      },
     )
+
+    return saved
   }, [documentId, enqueue, onSaveError])
+
+  /** The watermark or page numbers the queue's history holds this instant,
+      which leave the document export-only. */
+  const hasOwnedContentNow = useCallback(
+    () =>
+      currentWatermarkConfig(historyRef.current) !== null ||
+      currentPageNumbersConfig(historyRef.current) !== null,
+    [],
+  )
+
+  /** Resolves once everything queued so far has run: a close deciding what is
+      left to save must not decide against work still on its way. */
+  const settled = useCallback(
+    () => queueRef.current.then(
+      () => undefined,
+      () => undefined,
+    ),
+    [],
+  )
 
   /** Off the ref, not the rendered state: a guard deciding whether marks may be
       discarded must not trust a value that can lag the queue by a render. */
@@ -1312,6 +1346,7 @@ export function useAnnotations({
       exportCopy,
       exportArchive,
       exportCompressed,
+      hasOwnedContentNow,
       hasPendingWorkNow,
       historyNow,
       insertBlankPage,
@@ -1331,6 +1366,7 @@ export function useAnnotations({
       save,
       setPageNumbers,
       setWatermark,
+      settled,
       snapshotForMove,
       textEpochs,
       undo: undoCommand,
@@ -1345,6 +1381,7 @@ export function useAnnotations({
       exportCopy,
       exportArchive,
       exportCompressed,
+      hasOwnedContentNow,
       hasPendingWorkNow,
       history,
       historyNow,
@@ -1362,6 +1399,7 @@ export function useAnnotations({
       save,
       setPageNumbers,
       setWatermark,
+      settled,
       snapshotForMove,
       textEpochs,
       undoCommand,

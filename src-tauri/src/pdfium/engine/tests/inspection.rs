@@ -44,7 +44,7 @@ fn inspection_checks_every_page_and_reports_unreadable_sizes_as_unknown() {
     }
     fs::write(&broken, b"unreadable PDF").unwrap();
     let summaries = engine
-        .inspect_files(vec![all_a4, mixed, broken], false)
+        .inspect_files("main", vec![all_a4, mixed, broken], false)
         .unwrap();
     assert_eq!(summaries[0].all_pages_a4, Some(true));
     assert_eq!(summaries[0].page_count, Some(2));

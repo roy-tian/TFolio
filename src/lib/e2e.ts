@@ -9,6 +9,11 @@ import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
   installUpdate?: () => Promise<void>
+  /** Stands in for `quit_app`, which would end the process the spec drives. */
+  quitApp?: () => Promise<void>
+  /** Stands in for `cancel_word_open`, so a spec's stand-in conversion can
+      hear the Stop. */
+  cancelWordOpen?: () => Promise<boolean>
   exportPdfArchive?: (
     args: ArchiveExportRequest & { documentId: number },
     onProgress: (progress: PdfProgress) => void,

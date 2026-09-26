@@ -73,6 +73,13 @@ zip = { version = "4.6.1", default-features = false }
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
+# A timed-out or stopped converter is killed with its whole process group:
+# LibreOffice's launcher forks the real soffice.bin, which killing the
+# launcher alone would orphan along with its profile lock. Already in the
+# tree (the Tauri stack pulls it in), so naming it adds a direct use.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # The Windows Word-import engine's probe: whether Word's and WPS's
 # automation classes are registered, read straight from the merged HKCR
 # view. Already in the tree (the Tauri stack pulls it in), so naming it here

@@ -467,13 +467,18 @@ impl PdfiumEngine {
     /// only ever be exported to a copy, never written back over a source.
     pub(in crate::pdfium) fn merge_files_with_progress(
         &self,
+        window: &str,
         paths: Vec<PathBuf>,
-        smart_padding: bool,
-        normalize_a4: bool,
-        bookmarks: MergeBookmarks,
-        word_conversion: bool,
+        options: MergeOptions,
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<Option<PdfDocumentInfo>, String> {
+        let MergeOptions {
+            smart_padding,
+            normalize_a4,
+            bookmarks,
+            word_conversion,
+        } = options;
+
         if paths.len() < 2 {
             return Err("a merge needs at least two files".into());
         }
@@ -484,7 +489,7 @@ impl PdfiumEngine {
 
         // Stoppable like an owned-layer rebuild, whose loop holds the one lock
         // for the whole pile; nothing needs rollback — the store is joined last.
-        let operation = self.begin_operation(OperationTarget::Merge);
+        let operation = self.begin_operation(OperationTarget::Merge(window.to_string()));
 
         // One unit per source, plus the conversions this run will really do
         // (a cache hit adds none), then serialization, outline, and opening.
@@ -678,8 +683,18 @@ impl PdfiumEngine {
         smart_padding: bool,
         bookmarks: MergeBookmarks,
     ) -> Result<PdfDocumentInfo, String> {
-        self.merge_files_with_progress(paths, smart_padding, false, bookmarks, false, |_, _| {})?
-            .ok_or_else(|| "the merge was stopped".to_string())
+        self.merge_files_with_progress(
+            "main",
+            paths,
+            MergeOptions {
+                smart_padding,
+                normalize_a4: false,
+                bookmarks,
+                word_conversion: false,
+            },
+            |_, _| {},
+        )?
+        .ok_or_else(|| "the merge was stopped".to_string())
     }
 
     #[cfg(test)]
@@ -689,11 +704,14 @@ impl PdfiumEngine {
         smart_padding: bool,
     ) -> Result<PdfDocumentInfo, String> {
         self.merge_files_with_progress(
+            "main",
             paths,
-            smart_padding,
-            true,
-            MergeBookmarks::None,
-            false,
+            MergeOptions {
+                smart_padding,
+                normalize_a4: true,
+                bookmarks: MergeBookmarks::None,
+                word_conversion: false,
+            },
             |_, _| {},
         )?
         .ok_or_else(|| "the merge was stopped".to_string())

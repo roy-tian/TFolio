@@ -2,6 +2,7 @@ mod convert;
 mod handoff;
 mod launch;
 mod pdfium;
+mod quit;
 mod recent;
 mod settings;
 mod store;
@@ -18,15 +19,17 @@ use pdfium::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
     add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_archive,
     cancel_pdf_compression, cancel_pdf_merge, cancel_pdf_operation, cancel_pdf_search,
-    cancel_word_conversion, close_pdf, create_pdf, delete_pdf_annotations, delete_pdf_pages,
-    download_pdf_note_font, duplicate_pdf_pages, estimate_pdf_compression, export_compressed_pdf,
-    export_pdf, export_pdf_archive, extract_pdf_page_plain_text, extract_pdf_page_text,
-    insert_pdf_blank_page, insert_pdf_from_path, insert_pdf_pages_from_document, inspect_pdf_files,
-    merge_pdf_files, open_converted_from_path, open_pdf, open_pdf_from_path,
-    pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths, release_pdf_compression,
-    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
+    cancel_word_conversion, cancel_word_open, close_pdf, create_pdf, delete_pdf_annotations,
+    delete_pdf_pages, download_pdf_note_font, duplicate_pdf_pages, estimate_pdf_compression,
+    export_compressed_pdf, export_pdf, export_pdf_archive, extract_pdf_page_plain_text,
+    extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
+    insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_converted_from_path,
+    open_pdf, open_pdf_from_path, pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths,
+    release_pdf_compression, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
+    render_pdf_page_thumbnail, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf,
+    search_pdf_text, PdfiumState,
 };
+use quit::quit_app;
 use recent::{recent_pdf_view, recent_pdfs, remove_recent_pdf, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
 use tauri::Manager;
@@ -71,6 +74,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
 
+    // Cmd+Q must reach the unsaved check; the Dock's Quit and a logout still
+    // end the app unasked, since tao gives no hook to refuse them.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(quit::app_menu).on_menu_event(|app, event| {
+        if event.id().0 == quit::QUIT_MENU_ID {
+            quit::request_quit(app);
+        }
+    });
+
     #[cfg(feature = "e2e")]
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
@@ -106,7 +118,7 @@ pub fn run() {
         // Reloading replaces the page without destroying its window or closing documents.
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
-                windows::release_window(webview.app_handle(), webview.label());
+                windows::page_started(webview.app_handle(), webview.label());
             }
         })
         // The only place a drop's paths exist before the WebView touches
@@ -162,6 +174,7 @@ pub fn run() {
             cancel_pdf_operation,
             cancel_pdf_merge,
             cancel_word_conversion,
+            cancel_word_open,
             word_conversion_available,
             settings,
             set_settings,
@@ -171,6 +184,7 @@ pub fn run() {
             take_launch_files,
             open_new_window,
             print_window,
+            quit_app,
             focus_pdf_path,
             move_document,
             move_document_new_window,
@@ -203,6 +217,12 @@ pub fn run() {
             // The tail of a resize the write throttle may still be holding.
             if let tauri::RunEvent::Exit = _event {
                 window_state::flush(_app);
+
+                // Conversions stopped with their windows; what they left goes
+                // now rather than with a launch's sweep a day later.
+                if let Some(pdfium) = _app.try_state::<PdfiumState>() {
+                    pdfium.remove_conversion_files();
+                }
             }
 
             // Finder may raise a different window or leave the target minimized.

@@ -483,6 +483,28 @@ fn a_stop_between_files_stops_the_batch() {
 }
 
 #[test]
+fn a_stop_reaches_a_batch_queued_behind_another() {
+    let scratch = Scratch::new("queued-stop");
+    let converter = WordConverter::at_directory(scratch.path().to_path_buf());
+    let detected = Detected {
+        engines: vec![EngineKind::Word],
+        soffice: None,
+    };
+    // Another window's batch, holding the gate for as long as it runs.
+    let _running = converter.gate.lock().unwrap();
+
+    let stopped = converter.resolve_with(
+        &detected,
+        &[scratch.document("queued.docx", "fine")],
+        &|| true,
+        &mut || {},
+        &|_, _, _| panic!("a stopped batch opens no engine"),
+    );
+
+    assert!(stopped.is_err(), "the stop must not wait out the gate");
+}
+
+#[test]
 fn a_stop_mid_batch_keeps_what_it_already_converted() {
     let scratch = Scratch::new("mid-batch-stop");
     let converter = WordConverter::at_directory(scratch.path().to_path_buf());
@@ -628,8 +650,9 @@ fn a_child_answers_on_captured_stdout() {
         command
     };
 
-    let finished = super::run_with_timeout(&mut command, std::time::Duration::from_secs(10))
-        .expect("a shell should run");
+    let finished =
+        super::run_with_timeout(&mut command, std::time::Duration::from_secs(10), &|| false)
+            .expect("a shell should run");
 
     assert!(!finished.timed_out);
     assert!(finished.output.status.success());
@@ -637,6 +660,117 @@ fn a_child_answers_on_captured_stdout() {
         String::from_utf8_lossy(&finished.output.stdout).trim(),
         "probe-answer",
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_timed_out_converter_takes_what_it_forked_with_it() {
+    let scratch = Scratch::new("process-group");
+    let pid_file = scratch.path().join("forked.pid");
+    let mut command = std::process::Command::new("sh");
+    command.arg("-c").arg(format!(
+        "sleep 30 & echo $! > '{}'; wait",
+        pid_file.display()
+    ));
+
+    let finished =
+        super::run_with_timeout(&mut command, std::time::Duration::from_millis(500), &|| {
+            false
+        })
+        .expect("a shell should run");
+
+    assert!(finished.timed_out);
+
+    let forked: libc::pid_t = fs::read_to_string(&pid_file)
+        .expect("the shell should have named what it forked")
+        .trim()
+        .parse()
+        .expect("a pid");
+
+    assert!(
+        gone_soon(forked),
+        "the forked sleep outlived the converter it belonged to"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stop_ends_the_converter_without_waiting_out_its_deadline() {
+    let mut command = std::process::Command::new("sh");
+    command.args(["-c", "sleep 30"]);
+    let started = std::time::Instant::now();
+
+    let finished =
+        super::run_with_timeout(&mut command, std::time::Duration::from_secs(30), &|| {
+            started.elapsed() > std::time::Duration::from_millis(200)
+        })
+        .expect("a shell should run");
+
+    assert!(finished.stopped);
+    assert!(!finished.timed_out);
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+}
+
+/// A killed orphan is reaped by whoever adopts it, a moment after the kill.
+#[cfg(unix)]
+fn gone_soon(pid: libc::pid_t) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+
+    while std::time::Instant::now() < deadline {
+        // SAFETY: signal 0 only asks whether the process still exists.
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return true;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    false
+}
+
+#[test]
+fn a_batch_leaves_no_staged_copy_behind() {
+    let scratch = Scratch::new("staged-cleanup");
+    let converter = WordConverter::at_directory(scratch.path().to_path_buf());
+    let converts = scratch.document("kept.docx", "fine");
+    let refused = scratch.document("refused.docx", "refuse me");
+    let mut engine = word_engine();
+    engine.refuses = vec!["refuse me"];
+
+    let (entries, _) = run(
+        &converter,
+        &[EngineKind::Word],
+        &[converts, refused],
+        &[engine],
+    );
+    let results = converted(&entries.expect("both rows answer"));
+
+    assert!(
+        results[0].as_ref().is_some_and(|pdf| pdf.is_file()),
+        "the converted PDF stays for the cache"
+    );
+    assert!(results[1].is_none());
+
+    let staged: Vec<String> = fs::read_dir(scratch.path())
+        .expect("the run directory should be readable")
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("staged-"))
+        .collect();
+
+    assert!(staged.is_empty(), "{staged:?}");
+}
+
+#[test]
+fn the_run_directory_goes_with_the_process() {
+    let scratch = Scratch::new("run-dir");
+    let run_dir = scratch.path().join("word-import-test");
+    fs::create_dir_all(run_dir.join("lo-profile")).expect("a run directory should be creatable");
+    fs::write(run_dir.join("converted.pdf"), "%PDF-1.7").expect("a PDF should be writable");
+
+    WordConverter::at_directory(run_dir.clone()).remove_run_dir();
+
+    assert!(!run_dir.exists());
 }
 
 #[cfg(target_os = "linux")]

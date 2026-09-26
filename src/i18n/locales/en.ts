@@ -43,6 +43,23 @@ const en = {
       "One or more open documents have changes that are not saved. Closing them all will discard those changes.",
     discardAndCloseTab: "Discard and close tab",
     discardAndCloseAll: "Discard and close all",
+    saveBeforeClose: "Save",
+    unsavedQuitDescription:
+      "Open documents have changes that are not saved. Quitting will discard them.",
+    unsavedQuitElsewhereDescription:
+      "Another window has changes that are not saved, or did not answer. Quitting will discard them.",
+    unsavedQuitHereAndElsewhereDescription:
+      "Open documents here have changes that are not saved, and another window has some too or did not answer. Quitting will discard them all.",
+    discardAndQuit: "Discard and quit",
+    busyTitle: "Stop the work in progress?",
+    busyTabDescription:
+      "An edit or export is still running on this document. Closing its tab stops it.",
+    busyAllDescription:
+      "An edit or export is still running on an open document. Closing stops it.",
+    busyQuitDescription:
+      "An edit or export is still running on an open document. Quitting stops it.",
+    stopAndClose: "Stop and close",
+    stopAndQuit: "Stop and quit",
     moveToNewWindow: "Move to new window",
     hoverTitle: "Drop to move \u201c{{name}}\u201d here",
     hoverHint: "Its pages, edits, and history come with it",
@@ -378,6 +395,9 @@ const en = {
     openFailed: "This file could not be opened.",
     wordUnavailable:
       "Opening Word documents needs Word, WPS, or LibreOffice installed.",
+    wordConverting: "Converting {{name}} to PDF…",
+    wordConvertStop: "Stop",
+    wordConvertStopping: "Stopping…",
     unsavedTitle: "Discard unsaved changes?",
     unsavedDescription:
       "The open document has annotations that are not saved. Opening another PDF will discard them.",
