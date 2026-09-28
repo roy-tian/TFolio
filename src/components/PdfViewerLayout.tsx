@@ -29,7 +29,11 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { ViewportHold, ViewportHoldContext } from "@/hooks/useNearViewport"
+import {
+  useNearViewport,
+  ViewportHold,
+  ViewportHoldContext,
+} from "@/hooks/useNearViewport"
 import { usePageDrag, type PageDragState } from "@/hooks/usePageDrag"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview } from "@/hooks/useTextNoteTool"
@@ -491,6 +495,11 @@ function dropPreview(
   }
 }
 
+// The grid is not virtualized: every page keeps its cell and paper, but only
+// this near the view does a cell keep its pixels and its controls. Each control
+// carries a tooltip, and hundreds of them slowed opening and every selection.
+const THUMBNAIL_RETAIN_MARGIN = "1500px 0px"
+
 /**
  * Memoised on primitives alone: nothing here may be an object or a fresh
  * closure, either comparing unequal every render and switching the memo off.
@@ -555,6 +564,12 @@ const ThumbnailCell = memo(function ThumbnailCell({
   trailingZone: "none" | "row" | "end"
 }) {
   const { t } = useTranslation()
+  const cellRef = useRef<HTMLDivElement>(null)
+  const nearView = useNearViewport(cellRef, THUMBNAIL_RETAIN_MARGIN)
+  // A focused control stays however far the grid scrolls from it: unmounting
+  // it would drop keyboard focus back to the start of the document.
+  const [focusWithin, setFocusWithin] = useState(false)
+  const showControls = nearView || focusWithin
   const footprint = dimensionsForRotation(rotation, pageWidth, pageHeight)
   const paperHeight = (THUMBNAIL_WIDTH * footprint.height) / footprint.width
 
@@ -572,6 +587,18 @@ const ThumbnailCell = memo(function ThumbnailCell({
       // The whole cell answers for its page: `data-page-number` sits on the
       // paper alone, leaving the caption a hole in the drop target.
       data-page-cell={pageNumber}
+      onBlur={(event) => {
+        // Leaving the window blurs with no `relatedTarget` but keeps
+        // `activeElement`, and focus comes back to the same control.
+        if (
+          !event.currentTarget.contains(event.relatedTarget) &&
+          !event.currentTarget.contains(document.activeElement)
+        ) {
+          setFocusWithin(false)
+        }
+      }}
+      onFocus={() => setFocusWithin(true)}
+      ref={cellRef}
       style={{
         paddingBottom: THUMBNAIL_ROW_GAP,
         transform:
@@ -593,24 +620,28 @@ const ThumbnailCell = memo(function ThumbnailCell({
         pageNumber={pageNumber}
         pageWidth={pageWidth}
         renderEpoch={renderEpoch}
+        retainBitmap={nearView}
         rotation={rotation}
         selectedCount={selectedCount}
+        showControls={showControls}
         width={THUMBNAIL_WIDTH}
       />
-      <InsertZone
-        active={insertActive}
-        canPaste={canPaste}
-        dragging={dragging}
-        index={pageNumber}
-        label={t("pageEdit.insertBefore", { pageNumber })}
-        onInsert={onInsert}
-        onPaste={onPaste}
-        paperHeight={paperHeight}
-        pasteLabel={t("pageEdit.pasteBefore", { pageNumber })}
-      />
+      {showControls ? (
+        <InsertZone
+          active={insertActive}
+          canPaste={canPaste}
+          dragging={dragging}
+          index={pageNumber}
+          label={t("pageEdit.insertBefore", { pageNumber })}
+          onInsert={onInsert}
+          onPaste={onPaste}
+          paperHeight={paperHeight}
+          pasteLabel={t("pageEdit.pasteBefore", { pageNumber })}
+        />
+      ) : null}
       {/* The gap after the last cell of every row: the same gap the next row's
           first cell leads with, but drawn where the pointer actually is. */}
-      {trailingZone !== "none" ? (
+      {showControls && trailingZone !== "none" ? (
         <InsertZone
           active={trailingInsertActive}
           canPaste={canPaste}

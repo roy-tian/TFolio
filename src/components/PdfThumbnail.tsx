@@ -13,9 +13,6 @@ import { THUMBNAIL_CAPTION_HEIGHT } from "@/lib/viewMode"
 // Many cells share a row; preloading whole rows would queue dozens of PDFium
 // renders at once. Keep the grid's window to what is visible.
 const THUMBNAIL_ROOT_MARGIN = "0px"
-// The grid is not virtualized, so a scrolled-past cell would keep its pixels
-// for as long as the tab is open; well away from the view it lets them go.
-const THUMBNAIL_RETAIN_MARGIN = "1500px 0px"
 
 type PdfThumbnailProps = {
   /** Whether the keep-one-page rule forbids this delete — the sole page, or a
@@ -36,8 +33,12 @@ type PdfThumbnailProps = {
   pageNumber: number
   pageWidth: number
   renderEpoch: number
+  /** False once the cell is well away from the view: it gives its pixels back. */
+  retainBitmap: boolean
   rotation: number
   selectedCount: number
+  /** Whether the delete button is mounted; the cell's own call, see `ThumbnailCell`. */
+  showControls: boolean
   width: number
 }
 
@@ -56,15 +57,16 @@ export function PdfThumbnail({
   pageNumber,
   pageWidth,
   renderEpoch,
+  retainBitmap,
   rotation,
   selectedCount,
+  showControls,
   width,
 }: PdfThumbnailProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const isNearViewport = useNearViewport(wrapperRef, THUMBNAIL_ROOT_MARGIN)
-  const retainBitmap = useNearViewport(wrapperRef, THUMBNAIL_RETAIN_MARGIN)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -87,10 +89,6 @@ export function PdfThumbnail({
   const { height: footprintHeight, width: footprintWidth } =
     dimensionsForRotation(rotation, pageWidth, pageHeight)
   const label = t("viewer.thumbnailLabel", { pageNumber })
-  const deletesSelection = isSelected && selectedCount > 1
-  const deleteLabel = deletesSelection
-    ? t("pageEdit.deleteSelected", { count: selectedCount })
-    : t("pageEdit.deletePage", { pageNumber })
 
   return (
     <div
@@ -154,7 +152,12 @@ export function PdfThumbnail({
           </div>
           {!hasRendered && !renderFailed ? (
             <span className="absolute inset-0 grid place-items-center bg-white text-zinc-400">
-              <LoaderCircle className="size-4 animate-spin" />
+              {/* Only where a render is on its way: every spinning icon is
+                  style and paint work each frame, and a long document's grid
+                  would otherwise spin hundreds of them out of sight. */}
+              {isNearViewport ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
             </span>
           ) : null}
           {renderFailed ? (
@@ -164,26 +167,15 @@ export function PdfThumbnail({
           ) : null}
         </button>
       </HintTooltip>
-      <HintTooltip label={deleteLabel}>
-        <button
-          aria-label={deleteLabel}
-          className={cn(
-            "absolute -left-2 -top-2 z-20 grid size-6 place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm outline-none transition-opacity hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-0",
-            // No hover on a touch screen, so a selected page shows its button.
-            isSelected
-              ? "opacity-100"
-              : "opacity-0 group-hover/thumb:opacity-100",
-          )}
+      {showControls ? (
+        <DeleteButton
           disabled={deleteDisabled}
-          onClick={() => onDelete(pageNumber)}
-          // A press here is a press on the button, never the start of a page
-          // drag under it.
-          onPointerDown={(event) => event.stopPropagation()}
-          type="button"
-        >
-          <X className="size-3.5" />
-        </button>
-      </HintTooltip>
+          isSelected={isSelected}
+          onDelete={onDelete}
+          pageNumber={pageNumber}
+          selectedCount={selectedCount}
+        />
+      ) : null}
       {/* The caption's height is its own box, not the column's gap — the known
           height is what lets the insertion line find the paper in a row. */}
       <span
@@ -196,5 +188,48 @@ export function PdfThumbnail({
         {pageNumber}
       </span>
     </div>
+  )
+}
+
+function DeleteButton({
+  disabled,
+  isSelected,
+  onDelete,
+  pageNumber,
+  selectedCount,
+}: {
+  disabled: boolean
+  isSelected: boolean
+  onDelete: (pageNumber: number) => void
+  pageNumber: number
+  selectedCount: number
+}) {
+  const { t } = useTranslation()
+  const label =
+    isSelected && selectedCount > 1
+      ? t("pageEdit.deleteSelected", { count: selectedCount })
+      : t("pageEdit.deletePage", { pageNumber })
+
+  return (
+    <HintTooltip label={label}>
+      <button
+        aria-label={label}
+        className={cn(
+          "absolute -left-2 -top-2 z-20 grid size-6 place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm outline-none transition-opacity hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-0",
+          // No hover on a touch screen, so a selected page shows its button.
+          isSelected
+            ? "opacity-100"
+            : "opacity-0 group-hover/thumb:opacity-100",
+        )}
+        disabled={disabled}
+        onClick={() => onDelete(pageNumber)}
+        // A press here is a press on the button, never the start of a page
+        // drag under it.
+        onPointerDown={(event) => event.stopPropagation()}
+        type="button"
+      >
+        <X className="size-3.5" />
+      </button>
+    </HintTooltip>
   )
 }
