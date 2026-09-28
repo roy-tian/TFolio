@@ -8,7 +8,14 @@ import {
   type RefObject,
 } from "react"
 import { createPortal } from "react-dom"
-import { ClipboardPaste, Copy, Plus, RotateCw, Scissors } from "lucide-react"
+import {
+  ClipboardPaste,
+  Copy,
+  Plus,
+  RotateCw,
+  Scissors,
+  Trash2,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
@@ -680,7 +687,13 @@ function ThumbnailLayout({
   const rotatePages = useCallback(() => pageEditRef.current.onRotatePages(), [])
   // One menu for the whole grid: one per cell would mount hundreds of popup
   // roots, each with a document listener, for a gesture that happens once.
-  const [menuPage, setMenuPage] = useState<number | null>(null)
+  const [menu, setMenu] = useState<{
+    pageNumber: number
+    pages: PdfPageInfo[]
+  } | null>(null)
+  // An edit in flight can land under the open menu and renumber the pages;
+  // the menu then closes rather than act on whatever holds its number now.
+  const menuPage = menu?.pages === pages ? menu.pageNumber : null
   const pressedPage = useRef<number | null>(null)
   const selectPage = useCallback(
     (pageNumber: number, modifiers: SelectionModifiers) => {
@@ -706,12 +719,18 @@ function ThumbnailLayout({
   // it, and otherwise the one page `onMenuPage` is about to make the selection.
   const menuCount =
     menuPage !== null && selectedPages.has(menuPage) ? selectedPages.size : 1
+  const deleteMenuPages = () => {
+    // The page's own delete, which takes the selection when it holds the page.
+    if (menuPage !== null) {
+      pageEditRef.current.onDeletePage(menuPage)
+    }
+  }
 
   return (
     <ContextMenu
       onOpenChange={(open) => {
         if (!open) {
-          setMenuPage(null)
+          setMenu(null)
 
           return
         }
@@ -720,11 +739,14 @@ function ThumbnailLayout({
 
         // A press on a gap, or past the last page, opens nothing: the entries
         // here are a page's, and the gaps have buttons of their own.
-        if (pageNumber !== null) {
-          pageEditRef.current.onMenuPage(pageNumber)
+        if (pageNumber === null) {
+          setMenu(null)
+
+          return
         }
 
-        setMenuPage(pageNumber)
+        pageEditRef.current.onMenuPage(pageNumber)
+        setMenu({ pageNumber, pages })
       }}
       open={menuPage !== null}
     >
@@ -851,6 +873,17 @@ function ThumbnailLayout({
         <ContextMenuItem data-action="rotate-pages" onClick={rotatePages}>
           <RotateCw />
           {t("pageEdit.rotate", { count: menuCount })}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          data-action="delete-pages"
+          // A document keeps one page; the backend refuses a delete of them all.
+          disabled={menuCount === pages.length}
+          onClick={deleteMenuPages}
+          variant="destructive"
+        >
+          <Trash2 />
+          {t("pageEdit.delete", { count: menuCount })}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

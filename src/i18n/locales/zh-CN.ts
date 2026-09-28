@@ -422,6 +422,8 @@ const zhCN = {
     copy_other: "复制 {{count}} 页",
     rotate_one: "旋转 {{count}} 页",
     rotate_other: "旋转 {{count}} 页",
+    delete_one: "删除 {{count}} 页",
+    delete_other: "删除 {{count}} 页",
     pasteBefore: "粘贴到第 {{pageNumber}} 页前",
     pasteAtEnd: "粘贴到末尾",
     cutNotice_one: "已剪切 {{count}} 页（第 {{pages}} 页）",

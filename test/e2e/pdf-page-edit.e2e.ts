@@ -406,6 +406,35 @@ describe("TFolio page editing", () => {
     await clickThumb(1, { shift: true })
     expect(await selectedThumbs()).toEqual([1, 2, 3, 4])
 
+    // The page clicked last keeps focus, and its focus ring must not stand in
+    // for the selection's. Focused from script, it shows that ring here.
+    const focusVisible = await browser.execute(() => {
+      const thumb = document.querySelector<HTMLElement>(
+        "button[data-page-number='1']",
+      )!
+
+      thumb.focus()
+
+      return thumb.matches(":focus-visible")
+    })
+    expect(focusVisible).toBe(true)
+    // Waited for rather than read once: the rings ease in on selection.
+    await browser.waitUntil(
+      async () =>
+        (
+          await browser.execute(
+            () =>
+              new Set(
+                Array.from(
+                  document.querySelectorAll("button[data-page-number]"),
+                  (thumb) => getComputedStyle(thumb).boxShadow,
+                ),
+              ).size,
+          )
+        ) === 1,
+      { timeoutMsg: "the focused page's ring differs from the selection's" },
+    )
+
     await clickThumb(3)
     expect(await selectedThumbs()).toEqual([3])
 
@@ -531,8 +560,27 @@ describe("TFolio page editing", () => {
     })
     await waitForThumb(1, third!)
 
-    // The last page's own button is disabled: a document keeps one page.
+    // The page menu deletes the selection it was opened on, as the x does.
+    await $("button[aria-label^='Undo']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the undo never restored the selection",
+    })
+    await clickThumb(2)
+    await clickThumb(3, { shift: true })
+    await openThumbMenu(3)
+    await expect($("[data-action='delete-pages']")).toHaveText("Delete 2 pages")
+    await $("[data-action='delete-pages']").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 1, {
+      timeoutMsg: "the menu's delete never landed",
+    })
+    await waitForThumb(1, first!)
+
+    // A document keeps one page, so neither delete is offered for the last one.
     await expect($("button[aria-label='Delete page 1']")).toBeDisabled()
+    await openThumbMenu(1)
+    await expect($("[data-action='delete-pages']")).toHaveAttribute(
+      "data-disabled",
+    )
   })
 
   it("inserts blank pages in the gaps and undoes them", async () => {

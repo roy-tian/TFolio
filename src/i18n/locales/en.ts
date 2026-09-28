@@ -435,6 +435,8 @@ const en = {
     copy_other: "Copy {{count}} pages",
     rotate_one: "Rotate page",
     rotate_other: "Rotate {{count}} pages",
+    delete_one: "Delete page",
+    delete_other: "Delete {{count}} pages",
     pasteBefore: "Paste before page {{pageNumber}}",
     pasteAtEnd: "Paste at the end",
     cutNotice_one: "Page {{pages}} cut",
