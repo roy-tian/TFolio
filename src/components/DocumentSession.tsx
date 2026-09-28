@@ -363,7 +363,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // The grid has no single scale for a zoom to act on. The controls are absent
     // rather than disabled: disabled is what an unopened document means.
     const zoomApplies = viewMode === "single" || viewMode === "book"
-    const bookmarksApply = viewMode === "thumbnail"
+    // An edit replaces the outline wholesale. Deriving what is shown, rather
+    // than closing the sidebar, lets the undo that restores bookmarks restore it.
+    const bookmarksApply = pdfDocument.outline.length > 0
+    const bookmarksShown = bookmarksOpen && bookmarksApply
 
     const scrollToPage = useCallback(
       (pageNumber: number, behavior: ScrollBehavior = "smooth") => {
@@ -678,7 +681,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       documentPages: pdfDocument.pages,
       onMatchInGrid: useCallback((pageNumber: number) => {
         pendingScrollPageRef.current = pageNumber
-        setBookmarksOpen(false)
         setPreferredViewMode("single")
       }, []),
       sessionId: openedDocument.id,
@@ -703,7 +705,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       pendingScrollPageRef,
       pdfDocument,
       notice,
-      setBookmarksOpen,
       setPreferredViewMode,
       thumbnailSelection,
     })
@@ -1128,10 +1129,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         pendingScrollPageRef.current = currentPage
       }
 
-      if (mode === "single" || mode === "book") {
-        setBookmarksOpen(false)
-      }
-
       setPreferredViewMode(mode)
     }
 
@@ -1533,7 +1530,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       scrollToPage(pageNumber)
     }
 
-    const bookmarksLabel = bookmarksOpen
+    const bookmarksLabel = bookmarksShown
       ? t("toolbar.hideBookmarks")
       : t("toolbar.showBookmarks")
 
@@ -1565,7 +1562,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           annotations={annotations}
           bookmarksApply={bookmarksApply}
           bookmarksLabel={bookmarksLabel}
-          bookmarksOpen={bookmarksOpen}
+          bookmarksOpen={bookmarksShown}
           bookApplies={bookApplies}
           canSave={canSave}
           document={pdfDocument}
@@ -1676,7 +1673,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         ) : null}
 
         <div className="flex h-full pt-21">
-          {pdfDocument && bookmarksOpen ? (
+          {bookmarksShown ? (
             <BookmarkSidebar
               items={pdfDocument.outline}
               onNavigate={scrollToPage}

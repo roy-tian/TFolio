@@ -167,6 +167,7 @@ const zhCN = {
   toolbar: {
     saveAsMenu: "更多保存方式",
     hideBookmarks: "隐藏书签",
+    noBookmarks: "此文档没有书签",
     showBookmarks: "显示书签",
     viewMode: "视图模式",
     viewModeSingle: "单页视图",
@@ -520,7 +521,6 @@ const zhCN = {
   },
   bookmarks: {
     title: "书签",
-    empty: "此文档没有书签。",
     untitled: "未命名书签",
   },
   about: {

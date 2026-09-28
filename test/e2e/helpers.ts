@@ -67,6 +67,19 @@ export function blankPdf() {
   return minimalPdf(1, "0 0 300 400")
 }
 
+/** Two pages, with one bookmark pointing at the second. */
+export function outlinedPdf() {
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
+    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
+    "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
+    "6 0 obj\n<< /Type /Outlines /First 7 0 R /Last 7 0 R /Count 1 >>\nendobj\n",
+    "7 0 obj\n<< /Title (Second half) /Parent 6 0 R /Dest [4 0 R /XYZ null null null] >>\nendobj\n",
+  ])
+}
+
 export function bandedPdf(pageCount: number) {
   const kids = Array.from(
     { length: pageCount },

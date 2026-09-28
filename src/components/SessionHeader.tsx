@@ -158,7 +158,9 @@ export function SessionHeader({
             saveHint={saveHint}
           />
         ) : null}
-        <ToolbarTooltip label={bookmarksLabel}>
+        <ToolbarTooltip
+          label={bookmarksApply ? bookmarksLabel : t("toolbar.noBookmarks")}
+        >
           <Toggle
             aria-label={bookmarksLabel}
             className="size-8"

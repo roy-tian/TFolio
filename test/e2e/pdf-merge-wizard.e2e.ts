@@ -8,46 +8,12 @@ import {
   dropZoneButton,
   emitDrag,
   minimalPdf,
+  outlinedPdf,
   pointMultiPickerAt,
   refreshApp,
   seedSettings,
   writeScratchPdf,
 } from "./helpers"
-
-function outlinedPdf() {
-  const objects = [
-    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>\nendobj\n",
-    "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n",
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
-    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
-    "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
-    "6 0 obj\n<< /Type /Outlines /First 7 0 R /Last 7 0 R /Count 1 >>\nendobj\n",
-    "7 0 obj\n<< /Title (Second half) /Parent 6 0 R /Dest [4 0 R /XYZ null null null] >>\nendobj\n",
-  ]
-  const chunks = ["%PDF-1.4\n"]
-  const offsets: number[] = []
-  let byteLength = Buffer.byteLength(chunks[0]!, "ascii")
-
-  for (const object of objects) {
-    offsets.push(byteLength)
-    chunks.push(object)
-    byteLength += Buffer.byteLength(object, "ascii")
-  }
-
-  const xrefOffset = byteLength
-  chunks.push(`xref\n0 ${objects.length + 1}\n`, "0000000000 65535 f \n")
-
-  for (const offset of offsets) {
-    chunks.push(`${String(offset).padStart(10, "0")} 00000 n \n`)
-  }
-
-  chunks.push(
-    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n` +
-      `startxref\n${xrefOffset}\n%%EOF\n`,
-  )
-
-  return Buffer.from(chunks.join(""), "ascii")
-}
 
 async function openWizardWith(paths: string[]) {
   await pointMultiPickerAt(paths)
@@ -533,8 +499,7 @@ describe("merge wizard", () => {
     await expect($("[data-testid='merge-wizard-merge']")).toBeEnabled()
     await $("[data-testid='merge-wizard-merge']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, { timeout: 30_000 })
-    await $("[aria-label='Show bookmarks']").click()
-    await expect($("aside")).toHaveText(expect.stringContaining("no bookmarks"))
+    await expect($("[aria-label='Show bookmarks']")).toBeDisabled()
     await $("button[aria-label='Page numbers']").click()
     await expect($("//button[normalize-space()='Remove page numbers']")).not.toExist()
   })

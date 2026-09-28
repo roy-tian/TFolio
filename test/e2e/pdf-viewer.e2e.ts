@@ -6,9 +6,11 @@ import {
   dropZoneButton,
   minimalPdf,
   openPdfFromDisk,
+  outlinedPdf,
   refreshApp,
   seedSettings,
   textPdf,
+  tooltipOn,
 } from "./helpers"
 
 // The zoom listener is bound natively and non-passively, so the wheel goes out
@@ -214,15 +216,12 @@ describe("TFolio PDF viewer", () => {
 
     const bookmarksToggle = $("button[aria-label='Show bookmarks']")
     await expect(bookmarksToggle).toBeDisabled()
-    await $("button[aria-label='Thumbnails']").click()
-    await expect(bookmarksToggle).toBeEnabled()
-    await bookmarksToggle.click()
-    await expect($("nav[aria-label='Bookmarks']")).toHaveText(
-      "This document has no bookmarks.",
+    expect(await tooltipOn("button[aria-label='Show bookmarks']")).toBe(
+      "This document has no bookmarks",
     )
-    await $("button[aria-label='Single page']").click()
+    await $("button[aria-label='Thumbnails']").click()
     await expect(bookmarksToggle).toBeDisabled()
-    await expect($("nav[aria-label='Bookmarks']")).not.toBeExisting()
+    await $("button[aria-label='Single page']").click()
 
     await clickAppMenuItem("settings")
     await expect($("[role='dialog']")).toBeDisplayed()
@@ -268,12 +267,10 @@ describe("TFolio PDF viewer", () => {
     const pageInput = await $("input[aria-label='Page number']")
 
     await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
-    await expect(toggle("Show bookmarks")).toBeDisabled()
 
     // Book view pairs from page 1, so pages 1 and 2 share a spread.
     await toggle("Book").click()
     await expect(toggle("Book")).toHaveAttribute("aria-pressed", "true")
-    await expect(toggle("Show bookmarks")).toBeDisabled()
     await $("[data-page-number='2']").waitForDisplayed()
 
     const spread = await browser.execute(() => {
@@ -305,9 +302,6 @@ describe("TFolio PDF viewer", () => {
     // Thumbnails are an image and no selectable text layer; since M7 a click
     // selects, and it is the double-click that navigates.
     await toggle("Thumbnails").click()
-    await expect(toggle("Show bookmarks")).toBeEnabled()
-    await toggle("Show bookmarks").click()
-    await expect($("nav[aria-label='Bookmarks']")).toBeDisplayed()
     const thirdThumbnail = await $("button[aria-label='Select page 3']")
     await thirdThumbnail.waitForDisplayed()
     await expect($$(".pdf-text-layer")).toBeElementsArrayOfSize(0)
@@ -318,9 +312,30 @@ describe("TFolio PDF viewer", () => {
         .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
     })
     await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
-    await expect(toggle("Show bookmarks")).toBeDisabled()
-    await expect($("nav[aria-label='Bookmarks']")).not.toBeExisting()
     await expect(pageInput).toHaveValue("3")
+  })
+
+  it("keeps a document's bookmarks at hand in every view", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("outlined.pdf", outlinedPdf())
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const toggle = (label: string) => $(`button[aria-label='${label}']`)
+    const bookmarks = $("nav[aria-label='Bookmarks']")
+
+    await toggle("Show bookmarks").click()
+    await expect(bookmarks).toHaveText("Second half")
+    await bookmarks.$("button").click()
+    await expect($("input[aria-label='Page number']")).toHaveValue("2")
+
+    for (const mode of ["Book", "Thumbnails", "Single page"]) {
+      await toggle(mode).click()
+      await expect(bookmarks).toBeDisplayed()
+    }
+
+    await toggle("Hide bookmarks").click()
+    await expect(bookmarks).not.toBeExisting()
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

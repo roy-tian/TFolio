@@ -168,6 +168,7 @@ const en = {
   toolbar: {
     saveAsMenu: "More save options",
     hideBookmarks: "Hide bookmarks",
+    noBookmarks: "This document has no bookmarks",
     showBookmarks: "Show bookmarks",
     viewMode: "View mode",
     viewModeSingle: "Single page",
@@ -534,7 +535,6 @@ const en = {
   },
   bookmarks: {
     title: "Bookmarks",
-    empty: "This document has no bookmarks.",
     untitled: "Untitled bookmark",
   },
   about: {

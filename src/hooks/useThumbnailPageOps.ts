@@ -20,7 +20,6 @@ type UseThumbnailPageOpsOptions = {
   pendingScrollPageRef: RefObject<number | null>
   pdfDocument: PdfDocumentInfo
   notice: DocumentNotices
-  setBookmarksOpen: (open: boolean) => void
   setPreferredViewMode: (mode: ViewMode) => void
   thumbnailSelection: ReturnType<typeof useThumbnailSelection>
 }
@@ -36,7 +35,6 @@ export function useThumbnailPageOps({
   pendingScrollPageRef,
   pdfDocument,
   notice,
-  setBookmarksOpen,
   setPreferredViewMode,
   thumbnailSelection,
 }: UseThumbnailPageOpsOptions) {
@@ -48,7 +46,6 @@ export function useThumbnailPageOps({
   // click is selection now, so navigation moved to the second click.
   const openThumbnailPage = (pageNumber: number) => {
     pendingScrollPageRef.current = pageNumber
-    setBookmarksOpen(false)
     setPreferredViewMode("single")
   }
 

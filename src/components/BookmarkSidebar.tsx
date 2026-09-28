@@ -66,18 +66,12 @@ export function BookmarkSidebar({
         {t("bookmarks.title")}
       </div>
       <nav className="min-h-0 flex-1 overflow-auto p-2" aria-label={t("bookmarks.title")}>
-        {items.length ? (
-          <ul>
-            <BookmarkItems
-              items={items}
-              onNavigate={onNavigate}
-            />
-          </ul>
-        ) : (
-          <p className="px-2 py-5 text-center text-xs leading-5 text-muted-foreground">
-            {t("bookmarks.empty")}
-          </p>
-        )}
+        <ul>
+          <BookmarkItems
+            items={items}
+            onNavigate={onNavigate}
+          />
+        </ul>
       </nav>
     </aside>
   )
