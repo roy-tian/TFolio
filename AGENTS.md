@@ -11,7 +11,8 @@
 - Explain non-obvious WHY in comments; keep them concise and omit self-evident descriptions.
 - Keep files cohesive; extract unrelated responsibilities. Around 1,000 lines, review whether
   splitting improves clarity; cohesive files may exceed it.
-- Before updating the patched `pdfium-render`, read its Cargo manifest note.
+- Page reordering calls the raw `FPDF_MovePages` binding in `page_reorder.rs`, bypassing
+  `pdfium-render`'s page index cache: never keep a `PdfPage` alive past one engine call.
 - CI takes Bun's version from `packageManager`, not the local toolchain.
 
 ## Validation

@@ -1134,6 +1134,7 @@ mod io;
 mod marks;
 mod owned_content;
 mod page_ops;
+mod page_reorder;
 mod raster;
 
 pub(crate) use io::is_merge_image;

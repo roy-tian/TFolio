@@ -211,12 +211,10 @@ impl PdfiumEngine {
             .save_to_bytes()
             .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
 
-        if let Err(error) = entry.document.pages_mut().move_pages(&indices, 0) {
-            return Err(self.restore_document_snapshot(
-                entry,
-                snapshot,
-                format!("PDFium could not reorder the pages: {error}"),
-            ));
+        if let Err(error) =
+            super::page_reorder::move_pages(self.pdfium, &mut entry.document, &indices)
+        {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
         }
 
         entry.page_ids = indices

@@ -88,15 +88,6 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.6"
 
-# pdfium-render 0.9.3 binds FPDF_MovePages but exposes no safe wrapper, and
-# same-document page reordering has no other route (rebuilding via
-# FPDF_ImportPages orphans outline destinations). The fork adds only
-# PdfPages::move_pages(); its branch is cut from the exact commit the
-# crates.io 0.9.3 package was published from, and the rev pin keeps the
-# locked build closed.
-[patch.crates-io]
-pdfium-render = { git = "https://github.com/roy-tian/pdfium-render", rev = "9c4a5da57afafe75020aa4d2169af5094ee0e787" }
-
 [profile.dev.package.allsorts]
 opt-level = 3
 

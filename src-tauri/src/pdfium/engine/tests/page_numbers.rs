@@ -496,6 +496,50 @@ fn coexists_with_a_watermark() {
 
 #[test]
 #[ignore = "requires `bun run fonts:download`"]
+fn reorder_keeps_owned_layers_removable() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+    let original = page_fingerprints(engine, document.id, 2);
+
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply the watermark");
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number over the watermark");
+    let decorated = page_fingerprints(engine, document.id, 2);
+
+    for expected in [
+        vec![decorated[1].clone(), decorated[0].clone()],
+        decorated.clone(),
+        vec![decorated[1].clone(), decorated[0].clone()],
+    ] {
+        engine
+            .reorder_pages(document.id, &[2, 1])
+            .expect("sorting and its undo/redo should preserve owned layers");
+        assert_eq!(page_fingerprints(engine, document.id, 2), expected);
+    }
+
+    engine
+        .remove_page_numbers(document.id)
+        .expect("page numbers should remain removable after reloading");
+    for page in [1, 2] {
+        let text = extracted_text(engine, document.id, page);
+        assert!(text.contains("DRAFT") && !text.contains('—'));
+    }
+    engine
+        .remove_watermark(document.id)
+        .expect("the watermark should remain removable after reloading");
+    assert_eq!(
+        page_fingerprints(engine, document.id, 2),
+        vec![original[1].clone(), original[0].clone()],
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
 fn refuses_a_foreign_page_number_tail() {
     let engine = test_engine();
     let document = engine
