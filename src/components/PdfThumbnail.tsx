@@ -42,7 +42,7 @@ type PdfThumbnailProps = {
 }
 
 /** A preview that selects rather than reads — no text layer, so a grid stays
-    cheap. The cut/copy right-click belongs to the grid: see `ThumbnailLayout`. */
+    cheap. The right-click page menu belongs to the grid: see `ThumbnailLayout`. */
 export function PdfThumbnail({
   deleteDisabled,
   documentId,
@@ -116,9 +116,11 @@ export function PdfThumbnail({
             // selection is the louder voice.
             isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
             // Offset from the page, so the ring reads against the page's own
-            // white even when the theme paints the ring light.
+            // white even when the theme paints the ring light. The last page
+            // clicked keeps focus, and WebKitGTK may show its focus ring, which
+            // would grey that one page out of the selection's.
             isSelected &&
-              "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary dark:ring-offset-zinc-950",
+              "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary focus-visible:ring-2 focus-visible:ring-primary dark:ring-offset-zinc-950",
           )}
           data-page-number={pageNumber}
           data-rotation={rotation}
