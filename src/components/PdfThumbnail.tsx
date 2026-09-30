@@ -1,4 +1,4 @@
-import { useRef } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { LoaderCircle, TriangleAlert, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -22,6 +22,7 @@ type PdfThumbnailProps = {
       selection this page belongs to that spans the whole document. */
   deleteDisabled: boolean
   documentId: number
+  intrinsicRotation: number
   isCurrent: boolean
   /** Whether a cut is standing over this page: it is still here, and a paste
       is what would move it. */
@@ -46,6 +47,7 @@ type PdfThumbnailProps = {
 export function PdfThumbnail({
   deleteDisabled,
   documentId,
+  intrinsicRotation,
   isCurrent,
   isCut,
   isSelected,
@@ -63,8 +65,18 @@ export function PdfThumbnail({
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
   const isNearViewport = useNearViewport(wrapperRef, THUMBNAIL_ROOT_MARGIN)
   const retainBitmap = useNearViewport(wrapperRef, THUMBNAIL_RETAIN_MARGIN)
+  // Keep the old bitmap's geometry until its replacement is painted; changing
+  // it with the document metadata would stretch the still-upright preview.
+  const [paintedPage, setPaintedPage] = useState({
+    height: pageHeight,
+    rotation: intrinsicRotation,
+    width: pageWidth,
+    ready: false,
+  })
+  const previousPageRef = useRef(paintedPage)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -73,6 +85,20 @@ export function PdfThumbnail({
     isNearViewport,
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
+    onPaint: () =>
+      setPaintedPage((previous) =>
+        previous.ready &&
+        previous.height === pageHeight &&
+        previous.width === pageWidth &&
+        previous.rotation === intrinsicRotation
+          ? previous
+          : {
+              height: pageHeight,
+              rotation: intrinsicRotation,
+              width: pageWidth,
+              ready: true,
+            },
+      ),
     pageHeight,
     pageNumber,
     pageWidth,
@@ -82,10 +108,60 @@ export function PdfThumbnail({
     targetWidth: width,
   })
 
+  useLayoutEffect(() => {
+    const previous = previousPageRef.current
+    previousPageRef.current = paintedPage
+    const paper = wrapperRef.current
+    const preview = previewRef.current
+    const turn = ((paintedPage.rotation - previous.rotation + 540) % 360) - 180
+
+    if (
+      !previous.ready ||
+      !turn ||
+      !paper ||
+      !preview ||
+      paper.getClientRects().length === 0 ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return
+    }
+
+    // PDFium has already turned the new pixels. Start them counter-rotated at
+    // the old scale so their first frame matches the bitmap they replaced.
+    const timing = { duration: 250, easing: "ease-out" }
+    const spin = preview.animate(
+      [
+        {
+          transform: `translate(-50%, -50%) rotate(${rotation - turn}deg) scale(${paintedPage.width / previous.width})`,
+        },
+        { transform: `translate(-50%, -50%) rotate(${rotation}deg) scale(1)` },
+      ],
+      timing,
+    )
+    const oldFootprint = dimensionsForRotation(
+      rotation, previous.width, previous.height,
+    )
+    const newFootprint = dimensionsForRotation(
+      rotation, paintedPage.width, paintedPage.height,
+    )
+    const resize = paper.animate(
+      [
+        { height: `${(width * oldFootprint.height) / oldFootprint.width}px` },
+        { height: `${(width * newFootprint.height) / newFootprint.width}px` },
+      ],
+      timing,
+    )
+
+    return () => {
+      spin.cancel()
+      resize.cancel()
+    }
+  }, [paintedPage, rotation, width])
+
   // The user rotation spins the preview clockwise, swapping the footprint a
   // quarter turn leaves behind.
   const { height: footprintHeight, width: footprintWidth } =
-    dimensionsForRotation(rotation, pageWidth, pageHeight)
+    dimensionsForRotation(rotation, paintedPage.width, paintedPage.height)
   const label = t("viewer.thumbnailLabel", { pageNumber })
   const deletesSelection = isSelected && selectedCount > 1
   const deleteLabel = deletesSelection
@@ -111,7 +187,7 @@ export function PdfThumbnail({
           aria-label={label}
           aria-pressed={isSelected}
           className={cn(
-            "relative block w-full scroll-mt-5 overflow-hidden bg-white shadow-md outline-none ring-1 ring-black/10 transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-3 focus-visible:ring-ring/50",
+            "relative block w-full scroll-mt-5 bg-white shadow-md outline-none ring-1 ring-black/10 transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-3 focus-visible:ring-ring/50",
             // The current page keeps its marker, faded: in the editing grid the
             // selection is the louder voice.
             isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
@@ -130,24 +206,25 @@ export function PdfThumbnail({
           }
           onDoubleClick={() => onOpen(pageNumber)}
           ref={wrapperRef}
-          style={{ aspectRatio: footprintWidth / footprintHeight }}
+          style={{ height: (width * footprintHeight) / footprintWidth }}
           type="button"
         >
           <div
             className="absolute"
+            ref={previewRef}
             style={{
-              height: `${(pageHeight / footprintHeight) * 100}%`,
+              height: (width * paintedPage.height) / footprintWidth,
               left: "50%",
               top: "50%",
               transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-              width: `${(pageWidth / footprintWidth) * 100}%`,
+              width: (width * paintedPage.width) / footprintWidth,
             }}
           >
             <canvas
               className="block h-full w-full"
-              height={Math.max(1, Math.round(pageHeight))}
+              height={1}
               ref={canvasRef}
-              width={Math.max(1, Math.round(pageWidth))}
+              width={1}
             />
           </div>
           {!hasRendered && !renderFailed ? (
