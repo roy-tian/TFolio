@@ -50,7 +50,7 @@ serde_json = "1"
 # The fallback face's checksum is verified before it is ever handed to PDFium:
 # these bytes end up inside the reader's own documents.
 sha2 = "0.11"
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-dialog = "2"
 # The release check. Its network call, its signature check and its install are
 # all Rust-side: the WebView is granted none of the plugin's own commands, so
@@ -72,6 +72,12 @@ zip = { version = "4.6.1", default-features = false }
 # paying for zbus and a socket it would never use.
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+window-vibrancy = "0.8.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSWindow"] }
 
 # A timed-out or stopped converter is killed with its whole process group:
 # LibreOffice's launcher forks the real soffice.bin, which killing the

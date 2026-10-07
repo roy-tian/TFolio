@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 
 import { rememberSettings, storedSettings } from "@/lib/settings"
+import { applyWindowBackground } from "@/lib/windowBackground"
 
 export const themePreferences = ["light", "system", "dark"] as const
 
@@ -37,21 +38,22 @@ export function resolveTheme(themePreference: ThemePreference): ResolvedTheme {
   return themePreference
 }
 
-function applyResolvedTheme(themePreference: ThemePreference) {
+async function applyResolvedTheme(themePreference: ThemePreference) {
   const resolved = resolveTheme(themePreference)
   const root = document.documentElement
 
   root.classList.toggle("dark", resolved === "dark")
   root.style.colorScheme = resolved
+  await applyWindowBackground(resolved, themePreference === "system")
 }
 
-export function initializeTheme() {
+export async function initializeTheme() {
   preference = storedPreference() ?? defaultThemePreference
-  applyResolvedTheme(preference)
+  await applyResolvedTheme(preference)
 
   window.matchMedia(darkModeQuery).addEventListener("change", () => {
     if (preference === "system") {
-      applyResolvedTheme(preference)
+      void applyResolvedTheme(preference)
     }
   })
 }
@@ -64,7 +66,7 @@ export function setThemePreference(next: ThemePreference) {
   preference = next
 
   rememberSettings({ ui: { theme: next } })
-  applyResolvedTheme(next)
+  void applyResolvedTheme(next)
   listeners.forEach((listener) => listener())
 }
 

@@ -510,6 +510,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
   documentId,
   dragging,
   insertActive,
+  intrinsicRotation,
   isCurrent,
   isCut,
   isSelected,
@@ -538,6 +539,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
       make-way slide rides on, so it has to be in place before one moves. */
   dragging: boolean
   insertActive: boolean
+  intrinsicRotation: number
   isCurrent: boolean
   isCut: boolean
   isSelected: boolean
@@ -610,6 +612,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
       <PdfThumbnail
         deleteDisabled={deleteDisabled}
         documentId={documentId}
+        intrinsicRotation={intrinsicRotation}
         isCurrent={isCurrent}
         isCut={isCut}
         isSelected={isSelected}
@@ -843,6 +846,7 @@ function ThumbnailLayout({
               documentId={documentId}
               dragging={dragging}
               insertActive={dropIndex === pageNumber}
+              intrinsicRotation={page.rotation}
               isCurrent={currentPage === pageNumber}
               isCut={cut.has(pageNumber)}
               isSelected={isSelected}
