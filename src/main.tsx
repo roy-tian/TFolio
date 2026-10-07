@@ -18,7 +18,7 @@ async function bootstrap() {
   // The wizard's Word promise is the machine's own answer; it too is settled
   // before the first window can act on it.
   await loadWordConversionAvailability()
-  initializeTheme()
+  await initializeTheme()
   suppressNativeContextMenu()
 
   if (import.meta.env.MODE === "e2e") {

@@ -76,7 +76,7 @@ export function HomePanel({
     <div
       aria-hidden={!active}
       aria-labelledby={tabElementId(HOME_TAB_ID)}
-      className="h-svh overflow-hidden bg-background"
+      className="app-surface h-svh overflow-hidden"
       data-active={active}
       hidden={!active}
       id={panelElementId(HOME_TAB_ID)}
@@ -84,7 +84,7 @@ export function HomePanel({
     >
       {/* The page itself stays put and the recent list scrolls alone, so the
           welcome and the actions never move under the reader. */}
-      <main className="h-full overflow-y-auto bg-zinc-200/70 p-8 pt-29 dark:bg-zinc-950">
+      <main className="workspace-background h-full overflow-y-auto p-8 pt-29">
         <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center">
           <h1 className="text-2xl font-semibold">{t("home.welcome")}</h1>
           <p className="mt-2 text-center text-sm text-muted-foreground">

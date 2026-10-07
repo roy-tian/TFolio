@@ -67,6 +67,7 @@ body {
 
 :root {
   --background: oklch(1 0 0);
+  --workspace-background: color-mix(in srgb, #e4e4e7 70%, var(--background));
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
@@ -112,6 +113,7 @@ body {
 
 .dark {
   --background: oklch(0.145 0 0);
+  --workspace-background: #09090b;
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -158,6 +160,32 @@ body {
   }
   html {
     @apply font-sans;
+  }
+}
+
+.app-surface {
+  background-color: var(--background);
+}
+
+.workspace-background {
+  background-color: var(--workspace-background);
+}
+
+/* Native materials sit beneath the WebView; every covering app surface must
+   let them through. Screen-only so printing keeps its white paper ground. */
+@media screen {
+  .native-workspace,
+  .native-workspace body,
+  .native-workspace .app-surface {
+    background-color: transparent;
+  }
+
+  .native-workspace .workspace-background {
+    background-color: rgb(228 228 231 / 20%);
+  }
+
+  .native-workspace.dark .workspace-background {
+    background-color: rgb(9 9 11 / 30%);
   }
 }
 

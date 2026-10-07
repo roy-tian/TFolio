@@ -7,6 +7,7 @@ mod recent;
 mod settings;
 mod store;
 mod update;
+mod window_background;
 mod window_state;
 mod windows;
 
@@ -142,6 +143,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            window_background::set_workspace_background,
             create_pdf,
             open_pdf,
             open_pdf_from_path,

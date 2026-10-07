@@ -1881,7 +1881,7 @@ export default function App() {
   }, [homeActive, refreshRecentFiles])
 
   return (
-    <div className="h-svh overflow-hidden bg-background">
+    <div className="app-surface h-svh overflow-hidden">
       {homeActive ? (
         // The document tools — bookmarks, view mode — have no document to act
         // on here, so the home header carries only what still works.

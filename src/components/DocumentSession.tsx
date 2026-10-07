@@ -1553,7 +1553,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       <div
         aria-hidden={!active}
         aria-labelledby={tabElementId(openedDocument.id)}
-        className="h-svh overflow-hidden bg-background"
+        className="app-surface h-svh overflow-hidden"
         data-active={active}
         data-document-session={openedDocument.id}
         hidden={!active}
@@ -1687,7 +1687,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               inside it is placed against scrolled content and would drift. */}
           <div className="relative min-w-0 flex-1">
             <main
-              className="relative size-full overflow-auto bg-zinc-200/70 dark:bg-zinc-950"
+              className="workspace-background relative size-full overflow-auto"
               data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}
