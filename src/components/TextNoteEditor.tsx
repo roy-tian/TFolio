@@ -37,6 +37,7 @@ type TextNoteEditorProps = {
   onStyleChange: (style: TextNoteStyle, transient?: boolean) => void
   onTextChange: (text: string) => void
   page: PdfPageInfo
+  preparing: boolean
   rotation: number
   style: TextNoteStyle
   viewerRef: RefObject<HTMLElement | null>
@@ -60,6 +61,7 @@ export function TextNoteEditor({
   onStyleChange,
   onTextChange,
   page,
+  preparing,
   rotation,
   style,
   viewerRef,
@@ -156,8 +158,8 @@ export function TextNoteEditor({
   // Keyed to which note this is, not to mounting: placing one while another is
   // open swaps drafts in place, and a run-once effect would leave no caret.
   useEffect(() => {
-    textareaRef.current?.focus()
-  }, [draft.pageNumber, draft.origin.left, draft.origin.top])
+    if (!preparing) textareaRef.current?.focus()
+  }, [draft.pageNumber, draft.origin.left, draft.origin.top, preparing])
 
   if (!placement) {
     return null
@@ -168,9 +170,10 @@ export function TextNoteEditor({
   const previewSize = Math.max(12, style.fontSize * placement.pxPerPoint)
 
   return (
-    <div
-      className="fixed z-50"
-      ref={editorRef as RefObject<HTMLDivElement>}
+    <fieldset
+      className="fixed z-50 min-w-0 border-0 p-0"
+      disabled={preparing}
+      ref={editorRef as RefObject<HTMLFieldSetElement>}
       style={{ left: placement.left, top: placement.top }}
     >
       {/* Out of the flow so the text box — not the options beside it — starts
@@ -260,6 +263,6 @@ export function TextNoteEditor({
           </ToolbarTooltip>
         </div>
       </div>
-    </div>
+    </fieldset>
   )
 }

@@ -25,22 +25,26 @@ import {
 } from "@/lib/pdf"
 import { POINT_TO_PX } from "@/lib/zoom"
 
-// The text layer renders every span in the font that measured its run width,
-// so the horizontal scale stays consistent between measurement and layout.
+// Fragmented PDFs can give every glyph a different ink-box height. Changing
+// the measurement font for each glyph stalls the WebView; use one font and
+// scale both axes to the PDF bounds in the selectable DOM as well.
 const TEXT_LAYER_FONT_FAMILY = "sans-serif"
+const TEXT_LAYER_FONT_SIZE = 100
 
 let measureContext: CanvasRenderingContext2D | null = null
 
-function measureTextWidth(text: string, fontSize: number) {
+function measureTextWidth(text: string) {
   if (!measureContext) {
     measureContext = document.createElement("canvas").getContext("2d")
+
+    if (measureContext) {
+      measureContext.font = `${TEXT_LAYER_FONT_SIZE}px ${TEXT_LAYER_FONT_FAMILY}`
+    }
   }
 
   if (!measureContext) {
     return 0
   }
-
-  measureContext.font = `${fontSize}px ${TEXT_LAYER_FONT_FAMILY}`
 
   return measureContext.measureText(text).width
 }
@@ -203,15 +207,16 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const positionedSpans = useMemo(
     () =>
       textSpans.map((span) => {
-        const naturalWidth = measureTextWidth(span.text, span.height)
-        const scaleX = naturalWidth > 0 ? span.width / naturalWidth : 1
+        const naturalWidth = measureTextWidth(span.text)
+        const scaleY = span.height / TEXT_LAYER_FONT_SIZE
+        const scaleX = naturalWidth > 0 ? span.width / naturalWidth : scaleY
 
         return {
-          fontSize: span.height,
+          fontSize: TEXT_LAYER_FONT_SIZE,
           left: `${(span.left / layoutWidth) * 100}%`,
           text: span.text,
           top: `${(span.top / layoutHeight) * 100}%`,
-          transform: scaleX === 1 ? undefined : `scaleX(${scaleX})`,
+          transform: `scale(${scaleX}, ${scaleY})`,
         }
       }),
     [layoutHeight, layoutWidth, textSpans],

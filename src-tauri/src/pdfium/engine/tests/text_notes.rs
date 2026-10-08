@@ -1,6 +1,51 @@
 use super::support::*;
 use super::*;
 
+#[test]
+#[ignore = "requires `bun run pdfium:download` and `bun run fonts:download`"]
+fn preview_font_carries_the_embedded_notes_glyphs_and_ascent() {
+    let engine = test_engine();
+    let text = "Hello 你好\n第二行";
+    let packet = engine.text_note_font(text).expect("prepare preview font");
+    let ascent = f32::from_le_bytes(packet[..4].try_into().unwrap());
+    assert!(draws(&packet[4..], &text.replace('\n', "")));
+    assert!(packet.len() < 50_000, "the preview must use a subset");
+
+    let document = engine.open(minimal_pdf()).expect("open blank PDF");
+    engine
+        .add_text_note(
+            document.id,
+            1,
+            &note_origin(20.0, 100.0),
+            text,
+            &text_note_style(48.0),
+        )
+        .expect("add the same note");
+    let documents = engine.lock_documents().unwrap();
+    let entry = open_entry(&documents, document.id).unwrap();
+    let page = entry.document.pages().get(0).unwrap();
+    let annotation = page.annotations().get(0).unwrap();
+    let object = annotation.objects().get(0).unwrap();
+    let actual = object
+        .as_text_object()
+        .unwrap()
+        .font()
+        .ascent(PdfPoints::new(48.0))
+        .unwrap()
+        .value;
+    assert!((ascent * 48.0 - actual).abs() < 0.01);
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn preview_font_rejects_empty_and_oversized_text() {
+    let engine = test_engine();
+    assert!(engine.text_note_font(" \n").is_err());
+    assert!(engine
+        .text_note_font(&"你".repeat(MAX_TEXT_NOTE_CHARS + 1))
+        .is_err());
+}
+
 /// The pixel box the ink occupies: unlike `ink_inside_and_outside`, this tells
 /// text at its proper size from the same text shrunk or squashed into the band.
 fn ink_bounds(

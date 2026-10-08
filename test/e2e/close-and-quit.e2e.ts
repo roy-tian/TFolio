@@ -11,7 +11,9 @@ import {
   openPathViaDialog,
   openPdfFromBytes,
   openPdfFromDisk,
+  pageInk,
   refreshApp,
+  renderedPage,
   seedSettings,
 } from "./helpers"
 
@@ -96,6 +98,31 @@ describe("closing and quitting with unsaved work", () => {
       reverse: true,
       timeoutMsg: "the saved tab never closed",
     })
+  })
+
+  it("prepares and saves a typed Chinese note before closing", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    const filePath = await openPdfFromDisk("close-note.pdf", minimalPdf(1, "0 0 300 400"))
+    await renderedPage()
+    expect(await pageInk()).toBe(0)
+    await $("button[aria-label='Add a note']").click()
+    await browser.execute(() => {
+      const page = document.querySelector("[data-page-number='1']")!
+      const box = page.getBoundingClientRect()
+      page.querySelector("canvas")!.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true, button: 0, isPrimary: true,
+        clientX: box.left + box.width * 0.3,
+        clientY: box.top + box.height * 0.3,
+      }))
+    })
+    await $("textarea[aria-label='Note text']").setValue("你好")
+    await $("button[aria-label='Close close-note.pdf']").click()
+    await prompt().$("button=Save").click()
+    await $("button[aria-label='Close close-note.pdf']").waitForExist({ reverse: true })
+    await openPathViaDialog(filePath)
+    await renderedPage()
+    expect(await pageInk()).toBeGreaterThan(0)
   })
 
   it("keeps the tab when the prompt's Save As is cancelled", async () => {

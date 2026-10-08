@@ -598,6 +598,7 @@ export function useAnnotations({
     async (
       command: AnnotationCommand,
       onApplied?: (epochs: RenderEpochs) => void,
+      prepare?: () => Promise<boolean>,
     ) => {
       if (documentId === undefined) {
         return false
@@ -622,6 +623,9 @@ export function useAnnotations({
           pages: commandPages(command),
           textPages: commandTextPages(command),
           work: async () => {
+            // Font preparation belongs to the edit's queue slot too: save,
+            // undo and page moves must not overtake a note already submitted.
+            if (prepare && !(await prepare())) return false
             // `commit` gives the entry `nextId`; the marks are filed under it.
             await applyCommand(
               documentId,
@@ -747,11 +751,15 @@ export function useAnnotations({
             pages: commandPages(planned.command),
             textPages: commandTextPages(planned.command),
             work: async () => {
-              outcome = await invoke<PdfInsertOutcome>("insert_pdf_from_path", {
+              const args = {
                 documentId,
                 index,
                 path,
-              })
+              }
+              const insert = e2eOverride("insertPdfFromPath")
+              outcome = await (insert
+                ? insert(args)
+                : invoke<PdfInsertOutcome>("insert_pdf_from_path", args))
               onStructureChange(documentId, outcome.update)
               inserted = outcome.pageCount
               return true

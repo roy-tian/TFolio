@@ -19,8 +19,8 @@ export function TextNotePreview({
   note,
 }: TextNotePreviewProps) {
   const { origin, style, text } = note
-  const ascent = noteAscentRatio(text) * style.fontSize
-  const family = noteFontFamily(text)
+  const ascent = (note.font?.ascent ?? noteAscentRatio(text)) * style.fontSize
+  const family = note.font?.family ?? noteFontFamily(text)
 
   return (
     <svg

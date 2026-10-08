@@ -2,12 +2,20 @@
  * Tauri seals `__TAURI_INTERNALS__.invoke`, so the e2e seam must be the app's
  * own; the mode check is a compile-time constant, dead in every other build.
  */
-import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
+import type { PdfDocumentInfo, PdfExportOutcome, PdfInsertOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
+  /** Keeps an insertion pending while the GUI exercises page-edit guards. */
+  insertPdfFromPath?: (args: {
+    documentId: number
+    index: number
+    path: string
+  }) => Promise<PdfInsertOutcome>
+  checkUpdates?: () => Promise<void>
+  downloadUpdate?: () => Promise<void>
   installUpdate?: () => Promise<void>
   /** Stands in for `quit_app`, which would end the process the spec drives. */
   quitApp?: () => Promise<void>

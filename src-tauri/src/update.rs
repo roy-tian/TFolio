@@ -1,13 +1,12 @@
-//! The run's one release check, process-wide: two windows would install whichever
-//! fetched last. Its commands carry no argument, so no page names the endpoint or key.
+//! Process-wide updates, checked at startup and when About opens. Checks,
+//! downloads and installs share a gate so a recheck cannot replace an active
+//! installer. Commands take no endpoint, key or file from the WebView.
 
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
-    },
+    sync::Mutex,
+    time::Duration,
 };
 
 use base64::Engine as _;
@@ -38,8 +37,8 @@ const SIGNATURE_FILE_NAME: &str = "pending.json";
 
 const UNMEASURED_STEP_BYTES: u64 = 1 << 20;
 
-/// What every window is showing, in the shape `src/lib/update.ts` reads: a check
-/// that could not reach the endpoint is `Idle` too — not news to one who never asked.
+/// The last known offer, in the shape `src/lib/update.ts` reads. A failed check
+/// keeps it; About reports that request's error without discarding an installer.
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase", tag = "state")]
 pub enum UpdateStatus {
@@ -75,15 +74,31 @@ pub struct UpdateState {
     /// the same handle that verified the bytes.
     pending: Mutex<Option<Update>>,
     package: Mutex<Option<Package>>,
-    /// Held for the length of one download, so a second window's button joins
-    /// the download already running instead of starting another.
-    downloading: AtomicBool,
-    /// Held for the length of one install, so a second press cannot hand the same
-    /// package to the platform twice while the first waits on its root prompt.
-    installing: AtomicBool,
+    /// A recheck must not replace the feed signature while its installer is
+    /// being downloaded, verified or handed to the platform.
+    operation: tauri::async_runtime::Mutex<()>,
+    /// Concurrent callers wait for the active check's result, including errors.
+    check_error: tauri::async_runtime::Mutex<Option<String>>,
 }
 
 impl UpdateState {
+    async fn run_check(
+        &self,
+        check: impl std::future::Future<Output = Result<(), String>>,
+    ) -> Result<(), String> {
+        let mut error = match self.check_error.try_lock() {
+            Ok(error) => error,
+            Err(_) => return self.check_error.lock().await.clone().map_or(Ok(()), Err),
+        };
+        let Ok(_operation) = self.operation.try_lock() else {
+            return Ok(());
+        };
+
+        let result = check.await;
+        *error = result.as_ref().err().cloned();
+        result
+    }
+
     fn publish(&self, app: &AppHandle, status: UpdateStatus) {
         if let Ok(mut current) = self.status.lock() {
             *current = status.clone();
@@ -225,66 +240,97 @@ pub fn check_in_background(app: &AppHandle) {
     let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        // Read before the request and judged after it: what an earlier run left
-        // behind counts only if this run is offered the very same bytes.
-        let saved = saved_package(&app);
-        let Ok(updater) = app.updater() else {
-            return;
-        };
-
-        let update = match updater.check().await {
-            Ok(Some(update)) => update,
-            // Nothing newer, so a saved installer is for a release this one is
-            // already past — most likely the one it installed.
-            Ok(None) => return discard_package(&app),
-            // No answer is not an answer about the saved package either, so it
-            // stays where it is for the next run to ask about.
-            Err(_) => return,
-        };
-
-        let version = update.version.clone();
-        // The feed's own signature for this release, fetched this run: the saved
-        // copy is measured against it, never against anything the disk says.
-        let offered = update.signature.clone();
-        let state = app.state::<UpdateState>();
-
-        if let Ok(mut pending) = state.pending.lock() {
-            *pending = Some(update);
-        }
-
-        // Off the async runtime: the reread is a whole-file read, and every
-        // command issued while the workspace loads shares those worker threads.
-        let restored = match saved.filter(|package| package.signature == offered) {
-            Some(package) => {
-                let verifier = app.clone();
-                let candidate = package.clone();
-
-                tauri::async_runtime::spawn_blocking(move || {
-                    read_package(&verifier, &candidate).is_ok()
-                })
-                .await
-                .unwrap_or(false)
-                .then_some(package)
-            }
-            None => None,
-        };
-
-        let status = match restored {
-            Some(package) => {
-                if let Ok(mut held) = state.package.lock() {
-                    *held = Some(package);
-                }
-
-                UpdateStatus::Ready { version }
-            }
-            None => {
-                discard_package(&app);
-                UpdateStatus::Available { version }
-            }
-        };
-
-        state.publish(&app, status);
+        let _ = check_updates(app).await;
     });
+}
+
+/// About may ask again after the startup check. A check already in flight is
+/// shared; opening About while downloading/installing keeps that operation.
+#[tauri::command]
+pub async fn check_updates(app: AppHandle) -> Result<(), String> {
+    if cfg!(feature = "e2e") {
+        return Ok(());
+    }
+
+    let state = app.state::<UpdateState>();
+    state.run_check(check_release(&app, &state)).await
+}
+
+async fn check_release(app: &AppHandle, state: &UpdateState) -> Result<(), String> {
+    // Read before the request and judged after it: what an earlier run left
+    // behind counts only if this run is offered the very same bytes.
+    let saved = saved_package(app);
+    let updater = app
+        .updater_builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| error.to_string())?;
+
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        // Nothing newer, so a saved installer is for a release this one is
+        // already past — most likely the one it installed.
+        Ok(None) => {
+            discard_package(app);
+            if let Ok(mut pending) = state.pending.lock() {
+                *pending = None;
+            }
+            if let Ok(mut package) = state.package.lock() {
+                *package = None;
+            }
+            state.publish(app, UpdateStatus::Idle);
+            return Ok(());
+        }
+        // No answer is not an answer about the saved package either, so it
+        // stays where it is for the next run to ask about.
+        Err(error) => return Err(error.to_string()),
+    };
+
+    let version = update.version.clone();
+    // The feed's own signature for this release, fetched this run: the saved
+    // copy is measured against it, never against anything the disk says.
+    let offered = update.signature.clone();
+
+    if let Ok(mut pending) = state.pending.lock() {
+        *pending = Some(update);
+    }
+
+    // Off the async runtime: the reread is a whole-file read, and every
+    // command issued while the workspace loads shares those worker threads.
+    let restored = match saved.filter(|package| package.signature == offered) {
+        Some(package) => {
+            let verifier = app.clone();
+            let candidate = package.clone();
+
+            tauri::async_runtime::spawn_blocking(move || {
+                read_package(&verifier, &candidate).is_ok()
+            })
+            .await
+            .unwrap_or(false)
+            .then_some(package)
+        }
+        None => None,
+    };
+
+    let status = match restored {
+        Some(package) => {
+            if let Ok(mut held) = state.package.lock() {
+                *held = Some(package);
+            }
+
+            UpdateStatus::Ready { version }
+        }
+        None => {
+            if let Ok(mut held) = state.package.lock() {
+                *held = None;
+            }
+            discard_package(app);
+            UpdateStatus::Available { version }
+        }
+    };
+
+    state.publish(app, status);
+    Ok(())
 }
 
 /// The check runs before there is a page to hear it, so a window asks once on
@@ -300,20 +346,14 @@ pub async fn update_status(state: State<'_, UpdateState>) -> Result<UpdateStatus
 pub async fn download_update(app: AppHandle) -> Result<(), String> {
     let state = app.state::<UpdateState>();
 
-    // Already here, or already on its way in another window: either way this
-    // press has nothing of its own to start.
-    let claimed = state.package.lock().is_ok_and(|package| package.is_none())
-        && state
-            .downloading
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok();
-
-    if !claimed {
+    // Wait for an in-flight check before choosing the release to download.
+    // A second download finds the first one's saved package after this gate.
+    let _operation = state.operation.lock().await;
+    if state.package.lock().is_ok_and(|package| package.is_some()) {
         return Ok(());
     }
 
     let Some(update) = state.pending() else {
-        state.downloading.store(false, Ordering::Release);
         return Ok(());
     };
 
@@ -363,10 +403,6 @@ pub async fn download_update(app: AppHandle) -> Result<(), String> {
         )
         .await;
 
-    // Released before the result is read, so a download that failed can be
-    // asked for again.
-    state.downloading.store(false, Ordering::Release);
-
     let bytes = match downloaded {
         Ok(bytes) => bytes,
         Err(error) => {
@@ -409,20 +445,8 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 
     let state = app.state::<UpdateState>();
 
-    if state
-        .installing
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Ok(());
-    }
-
-    let outcome = install_verified_package(&app).await;
-    // Only a refusal reaches here: an install that took has already replaced
-    // this process.
-    state.installing.store(false, Ordering::Release);
-
-    outcome
+    let _operation = state.operation.lock().await;
+    install_verified_package(&app).await
 }
 
 async fn install_verified_package(app: &AppHandle) -> Result<(), String> {
@@ -488,6 +512,60 @@ async fn install_verified_package(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        cell::Cell,
+        future::{poll_fn, Future},
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
+
+    fn assert_shared_check(state: &UpdateState, outcome: Result<(), String>) {
+        let finished = Cell::new(false);
+        let mut context = Context::from_waker(Waker::noop());
+        let mut first = pin!(state.run_check(poll_fn(|_| {
+            if finished.get() {
+                Poll::Ready(outcome.clone())
+            } else {
+                Poll::Pending
+            }
+        })));
+        assert!(first.as_mut().poll(&mut context).is_pending());
+
+        let mut second =
+            pin!(state
+                .run_check(async { panic!("a concurrent caller must share the active check") }));
+        assert!(second.as_mut().poll(&mut context).is_pending());
+
+        finished.set(true);
+        assert_eq!(
+            first.as_mut().poll(&mut context),
+            Poll::Ready(outcome.clone())
+        );
+        assert_eq!(
+            second.as_mut().poll(&mut context),
+            Poll::Ready(outcome.clone())
+        );
+    }
+
+    #[test]
+    fn concurrent_checks_wait_for_and_share_success_or_failure() {
+        let state = UpdateState::default();
+        assert_shared_check(&state, Ok(()));
+        assert_shared_check(&state, Err("offline".into()));
+        // A later visit retries and clears the previous error on success.
+        assert_shared_check(&state, Ok(()));
+    }
+
+    #[test]
+    fn checking_does_not_interrupt_a_download_or_install() {
+        let state = UpdateState::default();
+        let _operation = state.operation.try_lock().unwrap();
+        let mut check = pin!(
+            state.run_check(async { panic!("checking must not replace an active installer") })
+        );
+        let mut context = Context::from_waker(Waker::noop());
+        assert_eq!(check.as_mut().poll(&mut context), Poll::Ready(Ok(())));
+    }
 
     /// Read as the frontend reads it, so this pins the wire names rather than
     /// the variants they are spelled from.

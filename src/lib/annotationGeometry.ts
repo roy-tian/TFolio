@@ -167,41 +167,65 @@ export function mergeRectsByLine(rects: PagePointsRect[]): PagePointsRect[] {
   const pending = [...rects].sort(
     (left, right) => left.top - right.top || left.left - right.left,
   )
-  const bands: PagePointsRect[] = []
-  let band = { ...pending[0] }
+  const rows: { top: number; bottom: number; rects: PagePointsRect[] }[] = []
+  let active: typeof rows = []
 
-  for (const rect of pending.slice(1)) {
-    const overlap =
-      Math.min(band.top + band.height, rect.top + rect.height) -
-      Math.max(band.top, rect.top)
-    // Either column can sort first when their ink boxes differ by a point, so
-    // the separation reads both ways: positive only when the boxes stand apart.
-    const gap = Math.max(
-      rect.left - (band.left + band.width),
-      band.left - (rect.left + rect.width),
-    )
+  // Ink tops vary within one line. Find the rows first, then visit each row
+  // left to right: a jump between tall glyphs must not look like a gutter
+  // before the shorter glyphs between them have been considered.
+  for (const rect of pending) {
+    active = active.filter((row) => row.bottom > rect.top)
+    const row = active.find((row) => {
+      const overlap = Math.min(row.bottom, rect.top + rect.height) - rect.top
 
-    if (
-      overlap <= SAME_LINE_OVERLAP * Math.min(band.height, rect.height) ||
-      gap > MAX_RUN_GAP * Math.max(band.height, rect.height)
-    ) {
-      bands.push(band)
-      band = { ...rect }
-      continue
-    }
+      return overlap > SAME_LINE_OVERLAP * Math.min(row.bottom - row.top, rect.height)
+    })
 
-    const left = Math.min(band.left, rect.left)
-    const top = Math.min(band.top, rect.top)
-
-    band = {
-      height: Math.max(band.top + band.height, rect.top + rect.height) - top,
-      left,
-      top,
-      width: Math.max(band.left + band.width, rect.left + rect.width) - left,
+    if (row) {
+      row.bottom = Math.max(row.bottom, rect.top + rect.height)
+      row.rects.push(rect)
+    } else {
+      const next = { top: rect.top, bottom: rect.top + rect.height, rects: [rect] }
+      rows.push(next)
+      active.push(next)
     }
   }
 
-  bands.push(band)
+  const bands: PagePointsRect[] = []
 
-  return bands
+  for (const row of rows) {
+    row.rects.sort((left, right) => left.left - right.left)
+    const lineBands: PagePointsRect[] = []
+
+    for (const rect of row.rects) {
+      // A tall heading in another column can put several body lines in this
+      // vertical group. Match each run to a local band, not the group's height.
+      const band = lineBands.find((candidate) => {
+        const overlap =
+          Math.min(candidate.top + candidate.height, rect.top + rect.height) -
+          Math.max(candidate.top, rect.top)
+        const gap = rect.left - (candidate.left + candidate.width)
+
+        return (
+          overlap > SAME_LINE_OVERLAP * Math.min(candidate.height, rect.height) &&
+          gap <= MAX_RUN_GAP * Math.max(candidate.height, rect.height)
+        )
+      })
+
+      if (!band) {
+        lineBands.push({ ...rect })
+        continue
+      }
+
+      const top = Math.min(band.top, rect.top)
+
+      band.height = Math.max(band.top + band.height, rect.top + rect.height) - top
+      band.top = top
+      band.width = Math.max(band.left + band.width, rect.left + rect.width) - band.left
+    }
+
+    bands.push(...lineBands)
+  }
+
+  return bands.sort((left, right) => left.top - right.top || left.left - right.left)
 }

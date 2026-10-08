@@ -1404,7 +1404,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
 
       // Closing the editor keeps what was typed, as clicking away from it does.
-      commitTextNote()
+      await commitTextNote()
       await annotations.settled()
 
       if (!saveRequiredRef.current && !annotations.isDirtyNow()) {
@@ -1754,6 +1754,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             onStyleChange={changeTextNoteStyle}
             onTextChange={textNote.setText}
             page={pdfDocument.pages[textNote.draft.pageNumber - 1]!}
+            preparing={textNote.preparing}
             rotation={rotationForPage(pageRotations, textNote.draft.pageNumber)}
             style={textNoteStyle}
             viewerRef={viewerRef}

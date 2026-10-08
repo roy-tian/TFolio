@@ -243,6 +243,18 @@ pub async fn add_pdf_rect_effect_annotation(
 }
 
 #[tauri::command]
+pub async fn pdf_text_note_font(
+    text: String,
+    state: State<'_, PdfiumState>,
+) -> Result<Response, String> {
+    let engine = Arc::clone(&state.0);
+    let bytes = tauri::async_runtime::spawn_blocking(move || engine.text_note_font(&text))
+        .await
+        .map_err(|error| format!("PDFium note font task failed: {error}"))??;
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
 pub async fn add_pdf_text_note_annotation(
     document_id: u64,
     page_number: i32,

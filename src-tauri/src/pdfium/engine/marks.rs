@@ -17,6 +17,40 @@ pub(super) fn owned_tail_base(
 }
 
 impl PdfiumEngine {
+    /// The preview must use the same subset and ascent as the embedded note,
+    /// not the WebView's independently resolved `sans-serif` fallback.
+    pub(in crate::pdfium) fn text_note_font(&self, text: &str) -> Result<Vec<u8>, String> {
+        if text.trim().is_empty() || text.chars().count() > MAX_TEXT_NOTE_CHARS {
+            return Err("a note's preview text is empty or too long".into());
+        }
+
+        let bytes = self.embedded_face_subset(text)?;
+        let ascent = {
+            let _documents = self.lock_documents()?;
+            let mut document = self
+                .pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not prepare the note font: {error}"))?;
+            let token = document
+                .fonts_mut()
+                .load_true_type_from_bytes(&bytes, true)
+                .map_err(|error| format!("PDFium rejected the note font: {error}"))?;
+            document
+                .fonts()
+                .get(token)
+                .ok_or_else(|| "PDFium lost the note font".to_string())?
+                .ascent(PdfPoints::new(1.0))
+                .map_err(|error| format!("PDFium could not measure the note font: {error}"))?
+                .value
+        };
+
+        // One binary response: a little-endian f32 ascent ratio, then the font.
+        let mut packet = Vec::with_capacity(4 + bytes.len());
+        packet.extend_from_slice(&ascent.to_le_bytes());
+        packet.extend_from_slice(&bytes);
+        Ok(packet)
+    }
+
     /// Covers `quads` on `page_number` with one highlight annotation — one mark
     /// as far as the reader is concerned, so taking it back is one step.
     pub(in crate::pdfium) fn add_highlight(

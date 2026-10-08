@@ -30,7 +30,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { ButtonGroup } from "@/components/ui/button-group"
-import { useAppUpdate } from "@/hooks/useAppUpdate"
+import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
 import {
   useMergeWizard,
@@ -723,13 +723,15 @@ export default function App() {
       // Any one of the update's kinds names the whole slot they share.
       notices.retract(workspaceOwner, ["updateAvailable"])
     }
+  }, [notices, update])
 
-    // A confirmation outliving the offer behind it would install what is no
-    // longer ready, and spring open by itself the next time one is shown.
-    if (update?.action?.kind !== "updateInstall") {
+  useEffect(() => {
+    // About can install even after the notification was dismissed. Only a
+    // change to the package's readiness should close its confirmation.
+    if (status.state !== "ready") {
       setConfirmingInstall(false)
     }
-  }, [notices, setConfirmingInstall, update])
+  }, [setConfirmingInstall, status.state])
 
   // A Stop pressed before the backend has listed the conversion finds nothing
   // to stop, so it asks again until one listens or the conversion is over.
@@ -1880,7 +1882,7 @@ export default function App() {
     }
   }, [homeActive, refreshRecentFiles])
 
-  return (
+  const workspace = (
     <div className="app-surface h-svh overflow-hidden">
       {homeActive ? (
         // The document tools — bookmarks, view mode — have no document to act
@@ -2067,5 +2069,11 @@ export default function App() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+
+  return (
+    <AppUpdateContext.Provider value={appUpdate}>
+      {workspace}
+    </AppUpdateContext.Provider>
   )
 }

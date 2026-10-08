@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useEffect, useRef, useState } from "react"
 
 import { updateNeedsConfirmation, watchUnsavedWork } from "@/lib/unsavedWork"
 
@@ -24,6 +24,8 @@ export type AppUpdate = {
   status: AppUpdateStatus
   visible: boolean
 }
+
+export const AppUpdateContext = createContext<AppUpdate | null>(null)
 
 /**
  * The check, download and install are process-wide in the backend; this keeps
