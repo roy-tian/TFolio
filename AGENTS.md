@@ -100,8 +100,9 @@
 
 ## Updates
 
-- Check updates once per process in Rust, never in e2e; no command takes a URL. Keep the
-  endpoint and verifying key in `tauri.conf.json`; exclude updater commands from WebView capabilities.
+- Check updates at startup and whenever About opens, in Rust and never in e2e; no command
+  takes a URL. Keep the endpoint and verifying key in `tauri.conf.json`; exclude updater
+  commands from WebView capabilities.
 - Installing an update restarts the process and discards unsaved work in every window. Confirm
   if any window has unsaved work or cannot answer. Refuse in debug builds: without a bundle type
   under `target/`, the plugin falls back to replacing the running binary itself.

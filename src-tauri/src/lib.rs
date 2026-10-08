@@ -34,7 +34,7 @@ use quit::quit_app;
 use recent::{recent_pdf_view, recent_pdfs, remove_recent_pdf, set_recent_pdf_view, RecentFiles};
 use settings::{set_settings, settings};
 use tauri::Manager;
-use update::{download_update, install_update, update_status, UpdateState};
+use update::{check_updates, download_update, install_update, update_status, UpdateState};
 use window_state::WindowState;
 use windows::{focus_pdf_path, open_new_window, print_window, AppWindows, DocumentOwners};
 
@@ -181,6 +181,7 @@ pub fn run() {
             settings,
             set_settings,
             update_status,
+            check_updates,
             download_update,
             install_update,
             take_launch_files,

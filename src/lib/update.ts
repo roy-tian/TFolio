@@ -79,7 +79,21 @@ export function watchUpdateStatus(
 }
 
 export function downloadUpdate(): Promise<void> {
+  const override = e2eOverride("downloadUpdate")
+  if (override) {
+    return override()
+  }
+
   return invoke("download_update")
+}
+
+export function checkUpdates(): Promise<void> {
+  const override = e2eOverride("checkUpdates")
+  if (override) {
+    return override()
+  }
+
+  return invoke("check_updates")
 }
 
 export function installUpdate(): Promise<void> {

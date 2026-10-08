@@ -529,7 +529,12 @@ const zhCN = {
     title: "TFolio",
     description: "你手边的 PDF 工作伴侣",
     version: "版本 {{version}}",
-    prerelease: "(内部测试版)",
+    updateAvailable: "发现新版本 {{version}}",
+    updateNow: "立即更新",
+    installNow: "立即安装",
+    downloading: "正在下载…",
+    checking: "正在检查更新…",
+    checkFailed: "检查更新失败。",
     copyright: "版权所有 © 2026 Roy Tian",
   },
 } as const satisfies TranslationSchema<typeof en>

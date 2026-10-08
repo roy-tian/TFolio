@@ -543,8 +543,12 @@ const en = {
     title: "TFolio",
     description: "Your PDF work companion, always at hand",
     version: "Version {{version}}",
-    /** Only while releases are internal: a stable one drops this key and its use. */
-    prerelease: "(internal beta)",
+    updateAvailable: "New version {{version}} available",
+    updateNow: "Update now",
+    installNow: "Install now",
+    downloading: "Downloading…",
+    checking: "Checking for updates…",
+    checkFailed: "Could not check for updates.",
     copyright: "Copyright © 2026 Roy Tian",
   },
 } as const

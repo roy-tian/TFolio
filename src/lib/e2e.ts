@@ -8,6 +8,8 @@ import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
+  checkUpdates?: () => Promise<void>
+  downloadUpdate?: () => Promise<void>
   installUpdate?: () => Promise<void>
   /** Stands in for `quit_app`, which would end the process the spec drives. */
   quitApp?: () => Promise<void>

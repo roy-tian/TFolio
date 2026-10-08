@@ -5,6 +5,7 @@ import { RadioGroup } from "@base-ui/react/radio-group"
 import { useTranslation } from "react-i18next"
 
 import appLargeIcon from "@/assets/brand/app-large.svg"
+import { AboutUpdate } from "@/components/AboutUpdate"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -349,7 +350,7 @@ export function SettingsDialog({
               </p>
               <p className="mt-auto pt-6 text-xs text-muted-foreground">
                 {t("about.version", { version: __APP_VERSION__ })}{" "}
-                {t("about.prerelease")}
+                {open && section === "about" ? <AboutUpdate /> : null}
               </p>
               <p className="pt-2 text-xs text-muted-foreground">
                 {t("about.copyright")}
