@@ -51,9 +51,9 @@ fn apply_background(
         window.set_theme(theme).map_err(|error| error.to_string())?;
 
         let tint = if dark {
-            (9, 9, 11, 180)
+            (9, 9, 11, 230)
         } else {
-            (244, 244, 245, 180)
+            (244, 244, 245, 230)
         };
         window_vibrancy::apply_acrylic(window, Some(tint)).map_err(|error| error.to_string())?;
     }
