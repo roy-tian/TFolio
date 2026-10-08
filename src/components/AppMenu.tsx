@@ -198,17 +198,6 @@ export function AppMenu({
               </DropdownMenuItem>
             </HintTooltip>
             <DropdownMenuItem
-              data-action="save-as"
-              disabled={!onSaveAs}
-              onClick={onSaveAs}
-            >
-              <Upload />
-              {t("menu.saveAs")}
-              <DropdownMenuShortcut>
-                {formatShortcut(shortcuts.saveAs)}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem
               data-action="save-all"
               disabled={!canSaveAll}
               onClick={onSaveAll}
@@ -217,6 +206,17 @@ export function AppMenu({
               {t("menu.saveAll")}
               <DropdownMenuShortcut>
                 {formatShortcut(shortcuts.saveAll)}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-action="save-as"
+              disabled={!onSaveAs}
+              onClick={onSaveAs}
+            >
+              <Upload />
+              {t("menu.saveAs")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.saveAs)}
               </DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem
