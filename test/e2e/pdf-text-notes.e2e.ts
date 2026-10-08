@@ -1,14 +1,19 @@
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
+import type { E2eOverrides } from "../../src/lib/e2e"
+import type { PdfInsertOutcome } from "../../src/lib/pdf"
 
 import {
   blankPdf,
   dropZoneButton,
+  emitDrag,
+  gapPoint,
   openPdfFromDisk,
   pageInk,
   refreshApp,
   renderedPage,
   seedSettings,
+  writeScratchPdf,
 } from "./helpers"
 
 async function clickOnPage(atX = 0.3, atY = 0.3) {
@@ -134,9 +139,98 @@ describe("TFolio text notes", () => {
     expect(hello).not.toBe(other)
   })
 
+  it("keeps undo behind a submitted note while its font is being prepared", async () => {
+    const clean = await pageInk()
+    await $("button[aria-label='Add a note']").click()
+    await clickOnPage()
+    await $("textarea[aria-label='Note text']").setValue("First")
+    await $("button[aria-label='Add this note']").click()
+    await browser.waitUntil(async () => await pageInk() !== clean)
+    const first = await pageInk()
+
+    await clickOnPage(0.5, 0.5)
+    await $("textarea[aria-label='Note text']").setValue("你好")
+    await browser.execute(() => {
+      const page = window as Window & { __releaseNoteFont?: () => void }
+      const load = FontFace.prototype.load
+      // Hold a real font load to inspect the pending edit, not a timing budget.
+      FontFace.prototype.load = async function () {
+        FontFace.prototype.load = load
+        const face = await load.call(this)
+        await new Promise<void>((resolve) => { page.__releaseNoteFont = resolve })
+        return face
+      }
+    })
+    await $("button[aria-label='Add this note']").click()
+    await browser.waitUntil(() => browser.execute(() => Boolean(
+      (window as Window & { __releaseNoteFont?: () => void }).__releaseNoteFont,
+    )))
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
+    await browser.execute(() => {
+      (window as Window & { __releaseNoteFont?: () => void }).__releaseNoteFont!()
+    })
+    await browser.waitUntil(async () => await pageInk() !== first)
+    await expect($("button[aria-label^='Undo']")).toBeEnabled()
+    await $("button[aria-label^='Undo']").click()
+    await browser.waitUntil(async () => await pageInk() === first)
+  })
+
+  it("discards a refused note before an insertion changes its page number", async () => {
+    const filePath = writeScratchPdf("insert-before-note.pdf", blankPdf())
+    await browser.execute(() => {
+      const app = window as unknown as Window & {
+        __TAURI__: typeof import("@tauri-apps/api")
+        __tfolioE2E?: E2eOverrides
+        __finishNoteInsertion?: () => void
+      }
+      app.__tfolioE2E = {
+        ...app.__tfolioE2E,
+        insertPdfFromPath: async (args) => {
+          await new Promise<void>((resolve) => { app.__finishNoteInsertion = resolve })
+          return app.__TAURI__.core.invoke<PdfInsertOutcome>("insert_pdf_from_path", args)
+        },
+      }
+    })
+    await $("button[aria-label='Thumbnails']").click()
+    await $("[data-insert-index='1']").waitForExist()
+    await emitDrag("drag-drop", await gapPoint(1), [filePath])
+    await browser.waitUntil(() => browser.execute(() => Boolean(
+      (window as Window & { __finishNoteInsertion?: () => void }).__finishNoteInsertion,
+    )))
+
+    await $("button[aria-label='Single page']").click()
+    await renderedPage()
+    await $("button[aria-label='Add a note']").click()
+    await clickOnPage()
+    const editor = $("textarea[aria-label='Note text']")
+    await editor.setValue("不能写到插入的新页面")
+    await $("button[aria-label='Add this note']").click()
+    await $("[data-notice='markWhileEditing']").waitForDisplayed()
+    await editor.waitForExist({ reverse: true })
+
+    await browser.execute(() => {
+      (window as Window & { __finishNoteInsertion?: () => void }).__finishNoteInsertion!()
+    })
+    await $("[data-page-number='2']").waitForExist()
+    await renderedPage()
+    await expect(editor).not.toExist()
+    await expect($("[data-slot='text-note-preview']")).not.toExist()
+    expect(await pageInk()).toBe(0)
+
+    // Once the page edit finishes, a newly placed note still works normally.
+    await clickOnPage()
+    await editor.setValue("新批注")
+    await $("button[aria-label='Add this note']").click()
+    await browser.waitUntil(async () => await pageInk() > 0)
+  })
+
   // The note must stay on screen from confirm until the page repaints carrying
   // it — PDFium, IPC and a decode sit between, and closing early blanked the text.
-  for (const note of [{ label: "Latin", text: "Note gy" }, { label: "Chinese", text: "你好" }]) {
+  for (const note of [
+    { label: "Latin", text: "Note gy" },
+    { label: "Chinese", text: "你好" },
+    { label: "mixed multiline", text: "Hello 你好\n第二行" },
+  ]) {
     it(`hands the ${note.label} note to the page without a blank or doubled frame`, async () => {
       // Large, so a wrong ascent is points off rather than a fraction of one.
       await seedSettings({

@@ -1,7 +1,7 @@
 import { usesEmbeddedFont } from "@/lib/embeddedFont"
 
-/** The same two faces the backend picks between, in the same order:
-    Helvetica for Latin-1, the system sans past it. */
+/** Editor/fallback families. The held preview of an embedded note instead
+    loads the backend's exact subset through `prepareTextNoteFont`. */
 export function noteFontFamily(text: string): string {
   return usesEmbeddedFont(text) ? "sans-serif" : "Helvetica, Arial, sans-serif"
 }
@@ -48,8 +48,8 @@ function measuredSystemAscent(): number {
 }
 
 /**
- * Pinned for the standard face, whose ascent is PDFium's own; measured for
- * the embedded one, which the browser resolves as the backend's subset does.
+ * Pinned for the standard face. The measured fallback is used only when the
+ * embedded preview font could not be prepared; system font choices can differ.
  */
 export function noteAscentRatio(text: string): number {
   return usesEmbeddedFont(text)

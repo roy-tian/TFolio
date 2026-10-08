@@ -26,9 +26,10 @@ use pdfium::{
     export_pdf, export_pdf_archive, extract_pdf_page_plain_text, extract_pdf_page_text,
     insert_pdf_blank_page, insert_pdf_from_path, insert_pdf_pages_from_document, inspect_pdf_files,
     merge_pdf_files, open_converted_from_path, open_pdf, open_pdf_from_path,
-    pdf_annotation_at_point, pick_pdf_path, pick_pdf_paths, release_pdf_compression,
-    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
+    pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path, pick_pdf_paths,
+    release_pdf_compression, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
+    render_pdf_page_thumbnail, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf,
+    search_pdf_text, PdfiumState,
 };
 use quit::quit_app;
 use recent::{recent_pdf_view, recent_pdfs, remove_recent_pdf, set_recent_pdf_view, RecentFiles};
@@ -166,6 +167,7 @@ pub fn run() {
             add_pdf_rect_annotation,
             add_pdf_rect_effect_annotation,
             add_pdf_text_note_annotation,
+            pdf_text_note_font,
             download_pdf_note_font,
             apply_pdf_watermark,
             delete_pdf_annotations,
