@@ -5,6 +5,7 @@ import type { PdfTextSpan } from "../../src/lib/pdf"
 import {
   dropZoneButton,
   fragmentedTextPdf,
+  mixedSizeColumnsPdf,
   openPdfFromDisk,
   refreshApp,
   renderedPage,
@@ -159,6 +160,30 @@ describe("TFolio select all", () => {
     await copyItem.click()
     await browser.waitUntil(async () => (await copiedText()) !== null)
     expect((await copiedText())!.replaceAll(/\s/g, "")).toBe("Selectable".repeat(6))
+  })
+
+  it("keeps body lines separate beside another column's larger heading", async () => {
+    await openPdfFromDisk("mixed-size-columns.pdf", mixedSizeColumnsPdf())
+    await renderedPage()
+    await $(".pdf-text-layer span").waitForExist()
+
+    await browser.keys(["Control", "a"])
+    await browser.waitUntil(() => browser.execute(() =>
+      document.querySelectorAll(".pdf-selection-layer span").length === 3,
+    ), { timeoutMsg: "select-all merged the two body lines beside the heading" })
+
+    await browser.keys("Escape")
+    await browser.execute(() => {
+      const layer = document.querySelector(".pdf-text-layer")!
+      const range = document.createRange()
+      range.selectNodeContents(layer)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+    })
+    await browser.waitUntil(() => browser.execute(() =>
+      document.querySelectorAll(".pdf-selection-layer span").length === 3,
+    ), { timeoutMsg: "the native range merged the two body lines beside the heading" })
   })
 
   it("selects the document's text in the page views, and Esc gives it back", async () => {

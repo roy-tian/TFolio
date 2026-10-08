@@ -379,6 +379,56 @@ describe("mergeRectsByLine", () => {
     expect(mergeRectsByLine(runs)).toEqual([rect(50, 40, 110, 10)])
   })
 
+  it("joins fragmented glyphs in reading order despite their different ink tops", () => {
+    // Sorting by top visits distant tall glyphs before the short glyphs that
+    // fill their gap. That gap is text, not a column gutter.
+    const runs = Array.from({ length: 12 }, (_, index) =>
+      rect(50 + index * 10, 40 + (index % 3), 9, 10 - (index % 3)),
+    )
+
+    expect(mergeRectsByLine(runs)).toEqual([rect(50, 40, 119, 10)])
+  })
+
+  it("joins each fragmented column without filling the gutter or line spacing", () => {
+    const runs = [40, 55].flatMap((top) => [50, 150].flatMap((left) =>
+      Array.from({ length: 6 }, (_, index) =>
+        rect(left + index * 10, top + (index % 3), 9, 10 - (index % 3)),
+      ),
+    ))
+
+    expect(mergeRectsByLine(runs)).toEqual([
+      rect(50, 40, 59, 10), rect(150, 40, 59, 10),
+      rect(50, 55, 59, 10), rect(150, 55, 59, 10),
+    ])
+  })
+
+  it("keeps body lines separate beside a taller heading in either column", () => {
+    for (const headingOnLeft of [true, false]) {
+      const heading = rect(headingOnLeft ? 50 : 310, 100, 160, 24)
+      const bodyLeft = headingOnLeft ? 310 : 50
+      const first = rect(bodyLeft, 100, 120, 8)
+      const second = rect(bodyLeft, 112, 100, 8)
+      const expected = headingOnLeft ? [heading, first, second] : [first, heading, second]
+
+      expect(mergeRectsByLine([heading, first, second])).toEqual(expected)
+    }
+  })
+
+  it("joins fragmented body lines independently beside a taller heading", () => {
+    const heading = rect(50, 100, 160, 30)
+    // Sorting by x interleaves both lines' glyphs. Each must still rejoin its
+    // own line, even though the heading puts both in the same vertical group.
+    const body = [100, 112].flatMap((top) =>
+      Array.from({ length: 8 }, (_, index) =>
+        rect(310 + index * 10, top + (index % 3), 9, 8 - (index % 3)),
+      ),
+    )
+
+    expect(mergeRectsByLine([heading, ...body])).toEqual([
+      heading, rect(310, 100, 79, 8), rect(310, 112, 79, 8),
+    ])
+  })
+
   it("keeps neighbouring lines apart whose boxes merely touch", () => {
     // Line pitch 14 over 10-high ink: the boxes abut without overlapping.
     const runs = [rect(72, 100, 200, 10), rect(72, 114, 200, 10)]

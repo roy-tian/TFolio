@@ -142,10 +142,16 @@ export const config: WebdriverIO.Config = {
     // test/e2e/helpers.ts), which the launcher's environment leaves unnamed.
     const laneOptions = (
       capabilities as {
-        "wdio:tauriServiceOptions"?: { env?: { XDG_DATA_HOME?: string } }
+        "wdio:tauriServiceOptions"?: { env?: { XDG_DATA_HOME?: string; DISPLAY?: string } }
       }
     )["wdio:tauriServiceOptions"]
     const dataDirectory = laneOptions?.env?.XDG_DATA_HOME
+    const display = laneOptions?.env?.DISPLAY
+
+    // Native input must reach this lane's app, not another lane's display.
+    if (display) {
+      process.env.DISPLAY = display
+    }
 
     if (dataDirectory) {
       process.env.XDG_DATA_HOME = dataDirectory
