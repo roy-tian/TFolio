@@ -1,8 +1,10 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
+import type { PdfTextSpan } from "../../src/lib/pdf"
 
 import {
   dropZoneButton,
+  fragmentedTextPdf,
   openPdfFromDisk,
   refreshApp,
   renderedPage,
@@ -94,6 +96,69 @@ describe("TFolio select all", () => {
       timeout: 5_000,
       timeoutMsg: "the interface was left holding a selection",
     })
+  })
+
+  it("keeps fragmented glyphs aligned and selectable at different heights", async () => {
+    await openPdfFromDisk("fragmented-text.pdf", fragmentedTextPdf())
+    await renderedPage()
+    await $(".pdf-text-layer span").waitForExist()
+    await $("button[aria-label='Fit page']").click()
+    await watchClipboard()
+
+    await browser.execute(() => {
+      const page = window as Window & {
+        __TAURI__: { core: { invoke: <T>(command: string, args: unknown) => Promise<T> } }
+        __fragmentedSpans?: PdfTextSpan[]
+      }
+      const documentId = Number(document.querySelector("[data-document-session][data-active='true']")!
+        .getAttribute("data-document-session"))
+      void page.__TAURI__.core.invoke<PdfTextSpan[]>("extract_pdf_page_text", {
+        documentId,
+        pageNumber: 1,
+      }).then((spans) => { page.__fragmentedSpans = spans })
+    })
+    await browser.waitUntil(() => browser.execute(() => Boolean(
+      (window as Window & { __fragmentedSpans?: PdfTextSpan[] }).__fragmentedSpans,
+    )))
+
+    const errors = await browser.execute(() => {
+      const expected = (window as Window & { __fragmentedSpans?: PdfTextSpan[] }).__fragmentedSpans!
+      const page = document.querySelector("[data-page-number='1']")!
+      const pageBox = page.getBoundingClientRect()
+      const spans = [...page.querySelectorAll(".pdf-text-layer span")]
+      const errors = spans.map((span, index) => {
+        const box = span.getBoundingClientRect()
+        const target = expected[index]
+        const range = document.createRange()
+        range.selectNodeContents(span)
+        return Math.max(
+          Math.abs((box.left - pageBox.left) * 300 / pageBox.width - target.left),
+          Math.abs((box.top - pageBox.top) * 400 / pageBox.height - target.top),
+          Math.abs(box.height * 400 / pageBox.height - target.height),
+          Math.abs(range.getBoundingClientRect().width * 300 / pageBox.width - target.width),
+        )
+      })
+      const range = document.createRange()
+      range.setStart(spans[0].firstChild!, 0)
+      const last = spans[spans.length - 1].firstChild!
+      range.setEnd(last, last.textContent!.length)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      return { count: spans.length, expected: expected.length, max: Math.max(...errors) }
+    })
+    expect(errors.count).toBe(errors.expected)
+    expect(errors.count).toBeGreaterThan(40)
+    expect(errors.max).toBeLessThan(0.5)
+
+    // Native Ctrl+C bypasses the clipboard seam; the page menu exercises the
+    // same selected text through the app's observable copy path.
+    await rightClick(".pdf-text-layer span")
+    const copyItem = $("[data-action='copy-text']")
+    await copyItem.waitForDisplayed()
+    await copyItem.click()
+    await browser.waitUntil(async () => (await copiedText()) !== null)
+    expect((await copiedText())!.replaceAll(/\s/g, "")).toBe("Selectable".repeat(6))
   })
 
   it("selects the document's text in the page views, and Esc gives it back", async () => {

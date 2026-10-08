@@ -159,6 +159,28 @@ export function textPdf(pageCount = 1) {
   ])
 }
 
+/** Some PDF exporters position each glyph separately, giving neighboring
+    characters different ink heights instead of one shared line box. */
+export function fragmentedTextPdf() {
+  let content = ""
+
+  for (let row = 0; row < 6; row += 1) {
+    for (const [column, glyph] of [..."Selectable"].entries()) {
+      const size = 8 + row * 3 + column * 0.13
+      content += `BT /F1 ${size} Tf 1 0 0 1 ${40 + column * 22} ${350 - row * 55} Tm (${glyph}) Tj ET\n`
+    }
+  }
+
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
+      "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+    `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
+    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  ])
+}
+
 export function wrappedSearchPdf() {
   const first =
     "BT\n/F1 24 Tf\n40 250 Td\n(Wrapped) Tj\n0 -30 Td\n(phrase) Tj\nET\n"
