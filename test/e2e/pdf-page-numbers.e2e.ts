@@ -97,7 +97,7 @@ describe("TFolio page numbers", () => {
       { timeout: 15_000, timeoutMsg: "the mirrored choice never showed a pair" },
     )
 
-    await $("//button[normalize-space()='Fixed centre']").click()
+    await $("//button[normalize-space()='Fixed center']").click()
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Every page"),
       { timeout: 15_000, timeoutMsg: "the fixed place never went back to one sheet" },
@@ -182,11 +182,11 @@ describe("TFolio page numbers", () => {
     await openPageNumbersDialog()
     // Seeded settings name no style, so the applied placement below is the *other*
     // one — which makes the reopened dialog's answer the file's, not the default's.
-    const centre = $("//button[normalize-space()='Fixed centre']")
+    const centre = $("//button[normalize-space()='Fixed center']")
     const wanted =
       (await centre.getAttribute("aria-pressed")) === "true"
         ? "Automatic"
-        : "Fixed centre"
+        : "Fixed center"
 
     await $(`//button[normalize-space()='${wanted}']`).click()
     await $("[data-testid='page-numbers-apply']").click()

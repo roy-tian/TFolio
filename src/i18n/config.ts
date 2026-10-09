@@ -1,11 +1,36 @@
 import { rememberSettings, storedSettings } from "@/lib/settings"
 
-export const supportedLanguages = ["zh-CN", "en"] as const
+export const supportedLanguages = [
+  "zh-CN",
+  "zh-TW",
+  "en",
+  "fr",
+  "es",
+  "it",
+  "de",
+  "th",
+] as const
 
 export type SupportedLanguage = (typeof supportedLanguages)[number]
 
+/** Each language named in itself, never translated: a reader stranded in an
+    interface they cannot read must still recognise their own. */
+export const languageNames: Record<SupportedLanguage, string> = {
+  "zh-CN": "简体中文",
+  "zh-TW": "繁體中文",
+  en: "English",
+  fr: "Français",
+  es: "Español",
+  it: "Italiano",
+  de: "Deutsch",
+  th: "ภาษาไทย",
+}
+
 export const defaultLanguage: SupportedLanguage = "zh-CN"
 export const fallbackLanguage: SupportedLanguage = "en"
+
+/** Read only when no script subtag (Hans/Hant) settles it. */
+const traditionalChineseRegions = new Set(["tw", "hk", "mo"])
 
 export function resolveSupportedLanguage(
   language: string | null | undefined,
@@ -14,17 +39,27 @@ export function resolveSupportedLanguage(
     return null
   }
 
-  const normalizedLanguage = language.trim().replaceAll("_", "-").toLowerCase()
+  const [base, ...subtags] = language
+    .trim()
+    .replaceAll("_", "-")
+    .toLowerCase()
+    .split("-")
 
-  if (normalizedLanguage === "zh" || normalizedLanguage.startsWith("zh-")) {
-    return "zh-CN"
+  if (base === "zh") {
+    if (subtags.includes("hant")) {
+      return "zh-TW"
+    }
+
+    if (subtags.includes("hans")) {
+      return "zh-CN"
+    }
+
+    return subtags.some((tag) => traditionalChineseRegions.has(tag))
+      ? "zh-TW"
+      : "zh-CN"
   }
 
-  if (normalizedLanguage === "en" || normalizedLanguage.startsWith("en-")) {
-    return "en"
-  }
-
-  return null
+  return supportedLanguages.find((supported) => supported === base) ?? null
 }
 
 function readStoredLanguage(): string | null {

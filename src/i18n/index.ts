@@ -9,13 +9,14 @@ import {
   supportedLanguages,
   type SupportedLanguage,
 } from "./config"
-import en from "./locales/en"
-import zhCN from "./locales/zh-CN"
+import { translations } from "./resources"
 
-const resources = {
-  "zh-CN": { translation: zhCN },
-  en: { translation: en },
-} as const
+const resources = Object.fromEntries(
+  supportedLanguages.map((language) => [
+    language,
+    { translation: translations[language] },
+  ]),
+)
 
 function syncDocumentLanguage(language: string) {
   const supportedLanguage =

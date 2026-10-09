@@ -1,10 +1,4 @@
-import type en from "./en"
-
-type TranslationSchema<T> = {
-  readonly [Key in keyof T]: T[Key] extends string
-    ? string
-    : TranslationSchema<T[Key]>
-}
+import type { TranslationSchema } from "../schema"
 
 const zhCN = {
   app: {
@@ -384,10 +378,6 @@ const zhCN = {
     languageHint: "选择界面显示语言。",
     close: "关闭",
   },
-  language: {
-    simplifiedChinese: "简体中文",
-    english: "英文",
-  },
   viewer: {
     dropTitle: "PDF/Word/图片",
     chooseFile: "选择要打开的文件",
@@ -541,6 +531,6 @@ const zhCN = {
     checkFailed: "检查更新失败。",
     copyright: "版权所有 © 2026 Roy Tian",
   },
-} as const satisfies TranslationSchema<typeof en>
+} as const satisfies TranslationSchema
 
 export default zhCN

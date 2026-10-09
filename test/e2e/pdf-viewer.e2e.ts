@@ -250,7 +250,7 @@ describe("TFolio PDF viewer", () => {
 
     await $("#settings-language").click()
     await $(
-      "//*[@role='option' and normalize-space()='Simplified Chinese']",
+      "//*[@role='option' and normalize-space()='简体中文']",
     ).click()
 
     const documentLanguage = await browser.execute(

@@ -24,7 +24,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { changeLanguage } from "@/i18n"
-import { resolveSupportedLanguage, type SupportedLanguage } from "@/i18n/config"
+import {
+  fallbackLanguage,
+  languageNames,
+  resolveSupportedLanguage,
+  supportedLanguages,
+  type SupportedLanguage,
+} from "@/i18n/config"
 import { cn } from "@/lib/utils"
 import {
   setThemePreference,
@@ -54,13 +60,12 @@ const themeOptions: Array<{
   { value: "dark", labelKey: "settings.themeDark", icon: Moon },
 ]
 
-const languageOptions: Array<{
-  value: SupportedLanguage
-  labelKey: "language.simplifiedChinese" | "language.english"
-}> = [
-  { value: "zh-CN", labelKey: "language.simplifiedChinese" },
-  { value: "en", labelKey: "language.english" },
-]
+// Base UI resolves the trigger's label from `items`; without it the trigger
+// would fall back to printing the raw value ("zh-CN").
+const languageItems = supportedLanguages.map((value) => ({
+  label: languageNames[value],
+  value,
+}))
 
 const mockColors: Record<
   ResolvedTheme,
@@ -156,14 +161,7 @@ export function SettingsDialog({
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const activeLanguage: SupportedLanguage =
-    resolveSupportedLanguage(i18n.resolvedLanguage) ?? "en"
-
-  // Base UI resolves the trigger's label from `items`; without it the trigger
-  // would fall back to printing the raw value ("zh-CN").
-  const languageItems = languageOptions.map((option) => ({
-    label: t(option.labelKey),
-    value: option.value,
-  }))
+    resolveSupportedLanguage(i18n.resolvedLanguage) ?? fallbackLanguage
 
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -324,7 +322,11 @@ export function SettingsDialog({
                   <SelectContent>
                     <SelectGroup>
                       {languageItems.map((item) => (
-                        <SelectItem key={item.value} value={item.value}>
+                        <SelectItem
+                          key={item.value}
+                          lang={item.value}
+                          value={item.value}
+                        >
                           {item.label}
                         </SelectItem>
                       ))}

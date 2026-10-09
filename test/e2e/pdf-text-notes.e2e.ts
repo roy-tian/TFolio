@@ -493,7 +493,7 @@ describe("TFolio text notes", () => {
     const optionsBox = () =>
       browser.execute(() => {
         const label = [...document.querySelectorAll("p")].find(
-          (node) => node.textContent === "Text colour",
+          (node) => node.textContent === "Text color",
         )!
         const panel = label.closest("div")!.parentElement!.getBoundingClientRect()
         const textarea = document
