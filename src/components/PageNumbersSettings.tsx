@@ -13,6 +13,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   clampPageNumbersStart,
@@ -126,11 +134,21 @@ export function PageNumbersSettings({
   const about = t("pageNumbers.about")
   const maxStart = maxPageNumbersStart(pageCount)
   const positionId = `${idPrefix}-position-label`
-  const fromId = `${idPrefix}-from`
+  const rangeId = `${idPrefix}-range`
   const startId = `${idPrefix}-start`
-  const blankCountedId = `${idPrefix}-blank-counted`
-  const blankNumberedId = `${idPrefix}-blank-numbered`
+  const blankPagesId = `${idPrefix}-blank-pages`
+  const colorHandlingId = `${idPrefix}-color-handling`
   const smartColorId = `${idPrefix}-smart-color`
+  const blankPages = !draft.blankCounted
+    ? "skip"
+    : draft.blankNumbered
+      ? "show"
+      : "hide"
+  const blankPageOptions = [
+    { value: "show", label: t("pageNumbers.blankCountAndShow") },
+    { value: "hide", label: t("pageNumbers.blankCountAndHide") },
+    { value: "skip", label: t("pageNumbers.blankSkip") },
+  ] as const
 
   return (
     // From `sm` the sheet sticks, so it stays in view while the controls pass
@@ -185,62 +203,27 @@ export function PageNumbersSettings({
             </ToggleGroup>
           </Field>
 
-          {/* Three columns rather than two: the range's two ends and the
-              start are one kind of field, so they take one width. */}
-          <div className="grid grid-cols-3 gap-4">
-            <Field
-              className="col-span-2"
-              data-invalid={validationError === "range"}
-            >
+          <div className="grid grid-cols-2 gap-4">
+            <Field className="min-w-0" data-invalid={validationError === "range"}>
               <SettingLabel
                 about={about}
                 hint={t("pageNumbers.rangeHint")}
-                htmlFor={fromId}
+                htmlFor={rangeId}
                 note={t("pageNumbers.rangeTotal", { count: pageCount })}
               >
                 {t("pageNumbers.range")}
               </SettingLabel>
-              {/* The row's own columns, repeated, so the ends line up with
-                  the start beside them; the dash rides the gap between. */}
-              <div className="relative grid min-w-0 grid-cols-2 gap-4">
-                <Input
-                  aria-invalid={validationError === "range"}
-                  aria-label={t("pageNumbers.rangeFrom")}
-                  className="min-w-0"
-                  data-testid="page-numbers-from"
-                  id={fromId}
-                  inputMode="numeric"
-                  max={pageCount}
-                  min={1}
-                  onChange={(event) =>
-                    onDraftChange({ ...draft, rangeFrom: event.target.value })
-                  }
-                  placeholder="1"
-                  type="number"
-                  value={draft.rangeFrom}
-                />
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center text-muted-foreground"
-                >
-                  –
-                </span>
-                <Input
-                  aria-invalid={validationError === "range"}
-                  aria-label={t("pageNumbers.rangeTo")}
-                  className="min-w-0"
-                  data-testid="page-numbers-to"
-                  inputMode="numeric"
-                  max={pageCount}
-                  min={1}
-                  onChange={(event) =>
-                    onDraftChange({ ...draft, rangeTo: event.target.value })
-                  }
-                  placeholder={String(pageCount)}
-                  type="number"
-                  value={draft.rangeTo}
-                />
-              </div>
+              <Input
+                aria-invalid={validationError === "range"}
+                className="min-w-0"
+                data-testid="page-numbers-range"
+                id={rangeId}
+                onChange={(event) =>
+                  onDraftChange({ ...draft, range: event.target.value })
+                }
+                placeholder={`1-${pageCount}`}
+                value={draft.range}
+              />
               {validationError === "range" ? (
                 <FieldError>
                   {t("pageNumbers.errorRange", { max: pageCount })}
@@ -248,7 +231,7 @@ export function PageNumbersSettings({
               ) : null}
             </Field>
 
-            <Field data-invalid={validationError === "start"}>
+            <Field className="min-w-0" data-invalid={validationError === "start"}>
               <SettingLabel
                 about={about}
                 hint={t("pageNumbers.startHint")}
@@ -290,69 +273,73 @@ export function PageNumbersSettings({
             </Field>
           </div>
 
-          {/* Boxes down the left rather than switches at the right edge: the
-              marks line up, and a long name cannot strand its control. */}
-          <div className="flex flex-col gap-3">
-            <Field orientation="horizontal">
-              <Checkbox
-                checked={draft.smartColor}
-                data-testid="page-numbers-smart-color"
-                id={smartColorId}
-                onCheckedChange={(smartColor) =>
-                  onDraftChange({ ...draft, smartColor })
-                }
-              />
+          <div className="grid grid-cols-2 items-start gap-4">
+            <Field className="min-w-0">
+              <SettingLabel
+                about={about}
+                hint={t("pageNumbers.blankPagesHint")}
+                htmlFor={blankPagesId}
+              >
+                {t("pageNumbers.blankPages")}
+              </SettingLabel>
+              <Select
+                items={blankPageOptions}
+                onValueChange={(value) => {
+                  if (value === "show" || value === "hide" || value === "skip") {
+                    onDraftChange({
+                      ...draft,
+                      blankCounted: value !== "skip",
+                      blankNumbered: value === "show",
+                    })
+                  }
+                }}
+                value={blankPages}
+              >
+                <SelectTrigger
+                  className="w-full min-w-0"
+                  data-testid="page-numbers-blank-pages"
+                  id={blankPagesId}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {blankPageOptions.map(({ value, label }) => (
+                      <SelectItem
+                        data-testid={`page-numbers-blank-${value}`}
+                        key={value}
+                        value={value}
+                      >
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+
+            <Field aria-labelledby={colorHandlingId} className="min-w-0">
               <SettingLabel
                 about={about}
                 hint={t("pageNumbers.smartColorHint")}
-                htmlFor={smartColorId}
+                id={colorHandlingId}
                 smart
               >
-                {t("pageNumbers.smartColor")}
+                {t("pageNumbers.colorHandling")}
               </SettingLabel>
-            </Field>
-
-            <Field orientation="horizontal">
-              <Checkbox
-                checked={draft.blankCounted}
-                data-testid="page-numbers-blank-counted"
-                id={blankCountedId}
-                onCheckedChange={(blankCounted) =>
-                  onDraftChange({ ...draft, blankCounted })
-                }
-              />
-              <SettingLabel
-                about={about}
-                hint={t("pageNumbers.blankCountedHint")}
-                htmlFor={blankCountedId}
-              >
-                {t("pageNumbers.blankCounted")}
-              </SettingLabel>
-            </Field>
-
-            {/* The indent follows the box above rather than standing against
-                it: a page that takes no number has none to print. */}
-            <Field
-              className="pl-6"
-              data-disabled={!draft.blankCounted}
-              orientation="horizontal"
-            >
-              <Checkbox
-                checked={draft.blankCounted && draft.blankNumbered}
-                data-testid="page-numbers-blank-numbered"
-                disabled={!draft.blankCounted}
-                id={blankNumberedId}
-                onCheckedChange={(blankNumbered) =>
-                  onDraftChange({ ...draft, blankNumbered })
-                }
-              />
-              <SettingLabel
-                about={about}
-                hint={t("pageNumbers.blankNumberedHint")}
-                htmlFor={blankNumberedId}
-              >
-                {t("pageNumbers.blankNumbered")}
-              </SettingLabel>
+              <div className="flex h-8 items-center gap-2">
+                <Checkbox
+                  checked={draft.smartColor}
+                  data-testid="page-numbers-smart-color"
+                  id={smartColorId}
+                  onCheckedChange={(smartColor) =>
+                    onDraftChange({ ...draft, smartColor })
+                  }
+                />
+                <SettingLabel about={about} htmlFor={smartColorId}>
+                  {t("pageNumbers.smartColor")}
+                </SettingLabel>
+              </div>
             </Field>
           </div>
         </FieldGroup>

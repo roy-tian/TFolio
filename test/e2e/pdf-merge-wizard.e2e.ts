@@ -484,7 +484,7 @@ describe("merge wizard", () => {
     await $("[data-testid='merge-wizard-watermark']").click()
     expect(await trailSteps()).toEqual(["Files", "Page numbers", "Watermark"])
     await nextStep()
-    await $("[data-testid='page-numbers-from']").setValue("99")
+    await $("[data-testid='page-numbers-range']").setValue("99")
     await $("//button[normalize-space()='Back']").click()
     await $("[data-testid='merge-wizard-page-numbers']").click()
     await nextStep()
@@ -692,7 +692,7 @@ describe("merge wizard", () => {
     heights.push(await frameHeight())
 
     await nextStep()
-    await $("[data-testid='page-numbers-from']").waitForExist({
+    await $("[data-testid='page-numbers-range']").waitForExist({
       timeout: 15_000,
     })
     heights.push(await frameHeight())

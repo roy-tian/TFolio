@@ -105,15 +105,78 @@ describe("TFolio page numbers", () => {
 
     // A backwards range holds the apply button until it is valid. The fixture
     // is one page, so a valid range is 1–1.
-    const from = $("[data-testid='page-numbers-from']")
-    const to = $("[data-testid='page-numbers-to']")
-    await from.setValue("5")
-    await to.setValue("1")
-    await expect($("[data-testid='page-numbers-apply']")).toBeDisabled()
+    const range = $("[data-testid='page-numbers-range']")
+    await expect(range).toHaveValue("1-1")
+    for (const invalid of ["5-1", "1-2", "1-", "1,2"]) {
+      await range.setValue(invalid)
+      await expect($("[data-testid='page-numbers-apply']")).toBeDisabled()
+    }
 
-    await from.setValue("1")
+    await range.setValue("1-1")
     await expect($("[data-testid='page-numbers-apply']")).toBeEnabled()
+
+    const layout = await browser.execute(() => {
+      const rect = (testId: string, field = false) => {
+        const element = document.querySelector(`[data-testid='${testId}']`)!
+        return (field ? element.closest("[data-slot='field']")! : element)
+          .getBoundingClientRect().toJSON()
+      }
+      return {
+        range: rect("page-numbers-range"),
+        start: rect("page-numbers-start"),
+        blanks: rect("page-numbers-blank-pages", true),
+        smart: rect("page-numbers-smart-color", true),
+        select: rect("page-numbers-blank-pages"),
+        checkbox: rect("page-numbers-smart-color"),
+      }
+    })
+    expect(Math.abs(layout.range.width - layout.start.width)).toBeLessThan(1)
+    expect(Math.abs(layout.blanks.width - layout.smart.width)).toBeLessThan(1)
+    expect(Math.abs(layout.blanks.top - layout.smart.top)).toBeLessThan(1)
+    expect(Math.abs(layout.blanks.height - layout.smart.height)).toBeLessThan(1)
+    expect(Math.abs(
+      layout.select.top + layout.select.height / 2 -
+      (layout.checkbox.top + layout.checkbox.height / 2),
+    )).toBeLessThan(1)
+    mkdirSync("artifacts/e2e", { recursive: true })
+    await browser.saveScreenshot("artifacts/e2e/page-numbers-dialog.png")
   })
+
+  for (const mode of ["hide", "skip"] as const) {
+    it(`selects and remembers the blank-page ${mode} option`, async () => {
+      const clean = await pagePixelFingerprint()
+      await openPageNumbersDialog()
+      const select = $("[data-testid='page-numbers-blank-pages']")
+      const labels = {
+        show: "Count and show numbers",
+        hide: "Count but hide numbers",
+        skip: "Skip counting",
+      }
+      await expect(select.$("[data-slot='select-value']")).toHaveText(labels.show)
+
+      // Each choice replaces both old flags; returning from skip must work too.
+      for (const choice of ["skip", "show", mode] as const) {
+        await select.click()
+        await $(`[data-testid='page-numbers-blank-${choice}']`).click()
+        await expect(select.$("[data-slot='select-value']")).toHaveText(labels[choice])
+      }
+      await $("[data-testid='page-numbers-apply']").click()
+      await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
+        reverse: true,
+        timeout: 30_000,
+      })
+      expect(await pagePixelFingerprint()).toBe(clean)
+
+      await refreshApp()
+      await dropZoneButton().waitForExist({ timeout: 30_000 })
+      await openPdfFromDisk(`page-numbers-blank-${mode}.pdf`, blankPdf())
+      await renderedPage()
+      await openPageNumbersDialog()
+      await expect(
+        $("[data-testid='page-numbers-blank-pages'] [data-slot='select-value']"),
+      ).toHaveText(labels[mode])
+    })
+  }
 
   it("remembers the style for the next document", async () => {
     await openPageNumbersDialog()

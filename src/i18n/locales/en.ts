@@ -352,23 +352,22 @@ const en = {
     positionHint:
       "A fixed place keeps every number where you put it. Automatic mirrors them for double-sided binding instead: odd pages bottom-right, even pages bottom-left.",
     range: "Pages",
-    rangeFrom: "From",
-    rangeTo: "To",
-    rangeHint: "Leave an end blank for the document’s own first or last page.",
+    rangeHint: "Enter a range such as 1-10, or a single page. Leave blank for every page.",
     rangeTotal_one: "{{count}} page",
     rangeTotal_other: "{{count}} pages",
     start: "Start at",
     startPlaceholder: "Page position",
     startHint: "Leave blank to print each page’s own position.",
+    colorHandling: "Colour blending",
     smartColor: "Smart number colour",
     smartColorHint:
       "Numbers are black, turning white where they land on a dark area.",
-    blankCounted: "Count blank pages",
-    blankCountedHint:
-      "A page nothing prints on still takes its place in the numbering. Turn this off and the numbering closes up over it instead — which means reading every page to find the blank ones, so a long document takes a moment longer.",
-    blankNumbered: "Number blank pages",
-    blankNumberedHint:
-      "A blank page prints the number it took. Turn this off and it keeps its place in the numbering silently. With counting off there is no number to print, so this follows it.",
+    blankPages: "Blank pages",
+    blankCountAndShow: "Count and show numbers",
+    blankCountAndHide: "Count but hide numbers",
+    blankSkip: "Skip counting",
+    blankPagesHint:
+      "Count blank pages with visible or hidden numbers, or skip them so later numbers close up. Hiding or skipping numbers requires checking every page for blank content, so long documents may take longer.",
     about: "About this setting",
     apply: "Apply",
     replace: "Replace",
