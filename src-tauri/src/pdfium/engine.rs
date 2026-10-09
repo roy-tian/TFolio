@@ -308,6 +308,8 @@ impl Drop for OperationGuard<'_> {
 
 pub(super) struct PdfiumEngine {
     pdfium: &'static Pdfium,
+    /// The same library bound again, for the calls pdfium-render does not wrap.
+    raw_bindings: &'static dyn PdfiumLibraryBindings,
     /// The open documents, and the lock serializing PDFium itself: it is not
     /// thread-safe, so hold this across *all* PDFium work, opening included.
     documents: Mutex<HashMap<u64, OpenDocument>>,
@@ -341,11 +343,12 @@ pub struct PdfiumState(pub(super) Arc<PdfiumEngine>);
 
 impl PdfiumState {
     pub fn new(app: &AppHandle) -> Result<Self, String> {
-        let bindings = bind_pdfium(app)?;
+        let (bindings, raw_bindings) = bind_pdfium(app)?;
         let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
 
         Ok(Self(Arc::new(PdfiumEngine {
             pdfium,
+            raw_bindings: Box::leak(raw_bindings),
             documents: Mutex::new(HashMap::new()),
             commits: Mutex::new(()),
             next_document_id: AtomicU64::new(1),

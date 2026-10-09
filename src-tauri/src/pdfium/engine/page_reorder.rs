@@ -10,11 +10,10 @@ use std::os::raw::c_ulong;
 /// is sound only while no `PdfPage` of this document is alive, leaving that
 /// cache nothing to go stale on; engine calls drop their pages before returning.
 pub(super) fn move_pages(
-    pdfium: &Pdfium,
+    bindings: &dyn PdfiumLibraryBindings,
     document: &mut PdfDocument<'static>,
     indices: &[PdfPageIndex],
 ) -> Result<(), String> {
-    let bindings = pdfium.bindings();
     // SAFETY: the handle stays live for this exclusive borrow, indices is a
     // valid buffer of its own length, and the engine serializes PDFium calls.
     let moved = unsafe {
