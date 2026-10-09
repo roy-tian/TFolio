@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import { usesEmbeddedFont } from "@/lib/embeddedFont"
 import {
@@ -75,6 +75,7 @@ function previewPlacements(
 }
 
 type WatermarkPreviewProps = {
+  children?: ReactNode
   config: WatermarkConfig
   placeholder: string
   /** The page the mark is previewed on, as displayed, in points. */
@@ -82,6 +83,7 @@ type WatermarkPreviewProps = {
 }
 
 export function WatermarkPreview({
+  children,
   config,
   page = A4_SHEET,
   placeholder,
@@ -169,6 +171,7 @@ export function WatermarkPreview({
         width: `${Math.min(1, (page.width / page.height) / (A4_SHEET.width / A4_SHEET.height)) * 100}%`,
       }}
     >
+      {children}
       <span
         aria-hidden
         className="pointer-events-none absolute top-0 left-0 whitespace-nowrap opacity-0"

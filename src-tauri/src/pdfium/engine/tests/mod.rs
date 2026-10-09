@@ -7,7 +7,7 @@ use allsorts::{
 };
 
 use crate::pdfium::geometry::{A4_LONG_POINTS, A4_SHORT_POINTS};
-use crate::pdfium::library::PDFIUM_LIBRARY_NAME;
+use crate::pdfium::library::{bind_library_twice, PDFIUM_LIBRARY_NAME};
 use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 
 mod support;
@@ -27,3 +27,4 @@ mod save_export;
 mod text_notes;
 mod text_search;
 mod watermark;
+mod watermark_preview;

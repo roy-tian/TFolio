@@ -18,6 +18,7 @@ TFolio is a lightweight, open-source desktop PDF app. Read, mark up, compile, an
 
 - Single-page, book spread, and thumbnail views; drag to reorder pages or move them into another open document.
 - Highlight text and add text notes; start each source on an odd page, fit a compilation to A4, and export a PDF or a ZIP of page PNGs.
+- Interface in Simplified and Traditional Chinese, English, French, Spanish, Italian, German, and Thai.
 
 ## Install
 

@@ -45,7 +45,7 @@ export function CompressExportDialog({
   onExport,
   onClose,
 }: CompressExportDialogProps) {
-  const { t } = useTranslation()
+  const { i18n, t } = useTranslation()
   const [imageQuality, setImageQuality] = useState<ImageQualityLevel>(DEFAULT_IMAGE_QUALITY)
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -178,7 +178,7 @@ export function CompressExportDialog({
     : !estimate || estimating
       ? t("compressExport.estimating")
       : t(savedPercent > 0 ? "compressExport.estimate" : "compressExport.estimateNoSaving", {
-          size: formatBytes(estimate.estimatedBytes),
+          size: formatBytes(estimate.estimatedBytes, i18n.language),
           percent: savedPercent,
         })
 

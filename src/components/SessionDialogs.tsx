@@ -2,6 +2,7 @@ import { PageNumbersDialog } from "@/components/PageNumbersDialog"
 import { PrintDialog } from "@/components/PrintDialog"
 import { PrintSheet } from "@/components/PrintSheet"
 import { WatermarkDialog } from "@/components/WatermarkDialog"
+import type { DocumentWatermarkPreviewProps } from "@/components/DocumentWatermarkPreview"
 import type { usePageNumbers } from "@/hooks/usePageNumbers"
 import type { usePrint } from "@/hooks/usePrint"
 import type { useWatermark } from "@/hooks/useWatermark"
@@ -12,8 +13,7 @@ type SessionDialogsProps = {
   active: boolean
   pageCount: number
   pageNumbers: ReturnType<typeof usePageNumbers>
-  /** What the watermark's preview is drawn on: the document's first page. */
-  previewPage?: { height: number; width: number }
+  watermarkPreview: Omit<DocumentWatermarkPreviewProps, "config">
   print: ReturnType<typeof usePrint>
   watermark: ReturnType<typeof useWatermark>
 }
@@ -24,7 +24,7 @@ export function SessionDialogs({
   active,
   pageCount,
   pageNumbers,
-  previewPage,
+  watermarkPreview,
   print,
   watermark,
 }: SessionDialogsProps) {
@@ -41,7 +41,7 @@ export function SessionDialogs({
         onRemove={() => void watermark.remove()}
         onStop={watermark.stop}
         open={active && watermark.open}
-        previewPage={previewPage}
+        preview={watermarkPreview}
         progress={watermark.progress}
         validationError={watermark.validationError}
       />

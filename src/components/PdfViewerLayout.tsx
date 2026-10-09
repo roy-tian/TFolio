@@ -29,6 +29,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import type { CaptureHighlight } from "@/hooks/useHighlightTool"
 import {
   useNearViewport,
   ViewportHold,
@@ -131,6 +132,7 @@ type LayoutProps = {
   activeSearchIndex: number | null
   /** The page holding the active match, the one page told which it is. */
   activeSearchPage: number | null
+  captureHighlight: CaptureHighlight
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
@@ -157,6 +159,7 @@ type LayoutProps = {
 function SingleLayout({
   activeSearchIndex,
   activeSearchPage,
+  captureHighlight,
   documentId,
   draftsByPage,
   notesByPage,
@@ -173,6 +176,7 @@ function SingleLayout({
 }: LayoutProps) {
   return pages.map((page, index) => (
     <PdfPage
+      captureHighlight={captureHighlight}
       documentId={documentId}
       drafts={draftsByPage.get(index + 1) ?? NO_DRAFTS}
       notes={notesByPage.get(index + 1) ?? NO_NOTES}
@@ -196,6 +200,7 @@ function SingleLayout({
 function BookLayout({
   activeSearchIndex,
   activeSearchPage,
+  captureHighlight,
   documentId,
   draftsByPage,
   notesByPage,
@@ -226,6 +231,7 @@ function BookLayout({
     >
       {row.map((pageNumber) => (
         <PdfPage
+          captureHighlight={captureHighlight}
           documentId={documentId}
           drafts={draftsByPage.get(pageNumber) ?? NO_DRAFTS}
           notes={notesByPage.get(pageNumber) ?? NO_NOTES}
@@ -929,6 +935,7 @@ type PdfViewerLayoutProps = {
   activeSearchIndex: number | null
   /** The page holding the active match, the one page told which it is. */
   activeSearchPage: number | null
+  captureHighlight: CaptureHighlight
   currentPage: number
   documentId: number
   drafts: RectDraft[]
@@ -960,6 +967,7 @@ type PdfViewerLayoutProps = {
 export function PdfViewerLayout({
   activeSearchIndex,
   activeSearchPage,
+  captureHighlight,
   currentPage,
   documentId,
   drafts,
@@ -995,6 +1003,7 @@ export function PdfViewerLayout({
   const layoutProps = {
     activeSearchIndex,
     activeSearchPage,
+    captureHighlight,
     contentWidth,
     documentId,
     draftsByPage,

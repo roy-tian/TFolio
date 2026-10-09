@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process"
 import { $, browser, expect } from "@wdio/globals"
 
 import {
@@ -10,12 +9,7 @@ import {
   seedSettings,
 } from "./helpers"
 
-type MousePosition = { clientX: number; clientY: number; screenX: number; screenY: number }
-type PointerWindow = Window & { __nativePointer?: MousePosition }
-
-function pointer(event: { x: number; y: number } | { down: boolean }) {
-  execFileSync("python3", ["test/e2e/native-pointer.py", JSON.stringify(event)])
-}
+import { calibratePointer, pointer } from "./nativePointer"
 
 describe("TFolio native text dragging", () => {
   it("extends and retracts a continuous selection across fragmented lines", async () => {
@@ -27,25 +21,15 @@ describe("TFolio native text dragging", () => {
     await $("button[aria-label='Fit page']").click()
     await $(".pdf-text-layer span").waitForExist()
 
-    // Calibrate against an actual event, including the native window frame.
-    await browser.execute(() => {
-      document.addEventListener("mousemove", (event) => {
-        const { clientX, clientY, screenX, screenY } = event
-        const page = window as PointerWindow
-        page.__nativePointer = { clientX, clientY, screenX, screenY }
-      }, { once: true })
-    })
-    pointer({ x: 300, y: 300 })
-    await browser.waitUntil(() => browser.execute(() => Boolean((window as PointerWindow).__nativePointer)))
-    const mouse = await browser.execute(() => (window as PointerWindow).__nativePointer!)
+    const offset = await calibratePointer()
     const spans = await browser.execute(() => [...document.querySelectorAll(".pdf-text-layer span")].map((span) => {
       const box = span.getBoundingClientRect()
       return { left: box.left, top: box.top, width: box.width, height: box.height, text: span.textContent ?? "" }
     }))
     expect(spans).toHaveLength(60)
     const at = (index: number, fraction: number) => ({
-      x: spans[index].left + spans[index].width * fraction + mouse.screenX - mouse.clientX,
-      y: spans[index].top + spans[index].height / 2 + mouse.screenY - mouse.clientY,
+      x: spans[index].left + spans[index].width * fraction + offset.x,
+      y: spans[index].top + spans[index].height / 2 + offset.y,
     })
 
     pointer(at(0, 0.1))

@@ -13,7 +13,19 @@ pub(super) const PDFIUM_LIBRARY_NAME: &str = "libpdfium.dylib";
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(super) const PDFIUM_LIBRARY_NAME: &str = "libpdfium.so";
 
-pub(super) fn bind_pdfium(app: &AppHandle) -> Result<Box<dyn PdfiumLibraryBindings>, String> {
+pub(super) type Bindings = Box<dyn PdfiumLibraryBindings>;
+
+/// pdfium-render keeps the bindings `Pdfium::new` takes to itself, so the raw
+/// calls it has no wrapper for go through a second binding of the same loaded
+/// library. Both bind first: once `Pdfium::new` runs, every bind is refused.
+pub(super) fn bind_library_twice(path: &Path) -> Result<(Bindings, Bindings), PdfiumError> {
+    Ok((
+        Pdfium::bind_to_library(path)?,
+        Pdfium::bind_to_library(path)?,
+    ))
+}
+
+pub(super) fn bind_pdfium(app: &AppHandle) -> Result<(Bindings, Bindings), String> {
     let candidates = pdfium_library_candidates(app);
     let mut failures = Vec::new();
 
@@ -22,7 +34,7 @@ pub(super) fn bind_pdfium(app: &AppHandle) -> Result<Box<dyn PdfiumLibraryBindin
             continue;
         }
 
-        match Pdfium::bind_to_library(&path) {
+        match bind_library_twice(&path) {
             Ok(bindings) => return Ok(bindings),
             Err(error) => failures.push(format!("{}: {error}", path.display())),
         }

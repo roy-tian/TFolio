@@ -7,7 +7,9 @@ import {
   minimalPdf,
   openPdfFromDisk,
   outlinedPdf,
+  pageInk,
   refreshApp,
+  renderedPage,
   seedSettings,
   textPdf,
   tooltipOn,
@@ -116,6 +118,8 @@ describe("TFolio PDF viewer", () => {
       return {
         availableHeight:
           viewer.clientHeight -
+          (document.querySelector("[data-tab-strip]")!.getBoundingClientRect().bottom -
+            viewer.getBoundingClientRect().top) -
           parseFloat(padding.paddingTop) -
           parseFloat(padding.paddingBottom),
         availableWidth:
@@ -246,7 +250,7 @@ describe("TFolio PDF viewer", () => {
 
     await $("#settings-language").click()
     await $(
-      "//*[@role='option' and normalize-space()='Simplified Chinese']",
+      "//*[@role='option' and normalize-space()='简体中文']",
     ).click()
 
     const documentLanguage = await browser.execute(
@@ -370,15 +374,13 @@ describe("TFolio PDF viewer", () => {
       })
     const pageTopInViewer = (pageNumber: number) =>
       browser.execute((number: number) => {
-        const viewer = document.querySelector<HTMLElement>(
-          "[data-document-session][data-active='true'] main",
-        )!
+        const strip = document.querySelector<HTMLElement>("[data-tab-strip]")!
         const page = document.querySelector<HTMLElement>(
           `[data-page-number='${number}']`,
         )!
 
         return Math.round(
-          page.getBoundingClientRect().top - viewer.getBoundingClientRect().top,
+          page.getBoundingClientRect().top - strip.getBoundingClientRect().bottom,
         )
       }, pageNumber)
     // The embedded WebKit WebDriver passes W3C navigation-key constants through as
@@ -1057,5 +1059,47 @@ describe("TFolio PDF viewer", () => {
         timeoutMsg: "the selected text never reached the clipboard",
       },
     )
+  })
+
+  // No tool is chosen: the menu marks with the highlight tool's colour anyway.
+  it("highlights selected page text from the same menu", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("text.pdf", textPdf())
+    await renderedPage()
+    await $(".pdf-text-layer span").waitForDisplayed({ timeout: 15_000 })
+
+    const clean = await pageInk()
+
+    await browser.execute(() => {
+      const span = document.querySelector(".pdf-text-layer span")!
+      const range = document.createRange()
+      const selection = window.getSelection()!
+
+      range.selectNodeContents(span)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    })
+    await rightClick(".pdf-text-layer span")
+
+    const highlightItem = await $("[data-action='highlight-text']")
+    await highlightItem.waitForDisplayed({ timeout: 15_000 })
+    await expect(highlightItem).toHaveText("Highlight")
+    await highlightItem.click()
+    await expect($("[data-slot='context-menu-content']")).not.toExist()
+
+    await browser.waitUntil(async () => (await pageInk()) > clean, {
+      timeout: 15_000,
+      timeoutMsg: "the highlight never reached the page",
+    })
+    expect(
+      await browser.execute(() => window.getSelection()?.toString() ?? ""),
+    ).toBe("")
+
+    await $("button[aria-label^='Undo']").click()
+    await browser.waitUntil(async () => (await pageInk()) === clean, {
+      timeout: 15_000,
+      timeoutMsg: "undo did not take the menu's highlight back off the page",
+    })
   })
 })

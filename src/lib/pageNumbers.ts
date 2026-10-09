@@ -33,8 +33,7 @@ export type PageNumbersDraft = {
   smartColor: boolean
   blankNumbered: boolean
   blankCounted: boolean
-  rangeFrom: string
-  rangeTo: string
+  range: string
   start: string
 }
 
@@ -126,7 +125,7 @@ function parseCount(value: string): number | null {
 /** The number the range's first page would print, as far as a half-typed draft
     can say — what the preview draws on its first sheet. */
 export function draftFirstPrinted(draft: PageNumbersDraft): number {
-  return parseCount(draft.start) ?? parseCount(draft.rangeFrom) ?? 1
+  return parseCount(draft.start) ?? parseCount(draft.range.split("-")[0] ?? "") ?? 1
 }
 
 export function isPageNumbersPreferences(
@@ -161,12 +160,8 @@ export function pageNumbersPreferences(
 
 /** The whole document spelled out, so a draft that covers every page opens with
     the span named rather than blank. A document of no pages has none to name. */
-function wholeRange(
-  pageCount: number,
-): Pick<PageNumbersDraft, "rangeFrom" | "rangeTo"> {
-  return pageCount > 0
-    ? { rangeFrom: "1", rangeTo: String(pageCount) }
-    : { rangeFrom: "", rangeTo: "" }
+function wholeRange(pageCount: number): string {
+  return pageCount > 0 ? `1-${pageCount}` : ""
 }
 
 /** The largest number the start field takes: the document's own length, under
@@ -202,7 +197,7 @@ export function draftFromPreferences(
     smartColor: preferences.smartColor,
     blankNumbered: preferences.blankNumbered,
     blankCounted: preferences.blankCounted,
-    ...wholeRange(pageCount),
+    range: wholeRange(pageCount),
     // The backend counts from the range's own first page when no start is
     // given, so "1" is the default it already had, now editable.
     start: "1",
@@ -219,9 +214,7 @@ export function draftFromConfig(
     smartColor: config.smartColor,
     blankNumbered: config.blankNumbered,
     blankCounted: config.blankCounted,
-    ...(config.range
-      ? { rangeFrom: String(config.range[0]), rangeTo: String(config.range[1]) }
-      : wholeRange(pageCount)),
+    range: config.range ? config.range.join("-") : wholeRange(pageCount),
     start: config.start === null ? "" : String(config.start),
   }
 }
@@ -230,20 +223,24 @@ export function parsePageNumbersDraft(
   draft: PageNumbersDraft,
   pageCount: number,
 ): { config: PageNumbersConfig | null; error: PageNumbersValidationError | null } {
-  const rangeFrom = draft.rangeFrom.trim()
-  const rangeTo = draft.rangeTo.trim()
+  const rangeText = draft.range.trim()
   let range: [number, number] | null = null
 
-  if (rangeFrom !== "" || rangeTo !== "") {
-    const from = rangeFrom === "" ? 1 : parseCount(rangeFrom)
-    const to = rangeTo === "" ? pageCount : parseCount(rangeTo)
-
-    if (from === null || to === null || from < 1 || from > to || to > pageCount) {
+  if (rangeText !== "") {
+    // Page numbering takes one contiguous span, not the arbitrary selections
+    // accepted by export and split, so do not expand it with parsePageRange.
+    const match = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(rangeText)
+    if (!match) {
       return { config: null, error: "range" }
     }
 
-    // The fields open on the whole document, which is what no range at all
-    // means, so both spellings apply as one config.
+    const from = Number(match[1])
+    const to = Number(match[2] ?? match[1])
+    if (from < 1 || from > to || to > pageCount) {
+      return { config: null, error: "range" }
+    }
+
+    // Spelling out the whole document and leaving it blank mean the same thing.
     range = from === 1 && to === pageCount ? null : [from, to]
   }
 
@@ -266,8 +263,7 @@ export function parsePageNumbersDraft(
       range,
       smartColor: draft.smartColor,
       start,
-      // A blank page that takes no number has none to print, whatever the
-      // other switch was left at.
+      // Also normalize older stored preferences with inconsistent flags.
       blankNumbered: draft.blankCounted && draft.blankNumbered,
       blankCounted: draft.blankCounted,
     },

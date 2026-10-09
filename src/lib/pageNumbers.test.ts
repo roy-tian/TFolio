@@ -37,15 +37,14 @@ function draft(overrides: Partial<PageNumbersDraft> = {}): PageNumbersDraft {
     smartColor: true,
     blankNumbered: true,
     blankCounted: true,
-    rangeFrom: "",
-    rangeTo: "",
+    range: "",
     start: "",
     ...overrides,
   }
 }
 
 describe("parsePageNumbersDraft", () => {
-  it("numbers every page when both ends of the range are blank", () => {
+  it("numbers every page when the range is blank", () => {
     const { config: parsed, error } = parsePageNumbersDraft(draft(), 10)
 
     expect(error).toBeNull()
@@ -54,7 +53,7 @@ describe("parsePageNumbersDraft", () => {
 
   it("reads a valid range", () => {
     const { config: parsed, error } = parsePageNumbersDraft(
-      draft({ rangeFrom: "2", rangeTo: "4" }),
+      draft({ range: " 2 - 4 " }),
       10,
     )
 
@@ -64,7 +63,7 @@ describe("parsePageNumbersDraft", () => {
 
   it("reads the whole document as no range at all", () => {
     const { config: parsed, error } = parsePageNumbersDraft(
-      draft({ rangeFrom: "1", rangeTo: "10" }),
+      draft({ range: "1-10" }),
       10,
     )
 
@@ -72,27 +71,24 @@ describe("parsePageNumbersDraft", () => {
     expect(parsed?.range).toBeNull()
   })
 
-  it("fills a blank end of the range from the document", () => {
-    expect(parsePageNumbersDraft(draft({ rangeFrom: "3" }), 10).config?.range).toEqual(
-      [3, 10],
+  it("reads a single page as a one-page range", () => {
+    expect(parsePageNumbersDraft(draft({ range: "3" }), 10).config?.range).toEqual(
+      [3, 3],
     )
-    expect(parsePageNumbersDraft(draft({ rangeTo: "4" }), 10).config?.range).toEqual([
-      1, 4,
-    ])
+    expect(parsePageNumbersDraft(draft({ range: "3-3" }), 10).config?.range).toEqual(
+      [3, 3],
+    )
+    expect(parsePageNumbersDraft(draft({ range: "  " }), 10).config?.range).toBeNull()
   })
 
   it("rejects an unusable range", () => {
-    const cases: PageNumbersDraft[] = [
-      draft({ rangeFrom: "0", rangeTo: "4" }),
-      draft({ rangeFrom: "5", rangeTo: "4" }),
-      draft({ rangeFrom: "1", rangeTo: "11" }),
-      draft({ rangeFrom: "1.5", rangeTo: "4" }),
-      draft({ rangeFrom: "11" }),
-      draft({ rangeTo: "0" }),
+    const cases = [
+      "0-4", "5-4", "1-11", "1.5-4", "11", "0", "-1", "3-", "-4",
+      "1-2-3", "1,3", "abc", "1e1", "1-999999999999999999999",
     ]
 
-    for (const value of cases) {
-      const { config: parsed, error } = parsePageNumbersDraft(value, 10)
+    for (const range of cases) {
+      const { config: parsed, error } = parsePageNumbersDraft(draft({ range }), 10)
       expect(parsed).toBeNull()
       expect(error).toBe("range")
     }
@@ -175,8 +171,7 @@ describe("draft round trips", () => {
   it("opens fresh from preferences on the whole document", () => {
     const fresh = draftFromPreferences(defaultPageNumbersPreferences, 10)
 
-    expect(fresh.rangeFrom).toBe("1")
-    expect(fresh.rangeTo).toBe("10")
+    expect(fresh.range).toBe("1-10")
     expect(fresh.start).toBe("1")
     expect(fresh.smartColor).toBe(true)
     expect(fresh.blankNumbered).toBe(true)
@@ -186,16 +181,14 @@ describe("draft round trips", () => {
 
   it("spells the document out for a config that numbers every page", () => {
     expect(draftFromConfig(config(), 10)).toMatchObject({
-      rangeFrom: "1",
-      rangeTo: "10",
+      range: "1-10",
     })
   })
 
   it("leaves the range blank with no document to measure", () => {
     const fresh = draftFromPreferences(defaultPageNumbersPreferences, 0)
 
-    expect(fresh.rangeFrom).toBe("")
-    expect(fresh.rangeTo).toBe("")
+    expect(fresh.range).toBe("")
   })
 })
 
@@ -263,8 +256,9 @@ describe("preferences", () => {
 describe("draftFirstPrinted", () => {
   it("prefers a custom start, then the range's first page, then one", () => {
     expect(draftFirstPrinted(draft())).toBe(1)
-    expect(draftFirstPrinted(draft({ rangeFrom: "4" }))).toBe(4)
-    expect(draftFirstPrinted(draft({ rangeFrom: "4", start: "12" }))).toBe(12)
+    expect(draftFirstPrinted(draft({ range: "4-10" }))).toBe(4)
+    expect(draftFirstPrinted(draft({ range: "4" }))).toBe(4)
+    expect(draftFirstPrinted(draft({ range: "4-", start: "12" }))).toBe(12)
     expect(draftFirstPrinted(draft({ start: "not a number" }))).toBe(1)
   })
 })

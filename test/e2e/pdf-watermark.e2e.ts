@@ -5,6 +5,7 @@ import "@wdio/tauri-service"
 
 import {
   appMenuItem,
+  bandedPdf,
   blankPdf,
   closeAppMenu,
   dropZoneButton,
@@ -83,7 +84,7 @@ describe("TFolio document watermark", () => {
       )
     const ascending = await previewTransform()
 
-    await $("//button[normalize-space()='Top-left to bottom-right']").click()
+    await $("//button[normalize-space()='TL ↘ BR']").click()
     expect(await previewTransform()).not.toBe(ascending)
     await $("//button[normalize-space()='Tiled']").click()
     await expect($("[data-testid='watermark-size']")).toHaveText(
@@ -175,6 +176,92 @@ describe("TFolio document watermark", () => {
     })
   })
 
+  it("previews document pixels and pages without navigating the reader", async () => {
+    await refreshApp()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("watermark-preview.pdf", bandedPdf(2))
+    await renderedPage()
+    await openWatermarkDialog()
+
+    const thumbnail = () => $("[data-testid='watermark-thumbnail'][data-ready='true']")
+    const pixels = () => browser.execute(() =>
+      document.querySelector<HTMLCanvasElement>("[data-testid='watermark-thumbnail']")!.toDataURL(),
+    )
+    await thumbnail().waitForExist({ timeout: 15_000 })
+    const firstPage = await pixels()
+    const hasInk = await browser.execute(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>("[data-testid='watermark-thumbnail']")!
+      const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data
+      return data.some((value, index) => index % 4 === 0 && value < 100)
+    })
+    expect(hasInk).toBe(true)
+    await expect($("[data-testid='watermark-page-number']")).toHaveText("1 / 2")
+    await expect($("[data-testid='watermark-previous-page']")).toBeDisabled()
+    await $("[data-testid='watermark-page-preview']").moveTo()
+    await $("[data-testid='watermark-next-page']").click()
+    await thumbnail().waitForExist({ timeout: 15_000 })
+    expect(await pixels()).not.toBe(firstPage)
+    await expect($("[data-testid='watermark-page-number']")).toHaveText("2 / 2")
+    await expect($("[data-testid='watermark-next-page']")).toBeDisabled()
+    await browser.saveScreenshot("artifacts/e2e/watermark-thumbnail.png")
+    await $("[data-testid='watermark-previous-page']").click()
+    await thumbnail().waitForExist({ timeout: 15_000 })
+    expect(await pixels()).toBe(firstPage)
+    await browser.keys("Escape")
+    await openWatermarkDialog()
+    await expect($("[data-testid='watermark-page-number']")).toHaveText("1 / 2")
+    await browser.keys("Escape")
+  })
+
+  it("previews a replacement without stacking the active watermark", async () => {
+    await refreshApp()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("watermark-replacement-preview.pdf", bandedPdf(1))
+    await renderedPage()
+    const cleanPixels = await pagePixelFingerprint()
+    const thumbnailPixels = async () => {
+      await $("[data-testid='watermark-thumbnail'][data-ready='true']").waitForExist({
+        timeout: 15_000,
+      })
+      return browser.execute(() =>
+        document.querySelector<HTMLCanvasElement>("[data-testid='watermark-thumbnail']")!.toDataURL(),
+      )
+    }
+
+    await openWatermarkDialog()
+    const background = await thumbnailPixels()
+    await browser.keys("Escape")
+    await applyWatermark("ALPHA")
+    await browser.waitUntil(async () => (await extractedText()).includes("ALPHA"), {
+      timeout: 20_000,
+    })
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) !== cleanPixels, {
+      timeout: 20_000,
+    })
+    await renderedPage()
+    const livePixels = await pagePixelFingerprint()
+
+    await openWatermarkDialog()
+    expect(await thumbnailPixels()).toBe(background)
+    await $("[data-testid='watermark-text']").setValue("BETA")
+    await expect($("[data-testid='watermark-preview']")).toHaveText("BETA")
+    expect(await thumbnailPixels()).toBe(background)
+    await browser.saveScreenshot("artifacts/e2e/watermark-replacement-preview.png")
+    await browser.keys("Escape")
+    expect(await pagePixelFingerprint()).toBe(livePixels)
+    expect(await extractedText()).toContain("ALPHA")
+    expect(await extractedText()).not.toContain("BETA")
+
+    await applyWatermark("BETA")
+    await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
+      timeout: 20_000,
+    })
+    expect(await extractedText()).not.toContain("ALPHA")
+    await openWatermarkDialog()
+    expect(await thumbnailPixels()).toBe(background)
+    await browser.keys("Escape")
+  })
+
   it("previews the mark on the document's own page shape", async () => {
     // Alone in the window, so the toolbar pressed below is this document's.
     await refreshApp()
@@ -187,6 +274,8 @@ describe("TFolio document watermark", () => {
 
     // A landscape page, previewed as one rather than as portrait A4.
     expect(sheet.width).toBeGreaterThan(sheet.height * 1.5)
+    await $("[data-testid='watermark-thumbnail'][data-ready='true']").waitForExist({ timeout: 15_000 })
+    await expect($("[data-testid='watermark-next-page']")).not.toExist()
     await browser.keys(["Escape"])
   })
 

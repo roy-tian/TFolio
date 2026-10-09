@@ -1,10 +1,4 @@
-import type en from "./en"
-
-type TranslationSchema<T> = {
-  readonly [Key in keyof T]: T[Key] extends string
-    ? string
-    : TranslationSchema<T[Key]>
-}
+import type { TranslationSchema } from "../schema"
 
 const zhCN = {
   app: {
@@ -306,6 +300,10 @@ const zhCN = {
     layoutSingle: "仅显示一份",
     layoutZebra: "斑马式重复",
     preview: "预览",
+    previousPage: "上一页",
+    nextPage: "下一页",
+    previewPage: "{{page}} / {{total}}",
+    previewLoading: "正在加载预览…",
     previewPlaceholder: "水印预览",
     disclosure: "水印会写入页面内容。它更难被移除，但并非无法移除。",
     disclosureAbout: "关于水印",
@@ -338,22 +336,21 @@ const zhCN = {
     positionHint:
       "固定位置时每页页码都落在你选的地方；自动匹配则按双面装订镜像对称——奇数页右下、偶数页左下。",
     range: "页面范围",
-    rangeFrom: "起始页",
-    rangeTo: "结束页",
-    rangeHint: "任一端留空即取文档的首页或末页。",
+    rangeHint: "输入如 1-10 的页码区间，或单个页码；留空则选择全部页面。",
     rangeTotal_one: "共 {{count}} 页",
     rangeTotal_other: "共 {{count}} 页",
     start: "起始页码",
     startPlaceholder: "文档页位",
     startHint: "留空则按每页实际的文档页位编号。",
+    colorHandling: "混色处理",
     smartColor: "智能匹配页码颜色",
     smartColorHint: "页码默认为黑色，落在深色区域时自动改用白色。",
-    blankCounted: "空白页面参与计数",
-    blankCountedHint:
-      "空白页照常占一个页码；关闭后编号跳过它，后面的页码依次前移——此时需要逐页取样才能判断哪些页是空白页，长文档会稍慢。",
-    blankNumbered: "空白页面显示页码",
-    blankNumberedHint:
-      "空白页照常把页码印出来；关闭则只占号不印。不参与计数时本就无号可印，此项随之关闭。",
+    blankPages: "空白页面",
+    blankCountAndShow: "参与计数且显示页码",
+    blankCountAndHide: "参与计数但隐藏页码",
+    blankSkip: "跳过计数",
+    blankPagesHint:
+      "空白页可以占号并显示页码、只占号不显示，或跳过计数，让后续页码依次前移。隐藏页码或跳过计数需要逐页判断空白内容，长文档会稍慢。",
     about: "关于此设置",
     apply: "应用",
     replace: "替换",
@@ -381,10 +378,6 @@ const zhCN = {
     languageHint: "选择界面显示语言。",
     close: "关闭",
   },
-  language: {
-    simplifiedChinese: "简体中文",
-    english: "英文",
-  },
   viewer: {
     dropTitle: "PDF/Word/图片",
     chooseFile: "选择要打开的文件",
@@ -409,6 +402,7 @@ const zhCN = {
     pageError: "第 {{pageNumber}} 页渲染失败",
     thumbnailLabel: "选中第 {{pageNumber}} 页",
     copyText: "复制",
+    highlightText: "文字高亮",
   },
   pageEdit: {
     deletePage: "删除第 {{pageNumber}} 页",
@@ -537,6 +531,6 @@ const zhCN = {
     checkFailed: "检查更新失败。",
     copyright: "版权所有 © 2026 Roy Tian",
   },
-} as const satisfies TranslationSchema<typeof en>
+} as const satisfies TranslationSchema
 
 export default zhCN

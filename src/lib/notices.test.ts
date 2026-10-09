@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import en from "@/i18n/locales/en"
-import zhCN from "@/i18n/locales/zh-CN"
+import { translations } from "@/i18n/resources"
 import {
   dismissNotice,
   isPageNotice,
@@ -60,24 +59,26 @@ function reads(locale: unknown, key: string): boolean {
 describe("noticeCatalogue", () => {
   // The typed `t` cannot check a key the catalogue holds as data, and the
   // plural forms are past `tsc`'s parity check too, so both are checked here.
-  test("names a message both locales can read", () => {
+  test("names a message every locale can read", () => {
     const keys = Object.values(noticeCatalogue).flatMap((entry) => [
       entry.textKey,
       ...("detailKey" in entry ? [entry.detailKey] : []),
     ])
 
-    expect(keys.filter((key) => !reads(en, key))).toEqual([])
-    expect(keys.filter((key) => !reads(zhCN, key))).toEqual([])
+    for (const locale of Object.values(translations)) {
+      expect(keys.filter((key) => !reads(locale, key))).toEqual([])
+    }
   })
 
-  test("names a button both locales can read", () => {
+  test("names a button every locale can read", () => {
     const keys = Object.values(noticeActions).flatMap((action) => [
       action.labelKey,
       ...("busyLabelKey" in action ? [action.busyLabelKey] : []),
     ])
 
-    expect(keys.filter((key) => !reads(en, key))).toEqual([])
-    expect(keys.filter((key) => !reads(zhCN, key))).toEqual([])
+    for (const locale of Object.values(translations)) {
+      expect(keys.filter((key) => !reads(locale, key))).toEqual([])
+    }
   })
 })
 

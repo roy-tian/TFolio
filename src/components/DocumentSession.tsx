@@ -34,6 +34,7 @@ import { useDocumentSearch } from "@/hooks/useDocumentSearch"
 import { useEraserTool } from "@/hooks/useEraserTool"
 import { useGridDrop } from "@/hooks/useGridDrop"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
+import { useTextDragSelection } from "@/hooks/useTextDragSelection"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useRecentView } from "@/hooks/useRecentView"
 import { useRectTool } from "@/hooks/useRectTool"
@@ -110,6 +111,7 @@ import {
   type ViewMode,
 } from "@/lib/viewMode"
 import { isNoteWorthKeeping } from "@/lib/textNoteDraft"
+import { viewerReadingBounds } from "@/lib/viewerViewport"
 import { anchorCorrection, anchorOnPage } from "@/lib/viewportAnchor"
 import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
@@ -754,17 +756,25 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [active, discardPrint])
 
-    const textSelectionDragging = useHighlightTool({
+    const textSelectable =
+      active && drawingApplies && (activeTool === null || activeTool === "highlight")
+
+    const finishTextDrag = useTextDragSelection({
+      enabled: textSelectable,
+      pages: pdfDocument.pages,
+      rotations: pageRotations,
+      viewerRef,
+    })
+
+    const highlightTool = useHighlightTool({
       active: active && drawingApplies && activeTool === "highlight",
       color: highlightColor,
+      finishTextDrag,
       onCommit: annotations.commit,
       opacity: HIGHLIGHT_OPACITY,
       pages: pdfDocument?.pages ?? [],
       rotations: pageRotations,
-      selectable:
-        active &&
-        drawingApplies &&
-        (activeTool === null || activeTool === "highlight"),
+      selectable: textSelectable,
       viewerRef,
     })
 
@@ -990,7 +1000,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       const page = viewer.querySelector<HTMLElement>(
         `[data-page-number="${position.pageNumber}"]`,
       )
-      const viewerRect = viewer.getBoundingClientRect()
+      const viewerRect = viewerReadingBounds(viewer)
       const pageRect = page?.getBoundingClientRect()
 
       if (!pageRect || pageRect.width <= 0 || pageRect.height <= 0) {
@@ -1176,7 +1186,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         )
         recentPageRef.current = page
       }
-      const viewerRect = viewer.getBoundingClientRect()
+      const viewerRect = viewerReadingBounds(viewer)
       const pageRect = page?.getBoundingClientRect()
       const anchor = pageRect
         ? anchorOnPage(
@@ -1672,7 +1682,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           </div>
         ) : null}
 
-        <div className="flex h-full pt-21">
+        <div className="flex h-full pt-[calc(3rem+var(--document-tabs-height))]">
           {bookmarksShown ? (
             <BookmarkSidebar
               items={pdfDocument.outline}
@@ -1683,11 +1693,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           {/* The viewer's scroll box cannot host the readout: anything absolute
               inside it is placed against scrolled content and would drift. */}
           <div className="relative min-w-0 flex-1">
+            {/* Text drags focus this from script, which can inherit a text
+                field's focus ring; it is never a Tab stop, so it needs none. */}
             <main
-              className="workspace-background relative size-full overflow-auto"
+              className="pdf-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
               data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}
+              tabIndex={-1}
             >
               <PdfViewerLayout
                 currentPage={currentPage}
@@ -1729,9 +1742,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                     : (search.matches[search.activeIndex]?.pageNumber ?? null)
                 }
                 onCopyAllText={copyDocumentText}
+                captureHighlight={highlightTool.captureSelection}
                 textEpochs={annotations.textEpochs}
                 textSelectAll={textSelectAll.selectedAll}
-                textSelectionDragging={textSelectionDragging}
+                textSelectionDragging={highlightTool.selectionDragging}
                 viewMode={viewMode}
                 viewerWidth={viewerWidth}
                 zoomPreviewing={zoom.zoomPreviewing}
@@ -1765,7 +1779,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           active={active}
           pageCount={pdfDocument?.numPages ?? 0}
           pageNumbers={pageNumbers}
-          previewPage={pdfDocument.pages[0]}
+          watermarkPreview={{
+            document: pdfDocument,
+            initialPage: currentPage,
+            renderEpochs: annotations.renderEpochs,
+          }}
           print={print}
           watermark={watermark}
         />

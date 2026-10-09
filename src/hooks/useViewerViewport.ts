@@ -7,6 +7,7 @@ import {
   type ViewportAnchor,
 } from "@/lib/viewportAnchor"
 import type { ViewMode } from "@/lib/viewMode"
+import { viewerReadingBounds, viewerTopInset } from "@/lib/viewerViewport"
 
 const RESIZE_COMPOSITOR_SETTLE_MS = 150
 
@@ -61,7 +62,7 @@ export function useViewerViewport({
       const page = viewer.querySelector<HTMLElement>(
         `[data-page-number="${currentPageRef.current}"]`,
       )
-      const rect = viewer.getBoundingClientRect()
+      const rect = viewerReadingBounds(viewer)
       const pageRect = page?.getBoundingClientRect()
 
       // Only a page on screen can hold the reader's place: mid-seek the tracked
@@ -109,7 +110,7 @@ export function useViewerViewport({
 
       if (roundedHeight !== committed.height) {
         committed.height = roundedHeight
-        setViewerHeight(roundedHeight)
+        setViewerHeight(Math.max(0, roundedHeight - viewerTopInset(viewer)))
       }
     }
 

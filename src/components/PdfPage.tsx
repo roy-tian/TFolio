@@ -1,4 +1,4 @@
-import { memo, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -6,12 +6,12 @@ import { useTranslation } from "react-i18next"
 import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { TextNotePreview } from "@/components/TextNotePreview"
+import type { CaptureHighlight } from "@/hooks/useHighlightTool"
 import { useNearViewport, ViewportHoldContext } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { useSelectionBands } from "@/hooks/useSelectionBands"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview as HeldNote } from "@/hooks/useTextNoteTool"
-import { mergeRectsByLine } from "@/lib/annotationGeometry"
 import { cachedPageText, rememberPageText } from "@/lib/pageText"
 import { distanceFromView, pageWork } from "@/lib/pageWork"
 import {
@@ -24,12 +24,16 @@ import {
   type PdfTextSpan,
 } from "@/lib/pdf"
 import { POINT_TO_PX } from "@/lib/zoom"
+import { searchHighlightRects } from "@/lib/searchHighlightGeometry"
+import { registerTextPage, textPageLayout } from "@/lib/textSelectionPage"
 
 // Fragmented PDFs can give every glyph a different ink-box height. Changing
 // the measurement font for each glyph stalls the WebView; use one font and
 // scale both axes to the PDF bounds in the selectable DOM as well.
 const TEXT_LAYER_FONT_FAMILY = "sans-serif"
 const TEXT_LAYER_FONT_SIZE = 100
+// Stable, so a page awaiting its text does not redo memos and registration.
+const NO_TEXT_SPANS: PdfTextSpan[] = []
 
 let measureContext: CanvasRenderingContext2D | null = null
 
@@ -56,6 +60,7 @@ type IndexedSearchMatch = {
 
 type PdfPageProps = {
   activeSearchIndex: number | null
+  captureHighlight: CaptureHighlight
   documentId: number
   /** Live and released rectangles awaiting this page's pixels: its own only. */
   drafts: RectDraft[]
@@ -84,6 +89,7 @@ type PdfPageProps = {
 
 type PdfPageSurfaceProps = {
   activeSearchIndex: number | null
+  captureHighlight: CaptureHighlight
   documentId: number
   drafts: RectDraft[]
   notes: HeldNote[]
@@ -105,6 +111,7 @@ type PdfPageSurfaceProps = {
     store, extracted text, and annotation preview instead of retaining them. */
 const PdfPageSurface = memo(function PdfPageSurface({
   activeSearchIndex,
+  captureHighlight,
   documentId,
   drafts,
   notes,
@@ -124,7 +131,11 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const [textSpans, setTextSpans] = useState<PdfTextSpan[]>([])
+  // Null until extraction settles: search hits wait for the rows they level
+  // to rather than drawing ink-tight first and then growing to full height.
+  const [loadedSpans, setLoadedSpans] = useState<PdfTextSpan[] | null>(null)
+  const textSpans = loadedSpans ?? NO_TEXT_SPANS
+  const textLayerRef = useRef<HTMLDivElement>(null)
 
   const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -148,11 +159,16 @@ const PdfPageSurface = memo(function PdfPageSurface({
         : 0,
   })
 
+  useLayoutEffect(() => {
+    const layer = textLayerRef.current
+    if (layer) return registerTextPage(layer, textSpans)
+  }, [hasRendered, textSpans])
+
   useEffect(() => {
     const cached = cachedPageText(documentId, pageNumber, textEpoch)
 
     if (cached) {
-      setTextSpans(cached)
+      setLoadedSpans(cached)
       return
     }
 
@@ -160,7 +176,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
     const leaving = new AbortController()
     // A text epoch means these spans no longer describe the page's selectable
     // content; do not leave stale runs clickable while PDFium extracts anew.
-    setTextSpans([])
+    setLoadedSpans(null)
 
     // Just behind its own page's render, ahead of any page further away.
     void pageWork
@@ -179,12 +195,12 @@ const PdfPageSurface = memo(function PdfPageSurface({
         rememberPageText(documentId, pageNumber, textEpoch, spans)
 
         if (!cancelled) {
-          setTextSpans(spans)
+          setLoadedSpans(spans)
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setTextSpans([])
+          setLoadedSpans([])
         }
       })
 
@@ -228,23 +244,20 @@ const PdfPageSurface = memo(function PdfPageSurface({
     transform: `translate(-50%, -50%) rotate(${page.rotation}deg)`,
     width: `${(layoutWidth / page.width) * 100}%`,
   }
-  const positionedSearchRects = useMemo(
-    () =>
-      searchMatches.flatMap(({ index, match }) =>
-        // Merged per match, so a hit reads as one mark a line — a gap the
-        // page's spacing left between runs is inside the hit, not a slit —
-        // while its cross-line boxes stay one per line.
-        mergeRectsByLine(match.rects).map((rect, rectIndex) => ({
-          height: `${(rect.height / layoutHeight) * 100}%`,
-          index,
-          key: `${index}-${rectIndex}`,
-          left: `${(rect.left / layoutWidth) * 100}%`,
-          top: `${(rect.top / layoutHeight) * 100}%`,
-          width: `${(rect.width / layoutWidth) * 100}%`,
-        })),
-      ),
-    [layoutHeight, layoutWidth, searchMatches],
-  )
+  const positionedSearchRects = useMemo(() => {
+    if (!loadedSpans) return []
+    const layout = textPageLayout(loadedSpans)
+    return searchMatches.flatMap(({ index, match }) =>
+      searchHighlightRects(match.rects, layout).map((rect, rectIndex) => ({
+        height: `${(rect.height / layoutHeight) * 100}%`,
+        index,
+        key: `${index}-${rectIndex}`,
+        left: `${(rect.left / layoutWidth) * 100}%`,
+        top: `${(rect.top / layoutHeight) * 100}%`,
+        width: `${(rect.width / layoutWidth) * 100}%`,
+      })),
+    )
+  }, [layoutHeight, layoutWidth, loadedSpans, searchMatches])
   const selectionBands = useSelectionBands({
     anchorRef: surfaceRef,
     page,
@@ -326,7 +339,12 @@ const PdfPageSurface = memo(function PdfPageSurface({
           </div>
         ) : null}
         {hasRendered && positionedSpans.length > 0 ? (
-          <PageTextMenu onCopyAll={onCopyAllText} style={pageLayerStyle}>
+          <PageTextMenu
+            captureHighlight={captureHighlight}
+            onCopyAll={onCopyAllText}
+            style={pageLayerStyle}
+            textLayerRef={textLayerRef}
+          >
             {positionedSpans.map((span, index) => (
               <span
                 key={index}
@@ -372,6 +390,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
 
 export const PdfPage = memo(function PdfPage({
   activeSearchIndex,
+  captureHighlight,
   documentId,
   drafts,
   notes,
@@ -428,6 +447,7 @@ export const PdfPage = memo(function PdfPage({
         >
           <PdfPageSurface
             activeSearchIndex={activeSearchIndex}
+            captureHighlight={captureHighlight}
             documentId={documentId}
             drafts={drafts}
             notes={notes}

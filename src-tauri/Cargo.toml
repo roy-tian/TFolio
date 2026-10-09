@@ -33,13 +33,13 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 # only ever parses this app's own fresh output — a reader's file still
 # reaches PDFium alone. Default features are off: they are only date and
 # parallelism helpers this use has no need of.
-lopdf = { version = "0.44", default-features = false }
+lopdf = { version = "0.45", default-features = false }
 # What lets a downloaded installer outlive the run that fetched it. The
 # updater plugin checks the signature over bytes it never writes down and
 # keeps that check private, so a saved package is checked again here — with
 # the same crate the plugin itself verifies with.
 minisign-verify = "0.2"
-pdfium-render = { version = "=0.9.3", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
 # The fallback face is fetched at runtime rather than bundled, so the app needs
 # an HTTPS client of its own. `tauri` already depends on reqwest, but with no
 # TLS backend compiled in; naming it here turns one on rather than adding a

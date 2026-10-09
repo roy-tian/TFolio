@@ -12,6 +12,24 @@ body,
   margin: 0;
 }
 
+/* Geist has no Han or Thai glyphs; they fall to a face picked by the element's
+   language, the UI's unless an element names its own (the language picker's items).
+   Han unification gives Simplified and Traditional one code point per character,
+   so only the face decides whether a Taiwanese reader sees their own glyph shapes. */
+:root,
+:lang(zh) {
+  --font-script: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC";
+}
+
+:lang(zh-TW) {
+  --font-script: "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC";
+}
+
+:lang(th) {
+  --font-script: "Leelawadee UI", "Thonburi", "Noto Sans Thai", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC";
+}
+
 body {
   overflow: hidden;
   overscroll-behavior: none;
@@ -19,8 +37,7 @@ body {
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei",
-    "Noto Sans CJK SC", sans-serif;
+  --font-sans: "Geist Variable", var(--font-script), sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -158,13 +175,26 @@ body {
   body {
     @apply bg-background text-foreground;
   }
-  html {
+  /* Children inherit the font list already resolved, not var(--font-script),
+     so an element naming its own language must resolve the list again. */
+  html,
+  [lang] {
     @apply font-sans;
   }
 }
 
 .app-surface {
+  --document-tabs-height: 2.25rem;
   background-color: var(--background);
+}
+
+/* The PDF must paint behind the tab strip for its backdrop blur to sample it.
+   Padding scrolls away with the document; scroll-padding keeps seeks below it. */
+.pdf-scroll-viewport {
+  margin-top: calc(-1 * var(--document-tabs-height));
+  height: calc(100% + var(--document-tabs-height));
+  padding-top: var(--document-tabs-height);
+  scroll-padding-top: var(--document-tabs-height);
 }
 
 .workspace-background {
@@ -303,7 +333,7 @@ body {
 }
 
 .pdf-search-layer span[data-active="true"] {
-  background: rgb(255 235 59 / 0.6);
+  background: rgb(160 145 45 / 0.75);
 }
 
 /* Each hotspot sits on the point its tool acts from, not the glyph's corner.

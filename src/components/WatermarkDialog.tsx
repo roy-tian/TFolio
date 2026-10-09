@@ -1,6 +1,10 @@
 import { Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import {
+  DocumentWatermarkPreview,
+  type DocumentWatermarkPreviewProps,
+} from "@/components/DocumentWatermarkPreview"
 import { OperationProgress } from "@/components/OperationProgress"
 import { WatermarkSettings } from "@/components/WatermarkSettings"
 import { Button } from "@/components/ui/button"
@@ -30,7 +34,7 @@ type WatermarkDialogProps = {
   onRemove: () => void
   onStop: () => void
   open: boolean
-  previewPage?: { height: number; width: number }
+  preview: Omit<DocumentWatermarkPreviewProps, "config">
   progress: PdfProgress | null
   validationError: WatermarkValidationError | null
 }
@@ -46,7 +50,7 @@ export function WatermarkDialog({
   onRemove,
   onStop,
   open,
-  previewPage,
+  preview,
   progress,
   validationError,
 }: WatermarkDialogProps) {
@@ -95,7 +99,9 @@ export function WatermarkDialog({
             autoFocus
             className="min-h-0 flex-1 overflow-y-auto p-5"
             draft={draft}
-            previewPage={previewPage}
+            preview={
+              open ? <DocumentWatermarkPreview {...preview} config={draft} /> : null
+            }
             onDraftChange={onDraftChange}
             validationError={validationError}
           />

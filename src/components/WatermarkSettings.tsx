@@ -1,4 +1,5 @@
 import { Info } from "lucide-react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { SliderRow } from "@/components/SliderRow"
@@ -45,8 +46,8 @@ type WatermarkSettingsProps = {
   className?: string
   draft: WatermarkConfig
   onDraftChange: (draft: WatermarkConfig) => void
-  /** The document's first page as displayed, in points; A4 without one. */
-  previewPage?: { height: number; width: number }
+  /** The document dialog supplies live pages; the merge wizard uses A4. */
+  preview?: ReactNode
   validationError: WatermarkValidationError | null
 }
 
@@ -58,7 +59,7 @@ export function WatermarkSettings({
   draft,
   idPrefix = "watermark",
   onDraftChange,
-  previewPage,
+  preview,
   validationError,
 }: WatermarkSettingsProps) {
   const { t } = useTranslation()
@@ -101,11 +102,12 @@ export function WatermarkSettings({
             </PopoverContent>
           </Popover>
         </div>
-        <WatermarkPreview
-          config={draft}
-          page={previewPage}
-          placeholder={t("watermark.previewPlaceholder")}
-        />
+        {preview ?? (
+          <WatermarkPreview
+            config={draft}
+            placeholder={t("watermark.previewPlaceholder")}
+          />
+        )}
       </Field>
 
       <div className="min-w-0 flex-1">

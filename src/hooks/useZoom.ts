@@ -11,6 +11,7 @@ import {
 import type { PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import { spreadPages, type ViewMode } from "@/lib/viewMode"
+import { viewerReadingBounds } from "@/lib/viewerViewport"
 import {
   anchorCorrection,
   anchorOnPage,
@@ -214,7 +215,7 @@ export function useZoom({
       return
     }
 
-    const rect = viewer.getBoundingClientRect()
+    const rect = viewerReadingBounds(viewer)
     captureAnchor(rect.left + rect.width / 2, rect.top + rect.height / 2)
   }, [captureAnchor, viewerRef])
 

@@ -117,6 +117,29 @@ describe("TFolio annotations", () => {
     expect(await pageInk()).toBe(clean)
   })
 
+  // A right-click is no drag: marking on its release would leave the page
+  // menu's own highlight item to mark the same text a second time.
+  it("leaves a right-clicked selection to the page menu", async () => {
+    const clean = await pageInk()
+
+    await $("button[aria-label='Highlight text']").click()
+    await browser.execute(() => {
+      const span = document.querySelector(".pdf-text-layer span")!
+      const range = document.createRange()
+      range.selectNodeContents(span)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+
+      span.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 2 }))
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 2 }))
+    })
+    await browser.pause(2500)
+
+    await expect($("button[aria-label^='Undo']")).toBeDisabled()
+    expect(await pageInk()).toBe(clean)
+  })
+
   it("keeps both ends of a cross-page selection mounted until highlight commit", async () => {
     await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
