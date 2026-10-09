@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from "react"
+import { useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react"
 import { Copy } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -31,6 +31,7 @@ type PageTextMenuProps = {
       case it is that — not a drag over this page — the menu offers. */
   onCopyAll?: () => void
   style: CSSProperties
+  textLayerRef: Ref<HTMLDivElement>
 }
 
 /** The page's right-click menu, standing in for the WebView's dropped one.
@@ -39,6 +40,7 @@ export function PageTextMenu({
   children,
   onCopyAll,
   style,
+  textLayerRef,
 }: PageTextMenuProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -60,7 +62,7 @@ export function PageTextMenu({
         setOpen(Boolean(onCopyAll) || selected.current !== "")
       }}
     >
-      <ContextMenuTrigger className="pdf-text-layer select-text" style={style}>
+      <ContextMenuTrigger className="pdf-text-layer select-text" style={style} ref={textLayerRef}>
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent>

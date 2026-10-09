@@ -159,6 +159,18 @@ export function textPdf(pageCount = 1) {
   ])
 }
 
+export function shortLastLinePdf() {
+  const content = "BT /F1 14 Tf 30 330 Td (A long first line followed by a very short final line) Tj 0 -25 Td (End) Tj ET\n"
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 450 400] " +
+      "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+    `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
+    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  ])
+}
+
 /** Some PDF exporters position each glyph separately, giving neighboring
     characters different ink heights instead of one shared line box. */
 export function fragmentedTextPdf(compact = false) {
@@ -176,6 +188,31 @@ export function fragmentedTextPdf(compact = false) {
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
     "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
     "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
+      "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+    `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
+    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  ])
+}
+
+/** Column-major prose and row-major table cells deliberately have different
+    reading orders. Each glyph is a separate PDF text object. */
+export function fragmentedColumnsPdf(table = false) {
+  let content = ""
+  const cells = table ? [[0, 0], [0, 1], [1, 0], [1, 1]] : [[0, 0], [1, 0], [0, 1], [1, 1]]
+  for (const [row, column] of cells) {
+    const text = column ? "RightText" : "LeftWords"
+    for (const [index, glyph] of [...text].entries()) {
+      content += `BT /F1 ${14 + index * 0.13} Tf 1 0 0 1 ${40 + column * 280 + index * 13} ${680 - row * 45} Tm (${glyph}) Tj ET\n`
+    }
+  }
+  if (table) {
+    for (const y of [660, 705, 615]) content += `30 ${y} m 580 ${y} l S\n`
+    for (const x of [30, 300, 580]) content += `${x} 615 m ${x} 705 l S\n`
+  }
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] " +
       "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
     `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
     "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",

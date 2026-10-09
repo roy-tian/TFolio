@@ -1,4 +1,4 @@
-import { memo, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -24,6 +24,7 @@ import {
   type PdfTextSpan,
 } from "@/lib/pdf"
 import { POINT_TO_PX } from "@/lib/zoom"
+import { registerTextPage } from "@/lib/textSelectionPage"
 
 // Fragmented PDFs can give every glyph a different ink-box height. Changing
 // the measurement font for each glyph stalls the WebView; use one font and
@@ -125,6 +126,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const [textSpans, setTextSpans] = useState<PdfTextSpan[]>([])
+  const textLayerRef = useRef<HTMLDivElement>(null)
 
   const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -147,6 +149,11 @@ const PdfPageSurface = memo(function PdfPageSurface({
         ? Math.round(Math.max(MIN_PAGE_RENDER_WIDTH, renderWidth))
         : 0,
   })
+
+  useLayoutEffect(() => {
+    const layer = textLayerRef.current
+    if (layer) return registerTextPage(layer, textSpans)
+  }, [hasRendered, textSpans])
 
   useEffect(() => {
     const cached = cachedPageText(documentId, pageNumber, textEpoch)
@@ -326,7 +333,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
           </div>
         ) : null}
         {hasRendered && positionedSpans.length > 0 ? (
-          <PageTextMenu onCopyAll={onCopyAllText} style={pageLayerStyle}>
+          <PageTextMenu onCopyAll={onCopyAllText} style={pageLayerStyle} textLayerRef={textLayerRef}>
             {positionedSpans.map((span, index) => (
               <span
                 key={index}

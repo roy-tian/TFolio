@@ -9,6 +9,8 @@ import type { PdfPageInfo } from "@/lib/pdf"
 type UseHighlightToolOptions = {
   active: boolean
   color: string
+  /** Settles a text drag at the release point before its selection is read. */
+  finishTextDrag: (x: number, y: number) => void
   onCommit: (command: HighlightCommand) => void
   opacity: number
   pages: PdfPageInfo[]
@@ -40,6 +42,7 @@ function quadsOnPage(
 export function useHighlightTool({
   active,
   color,
+  finishTextDrag,
   onCommit,
   opacity,
   pages,
@@ -68,7 +71,7 @@ export function useHighlightTool({
     }
 
     // Bound on the document: a drag that runs off the page still ends there.
-    const handlePointerUp = () => {
+    const handlePointerUp = (event: PointerEvent) => {
       if (!startedOnText) {
         setSelectionDragging(false)
         return
@@ -80,6 +83,10 @@ export function useHighlightTool({
       if (!active) {
         return
       }
+
+      // Pointerup arrives before the mouseup that ends a text drag, whose
+      // selection otherwise still lags the release point by up to a frame.
+      finishTextDrag(event.clientX, event.clientY)
 
       const viewer = viewerRef.current
       const selection = window.getSelection()
@@ -138,7 +145,7 @@ export function useHighlightTool({
       document.removeEventListener("pointercancel", handlePointerCancel)
       document.removeEventListener("pointerup", handlePointerUp)
     }
-  }, [active, color, onCommit, opacity, pages, rotations, selectable, viewerRef])
+  }, [active, color, finishTextDrag, onCommit, opacity, pages, rotations, selectable, viewerRef])
 
   return selectionDragging
 }

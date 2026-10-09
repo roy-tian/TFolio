@@ -5,7 +5,8 @@ import {
   mergeRectsByLine,
   type PagePointsRect,
 } from "@/lib/annotationGeometry"
-import type { PdfPageInfo } from "@/lib/pdf"
+import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
+import { textPage } from "@/lib/textSelectionPage"
 
 /**
  * Clipped to the span, not `Range.getClientRects`, which reports a rect for
@@ -44,7 +45,17 @@ export function selectedLineRectsOnPage(
   const box = pageElement.getBoundingClientRect()
   const rects: PagePointsRect[] = []
 
-  for (const span of pageElement.querySelectorAll(".pdf-text-layer span")) {
+  const mounted = textPage(pageElement)
+  if (!mounted) return []
+  const { spans, layout: { lineOfRun } } = mounted
+  const { height } = dimensionsForRotation(page.rotation, page.width, page.height)
+  const pageRect = (rect: DOMRect) => fractionsToPageRect(
+    clampFraction(clientPointToFraction(box, rect.left, rect.top)),
+    clampFraction(clientPointToFraction(box, rect.right, rect.bottom)),
+    page,
+    rotation,
+  )
+  for (const [index, span] of spans.entries()) {
     if (!selection.containsNode(span, true)) {
       continue
     }
@@ -57,12 +68,12 @@ export function selectedLineRectsOnPage(
 
     // A span stretched to the width PDFium reported can reach past the page's
     // edge, and a band taken outside it would paint past the page.
-    const band = fractionsToPageRect(
-      clampFraction(clientPointToFraction(box, rect.left, rect.top)),
-      clampFraction(clientPointToFraction(box, rect.right, rect.bottom)),
-      page,
-      rotation,
-    )
+    const band = pageRect(rect)
+    const line = lineOfRun.get(index)
+    if (line) {
+      band.top = Math.max(0, line.top)
+      band.height = Math.min(height, line.top + line.height) - band.top
+    }
 
     if (band.width > 0 && band.height > 0) {
       rects.push(band)

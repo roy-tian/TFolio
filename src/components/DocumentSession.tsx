@@ -34,6 +34,7 @@ import { useDocumentSearch } from "@/hooks/useDocumentSearch"
 import { useEraserTool } from "@/hooks/useEraserTool"
 import { useGridDrop } from "@/hooks/useGridDrop"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
+import { useTextDragSelection } from "@/hooks/useTextDragSelection"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useRecentView } from "@/hooks/useRecentView"
 import { useRectTool } from "@/hooks/useRectTool"
@@ -755,17 +756,25 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [active, discardPrint])
 
+    const textSelectable =
+      active && drawingApplies && (activeTool === null || activeTool === "highlight")
+
+    const finishTextDrag = useTextDragSelection({
+      enabled: textSelectable,
+      pages: pdfDocument.pages,
+      rotations: pageRotations,
+      viewerRef,
+    })
+
     const textSelectionDragging = useHighlightTool({
       active: active && drawingApplies && activeTool === "highlight",
       color: highlightColor,
+      finishTextDrag,
       onCommit: annotations.commit,
       opacity: HIGHLIGHT_OPACITY,
       pages: pdfDocument?.pages ?? [],
       rotations: pageRotations,
-      selectable:
-        active &&
-        drawingApplies &&
-        (activeTool === null || activeTool === "highlight"),
+      selectable: textSelectable,
       viewerRef,
     })
 
@@ -1684,11 +1693,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           {/* The viewer's scroll box cannot host the readout: anything absolute
               inside it is placed against scrolled content and would drift. */}
           <div className="relative min-w-0 flex-1">
+            {/* Text drags focus this from script, which can inherit a text
+                field's focus ring; it is never a Tab stop, so it needs none. */}
             <main
-              className="pdf-scroll-viewport workspace-background relative w-full overflow-auto"
+              className="pdf-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
               data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}
+              tabIndex={-1}
             >
               <PdfViewerLayout
                 currentPage={currentPage}

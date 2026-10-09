@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState, type RefObject } from "react"
+import { useEffect, useState, type RefObject } from "react"
 
-import {
-  mergeRectsByLine,
-  type PagePointsRect,
-} from "@/lib/annotationGeometry"
+import type { PagePointsRect } from "@/lib/annotationGeometry"
 import { selectedLineRectsOnPage } from "@/lib/textSelection"
+import { textPageLayout } from "@/lib/textSelectionPage"
 import type { PdfPageInfo, PdfTextSpan } from "@/lib/pdf"
 
 type UseSelectionBandsOptions = {
@@ -50,23 +48,6 @@ export function useSelectionBands({
   spans,
 }: UseSelectionBandsOptions) {
   const [bands, setBands] = useState(NO_BANDS)
-
-  // Select-all stands for pages virtualisation never mounted a range over, so
-  // its bands come from the extracted geometry, not from any DOM selection.
-  const selectAllBands = useMemo(
-    () =>
-      selectAll
-        ? mergeRectsByLine(
-            spans.map((span) => ({
-              height: span.height,
-              left: span.left,
-              top: span.top,
-              width: span.width,
-            })),
-          )
-        : NO_BANDS,
-    [selectAll, spans],
-  )
 
   useEffect(() => {
     if (selectAll) {
@@ -123,5 +104,7 @@ export function useSelectionBands({
     }
   }, [anchorRef, page, rotation, selectAll])
 
-  return selectAll ? selectAllBands : bands
+  // Select-all stands for pages virtualisation never mounted a range over, so
+  // its bands come from the extracted geometry, not from any DOM selection.
+  return selectAll ? textPageLayout(spans).lines : bands
 }
