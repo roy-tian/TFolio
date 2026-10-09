@@ -164,7 +164,17 @@ body {
 }
 
 .app-surface {
+  --document-tabs-height: 2.25rem;
   background-color: var(--background);
+}
+
+/* The PDF must paint behind the tab strip for its backdrop blur to sample it.
+   Padding scrolls away with the document; scroll-padding keeps seeks below it. */
+.pdf-scroll-viewport {
+  margin-top: calc(-1 * var(--document-tabs-height));
+  height: calc(100% + var(--document-tabs-height));
+  padding-top: var(--document-tabs-height);
+  scroll-padding-top: var(--document-tabs-height);
 }
 
 .workspace-background {

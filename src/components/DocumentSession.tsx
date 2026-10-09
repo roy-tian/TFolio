@@ -110,6 +110,7 @@ import {
   type ViewMode,
 } from "@/lib/viewMode"
 import { isNoteWorthKeeping } from "@/lib/textNoteDraft"
+import { viewerReadingBounds } from "@/lib/viewerViewport"
 import { anchorCorrection, anchorOnPage } from "@/lib/viewportAnchor"
 import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
@@ -990,7 +991,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       const page = viewer.querySelector<HTMLElement>(
         `[data-page-number="${position.pageNumber}"]`,
       )
-      const viewerRect = viewer.getBoundingClientRect()
+      const viewerRect = viewerReadingBounds(viewer)
       const pageRect = page?.getBoundingClientRect()
 
       if (!pageRect || pageRect.width <= 0 || pageRect.height <= 0) {
@@ -1176,7 +1177,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         )
         recentPageRef.current = page
       }
-      const viewerRect = viewer.getBoundingClientRect()
+      const viewerRect = viewerReadingBounds(viewer)
       const pageRect = page?.getBoundingClientRect()
       const anchor = pageRect
         ? anchorOnPage(
@@ -1672,7 +1673,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           </div>
         ) : null}
 
-        <div className="flex h-full pt-21">
+        <div className="flex h-full pt-[calc(3rem+var(--document-tabs-height))]">
           {bookmarksShown ? (
             <BookmarkSidebar
               items={pdfDocument.outline}
@@ -1684,7 +1685,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               inside it is placed against scrolled content and would drift. */}
           <div className="relative min-w-0 flex-1">
             <main
-              className="workspace-background relative size-full overflow-auto"
+              className="pdf-scroll-viewport workspace-background relative w-full overflow-auto"
               data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}

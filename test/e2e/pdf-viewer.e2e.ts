@@ -116,6 +116,8 @@ describe("TFolio PDF viewer", () => {
       return {
         availableHeight:
           viewer.clientHeight -
+          (document.querySelector("[data-tab-strip]")!.getBoundingClientRect().bottom -
+            viewer.getBoundingClientRect().top) -
           parseFloat(padding.paddingTop) -
           parseFloat(padding.paddingBottom),
         availableWidth:
@@ -370,15 +372,13 @@ describe("TFolio PDF viewer", () => {
       })
     const pageTopInViewer = (pageNumber: number) =>
       browser.execute((number: number) => {
-        const viewer = document.querySelector<HTMLElement>(
-          "[data-document-session][data-active='true'] main",
-        )!
+        const strip = document.querySelector<HTMLElement>("[data-tab-strip]")!
         const page = document.querySelector<HTMLElement>(
           `[data-page-number='${number}']`,
         )!
 
         return Math.round(
-          page.getBoundingClientRect().top - viewer.getBoundingClientRect().top,
+          page.getBoundingClientRect().top - strip.getBoundingClientRect().bottom,
         )
       }, pageNumber)
     // The embedded WebKit WebDriver passes W3C navigation-key constants through as

@@ -2,6 +2,7 @@ import { useEffect, useRef, type RefObject } from "react"
 
 import { pickCurrentPage, type PageCandidate } from "@/lib/pdf"
 import type { ViewMode } from "@/lib/viewMode"
+import { viewerReadingBounds } from "@/lib/viewerViewport"
 
 /**
  * Re-runs on `viewMode`, and on `pages`: switching modes re-parents every page
@@ -53,7 +54,7 @@ export function useCurrentPageTracker(
           return
         }
 
-        const viewerBounds = viewer.getBoundingClientRect()
+        const viewerBounds = viewerReadingBounds(viewer)
         const candidates: PageCandidate[] = []
 
         for (const page of visiblePages) {

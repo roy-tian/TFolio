@@ -14,6 +14,7 @@ import {
   stepSearchMatch,
 } from "@/lib/pdfSearch"
 import type { ViewMode } from "@/lib/viewMode"
+import { viewerReadingBounds } from "@/lib/viewerViewport"
 
 const SEARCH_DEBOUNCE_MS = 180
 const SEARCH_REVEAL_TIMEOUT_MS = 3000
@@ -259,7 +260,7 @@ export function useDocumentSearch({
       `[data-page-number="${match.pageNumber}"]`,
     )
     const pageBox = page?.getBoundingClientRect()
-    const viewerBox = viewer.getBoundingClientRect()
+    const viewerBox = viewerReadingBounds(viewer)
 
     // A page off screen, sideways included, is virtualized with no highlight to
     // measure: bring it over first so the near-viewport observer attaches one.
@@ -286,7 +287,7 @@ export function useDocumentSearch({
       if (rects.length > 0) {
         const offset = searchRevealOffset(
           rects,
-          viewer.getBoundingClientRect(),
+          viewerReadingBounds(viewer),
           document
             .querySelector<HTMLElement>(
               `[data-document-search="${sessionId}"] [data-slot="pdf-search"]`,
