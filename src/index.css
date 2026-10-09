@@ -313,7 +313,7 @@ body {
 }
 
 .pdf-search-layer span[data-active="true"] {
-  background: rgb(255 235 59 / 0.6);
+  background: rgb(160 145 45 / 0.75);
 }
 
 /* Each hotspot sits on the point its tool acts from, not the glyph's corner.

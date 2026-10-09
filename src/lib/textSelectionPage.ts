@@ -9,8 +9,9 @@ export type TextPageLayout = {
 
 const layouts = new WeakMap<PagePointsRect[], TextPageLayout>()
 
-/** Built on first use, not on mount: scrolling mounts pages nobody selects on.
-    Kept with the runs array, which cached page text hands back on remount. */
+/** Built when a selection or a search hit on the page first needs rows, not
+    on mount: scrolling mounts pages nobody selects or searches on. Kept with
+    the runs array, which cached page text hands back on remount. */
 export function textPageLayout(rects: PagePointsRect[]) {
   let layout = layouts.get(rects)
   if (!layout) {

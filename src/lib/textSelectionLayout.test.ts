@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import { nearestTextLine, nearestTextRun, textLines } from "@/lib/textSelectionLayout"
+import { lineOfRect, nearestTextLine, nearestTextRun, textLines } from "@/lib/textSelectionLayout"
 
 const rect = (left: number, top: number, width = 8, height = 10) => ({ left, top, width, height })
 
@@ -97,6 +97,18 @@ describe("text selection layout", () => {
     expect(lines).toHaveLength(500)
     expect(lines.every(line => line.runs.length === 80)).toBe(true)
     expect(new Set(lines.flatMap(line => line.runs)).size).toBe(runs.length)
+  })
+
+  it("looks up the same row for a run that textLines assigned it", () => {
+    const runs = [
+      rect(0, 0, 40, 20), rect(60, 0, 40, 20), rect(42, 12, 16, 20),
+      rect(0, 40), rect(12, 44, 5, 6), rect(24, 41, 8, 9),
+    ]
+    const lines = textLines(runs)
+    for (const [index, run] of runs.entries()) {
+      expect(lineOfRect(lines, runs, run)?.runs).toContain(index)
+    }
+    expect(lineOfRect(lines, runs, rect(200, 0))).toBeUndefined()
   })
 
   it("accepts empty and singleton pages", () => {

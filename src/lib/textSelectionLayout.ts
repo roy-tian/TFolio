@@ -17,17 +17,31 @@ export function textLines(rects: PagePointsRect[]): TextLine[] {
       active.push(lines[nextLine++])
     }
     active = active.filter(line => line.top + line.height >= rect.top - 0.01)
-    const line = active.find(line =>
-      rect.left >= line.left - 0.01 &&
-      rect.left + rect.width <= line.left + line.width + 0.01 &&
-      rect.top + rect.height <= line.top + line.height + 0.01,
-    )
-    line?.runs.push(index)
+    active.find(line => contains(line, rect))?.runs.push(index)
   }
   for (const line of lines) {
     line.runs.sort((a, b) => rects[a].left - rects[b].left)
   }
   return lines
+}
+
+function contains(outer: PagePointsRect, inner: PagePointsRect) {
+  return inner.left >= outer.left - 0.01 &&
+    inner.top >= outer.top - 0.01 &&
+    inner.left + inner.width <= outer.left + outer.width + 0.01 &&
+    inner.top + inner.height <= outer.top + outer.height + 0.01
+}
+
+/** The row `textLines` gave the run holding `rect`. Bands can overlap, and the
+    first one around a sub-run box need not be the band its run belongs to. */
+export function lineOfRect(lines: TextLine[], rects: PagePointsRect[], rect: PagePointsRect) {
+  let first: TextLine | undefined
+  for (const line of lines) {
+    if (!contains(line, rect)) continue
+    if (line.runs.some(index => contains(rects[index], rect))) return line
+    first ??= line
+  }
+  return first
 }
 
 function distance(value: number, start: number, length: number) {
