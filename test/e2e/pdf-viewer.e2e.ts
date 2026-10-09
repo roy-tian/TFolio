@@ -7,7 +7,9 @@ import {
   minimalPdf,
   openPdfFromDisk,
   outlinedPdf,
+  pageInk,
   refreshApp,
+  renderedPage,
   seedSettings,
   textPdf,
   tooltipOn,
@@ -1057,5 +1059,47 @@ describe("TFolio PDF viewer", () => {
         timeoutMsg: "the selected text never reached the clipboard",
       },
     )
+  })
+
+  // No tool is chosen: the menu marks with the highlight tool's colour anyway.
+  it("highlights selected page text from the same menu", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("text.pdf", textPdf())
+    await renderedPage()
+    await $(".pdf-text-layer span").waitForDisplayed({ timeout: 15_000 })
+
+    const clean = await pageInk()
+
+    await browser.execute(() => {
+      const span = document.querySelector(".pdf-text-layer span")!
+      const range = document.createRange()
+      const selection = window.getSelection()!
+
+      range.selectNodeContents(span)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    })
+    await rightClick(".pdf-text-layer span")
+
+    const highlightItem = await $("[data-action='highlight-text']")
+    await highlightItem.waitForDisplayed({ timeout: 15_000 })
+    await expect(highlightItem).toHaveText("Highlight")
+    await highlightItem.click()
+    await expect($("[data-slot='context-menu-content']")).not.toExist()
+
+    await browser.waitUntil(async () => (await pageInk()) > clean, {
+      timeout: 15_000,
+      timeoutMsg: "the highlight never reached the page",
+    })
+    expect(
+      await browser.execute(() => window.getSelection()?.toString() ?? ""),
+    ).toBe("")
+
+    await $("button[aria-label^='Undo']").click()
+    await browser.waitUntil(async () => (await pageInk()) === clean, {
+      timeout: 15_000,
+      timeoutMsg: "undo did not take the menu's highlight back off the page",
+    })
   })
 })

@@ -766,7 +766,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
     })
 
-    const textSelectionDragging = useHighlightTool({
+    const highlightTool = useHighlightTool({
       active: active && drawingApplies && activeTool === "highlight",
       color: highlightColor,
       finishTextDrag,
@@ -1742,9 +1742,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                     : (search.matches[search.activeIndex]?.pageNumber ?? null)
                 }
                 onCopyAllText={copyDocumentText}
+                captureHighlight={highlightTool.captureSelection}
                 textEpochs={annotations.textEpochs}
                 textSelectAll={textSelectAll.selectedAll}
-                textSelectionDragging={textSelectionDragging}
+                textSelectionDragging={highlightTool.selectionDragging}
                 viewMode={viewMode}
                 viewerWidth={viewerWidth}
                 zoomPreviewing={zoom.zoomPreviewing}

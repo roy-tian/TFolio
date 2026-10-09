@@ -250,6 +250,8 @@ describe("TFolio select all", () => {
 
     const copyItem = await $("[data-action='copy-text']")
     await copyItem.waitForDisplayed({ timeout: 15_000 })
+    // A select-all is the app's own, with no range a highlight could mark.
+    await expect($("[data-action='highlight-text']")).not.toExist()
     await copyItem.click()
 
     await browser.waitUntil(async () => (await copiedText()) !== null, {

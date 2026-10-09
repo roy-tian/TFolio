@@ -412,6 +412,7 @@ const zhCN = {
     pageError: "第 {{pageNumber}} 页渲染失败",
     thumbnailLabel: "选中第 {{pageNumber}} 页",
     copyText: "复制",
+    highlightText: "文字高亮",
   },
   pageEdit: {
     deletePage: "删除第 {{pageNumber}} 页",

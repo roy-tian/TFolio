@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { TextNotePreview } from "@/components/TextNotePreview"
+import type { CaptureHighlight } from "@/hooks/useHighlightTool"
 import { useNearViewport, ViewportHoldContext } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { useSelectionBands } from "@/hooks/useSelectionBands"
@@ -59,6 +60,7 @@ type IndexedSearchMatch = {
 
 type PdfPageProps = {
   activeSearchIndex: number | null
+  captureHighlight: CaptureHighlight
   documentId: number
   /** Live and released rectangles awaiting this page's pixels: its own only. */
   drafts: RectDraft[]
@@ -87,6 +89,7 @@ type PdfPageProps = {
 
 type PdfPageSurfaceProps = {
   activeSearchIndex: number | null
+  captureHighlight: CaptureHighlight
   documentId: number
   drafts: RectDraft[]
   notes: HeldNote[]
@@ -108,6 +111,7 @@ type PdfPageSurfaceProps = {
     store, extracted text, and annotation preview instead of retaining them. */
 const PdfPageSurface = memo(function PdfPageSurface({
   activeSearchIndex,
+  captureHighlight,
   documentId,
   drafts,
   notes,
@@ -335,7 +339,12 @@ const PdfPageSurface = memo(function PdfPageSurface({
           </div>
         ) : null}
         {hasRendered && positionedSpans.length > 0 ? (
-          <PageTextMenu onCopyAll={onCopyAllText} style={pageLayerStyle} textLayerRef={textLayerRef}>
+          <PageTextMenu
+            captureHighlight={captureHighlight}
+            onCopyAll={onCopyAllText}
+            style={pageLayerStyle}
+            textLayerRef={textLayerRef}
+          >
             {positionedSpans.map((span, index) => (
               <span
                 key={index}
@@ -381,6 +390,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
 
 export const PdfPage = memo(function PdfPage({
   activeSearchIndex,
+  captureHighlight,
   documentId,
   drafts,
   notes,
@@ -437,6 +447,7 @@ export const PdfPage = memo(function PdfPage({
         >
           <PdfPageSurface
             activeSearchIndex={activeSearchIndex}
+            captureHighlight={captureHighlight}
             documentId={documentId}
             drafts={drafts}
             notes={notes}

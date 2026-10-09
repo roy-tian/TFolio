@@ -426,6 +426,7 @@ const en = {
     pageError: "Page {{pageNumber}} could not be rendered",
     thumbnailLabel: "Select page {{pageNumber}}",
     copyText: "Copy",
+    highlightText: "Highlight",
   },
   pageEdit: {
     deletePage: "Delete page {{pageNumber}}",
