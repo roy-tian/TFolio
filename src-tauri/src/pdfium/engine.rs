@@ -650,22 +650,30 @@ impl PdfiumEngine {
                 .pages()
                 .get(page_number - 1)
                 .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
-            let render_config = PdfRenderConfig::new()
-                .set_target_width(width)
-                .set_maximum_width(max_width)
-                .set_maximum_height(MAX_RENDER_HEIGHT)
-                .render_annotations(true)
-                .render_form_data(true)
-                // What `RawBitmap::into_rgb` reads; pdfium-render's default, stated.
-                .set_reverse_byte_order(true);
-            let bitmap = page
-                .render_with_config(&render_config)
-                .map_err(|error| format!("PDFium could not render page {page_number}: {error}"))?;
-
-            RawBitmap::copy_of(&bitmap)?
+            Self::render_page_raw(&page, width, max_width)?
         };
 
         raw.into_rgb()
+    }
+
+    fn render_page_raw(
+        page: &PdfPage<'_>,
+        width: i32,
+        max_width: i32,
+    ) -> Result<RawBitmap, String> {
+        let render_config = PdfRenderConfig::new()
+            .set_target_width(width)
+            .set_maximum_width(max_width)
+            .set_maximum_height(MAX_RENDER_HEIGHT)
+            .render_annotations(true)
+            .render_form_data(true)
+            // What `RawBitmap::into_rgb` reads; pdfium-render's default, stated.
+            .set_reverse_byte_order(true);
+        let bitmap = page
+            .render_with_config(&render_config)
+            .map_err(|error| format!("PDFium could not render the page: {error}"))?;
+
+        RawBitmap::copy_of(&bitmap)
     }
 
     #[cfg(test)]
@@ -698,11 +706,15 @@ impl PdfiumEngine {
         width: i32,
     ) -> Result<Vec<u8>, String> {
         let image = self.render_rgb(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)?;
+        Self::encode_thumbnail(image)
+    }
+
+    fn encode_thumbnail(image: image::RgbImage) -> Result<Vec<u8>, String> {
         let mut webp = Cursor::new(Vec::new());
 
         DynamicImage::ImageRgb8(image)
             .write_to(&mut webp, ImageFormat::WebP)
-            .map_err(|error| format!("could not encode page {page_number} thumbnail: {error}"))?;
+            .map_err(|error| format!("could not encode the page thumbnail: {error}"))?;
 
         Ok(webp.into_inner())
     }
@@ -1136,6 +1148,7 @@ mod owned_content;
 mod page_ops;
 mod page_reorder;
 mod raster;
+mod watermark_preview;
 
 pub(crate) use io::is_merge_image;
 use io::{image_page_document, read_image, read_pdf_bytes};

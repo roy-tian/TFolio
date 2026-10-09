@@ -27,3 +27,4 @@ mod save_export;
 mod text_notes;
 mod text_search;
 mod watermark;
+mod watermark_preview;

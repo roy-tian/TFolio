@@ -137,6 +137,23 @@ pub async fn render_pdf_page_thumbnail(
 }
 
 #[tauri::command]
+pub async fn render_pdf_watermark_preview(
+    document_id: u64,
+    page_number: i32,
+    width: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<Response, String> {
+    let engine = Arc::clone(&state.0);
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        engine.render_watermark_preview(document_id, page_number, width)
+    })
+    .await
+    .map_err(|error| format!("PDFium watermark preview task failed: {error}"))??;
+
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
 pub async fn extract_pdf_page_text(
     document_id: u64,
     page_number: i32,

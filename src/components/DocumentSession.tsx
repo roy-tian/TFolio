@@ -1766,7 +1766,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           active={active}
           pageCount={pdfDocument?.numPages ?? 0}
           pageNumbers={pageNumbers}
-          previewPage={pdfDocument.pages[0]}
+          watermarkPreview={{
+            document: pdfDocument,
+            initialPage: currentPage,
+            renderEpochs: annotations.renderEpochs,
+          }}
           print={print}
           watermark={watermark}
         />

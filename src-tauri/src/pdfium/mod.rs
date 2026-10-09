@@ -25,8 +25,8 @@ pub use commands::{
     insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_converted_from_path,
     open_pdf, open_pdf_from_path, pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path,
     pick_pdf_paths, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
-    render_pdf_page_thumbnail, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf,
-    search_pdf_text,
+    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
+    rotate_pdf_pages, save_pdf, search_pdf_text,
 };
 pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
