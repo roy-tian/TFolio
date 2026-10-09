@@ -62,6 +62,8 @@ export function useDocumentSearch({
   const [failed, setFailed] = useState(false)
   const [limitReached, setLimitReached] = useState(false)
   const generationRef = useRef(0)
+  const completedSearchRef = useRef<{ documentId: number; query: string } | null>(null)
+  const [revealRequest, setRevealRequest] = useState(0)
   const cancellationRef = useRef<Promise<void>>(Promise.resolve())
   // The match the reader was last brought to. Entering the grid, or coming
   // back to this tab, is not a request to be taken there again.
@@ -114,9 +116,17 @@ export function useDocumentSearch({
     const trimmed = query.trim()
 
     if (!searchOpen || trimmed.length === 0 || !documentId) {
+      completedSearchRef.current = null
       setSearching(false)
 
       return
+    }
+
+    if (
+      completedSearchRef.current?.documentId !== documentId ||
+      completedSearchRef.current.query !== trimmed
+    ) {
+      completedSearchRef.current = null
     }
 
     setSearching(true)
@@ -142,11 +152,16 @@ export function useDocumentSearch({
             return
           }
 
+          const index = firstSearchMatchFromPage(outcome.matches, currentPageRef.current)
+          // Edits refresh counts and rectangles, not the reader's navigation.
+          // Mark passive results as handled even if they were never scrolled to.
+          if (completedSearchRef.current && index !== null) {
+            revealedRef.current = { index, matches: outcome.matches }
+          }
+          completedSearchRef.current = { documentId, query: trimmed }
           setLimitReached(outcome.limitReached)
           setMatches(outcome.matches)
-          setActiveIndex(
-            firstSearchMatchFromPage(outcome.matches, currentPageRef.current),
-          )
+          setActiveIndex(index)
         } catch {
           if (generationRef.current === generation) {
             setFailed(true)
@@ -202,6 +217,9 @@ export function useDocumentSearch({
 
   const stepMatch = useCallback(
     (direction: -1 | 1) => {
+      // A single result still needs a fresh reveal when requested from the grid.
+      revealedRef.current = null
+      setRevealRequest((request) => request + 1)
       setActiveIndex((current) =>
         stepSearchMatch(current, matches.length, direction),
       )
@@ -330,6 +348,7 @@ export function useDocumentSearch({
     activeIndex,
     matches,
     onMatchInGrid,
+    revealRequest,
     searchOpen,
     sessionId,
     setCurrentPage,
