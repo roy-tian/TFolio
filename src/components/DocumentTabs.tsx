@@ -348,10 +348,7 @@ export function DocumentTabs({
                     <button
                       aria-controls={panelElementId(tab.id)}
                       aria-selected={selected}
-                      className={cn(
-                        "flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                        reorderable && "cursor-grab",
-                      )}
+                      className="flex h-full min-w-0 flex-1 cursor-default items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                       id={tabElementId(tab.id)}
                       onClick={(event) => {
                         if (draggedClickRef.current === tab.id) {
