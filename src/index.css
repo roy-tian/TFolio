@@ -5,6 +5,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* shadcn's `shimmer` makes the words transparent and paints them with a colour
+   relative to currentColor; a WebView that cannot parse one (Safari before
+   16.4) would leave no words at all, so it keeps them plain instead. */
+@custom-variant relative-color {
+  @supports (color: oklch(from currentColor l c h)) {
+    @slot;
+  }
+}
+
 html,
 body,
 #root {
@@ -195,6 +204,34 @@ body {
   height: calc(100% + var(--document-tabs-height));
   padding-top: var(--document-tabs-height);
   scroll-padding-top: var(--document-tabs-height);
+}
+
+/* A native scrollbar runs the box's full height, under the tabs too; only a
+   styled track can start below them. Styled bars never overlay: on overlay
+   platforms too, they take their width from the pages. */
+.pdf-scroll-viewport::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.pdf-scroll-viewport::-webkit-scrollbar-track:vertical {
+  margin-top: var(--document-tabs-height);
+}
+
+.pdf-scroll-viewport::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+  background-color: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
+}
+
+.pdf-scroll-viewport::-webkit-scrollbar-thumb:hover,
+.pdf-scroll-viewport::-webkit-scrollbar-thumb:active {
+  background-color: var(--muted-foreground);
+}
+
+.pdf-scroll-viewport::-webkit-scrollbar-corner {
+  background-color: transparent;
 }
 
 .workspace-background {

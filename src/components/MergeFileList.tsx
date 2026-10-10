@@ -228,12 +228,15 @@ export function MergeFileList({ wizard }: {
             data-testid="merge-wizard-adding"
             role="status"
           >
-            <Spinner className="size-3.5 shrink-0" />
-            {t(
-              wordConversionAvailable()
-                ? "mergeWizard.addingFiles"
-                : "mergeWizard.addingFilesPlain",
-            )}
+            <Spinner className="size-3.5 shrink-0 motion-reduce:animate-none" />
+            <span>
+              <span className="relative-color:shimmer">
+                {t("mergeWizard.addingFiles")}
+              </span>
+              {wordConversionAvailable()
+                ? t("mergeWizard.addingFilesWordNote")
+                : null}
+            </span>
           </p>
           <Button
             data-testid="merge-wizard-stop-adding"

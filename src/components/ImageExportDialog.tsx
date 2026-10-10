@@ -221,7 +221,13 @@ export function ImageExportDialog({
             }}
             data-testid="image-export-cancel"
           >
-            {t(stopping ? "imageExport.stopping" : "imageExport.cancel")}
+            {t(
+              stopping
+                ? "imageExport.stopping"
+                : busy
+                  ? "imageExport.stop"
+                  : "imageExport.cancel",
+            )}
           </Button>
           <Button
             disabled={busy || selectionError !== undefined}

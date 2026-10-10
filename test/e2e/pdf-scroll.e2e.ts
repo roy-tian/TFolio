@@ -61,44 +61,49 @@ describe("PDF scrolling", () => {
     })
   }
 
-  it("keeps the native scrollbar gutter outside the tab strip", async () => {
+  it("spans the tab strip over the scrollbar and centres the page status on the pages", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await openPdfFromDisk("scrollbar-gutter.pdf", minimalPdf(100, "0 0 595 842"))
     await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
 
-    try {
-      // On classic-scrollbar hosts this changes the measured gutter at runtime;
-      // overlay-scrollbar hosts must still keep their right-edge thumb reachable.
-      for (const overflow of ["hidden", "scroll"]) {
-        await browser.execute((value: string) => {
-          const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-          viewer.style.overflowY = value
-          viewer.scrollTop = 0
-        }, overflow)
-        await browser.waitUntil(() => browser.execute(() => {
-          const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-          const strip = document.querySelector<HTMLElement>("[data-tab-strip]")!
-          const box = viewer.getBoundingClientRect()
-          const gutter = viewer.offsetWidth - viewer.clientWidth
-          const hit = document.elementFromPoint(box.right - 4, box.top + 8)
+    const layout = () => browser.execute(() => {
+      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const strip = document.querySelector<HTMLElement>("[data-tab-strip]")!
+      const status = document.querySelector(
+        "[data-document-session][data-active='true'] [data-slot='page-status']",
+      )!.getBoundingClientRect()
+      const box = viewer.getBoundingClientRect()
+      const stripBox = strip.getBoundingClientRect()
 
-          return strip.getBoundingClientRect().right <= box.right - Math.max(20, gutter) &&
-            hit === viewer
-        }))
+      return {
+        gutter: viewer.offsetWidth - viewer.clientWidth,
+        pagesCentre: box.left + viewer.clientWidth / 2,
+        statusCentre: status.left + status.width / 2,
+        stripCoversGutter: strip.contains(
+          document.elementFromPoint(box.right - 4, stripBox.top + stripBox.height / 2),
+        ),
+        stripRight: stripBox.right,
+        windowWidth: window.innerWidth,
       }
+    })
 
-      const documentTab = await $("button[role='tab'][aria-selected='true']").getAttribute("id")
-      await $("#workspace-tab-home").click()
-      expect(await browser.execute(() =>
-        document.querySelector("[data-tab-strip]")!.getBoundingClientRect().right,
-      )).toBe(await browser.execute(() => window.innerWidth))
-      await $(`#${documentTab}`).click()
-      await browser.waitUntil(() => browser.execute(() => {
-        const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-        const strip = document.querySelector("[data-tab-strip]")!.getBoundingClientRect()
-        return strip.right <= viewer.getBoundingClientRect().left + viewer.clientWidth
-      }))
+    try {
+      // Styled, the scrollbar takes its width even where the host overlays.
+      await browser.waitUntil(async () => (await layout()).gutter === 12)
+      const scrolling = await layout()
+      expect(scrolling.stripRight).toBe(scrolling.windowWidth)
+      expect(scrolling.stripCoversGutter).toBe(true)
+      expect(Math.abs(scrolling.statusCentre - scrolling.pagesCentre)).toBeLessThanOrEqual(1)
+
+      await browser.execute(() => {
+        document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!.style.overflowY = "hidden"
+      })
+      await browser.waitUntil(async () => {
+        const still = await layout()
+        return still.gutter === 0 &&
+          Math.abs(still.statusCentre - still.windowWidth / 2) <= 1
+      })
     } finally {
       await browser.execute(() => {
         document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!

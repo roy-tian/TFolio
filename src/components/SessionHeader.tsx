@@ -76,6 +76,7 @@ type SessionHeaderProps = {
   print: ReturnType<typeof usePrint>
   saveHint: string | undefined
   saveLabel: string
+  scrollbarWidth: number
   searchOpen: boolean
   tool: {
     activeTool: AnnotationTool
@@ -123,6 +124,7 @@ export function SessionHeader({
   print,
   saveHint,
   saveLabel,
+  scrollbarWidth,
   searchOpen,
   tool,
   viewMode,
@@ -297,6 +299,9 @@ export function SessionHeader({
         className="flex min-w-24 items-center justify-center gap-2 font-mono text-sm tabular-nums"
         data-slot="page-status"
         role="group"
+        // The pages centre in what the viewer's scrollbar leaves; widening the
+        // middle column by that gutter moves this centre half of it to match.
+        style={{ marginRight: scrollbarWidth }}
       >
         <PageNumberField
           currentPage={page.current}

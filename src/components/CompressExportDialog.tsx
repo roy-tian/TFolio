@@ -254,7 +254,13 @@ export function CompressExportDialog({
             }}
             data-testid="compress-cancel"
           >
-            {t(stopping ? "compressExport.stopping" : "compressExport.cancel")}
+            {t(
+              stopping
+                ? "compressExport.stopping"
+                : busy
+                  ? "compressExport.stop"
+                  : "compressExport.cancel",
+            )}
           </Button>
           <Button
             disabled={busy}

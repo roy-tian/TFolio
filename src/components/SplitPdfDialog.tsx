@@ -150,7 +150,13 @@ export function SplitPdfDialog({
             }}
             data-testid="split-export-cancel"
           >
-            {t(stopping ? "splitExport.stopping" : "splitExport.cancel")}
+            {t(
+              stopping
+                ? "splitExport.stopping"
+                : busy
+                  ? "splitExport.stop"
+                  : "splitExport.cancel",
+            )}
           </Button>
           <Button
             disabled={busy || (mode === "bookmarks" && !hasBookmarks)}

@@ -22,7 +22,7 @@ const CONVERT_SCRIPT: &str = r#"
 param([string]$ProgId, [string]$Pairs)
 $ErrorActionPreference = 'Stop'
 # Redirected output is otherwise the OEM code page on Windows PowerShell 5.1,
-# and a path with a non-ASCII character in it — the cache dir lives under the
+# and a path with a non-ASCII character in it — the run dir lives under the
 # user's profile — would echo back as something else entirely. Some hosts
 # refuse the switch on a redirected pipe; the per-file protocol must outlive
 # that refusal, so a garbled path beats a script that never answers.
