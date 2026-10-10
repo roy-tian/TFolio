@@ -451,6 +451,24 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_frame_writes_nothing() {
+        let (state, file) = scratch("repeat");
+
+        state.record(geometry());
+        let written = state.memo.lock().unwrap().written;
+        // Inside the first write's interval, where a change would arm the
+        // trailing write; a repeat is no change, so it neither writes nor arms.
+        state.record(geometry());
+
+        let memo = state.memo.lock().unwrap();
+        assert_eq!(memo.written, written);
+        assert!(!memo.trailing);
+        drop(memo);
+
+        let _ = std::fs::remove_dir_all(file.parent().expect("the scratch file has a directory"));
+    }
+
+    #[test]
     fn a_throttled_burst_defers_to_the_trailing_write() {
         let (state, file) = scratch("throttled-burst");
         let moved = WindowGeometry {

@@ -435,6 +435,38 @@ mod tests {
         assert!(document.views.is_empty());
     }
 
+    /// `Store::write` renders this run's copy whatever changed, so only the
+    /// check before it keeps a removal of nothing off the disk.
+    #[test]
+    fn removing_an_unknown_path_rewrites_nothing() {
+        let directory =
+            std::env::temp_dir().join(format!("tfolio-recent-remove-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        let file = directory.join(RecentFilesDocument::FILE_NAME);
+        let recent = RecentFiles(Store::at(Some(file.clone())));
+
+        recent.record(Path::new("/docs/b.pdf"));
+        recent.record(Path::new("/docs/a.pdf"));
+        // A marker in the file's place, so any write at all shows.
+        std::fs::write(&file, "untouched").expect("the scratch file should be writable");
+
+        recent.remove(Path::new("/docs/other.pdf"));
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("the file should be there"),
+            "untouched"
+        );
+
+        // A known path does write, so the marker is a real witness.
+        recent.remove(Path::new("/docs/a.pdf"));
+        let written = std::fs::read_to_string(&file).expect("the file should be there");
+        assert_eq!(
+            paths(&RecentFilesDocument::parse(&written).files),
+            ["/docs/b.pdf"]
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
     #[test]
     fn an_unreadable_list_reads_as_empty() {
         assert!(RecentFilesDocument::parse("{ not toml").files.is_empty());

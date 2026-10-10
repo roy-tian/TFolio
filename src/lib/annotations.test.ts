@@ -37,6 +37,7 @@ import {
   type AnnotationCommand,
   type AnnotationHistory,
 } from "@/lib/annotations"
+import { defaultRectStyle } from "@/lib/annotationStyles"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { defaultWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
@@ -49,6 +50,25 @@ function highlight(...pageNumbers: number[]): AnnotationCommand {
       pageNumber,
       quads: [{ height: 10, left: 0, top: 0, width: 50 }],
     })),
+  }
+}
+
+function rect(pageNumber: number): AnnotationCommand {
+  return {
+    bounds: { height: 20, left: 10, top: 10, width: 40 },
+    kind: "rect",
+    pageNumber,
+    style: defaultRectStyle,
+  }
+}
+
+function note(pageNumber: number): AnnotationCommand {
+  return {
+    kind: "textNote",
+    origin: { left: 10, top: 10 },
+    pageNumber,
+    style: { color: "#111827", fontSize: 12, opacity: 1 },
+    text: "hi",
   }
 }
 
@@ -86,6 +106,11 @@ function pageNumbers(
 }
 
 describe("commandPages", () => {
+  it("reports the one page a rectangle or a note sits on", () => {
+    expect(commandPages(rect(2))).toEqual([2])
+    expect(commandPages(note(3))).toEqual([3])
+  })
+
   it("reports every page a selection ran across", () => {
     expect(commandPages(highlight(3, 4))).toEqual([3, 4])
   })
@@ -752,15 +777,7 @@ describe("retargetCommand", () => {
   })
 
   it("aims a single-page command at the page its mark was on", () => {
-    const note: AnnotationCommand = {
-      kind: "textNote",
-      origin: { left: 10, top: 10 },
-      pageNumber: 1,
-      style: { color: "#111827", fontSize: 12, opacity: 1 },
-      text: "hi",
-    }
-
-    expect(retargetCommand(note, [7])).toMatchObject({ pageNumber: 7 })
+    expect(retargetCommand(note(1), [7])).toMatchObject({ pageNumber: 7 })
   })
 
   it("leaves the command alone where the backend reported nothing", () => {
