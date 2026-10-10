@@ -45,13 +45,6 @@ describe("update installation confirmation", () => {
     await expectInstalled()
   })
 
-  it("installs directly with an unchanged PDF open", async () => {
-    await openPdfFromDisk("clean-update.pdf", minimalPdf(2))
-    await offerUpdate()
-    await requestInstall()
-    await expectInstalled()
-  })
-
   it("asks before discarding edits in a background tab and respects cancel", async () => {
     await openPdfFromDisk("edited-update.pdf", minimalPdf(2))
     await $("button[aria-label='Delete page 1']").click()

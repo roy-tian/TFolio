@@ -2,36 +2,6 @@ use super::super::page_ops::{validate_page_order, validate_pages_to_delete};
 use super::support::*;
 use super::*;
 
-// Four pages, each with one black bar at a page-specific horizontal position,
-// so every page renders to a distinct pixel fingerprint.
-fn four_page_banded_pdf() -> Vec<u8> {
-    let mut objects = vec![
-        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
-        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R] /Count 4 >>\nendobj\n"
-            .to_string(),
-    ];
-
-    for page in 0..4 {
-        objects.push(format!(
-            "{} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents {} 0 R >>\nendobj\n",
-            3 + page,
-            7 + page,
-        ));
-    }
-
-    for page in 0..4 {
-        let content = format!("0 0 0 rg\n{} 100 30 120 re f\n", 20 + page * 40);
-
-        objects.push(format!(
-            "{} 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
-            7 + page,
-            content.len(),
-        ));
-    }
-
-    build_pdf(&objects)
-}
-
 // Two pages where only the second carries heavy content, so deleting it leaves
 // a measurable hole for compaction to reclaim.
 fn heavy_second_page_pdf() -> Vec<u8> {
@@ -114,7 +84,7 @@ fn deletion_validation_keeps_a_page_and_refuses_junk() {
 fn reorders_pages_and_their_content() {
     let engine = test_engine();
     let document = engine
-        .open(four_page_banded_pdf())
+        .open(banded_pdf(&[20, 60, 100, 140]))
         .expect("PDFium should open the banded PDF");
     let before = page_fingerprints(engine, document.id, 4);
 
@@ -305,7 +275,7 @@ fn turns_the_named_pages_and_reports_their_new_shape() {
 fn a_turned_page_renders_turned_and_reopens_turned() {
     let engine = test_engine();
     let document = engine
-        .open(four_page_banded_pdf())
+        .open(banded_pdf(&[20, 60, 100, 140]))
         .expect("PDFium should open the banded PDF");
     let upright = page_fingerprints(engine, document.id, 4);
 
@@ -354,7 +324,7 @@ fn a_turned_page_renders_turned_and_reopens_turned() {
 fn refuses_a_turn_it_cannot_make() {
     let engine = test_engine();
     let document = engine
-        .open(four_page_banded_pdf())
+        .open(banded_pdf(&[20, 60, 100, 140]))
         .expect("PDFium should open the banded PDF");
     let before = page_fingerprints(engine, document.id, 4);
 
@@ -560,7 +530,7 @@ fn reorder_keeps_outline_destinations() {
 fn delete_then_restore_is_lossless() {
     let engine = test_engine();
     let document = engine
-        .open(four_page_banded_pdf())
+        .open(banded_pdf(&[20, 60, 100, 140]))
         .expect("PDFium should open the banded PDF");
 
     engine
@@ -613,7 +583,7 @@ fn delete_then_restore_is_lossless() {
 fn restore_preserves_the_watermark_guard() {
     let engine = test_engine();
     let document = engine
-        .open(four_page_banded_pdf())
+        .open(banded_pdf(&[20, 60, 100, 140]))
         .expect("PDFium should open the banded PDF");
 
     engine

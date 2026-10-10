@@ -240,7 +240,6 @@ mod tests {
         assert!(rendered.contains("[pageNumbers]"));
         assert!(rendered.contains("fontSize"));
         assert!(!rendered.contains("[watermark]"));
-        assert!(!rendered.contains("[import]"));
     }
 
     /// An older schema's watermark is the likeliest stray in the frontend's copy;

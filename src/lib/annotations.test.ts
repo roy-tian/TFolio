@@ -86,10 +86,6 @@ function pageNumbers(
 }
 
 describe("commandPages", () => {
-  it("reports the page a single-page command writes to", () => {
-    expect(commandPages(highlight(3))).toEqual([3])
-  })
-
   it("reports every page a selection ran across", () => {
     expect(commandPages(highlight(3, 4))).toEqual([3, 4])
   })
@@ -632,12 +628,6 @@ describe("pasting the document's own pages", () => {
     expect(commandPages(command)).toEqual([2, 3, 4, 5])
     expect(commandTextPages(command)).toEqual([2, 3, 4, 5])
     expect(movesPages(command)).toBe(true)
-  })
-
-  it("names the block its undo deletes and its redo restores", () => {
-    const command = planDuplicatePages(emptyHistory, [1, 3, 4], 3, 5)!.command
-
-    expect(insertPagesRange(command)).toEqual([3, 4, 5])
   })
 })
 

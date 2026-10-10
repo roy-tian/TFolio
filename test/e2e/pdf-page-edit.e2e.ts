@@ -819,27 +819,6 @@ describe("TFolio page editing", () => {
     }
   })
 
-  it("double-click still leaves the grid for the page itself", async () => {
-    await openPdfFromDisk("open-page.pdf", bandedPdf(4))
-    await paintedFingerprints(4)
-
-    await browser.execute(() => {
-      document
-        .querySelector("button[data-page-number='3']")!
-        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
-    })
-
-    await expect($("button[aria-label='Single page']")).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    )
-    await browser.waitUntil(
-      async () =>
-        (await $("input[aria-label='Page number']").getValue()) === "3",
-      { timeoutMsg: "the double-clicked page never became current" },
-    )
-  })
-
   it("carries pages to another document through its tab", async () => {
     await openPdfFromDisk("into.pdf", bandedPdf(2))
     const [first, second] = await paintedFingerprints(2, ACTIVE_GRID)

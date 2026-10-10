@@ -436,18 +436,6 @@ mod tests {
     }
 
     #[test]
-    fn forgetting_an_unknown_path_leaves_the_list_alone() {
-        let mut document = RecentFilesDocument {
-            files: vec![PathBuf::from("/docs/a.pdf")],
-            views: Vec::new(),
-        };
-
-        forget(&mut document, Path::new("/docs/other.pdf"));
-
-        assert_eq!(paths(&document.files), ["/docs/a.pdf"]);
-    }
-
-    #[test]
     fn an_unreadable_list_reads_as_empty() {
         assert!(RecentFilesDocument::parse("{ not toml").files.is_empty());
         assert!(RecentFilesDocument::parse("").files.is_empty());

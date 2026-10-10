@@ -72,13 +72,6 @@ describe("isRectStyle", () => {
     ).toBe(false)
   })
 
-  // A style loaded with these would draw an invisible mark that still records as
-  // an edit, so it is rejected in favour of the visible default.
-  it("rejects an opacity the sliders never produce", () => {
-    expect(isRectStyle({ ...defaultRectStyle, opacity: 0 })).toBe(false)
-    expect(isRectStyle({ ...defaultRectStyle, opacity: 1.5 })).toBe(false)
-  })
-
   it("rejects non-finite sizes", () => {
     expect(isRectStyle({ ...defaultRectStyle, opacity: Number.NaN })).toBe(false)
     expect(

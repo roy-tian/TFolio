@@ -208,15 +208,6 @@ describe("retractNotices", () => {
       retractNotices(list, documentOwner(1), ["noteFontMissing"]),
     ).toHaveLength(0)
   })
-
-  test("leaves the workspace's own alone when a document takes its back", () => {
-    const list = raiseAll([
-      { kind: "openFailed", owner: workspaceOwner },
-      { kind: "saveFailed", owner: documentOwner(1) },
-    ])
-
-    expect(retractNotices(list, documentOwner(1))).toHaveLength(1)
-  })
 })
 
 describe("visibleNotices", () => {

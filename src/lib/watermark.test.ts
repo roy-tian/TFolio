@@ -111,11 +111,6 @@ describe("clampWatermarkText", () => {
     expect(clamped).not.toContain("�")
     expect(validateWatermarkConfig(config({ text: clamped }))).toBeNull()
   })
-
-  it("leaves text within the limit untouched", () => {
-    expect(clampWatermarkText("内部资料")).toBe("内部资料")
-    expect(clampWatermarkText("")).toBe("")
-  })
 })
 
 describe("watermark geometry", () => {

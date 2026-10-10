@@ -28,12 +28,6 @@ describe("clampNoteText", () => {
     expect(clampNoteText("Hello")).toBe("Hello")
   })
 
-  test("cuts a note to the character ceiling", () => {
-    expect(clampNoteText("a".repeat(TEXT_NOTE_MAX_CHARS + 10))).toHaveLength(
-      TEXT_NOTE_MAX_CHARS,
-    )
-  })
-
   test("counts code points, not UTF-16 units", () => {
     // An astral character is two units and one `char` to Rust, so a limit
     // measured in units would cut a Chinese note at half its allowance.

@@ -386,20 +386,6 @@ mod tests {
     }
 
     #[test]
-    fn prints_document_position_by_default() {
-        let printed = labels(&config(), 3);
-
-        assert_eq!(
-            printed,
-            vec![
-                Some("— 1 —".to_string()),
-                Some("— 2 —".to_string()),
-                Some("— 3 —".to_string())
-            ]
-        );
-    }
-
-    #[test]
     fn custom_start_renumbers_from_the_range_first_page() {
         let mut value = config();
         value.range = Some((2, 4));

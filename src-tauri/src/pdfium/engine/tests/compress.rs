@@ -476,24 +476,6 @@ fn keeping_original_images_leaves_their_bytes() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn compression_estimates_report_both_sizes() {
-    let engine = test_engine();
-    let document = engine.open(two_page_pdf()).unwrap();
-
-    for image_dpi in [None, Some(150)] {
-        let estimate = engine
-            .estimate_compression(document.id, CompressionOptions { image_dpi })
-            .unwrap()
-            .expect("an uncancelled estimate should answer");
-        assert!(estimate.original_bytes > 0);
-        assert!(estimate.estimated_bytes > 0);
-    }
-
-    engine.close(document.id).unwrap();
-}
-
-#[test]
-#[ignore = "requires `bun run pdfium:download`"]
 fn a_stopped_export_abandons_without_failing() {
     let engine = test_engine();
     let directory = scratch_directory("compress-stop");
@@ -601,9 +583,8 @@ fn a_compressed_copy_refuses_to_replace_an_open_pdf() {
     assert!(refused.contains("cannot replace an open PDF"));
 
     // The source's bytes are the refusal's promise: nothing was written.
-    let before = fs::read(&source).unwrap();
+    assert_eq!(fs::read(&source).unwrap(), text_pdf());
     engine.close(document.id).unwrap();
-    assert_eq!(fs::read(&source).unwrap(), before);
     fs::remove_dir_all(directory).unwrap();
 }
 

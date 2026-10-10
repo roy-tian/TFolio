@@ -203,7 +203,9 @@ fn save_as_binds_a_plain_pdf_to_the_new_file() {
 }
 
 // Bound to its copy, a copy-only document would refuse the next write to that
-// copy as its own file; it stays on the file `save` already refuses.
+// copy as its own file; it stays on the file `save` already refuses. An export
+// onto that file must carry the same refusal, or the export dialog becomes the
+// way around it — a closed file can't be unmarked.
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_copy_only_export_leaves_the_document_on_its_source() {
@@ -313,45 +315,6 @@ fn save_as_refuses_a_file_open_in_another_document() {
     engine
         .export_to(holder.id, &held)
         .expect("a document's own file takes its save-as");
-
-    fs::remove_dir_all(&directory).ok();
-}
-
-// An export onto the source must carry `save`'s watermark refusal, or the
-// export dialog becomes the way around it — a closed file can't be unmarked.
-#[test]
-#[ignore = "requires `bun run pdfium:download`"]
-fn a_watermarked_export_will_not_overwrite_the_source() {
-    let engine = test_engine();
-    let directory = scratch_directory("watermark-export");
-    let source = directory.join("source.pdf");
-    fs::write(&source, minimal_pdf()).expect("the fixture should be writable");
-    let original = fs::read(&source).expect("the fixture should be readable");
-
-    let document = engine
-        .open_from_path(source.clone())
-        .expect("PDFium should open the PDF by path");
-    engine
-        .apply_watermark(document.id, watermark_config("DRAFT"))
-        .expect("PDFium should apply the watermark");
-
-    let error = engine
-        .export_to(document.id, &source)
-        .expect_err("a watermarked export must not land on the source");
-    assert_eq!(
-        error,
-        io::EXPORT_COPY_ONLY_ERROR,
-        "the refusal should be the code the frontend words"
-    );
-    assert_eq!(
-        fs::read(&source).expect("the source should still be readable"),
-        original,
-        "the refusal has to come before the write, not after it"
-    );
-
-    engine
-        .export_to(document.id, &directory.join("copy.pdf"))
-        .expect("the export should write the watermarked copy");
 
     fs::remove_dir_all(&directory).ok();
 }

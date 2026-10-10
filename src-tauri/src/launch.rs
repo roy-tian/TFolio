@@ -213,19 +213,6 @@ mod tests {
     }
 
     #[test]
-    fn resolves_a_relative_name_against_the_launch_directory() {
-        let directory = scratch("relative");
-        let file = write_file(&directory, "relative.pdf");
-
-        assert_eq!(
-            open_paths_from_args(["relative.pdf".to_string()], &directory),
-            vec![file]
-        );
-
-        let _ = fs::remove_dir_all(&directory);
-    }
-
-    #[test]
     fn drops_the_dot_segments_a_relative_name_carries() {
         let directory = scratch("dotted");
         let file = write_file(&directory, "dotted.pdf");

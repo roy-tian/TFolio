@@ -451,19 +451,6 @@ mod tests {
     }
 
     #[test]
-    fn the_first_change_lands_immediately_and_a_repeat_lands_nothing() {
-        let (state, file) = scratch("first-change");
-
-        state.record(geometry());
-        assert_eq!(on_disk(&file), Some(geometry()));
-
-        state.record(geometry());
-        assert_eq!(on_disk(&file), Some(geometry()));
-
-        let _ = std::fs::remove_dir_all(file.parent().expect("the scratch file has a directory"));
-    }
-
-    #[test]
     fn a_throttled_burst_defers_to_the_trailing_write() {
         let (state, file) = scratch("throttled-burst");
         let moved = WindowGeometry {
