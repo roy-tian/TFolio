@@ -487,8 +487,9 @@ const en = {
     sourceFilter: "PDFs, images, and Word documents",
     /** The same dialog where no office suite was detected to convert Word. */
     sourceFilterPlain: "PDFs and images",
-    addingFiles: "Adding files\u2026 Word documents convert as they arrive.",
-    addingFilesPlain: "Adding files\u2026",
+    addingFiles: "Adding files\u2026",
+    /** Follows the status directly, so it carries its own separator. */
+    addingFilesWordNote: " (Word documents convert as they arrive)",
     emptyDrop: "Click to open or drag PDFs, Word documents, and images here.",
     empty: "No files yet. Add at least two files to merge.",
     imageSource: "Image",

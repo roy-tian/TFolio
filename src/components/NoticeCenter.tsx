@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 
 import { OperationProgress } from "@/components/OperationProgress"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import {
   NOTICE_LIFE_MS,
   isPageNotice,
@@ -138,7 +139,8 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
   const message = t(entry.textKey, notice.values as TOptions)
   const action = notice.action ? noticeActions[notice.action.kind] : null
   const busy = notice.action?.busy === true
-  const ToneIcon = toneIcons[entry.tone]
+  const running = "running" in entry
+  const MarkIcon = running ? Spinner : toneIcons[entry.tone]
 
   return (
     <div
@@ -153,17 +155,24 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
     >
       {notice.progress === undefined ? (
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <ToneIcon
+          <MarkIcon
             aria-hidden
             // A plain report is the one tone whose mark stays quiet: it says
             // what happened, and nothing about it needs answering.
             className={cn(
               "size-4 shrink-0",
+              // The words already stop shimmering under reduced motion.
+              running && "motion-reduce:animate-none",
               entry.tone === "info" && "text-muted-foreground",
             )}
           />
           <div className="min-w-0 flex-1">
-            <p data-page-notice={isPageNotice(notice.kind) ? "" : undefined}>
+            <p
+              // Fitted to the words, so the shimmer crosses them rather than
+              // the row's empty width.
+              className={cn(running && "w-fit relative-color:shimmer")}
+              data-page-notice={isPageNotice(notice.kind) ? "" : undefined}
+            >
               {message}
             </p>
             {"detailKey" in entry ? <p>{t(entry.detailKey)}</p> : null}

@@ -44,6 +44,9 @@ export type NoticeAction = {
 type NoticeEntry = {
   detailKey?: ParseKeys
   life: NoticeLife
+  /** Work that reports no measure of its own: a spinner and shimmering words
+      stand in for the bar a progress notice draws. */
+  running?: true
   /** What this notice replaces, where that is not itself: the grid's six
       clipboard notices are one running report, not six that stand together. */
   slot?: string
@@ -244,6 +247,7 @@ export const noticeCatalogue = {
   // Standing for as long as the conversion runs; the open retracts it.
   wordConverting: {
     life: "standing",
+    running: true,
     textKey: "viewer.wordConverting",
     tone: "info",
   },

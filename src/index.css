@@ -5,6 +5,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* shadcn's `shimmer` makes the words transparent and paints them with a colour
+   relative to currentColor; a WebView that cannot parse one (Safari before
+   16.4) would leave no words at all, so it keeps them plain instead. */
+@custom-variant relative-color {
+  @supports (color: oklch(from currentColor l c h)) {
+    @slot;
+  }
+}
+
 html,
 body,
 #root {
