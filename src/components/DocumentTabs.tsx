@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { ChevronDown, ExternalLink, FolderOpen, House, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -120,7 +120,6 @@ export function DocumentTabs({
   const scrollerRef = useRef<HTMLDivElement>(null)
   const stripRef = useRef<HTMLDivElement>(null)
   const [scrolls, setScrolls] = useState(false)
-  const [scrollbarWidth, setScrollbarWidth] = useState(0)
   const tabIds: TabId[] = [HOME_TAB_ID, ...tabs.map((tab) => tab.id)]
   const reorderable = tabs.length > 1
   // The strip's handle is the tab itself; only its close button is pressed.
@@ -202,28 +201,6 @@ export function DocumentTabs({
     return () => observer.disconnect()
   }, [tabs.length])
 
-  // The PDF scrollport extends behind the strip, including its native scrollbar.
-  // Leave that gutter uncovered, even when a system theme makes it wider.
-  useLayoutEffect(() => {
-    const viewer = document.getElementById(panelElementId(activeId))
-      ?.querySelector<HTMLElement>("[data-pdf-scroll-root]")
-
-    if (!viewer) {
-      setScrollbarWidth(0)
-      return
-    }
-
-    const measure = () => {
-      setScrollbarWidth(viewer.offsetWidth - viewer.clientWidth)
-    }
-
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(viewer)
-
-    return () => observer.disconnect()
-  }, [activeId])
-
   // Also when `scrolls` flips: the menu button appearing takes its width off
   // the strip, which would otherwise clip the tab just scrolled into view.
   useEffect(() => {
@@ -256,8 +233,6 @@ export function DocumentTabs({
       className="fixed inset-x-0 top-12 z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted/70 px-2 backdrop-blur"
       data-tab-strip
       ref={stripRef}
-      // Overlay scrollbars measure zero; leave room for their expanded thumb too.
-      style={{ right: homeSelected ? 0 : `max(1.25rem, ${scrollbarWidth}px)` }}
     >
       {/* The open and list actions sit outside the tablist: they are not tabs,
           and arrow-key tab navigation must not land on them. */}
