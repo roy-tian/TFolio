@@ -5,6 +5,8 @@ use std::{
     cell::Cell,
     fs,
     path::{Path, PathBuf},
+    rc::Rc,
+    slice,
     sync::{Arc, Mutex},
 };
 
@@ -70,7 +72,7 @@ struct FakeSession {
     /// Flips `stop_flag` once this many files have converted, modelling a
     /// reader whose stop lands in the middle of an engine's batch.
     stop_after: Option<usize>,
-    stop_flag: Option<Arc<Cell<bool>>>,
+    stop_flag: Option<Rc<Cell<bool>>>,
 }
 
 impl ConvertSession for FakeSession {
@@ -266,13 +268,13 @@ fn a_converted_file_is_cached_until_it_changes() {
     let (first, first_log) = run(
         &converter,
         &[EngineKind::Word],
-        &[document.clone()],
+        slice::from_ref(&document),
         &[word_engine()],
     );
     let (second, second_log) = run(
         &converter,
         &[EngineKind::Word],
-        &[document.clone()],
+        slice::from_ref(&document),
         &[word_engine()],
     );
 
@@ -517,7 +519,7 @@ fn a_stop_mid_batch_keeps_what_it_already_converted() {
     // once and named twice: a rewrite's mtime is nothing to test against.
     let first = scratch.document("first.docx", "fine");
     let second = scratch.document("second.docx", "also fine");
-    let stop = Arc::new(Cell::new(false));
+    let stop = Rc::new(Cell::new(false));
 
     let stopped = converter.resolve_with(
         &detected,
@@ -530,7 +532,7 @@ fn a_stop_mid_batch_keeps_what_it_already_converted() {
                 log: Arc::new(Mutex::new(Log::default())),
                 seen: 0,
                 stop_after: Some(1),
-                stop_flag: Some(Arc::clone(&stop)),
+                stop_flag: Some(Rc::clone(&stop)),
             }) as Box<dyn ConvertSession>)
         },
     );
