@@ -223,6 +223,25 @@ fn source_facts(path: &Path) -> Option<SourceFacts> {
     })
 }
 
+/// The user's TEMP, which Office itself must be free to write: a
+/// document-control agent (IP-guard) let Word read a staged copy under the
+/// AppData cache but silently dropped the PDF it exported beside it.
+#[cfg(windows)]
+fn conversion_root(app: &AppHandle) -> Option<PathBuf> {
+    let identifier = &app.config().identifier;
+
+    app.path()
+        .temp_dir()
+        .ok()
+        .map(|directory| directory.join(identifier))
+}
+
+/// Elsewhere the per-user cache: Linux's temp directory is the shared `/tmp`.
+#[cfg(not(windows))]
+fn conversion_root(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_cache_dir().ok()
+}
+
 /// The cache is keyed by canonical path, mtime and size, so a file edited
 /// between listing and merging converts again rather than merging stale.
 pub struct WordConverter {
@@ -241,10 +260,7 @@ struct CachedPdf {
 
 impl WordConverter {
     pub fn new(app: &AppHandle) -> Self {
-        let run_dir = app
-            .path()
-            .app_cache_dir()
-            .ok()
+        let run_dir = conversion_root(app)
             .map(|directory| directory.join(format!("{RUN_DIR_PREFIX}{}", std::process::id())));
 
         if let Some(directory) = &run_dir {
@@ -252,6 +268,13 @@ impl WordConverter {
             // the middle of a conversion would read as the file's refusal.
             let _ = fs::create_dir_all(directory);
             sweep_stale_runs(directory);
+
+            // Earlier releases ran under the AppData cache, and a crash
+            // there left files nothing else would ever come back for.
+            #[cfg(windows)]
+            if let (Ok(legacy), Some(name)) = (app.path().app_cache_dir(), directory.file_name()) {
+                sweep_stale_runs(&legacy.join(name));
+            }
         }
 
         Self {
@@ -341,7 +364,7 @@ impl WordConverter {
 
             let Some(run_dir) = &self.run_dir else {
                 entries[index] = Entry::Failed(ConvertError::Failed(
-                    "the app's cache directory is unavailable".into(),
+                    "the app's conversion directory is unavailable".into(),
                 ));
                 continue;
             };
