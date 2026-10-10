@@ -391,7 +391,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewMode,
       viewerRef,
     })
-    const { committedSizeRef, pendingScrollPageRef, viewerHeight, viewerWidth } = viewport
+    const {
+      committedSizeRef,
+      pendingScrollPageRef,
+      scrollbarWidth,
+      viewerHeight,
+      viewerWidth,
+    } = viewport
 
     const zoom = useZoom({
       contentHeight: Math.max(0, viewerHeight - CONTENT_PADDING_Y),
@@ -1617,6 +1623,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           print={print}
           saveHint={saveHint}
           saveLabel={saveLabel}
+          scrollbarWidth={scrollbarWidth}
           searchOpen={search.searchOpen}
           tool={{
             activeTool,

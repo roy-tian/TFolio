@@ -37,6 +37,7 @@ export function useViewerViewport({
 }: UseViewerViewportOptions) {
   const [viewerWidth, setViewerWidth] = useState(0)
   const [viewerHeight, setViewerHeight] = useState(0)
+  const [scrollbarWidth, setScrollbarWidth] = useState(0)
   // The mode the last commit actually laid out, so a switch can be told from a
   // re-render — the layout is what strands an offset, not the stored choice.
   const laidOutViewModeRef = useRef(viewMode)
@@ -88,6 +89,7 @@ export function useViewerViewport({
         return
       }
 
+      setScrollbarWidth(viewer.offsetWidth - viewer.clientWidth)
       const committed = committedSizeRef.current
 
       if (
@@ -230,6 +232,7 @@ export function useViewerViewport({
   return {
     committedSizeRef,
     pendingScrollPageRef,
+    scrollbarWidth,
     viewerHeight,
     viewerWidth,
   }
