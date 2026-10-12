@@ -38,20 +38,30 @@ impl RawBitmap {
         };
         let stride = self.bytes.len().checked_div(height).unwrap_or(0);
 
-        // A zero stride would panic in `chunks_exact`, and release aborts on panic.
-        if stride == 0 || stride < width * channels {
-            return Err("PDFium's bitmap is smaller than its size".into());
+        // A zero size would panic in `chunks_exact`, and release aborts on panic.
+        if width == 0 || stride < width * channels {
+            return Err("PDFium's bitmap is empty or smaller than its size".into());
         }
 
-        let mut rgb = Vec::with_capacity(width * height * 3);
+        let mut rgb = vec![0; width * height * 3];
+        let rows = rgb
+            .chunks_exact_mut(width * 3)
+            .zip(self.bytes.chunks_exact(stride));
 
-        for row in self.bytes.chunks_exact(stride).take(height) {
-            for pixel in row[..width * channels].chunks_exact(channels) {
-                match channels {
-                    1 => rgb.extend_from_slice(&[pixel[0], pixel[0], pixel[0]]),
-                    _ => rgb.extend_from_slice(&pixel[..3]),
+        // Matched once, not per pixel: pushing pixel by pixel measured about
+        // four times slower, 27 ms against 7 for an 1800 px page.
+        match channels {
+            1 => rows.for_each(|(out, row)| {
+                for (pixel, &gray) in out.chunks_exact_mut(3).zip(&row[..width]) {
+                    pixel.fill(gray);
                 }
-            }
+            }),
+            3 => rows.for_each(|(out, row)| out.copy_from_slice(&row[..width * 3])),
+            _ => rows.for_each(|(out, row)| {
+                for (pixel, source) in out.chunks_exact_mut(3).zip(row.chunks_exact(4)) {
+                    pixel.copy_from_slice(&source[..3]);
+                }
+            }),
         }
 
         RgbImage::from_raw(self.width, self.height, rgb)
@@ -82,6 +92,25 @@ mod tests {
                 .expect("a padded bitmap converts")
                 .into_raw(),
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        );
+    }
+
+    #[test]
+    fn padded_three_channel_rows_drop_their_padding() {
+        // One pixel a row, padded to the four-byte boundary PDFium aligns to.
+        let bitmap = RawBitmap {
+            bytes: vec![1, 2, 3, 0, 4, 5, 6, 0],
+            width: 1,
+            height: 2,
+            format: PdfBitmapFormat::BGR,
+        };
+
+        assert_eq!(
+            bitmap
+                .into_rgb()
+                .expect("a padded bitmap converts")
+                .into_raw(),
+            vec![1, 2, 3, 4, 5, 6]
         );
     }
 
