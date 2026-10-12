@@ -1,0 +1,57 @@
+[package]
+name = "tfolio-engine"
+# Not versioned with the app: `version:bump` aligns the app's files alone, and
+# nothing outside this workspace depends on the engine.
+version = "0.0.0"
+description = "TFolio's PDF engine: PDFium, fonts, and Word conversion, with no app shell"
+authors = ["Roy Tian"]
+license = "MIT"
+edition = "2021"
+publish = false
+
+[features]
+# The GUI suite's build: Word conversion answers deterministically, whatever
+# the machine running the specs has installed.
+e2e = []
+
+[dependencies]
+allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
+fontdb = "0.24.0"
+getrandom = "0.4"
+# The formats a merge may bring in as pages, plus the two the app already
+# renders with. Every decoder here is pure Rust: an image the reader picked is
+# parsed in this process, and `MAX_IMAGE_PIXELS` bounds what one may expand to.
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
+# PDFium reads outlines but cannot write one, so the merge wizard hands the
+# bytes PDFium just produced to lopdf to have their /Outlines written. It
+# only ever parses this app's own fresh output — a reader's file still
+# reaches PDFium alone. Default features are off: they are only date and
+# parallelism helpers this use has no need of.
+lopdf = { version = "0.45", default-features = false }
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
+# The fallback face is fetched at runtime rather than bundled, so the engine
+# needs an HTTPS client of its own. In the app this is the reqwest `tauri`
+# already depends on, with no TLS backend compiled in; naming one here turns
+# it on rather than adding a second HTTP stack. `rustls` verifies against the
+# platform's own trust store.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+serde = { version = "1", features = ["derive"] }
+# The fallback face's checksum is verified before it is ever handed to PDFium:
+# these bytes end up inside the reader's own documents.
+sha2 = "0.11"
+zip = { version = "4.6.1", default-features = false }
+
+# A timed-out or stopped converter is killed with its whole process group:
+# LibreOffice's launcher forks the real soffice.bin, which killing the
+# launcher alone would orphan along with its profile lock. Already in the
+# app's tree (the Tauri stack pulls it in), so naming it adds a direct use.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# The Windows Word-import engine's probe: whether Word's and WPS's
+# automation classes are registered, read straight from the merged HKCR
+# view. Already in the app's tree (the Tauri stack pulls it in), so naming it
+# here adds a direct use, not a new dependency, and this section costs the
+# Linux and macOS builds nothing.
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"

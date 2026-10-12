@@ -3,24 +3,37 @@ use std::{
     sync::Arc,
 };
 
+use serde::Deserialize;
 use tauri::{
     ipc::{Channel, InvokeBody, Request, Response},
     AppHandle, Manager, State, WebviewWindow,
 };
 use tauri_plugin_dialog::DialogExt;
+use tfolio_engine::{
+    download_fallback_font, size_limit_error, word_available, ExportOutcome, InsertOutcome,
+    MergeBookmarks, MergeOptions, OperationTarget, PageNumbersConfig, PagePoint, PagePointsRect,
+    PdfDocumentInfo, PdfFileSummary, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
+    PdfiumEngine, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
+    MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+};
 
-use crate::convert::{self, WORD_EXTENSIONS};
 use crate::recent::RecentFiles;
 use crate::windows::{page_generation, record_document, DocumentOwners};
 
-use super::engine::{MergeOptions, OperationTarget, PdfiumEngine, MERGE_IMAGE_EXTENSIONS};
-use super::font::{download_fallback_font, fallback_font_destination};
-use super::{
-    size_limit_error, ExportOutcome, InsertOutcome, MergePlan, PageNumbersConfig, PagePoint,
-    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfProgress, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, PdfiumState, RectEffect, RectStyle, TextNoteStyle,
-    WatermarkConfig, MAX_PDF_BYTES,
-};
+use super::paths::fallback_font_destination;
+use super::{PdfProgress, PdfiumState};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergePlan {
+    paths: Vec<String>,
+    /// A blank before any file that would otherwise open on an even page.
+    smart_padding: bool,
+    /// Every page laid on an A4 sheet of its own instead of keeping the size its
+    /// source gave it.
+    normalize_a4: bool,
+    bookmarks: MergeBookmarks,
+}
 
 /// A path is a string any page code can make up, so only paths the OS produced
 /// in this process's sight are acted on; the e2e build waives the check.
@@ -79,7 +92,7 @@ pub async fn open_pdf(
         .await
         .map_err(|error| format!("PDFium open task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id, None);
+    record_document(&owners, &window, page, document.id(), None);
 
     Ok(document)
 }
@@ -97,7 +110,7 @@ pub async fn create_pdf(
         .await
         .map_err(|error| format!("PDFium create task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id, None);
+    record_document(&owners, &window, page, document.id(), None);
 
     Ok(document)
 }
@@ -551,6 +564,11 @@ pub async fn insert_pdf_blank_page(
         .map_err(|error| format!("PDFium page insertion task failed: {error}"))?
 }
 
+#[tauri::command]
+pub fn word_conversion_available() -> bool {
+    word_available()
+}
+
 /// Shows the native open dialog and hands back the chosen path — recorded as
 /// approved, which is what entitles `open_pdf_from_path` to act on it later.
 /// Images and Word documents ride along, the merge's source list in miniature;
@@ -562,7 +580,7 @@ pub async fn pick_pdf_path(
     state: State<'_, PdfiumState>,
 ) -> Result<Option<String>, String> {
     let engine = Arc::clone(&state.0);
-    let word = convert::word_available();
+    let word = word_available();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>, String> {
         let mut extensions = vec!["pdf"];
@@ -624,7 +642,7 @@ pub async fn open_pdf_from_path(
     .await
     .map_err(|error| format!("PDFium open task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id, Some(path));
+    record_document(&owners, &window, page, document.id(), Some(path));
 
     Ok(document)
 }
@@ -654,7 +672,7 @@ pub async fn open_converted_from_path(
     .await
     .map_err(|error| format!("conversion task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id, None);
+    record_document(&owners, &window, page, document.id(), None);
 
     Ok(document)
 }
@@ -715,7 +733,7 @@ pub async fn pick_pdf_paths(
     state: State<'_, PdfiumState>,
 ) -> Result<Vec<String>, String> {
     let engine = Arc::clone(&state.0);
-    let word = convert::word_available();
+    let word = word_available();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
         // One filter covering everything a merge can take: a reader adding a
@@ -765,7 +783,7 @@ pub async fn inspect_pdf_files(
     window: WebviewWindow,
 ) -> Result<Vec<PdfFileSummary>, String> {
     let engine = Arc::clone(&state.0);
-    let word = convert::word_available();
+    let word = word_available();
     let label = window.label().to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -795,7 +813,7 @@ pub async fn merge_pdf_files(
     window: WebviewWindow,
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&state.0);
-    let word = convert::word_available();
+    let word = word_available();
     let page = page_generation(&window);
     let label = window.label().to_string();
 
@@ -823,7 +841,7 @@ pub async fn merge_pdf_files(
     .map_err(|error| format!("PDFium merge task failed: {error}"))??;
 
     if let Some(document) = &merged {
-        record_document(&owners, &window, page, document.id, None);
+        record_document(&owners, &window, page, document.id(), None);
     }
 
     Ok(merged)
@@ -923,7 +941,7 @@ fn export_and_bind(
 ) -> Result<ExportOutcome, String> {
     let outcome = engine.export_to(document_id, &path)?;
 
-    if outcome.saved_to_source {
+    if outcome.saved_to_source() {
         engine.approve_paths([&path]);
         app.state::<RecentFiles>().record(&path);
         app.state::<DocumentOwners>().adopt_path(document_id, path);

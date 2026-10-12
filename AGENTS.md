@@ -11,6 +11,8 @@
 - Explain non-obvious WHY in comments; keep them concise and omit self-evident descriptions.
 - Keep files cohesive; extract unrelated responsibilities. Around 1,000 lines, review whether
   splitting improves clarity; cohesive files may exceed it.
+- `src-tauri/engine` (`tfolio-engine`) must not depend on Tauri: the app resolves paths into
+  `EnginePaths` and owns commands, dialogs, windows, and the async runtime.
 - Page reordering calls the raw `FPDF_MovePages` binding in `page_reorder.rs`, bypassing
   `pdfium-render`'s page index cache: never keep a `PdfPage` alive past one engine call.
 - CI takes Bun's version from `packageManager`, not the local toolchain.
@@ -18,8 +20,9 @@
 ## Validation
 
 - Before a PR, run `bun run version:check`, `bun run test`, `bun run build`, and Cargo
-  `fmt -- --check`, `clippy --locked -- -D warnings` (which subsumes `check`), and `test --locked`
-  against `src-tauri/Cargo.toml`. Backend or GUI changes also require `bun run test:all`.
+  `fmt --all -- --check` (without `--all` it skips the engine crate), `clippy --locked -- -D warnings`
+  (which subsumes `check`), and `test --locked` against `src-tauri/Cargo.toml`. Backend or GUI
+  changes also require `bun run test:all`.
 - Run overlapping checks once; `test:all` satisfies the `bun run test` and Cargo `test --locked` requirements.
 - PDFium test fonts are not bundled. PDFium-dependent ignored Rust tests require `fonts:download`;
   missing fonts fail those tests instead of skipping them.

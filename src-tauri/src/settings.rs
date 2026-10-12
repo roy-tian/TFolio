@@ -3,11 +3,9 @@
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tfolio_engine::{PageNumbersPreferences, WatermarkConfig};
 
-use crate::{
-    pdfium::{PageNumbersPreferences, WatermarkConfig},
-    store::{Store, Stored},
-};
+use crate::store::{Store, Stored};
 
 /// What 0.1.3 and earlier kept, and all it kept: the page-number style.
 const REPLACED_FILE_NAME: &str = "preferences.json";
@@ -51,7 +49,7 @@ struct AnnotatePreferences {
     text_note: Option<TextNotePreferences>,
 }
 
-/// Not `pdfium::RectStyle`: the reader picks one style with the effect inside it
+/// Not `tfolio_engine::RectStyle`: the reader picks one style with the effect inside it
 /// and keeps the unused strength, so switching back draws what it drew before.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,7 +60,7 @@ struct RectPreferences {
     strength: f64,
 }
 
-/// The same fields `pdfium::TextNoteStyle` takes, but that one is command input
+/// The same fields `tfolio_engine::TextNoteStyle` takes, but that one is command input
 /// and reads only one way; this crosses back out to the dialog that set it.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

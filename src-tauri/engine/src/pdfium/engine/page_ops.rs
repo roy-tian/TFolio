@@ -193,7 +193,7 @@ pub(super) fn page_range_argument(indices: &[usize]) -> String {
 impl PdfiumEngine {
     /// Rearranges the pages into `order` — the current 1-based page numbers in
     /// their new sequence. The identity order changes nothing and bumps nothing.
-    pub(in crate::pdfium) fn reorder_pages(
+    pub fn reorder_pages(
         &self,
         document_id: u64,
         order: &[i32],
@@ -229,7 +229,7 @@ impl PdfiumEngine {
 
     /// Turns pages clockwise on top of what each carries. Alone among structure
     /// commands it moves no page: the turn is each page's rewritten `/Rotate`.
-    pub(in crate::pdfium) fn rotate_pages(
+    pub fn rotate_pages(
         &self,
         document_id: u64,
         page_numbers: &[i32],
@@ -287,7 +287,7 @@ impl PdfiumEngine {
 
     /// Deletes the given pages, first copying them — and the session state
     /// with them — into a stash under `stash_id` for a later restore.
-    pub(in crate::pdfium) fn delete_pages(
+    pub fn delete_pages(
         &self,
         document_id: u64,
         page_numbers: &[i32],
@@ -375,11 +375,7 @@ impl PdfiumEngine {
     /// Drops the stashes of undone inserts the reader has branched away from:
     /// no redo can reach them, and each holds a copy of its pages. An id with
     /// no stash is nothing to drop, which a repeated discard is.
-    pub(in crate::pdfium) fn discard_stashes(
-        &self,
-        document_id: u64,
-        stash_ids: &[u64],
-    ) -> Result<(), String> {
+    pub fn discard_stashes(&self, document_id: u64, stash_ids: &[u64]) -> Result<(), String> {
         // Closing a stash's document is PDFium work, so under the store's lock.
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
@@ -391,7 +387,7 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    pub(in crate::pdfium) fn restore_pages(
+    pub fn restore_pages(
         &self,
         document_id: u64,
         stash_id: u64,
@@ -507,7 +503,7 @@ impl PdfiumEngine {
 
     /// Inserts a blank page at 1-based `index`, sized from the unrotated
     /// dimensions of the page that will follow it — or precede it, at the end.
-    pub(in crate::pdfium) fn insert_blank_page(
+    pub fn insert_blank_page(
         &self,
         document_id: u64,
         index: i32,
@@ -570,7 +566,7 @@ impl PdfiumEngine {
 
     /// Inserts every page of the PDF at `path` as one edit, under the same
     /// limits as a fresh open; its pages become this document's own.
-    pub(in crate::pdfium) fn insert_from_path(
+    pub fn insert_from_path(
         &self,
         document_id: u64,
         path: PathBuf,
@@ -706,7 +702,7 @@ impl PdfiumEngine {
 
     /// The cross-tab thumbnail drag: pages copied from another open document as
     /// the reader has it, marks and all, export-only like an inserted file's.
-    pub(in crate::pdfium) fn insert_pages_from_document(
+    pub fn insert_pages_from_document(
         &self,
         document_id: u64,
         source_document_id: u64,
@@ -768,7 +764,7 @@ impl PdfiumEngine {
 
     /// The grid's copy-and-paste; PDFium cannot import into itself, so the
     /// pages detour through a scratch document, as a delete's stash does.
-    pub(in crate::pdfium) fn duplicate_pages(
+    pub fn duplicate_pages(
         &self,
         document_id: u64,
         page_numbers: &[i32],

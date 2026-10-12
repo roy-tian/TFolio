@@ -11,12 +11,11 @@ use std::{
 
 use image::{imageops, metadata::Orientation, DynamicImage, ImageDecoder, ImageFormat};
 use pdfium_render::prelude::*;
-use tauri::AppHandle;
 
 use super::{
     font::{
-        fallback_font_candidates, needs_embedded_font, page_number_face, regular_face, subset_for,
-        system_embedded_face, EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR, PAGE_NUMBER_GLYPHS,
+        needs_embedded_font, page_number_face, regular_face, subset_for, system_embedded_face,
+        EMBEDDED_FACE_PROBE, FONT_MISSING_ERROR, PAGE_NUMBER_GLYPHS,
     },
     geometry::{
         a4_placement, annotation_color, annotation_covers, page_rect_to_pdfium,
@@ -68,7 +67,7 @@ const MAX_SEARCH_MATCHES: usize = 10_000;
 const MAX_SEARCH_RECTS: usize = 50_000;
 // Matched on the extension because the wizard must sort a dropped file before
 // anything reads it; the bytes are still header-checked when decoded.
-pub(super) const MERGE_IMAGE_EXTENSIONS: [&str; 8] =
+pub const MERGE_IMAGE_EXTENSIONS: [&str; 8] =
     ["bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"];
 
 #[derive(Debug, PartialEq)]
@@ -242,7 +241,7 @@ fn open_entry_mut(
 /// What a cancellable operation works on. A merge names no document until it
 /// has built one, so it is named by the window whose modal wizard asked.
 #[derive(Clone, PartialEq, Eq)]
-pub(super) enum OperationTarget {
+pub enum OperationTarget {
     Document(u64),
     Archive(u64),
     Merge(String),
@@ -264,11 +263,11 @@ pub(super) enum OperationTarget {
 
 /// A merge's layout choices, and whether its Word sources may be converted.
 #[derive(Clone, Copy)]
-pub(super) struct MergeOptions {
-    pub(super) smart_padding: bool,
-    pub(super) normalize_a4: bool,
-    pub(super) bookmarks: MergeBookmarks,
-    pub(super) word_conversion: bool,
+pub struct MergeOptions {
+    pub smart_padding: bool,
+    pub normalize_a4: bool,
+    pub bookmarks: MergeBookmarks,
+    pub word_conversion: bool,
 }
 
 struct RunningOperation {
@@ -306,7 +305,7 @@ impl Drop for OperationGuard<'_> {
     }
 }
 
-pub(super) struct PdfiumEngine {
+pub struct PdfiumEngine {
     pdfium: &'static Pdfium,
     /// The same library bound again, for the calls pdfium-render does not wrap.
     raw_bindings: &'static dyn PdfiumLibraryBindings,
@@ -318,8 +317,7 @@ pub(super) struct PdfiumEngine {
     /// staged, never an older one over a newer.
     commits: Mutex<()>,
     next_document_id: AtomicU64,
-    /// Every place the downloadable fallback face may be, in trial order —
-    /// resolved at startup, the only point an `AppHandle` reaches this module.
+    /// Every place the downloadable fallback face may be, in trial order.
     fallback_font_candidates: Vec<PathBuf>,
     /// The fallback face's static Regular instance, resolved on first use and
     /// kept — most sessions never fetch the ~17 MB source it is cut from.
@@ -338,15 +336,26 @@ pub(super) struct PdfiumEngine {
     word: crate::convert::WordConverter,
 }
 
-#[derive(Clone)]
-pub struct PdfiumState(pub(super) Arc<PdfiumEngine>);
+/// Where the host keeps what the engine loads and writes. The host alone knows
+/// its own install layout, so it resolves these; none need exist yet.
+pub struct EnginePaths {
+    /// PDFium's library, in trial order.
+    pub library_candidates: Vec<PathBuf>,
+    /// The fallback face, in trial order.
+    pub fallback_font_candidates: Vec<PathBuf>,
+    /// Where Word conversions run, a directory per process beneath it. `None`
+    /// fails every conversion.
+    pub conversion_root: Option<PathBuf>,
+    /// Roots earlier releases converted under: swept of stale runs, never written.
+    pub retired_conversion_roots: Vec<PathBuf>,
+}
 
-impl PdfiumState {
-    pub fn new(app: &AppHandle) -> Result<Self, String> {
-        let (bindings, raw_bindings) = bind_pdfium(app)?;
+impl PdfiumEngine {
+    pub fn new(paths: EnginePaths) -> Result<Self, String> {
+        let (bindings, raw_bindings) = bind_pdfium(&paths.library_candidates)?;
         let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
 
-        Ok(Self(Arc::new(PdfiumEngine {
+        Ok(Self {
             pdfium,
             raw_bindings: Box::leak(raw_bindings),
             documents: Mutex::new(HashMap::new()),
@@ -354,42 +363,25 @@ impl PdfiumState {
             next_document_id: AtomicU64::new(1),
             // Absent is not fatal here: it only fails the first note that needs
             // it, so a missing font cannot stop the app from opening PDFs.
-            fallback_font_candidates: fallback_font_candidates(app),
+            fallback_font_candidates: paths.fallback_font_candidates,
             fallback_font: OnceLock::new(),
             system_face: OnceLock::new(),
             page_number_font: OnceLock::new(),
             approved_paths: Mutex::new(HashSet::new()),
             operations: Mutex::new(HashMap::new()),
             next_operation_id: AtomicU64::new(1),
-            word: crate::convert::WordConverter::new(app),
-        })))
-    }
-
-    pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
-        self.0.approve_paths(paths);
-    }
-
-    pub fn cancel_window_work(&self, label: &str) {
-        self.0.cancel_window_work(label);
+            word: crate::convert::WordConverter::new(
+                paths.conversion_root,
+                &paths.retired_conversion_roots,
+            ),
+        })
     }
 
     pub fn remove_conversion_files(&self) {
-        self.0.word.remove_run_dir();
+        self.word.remove_run_dir();
     }
 
-    /// Closing takes the PDFium lock, so it must not block the window event loop.
-    pub fn close_document_detached(&self, document_id: u64) {
-        let engine = Arc::clone(&self.0);
-        engine.cancel_document_work(document_id);
-
-        tauri::async_runtime::spawn_blocking(move || {
-            let _ = engine.close(document_id);
-        });
-    }
-}
-
-impl PdfiumEngine {
-    pub(super) fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
+    pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
         if let Ok(mut approved) = self.approved_paths.lock() {
             approved.extend(paths.into_iter().cloned());
         }
@@ -397,8 +389,7 @@ impl PdfiumEngine {
 
     /// Kept rather than consumed: the reader may cancel the unsaved guard and
     /// open the same file again; the e2e build waives the check at call sites.
-    #[cfg_attr(feature = "e2e", allow(dead_code))]
-    pub(super) fn is_approved(&self, path: &Path) -> bool {
+    pub fn is_approved(&self, path: &Path) -> bool {
         self.approved_paths
             .lock()
             .map(|approved| approved.contains(path))
@@ -442,7 +433,7 @@ impl PdfiumEngine {
 
     /// Flags every operation on `target` to stop, answering whether one
     /// listened. Takes no document lock — the operation it stops holds it.
-    pub(super) fn cancel_operation(&self, target: OperationTarget) -> bool {
+    pub fn cancel_operation(&self, target: OperationTarget) -> bool {
         let operations = lock_operations(&self.operations);
         let mut asked = false;
 
@@ -458,14 +449,14 @@ impl PdfiumEngine {
 
     /// A window's merge and conversions have nowhere to land once it is gone
     /// or reloading; a Word suite would otherwise run on for minutes.
-    pub(super) fn cancel_window_work(&self, label: &str) {
+    pub fn cancel_window_work(&self, label: &str) {
         self.cancel_operation(OperationTarget::Merge(label.to_string()));
         self.cancel_operation(OperationTarget::Convert(label.to_string()));
         self.cancel_operation(OperationTarget::OpenConverted(label.to_string()));
     }
 
     /// Cancel first so closing a document does not wait for its entire rebuild.
-    pub(super) fn cancel_document_work(&self, document_id: u64) {
+    pub fn cancel_document_work(&self, document_id: u64) {
         self.cancel_operation(OperationTarget::Document(document_id));
         self.cancel_operation(OperationTarget::Search(document_id));
         self.cancel_operation(OperationTarget::Archive(document_id));
@@ -475,7 +466,7 @@ impl PdfiumEngine {
 
     /// A new one-page A4 document, built in memory: no file of its own, so a
     /// save has nowhere to write until an export adopts a destination.
-    pub(super) fn create_blank(&self) -> Result<PdfDocumentInfo, String> {
+    pub fn create_blank(&self) -> Result<PdfDocumentInfo, String> {
         let bytes = {
             // PDFium work like any other, so under the store's lock — given
             // back before `open_with_source` takes it again.
@@ -499,11 +490,11 @@ impl PdfiumEngine {
         self.open_with_source(bytes, None)
     }
 
-    pub(super) fn open(&self, bytes: Vec<u8>) -> Result<PdfDocumentInfo, String> {
+    pub fn open(&self, bytes: Vec<u8>) -> Result<PdfDocumentInfo, String> {
         self.open_with_source(bytes, None)
     }
 
-    pub(super) fn open_from_path(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
+    pub fn open_from_path(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
         let bytes = read_pdf_bytes(&path)?;
 
         self.open_with_source(bytes, Some(path))
@@ -512,11 +503,7 @@ impl PdfiumEngine {
     /// An image or a Word document opened as its converted PDF. Built in
     /// memory with no source binding, like `create_blank`: the file behind it
     /// is only ever read, so there is no destination for approval to guard.
-    pub(super) fn open_converted(
-        &self,
-        window: &str,
-        path: PathBuf,
-    ) -> Result<PdfDocumentInfo, String> {
+    pub fn open_converted(&self, window: &str, path: PathBuf) -> Result<PdfDocumentInfo, String> {
         if is_merge_image(&path) {
             // Decoded before the lock: a decode is no PDFium work.
             let image = read_image(&path)?;
@@ -691,7 +678,7 @@ impl PdfiumEngine {
             .map(DynamicImage::ImageRgb8)
     }
 
-    pub(super) fn render_page(
+    pub fn render_page(
         &self,
         document_id: u64,
         page_number: i32,
@@ -702,7 +689,7 @@ impl PdfiumEngine {
         encode_png(&image).map_err(|error| format!("could not encode page {page_number}: {error}"))
     }
 
-    pub(super) fn render_thumbnail(
+    pub fn render_thumbnail(
         &self,
         document_id: u64,
         page_number: i32,
@@ -722,11 +709,7 @@ impl PdfiumEngine {
         Ok(webp.into_inner())
     }
 
-    pub(super) fn search_text(
-        &self,
-        document_id: u64,
-        query: &str,
-    ) -> Result<PdfSearchOutcome, String> {
+    pub fn search_text(&self, document_id: u64, query: &str) -> Result<PdfSearchOutcome, String> {
         // Rejected before normalization allocates a second string. The field has
         // a maxlength, but commands are callable directly and enforce their own.
         if query.chars().nth(MAX_SEARCH_CHARS).is_some() {
@@ -873,11 +856,7 @@ impl PdfiumEngine {
 
     /// The page's text as PDFium reconstructs it, line breaks included — unlike
     /// the spans, positioned layout runs no reader would want on a clipboard.
-    pub(super) fn extract_plain_text(
-        &self,
-        document_id: u64,
-        page_number: i32,
-    ) -> Result<String, String> {
+    pub fn extract_plain_text(&self, document_id: u64, page_number: i32) -> Result<String, String> {
         let documents = self.lock_documents()?;
         let entry = open_entry(&documents, document_id)?;
 
@@ -895,7 +874,7 @@ impl PdfiumEngine {
         Ok(text.all())
     }
 
-    pub(super) fn extract_text(
+    pub fn extract_text(
         &self,
         document_id: u64,
         page_number: i32,
@@ -1025,7 +1004,7 @@ impl PdfiumEngine {
             .ok_or_else(|| "the page-number font could not be cached".to_string())
     }
 
-    pub(super) fn close(&self, document_id: u64) -> Result<(), String> {
+    pub fn close(&self, document_id: u64) -> Result<(), String> {
         self.lock_documents()?.remove(&document_id);
 
         Ok(())
@@ -1153,7 +1132,7 @@ mod page_reorder;
 mod raster;
 mod watermark_preview;
 
-pub(crate) use io::is_merge_image;
+pub use io::is_merge_image;
 use io::{image_page_document, read_image, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};

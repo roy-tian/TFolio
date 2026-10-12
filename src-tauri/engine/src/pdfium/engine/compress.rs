@@ -496,7 +496,7 @@ impl PdfiumEngine {
     /// the document still matches it. `None` reports the run was stopped,
     /// which a superseding estimate or a closing dialog asks for; the answer
     /// it abandons was already unwanted.
-    pub(in crate::pdfium) fn estimate_compression(
+    pub fn estimate_compression(
         &self,
         document_id: u64,
         options: CompressionOptions,
@@ -535,7 +535,7 @@ impl PdfiumEngine {
 
     /// A compressed copy for a reader-chosen destination, announced per image
     /// where images are what the work is. `false` abandons, leaving no file.
-    pub(in crate::pdfium) fn export_compressed(
+    pub fn export_compressed(
         &self,
         document_id: u64,
         path: &Path,
@@ -579,7 +579,7 @@ impl PdfiumEngine {
 
     /// The dialog is gone, and with it every reason to hold a copy or two of
     /// the document.
-    pub(in crate::pdfium) fn release_compression(&self, document_id: u64) -> Result<(), String> {
+    pub fn release_compression(&self, document_id: u64) -> Result<(), String> {
         if let Some(entry) = self.lock_documents()?.get_mut(&document_id) {
             entry.compress_cache = None;
         }

@@ -19,12 +19,11 @@ use std::{
 };
 
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager};
 
 use crate::pdfium::MAX_PDF_BYTES;
 
 /// Both engines read .doc and .docx; anything richer waits until one earns it.
-pub(crate) const WORD_EXTENSIONS: [&str; 2] = ["doc", "docx"];
+pub const WORD_EXTENSIONS: [&str; 2] = ["doc", "docx"];
 
 /// Generous (a cold Word start takes tens of seconds) but finite: a hung
 /// converter must give way to the next engine.
@@ -128,7 +127,7 @@ fn detected() -> &'static Detected {
 
 /// Whether the wizard may promise Word conversion: the machine's own
 /// suites, detected passively — never a reader setting.
-pub(crate) fn word_available() -> bool {
+pub fn word_available() -> bool {
     // E2e answers yes with no engine behind it, so specs can drive the row
     // a refused conversion leaves; a closed door would never show it.
     if cfg!(feature = "e2e") {
@@ -136,11 +135,6 @@ pub(crate) fn word_available() -> bool {
     }
 
     !detected().engines.is_empty()
-}
-
-#[tauri::command]
-pub fn word_conversion_available() -> bool {
-    word_available()
 }
 
 /// Passive only: nothing here may start an office suite, because probing runs
@@ -190,7 +184,7 @@ fn probe() -> Detected {
 }
 
 /// Extension only: this decides before anything reads the file.
-pub(crate) fn is_word_document(path: &Path) -> bool {
+pub fn is_word_document(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| WORD_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
@@ -223,25 +217,6 @@ fn source_facts(path: &Path) -> Option<SourceFacts> {
     })
 }
 
-/// The user's TEMP, which Office itself must be free to write: a
-/// document-control agent (IP-guard) let Word read a staged copy under the
-/// AppData cache but silently dropped the PDF it exported beside it.
-#[cfg(windows)]
-fn conversion_root(app: &AppHandle) -> Option<PathBuf> {
-    let identifier = &app.config().identifier;
-
-    app.path()
-        .temp_dir()
-        .ok()
-        .map(|directory| directory.join(identifier))
-}
-
-/// Elsewhere the per-user cache: Linux's temp directory is the shared `/tmp`.
-#[cfg(not(windows))]
-fn conversion_root(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_cache_dir().ok()
-}
-
 /// The cache is keyed by canonical path, mtime and size, so a file edited
 /// between listing and merging converts again rather than merging stale.
 pub struct WordConverter {
@@ -259,9 +234,9 @@ struct CachedPdf {
 }
 
 impl WordConverter {
-    pub fn new(app: &AppHandle) -> Self {
-        let run_dir = conversion_root(app)
-            .map(|directory| directory.join(format!("{RUN_DIR_PREFIX}{}", std::process::id())));
+    pub(crate) fn new(root: Option<PathBuf>, retired_roots: &[PathBuf]) -> Self {
+        let run_dir =
+            root.map(|directory| directory.join(format!("{RUN_DIR_PREFIX}{}", std::process::id())));
 
         if let Some(directory) = &run_dir {
             // Made here rather than at first use: a missing directory in
@@ -269,11 +244,12 @@ impl WordConverter {
             let _ = fs::create_dir_all(directory);
             sweep_stale_runs(directory);
 
-            // Earlier releases ran under the AppData cache, and a crash
-            // there left files nothing else would ever come back for.
-            #[cfg(windows)]
-            if let (Ok(legacy), Some(name)) = (app.path().app_cache_dir(), directory.file_name()) {
-                sweep_stale_runs(&legacy.join(name));
+            // A crash under a retired root left files nothing else would
+            // ever come back for.
+            if let Some(name) = directory.file_name() {
+                for retired in retired_roots {
+                    sweep_stale_runs(&retired.join(name));
+                }
             }
         }
 

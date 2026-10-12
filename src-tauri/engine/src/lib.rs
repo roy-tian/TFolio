@@ -1,0 +1,15 @@
+//! The PDF engine apart from any app shell: the host resolves where things
+//! live (`EnginePaths`) and keeps these blocking calls off its UI thread.
+
+mod convert;
+mod pdfium;
+
+pub use convert::{is_word_document, word_available, WORD_EXTENSIONS};
+pub use pdfium::{
+    download_fallback_font, is_merge_image, size_limit_error, ArchiveOptions, CompressionEstimate,
+    CompressionOptions, EnginePaths, ExportOutcome, ImageFormat, InsertOutcome, MergeBookmarks,
+    MergeOptions, OperationTarget, PageNumbersConfig, PageNumbersPreferences, PagePoint,
+    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfSearchOutcome, PdfStructureUpdate,
+    PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig,
+    CJK_FONT_NAME, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, PDFIUM_LIBRARY_NAME,
+};

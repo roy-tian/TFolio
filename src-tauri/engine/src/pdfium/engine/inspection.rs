@@ -59,7 +59,7 @@ impl PdfiumEngine {
 
     /// Reads each merge candidate just far enough for the wizard's first step.
     /// An unreadable file is reported as such, so its row stays and says why.
-    pub(in crate::pdfium) fn inspect_files(
+    pub fn inspect_files(
         &self,
         window: &str,
         paths: Vec<PathBuf>,

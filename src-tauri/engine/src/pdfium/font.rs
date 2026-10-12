@@ -1,11 +1,4 @@
-use std::{
-    collections::HashSet,
-    env,
-    fmt::Write,
-    fs,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::HashSet, fmt::Write, fs, path::Path, time::Duration};
 
 use allsorts::{
     binary::read::ReadScope,
@@ -18,9 +11,8 @@ use allsorts::{
 };
 use fontdb::{Database, Family, Query, Source, Stretch, Style, Weight};
 use sha2::{Digest, Sha256};
-use tauri::{path::BaseDirectory, AppHandle, Manager};
 
-pub(super) const CJK_FONT_NAME: &str = "NotoSansSC.ttf";
+pub const CJK_FONT_NAME: &str = "NotoSansSC.ttf";
 /// Body text is Regular: a variable face left unpinned embeds wherever its own
 /// axes default to — Thin, for the fetched fallback.
 const REGULAR_FONT_WEIGHT: i32 = 400;
@@ -38,7 +30,7 @@ const FALLBACK_FONT_SHA256: &str =
     "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da";
 /// Compiled in so the licence cannot fail to arrive or differ from the pinned
 /// commit; it sits outside `resources/fonts/`, which the download script sweeps.
-const FALLBACK_FONT_LICENSE: &str = include_str!("../../resources/OFL.NotoSansSC.txt");
+const FALLBACK_FONT_LICENSE: &str = include_str!("../../../resources/OFL.NotoSansSC.txt");
 const FALLBACK_FONT_LICENSE_NAME: &str = "LICENSE.NotoSansSC";
 /// Generous — 17 MB over a slow line is not a failure — but finite, so a
 /// connection that opens and then stalls cannot spin for ever.
@@ -105,47 +97,11 @@ pub(super) fn needs_embedded_font(text: &str) -> bool {
         .any(|character| !matches!(character, ' '..='~' | '\u{a0}'..='\u{ff}' | '\n' | '\r'))
 }
 
-/// Existence is deliberately not checked: the fallback arrives only when a
-/// reader accepts the download.
-pub(super) fn fallback_font_candidates(app: &AppHandle) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-
-    if let Some(path) = env::var_os("TFOLIO_FONT_PATH") {
-        let path = PathBuf::from(path);
-
-        if path.is_dir() {
-            candidates.push(path.join(CJK_FONT_NAME));
-        } else if path.file_name().is_some_and(|file| file == CJK_FONT_NAME) {
-            candidates.push(path);
-        }
-    }
-
-    if let Some(downloaded) = fallback_font_destination(app) {
-        candidates.push(downloaded);
-    }
-
-    if let Ok(resource_path) = app.path().resolve(
-        Path::new("fonts").join(CJK_FONT_NAME),
-        BaseDirectory::Resource,
-    ) {
-        candidates.push(resource_path);
-    }
-
-    candidates.push(bundled_font_path(CJK_FONT_NAME));
-    candidates
-}
-
-/// The app's own data directory, not the resource directory: an `.app` bundle
-/// or `/usr` install is read-only, and where it is not, the bundle is signed.
-pub(super) fn fallback_font_destination(app: &AppHandle) -> Option<PathBuf> {
-    app.path()
-        .app_data_dir()
-        .ok()
-        .map(|directory| directory.join("fonts").join(CJK_FONT_NAME))
-}
-
-pub(super) fn bundled_font_path(name: &str) -> PathBuf {
+/// The app's resources, which tests read in place: the engine bundles none.
+#[cfg(test)]
+pub(super) fn bundled_font_path(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
         .join("resources")
         .join("fonts")
         .join(name)
@@ -274,7 +230,7 @@ fn hex(digest: &[u8]) -> String {
 
 /// Verified against the pinned size and digest before anything is written, and
 /// landed through a temporary sibling, so a failed fetch leaves no file behind.
-pub(super) async fn download_fallback_font(destination: &Path) -> Result<(), String> {
+pub async fn download_fallback_font(destination: &Path) -> Result<(), String> {
     let url = format!(
         "https://cdn.jsdelivr.net/gh/google/fonts@{FALLBACK_FONT_COMMIT}/{FALLBACK_FONT_SOURCE}"
     );
@@ -649,6 +605,7 @@ mod tests {
         // nothing else would notice one being bumped while the other stayed put.
         let script = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
                 .join("..")
                 .join("scripts")
                 .join("download-fonts.mjs"),

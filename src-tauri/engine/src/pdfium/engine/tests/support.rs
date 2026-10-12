@@ -54,6 +54,7 @@ pub(super) fn test_pdfium() -> (&'static Pdfium, &'static dyn PdfiumLibraryBindi
 
     *PDFIUM.get_or_init(|| {
         let library_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
             .join("resources")
             .join("pdfium")
             .join(PDFIUM_LIBRARY_NAME);
@@ -79,8 +80,8 @@ pub(super) fn test_engine() -> &'static PdfiumEngine {
         documents: Mutex::new(HashMap::new()),
         commits: Mutex::new(()),
         next_document_id: AtomicU64::new(1),
-        // Straight from the source tree: the tests have no `AppHandle` to
-        // resolve an app-data path through, and no business fetching a font.
+        // Straight from the source tree: the tests have no host to resolve an
+        // app-data path, and no business fetching a font.
         fallback_font_candidates: vec![crate::pdfium::font::bundled_font_path(
             crate::pdfium::font::CJK_FONT_NAME,
         )],

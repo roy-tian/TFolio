@@ -88,7 +88,7 @@ jobs:
           workspaces: ./src-tauri -> target
 
       - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
       # Clippy type-checks the same targets, so a separate `cargo check` adds nothing.
       - name: Run Clippy

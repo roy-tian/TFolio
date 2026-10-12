@@ -136,7 +136,7 @@ impl PdfiumEngine {
         work(&entry.document)
     }
 
-    pub(in crate::pdfium) fn export_archive(
+    pub fn export_archive(
         &self,
         document_id: u64,
         path: &Path,

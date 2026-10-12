@@ -1191,7 +1191,7 @@ impl PdfiumEngine {
         }
     }
 
-    pub(in crate::pdfium) fn apply_watermark_with_progress(
+    pub fn apply_watermark_with_progress(
         &self,
         document_id: u64,
         config: WatermarkConfig,
@@ -1261,7 +1261,7 @@ impl PdfiumEngine {
 
     /// Removes only the watermark this open session owns, rebuilding any other
     /// owned layer's tail so it survives the change unaltered.
-    pub(in crate::pdfium) fn remove_watermark_with_progress(
+    pub fn remove_watermark_with_progress(
         &self,
         document_id: u64,
         mut on_progress: impl FnMut(usize, usize),
@@ -1294,7 +1294,7 @@ impl PdfiumEngine {
 
     /// Applies page numbers, rebuilding every owned layer's tail in canonical
     /// order, numbers on top; the range validates against the current length.
-    pub(in crate::pdfium) fn apply_page_numbers_with_progress(
+    pub fn apply_page_numbers_with_progress(
         &self,
         document_id: u64,
         config: PageNumbersConfig,
@@ -1346,7 +1346,7 @@ impl PdfiumEngine {
 
     /// Removes only the page numbers this open session owns, rebuilding any
     /// watermark so it survives the change unaltered.
-    pub(in crate::pdfium) fn remove_page_numbers_with_progress(
+    pub fn remove_page_numbers_with_progress(
         &self,
         document_id: u64,
         mut on_progress: impl FnMut(usize, usize),

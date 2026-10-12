@@ -62,15 +62,15 @@ export type PdfExportOutcome = {
 }
 
 /** The backend's refusal to write over a file another tab holds, kept in step
-    with `EXPORT_TARGET_OPEN_ERROR` in `src-tauri/src/pdfium/engine/io.rs`. */
+    with `EXPORT_TARGET_OPEN_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
 export const EXPORT_TARGET_OPEN = "tfolio:export-target-open"
 
 /** A copy-only document's export aimed at its own file, kept in step with
-    `EXPORT_COPY_ONLY_ERROR` in `src-tauri/src/pdfium/engine/io.rs`. */
+    `EXPORT_COPY_ONLY_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
 export const EXPORT_COPY_ONLY = "tfolio:export-copy-only"
 
 /** A destination the OS would not let the app write, kept in step with
-    `EXPORT_DENIED_ERROR` in `src-tauri/src/pdfium/engine/io.rs`. */
+    `EXPORT_DENIED_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
 export const EXPORT_DENIED = "tfolio:export-denied"
 
 function isRefusal(error: unknown, code: string): boolean {
@@ -115,7 +115,7 @@ export type PdfInsertOutcome = {
 export const MAX_PAGE_WIDTH = 896
 
 // Mirrors MIN_RENDER_WIDTH, MAX_RENDER_WIDTH and MAX_THUMBNAIL_WIDTH in
-// src-tauri/src/pdfium/engine.rs; the backend rejects anything outside them.
+// src-tauri/engine/src/pdfium/engine.rs; the backend rejects anything outside them.
 export const MIN_RENDER_WIDTH = 64
 export const MAX_RENDER_WIDTH = 4096
 export const MAX_THUMBNAIL_RENDER_WIDTH = 512

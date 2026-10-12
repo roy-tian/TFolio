@@ -8,10 +8,10 @@ use std::{
 };
 
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tfolio_engine::{is_merge_image, is_word_document};
 
 use crate::{
-    convert::is_word_document,
-    pdfium::{is_merge_image, PdfiumState},
+    pdfium::PdfiumState,
     recent::is_recordable,
     windows::{focus_target, focus_target_except},
 };

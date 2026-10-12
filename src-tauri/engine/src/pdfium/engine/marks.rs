@@ -19,7 +19,7 @@ pub(super) fn owned_tail_base(
 impl PdfiumEngine {
     /// The preview must use the same subset and ascent as the embedded note,
     /// not the WebView's independently resolved `sans-serif` fallback.
-    pub(in crate::pdfium) fn text_note_font(&self, text: &str) -> Result<Vec<u8>, String> {
+    pub fn text_note_font(&self, text: &str) -> Result<Vec<u8>, String> {
         if text.trim().is_empty() || text.chars().count() > MAX_TEXT_NOTE_CHARS {
             return Err("a note's preview text is empty or too long".into());
         }
@@ -53,7 +53,7 @@ impl PdfiumEngine {
 
     /// Covers `quads` on `page_number` with one highlight annotation — one mark
     /// as far as the reader is concerned, so taking it back is one step.
-    pub(in crate::pdfium) fn add_highlight(
+    pub fn add_highlight(
         &self,
         document_id: u64,
         page_number: i32,
@@ -140,7 +140,7 @@ impl PdfiumEngine {
 
     /// The pixels inside `bounds` replaced by a raster treatment on one Stamp
     /// annotation; the page content beneath is untouched and still extractable.
-    pub(in crate::pdfium) fn add_rect_effect(
+    pub fn add_rect_effect(
         &self,
         document_id: u64,
         page_number: i32,
@@ -373,7 +373,7 @@ impl PdfiumEngine {
 
     /// A rectangle as a Stamp with a hand-built path, not a Square: the same
     /// kind of mark the blur and mosaic leave, really rendered, not `/IC`/`/CA`.
-    pub(in crate::pdfium) fn add_rect(
+    pub fn add_rect(
         &self,
         document_id: u64,
         page_number: i32,
@@ -480,7 +480,7 @@ impl PdfiumEngine {
 
     /// A stamp, not the FreeText the format has for this: PDFium 0.9.3 exposes
     /// no font size or face on one. No wrapping — a note breaks at returns only.
-    pub(in crate::pdfium) fn add_text_note(
+    pub fn add_text_note(
         &self,
         document_id: u64,
         page_number: i32,
@@ -680,11 +680,7 @@ impl PdfiumEngine {
 
     /// An id is itself the proof the annotation behind it is this session's to
     /// remove; re-checked here, since the caller is a browser and can lie.
-    pub(in crate::pdfium) fn delete_marks(
-        &self,
-        document_id: u64,
-        mark_ids: &[u64],
-    ) -> Result<Vec<i32>, String> {
+    pub fn delete_marks(&self, document_id: u64, mark_ids: &[u64]) -> Result<Vec<i32>, String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
 
@@ -769,7 +765,7 @@ impl PdfiumEngine {
 
     /// Topmost first — the one the reader sees, PDFium drawing in order — and
     /// only the session's own tail, which is all the eraser may find.
-    pub(in crate::pdfium) fn mark_at_point(
+    pub fn mark_at_point(
         &self,
         document_id: u64,
         page_number: i32,

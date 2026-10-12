@@ -1,7 +1,7 @@
 use super::*;
 
 impl PdfiumEngine {
-    pub(in crate::pdfium) fn render_watermark_preview(
+    pub fn render_watermark_preview(
         &self,
         document_id: u64,
         page_number: i32,

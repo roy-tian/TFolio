@@ -246,7 +246,7 @@ pub(super) fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-pub(crate) fn is_merge_image(path: &Path) -> bool {
+pub fn is_merge_image(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
@@ -593,7 +593,7 @@ impl PdfiumEngine {
 
     /// The guided merge's backend half. The result has no source path, so it can
     /// only ever be exported to a copy, never written back over a source.
-    pub(in crate::pdfium) fn merge_files_with_progress(
+    pub fn merge_files_with_progress(
         &self,
         window: &str,
         paths: Vec<PathBuf>,
@@ -846,7 +846,7 @@ impl PdfiumEngine {
         .ok_or_else(|| "the merge was stopped".to_string())
     }
 
-    pub(in crate::pdfium) fn save(&self, document_id: u64) -> Result<(), String> {
+    pub fn save(&self, document_id: u64) -> Result<(), String> {
         let _operation = self.begin_operation(OperationTarget::Document(document_id));
         let _commits = self.lock_commits()?;
         let mut documents = self.lock_documents()?;
@@ -893,7 +893,7 @@ impl PdfiumEngine {
     /// The folder a save-as dialog should open in for this document: its own
     /// file's, when it has one. `None` — no file, or the store busy with an
     /// edit — tells the caller to fall back elsewhere.
-    pub(in crate::pdfium) fn document_source_dir(&self, document_id: u64) -> Option<PathBuf> {
+    pub fn document_source_dir(&self, document_id: u64) -> Option<PathBuf> {
         let documents = self.try_lock_documents()?;
         open_entry(&documents, document_id)
             .ok()?
@@ -908,11 +908,7 @@ impl PdfiumEngine {
     /// which `save` writes there and the old file stays as it was. A copy-only
     /// document with a file stays bound to it: `save` refuses that file, so
     /// binding the copy would refuse the next write to the copy as well.
-    pub(in crate::pdfium) fn export_to(
-        &self,
-        document_id: u64,
-        path: &Path,
-    ) -> Result<ExportOutcome, String> {
+    pub fn export_to(&self, document_id: u64, path: &Path) -> Result<ExportOutcome, String> {
         let _operation = self.begin_operation(OperationTarget::Document(document_id));
         let _commits = self.lock_commits()?;
         let mut documents = self.lock_documents()?;
@@ -977,7 +973,7 @@ impl PdfiumEngine {
     /// The bare write `save` and `export_to` share; test-only since the dialogs
     /// moved into the commands.
     #[cfg(test)]
-    pub(in crate::pdfium) fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
+    pub fn save_to(&self, document_id: u64, path: &Path) -> Result<(), String> {
         let _operation = self.begin_operation(OperationTarget::Document(document_id));
         let _commits = self.lock_commits()?;
         let mut documents = self.lock_documents()?;

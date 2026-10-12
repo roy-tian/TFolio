@@ -1,3 +1,9 @@
+# The engine is a crate of its own so no Tauri type can reach it. Listed as a
+# default member so every command run on this manifest covers it too.
+[workspace]
+members = ["engine"]
+default-members = [".", "engine"]
+
 [package]
 name = "tfolio"
 version = "0.1.16"
@@ -11,45 +17,23 @@ name = "tfolio_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
+e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver", "tfolio-engine/e2e"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
 # The one transform between a signed release and the two strings that check
 # it: both the key and the signature reach this app base64-wrapped. Already
 # in the tree under the updater plugin, so this names it rather than adds it.
 base64 = "0.22"
-fontdb = "0.24.0"
-getrandom = "0.4"
-# The formats a merge may bring in as pages, plus the two the app already
-# renders with. Every decoder here is pure Rust: an image the reader picked is
-# parsed in this process, and `MAX_IMAGE_PIXELS` bounds what one may expand to.
-image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
-# PDFium reads outlines but cannot write one, so the merge wizard hands the
-# bytes PDFium just produced to lopdf to have their /Outlines written. It
-# only ever parses this app's own fresh output — a reader's file still
-# reaches PDFium alone. Default features are off: they are only date and
-# parallelism helpers this use has no need of.
-lopdf = { version = "0.45", default-features = false }
 # What lets a downloaded installer outlive the run that fetched it. The
 # updater plugin checks the signature over bytes it never writes down and
 # keeps that check private, so a saved package is checked again here — with
 # the same crate the plugin itself verifies with.
 minisign-verify = "0.2"
-pdfium-render = { version = "=0.9.4", default-features = false, features = ["image_025", "pdfium_7881", "thread_safe"] }
-# The fallback face is fetched at runtime rather than bundled, so the app needs
-# an HTTPS client of its own. `tauri` already depends on reqwest, but with no
-# TLS backend compiled in; naming it here turns one on rather than adding a
-# second HTTP stack. `rustls` verifies against the platform's own trust store.
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# The fallback face's checksum is verified before it is ever handed to PDFium:
-# these bytes end up inside the reader's own documents.
-sha2 = "0.11"
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-dialog = "2"
 # The release check. Its network call, its signature check and its install are
@@ -59,11 +43,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-wdio = { version = "1", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+tfolio-engine = { path = "engine" }
 # The settings file's format. Already in the tree — `tauri-build` reads
 # `tauri.conf.json`'s Cargo side with it — so naming it here adds a name,
 # not a dependency.
 toml = "1"
-zip = { version = "4.6.1", default-features = false }
 
 # Where a file the reader double-clicked arrives, on the two platforms whose
 # answer to "open this with TFolio" is a second TFolio: it hands that process's
@@ -78,21 +62,6 @@ window-vibrancy = "0.8.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSWindow"] }
-
-# A timed-out or stopped converter is killed with its whole process group:
-# LibreOffice's launcher forks the real soffice.bin, which killing the
-# launcher alone would orphan along with its profile lock. Already in the
-# tree (the Tauri stack pulls it in), so naming it adds a direct use.
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-# The Windows Word-import engine's probe: whether Word's and WPS's
-# automation classes are registered, read straight from the merged HKCR
-# view. Already in the tree (the Tauri stack pulls it in), so naming it here
-# adds a direct use, not a new dependency, and this section costs the Linux
-# and macOS builds nothing.
-[target.'cfg(windows)'.dependencies]
-windows-registry = "0.6"
 
 [profile.dev.package.allsorts]
 opt-level = 3

@@ -7,7 +7,7 @@ export function noteFontFamily(text: string): string {
 }
 
 /** The step between a note's baselines, mirroring `TEXT_NOTE_LINE_HEIGHT` in
-    `src-tauri/src/pdfium/geometry.rs`. */
+    `src-tauri/engine/src/pdfium/geometry.rs`. */
 export const TEXT_NOTE_LINE_HEIGHT = 1.2
 
 /** What PDFium reports for the standard Helvetica — its own bundled clone,
