@@ -92,7 +92,6 @@ pub(super) fn test_engine() -> &'static PdfiumEngine {
         // Resolved from the system's own fonts on the first apply, exactly as
         // the app resolves it.
         page_number_font: OnceLock::new(),
-        approved_paths: Mutex::new(HashSet::new()),
         operations: Mutex::new(HashMap::new()),
         next_operation_id: AtomicU64::new(1),
     })
@@ -352,7 +351,6 @@ pub(super) fn font_engine(
         fallback_font: OnceLock::new(),
         system_face: OnceLock::from(system_face),
         page_number_font: OnceLock::new(),
-        approved_paths: Mutex::new(HashSet::new()),
         operations: Mutex::new(HashMap::new()),
         next_operation_id: AtomicU64::new(1),
     }

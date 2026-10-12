@@ -11,10 +11,13 @@ fn opens_and_renders_pdf_with_pdfium() {
     assert_eq!(document.num_pages, 1);
     assert_eq!(document.pages.len(), 1);
 
-    let png = engine
+    let page = engine
         .render_page(document.id, 1, 400)
         .expect("PDFium should render the page");
-    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    // 200 × 300 points, scaled to the width asked for.
+    assert_eq!(page.dimensions(), (400, 600));
+    // Blank, so all of it is the white every page renders onto.
+    assert!(page.pixels().all(|pixel| pixel.0 == [255, 255, 255]));
 
     // The minimal PDF carries no page content, so it has no selectable text.
     let spans = engine
@@ -25,18 +28,16 @@ fn opens_and_renders_pdf_with_pdfium() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn renders_thumbnail_as_webp() {
+fn renders_thumbnail_within_its_cap() {
     let engine = test_engine();
     let document = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
-    let webp = engine
+    let thumbnail = engine
         .render_thumbnail(document.id, 1, 200)
         .expect("PDFium should render the thumbnail");
 
-    // RIFF container magic, with the four-byte file size in between.
-    assert_eq!(&webp[..4], b"RIFF");
-    assert_eq!(&webp[8..12], b"WEBP");
+    assert_eq!(thumbnail.dimensions(), (200, 300));
 
     let error = engine
         .render_thumbnail(document.id, 1, MAX_THUMBNAIL_WIDTH + 1)

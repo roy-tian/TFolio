@@ -79,13 +79,9 @@ fn watermark_is_semi_transparent() {
         let reopened = engine
             .open(bytes)
             .expect("PDFium should reopen the alpha spike");
-        let image = image::load_from_memory(
-            &engine
-                .render_page(reopened.id, 1, 400)
-                .expect("PDFium should render the reopened alpha spike"),
-        )
-        .expect("the alpha spike should be a PNG")
-        .into_rgb8();
+        let image = engine
+            .render_page(reopened.id, 1, 400)
+            .expect("PDFium should render the reopened alpha spike");
         engine
             .close(reopened.id)
             .expect("the reopened fixture should close");
@@ -255,13 +251,9 @@ fn places_watermark_in_display_space_on_rotated_pages() {
         engine
             .apply_watermark(document.id, config)
             .expect("PDFium should apply a display-space watermark");
-        let image = image::load_from_memory(
-            &engine
-                .render_page(document.id, 1, 400)
-                .expect("PDFium should render the rotated watermark"),
-        )
-        .expect("the rotated watermark should be a PNG")
-        .into_rgb8();
+        let image = engine
+            .render_page(document.id, 1, 400)
+            .expect("PDFium should render the rotated watermark");
         let mut left = image.width();
         let mut right = 0;
         let mut top = image.height();

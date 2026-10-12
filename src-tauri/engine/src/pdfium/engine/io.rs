@@ -595,7 +595,7 @@ impl PdfiumEngine {
     /// only ever be exported to a copy, never written back over a source.
     pub fn merge_files_with_progress(
         &self,
-        window: &str,
+        scope: &str,
         paths: Vec<PathBuf>,
         options: MergeOptions,
         mut on_progress: impl FnMut(usize, usize),
@@ -617,7 +617,7 @@ impl PdfiumEngine {
 
         // Stoppable like an owned-layer rebuild, whose loop holds the one lock
         // for the whole pile; nothing needs rollback — the store is joined last.
-        let operation = self.begin_operation(OperationTarget::Merge(window.to_string()));
+        let operation = self.begin_operation(OperationTarget::Merge(scope.to_string()));
 
         // One unit per source, plus the conversions this run will really do
         // (a cache hit adds none), then serialization, outline, and opening.

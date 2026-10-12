@@ -17,7 +17,7 @@ name = "tfolio_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver", "tfolio-engine/e2e"]
+e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -27,6 +27,10 @@ tauri-build = { version = "2", features = [] }
 # it: both the key and the signature reach this app base64-wrapped. Already
 # in the tree under the updater plugin, so this names it rather than adds it.
 base64 = "0.22"
+# Encodes the pages the engine renders as pixels into what the WebView
+# decodes. Already in the tree under the engine, so this names it rather than
+# adds it.
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 # What lets a downloaded installer outlive the run that fetched it. The
 # updater plugin checks the signature over bytes it never writes down and
 # keeps that check private, so a saved package is checked again here — with

@@ -14,7 +14,7 @@ pub async fn cancel_pdf_archive(
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::Archive(document_id)))
 }
 
@@ -28,7 +28,7 @@ pub async fn export_pdf_archive(
     app: AppHandle,
     state: State<'_, PdfiumState>,
 ) -> Result<Option<String>, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     tauri::async_runtime::spawn_blocking(move || {
         let Some(picked) = export_dialog(
             &app,

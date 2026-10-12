@@ -506,10 +506,10 @@ fn a_stopped_merge_hands_back_nothing() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn a_released_window_stops_its_own_merge_and_no_other() {
+fn a_released_scope_stops_its_own_merge_and_no_other() {
     let _merges = merge_test_guard();
     let engine = test_engine();
-    let directory = scratch_directory("merge-files-window-released");
+    let directory = scratch_directory("merge-files-scope-released");
     let paths = merge_sources(
         &directory,
         &[
@@ -525,26 +525,26 @@ fn a_released_window_stops_its_own_merge_and_no_other() {
     };
     let merge_releasing = |released: &str| {
         engine
-            .merge_files_with_progress("window-2", paths.clone(), options, |completed, _| {
+            .merge_files_with_progress("scope-2", paths.clone(), options, |completed, _| {
                 if completed > 0 {
-                    engine.cancel_window_work(released);
+                    engine.cancel_scope_work(released);
                 }
             })
             .expect("a stopped merge is not a failure")
     };
 
     // Not `main`: the engine is shared, and releasing `main` would stop the
-    // conversions other tests run under that label at the same moment.
-    let untouched = merge_releasing("window-3");
+    // conversions other tests run under that scope at the same moment.
+    let untouched = merge_releasing("scope-3");
     assert!(
         untouched.is_some(),
-        "another window going leaves this window's merge running"
+        "another scope going leaves this scope's merge running"
     );
     let _ = engine.close(untouched.map(|document| document.id).unwrap_or_default());
 
     assert!(
-        merge_releasing("window-2").is_none(),
-        "the window's own release stops its merge"
+        merge_releasing("scope-2").is_none(),
+        "the scope's own release stops its merge"
     );
 
     fs::remove_dir_all(directory).ok();

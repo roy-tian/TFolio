@@ -191,7 +191,6 @@ pub(crate) fn versioned_opt_candidates(opt: &Path) -> Vec<PathBuf> {
 /// Passive: files are looked for, nothing is run. The PATH scan is last
 /// because PATH may hold a wrapper rather than the real binary.
 #[cfg(not(windows))]
-#[cfg_attr(feature = "e2e", allow(dead_code))]
 pub(crate) fn find_soffice() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 

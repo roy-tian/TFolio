@@ -4,7 +4,7 @@
 mod convert;
 mod pdfium;
 
-pub use convert::{is_word_document, word_available, WORD_EXTENSIONS};
+pub use convert::{is_word_document, WordSuites, WORD_EXTENSIONS};
 pub use pdfium::{
     download_fallback_font, is_merge_image, size_limit_error, ArchiveOptions, CompressionEstimate,
     CompressionOptions, EnginePaths, ExportOutcome, ImageFormat, InsertOutcome, MergeBookmarks,

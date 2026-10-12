@@ -1,10 +1,13 @@
 use super::*;
 
+use std::io::Cursor;
+
 use allsorts::{
     binary::read::ReadScope,
     font::{Font, MatchingPresentation},
     font_data::FontData,
 };
+use image::ImageFormat;
 
 use crate::pdfium::geometry::{A4_LONG_POINTS, A4_SHORT_POINTS};
 use crate::pdfium::library::{bind_library_twice, PDFIUM_LIBRARY_NAME};

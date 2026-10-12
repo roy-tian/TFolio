@@ -12,7 +12,8 @@
 - Keep files cohesive; extract unrelated responsibilities. Around 1,000 lines, review whether
   splitting improves clarity; cohesive files may exceed it.
 - `src-tauri/engine` (`tfolio-engine`) must not depend on Tauri: the app resolves paths into
-  `EnginePaths` and owns commands, dialogs, windows, and the async runtime.
+  `EnginePaths` and owns commands, dialogs, windows, path approval, IPC image encoding, and the
+  async runtime. The engine has no `e2e` feature; e2e choices are passed in by the app.
 - Page reordering calls the raw `FPDF_MovePages` binding in `page_reorder.rs`, bypassing
   `pdfium-render`'s page index cache: never keep a `PdfPage` alive past one engine call.
 - CI takes Bun's version from `packageManager`, not the local toolchain.

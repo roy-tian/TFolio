@@ -9,11 +9,6 @@ license = "MIT"
 edition = "2021"
 publish = false
 
-[features]
-# The GUI suite's build: Word conversion answers deterministically, whatever
-# the machine running the specs has installed.
-e2e = []
-
 [dependencies]
 allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
 fontdb = "0.24.0"

@@ -38,13 +38,12 @@ const STALE_RUN_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const RUN_DIR_PREFIX: &str = "word-import-";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "e2e", allow(dead_code))]
 pub(crate) enum EngineKind {
     #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
     Word,
     #[cfg_attr(not(windows), allow(dead_code))]
     Wps,
-    #[cfg_attr(any(windows, feature = "e2e"), allow(dead_code))]
+    #[cfg_attr(windows, allow(dead_code))]
     LibreOffice,
 }
 
@@ -119,27 +118,18 @@ pub(crate) struct Detected {
     pub(crate) soffice: Option<PathBuf>,
 }
 
-static DETECTED: OnceLock<Detected> = OnceLock::new();
-
-fn detected() -> &'static Detected {
-    DETECTED.get_or_init(probe)
-}
-
-/// Whether the wizard may promise Word conversion: the machine's own
-/// suites, detected passively — never a reader setting.
-pub fn word_available() -> bool {
-    // E2e answers yes with no engine behind it, so specs can drive the row
-    // a refused conversion leaves; a closed door would never show it.
-    if cfg!(feature = "e2e") {
-        return true;
-    }
-
-    !detected().engines.is_empty()
+/// Which office suites Word conversion may call on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WordSuites {
+    /// Whatever this machine has installed, detected on first use.
+    Installed,
+    /// None, whatever is installed: every conversion is refused as having no
+    /// converter, so the outcome cannot depend on the machine.
+    Absent,
 }
 
 /// Passive only: nothing here may start an office suite, because probing runs
 /// at first use, in the middle of a gesture the reader is waiting on.
-#[cfg(not(feature = "e2e"))]
 fn probe() -> Detected {
     let mut engines = Vec::new();
 
@@ -171,16 +161,6 @@ fn probe() -> Detected {
     }
 
     Detected { engines, soffice }
-}
-
-/// The e2e build answers deterministically: no engine, ever, so a spec never
-/// depends on what the machine it runs on happens to have installed.
-#[cfg(feature = "e2e")]
-fn probe() -> Detected {
-    Detected {
-        engines: Vec::new(),
-        soffice: None,
-    }
 }
 
 /// Extension only: this decides before anything reads the file.
@@ -225,6 +205,7 @@ pub struct WordConverter {
     /// Held for a whole batch: two windows importing at once would overwrite
     /// each other's staged copies and share one LibreOffice profile.
     gate: Mutex<()>,
+    detected: OnceLock<Detected>,
 }
 
 struct CachedPdf {
@@ -234,7 +215,11 @@ struct CachedPdf {
 }
 
 impl WordConverter {
-    pub(crate) fn new(root: Option<PathBuf>, retired_roots: &[PathBuf]) -> Self {
+    pub(crate) fn new(
+        root: Option<PathBuf>,
+        retired_roots: &[PathBuf],
+        suites: WordSuites,
+    ) -> Self {
         let run_dir =
             root.map(|directory| directory.join(format!("{RUN_DIR_PREFIX}{}", std::process::id())));
 
@@ -253,10 +238,19 @@ impl WordConverter {
             }
         }
 
+        let detected = match suites {
+            WordSuites::Installed => OnceLock::new(),
+            WordSuites::Absent => OnceLock::from(Detected {
+                engines: Vec::new(),
+                soffice: None,
+            }),
+        };
+
         Self {
             run_dir,
             cache: Mutex::new(HashMap::new()),
             gate: Mutex::new(()),
+            detected,
         }
     }
 
@@ -267,6 +261,7 @@ impl WordConverter {
             run_dir: Some(run_dir),
             cache: Mutex::new(HashMap::new()),
             gate: Mutex::new(()),
+            detected: OnceLock::new(),
         }
     }
 
@@ -276,7 +271,16 @@ impl WordConverter {
             run_dir: None,
             cache: Mutex::new(HashMap::new()),
             gate: Mutex::new(()),
+            detected: OnceLock::new(),
         }
+    }
+
+    fn detected(&self) -> &Detected {
+        self.detected.get_or_init(probe)
+    }
+
+    pub(crate) fn available(&self) -> bool {
+        !self.detected().engines.is_empty()
     }
 
     pub(crate) fn pending_count(&self, paths: &[PathBuf]) -> usize {
@@ -292,7 +296,13 @@ impl WordConverter {
         cancelled: &dyn Fn() -> bool,
         on_converted: &mut dyn FnMut(),
     ) -> Result<Vec<Entry>, Cancelled> {
-        self.resolve_with(detected(), paths, cancelled, on_converted, &open_session)
+        self.resolve_with(
+            self.detected(),
+            paths,
+            cancelled,
+            on_converted,
+            &open_session,
+        )
     }
 
     fn resolve_with(
@@ -303,8 +313,8 @@ impl WordConverter {
         on_converted: &mut dyn FnMut(),
         open_session: &SessionOpener<'_>,
     ) -> Result<Vec<Entry>, Cancelled> {
-        // Polled rather than waited on: a stop, or this window closing, must
-        // reach a batch queued behind another window's minutes-long one.
+        // Polled rather than waited on: a stop, or its scope being let go, must
+        // reach a batch queued behind another scope's minutes-long one.
         let _batch = loop {
             match self.gate.try_lock() {
                 Ok(batch) => break batch,

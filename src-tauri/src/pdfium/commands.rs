@@ -10,16 +10,17 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 use tfolio_engine::{
-    download_fallback_font, size_limit_error, word_available, ExportOutcome, InsertOutcome,
-    MergeBookmarks, MergeOptions, OperationTarget, PageNumbersConfig, PagePoint, PagePointsRect,
-    PdfDocumentInfo, PdfFileSummary, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
-    PdfiumEngine, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
-    MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+    download_fallback_font, size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks,
+    MergeOptions, OperationTarget, PageNumbersConfig, PagePoint, PagePointsRect, PdfDocumentInfo,
+    PdfFileSummary, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect,
+    RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS,
+    WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
 use crate::windows::{page_generation, record_document, DocumentOwners};
 
+use super::encode::{encode_png, encode_webp};
 use super::paths::fallback_font_destination;
 use super::{PdfProgress, PdfiumState};
 
@@ -38,8 +39,8 @@ pub struct MergePlan {
 /// A path is a string any page code can make up, so only paths the OS produced
 /// in this process's sight are acted on; the e2e build waives the check.
 #[cfg(not(feature = "e2e"))]
-fn ensure_approved(engine: &PdfiumEngine, path: &Path) -> Result<(), String> {
-    if engine.is_approved(path) {
+fn ensure_approved(state: &PdfiumState, path: &Path) -> Result<(), String> {
+    if state.is_approved(path) {
         Ok(())
     } else {
         Err(format!(
@@ -85,7 +86,7 @@ pub async fn open_pdf(
     }
 
     let bytes = bytes.clone();
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     let page = page_generation(&window);
 
     let document = tauri::async_runtime::spawn_blocking(move || engine.open(bytes))
@@ -103,7 +104,7 @@ pub async fn create_pdf(
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
 ) -> Result<PdfDocumentInfo, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     let page = page_generation(&window);
 
     let document = tauri::async_runtime::spawn_blocking(move || engine.create_blank())
@@ -122,9 +123,11 @@ pub async fn render_pdf_page(
     width: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<Response, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        engine.render_page(document_id, page_number, width)
+        let page = engine.render_page(document_id, page_number, width)?;
+
+        encode_png(&page).map_err(|error| format!("could not encode page {page_number}: {error}"))
     })
     .await
     .map_err(|error| format!("PDFium render task failed: {error}"))??;
@@ -139,9 +142,12 @@ pub async fn render_pdf_page_thumbnail(
     width: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<Response, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        engine.render_thumbnail(document_id, page_number, width)
+        let thumbnail = engine.render_thumbnail(document_id, page_number, width)?;
+
+        encode_webp(&thumbnail)
+            .map_err(|error| format!("could not encode the page thumbnail: {error}"))
     })
     .await
     .map_err(|error| format!("PDFium thumbnail task failed: {error}"))??;
@@ -156,9 +162,12 @@ pub async fn render_pdf_watermark_preview(
     width: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<Response, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        engine.render_watermark_preview(document_id, page_number, width)
+        let preview = engine.render_watermark_preview(document_id, page_number, width)?;
+
+        encode_webp(&preview)
+            .map_err(|error| format!("could not encode the watermark preview: {error}"))
     })
     .await
     .map_err(|error| format!("PDFium watermark preview task failed: {error}"))??;
@@ -172,7 +181,7 @@ pub async fn extract_pdf_page_text(
     page_number: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<Vec<PdfTextSpan>, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.extract_text(document_id, page_number))
         .await
@@ -187,7 +196,7 @@ pub async fn extract_pdf_page_plain_text(
     page_number: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<String, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.extract_plain_text(document_id, page_number)
@@ -202,7 +211,7 @@ pub async fn search_pdf_text(
     query: String,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfSearchOutcome, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.search_text(document_id, &query))
         .await
@@ -216,7 +225,7 @@ pub async fn cancel_pdf_search(
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::Search(document_id)))
 }
 
@@ -229,7 +238,7 @@ pub async fn add_pdf_highlight_annotation(
     opacity: f32,
     state: State<'_, PdfiumState>,
 ) -> Result<u64, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.add_highlight(document_id, page_number, &quads, &color, opacity)
@@ -246,7 +255,7 @@ pub async fn add_pdf_rect_annotation(
     style: RectStyle,
     state: State<'_, PdfiumState>,
 ) -> Result<u64, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.add_rect(document_id, page_number, &bounds, &style)
@@ -263,7 +272,7 @@ pub async fn add_pdf_rect_effect_annotation(
     effect: RectEffect,
     state: State<'_, PdfiumState>,
 ) -> Result<u64, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.add_rect_effect(document_id, page_number, &bounds, &effect)
@@ -277,7 +286,7 @@ pub async fn pdf_text_note_font(
     text: String,
     state: State<'_, PdfiumState>,
 ) -> Result<Response, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     let bytes = tauri::async_runtime::spawn_blocking(move || engine.text_note_font(&text))
         .await
         .map_err(|error| format!("PDFium note font task failed: {error}"))??;
@@ -293,7 +302,7 @@ pub async fn add_pdf_text_note_annotation(
     style: TextNoteStyle,
     state: State<'_, PdfiumState>,
 ) -> Result<u64, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.add_text_note(document_id, page_number, &origin, &text, &style)
@@ -321,7 +330,7 @@ pub async fn apply_pdf_watermark(
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.apply_watermark_with_progress(document_id, config, channel_progress(on_progress))
@@ -336,7 +345,7 @@ pub async fn remove_pdf_watermark(
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.remove_watermark_with_progress(document_id, channel_progress(on_progress))
@@ -353,7 +362,7 @@ pub async fn apply_pdf_page_numbers(
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.apply_page_numbers_with_progress(document_id, config, channel_progress(on_progress))
@@ -368,7 +377,7 @@ pub async fn remove_pdf_page_numbers(
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.remove_page_numbers_with_progress(document_id, channel_progress(on_progress))
@@ -385,7 +394,7 @@ pub async fn cancel_pdf_operation(
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::Document(document_id)))
 }
 
@@ -397,7 +406,7 @@ pub async fn cancel_pdf_merge(
     window: WebviewWindow,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::Merge(window.label().to_string())))
 }
 
@@ -408,7 +417,7 @@ pub async fn cancel_word_open(
     window: WebviewWindow,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::OpenConverted(window.label().to_string())))
 }
 
@@ -419,7 +428,7 @@ pub async fn cancel_word_conversion(
     window: WebviewWindow,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::Convert(window.label().to_string())))
 }
 
@@ -431,7 +440,7 @@ pub async fn delete_pdf_annotations(
     mark_ids: Vec<u64>,
     state: State<'_, PdfiumState>,
 ) -> Result<Vec<i32>, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.delete_marks(document_id, &mark_ids))
         .await
@@ -446,7 +455,7 @@ pub async fn pdf_annotation_at_point(
     point: PagePoint,
     state: State<'_, PdfiumState>,
 ) -> Result<Option<u64>, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.mark_at_point(document_id, page_number, &point)
@@ -461,7 +470,7 @@ pub async fn reorder_pdf_pages(
     order: Vec<i32>,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.reorder_pages(document_id, &order))
         .await
@@ -476,7 +485,7 @@ pub async fn rotate_pdf_pages(
     degrees: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.rotate_pages(document_id, &page_numbers, degrees)
@@ -492,7 +501,7 @@ pub async fn delete_pdf_pages(
     stash_id: u64,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.delete_pages(document_id, &page_numbers, stash_id)
@@ -515,7 +524,7 @@ pub async fn discard_pdf_stashes(
         return Err("this window does not hold that document".to_string());
     }
 
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.discard_stashes(document_id, &stash_ids))
         .await
@@ -528,7 +537,7 @@ pub async fn restore_pdf_pages(
     stash_id: u64,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.restore_pages(document_id, stash_id))
         .await
@@ -542,7 +551,7 @@ pub async fn duplicate_pdf_pages(
     index: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.duplicate_pages(document_id, &page_numbers, index)
@@ -557,7 +566,7 @@ pub async fn insert_pdf_blank_page(
     index: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.insert_blank_page(document_id, index))
         .await
@@ -565,8 +574,8 @@ pub async fn insert_pdf_blank_page(
 }
 
 #[tauri::command]
-pub fn word_conversion_available() -> bool {
-    word_available()
+pub fn word_conversion_available(state: State<'_, PdfiumState>) -> bool {
+    state.word_available()
 }
 
 /// Shows the native open dialog and hands back the chosen path — recorded as
@@ -579,8 +588,8 @@ pub async fn pick_pdf_path(
     app: AppHandle,
     state: State<'_, PdfiumState>,
 ) -> Result<Option<String>, String> {
-    let engine = Arc::clone(&state.0);
-    let word = word_available();
+    let state = state.inner().clone();
+    let word = state.word_available();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>, String> {
         let mut extensions = vec!["pdf"];
@@ -605,7 +614,7 @@ pub async fn pick_pdf_path(
             .into_path()
             .map_err(|error| format!("the chosen file is unusable: {error}"))?;
 
-        engine.approve_paths([&path]);
+        state.approve_paths([&path]);
         Ok(Some(path.to_string_lossy().into_owned()))
     })
     .await
@@ -620,18 +629,19 @@ pub async fn open_pdf_from_path(
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
 ) -> Result<PdfDocumentInfo, String> {
-    let engine = Arc::clone(&state.0);
-    let recent = recent.inner().clone();
     let path = PathBuf::from(path);
+
+    // Opening a path binds it as the file `save_pdf` will overwrite, which
+    // is why an unapproved one is refused — see `ensure_approved`.
+    #[cfg(not(feature = "e2e"))]
+    ensure_approved(&state, &path)?;
+
+    let engine = Arc::clone(&state.engine);
+    let recent = recent.inner().clone();
     let opened = path.clone();
     let page = page_generation(&window);
 
     let document = tauri::async_runtime::spawn_blocking(move || {
-        // Opening a path binds it as the file `save_pdf` will overwrite, which
-        // is why an unapproved one is refused — see `ensure_approved`.
-        #[cfg(not(feature = "e2e"))]
-        ensure_approved(&engine, &opened)?;
-
         let document = engine.open_from_path(opened.clone())?;
         // Recorded only once the file actually opened, so the list the next
         // run approves holds nothing this one could not open itself.
@@ -657,20 +667,19 @@ pub async fn open_converted_from_path(
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
 ) -> Result<PdfDocumentInfo, String> {
-    let engine = Arc::clone(&state.0);
+    let path = PathBuf::from(path);
+
+    #[cfg(not(feature = "e2e"))]
+    ensure_approved(&state, &path)?;
+
+    let engine = Arc::clone(&state.engine);
     let page = page_generation(&window);
     let label = window.label().to_string();
 
-    let document = tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-
-        #[cfg(not(feature = "e2e"))]
-        ensure_approved(&engine, &path)?;
-
-        engine.open_converted(&label, path)
-    })
-    .await
-    .map_err(|error| format!("conversion task failed: {error}"))??;
+    let document =
+        tauri::async_runtime::spawn_blocking(move || engine.open_converted(&label, path))
+            .await
+            .map_err(|error| format!("conversion task failed: {error}"))??;
 
     record_document(&owners, &window, page, document.id(), None);
 
@@ -684,18 +693,16 @@ pub async fn insert_pdf_from_path(
     index: i32,
     state: State<'_, PdfiumState>,
 ) -> Result<InsertOutcome, String> {
-    let engine = Arc::clone(&state.0);
+    let path = PathBuf::from(path);
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
+    #[cfg(not(feature = "e2e"))]
+    ensure_approved(&state, &path)?;
 
-        #[cfg(not(feature = "e2e"))]
-        ensure_approved(&engine, &path)?;
+    let engine = Arc::clone(&state.engine);
 
-        engine.insert_from_path(document_id, path, index)
-    })
-    .await
-    .map_err(|error| format!("PDFium insert task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || engine.insert_from_path(document_id, path, index))
+        .await
+        .map_err(|error| format!("PDFium insert task failed: {error}"))?
 }
 
 /// Nothing is read from disk, so there is no path to approve; what is checked
@@ -717,7 +724,7 @@ pub async fn insert_pdf_pages_from_document(
         return Err("both documents must be open in this window".into());
     }
 
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         engine.insert_pages_from_document(document_id, source_document_id, &page_numbers, index)
@@ -732,8 +739,8 @@ pub async fn pick_pdf_paths(
     app: AppHandle,
     state: State<'_, PdfiumState>,
 ) -> Result<Vec<String>, String> {
-    let engine = Arc::clone(&state.0);
-    let word = word_available();
+    let state = state.inner().clone();
+    let word = state.word_available();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
         // One filter covering everything a merge can take: a reader adding a
@@ -765,7 +772,7 @@ pub async fn pick_pdf_paths(
             })
             .collect::<Result<Vec<PathBuf>, _>>()?;
 
-        engine.approve_paths(paths.iter());
+        state.approve_paths(paths.iter());
 
         Ok(paths
             .iter()
@@ -782,24 +789,22 @@ pub async fn inspect_pdf_files(
     state: State<'_, PdfiumState>,
     window: WebviewWindow,
 ) -> Result<Vec<PdfFileSummary>, String> {
-    let engine = Arc::clone(&state.0);
-    let word = word_available();
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+
+    // Reading a file the WebView merely named would let a page learn what
+    // any PDF on the disk holds, so an inspection is approved like an open.
+    #[cfg(not(feature = "e2e"))]
+    for path in &paths {
+        ensure_approved(&state, path)?;
+    }
+
+    let engine = Arc::clone(&state.engine);
+    let word = state.word_available();
     let label = window.label().to_string();
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-
-        // Reading a file the WebView merely named would let a page learn what
-        // any PDF on the disk holds, so an inspection is approved like an open.
-        #[cfg(not(feature = "e2e"))]
-        for path in &paths {
-            ensure_approved(&engine, path)?;
-        }
-
-        engine.inspect_files(&label, paths, word)
-    })
-    .await
-    .map_err(|error| format!("PDFium inspection task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || engine.inspect_files(&label, paths, word))
+        .await
+        .map_err(|error| format!("PDFium inspection task failed: {error}"))?
 }
 
 /// The result has no source path, so it can only ever be exported to a copy.
@@ -812,19 +817,19 @@ pub async fn merge_pdf_files(
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
 ) -> Result<Option<PdfDocumentInfo>, String> {
-    let engine = Arc::clone(&state.0);
-    let word = word_available();
+    let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
+
+    #[cfg(not(feature = "e2e"))]
+    for path in &paths {
+        ensure_approved(&state, path)?;
+    }
+
+    let engine = Arc::clone(&state.engine);
+    let word = state.word_available();
     let page = page_generation(&window);
     let label = window.label().to_string();
 
     let merged = tauri::async_runtime::spawn_blocking(move || {
-        let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
-
-        #[cfg(not(feature = "e2e"))]
-        for path in &paths {
-            ensure_approved(&engine, path)?;
-        }
-
         engine.merge_files_with_progress(
             &label,
             paths,
@@ -849,7 +854,7 @@ pub async fn merge_pdf_files(
 
 #[tauri::command]
 pub async fn save_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result<(), String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || engine.save(document_id))
         .await
@@ -902,7 +907,7 @@ pub async fn export_pdf(
     app: AppHandle,
     state: State<'_, PdfiumState>,
 ) -> Result<Option<ExportOutcome>, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     // `blocking_save_file` would deadlock the main thread outside
     // `spawn_blocking`; the document lock is not taken until the reader chooses.
@@ -942,7 +947,7 @@ fn export_and_bind(
     let outcome = engine.export_to(document_id, &path)?;
 
     if outcome.saved_to_source() {
-        engine.approve_paths([&path]);
+        app.state::<PdfiumState>().approve_paths([&path]);
         app.state::<RecentFiles>().record(&path);
         app.state::<DocumentOwners>().adopt_path(document_id, path);
     }
@@ -961,7 +966,7 @@ pub async fn export_pdf_to(
     app: AppHandle,
     state: State<'_, PdfiumState>,
 ) -> Result<ExportOutcome, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
         export_and_bind(&app, &engine, document_id, PathBuf::from(path))
@@ -986,7 +991,7 @@ pub async fn close_pdf(
         return Ok(());
     }
 
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
 
     engine.cancel_document_work(document_id);
     // Release ownership before waiting for PDFium so a closed tab does not block reopening.

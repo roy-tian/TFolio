@@ -6,7 +6,7 @@ impl PdfiumEngine {
         document_id: u64,
         page_number: i32,
         width: i32,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<RgbImage, String> {
         if !(MIN_RENDER_WIDTH..=MAX_THUMBNAIL_WIDTH).contains(&width) {
             return Err(format!(
                 "render width must be between {MIN_RENDER_WIDTH} and {MAX_THUMBNAIL_WIDTH} pixels"
@@ -81,6 +81,6 @@ impl PdfiumEngine {
             Self::render_page_raw(&page, width, MAX_THUMBNAIL_WIDTH)?
         };
 
-        Self::encode_thumbnail(raw.into_rgb()?)
+        raw.into_rgb()
     }
 }

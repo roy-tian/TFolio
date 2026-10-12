@@ -1,13 +1,18 @@
 mod archive;
 mod commands;
 mod compress;
+mod encode;
 mod paths;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 
 use serde::Serialize;
 use tauri::AppHandle;
-use tfolio_engine::PdfiumEngine;
+use tfolio_engine::{PdfiumEngine, WordSuites};
 
 pub use archive::{cancel_pdf_archive, export_pdf_archive};
 #[cfg(feature = "e2e")]
@@ -46,28 +51,65 @@ impl PdfProgress {
 }
 
 #[derive(Clone)]
-pub struct PdfiumState(Arc<PdfiumEngine>);
+pub struct PdfiumState {
+    engine: Arc<PdfiumEngine>,
+    /// Paths something outside the WebView produced — a drop, a dialog pick. A
+    /// path is a string any page code can make up, and opening one binds a save.
+    approved: Arc<Mutex<HashSet<PathBuf>>>,
+}
 
 impl PdfiumState {
     pub fn new(app: &AppHandle) -> Result<Self, String> {
-        PdfiumEngine::new(paths::engine_paths(app)).map(|engine| Self(Arc::new(engine)))
+        // The GUI suite must not depend on what the machine running it has installed.
+        let word_suites = if cfg!(feature = "e2e") {
+            WordSuites::Absent
+        } else {
+            WordSuites::Installed
+        };
+
+        Ok(Self {
+            engine: Arc::new(PdfiumEngine::new(paths::engine_paths(app), word_suites)?),
+            approved: Arc::default(),
+        })
     }
 
     pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
-        self.0.approve_paths(paths);
+        if let Ok(mut approved) = self.approved.lock() {
+            approved.extend(paths.into_iter().cloned());
+        }
     }
 
+    /// Kept rather than consumed: the reader may cancel the unsaved guard and
+    /// open the same file again; the e2e build waives the check at call sites.
+    #[cfg_attr(feature = "e2e", allow(dead_code))]
+    fn is_approved(&self, path: &Path) -> bool {
+        self.approved
+            .lock()
+            .map(|approved| approved.contains(path))
+            .unwrap_or(false)
+    }
+
+    /// Whether the wizard may promise Word conversion: the machine's own
+    /// suites, detected passively — never a reader setting.
+    fn word_available(&self) -> bool {
+        // E2e answers yes with no suite behind it, so specs can drive the row
+        // a refused conversion leaves; a closed door would never show it.
+        cfg!(feature = "e2e") || self.engine.word_conversion_available()
+    }
+
+    /// A window's label is the engine's cancellation scope for its merge and
+    /// Word conversions.
     pub fn cancel_window_work(&self, label: &str) {
-        self.0.cancel_window_work(label);
+        self.engine.cancel_scope_work(label);
     }
 
     pub fn remove_conversion_files(&self) {
-        self.0.remove_conversion_files();
+        self.engine.remove_conversion_files();
     }
 
     /// Closing takes the PDFium lock, so it must not block the window event loop.
     pub fn close_document_detached(&self, document_id: u64) {
-        let engine = Arc::clone(&self.0);
+        let engine = Arc::clone(&self.engine);
         engine.cancel_document_work(document_id);
 
         tauri::async_runtime::spawn_blocking(move || {

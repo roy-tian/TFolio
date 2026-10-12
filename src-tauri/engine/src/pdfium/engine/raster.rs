@@ -1,10 +1,8 @@
 //! A page's pixels leave PDFium as a plain copy of its buffer, taken under the
-//! documents lock; converting and encoding them waits until it is released.
+//! documents lock; converting them waits until it is released, and encoding
+//! them for the screen is the host's.
 
-use image::{
-    codecs::png::{CompressionType, FilterType, PngEncoder},
-    ExtendedColorType, ImageEncoder, RgbImage,
-};
+use image::RgbImage;
 use pdfium_render::prelude::*;
 
 pub(super) struct RawBitmap {
@@ -61,42 +59,9 @@ impl RawBitmap {
     }
 }
 
-/// The one PNG encoder for page images. Sub-filtered with fast deflate it
-/// measured about seven times faster than the adaptive default on scanned
-/// pages at 1800 px, for about a fifth more bytes — a local IPC hop, where
-/// time is what the reader waits on.
-pub(super) fn encode_png(image: &RgbImage) -> Result<Vec<u8>, String> {
-    let mut png = Vec::new();
-
-    PngEncoder::new_with_quality(&mut png, CompressionType::Fast, FilterType::Sub)
-        .write_image(
-            image.as_raw(),
-            image.width(),
-            image.height(),
-            ExtendedColorType::Rgb8,
-        )
-        .map_err(|error| error.to_string())?;
-
-    Ok(png)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_page_image_survives_the_encoder_unchanged() {
-        let image = RgbImage::from_fn(37, 23, |x, y| {
-            image::Rgb([(x * 7) as u8, (y * 11) as u8, ((x + y) * 3) as u8])
-        });
-
-        let png = encode_png(&image).expect("the encoder should take an RGB page");
-        let decoded = image::load_from_memory(&png)
-            .expect("the PNG should decode")
-            .into_rgb8();
-
-        assert_eq!(decoded, image);
-    }
 
     #[test]
     fn padded_four_channel_rows_come_out_as_rgb() {

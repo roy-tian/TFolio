@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{Cursor, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -9,8 +9,10 @@ use std::{
     },
 };
 
-use image::{imageops, metadata::Orientation, DynamicImage, ImageDecoder, ImageFormat};
+use image::{imageops, metadata::Orientation, DynamicImage, ImageDecoder, RgbImage};
 use pdfium_render::prelude::*;
+
+use crate::convert::WordSuites;
 
 use super::{
     font::{
@@ -239,7 +241,8 @@ fn open_entry_mut(
 }
 
 /// What a cancellable operation works on. A merge names no document until it
-/// has built one, so it is named by the window whose modal wizard asked.
+/// has built one, so it and the Word conversions are named by a scope the host
+/// chooses: whatever a Stop, or giving up on a request, is meant to reach.
 #[derive(Clone, PartialEq, Eq)]
 pub enum OperationTarget {
     Document(u64),
@@ -252,12 +255,12 @@ pub enum OperationTarget {
     /// The dialog's size estimates, apart from the export: a dialog stopping
     /// its superseded estimates must never stop a copy already being written.
     CompressEstimate(u64),
-    /// The Word→PDF conversions behind a wizard inspection, by window, which
+    /// The Word→PDF conversions behind a merge inspection, by scope, which
     /// can outlast a reader's patience alone; a merge's stay under its own
     /// target.
     Convert(String),
-    /// A Word document opened as a tab, apart from the wizard's: the wizard
-    /// may be open over it, and neither's Stop is meant for the other.
+    /// A Word document opened on its own, apart from an inspection's: both may
+    /// run in one scope, and neither's Stop is meant for the other.
     OpenConverted(String),
 }
 
@@ -326,9 +329,6 @@ pub struct PdfiumEngine {
     /// machine can be embedded; resolved once, a scan of every installed face.
     system_face: OnceLock<Option<(Vec<u8>, usize)>>,
     page_number_font: OnceLock<Vec<u8>>,
-    /// Paths something outside the WebView produced — a drop, a dialog pick. A
-    /// path is a string any page code can make up, and opening one binds a save.
-    approved_paths: Mutex<HashSet<PathBuf>>,
     /// The cancel flags of long operations now running, behind a lock of their
     /// own: the operation a cancel must reach holds `documents` for its whole run.
     operations: Mutex<HashMap<u64, RunningOperation>>,
@@ -351,7 +351,7 @@ pub struct EnginePaths {
 }
 
 impl PdfiumEngine {
-    pub fn new(paths: EnginePaths) -> Result<Self, String> {
+    pub fn new(paths: EnginePaths, word_suites: WordSuites) -> Result<Self, String> {
         let (bindings, raw_bindings) = bind_pdfium(&paths.library_candidates)?;
         let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
 
@@ -367,12 +367,12 @@ impl PdfiumEngine {
             fallback_font: OnceLock::new(),
             system_face: OnceLock::new(),
             page_number_font: OnceLock::new(),
-            approved_paths: Mutex::new(HashSet::new()),
             operations: Mutex::new(HashMap::new()),
             next_operation_id: AtomicU64::new(1),
             word: crate::convert::WordConverter::new(
                 paths.conversion_root,
                 &paths.retired_conversion_roots,
+                word_suites,
             ),
         })
     }
@@ -381,19 +381,10 @@ impl PdfiumEngine {
         self.word.remove_run_dir();
     }
 
-    pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
-        if let Ok(mut approved) = self.approved_paths.lock() {
-            approved.extend(paths.into_iter().cloned());
-        }
-    }
-
-    /// Kept rather than consumed: the reader may cancel the unsaved guard and
-    /// open the same file again; the e2e build waives the check at call sites.
-    pub fn is_approved(&self, path: &Path) -> bool {
-        self.approved_paths
-            .lock()
-            .map(|approved| approved.contains(path))
-            .unwrap_or(false)
+    /// Whether any office suite can convert Word documents: detected passively
+    /// on the first ask, never by starting one.
+    pub fn word_conversion_available(&self) -> bool {
+        self.word.available()
     }
 
     /// Locks the store — and with it PDFium itself — behind the one wording
@@ -447,12 +438,12 @@ impl PdfiumEngine {
         asked
     }
 
-    /// A window's merge and conversions have nowhere to land once it is gone
-    /// or reloading; a Word suite would otherwise run on for minutes.
-    pub fn cancel_window_work(&self, label: &str) {
-        self.cancel_operation(OperationTarget::Merge(label.to_string()));
-        self.cancel_operation(OperationTarget::Convert(label.to_string()));
-        self.cancel_operation(OperationTarget::OpenConverted(label.to_string()));
+    /// A scope's merge and conversions have nowhere to land once the host lets
+    /// it go; a Word suite would otherwise run on for minutes.
+    pub fn cancel_scope_work(&self, scope: &str) {
+        self.cancel_operation(OperationTarget::Merge(scope.to_string()));
+        self.cancel_operation(OperationTarget::Convert(scope.to_string()));
+        self.cancel_operation(OperationTarget::OpenConverted(scope.to_string()));
     }
 
     /// Cancel first so closing a document does not wait for its entire rebuild.
@@ -503,7 +494,7 @@ impl PdfiumEngine {
     /// An image or a Word document opened as its converted PDF. Built in
     /// memory with no source binding, like `create_blank`: the file behind it
     /// is only ever read, so there is no destination for approval to guard.
-    pub fn open_converted(&self, window: &str, path: PathBuf) -> Result<PdfDocumentInfo, String> {
+    pub fn open_converted(&self, scope: &str, path: PathBuf) -> Result<PdfDocumentInfo, String> {
         if is_merge_image(&path) {
             // Decoded before the lock: a decode is no PDFium work.
             let image = read_image(&path)?;
@@ -520,12 +511,11 @@ impl PdfiumEngine {
         }
 
         if crate::convert::is_word_document(&path) {
-            // Stoppable like the wizard's inspection of the same file: an
-            // office suite's startup is seconds the open flow must be able to
-            // walk away from, and `cancel_word_conversion` aims at this target.
+            // Stoppable like an inspection of the same file: an office suite's
+            // startup is seconds the open flow must be able to walk away from.
             let entry = {
                 let operation =
-                    self.begin_operation(OperationTarget::OpenConverted(window.to_string()));
+                    self.begin_operation(OperationTarget::OpenConverted(scope.to_string()));
                 let cancelled = || operation.is_cancelled();
 
                 self.resolve_word_documents(
@@ -622,7 +612,7 @@ impl PdfiumEngine {
         page_number: i32,
         width: i32,
         max_width: i32,
-    ) -> Result<image::RgbImage, String> {
+    ) -> Result<RgbImage, String> {
         if !(MIN_RENDER_WIDTH..=max_width).contains(&width) {
             return Err(format!(
                 "render width must be between {MIN_RENDER_WIDTH} and {max_width} pixels"
@@ -678,15 +668,15 @@ impl PdfiumEngine {
             .map(DynamicImage::ImageRgb8)
     }
 
+    /// Pixels, not a file format: how a page travels to the screen is the
+    /// host's to choose, and it encodes them off the documents lock.
     pub fn render_page(
         &self,
         document_id: u64,
         page_number: i32,
         width: i32,
-    ) -> Result<Vec<u8>, String> {
-        let image = self.render_rgb(document_id, page_number, width, MAX_RENDER_WIDTH)?;
-
-        encode_png(&image).map_err(|error| format!("could not encode page {page_number}: {error}"))
+    ) -> Result<RgbImage, String> {
+        self.render_rgb(document_id, page_number, width, MAX_RENDER_WIDTH)
     }
 
     pub fn render_thumbnail(
@@ -694,19 +684,8 @@ impl PdfiumEngine {
         document_id: u64,
         page_number: i32,
         width: i32,
-    ) -> Result<Vec<u8>, String> {
-        let image = self.render_rgb(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)?;
-        Self::encode_thumbnail(image)
-    }
-
-    fn encode_thumbnail(image: image::RgbImage) -> Result<Vec<u8>, String> {
-        let mut webp = Cursor::new(Vec::new());
-
-        DynamicImage::ImageRgb8(image)
-            .write_to(&mut webp, ImageFormat::WebP)
-            .map_err(|error| format!("could not encode the page thumbnail: {error}"))?;
-
-        Ok(webp.into_inner())
+    ) -> Result<RgbImage, String> {
+        self.render_rgb(document_id, page_number, width, MAX_THUMBNAIL_WIDTH)
     }
 
     pub fn search_text(&self, document_id: u64, query: &str) -> Result<PdfSearchOutcome, String> {
@@ -1136,7 +1115,7 @@ pub use io::is_merge_image;
 use io::{image_page_document, read_image, read_pdf_bytes};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
-use raster::{encode_png, RawBitmap};
+use raster::RawBitmap;
 
 #[cfg(test)]
 mod tests;
