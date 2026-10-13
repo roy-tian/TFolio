@@ -52,13 +52,18 @@ impl RawBitmap {
         // four times slower, 27 ms against 7 for an 1800 px page.
         match channels {
             1 => rows.for_each(|(out, row)| {
-                for (pixel, &gray) in out.chunks_exact_mut(3).zip(&row[..width]) {
+                for (pixel, &gray) in out.as_chunks_mut::<3>().0.iter_mut().zip(&row[..width]) {
                     pixel.fill(gray);
                 }
             }),
             3 => rows.for_each(|(out, row)| out.copy_from_slice(&row[..width * 3])),
             _ => rows.for_each(|(out, row)| {
-                for (pixel, source) in out.chunks_exact_mut(3).zip(row.chunks_exact(4)) {
+                for (pixel, source) in out
+                    .as_chunks_mut::<3>()
+                    .0
+                    .iter_mut()
+                    .zip(row.as_chunks::<4>().0)
+                {
                     pixel.copy_from_slice(&source[..3]);
                 }
             }),
