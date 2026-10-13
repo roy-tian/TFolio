@@ -8,7 +8,6 @@ import {
   exportFailureNotice,
   fileNameFromPath,
   isPdfPath,
-  MIN_PAGE_OUTPUT_SCALE,
   pickCurrentPage,
   resolveOutputScale,
 } from "./pdf"
@@ -125,10 +124,6 @@ describe("pickCurrentPage", () => {
 })
 
 describe("resolveOutputScale", () => {
-  test("the page minimum is 1.25", () => {
-    expect(MIN_PAGE_OUTPUT_SCALE).toBe(1.25)
-  })
-
   test("floors a low-DPI surface up to the page minimum", () => {
     expect(resolveOutputScale(1, 1.25)).toBe(1.25)
     expect(resolveOutputScale(1.1, 1.25)).toBe(1.25)

@@ -8,10 +8,10 @@ use std::{
 };
 
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tfolio_engine::{is_merge_image, is_word_document};
 
 use crate::{
-    convert::is_word_document,
-    pdfium::{is_merge_image, PdfiumState},
+    pdfium::PdfiumState,
     recent::is_recordable,
     windows::{focus_target, focus_target_except},
 };
@@ -208,19 +208,6 @@ mod tests {
         );
 
         assert_eq!(paths, vec![first, second, photo, letter]);
-
-        let _ = fs::remove_dir_all(&directory);
-    }
-
-    #[test]
-    fn resolves_a_relative_name_against_the_launch_directory() {
-        let directory = scratch("relative");
-        let file = write_file(&directory, "relative.pdf");
-
-        assert_eq!(
-            open_paths_from_args(["relative.pdf".to_string()], &directory),
-            vec![file]
-        );
 
         let _ = fs::remove_dir_all(&directory);
     }

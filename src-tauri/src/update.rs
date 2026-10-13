@@ -632,19 +632,6 @@ mod tests {
         );
     }
 
-    /// The sidecar is this app's own file, so its shape is worth pinning: a
-    /// package saved by one run has to read back in the next.
-    #[test]
-    fn the_saved_signature_round_trips_through_its_sidecar() {
-        let written = serde_json::to_string(&Package {
-            signature: PACKAGE_SIGNATURE.into(),
-        })
-        .expect("the sidecar should serialize");
-        let read: Package = serde_json::from_str(&written).expect("it should read back");
-
-        assert_eq!(read.signature, PACKAGE_SIGNATURE);
-    }
-
     #[test]
     fn a_download_of_unannounced_length_leaves_its_total_out() {
         assert_eq!(

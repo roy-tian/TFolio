@@ -120,7 +120,7 @@ export const textNoteSwatches: readonly HexColor[] = [
   "#000000",
 ]
 
-/** Mirrors `MIN_/MAX_TEXT_NOTE_*` in `src-tauri/src/pdfium/geometry.rs`:
+/** Mirrors `MIN_/MAX_TEXT_NOTE_*` in `src-tauri/engine/src/pdfium/geometry.rs`:
     neither side clamps a value outside these ends. */
 export const TEXT_NOTE_MIN_FONT_SIZE = 6
 export const TEXT_NOTE_MAX_FONT_SIZE = 72
@@ -134,7 +134,7 @@ export const defaultTextNoteStyle: TextNoteStyle = {
 }
 
 /** The backend's answer when no installed face can draw a note, kept in step
-    with `FONT_MISSING_ERROR` in `src-tauri/src/pdfium/font.rs`. */
+    with `FONT_MISSING_ERROR` in `src-tauri/engine/src/pdfium/font.rs`. */
 export const NOTE_FONT_MISSING = "tfolio:font-missing"
 
 export function isNoteFontMissing(error: unknown): boolean {

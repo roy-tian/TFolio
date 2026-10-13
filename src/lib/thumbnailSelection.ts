@@ -65,11 +65,3 @@ export function selectionAfterClick(
 export function selectionOfAllPages(numPages: number): ThumbnailSelection {
   return numPages < 1 ? emptySelection : { anchor: 1, pages: range(1, numPages) }
 }
-
-/**
- * Page numbers may now name different pages entirely, so nothing survives —
- * the one honest answer a selection keyed by position can give.
- */
-export function selectionAfterStructureChange(): ThumbnailSelection {
-  return emptySelection
-}

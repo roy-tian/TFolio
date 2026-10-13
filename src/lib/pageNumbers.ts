@@ -39,7 +39,7 @@ export type PageNumbersDraft = {
 
 export type PageNumbersValidationError = "range" | "start"
 
-// Mirrored by `src-tauri/src/pdfium/page_numbers.rs`; both sides reject rather
+// Mirrored by `src-tauri/engine/src/pdfium/page_numbers.rs`; both sides reject rather
 // than clamp, because Tauri commands remain callable outside this UI.
 export const PAGE_NUMBERS_FONT_SIZE = 11
 export const PAGE_NUMBERS_BOTTOM_MARGIN = 51.02

@@ -18,7 +18,7 @@ const steps = [
   {
     label: "Rust formatting",
     bin: "cargo",
-    args: ["fmt", "--manifest-path", manifest, "--", "--check"],
+    args: ["fmt", "--manifest-path", manifest, "--all", "--", "--check"],
   },
   {
     label: "Rust clippy (warnings as errors)",

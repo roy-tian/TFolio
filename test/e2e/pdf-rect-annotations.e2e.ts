@@ -53,12 +53,13 @@ async function washedShare() {
     const canvas = document.querySelector<HTMLCanvasElement>(
       "[data-page-number='1'] canvas",
     )!
-    const { data } = canvas.getContext("2d")!.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    )
+    // A `bitmaprenderer` canvas has no 2d context to read: copy it into one.
+    const copy = document.createElement("canvas")
+    copy.width = canvas.width
+    copy.height = canvas.height
+    const context = copy.getContext("2d")!
+    context.drawImage(canvas, 0, 0)
+    const { data } = context.getImageData(0, 0, copy.width, copy.height)
     let washed = 0
 
     for (let index = 0; index < data.length; index += 4) {
@@ -126,16 +127,15 @@ describe("TFolio rectangle annotations", () => {
           const paintedPreview = !previewCanvas || previewCanvas.getContext("2d")!
             .getImageData(0, 0, 1, 1).data[3]! > 0
 
-          // Delay only decoding: the annotation still goes through real IPC,
-          // PDFium, and history. An IPC-success-only fix fails during this gap.
-          const decode = window.createImageBitmap.bind(window)
+          // Delay only decoding, by holding back the decode worker's requests:
+          // the annotation still goes through real IPC, PDFium, and history.
+          // An IPC-success-only fix fails during this gap.
+          const post = Worker.prototype.postMessage
           let decodes = 0
-          window.createImageBitmap = (async (...args: Parameters<typeof decode>) => {
-            const bitmap = await decode(...args)
+          Worker.prototype.postMessage = function (this: Worker, ...args: Parameters<typeof post>) {
             decodes += 1
-            await new Promise((resolve) => setTimeout(resolve, 500))
-            return bitmap
-          }) as typeof window.createImageBitmap
+            setTimeout(() => post.apply(this, args), 500)
+          } as typeof post
 
           let missing = false
           let doubled = false
@@ -164,7 +164,7 @@ describe("TFolio rectangle annotations", () => {
               }
             }
           } finally {
-            window.createImageBitmap = decode
+            Worker.prototype.postMessage = post
           }
           done({ decodes, doubled, landed, missing, paintedPreview, replaced, waitingFrames })
         })()
@@ -235,14 +235,13 @@ describe("TFolio rectangle annotations", () => {
       const frame = () => new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       )
-      const decode = window.createImageBitmap.bind(window)
+      // Holds the decode worker's requests until the drags are done.
+      const post = Worker.prototype.postMessage
       let release!: () => void
       const gate = new Promise<void>((resolve) => { release = resolve })
-      window.createImageBitmap = (async (...args: Parameters<typeof decode>) => {
-        const bitmap = await decode(...args)
-        await gate
-        return bitmap
-      }) as typeof window.createImageBitmap
+      Worker.prototype.postMessage = function (this: Worker, ...args: Parameters<typeof post>) {
+        void gate.then(() => post.apply(this, args))
+      } as typeof post
 
       const drag = async (from: number, to: number) => {
         source.dispatchEvent(new PointerEvent("pointerdown", {
@@ -277,7 +276,7 @@ describe("TFolio rectangle annotations", () => {
             retained: Boolean(first?.isConnected),
           })
         } finally {
-          window.createImageBitmap = decode
+          Worker.prototype.postMessage = post
           release()
         }
       })()
@@ -518,21 +517,29 @@ describe("TFolio rectangle annotations", () => {
       { timeoutMsg: "the mosaic preview never sized itself" },
     )
 
-    await browser.execute(() => {
+    await browser.executeAsync((done: () => void) => {
       const page = document.querySelector("[data-page-number='1']")!
       const source = page.querySelector<HTMLCanvasElement>("canvas")!
-      const sourceContext = source.getContext("2d")!
       const box = page.getBoundingClientRect()
+      // The page canvas takes bitmaps, not drawing: hand it a magenta one.
+      const fill = document.createElement("canvas")
+      fill.width = source.width
+      fill.height = source.height
+      const fillContext = fill.getContext("2d")!
+      fillContext.fillStyle = "#ff00ff"
+      fillContext.fillRect(0, 0, fill.width, fill.height)
 
-      sourceContext.fillStyle = "#ff00ff"
-      sourceContext.fillRect(0, 0, source.width, source.height)
-      document.dispatchEvent(
-        new PointerEvent("pointermove", {
-          bubbles: true,
-          clientX: box.left + box.width * 0.74,
-          clientY: box.top + box.height * 0.74,
-        }),
-      )
+      void createImageBitmap(fill).then((magenta) => {
+        source.getContext("bitmaprenderer")!.transferFromImageBitmap(magenta)
+        document.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            clientX: box.left + box.width * 0.74,
+            clientY: box.top + box.height * 0.74,
+          }),
+        )
+        done()
+      })
     })
 
     const previewCenter = () =>

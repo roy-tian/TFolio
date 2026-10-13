@@ -55,9 +55,13 @@ function visibleInk() {
     const canvas = document.querySelector<HTMLCanvasElement>(
       `${css} [data-page-number='1'] canvas`,
     )!
-    const { data } = canvas
-      .getContext("2d")!
-      .getImageData(0, 0, canvas.width, canvas.height)
+    // A `bitmaprenderer` canvas has no 2d context to read: copy it into one.
+    const copy = document.createElement("canvas")
+    copy.width = canvas.width
+    copy.height = canvas.height
+    const context = copy.getContext("2d")!
+    context.drawImage(canvas, 0, 0)
+    const { data } = context.getImageData(0, 0, copy.width, copy.height)
     let ink = 0
 
     for (let index = 0; index < data.length; index += 4) {

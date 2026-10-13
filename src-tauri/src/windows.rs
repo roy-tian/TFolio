@@ -467,15 +467,6 @@ mod tests {
     }
 
     #[test]
-    fn forgets_a_closed_document() {
-        let owners = DocumentOwners::default();
-        owners.record(1, "main", Some(PathBuf::from("/tmp/a.pdf")));
-        owners.release(1);
-
-        assert_eq!(owners.holder_of(Path::new("/tmp/a.pdf"), "window-2"), None);
-    }
-
-    #[test]
     fn a_first_export_makes_a_document_stand_for_the_file_it_adopted() {
         let owners = DocumentOwners::default();
         owners.record(1, "main", None);

@@ -1,6 +1,6 @@
 export type ImageFormat = "jpg" | "png"
 
-/** Mirrors `ArchiveOptions` in `src-tauri/src/pdfium/archive.rs`, tagged so
+/** Mirrors `ArchiveOptions` in `src-tauri/engine/src/pdfium/archive.rs`, tagged so
     only the images variant carries the density and page selection. */
 export type ArchiveOptions =
   | { format: "images"; imageFormat: ImageFormat; dpi: number; pages: number[] }

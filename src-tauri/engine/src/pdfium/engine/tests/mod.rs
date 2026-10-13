@@ -1,0 +1,33 @@
+use super::*;
+
+use std::io::Cursor;
+
+use allsorts::{
+    binary::read::ReadScope,
+    font::{Font, MatchingPresentation},
+    font_data::FontData,
+};
+use image::ImageFormat;
+
+use crate::pdfium::geometry::{A4_LONG_POINTS, A4_SHORT_POINTS};
+use crate::pdfium::library::{bind_library_twice, PDFIUM_LIBRARY_NAME};
+use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
+
+mod support;
+
+mod annotations;
+mod archive_export;
+mod compress;
+mod documents;
+mod image_dpi;
+mod insert_pages;
+mod inspection;
+mod merge;
+mod page_numbers;
+mod page_structure;
+mod rect_effect;
+mod save_export;
+mod text_notes;
+mod text_search;
+mod watermark;
+mod watermark_preview;

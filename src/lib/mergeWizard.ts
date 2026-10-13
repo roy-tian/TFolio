@@ -4,11 +4,11 @@ import { e2eOverride } from "@/lib/e2e"
 import { fileNameFromPath, isPdfPath } from "@/lib/pdf"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 
-/** Mirrors `MergeSourceKind` in `src-tauri/src/pdfium/mod.rs`; a Word
+/** Mirrors `MergeSourceKind` in `src-tauri/engine/src/pdfium/mod.rs`; a Word
     document arrives as the PDF the machine's office suite made of it. */
 export type MergeSourceKind = "pdf" | "image" | "word"
 
-/** Mirrors `MergeSourceError` in `src-tauri/src/pdfium/mod.rs`; the wizard
+/** Mirrors `MergeSourceError` in `src-tauri/engine/src/pdfium/mod.rs`; the wizard
     words these itself. */
 export type MergeSourceError = "converterMissing" | "conversionFailed"
 
@@ -33,7 +33,7 @@ export function isMergeImagePath(path: string) {
   )
 }
 
-/** Mirrors `WORD_EXTENSIONS` in `src-tauri/src/convert/mod.rs`. */
+/** Mirrors `WORD_EXTENSIONS` in `src-tauri/engine/src/convert/mod.rs`. */
 export const mergeWordExtensions = ["doc", "docx"] as const
 
 export function isMergeWordPath(path: string) {

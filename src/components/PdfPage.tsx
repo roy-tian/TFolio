@@ -279,12 +279,15 @@ const PdfPageSurface = memo(function PdfPageSurface({
           width: `${(page.width / footprintWidth) * 100}%`,
         }}
       >
+        {/* Constant so React never resizes it: usePageBitmap owns the size,
+            and resizing keeps the transferred bitmap while `width` stops
+            naming it. */}
         <canvas
           className="block h-full w-full"
           data-rendered={hasRendered}
-          height={Math.max(1, Math.round(page.height))}
+          height={1}
           ref={canvasRef}
-          width={Math.max(1, Math.round(page.width))}
+          width={1}
         />
         {notes.length > 0 ? (
           <div className="pointer-events-none absolute" style={pageLayerStyle}>

@@ -27,7 +27,7 @@ function stepsToCover(distance: number, step: number) {
 
 type Box = { height: number; width: number }
 
-/** Mirrors `watermark_placements` in `src-tauri/src/pdfium/watermark.rs`, as an
+/** Mirrors `watermark_placements` in `src-tauri/engine/src/pdfium/watermark.rs`, as an
     approximation — PDFium measures real glyphs — so a mismatch is a preview bug. */
 function previewPlacements(
   sheet: Box,

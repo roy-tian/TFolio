@@ -3,7 +3,6 @@ import { describe, expect, it } from "bun:test"
 import {
   emptySelection,
   selectionAfterClick,
-  selectionAfterStructureChange,
   selectionOfAllPages,
   type ThumbnailSelection,
 } from "@/lib/thumbnailSelection"
@@ -57,13 +56,6 @@ describe("selectionAfterClick", () => {
 
     expect(pagesOf(selection)).toEqual([4])
     expect(selection.anchor).toBe(4)
-  })
-})
-
-describe("selectionAfterStructureChange", () => {
-  it("keeps nothing, because page numbers name different pages now", () => {
-    expect(selectionAfterStructureChange().pages.size).toBe(0)
-    expect(selectionAfterStructureChange().anchor).toBeNull()
   })
 })
 

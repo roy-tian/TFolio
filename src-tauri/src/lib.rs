@@ -1,4 +1,3 @@
-mod convert;
 mod handoff;
 mod launch;
 mod pdfium;
@@ -11,7 +10,6 @@ mod window_background;
 mod window_state;
 mod windows;
 
-use convert::word_conversion_available;
 use handoff::{move_document, move_document_new_window, take_moved_tabs, HandoffQueue};
 use launch::{take_launch_files, LaunchQueue};
 #[cfg(feature = "e2e")]
@@ -29,7 +27,7 @@ use pdfium::{
     pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path, pick_pdf_paths,
     release_pdf_compression, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
     render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_pdf, search_pdf_text, PdfiumState,
+    rotate_pdf_pages, save_pdf, search_pdf_text, word_conversion_available, PdfiumState,
 };
 use quit::quit_app;
 use recent::{recent_pdf_view, recent_pdfs, remove_recent_pdf, set_recent_pdf_view, RecentFiles};

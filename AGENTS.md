@@ -11,6 +11,9 @@
 - Explain non-obvious WHY in comments; keep them concise and omit self-evident descriptions.
 - Keep files cohesive; extract unrelated responsibilities. Around 1,000 lines, review whether
   splitting improves clarity; cohesive files may exceed it.
+- `src-tauri/engine` (`tfolio-engine`) must not depend on Tauri: the app resolves paths into
+  `EnginePaths` and owns commands, dialogs, windows, path approval, IPC image encoding, and the
+  async runtime. The engine has no `e2e` feature; e2e choices are passed in by the app.
 - Page reordering calls the raw `FPDF_MovePages` binding in `page_reorder.rs`, bypassing
   `pdfium-render`'s page index cache: never keep a `PdfPage` alive past one engine call.
 - CI takes Bun's version from `packageManager`, not the local toolchain.
@@ -18,8 +21,9 @@
 ## Validation
 
 - Before a PR, run `bun run version:check`, `bun run test`, `bun run build`, and Cargo
-  `fmt -- --check`, `clippy --locked -- -D warnings` (which subsumes `check`), and `test --locked`
-  against `src-tauri/Cargo.toml`. Backend or GUI changes also require `bun run test:all`.
+  `fmt --all -- --check` (without `--all` it skips the engine crate), `clippy --locked -- -D warnings`
+  (which subsumes `check`), and `test --locked` against `src-tauri/Cargo.toml`. Backend or GUI
+  changes also require `bun run test:all`.
 - Run overlapping checks once; `test:all` satisfies the `bun run test` and Cargo `test --locked` requirements.
 - PDFium test fonts are not bundled. PDFium-dependent ignored Rust tests require `fonts:download`;
   missing fonts fail those tests instead of skipping them.
@@ -79,8 +83,10 @@
 
 - Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for outlines,
   which PDFium cannot write.
-- Render in Rust; transfer bytes/images as raw IPC binary and decode with `createImageBitmap`,
-  never `blob:`.
+- Render in Rust; transfer bytes/images as raw IPC binary and decode with `createImageBitmap`
+  in the decode worker (`imageDecode.ts`), never `blob:`. Page canvases take bitmaps through
+  `bitmaprenderer`: they have no 2d context, so read pixels through a 2d copy; resizing keeps
+  the bitmap, so release it with `transferFromImageBitmap(null)`.
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool
   may wait on the PDFium lock held by the operation being cancelled.

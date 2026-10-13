@@ -451,14 +451,19 @@ mod tests {
     }
 
     #[test]
-    fn the_first_change_lands_immediately_and_a_repeat_lands_nothing() {
-        let (state, file) = scratch("first-change");
+    fn a_repeated_frame_writes_nothing() {
+        let (state, file) = scratch("repeat");
 
         state.record(geometry());
-        assert_eq!(on_disk(&file), Some(geometry()));
-
+        let written = state.memo.lock().unwrap().written;
+        // Inside the first write's interval, where a change would arm the
+        // trailing write; a repeat is no change, so it neither writes nor arms.
         state.record(geometry());
-        assert_eq!(on_disk(&file), Some(geometry()));
+
+        let memo = state.memo.lock().unwrap();
+        assert_eq!(memo.written, written);
+        assert!(!memo.trailing);
+        drop(memo);
 
         let _ = std::fs::remove_dir_all(file.parent().expect("the scratch file has a directory"));
     }

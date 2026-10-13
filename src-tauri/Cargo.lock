@@ -5058,20 +5058,12 @@ dependencies = [
 name = "tfolio"
 version = "0.1.16"
 dependencies = [
- "allsorts",
  "base64 0.22.1",
- "fontdb",
- "getrandom 0.4.3",
  "image",
- "libc",
- "lopdf",
  "minisign-verify",
  "objc2-app-kit",
- "pdfium-render",
- "reqwest",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -5079,8 +5071,25 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-wdio",
  "tauri-plugin-wdio-webdriver",
+ "tfolio-engine",
  "toml 1.1.8+spec-1.1.0",
  "window-vibrancy",
+]
+
+[[package]]
+name = "tfolio-engine"
+version = "0.0.0"
+dependencies = [
+ "allsorts",
+ "fontdb",
+ "getrandom 0.4.3",
+ "image",
+ "libc",
+ "lopdf",
+ "pdfium-render",
+ "reqwest",
+ "serde",
+ "sha2 0.11.0",
  "windows-registry",
  "zip",
 ]

@@ -644,12 +644,13 @@ export function pageInk(pageNumber = 1) {
     const canvas = document.querySelector<HTMLCanvasElement>(
       `[data-page-number='${targetPage}'] canvas`,
     )!
-    const { data } = canvas.getContext("2d")!.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    )
+    // A `bitmaprenderer` canvas has no 2d context to read: copy it into one.
+    const copy = document.createElement("canvas")
+    copy.width = canvas.width
+    copy.height = canvas.height
+    const context = copy.getContext("2d")!
+    context.drawImage(canvas, 0, 0)
+    const { data } = context.getImageData(0, 0, copy.width, copy.height)
     let ink = 0
 
     for (let index = 0; index < data.length; index += 4) {
@@ -666,12 +667,13 @@ export function pagePixelFingerprint(pageSelector = "[data-page-number='1']") {
     const canvas = document.querySelector<HTMLCanvasElement>(
       `${selector} canvas`,
     )!
-    const { data } = canvas.getContext("2d")!.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    )
+    // A `bitmaprenderer` canvas has no 2d context to read: copy it into one.
+    const copy = document.createElement("canvas")
+    copy.width = canvas.width
+    copy.height = canvas.height
+    const context = copy.getContext("2d")!
+    context.drawImage(canvas, 0, 0)
+    const { data } = context.getImageData(0, 0, copy.width, copy.height)
     let hash = 2166136261
 
     for (const value of data) {
@@ -688,7 +690,7 @@ export async function renderedPage(pageSelector = "[data-page-number='1']") {
   await page.waitForDisplayed({ timeout: 30_000 })
 
   const canvas = await page.$("canvas")
-  // The canvas starts at the PDF's dimensions, before it contains any pixels.
+  // The canvas has a size before it contains any pixels.
   await expect(canvas).toHaveAttribute("data-rendered", "true", { wait: 30_000 })
 
   // A zoom-settling re-render (150ms debounce) can follow the first bitmap at

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
+import { decodeImage } from "@/lib/imageDecode"
 import { distanceFromView, pageWork } from "@/lib/pageWork"
 import { resolveOutputScale } from "@/lib/pdf"
 
@@ -114,26 +115,27 @@ export function usePageBitmap({
 
       // Decoding the bytes straight into a bitmap keeps the image off the
       // document, so no `blob:` source is needed and the CSP stays untouched.
-      const bitmap = await createImageBitmap(
-        new Blob([bytes], { type: mimeType }),
-      )
+      const bitmap = await decodeImage(bytes, mimeType)
 
       if (cancelled) {
         bitmap.close()
         return
       }
 
-      const context = canvas.getContext("2d", { alpha: false })
+      // Takes the bitmap without the copy a 2d `drawImage` makes on this
+      // thread. The canvas then has no 2d context to read pixels back from.
+      const context = canvas.getContext("bitmaprenderer")
 
       if (!context) {
         bitmap.close()
-        throw new Error("Canvas 2D rendering is unavailable")
+        throw new Error("Canvas bitmap rendering is unavailable")
       }
 
+      // Readers take `canvas.width` as the bitmap's width; a transfer alone
+      // need not resize the canvas.
       canvas.width = bitmap.width
       canvas.height = bitmap.height
-      context.drawImage(bitmap, 0, 0)
-      bitmap.close()
+      context.transferFromImageBitmap(bitmap)
       lastRenderRef.current = { documentId, renderEpoch, renderWidth }
       onPaintRef.current?.(pageNumber, renderEpoch)
       setHasRendered(true)
@@ -181,7 +183,10 @@ export function usePageBitmap({
       return
     }
 
-    // Zero-sized drops the backing store; coming back renders it again.
+    // Resizing alone keeps a transferred bitmap, so release it through the
+    // context first; zero-sized then reads as released. Coming back renders
+    // it again.
+    canvas.getContext("bitmaprenderer")?.transferFromImageBitmap(null)
     canvas.width = 0
     canvas.height = 0
     lastRenderRef.current = null

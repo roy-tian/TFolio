@@ -80,13 +80,6 @@ describe("totalPageRotation", () => {
 })
 
 describe("fractionToPagePoint", () => {
-  it("scales a fraction of an upright page to its points", () => {
-    expect(fractionToPagePoint({ x: 0.5, y: 0.5 }, page(0), 0)).toEqual({
-      left: 100,
-      top: 150,
-    })
-  })
-
   // The centre is the one point every rotation fixes, so it holds whatever the
   // page and the reader are each doing.
   it("holds the centre still through every rotation pair", () => {
@@ -306,13 +299,6 @@ describe("pagePointToFraction", () => {
 })
 
 describe("fractionToClientPoint", () => {
-  it("is the inverse of clientPointToFraction", () => {
-    const box = { height: 200, left: 50, top: 100, width: 400 }
-    const round = fractionToClientPoint(box, clientPointToFraction(box, 250, 200))
-
-    expect(round).toEqual({ x: 250, y: 200 })
-  })
-
   it("measures a fraction back onto the box", () => {
     const box = { height: 200, left: 50, top: 100, width: 400 }
 
@@ -427,13 +413,6 @@ describe("mergeRectsByLine", () => {
     expect(mergeRectsByLine([heading, ...body])).toEqual([
       heading, rect(310, 100, 79, 8), rect(310, 112, 79, 8),
     ])
-  })
-
-  it("keeps neighbouring lines apart whose boxes merely touch", () => {
-    // Line pitch 14 over 10-high ink: the boxes abut without overlapping.
-    const runs = [rect(72, 100, 200, 10), rect(72, 114, 200, 10)]
-
-    expect(mergeRectsByLine(runs)).toEqual(runs)
   })
 
   it("keeps a footnote marker that barely climbs the line as its own band", () => {

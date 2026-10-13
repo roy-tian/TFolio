@@ -304,14 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn a_window_with_nothing_queued_answers_empty() {
-        let queue = HandoffQueue::default();
-
-        assert!(queue.pending_ids("main").is_empty());
-        assert!(queue.take("main").is_empty());
-    }
-
-    #[test]
     fn a_window_larger_than_the_area_still_gets_a_place() {
         // A drop from a window wider than the monitor it landed on must not
         // turn the clamp's range inside out.

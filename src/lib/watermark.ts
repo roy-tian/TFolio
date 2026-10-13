@@ -18,7 +18,7 @@ export type WatermarkValidationError =
   | "tooLong"
   | "style"
 
-// Mirrored by `src-tauri/src/pdfium/watermark.rs`; both sides reject rather
+// Mirrored by `src-tauri/engine/src/pdfium/watermark.rs`; both sides reject rather
 // than clamp, because Tauri commands remain callable outside this UI.
 export const WATERMARK_MAX_CHARS = 256
 export const WATERMARK_MIN_WIDTH_RATIO = 0.1

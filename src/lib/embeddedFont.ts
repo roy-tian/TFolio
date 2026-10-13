@@ -1,5 +1,5 @@
 /**
- * Mirrors `needs_embedded_font` in `src-tauri/src/pdfium/font.rs` — Latin-1's
+ * Mirrors `needs_embedded_font` in `src-tauri/engine/src/pdfium/font.rs` — Latin-1's
  * printable range, nothing else — so a preview matches the embedded metrics.
  */
 export function usesEmbeddedFont(text: string): boolean {

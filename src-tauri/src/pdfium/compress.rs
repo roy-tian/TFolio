@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use tauri::{ipc::Channel, AppHandle, State};
+use tfolio_engine::{CompressionEstimate, CompressionOptions, OperationTarget};
 
 use super::{
     commands::{channel_progress, export_dialog},
-    engine::OperationTarget,
     PdfProgress, PdfiumState,
 };
 
@@ -15,7 +14,7 @@ pub async fn cancel_pdf_compression(
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::Compress(document_id)))
 }
 
@@ -27,7 +26,7 @@ pub async fn cancel_pdf_compression_estimate(
     state: State<'_, PdfiumState>,
 ) -> Result<bool, String> {
     Ok(state
-        .0
+        .engine
         .cancel_operation(OperationTarget::CompressEstimate(document_id)))
 }
 
@@ -38,42 +37,12 @@ pub async fn release_pdf_compression(
     document_id: u64,
     state: State<'_, PdfiumState>,
 ) -> Result<(), String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     // The store's lock may be held by a long edit; waiting belongs off the
     // IPC thread.
     tauri::async_runtime::spawn_blocking(move || engine.release_compression(document_id))
         .await
         .map_err(|error| format!("compression release task failed: {error}"))?
-}
-
-/// The level is bounded by the engine, not by the choices that usually pick
-/// it: a command's arguments are anyone's to send.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct CompressionOptions {
-    /// The resolution images are resampled toward, in pixels per inch of
-    /// their drawn size. `None` leaves the images' bytes untouched and
-    /// compresses structure alone.
-    pub image_dpi: Option<u32>,
-}
-
-/// The dialog's bottom line. `estimated_bytes` is the pipeline's own output,
-/// exactly what the export will write; `original_bytes` is the opened file's
-/// length until an edit or a write, then PDFium's rewrite of the document.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompressionEstimate {
-    pub(in crate::pdfium) original_bytes: u64,
-    pub(in crate::pdfium) estimated_bytes: u64,
-}
-
-impl CompressionEstimate {
-    pub(in crate::pdfium) fn new(original_bytes: u64, estimated_bytes: u64) -> Self {
-        Self {
-            original_bytes,
-            estimated_bytes,
-        }
-    }
 }
 
 #[tauri::command]
@@ -82,7 +51,7 @@ pub async fn estimate_pdf_compression(
     options: CompressionOptions,
     state: State<'_, PdfiumState>,
 ) -> Result<Option<CompressionEstimate>, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     tauri::async_runtime::spawn_blocking(move || engine.estimate_compression(document_id, options))
         .await
         .map_err(|error| format!("compression estimate task failed: {error}"))?
@@ -98,7 +67,7 @@ pub async fn export_compressed_pdf(
     app: AppHandle,
     state: State<'_, PdfiumState>,
 ) -> Result<Option<String>, String> {
-    let engine = Arc::clone(&state.0);
+    let engine = Arc::clone(&state.engine);
     tauri::async_runtime::spawn_blocking(move || {
         let Some(picked) = export_dialog(
             &app,

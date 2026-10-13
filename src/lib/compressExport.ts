@@ -1,4 +1,4 @@
-/** Mirrors `CompressionOptions` in `src-tauri/src/pdfium/compress.rs`: the
+/** Mirrors `CompressionOptions` in `src-tauri/engine/src/pdfium/compress.rs`: the
     resolution images are resampled toward, in pixels per inch of their drawn
     size. `null` leaves images untouched. */
 export type CompressionOptions = {

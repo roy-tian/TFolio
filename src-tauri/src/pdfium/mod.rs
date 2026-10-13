@@ -1,16 +1,18 @@
 mod archive;
-mod archive_links;
 mod commands;
 mod compress;
-mod engine;
-mod font;
-mod geometry;
-mod library;
-mod outline;
-mod page_numbers;
-mod watermark;
+mod encode;
+mod paths;
 
-use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
+
+use serde::Serialize;
+use tauri::AppHandle;
+use tfolio_engine::{PdfiumEngine, WordSuites};
 
 pub use archive::{cancel_pdf_archive, export_pdf_archive};
 #[cfg(feature = "e2e")]
@@ -26,30 +28,12 @@ pub use commands::{
     open_pdf, open_pdf_from_path, pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path,
     pick_pdf_paths, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
     render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_pdf, search_pdf_text,
+    rotate_pdf_pages, save_pdf, search_pdf_text, word_conversion_available,
 };
 pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
     export_compressed_pdf, release_pdf_compression,
 };
-pub use engine::PdfiumState;
-// `launch.rs` reads the image kinds for its own launch test.
-pub(crate) use engine::is_merge_image;
-pub use page_numbers::{PageNumbersConfig, PageNumbersPreferences};
-pub use watermark::WatermarkConfig;
-
-// The one ceiling every PDF this app reads is held to, wherever it came from
-// — also the ceiling a conversion's output must meet before it is one.
-pub(crate) const MAX_PDF_BYTES: usize = 512 * 1024 * 1024;
-
-/// The frontend matches this refusal by its "MiB limit" substring
-/// (`loadPdfFromPath` in `App.tsx`), so every call site shares one wording.
-fn size_limit_error() -> String {
-    format!(
-        "PDF file exceeds the {} MiB limit",
-        MAX_PDF_BYTES / 1024 / 1024
-    )
-}
 
 /// Counts work units rather than bytes: pages for owned content, and
 /// source/finishing stages for a merge.
@@ -66,217 +50,70 @@ impl PdfProgress {
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfDocumentInfo {
-    id: u64,
-    num_pages: i32,
-    pages: Vec<PdfPageInfo>,
-    outline: Vec<PdfOutlineItem>,
-    /// The file this document was opened from. `None` — opened from bytes —
-    /// disables saving; only exporting can give it a file.
-    path: Option<String>,
+#[derive(Clone)]
+pub struct PdfiumState {
+    engine: Arc<PdfiumEngine>,
+    /// Paths something outside the WebView produced — a drop, a dialog pick. A
+    /// path is a string any page code can make up, and opening one binds a save.
+    approved: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
-/// The frontend holds no mirror of the page list to patch, so it replaces its
-/// copy wholesale after every structure change.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfStructureUpdate {
-    num_pages: i32,
-    pages: Vec<PdfPageInfo>,
-    outline: Vec<PdfOutlineItem>,
-    /// Like a watermark, any page another file brought in leaves the document
-    /// export-only; the frontend's save key reads this, not its own history.
-    has_merged_pages: bool,
-}
+impl PdfiumState {
+    pub fn new(app: &AppHandle) -> Result<Self, String> {
+        // The GUI suite must not depend on what the machine running it has installed.
+        let word_suites = if cfg!(feature = "e2e") {
+            WordSuites::Absent
+        } else {
+            WordSuites::Installed
+        };
 
-/// `page_count` is the one thing the frontend cannot know until the file is
-/// read — and what its undo needs to know which pages to take back out.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InsertOutcome {
-    page_count: i32,
-    update: PdfStructureUpdate,
-}
+        Ok(Self {
+            engine: Arc::new(PdfiumEngine::new(paths::engine_paths(app), word_suites)?),
+            approved: Arc::default(),
+        })
+    }
 
-/// How a merge turns its sources' bookmarks into the merged outline. Every
-/// mode but `None` needs an outline written, which PDFium cannot do.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum MergeBookmarks {
-    /// No outline at all — the shape a merge already produces, since imported
-    /// pages leave their source's bookmarks behind.
-    None,
-    /// One top-level bookmark per file, on the file's first page.
-    PerFile,
-    /// Each file's own bookmarks, remapped onto their merged positions and laid
-    /// out one file after another at the top level.
-    KeepExisting,
-    /// One bookmark per file, with that file's own bookmarks beneath it.
-    PerFileWithExisting,
-}
+    pub fn approve_paths<'a>(&self, paths: impl IntoIterator<Item = &'a PathBuf>) {
+        if let Ok(mut approved) = self.approved.lock() {
+            approved.extend(paths.into_iter().cloned());
+        }
+    }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MergePlan {
-    paths: Vec<String>,
-    /// A blank before any file that would otherwise open on an even page.
-    smart_padding: bool,
-    /// Every page laid on an A4 sheet of its own instead of keeping the size its
-    /// source gave it.
-    normalize_a4: bool,
-    bookmarks: MergeBookmarks,
-}
+    /// Kept rather than consumed: the reader may cancel the unsaved guard and
+    /// open the same file again; the e2e build waives the check at call sites.
+    #[cfg_attr(feature = "e2e", allow(dead_code))]
+    fn is_approved(&self, path: &Path) -> bool {
+        self.approved
+            .lock()
+            .map(|approved| approved.contains(path))
+            .unwrap_or(false)
+    }
 
-/// An image is laid on a sheet of its own; a Word document arrives as the PDF
-/// this machine's office suite made of it — the only renderer it can be trusted to.
-#[derive(Clone, Copy, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum MergeSourceKind {
-    Pdf,
-    Image,
-    Word,
-}
+    /// Whether the wizard may promise Word conversion: the machine's own
+    /// suites, detected passively — never a reader setting.
+    fn word_available(&self) -> bool {
+        // E2e answers yes with no suite behind it, so specs can drive the row
+        // a refused conversion leaves; a closed door would never show it.
+        cfg!(feature = "e2e") || self.engine.word_conversion_available()
+    }
 
-/// Why a Word document could not become a PDF. The wizard words these itself;
-/// the detail an engine reported stays in the error it came with.
-#[derive(Clone, Copy, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum MergeSourceError {
-    ConverterMissing,
-    ConversionFailed,
-}
+    /// A window's label is the engine's cancellation scope for its merge and
+    /// Word conversions.
+    pub fn cancel_window_work(&self, label: &str) {
+        self.engine.cancel_scope_work(label);
+    }
 
-/// Read before anything is merged, so the wizard can show page counts and
-/// total up the result.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfFileSummary {
-    path: String,
-    kind: MergeSourceKind,
-    /// `None` when the file could not be read, so the row shows as
-    /// unusable rather than silently going missing from the list.
-    page_count: Option<i32>,
-    all_pages_a4: Option<bool>,
-    /// Whether the file brings bookmarks of its own — what makes the
-    /// bookmark-keeping modes worth offering.
-    has_outline: bool,
-    /// Set only where "unreadable" would understate the row: a Word document
-    /// that no installed application could convert, or none could be found.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<MergeSourceError>,
-}
+    pub fn remove_conversion_files(&self) {
+        self.engine.remove_conversion_files();
+    }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExportOutcome {
-    path: String,
-    /// Whether the document is now bound to `path` — false only for a copy-only
-    /// document's copy. This, not the operation's name, marks the history saved.
-    saved_to_source: bool,
-}
+    /// Closing takes the PDFium lock, so it must not block the window event loop.
+    pub fn close_document_detached(&self, document_id: u64) {
+        let engine = Arc::clone(&self.engine);
+        engine.cancel_document_work(document_id);
 
-#[derive(Clone, Copy, Debug, Serialize)]
-struct PdfPageInfo {
-    // `width`/`height` are displayed dimensions (`/Rotate` already applied),
-    // matching the rendered bitmap; `rotation` orients the frontend text layer.
-    width: f32,
-    height: f32,
-    rotation: f32,
-}
-
-/// A text run's bounding box in *unrotated* page points, top-left origin: the
-/// frontend rotates the whole text layer by the page's rotation.
-#[derive(Serialize)]
-pub struct PdfTextSpan {
-    text: String,
-    left: f32,
-    top: f32,
-    width: f32,
-    height: f32,
-}
-
-/// *Unrotated* page points with a top-left origin, so callers never have to
-/// know which way PDFium counts its own axes.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PagePointsRect {
-    left: f32,
-    top: f32,
-    width: f32,
-    height: f32,
-}
-
-/// One occurrence; a wrapped one has a rectangle per line, kept together so
-/// the result counter advances by occurrences rather than lines.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfSearchMatch {
-    page_number: i32,
-    rects: Vec<PagePointsRect>,
-}
-
-/// A search can be stopped when its term changes; `cancelled` lets the
-/// frontend discard the interrupted run's partial matches.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfSearchOutcome {
-    cancelled: bool,
-    /// True when the bounded IPC result has more occurrences than it can safely
-    /// retain. The returned prefix remains navigable and is labelled as such.
-    limit_reached: bool,
-    matches: Vec<PdfSearchMatch>,
-}
-
-/// A block of `color` with `opacity` on its alpha — no border or radius: the
-/// reader picks how much of what is under it still shows through.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RectStyle {
-    color: String,
-    opacity: f32,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RectEffect {
-    kind: RectEffectKind,
-    /// Mosaic block size or blur sigma, in page points.
-    strength: f32,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum RectEffectKind {
-    Mosaic,
-    Blur,
-}
-
-/// The same space `PagePointsRect` uses. A note is placed by its top-left
-/// corner — where the reader clicked — not the baseline PDFium draws from.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PagePoint {
-    left: f32,
-    top: f32,
-}
-
-/// No family to pick: Latin text draws in Helvetica, anything else in a face
-/// the machine can embed — a control would offer a choice a note might not get.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TextNoteStyle {
-    /// Point size, as a PDF measures type.
-    font_size: f32,
-    color: String,
-    opacity: f32,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PdfOutlineItem {
-    title: String,
-    page_number: Option<i32>,
-    items: Vec<PdfOutlineItem>,
+        tauri::async_runtime::spawn_blocking(move || {
+            let _ = engine.close(document_id);
+        });
+    }
 }

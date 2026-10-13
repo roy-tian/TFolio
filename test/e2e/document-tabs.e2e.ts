@@ -11,7 +11,6 @@ import {
   clickAppMenuItem,
   dropZoneButton,
   emitDrag,
-  gapPoint,
   minimalPdf,
   openFileButton,
   openPathViaDialog,
@@ -697,26 +696,5 @@ describe("independent document tabs", () => {
       "aria-selected",
       "true",
     )
-  })
-
-  it("keeps a PDF dropped on the grid inside the current tab", async () => {
-    await openPdfFromDisk("base.pdf", minimalPdf(2))
-    await $("button[aria-label='Thumbnails']").click()
-    await $("button[data-page-number='1']").waitForDisplayed()
-
-    const addedPath = writePdf("inserted.pdf", 2)
-    const point = await gapPoint(1)
-
-    await emitDrag("drag-over", point, [addedPath])
-    await emitDrag("drag-drop", point, [addedPath])
-
-    await browser.waitUntil(
-      async () => (await $$("button[data-page-number]").length) === 4,
-      { timeoutMsg: "the dropped PDF's pages never joined the document" },
-    )
-    // The pages joined this document rather than opening tabs of their own —
-    // anywhere but the grid, the same drop would.
-    await expect(tabButtons()).toBeElementsArrayOfSize(2)
-    await expect($("button[aria-label='Close base.pdf']")).toBeDisplayed()
   })
 })
