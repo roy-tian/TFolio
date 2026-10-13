@@ -43,9 +43,13 @@ function thumbFingerprint(pageNumber: number, scope = "") {
       return -1
     }
 
-    const { data } = canvas
-      .getContext("2d")!
-      .getImageData(0, 0, canvas.width, canvas.height)
+    // A `bitmaprenderer` canvas has no 2d context to read: copy it into one.
+    const copy = document.createElement("canvas")
+    copy.width = canvas.width
+    copy.height = canvas.height
+    const context = copy.getContext("2d")!
+    context.drawImage(canvas, 0, 0)
+    const { data } = context.getImageData(0, 0, copy.width, copy.height)
     let hash = 0
     let ink = 0
     let whites = 0
@@ -768,20 +772,20 @@ describe("TFolio page editing", () => {
     await openPdfFromDisk("reorder.pdf", bandedPdf(4))
     const [first, second, third, fourth] = await paintedFingerprints(4)
 
-    // Hold decoding, not the PDF mutation: the committed grid must carry its
-    // existing canvases into place even when no replacement bitmap can paint.
+    // Hold decoding (the decode worker's requests), not the PDF mutation: the
+    // committed grid must carry its existing canvases into place even when no
+    // replacement bitmap can paint.
     await browser.execute(() => {
-      const decode = window.createImageBitmap.bind(window)
+      const post = Worker.prototype.postMessage
       let resume!: () => void
       const held = new Promise<void>((resolve) => { resume = resolve })
 
-      window.createImageBitmap = (async (...args: Parameters<typeof decode>) => {
-        await held
-        return decode(...args)
-      }) as typeof window.createImageBitmap
+      Worker.prototype.postMessage = function (this: Worker, ...args: Parameters<typeof post>) {
+        void held.then(() => post.apply(this, args))
+      } as typeof post
 
       document.addEventListener("resume-thumbnail-decoding", () => {
-        window.createImageBitmap = decode
+        Worker.prototype.postMessage = post
         resume()
       }, { once: true })
     })

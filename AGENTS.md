@@ -83,8 +83,10 @@
 
 - Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for outlines,
   which PDFium cannot write.
-- Render in Rust; transfer bytes/images as raw IPC binary and decode with `createImageBitmap`,
-  never `blob:`.
+- Render in Rust; transfer bytes/images as raw IPC binary and decode with `createImageBitmap`
+  in the decode worker (`imageDecode.ts`), never `blob:`. Page canvases take bitmaps through
+  `bitmaprenderer`: they have no 2d context, so read pixels through a 2d copy; resizing keeps
+  the bitmap, so release it with `transferFromImageBitmap(null)`.
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool
   may wait on the PDFium lock held by the operation being cancelled.

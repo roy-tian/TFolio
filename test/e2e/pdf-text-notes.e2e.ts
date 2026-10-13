@@ -268,9 +268,13 @@ describe("TFolio text notes", () => {
         // Where the note's ink starts, in the page's own points: the canvas is
         // rendered at some multiple of the 300x400 page.
         const inkTop = () => {
-          const { data } = source.getContext("2d")!.getImageData(
-            0, 0, source.width, source.height,
-          )
+          // A `bitmaprenderer` canvas has no 2d context to read: copy it into one.
+          const copy = document.createElement("canvas")
+          copy.width = source.width
+          copy.height = source.height
+          const context = copy.getContext("2d")!
+          context.drawImage(source, 0, 0)
+          const { data } = context.getImageData(0, 0, copy.width, copy.height)
 
           for (let y = 0; y < source.height; y += 1) {
             for (let x = 0; x < source.width; x += 1) {
@@ -286,14 +290,13 @@ describe("TFolio text notes", () => {
         }
 
         void (async () => {
-          // Only decoding is delayed — IPC, PDFium and history stay real; a fix
-          // that merely kept the editor open would double the text once landed.
-          const decode = window.createImageBitmap.bind(window)
-          window.createImageBitmap = (async (...args: Parameters<typeof decode>) => {
-            const bitmap = await decode(...args)
-            await new Promise((resolve) => setTimeout(resolve, 400))
-            return bitmap
-          }) as typeof window.createImageBitmap
+          // Only decoding is delayed, by holding back the decode worker's
+          // requests — IPC, PDFium and history stay real; a fix that merely
+          // kept the editor open would double the text once landed.
+          const post = Worker.prototype.postMessage
+          Worker.prototype.postMessage = function (this: Worker, ...args: Parameters<typeof post>) {
+            setTimeout(() => post.apply(this, args), 400)
+          } as typeof post
 
           let blankFrames = 0
           let waitingFrames = 0
@@ -337,7 +340,7 @@ describe("TFolio text notes", () => {
               }
             }
           } finally {
-            window.createImageBitmap = decode
+            Worker.prototype.postMessage = post
           }
 
           // Let the render settle before the ink is measured.
