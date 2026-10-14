@@ -261,6 +261,60 @@ describe("TFolio select all", () => {
     expect((await copiedText()) ?? "").toContain("Highlight me please 20")
   })
 
+  // A shift-click far down the document: the pages between were passed while
+  // nothing was selected, so they hold no spans for the WebView to copy.
+  it("copies the pages a selection runs over without spans", async () => {
+    await openPdfFromDisk("span-copy.pdf", textPdf(20))
+    await $("[data-page-number='1'] .pdf-text-layer span").waitForExist({ timeout: 15_000 })
+    await watchClipboard()
+    await browser.execute(() => {
+      const text = document.querySelector("[data-page-number='1'] .pdf-text-layer span")!.firstChild!
+      window.getSelection()!.setBaseAndExtent(text, 0, text, 9)
+      document.querySelector("[data-page-number='10']")!.scrollIntoView({ block: "start" })
+    })
+    await $("[data-page-number='10'] .pdf-text-layer span").waitForExist({ timeout: 15_000 })
+    const unbuilt = await browser.execute(() => {
+      const selection = window.getSelection()!
+      const end = document.querySelector("[data-page-number='10'] .pdf-text-layer span")!.firstChild!
+      selection.setBaseAndExtent(selection.anchorNode!, selection.anchorOffset, end, 9)
+
+      return [2, 3, 4, 5, 6, 7, 8].filter((page) =>
+        !document.querySelector(`[data-page-number='${page}'] .pdf-text-layer span`))
+    })
+    expect(unbuilt.length).toBeGreaterThan(0)
+
+    const expected = [
+      ...Array.from({ length: 9 }, (_, index) => `Highlight me please ${index + 1}`),
+      "Highlight",
+    ].join("\n")
+    // The WebView's own copy, as a key would start it; the pages between are
+    // read as the selection is made, so a later event finds them waiting.
+    const copied = await browser.waitUntil(
+      () => browser.execute(() => {
+        const data = new DataTransfer()
+        const event = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data })
+        document.dispatchEvent(event)
+
+        return event.defaultPrevented ? data.getData("text/plain") : ""
+      }),
+      { timeout: 15_000, timeoutMsg: "the copy never took over the pages without spans" },
+    )
+    expect(copied).toBe(expected)
+
+    // A copy above that found a page still being read wrote the clipboard
+    // late itself: clear the watch, or that write would pass for the menu's.
+    await watchClipboard()
+    await rightClick("[data-page-number='10'] .pdf-text-layer span")
+    const copyItem = await $("[data-action='copy-text']")
+    await copyItem.waitForDisplayed({ timeout: 15_000 })
+    await copyItem.click()
+    await browser.waitUntil(async () => (await copiedText()) !== null, {
+      timeout: 15_000,
+      timeoutMsg: "nothing reached the clipboard",
+    })
+    expect(await copiedText()).toBe(expected)
+  })
+
   it("selects every page in the thumbnail grid", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
     await refreshApp()

@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from "react"
 
+import type { CurrentPage } from "@/hooks/useCurrentPage"
 import type { PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import { spreadPages, type ViewMode } from "@/lib/viewMode"
@@ -57,7 +58,7 @@ type UseZoomOptions = {
   contentHeight: number
   /** Width available to pages, once the column's padding is out. */
   contentWidth: number
-  currentPage: number
+  currentPage: CurrentPage
   disabled: boolean
   /** A recent file's own zoom, over the fresh-document default. */
   initialZoom?: ZoomState
@@ -141,12 +142,10 @@ export function useZoom({
   // Written on commit rather than in render, so a render React throws away
   // cannot leave behind a scale that was never shown.
   const scaleRef = useRef(scale)
-  const currentPageRef = useRef(currentPage)
 
   useEffect(() => {
     scaleRef.current = scale
-    currentPageRef.current = currentPage
-  }, [currentPage, scale])
+  }, [scale])
 
   const clearPreviewTransform = useCallback(() => {
     const layout = viewerRef.current?.querySelector<HTMLElement>(
@@ -185,7 +184,7 @@ export function useZoom({
           .elementFromPoint(clientX, clientY)
           ?.closest<HTMLElement>("[data-page-number]") ??
         viewer.querySelector<HTMLElement>(
-          `[data-page-number="${currentPageRef.current}"]`,
+          `[data-page-number="${currentPage.get()}"]`,
         )
 
       if (!page) {
@@ -203,7 +202,7 @@ export function useZoom({
         anchorRef.current = anchor
       }
     },
-    [viewerRef],
+    [currentPage, viewerRef],
   )
 
   // A button zoom has no pointer to work from, so it holds the middle of the
@@ -358,10 +357,10 @@ export function useZoom({
       // zoom last picked; the page is fresh — "fit" means the page in front.
     requestZoom((current) => ({
       ...current,
-      fitPage: currentPageRef.current,
+      fitPage: currentPage.get(),
       mode: nextFitMode(current.mode),
     }))
-  }, [cancelPreview, captureCentreAnchor, requestZoom])
+  }, [cancelPreview, captureCentreAnchor, currentPage, requestZoom])
 
   /** For a newly opened document, which has no reading position to keep. */
   const resetToDefault = useCallback(() => {

@@ -1,6 +1,7 @@
 import { $, browser, expect } from "@wdio/globals"
 
 import { bandedPdf, minimalPdf, openPdfFromDisk, refreshApp, seedSettings } from "./helpers"
+import { calibratePointer, pointer } from "./nativePointer"
 
 describe("PDF scrolling", () => {
   before(async () => {
@@ -172,5 +173,68 @@ describe("PDF scrolling", () => {
     })
     expect(after.scrollTop).toBe(before.scrollTop)
     expect(after.gap).toBeGreaterThan(0)
+  })
+
+  // Pressed for real: the bridge's click never let go of the selection the
+  // way a released button does, which left the caret before the number.
+  it("keeps a focused page field on the page read until something is typed", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("page-field.pdf", bandedPdf(12))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+    const offset = await calibratePointer()
+    const field = () => browser.execute(() => {
+      const input = document.querySelector<HTMLInputElement>("input[aria-label='Page number']")!
+
+      return {
+        focused: document.activeElement === input,
+        selected: input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0),
+        value: input.value,
+      }
+    })
+    const press = async () => {
+      const at = await browser.execute(() => {
+        const box = document.querySelector("input[aria-label='Page number']")!.getBoundingClientRect()
+
+        return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+      })
+      pointer({ x: at.x + offset.x, y: at.y + offset.y })
+      pointer({ down: true })
+      pointer({ down: false })
+      await browser.waitUntil(async () => (await field()).focused)
+    }
+    const readTo = async (page: number) => {
+      await browser.execute((page) => {
+        document.querySelector(`[data-page-number='${page}']`)!.scrollIntoView({ block: "start" })
+      }, page)
+      await expect($("[data-slot='page-status']")).toHaveAttribute("aria-label", `Page ${page} of 12`)
+    }
+
+    await press()
+    expect(await field()).toEqual({ focused: true, selected: "1", value: "1" })
+
+    await readTo(5)
+    expect(await field()).toEqual({ focused: true, selected: "5", value: "5" })
+
+    // Not `setValue`: the bridge's clear blurs the field, which drops the
+    // draft, and its typing then appends to the restored number ("59").
+    await browser.execute(() => {
+      const input = document.querySelector<HTMLInputElement>("input[aria-label='Page number']")!
+
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "9")
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    await readTo(3)
+    expect((await field()).value).toBe("9")
+    await browser.keys("Enter")
+    await expect($("[data-slot='page-status']")).toHaveAttribute("aria-label", "Page 9 of 12")
+
+    // Untyped, Enter stands on the page the field has followed to.
+    await press()
+    await readTo(4)
+    await browser.keys("Enter")
+    await browser.pause(500)
+    await expect($("[data-slot='page-status']")).toHaveAttribute("aria-label", "Page 4 of 12")
+    expect(await field()).toMatchObject({ focused: false, value: "4" })
   })
 })

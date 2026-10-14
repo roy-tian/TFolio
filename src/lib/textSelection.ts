@@ -8,25 +8,30 @@ import {
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import { textPage } from "@/lib/textSelectionPage"
 
+/** The part of `range` inside `node`; collapsed where the two do not meet,
+    since moving one end past the other collapses a range. */
+export function rangeWithin(range: Range, node: Node) {
+  const part = document.createRange()
+
+  part.selectNodeContents(node)
+
+  if (part.compareBoundaryPoints(Range.START_TO_START, range) < 0) {
+    part.setStart(range.startContainer, range.startOffset)
+  }
+
+  if (part.compareBoundaryPoints(Range.END_TO_END, range) > 0) {
+    part.setEnd(range.endContainer, range.endOffset)
+  }
+
+  return part
+}
+
 /**
  * Clipped to the span, not `Range.getClientRects`, which reports a rect for
  * every element the range encloses whole — e.g. the next page's whole canvas.
  */
 export function selectedRectOfSpan(selection: Selection, span: Element) {
-  const range = selection.getRangeAt(0)
-  const spanRange = document.createRange()
-
-  spanRange.selectNodeContents(span)
-
-  const overlap = range.cloneRange()
-
-  if (overlap.compareBoundaryPoints(Range.START_TO_START, spanRange) < 0) {
-    overlap.setStart(spanRange.startContainer, spanRange.startOffset)
-  }
-
-  if (overlap.compareBoundaryPoints(Range.END_TO_END, spanRange) > 0) {
-    overlap.setEnd(spanRange.endContainer, spanRange.endOffset)
-  }
+  const overlap = rangeWithin(selection.getRangeAt(0), span)
 
   return overlap.collapsed ? null : overlap.getBoundingClientRect()
 }

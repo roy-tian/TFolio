@@ -33,11 +33,16 @@ export type MountedTextPage = {
 const byPage = new WeakMap<Element, MountedTextPage>()
 const byViewer = new WeakMap<Element, Set<MountedTextPage>>()
 
-/** Registration follows React's text/geometry lifetime, not the selection's.
+/** Registration follows the built spans' lifetime, not the selection's:
+    `spans` holds one element per run, in run order, once all are built.
     Raw page coordinates survive zoom, scroll and rotation without measuring
-    every DOM run again. Unmounting releases the nodes; the layout lives as
-    long as its runs array. */
-export function registerTextPage(layer: HTMLElement, rects: PagePointsRect[]) {
+    every DOM run again. Releasing drops the nodes; the layout lives as long
+    as its runs array. */
+export function registerTextPage(
+  layer: HTMLElement,
+  rects: PagePointsRect[],
+  spans: HTMLElement[],
+) {
   const element = layer.closest("[data-page-number]")
   const viewer = layer.closest("[data-pdf-scroll-root]")
   if (!element || !viewer) return
@@ -45,7 +50,7 @@ export function registerTextPage(layer: HTMLElement, rects: PagePointsRect[]) {
   const mounted: MountedTextPage = {
     element,
     layer,
-    spans: [...layer.querySelectorAll<HTMLElement>("span")],
+    spans,
     get layout() {
       return textPageLayout(rects)
     },

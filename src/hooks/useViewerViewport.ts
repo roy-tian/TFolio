@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { RefObject } from "react"
 
+import type { CurrentPage } from "@/hooks/useCurrentPage"
 import {
   anchorCorrection,
   anchorOnPage,
@@ -13,8 +14,7 @@ const RESIZE_COMPOSITOR_SETTLE_MS = 150
 
 type UseViewerViewportOptions = {
   active: boolean
-  currentPage: number
-  currentPageRef: RefObject<number>
+  currentPage: CurrentPage
   restoringRecentView: boolean
   scrollToPage: (pageNumber: number, behavior?: ScrollBehavior) => void
   viewMode: ViewMode
@@ -29,7 +29,6 @@ type UseViewerViewportOptions = {
 export function useViewerViewport({
   active,
   currentPage,
-  currentPageRef,
   restoringRecentView,
   scrollToPage,
   viewMode,
@@ -61,7 +60,7 @@ export function useViewerViewport({
     // the page away. The reading line is the viewer's own top edge.
     const captureResizeAnchor = () => {
       const page = viewer.querySelector<HTMLElement>(
-        `[data-page-number="${currentPageRef.current}"]`,
+        `[data-page-number="${currentPage.get()}"]`,
       )
       const rect = viewerReadingBounds(viewer)
       const pageRect = page?.getBoundingClientRect()
@@ -71,7 +70,7 @@ export function useViewerViewport({
       resizeAnchorRef.current =
         pageRect && pageRect.bottom > rect.top && pageRect.top < rect.bottom
           ? anchorOnPage(
-              currentPageRef.current,
+              currentPage.get(),
               pageRect,
               rect.left + rect.width / 2,
               rect.top,
@@ -186,7 +185,7 @@ export function useViewerViewport({
       return
     }
 
-    pendingScrollPageRef.current = currentPage
+    pendingScrollPageRef.current = currentPage.get()
   }, [active, currentPage, restoringRecentView])
 
   // For the switch nobody pressed: a merge past a one-page document's spread
@@ -200,7 +199,7 @@ export function useViewerViewport({
     laidOutViewModeRef.current = viewMode
 
     if (pendingScrollPageRef.current === null) {
-      pendingScrollPageRef.current = currentPage
+      pendingScrollPageRef.current = currentPage.get()
     }
   }, [currentPage, viewMode])
 

@@ -323,9 +323,10 @@ body {
   white-space: pre;
   transform-origin: 0 0;
   color: transparent;
-  /* Must match TEXT_LAYER_FONT_FAMILY in PdfPage.tsx: the run width is measured
-     with this family, so the span has to render with it too or scaleX skews. */
+  /* Must match TEXT_LAYER_FONT_* in textLayerBuild.ts: the run width is measured
+     with this font, so the span has to render with it too or scaleX skews. */
   font-family: sans-serif;
+  font-size: 100px;
 }
 
 /* The selection is painted by the band layer, one rectangle per line; the
