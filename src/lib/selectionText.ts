@@ -1,3 +1,4 @@
+import { finishTextLayersIn } from "@/lib/textLayerBuild"
 import { rangeWithin } from "@/lib/textSelection"
 import type { TextLine } from "@/lib/textSelectionLayout"
 import { textPage, textPagesIn } from "@/lib/textSelectionPage"
@@ -140,6 +141,11 @@ export function selectedPagesText(
   }
 
   const { first, firstPage, last, lastPage, range } = selected
+
+  // A drag or a key can reach into pages that just came near and are still
+  // building their spans; an end can sit on the layer rather than in a span.
+  finishTextLayersIn(range)
+
   const built = new Map<number, Element>()
 
   for (const { element } of textPagesIn(selected.viewer)) {

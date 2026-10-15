@@ -5,6 +5,8 @@ import type { PdfTextSpan } from "../../src/lib/pdf"
 import {
   dropZoneButton,
   fragmentedTextPdf,
+  GLYPH_PAGE_ROWS,
+  glyphPagesPdf,
   mixedSizeColumnsPdf,
   openPdfFromDisk,
   pageInk,
@@ -366,6 +368,70 @@ describe("TFolio select all", () => {
       return event.defaultPrevented ? data.getData("text/plain") : null
     })
     expect(copied).toBe("Highlight me please 1\n\nHighlight me please 2\n\nHighlight")
+  })
+
+  // Spans come a batch a frame, and a selection reaching up into a page still
+  // building them runs past the built ones; the clipboard cannot wait.
+  it("copies all of a page whose spans are still being built", async () => {
+    await openPdfFromDisk("building-copy.pdf", glyphPagesPdf(6))
+    await renderedPage()
+    const whole = GLYPH_PAGE_ROWS.join("")
+    await browser.waitUntil(
+      () => browser.execute((text: string) =>
+        document.querySelector("[data-page-number='1'] .pdf-text-layer")?.textContent === text, whole),
+      { timeout: 15_000, timeoutMsg: "page 1 never built its spans" },
+    )
+    expect(await browser.execute(() =>
+      document.querySelectorAll("[data-page-number='1'] .pdf-text-layer span").length)).toBe(780)
+
+    // Past the band spans keep to, above the view, but still mounted.
+    await browser.execute(() => {
+      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const second = document.querySelector("[data-page-number='2']")!.getBoundingClientRect()
+      viewer.scrollTop += second.bottom - viewer.getBoundingClientRect().top + 400
+    })
+    await browser.waitUntil(
+      () => browser.execute(() =>
+        Boolean(document.querySelector("[data-page-number='2'] canvas[data-rendered='true']")) &&
+        !document.querySelector("[data-page-number='2'] .pdf-text-layer span") &&
+        Boolean(document.querySelector("[data-page-number='3'] .pdf-text-layer span"))),
+      { timeout: 15_000, timeoutMsg: "page 2 never stood mounted without spans" },
+    )
+
+    const copied = await browser.executeAsync((text: string, done: (copied: string) => void) => {
+      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const layer = document.querySelector("[data-page-number='2'] .pdf-text-layer")!
+      const deadline = performance.now() + 10_000
+      const poll = () => {
+        const built = layer.textContent ?? ""
+
+        if (built === text) {
+          done("page 2 finished building before a frame caught it")
+        } else if (built === "") {
+          if (performance.now() > deadline) {
+            done("page 2 never started building")
+          } else {
+            requestAnimationFrame(poll)
+          }
+        } else {
+          // From page 3 up into page 2, copied in the frame that caught it.
+          const below = document.querySelector("[data-page-number='3'] .pdf-text-layer span")!
+          window.getSelection()!.setBaseAndExtent(
+            below.firstChild!, 0, layer.querySelector("span")!.firstChild!, 0)
+
+          const data = new DataTransfer()
+          const event = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data })
+          document.dispatchEvent(event)
+
+          done(event.defaultPrevented ? data.getData("text/plain") : "the copy was left to the WebView")
+        }
+      }
+
+      // Page 2's foot back in view: its spans start to build.
+      viewer.scrollTop -= 500
+      requestAnimationFrame(poll)
+    }, whole)
+    expect(copied).toBe(GLYPH_PAGE_ROWS.join("\n"))
   })
 
   // The selection reaches the page only after it has left the band spans

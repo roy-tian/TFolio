@@ -96,6 +96,27 @@ function schedule() {
   }
 }
 
+function finishBuild(job: Job) {
+  if (!builds.delete(job)) {
+    return
+  }
+
+  while (!job.step()) {
+    // Each step appends one batch; the last also hands the spans over.
+  }
+}
+
+/** Builds at once the rest of every layer `range` reaches into, for a copy of
+    it: runs are built in order, so a selection reaching past the built spans
+    misses the rest, and the clipboard will not wait for them. */
+export function finishTextLayersIn(range: Range) {
+  for (const job of builds) {
+    if (job.layer && range.intersectsNode(job.layer)) {
+      finishBuild(job)
+    }
+  }
+}
+
 let measureContext: CanvasRenderingContext2D | null = null
 // Fragmented runs are mostly single glyphs, which repeat across a page. Only
 // those are kept (a surrogate pair is two units), which bounds the cache.
@@ -221,15 +242,7 @@ export function buildTextLayer(
   schedule()
 
   return {
-    finish: () => {
-      if (!builds.delete(job)) {
-        return
-      }
-
-      while (!job.step()) {
-        // Each step appends one batch; the last also hands the spans over.
-      }
-    },
+    finish: () => finishBuild(job),
     release: () => {
       builds.delete(job)
       tearDown(holder)
