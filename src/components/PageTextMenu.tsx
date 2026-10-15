@@ -18,8 +18,8 @@ function selectedPageText(): string | Promise<string> {
   const selection = window.getSelection()
   const pages = selectedPagesText(selection)
 
-  if (pages) {
-    return pages.text
+  if (pages !== null) {
+    return pages
   }
 
   // Started in page text but ending past every page, as a keyboard or native

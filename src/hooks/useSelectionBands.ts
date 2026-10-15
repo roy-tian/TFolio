@@ -13,7 +13,8 @@ type UseSelectionBandsOptions = {
   rotation: number
   /** The app's own select-all, which no document range stands for. */
   selectAll: boolean
-  /** The page's extracted runs, in page points — select-all's whole geometry. */
+  /** The page's extracted runs, in page points — select-all's whole geometry,
+      and that of a page a selection takes in whole before it has spans. */
   spans: PdfTextSpan[]
   /** Bumped as the page's spans register, which they do frames after mount. */
   spansRegistered: number
@@ -105,7 +106,7 @@ export function useSelectionBands({
         cancelAnimationFrame(frame)
       }
     }
-  }, [anchorRef, page, rotation, selectAll, spansRegistered])
+  }, [anchorRef, page, rotation, selectAll, spans, spansRegistered])
 
   // Select-all stands for pages virtualisation never mounted a range over, so
   // its bands come from the extracted geometry, not from any DOM selection.

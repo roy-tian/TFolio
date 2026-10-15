@@ -1,4 +1,4 @@
-import { memo, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -26,7 +26,7 @@ import {
 import { POINT_TO_PX } from "@/lib/zoom"
 import { searchHighlightRects } from "@/lib/searchHighlightGeometry"
 import { buildTextLayer } from "@/lib/textLayerBuild"
-import { registerTextPage, textPageLayout } from "@/lib/textSelectionPage"
+import { registerPageRuns, registerTextPage, textPageLayout } from "@/lib/textSelectionPage"
 
 // Stable, so a page awaiting its text does not redo memos and registration.
 const NO_TEXT_SPANS: PdfTextSpan[] = []
@@ -189,6 +189,12 @@ const PdfPageSurface = memo(function PdfPageSurface({
       leaving.abort()
     }
   }, [documentId, pageNumber, textEpoch])
+
+  // Ahead of the bands' effect, which reads them for a page taken in whole.
+  useLayoutEffect(() => {
+    const element = surfaceRef.current?.closest("[data-page-number]")
+    if (element && loadedSpans) return registerPageRuns(element, loadedSpans)
+  }, [loadedSpans])
 
   // Spans are in the page's unrotated space; for 90°/270° the dimensions are
   // swapped and the layer itself is rotated to line back up with the bitmap.

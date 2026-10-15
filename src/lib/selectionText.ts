@@ -1,13 +1,16 @@
 import { rangeWithin } from "@/lib/textSelection"
-import { textPage } from "@/lib/textSelectionPage"
+import type { TextLine } from "@/lib/textSelectionLayout"
+import { textPage, textPagesIn } from "@/lib/textSelectionPage"
 
 /** PDFium's text for a page: at once when it has been read, else a promise
-    that settles with "" rather than rejecting. */
-export type PageTextReader = (pageNumber: number) => string | Promise<string>
+    that settles with "" rather than rejecting. Only a read a copy will `wait`
+    for goes ahead of the renders and outlives the selection moving on. */
+export type PageTextReader = (pageNumber: number, wait: boolean) => string | Promise<string>
 
 const readers = new WeakMap<Element, PageTextReader>()
 
-/** A viewer's session lends it the reader for pages it shows without spans. */
+/** A viewer's session lends it the reader for the pages between a selection's
+    ends. */
 export function registerPageTextReader(viewer: Element, reader: PageTextReader) {
   readers.set(viewer, reader)
 
@@ -66,81 +69,108 @@ export function selectedPages(selection: Selection | null): SelectedPages | null
   }
 }
 
-/** The pages strictly between the selection's ends, in page order. */
-export function pagesBetween({ first, last, viewer }: SelectedPages) {
-  const pages: [number, HTMLElement][] = []
+/** The selected part of a page's built spans, in PDFium's own form: runs keep
+    the spaces PDFium puts between words but carry no line breaks, so one goes
+    wherever consecutive runs sit on different lines. */
+function builtPart(range: Range, page: Element) {
+  const mounted = textPage(page)
 
-  // One pass over the viewer, not a lookup per page: a long selection spans
-  // hundreds of wrappers, and a fragmented page holds a thousand spans.
-  for (const page of viewer.querySelectorAll<HTMLElement>("[data-page-number]")) {
-    const pageNumber = Number(page.dataset.pageNumber)
+  // Spans not yet built, or midway through a rebuild: what stands in the
+  // layer is all there is.
+  if (!mounted) {
+    const layer = page.querySelector(".pdf-text-layer")
 
-    if (pageNumber > first && pageNumber < last) {
-      pages.push([pageNumber, page])
-    }
+    return layer ? rangeWithin(range, layer).toString() : ""
   }
 
-  return pages.sort(([a], [b]) => a - b)
-}
+  const { spans, layout: { lineOfRun } } = mounted
+  let text = ""
+  let line: TextLine | undefined
 
-/** The selected part of a page's built spans, joined as `Range.toString`
-    joins the runs, as the WebView's copy does within a page. Their own holder,
-    not the layer: one being replaced can briefly hold the old spans beside them. */
-function builtPart(range: Range, page: HTMLElement) {
-  const holder =
-    textPage(page)?.spans[0]?.parentElement ?? page.querySelector(".pdf-text-layer")
+  for (const [index, span] of spans.entries()) {
+    if (!range.intersectsNode(span)) {
+      continue
+    }
 
-  return holder ? rangeWithin(range, holder).toString() : ""
-}
+    // Only a span holding an end is cut; a fragmented page has a thousand.
+    const part =
+      span.contains(range.startContainer) || span.contains(range.endContainer)
+        ? rangeWithin(range, span).toString()
+        : (span.textContent ?? "")
 
-export type SelectedPagesText = {
-  /** Every page it runs over had its spans built: the WebView's copy has it all. */
-  complete: boolean
-  text: string | Promise<string>
+    if (part === "") {
+      continue
+    }
+
+    // A run no line took in cannot be said to start one.
+    const runLine = lineOfRun.get(index) ?? line
+
+    if (text !== "" && runLine !== line) {
+      text += "\n"
+    }
+
+    line = runLine
+    text += part
+  }
+
+  return text
 }
 
 /**
- * What a selection of page text holds, page by page, joined as the WebView's
- * copy joins pages. Spans exist only near the reader, so a page between the
- * ends that has none gives PDFium's whole text: a selection covering it
- * covers all of it. Null when the selection is not page text.
+ * What a selection of page text holds, in the form the whole document's copy
+ * takes from PDFium: a page between the ends is PDFium's text for it, from
+ * its spans only while PDFium is still reading it, and pages stand a blank
+ * line apart. Null when the selection is not page text or its viewer lends
+ * no reader.
  */
 export function selectedPagesText(
   selection: Selection | null,
   viewer?: Element,
-): SelectedPagesText | null {
+): string | Promise<string> | null {
   const selected = selectedPages(selection)
 
   if (!selected || (viewer && selected.viewer !== viewer)) {
     return null
   }
 
-  const { first, firstPage, last, lastPage, range } = selected
   const reader = readers.get(selected.viewer)
-  const parts: (string | Promise<string>)[] = []
-  let complete = true
 
-  parts.push(builtPart(range, firstPage))
+  if (!reader) {
+    return null
+  }
 
-  for (const [pageNumber, page] of pagesBetween(selected)) {
-    if (textPage(page) || !reader) {
-      parts.push(builtPart(range, page))
-    } else {
-      complete = false
-      parts.push(reader(pageNumber))
+  const { first, firstPage, last, lastPage, range } = selected
+  const built = new Map<number, Element>()
+
+  for (const { element } of textPagesIn(selected.viewer)) {
+    const pageNumber = Number(element.getAttribute("data-page-number"))
+
+    if (pageNumber > first && pageNumber < last) {
+      built.set(pageNumber, element)
     }
   }
 
+  // PDFium trims each page, so neither end keeps whitespace at a page break;
+  // a one-page copy keeps the selection as it is.
+  const opening = builtPart(range, firstPage)
+  const parts: (string | Promise<string>)[] = [last === first ? opening : opening.trimEnd()]
+
+  for (let pageNumber = first + 1; pageNumber < last; pageNumber += 1) {
+    const page = built.get(pageNumber)
+    const text = reader(pageNumber, !page)
+
+    // Still being read, but near enough to have spans: waiting would write
+    // the clipboard after the key, which refuses it, so the spans stand in.
+    parts.push(typeof text !== "string" && page ? builtPart(range, page).trim() : text)
+  }
+
   if (last !== first) {
-    parts.push(builtPart(range, lastPage))
+    parts.push(builtPart(range, lastPage).trimStart())
   }
 
-  const join = (texts: string[]) => texts.filter((text) => text !== "").join("\n")
+  const join = (texts: string[]) => texts.filter((text) => text !== "").join("\n\n")
 
-  return {
-    complete,
-    text: parts.every((part) => typeof part === "string")
-      ? join(parts as string[])
-      : Promise.all(parts).then(join),
-  }
+  return parts.every((part) => typeof part === "string")
+    ? join(parts as string[])
+    : Promise.all(parts).then(join)
 }

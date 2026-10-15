@@ -72,6 +72,26 @@ export function textPage(element: Element) {
   return byPage.get(element)
 }
 
+/** The pages in `viewer` whose spans are built: a handful near the reader. */
+export function textPagesIn(viewer: Element): Iterable<MountedTextPage> {
+  return byViewer.get(viewer) ?? []
+}
+
+const runsByPage = new WeakMap<Element, PagePointsRect[]>()
+
+/** A mounted page's extracted runs, from the moment they load: spans are built
+    only near the view, but a selection can take in a page whole without them. */
+export function registerPageRuns(element: Element, rects: PagePointsRect[]) {
+  runsByPage.set(element, rects)
+  return () => {
+    if (runsByPage.get(element) === rects) runsByPage.delete(element)
+  }
+}
+
+export function pageRuns(element: Element) {
+  return runsByPage.get(element)
+}
+
 /** Normal movement is one native element hit, independent of document length.
     In margins/outside the viewport only mounted text surfaces are candidates;
     virtualized page wrappers never enter this registry. */

@@ -6,7 +6,7 @@ import {
   type PagePointsRect,
 } from "@/lib/annotationGeometry"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
-import { textPage } from "@/lib/textSelectionPage"
+import { pageRuns, textPage, textPageLayout } from "@/lib/textSelectionPage"
 
 /** The part of `range` inside `node`; collapsed where the two do not meet,
     since moving one end past the other collapses a range. */
@@ -47,13 +47,33 @@ export function selectedLineRectsOnPage(
   page: PdfPageInfo,
   rotation: number,
 ): PagePointsRect[] {
+  const mounted = textPage(pageElement)
+  const { height, width } = dimensionsForRotation(page.rotation, page.width, page.height)
+
+  if (!mounted) {
+    // Spans exist only near the view, so a page between a selection's ends
+    // may have none to measure; taken in whole, it is every line it has.
+    const runs = pageRuns(pageElement)
+
+    return runs && selection.containsNode(pageElement, false)
+      ? textPageLayout(runs).lines.flatMap((line) => {
+          // A band whose runs all went to an overlapping one would mark twice.
+          if (line.runs.length === 0) return []
+          const left = Math.max(0, line.left)
+          const top = Math.max(0, line.top)
+          const right = Math.min(width, line.left + line.width)
+          const bottom = Math.min(height, line.top + line.height)
+
+          return right > left && bottom > top
+            ? [{ height: bottom - top, left, top, width: right - left }]
+            : []
+        })
+      : []
+  }
+
   const box = pageElement.getBoundingClientRect()
   const rects: PagePointsRect[] = []
-
-  const mounted = textPage(pageElement)
-  if (!mounted) return []
   const { spans, layout: { lineOfRun } } = mounted
-  const { height } = dimensionsForRotation(page.rotation, page.width, page.height)
   const pageRect = (rect: DOMRect) => fractionsToPageRect(
     clampFraction(clientPointToFraction(box, rect.left, rect.top)),
     clampFraction(clientPointToFraction(box, rect.right, rect.bottom)),

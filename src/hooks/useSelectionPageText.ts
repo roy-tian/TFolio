@@ -5,12 +5,10 @@ import { copyPlainText } from "@/lib/clipboard"
 import { pagePlainText } from "@/lib/documentText"
 import { isAbortError } from "@/lib/pageWork"
 import {
-  pagesBetween,
   registerPageTextReader,
   selectedPages,
   selectedPagesText,
 } from "@/lib/selectionText"
-import { textPage } from "@/lib/textSelectionPage"
 
 type Options = {
   active: boolean
@@ -20,14 +18,15 @@ type Options = {
 }
 
 /**
- * Gives a selection over pages without spans — only pages near the reader
- * keep theirs — PDFium's text for them, in the WebView's copy and the page
- * menu's. Read as the selection is made: the clipboard refuses a write that
- * comes long after the key asking for it.
+ * Copies a selection of page text in PDFium's form, by key and by the page
+ * menu: the pages between its ends come from PDFium, since only pages near
+ * the reader keep spans. Read as the selection is made: the clipboard refuses
+ * a write that comes long after the key asking for it.
  */
 export function useSelectionPageText({ active, documentId, textEpochs, viewerRef }: Options) {
   // Read per call: an edit that moves a page's epoch must not restart reads.
   const epochs = useRef(textEpochs)
+  const refollow = useRef<(() => void) | undefined>(undefined)
   useLayoutEffect(() => {
     epochs.current = textEpochs
   })
@@ -44,8 +43,9 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
     // One per read in flight: dropping a page must leave the others queued,
     // and the queue cannot take back a read PDFium already has.
     const reads = new Map<string, AbortController>()
-    // Pages a copy is waiting on go ahead of the renders.
-    const awaited = new Set<string>()
+    // Pages a copy is waiting on go ahead of the renders; counted, since a
+    // second copy can wait on a page the first is still waiting on.
+    const awaited = new Map<number, number>()
     let span: { first: number; last: number } | null = null
     let frame = 0
     let closed = false
@@ -67,7 +67,7 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
         }
       }
       const pending: Promise<string> = pagePlainText(documentId, pageNumber, {
-        priority: () => (awaited.has(key) ? 0 : Number.MAX_SAFE_INTEGER),
+        priority: () => (awaited.has(pageNumber) ? 0 : Number.MAX_SAFE_INTEGER),
         signal: controller.signal,
       }).then(
         (text) => {
@@ -87,8 +87,10 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
             texts.delete(key)
           }
 
-          // Dropped with the selection that asked, after a copy took it.
-          return isAbortError(error) && awaited.has(key) && !closed ? read(pageNumber) : ""
+          // Dropped with the selection, or for an edit, after a copy took it.
+          return isAbortError(error) && awaited.has(pageNumber) && !closed
+            ? read(pageNumber)
+            : ""
         },
       )
 
@@ -98,18 +100,31 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
       return pending
     }
 
-    const unregister = registerPageTextReader(viewer, (pageNumber) => {
-      const key = keyOf(pageNumber)
-      awaited.add(key)
+    const unregister = registerPageTextReader(viewer, (pageNumber, wait) => {
+      // Spans stand in for a page still being read: nothing waits on it.
+      if (!wait) {
+        return read(pageNumber)
+      }
+
+      awaited.set(pageNumber, (awaited.get(pageNumber) ?? 0) + 1)
+      const release = () => {
+        const count = awaited.get(pageNumber) ?? 0
+
+        if (count > 1) {
+          awaited.set(pageNumber, count - 1)
+        } else {
+          awaited.delete(pageNumber)
+        }
+      }
       const text = read(pageNumber)
 
       if (typeof text === "string") {
-        awaited.delete(key)
+        release()
 
         return text
       }
 
-      return text.finally(() => awaited.delete(key))
+      return text.finally(release)
     })
 
     const follow = () => {
@@ -129,7 +144,13 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
       for (const key of texts.keys()) {
         const pageNumber = Number.parseInt(key)
 
-        if (!next || pageNumber <= next.first || pageNumber >= next.last) {
+        // Out of the selection, or text an edit has since replaced.
+        if (
+          !next ||
+          pageNumber <= next.first ||
+          pageNumber >= next.last ||
+          key !== keyOf(pageNumber)
+        ) {
           texts.delete(key)
           reads.get(key)?.abort()
         }
@@ -139,10 +160,8 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
         return
       }
 
-      for (const [pageNumber, page] of pagesBetween(selected!)) {
-        if (!textPage(page)) {
-          void read(pageNumber)
-        }
+      for (let pageNumber = next.first + 1; pageNumber < next.last; pageNumber += 1) {
+        void read(pageNumber)
       }
     }
 
@@ -153,31 +172,42 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
     }
 
     const handleCopy = (event: ClipboardEvent) => {
-      const selected = event.defaultPrevented
+      const text = event.defaultPrevented
         ? null
         : selectedPagesText(document.getSelection(), viewer)
 
-      // Every page in it has its spans: the WebView's own copy is whole.
-      if (!selected || selected.complete) {
+      // Nothing to write: the WebView's own copy is no worse than emptying
+      // the clipboard.
+      if (text === null || text === "") {
         return
       }
 
+      // Taken even with every page's spans built: the WebView joins runs its
+      // own way, not in PDFium's form.
       event.preventDefault()
 
-      if (typeof selected.text === "string" && event.clipboardData) {
-        event.clipboardData.setData("text/plain", selected.text)
+      if (typeof text === "string" && event.clipboardData) {
+        event.clipboardData.setData("text/plain", text)
 
         return
       }
 
       // A page still being read: the event's clipboard closes with this handler.
-      void Promise.resolve(selected.text).then(copyPlainText)
+      void Promise.resolve(text).then(copyPlainText)
+    }
+
+    // An edit moves epochs under a standing selection with no selectionchange
+    // to say so, and the pages between need reading again.
+    refollow.current = () => {
+      span = null
+      handleSelectionChange()
     }
 
     document.addEventListener("selectionchange", handleSelectionChange)
     document.addEventListener("copy", handleCopy)
 
     return () => {
+      refollow.current = undefined
       closed = true
       cancelAnimationFrame(frame)
 
@@ -190,4 +220,9 @@ export function useSelectionPageText({ active, documentId, textEpochs, viewerRef
       document.removeEventListener("copy", handleCopy)
     }
   }, [active, documentId, viewerRef])
+
+  // After the effect above, so it reaches the reads that effect now keeps.
+  useEffect(() => {
+    refollow.current?.()
+  }, [textEpochs])
 }
