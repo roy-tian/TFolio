@@ -33,11 +33,16 @@ export type MountedTextPage = {
 const byPage = new WeakMap<Element, MountedTextPage>()
 const byViewer = new WeakMap<Element, Set<MountedTextPage>>()
 
-/** Registration follows React's text/geometry lifetime, not the selection's.
+/** Registration follows the built spans' lifetime, not the selection's:
+    `spans` holds one element per run, in run order, once all are built.
     Raw page coordinates survive zoom, scroll and rotation without measuring
-    every DOM run again. Unmounting releases the nodes; the layout lives as
-    long as its runs array. */
-export function registerTextPage(layer: HTMLElement, rects: PagePointsRect[]) {
+    every DOM run again. Releasing drops the nodes; the layout lives as long
+    as its runs array. */
+export function registerTextPage(
+  layer: HTMLElement,
+  rects: PagePointsRect[],
+  spans: HTMLElement[],
+) {
   const element = layer.closest("[data-page-number]")
   const viewer = layer.closest("[data-pdf-scroll-root]")
   if (!element || !viewer) return
@@ -45,7 +50,7 @@ export function registerTextPage(layer: HTMLElement, rects: PagePointsRect[]) {
   const mounted: MountedTextPage = {
     element,
     layer,
-    spans: [...layer.querySelectorAll<HTMLElement>("span")],
+    spans,
     get layout() {
       return textPageLayout(rects)
     },
@@ -65,6 +70,26 @@ export function registerTextPage(layer: HTMLElement, rects: PagePointsRect[]) {
 
 export function textPage(element: Element) {
   return byPage.get(element)
+}
+
+/** The pages in `viewer` whose spans are built: a handful near the reader. */
+export function textPagesIn(viewer: Element): Iterable<MountedTextPage> {
+  return byViewer.get(viewer) ?? []
+}
+
+const runsByPage = new WeakMap<Element, PagePointsRect[]>()
+
+/** A mounted page's extracted runs, from the moment they load: spans are built
+    only near the view, but a selection can take in a page whole without them. */
+export function registerPageRuns(element: Element, rects: PagePointsRect[]) {
+  runsByPage.set(element, rects)
+  return () => {
+    if (runsByPage.get(element) === rects) runsByPage.delete(element)
+  }
+}
+
+export function pageRuns(element: Element) {
+  return runsByPage.get(element)
 }
 
 /** Normal movement is one native element hit, independent of document length.

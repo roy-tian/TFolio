@@ -219,6 +219,41 @@ export function fragmentedColumnsPdf(table = false) {
   ])
 }
 
+/** Every page's rows of `glyphPagesPdf`, distinct so a misplaced one shows. */
+export const GLYPH_PAGE_ROWS = Array.from({ length: 30 }, (_, row) => {
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  const rotated = letters.slice(row % 26) + letters.slice(0, row % 26)
+
+  // Past one full turn, reversed so no row repeats another.
+  return row < 26 ? rotated : [...rotated].reverse().join("")
+})
+
+/** Each glyph its own text object, and so its own run: 780 a page, which take
+    several frames to build. Courier's set advance leaves no gap between glyphs
+    for PDFium to read as a space. */
+export function glyphPagesPdf(pageCount: number) {
+  let content = ""
+
+  for (const [row, text] of GLYPH_PAGE_ROWS.entries()) {
+    for (const [column, glyph] of [...text].entries()) {
+      content += `BT /F1 10 Tf 1 0 0 1 ${40 + column * 6} ${370 - row * 12} Tm (${glyph}) Tj ET\n`
+    }
+  }
+
+  const contentId = 3 + pageCount
+  const kids = Array.from({ length: pageCount }, (_, index) => `${3 + index} 0 R`).join(" ")
+
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`,
+    ...Array.from({ length: pageCount }, (_, index) =>
+      `${3 + index} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] ` +
+        `/Resources << /Font << /F1 ${contentId + 1} 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`),
+    `${contentId} 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`,
+    `${contentId + 1} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n`,
+  ])
+}
+
 /** A heading in one column spans both body lines in the other column. */
 export function mixedSizeColumnsPdf() {
   const content =

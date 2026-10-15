@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
+import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import type { usePrint } from "@/hooks/usePrint"
 import type { useZoom } from "@/hooks/useZoom"
 import type { HexColor, RectStyle } from "@/lib/annotations"
@@ -66,12 +67,8 @@ type SessionHeaderProps = {
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
   page: {
-    current: number
-    input: string
-    inputFocused: boolean
-    onFocusedChange: (focused: boolean) => void
-    onInput: (value: string) => void
-    onSubmit: () => void
+    current: CurrentPage
+    onSubmit: (value: string) => void
   }
   print: ReturnType<typeof usePrint>
   saveHint: string | undefined
@@ -291,36 +288,12 @@ export function SessionHeader({
         </ToolbarTooltip>
       </div>
 
-      <div
-        aria-label={t("toolbar.pageStatus", {
-          current: page.current,
-          total: pdfDocument?.numPages ?? 0,
-        })}
-        className="flex min-w-24 items-center justify-center gap-2 font-mono text-sm tabular-nums"
-        data-slot="page-status"
-        role="group"
-        // The pages centre in what the viewer's scrollbar leaves; widening the
-        // middle column by that gutter moves this centre half of it to match.
-        style={{ marginRight: scrollbarWidth }}
-      >
-        <PageNumberField
-          currentPage={page.current}
-          disabled={!pdfDocument}
-          focused={page.inputFocused}
-          onFocusedChange={page.onFocusedChange}
-          onInput={page.onInput}
-          onSubmit={page.onSubmit}
-          value={page.input}
-        />
-        <span className="text-muted-foreground">/</span>
-        <span>{pdfDocument?.numPages ?? 0}</span>
-        <span aria-live="polite" className="sr-only">
-          {t("toolbar.pageStatus", {
-            current: page.current,
-            total: pdfDocument?.numPages ?? 0,
-          })}
-        </span>
-      </div>
+      <PageStatus
+        currentPage={page.current}
+        onSubmit={page.onSubmit}
+        pageCount={pdfDocument?.numPages}
+        scrollbarWidth={scrollbarWidth}
+      />
 
       <div className="flex items-center gap-1 justify-self-end">
         <HistoryControls
@@ -352,5 +325,44 @@ export function SessionHeader({
         {active && !macOS ? <WindowControls /> : null}
       </div>
     </header>
+  )
+}
+
+type PageStatusProps = {
+  currentPage: CurrentPage
+  onSubmit: (value: string) => void
+  /** Absent until a document is open. */
+  pageCount: number | undefined
+  scrollbarWidth: number
+}
+
+/** The one part of the toolbar that follows scrolling, so the only part that
+    re-renders as the reader crosses into another page. */
+function PageStatus({ currentPage, onSubmit, pageCount, scrollbarWidth }: PageStatusProps) {
+  const { t } = useTranslation()
+  const current = useCurrentPage(currentPage)
+  const status = t("toolbar.pageStatus", { current, total: pageCount ?? 0 })
+
+  return (
+    <div
+      aria-label={status}
+      className="flex min-w-24 items-center justify-center gap-2 font-mono text-sm tabular-nums"
+      data-slot="page-status"
+      role="group"
+      // The pages centre in what the viewer's scrollbar leaves; widening the
+      // middle column by that gutter moves this centre half of it to match.
+      style={{ marginRight: scrollbarWidth }}
+    >
+      <PageNumberField
+        currentPage={current}
+        disabled={pageCount === undefined}
+        onSubmit={onSubmit}
+      />
+      <span className="text-muted-foreground">/</span>
+      <span>{pageCount ?? 0}</span>
+      <span aria-live="polite" className="sr-only">
+        {status}
+      </span>
+    </div>
   )
 }

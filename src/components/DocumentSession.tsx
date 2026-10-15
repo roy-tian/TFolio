@@ -24,6 +24,7 @@ import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import type { AnnotationTool } from "@/components/AnnotationToolbar"
 import { useAnnotations } from "@/hooks/useAnnotations"
+import { createCurrentPage } from "@/hooks/useCurrentPage"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useDocumentNotices, type NoticeChannel } from "@/hooks/useNotices"
 import { usePageClipboard } from "@/hooks/usePageClipboard"
@@ -34,6 +35,7 @@ import { useDocumentSearch } from "@/hooks/useDocumentSearch"
 import { useEraserTool } from "@/hooks/useEraserTool"
 import { useGridDrop } from "@/hooks/useGridDrop"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
+import { useSelectionPageText } from "@/hooks/useSelectionPageText"
 import { useTextDragSelection } from "@/hooks/useTextDragSelection"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useRecentView } from "@/hooks/useRecentView"
@@ -268,16 +270,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
     // Read by a close's save, which runs after the queue and before a render.
     const hasMergedPagesRef = useRef(hasMergedPages)
-    const [currentPage, setCurrentPage] = useState(() =>
-      Math.min(
-        Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
-        Math.max(openedDocument.numPages, 1),
+    const [currentPage] = useState(() =>
+      createCurrentPage(
+        Math.min(
+          Math.max(initialRecentView?.position.pageNumber ?? 1, 1),
+          Math.max(openedDocument.numPages, 1),
+        ),
       ),
     )
-    const [pageInput, setPageInput] = useState(() => String(currentPage))
-    // The odometer stands in for the field's own text, and has to stand aside
-    // while what the field holds is no longer the page being read.
-    const [pageInputFocused, setPageInputFocused] = useState(false)
     const [pageRotations, setPageRotations] = useState<number[]>(
       () => movedSeed?.pageRotations ?? openedDocument.pages.map(() => 0),
     )
@@ -334,9 +334,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }
         : null,
     )
-    // The tracked page, for effects bound once: they cannot read a value that
-    // re-renders.
-    const currentPageRef = useRef(currentPage)
     const mountedRef = useRef(false)
     // Which offer a fetch in flight belongs to. A download cannot be called
     // back, so what it returns to is checked against this instead.
@@ -376,16 +373,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           `[data-page-number="${pageNumber}"]`,
         )
 
-        setCurrentPage(pageNumber)
+        currentPage.set(pageNumber)
         page?.scrollIntoView({ behavior, block: "start" })
       },
-      [],
+      [currentPage],
     )
 
     const viewport = useViewerViewport({
       active,
       currentPage,
-      currentPageRef,
       restoringRecentView,
       scrollToPage,
       viewMode,
@@ -625,8 +621,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                   nextKey: nextKey + update.numPages,
                 },
           )
-          setCurrentPage((page) =>
-            Math.min(Math.max(page, 1), Math.max(1, update.numPages)),
+          currentPage.set(
+            Math.min(Math.max(currentPage.get(), 1), Math.max(1, update.numPages)),
           )
           clearThumbnailSelection()
           // The page numbers on the clipboard now name other pages — unless this
@@ -636,7 +632,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             rotationsForPageCount(rotations, update.numPages),
           )
         },
-        [clearNoteFontOffer, clearThumbnailSelection, pageClipboardStructureChanged],
+        [clearNoteFontOffer, clearThumbnailSelection, currentPage, pageClipboardStructureChanged],
       ),
       onEditRefused: useCallback(
         () => notice.raise("markWhileEditing"),
@@ -684,7 +680,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     const search = useDocumentSearch({
       active,
-      currentPageRef,
+      currentPage,
       documentId: pdfDocument?.id,
       documentPages: pdfDocument.pages,
       onMatchInGrid: useCallback((pageNumber: number) => {
@@ -692,7 +688,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         setPreferredViewMode("single")
       }, []),
       sessionId: openedDocument.id,
-      setCurrentPage,
       textEpochs: annotations.textEpochs,
       viewerRef,
       viewMode,
@@ -769,6 +764,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       enabled: textSelectable,
       pages: pdfDocument.pages,
       rotations: pageRotations,
+      viewerRef,
+    })
+
+    useSelectionPageText({
+      active,
+      documentId: pdfDocument.id,
+      textEpochs: annotations.textEpochs,
       viewerRef,
     })
 
@@ -977,11 +979,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       // effect. Strict Mode's second effect sees the ref already cleared.
     }, [])
 
-    useEffect(() => {
-      currentPageRef.current = currentPage
-      setPageInput(String(currentPage))
-    }, [currentPage])
-
     // Restored against the first real layout, once size and saved zoom have both
     // sized the pages; normalized, so a new window size stays a useful position.
     useLayoutEffect(() => {
@@ -1071,7 +1068,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
       active ? pdfDocument.id : undefined,
       viewMode,
-      setCurrentPage,
+      currentPage.set,
       zoom.zoomPreviewing || restoringRecentView,
       pdfDocument.pages,
     )
@@ -1107,7 +1104,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         event.preventDefault()
 
-        const current = currentPageRef.current
+        const current = currentPage.get()
         const target = pageTurnTarget(
           current,
           pdfDocument.numPages,
@@ -1125,9 +1122,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           return
         }
 
-        // A held key may repeat before React's effect mirrors state into this ref.
-        // Advance it now so every repeat still turns exactly one page or spread.
-        currentPageRef.current = target
+        // Sets the page at once, so a held key's every repeat still turns
+        // exactly one page or spread from the last.
         scrollToPage(target, "auto")
       }
 
@@ -1136,13 +1132,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       return () => {
         document.removeEventListener("keydown", handlePageTurn)
       }
-    }, [active, pdfDocument.numPages, scrollToPage, viewMode])
+    }, [active, currentPage, pdfDocument.numPages, scrollToPage, viewMode])
 
     // Each mode stacks pages to a different height, so the kept offset would land
     // somewhere unrelated; queued here, ahead of the next render's layout effects.
     const changeViewMode = (mode: ViewMode) => {
       if (mode !== viewMode) {
-        pendingScrollPageRef.current = currentPage
+        pendingScrollPageRef.current = currentPage.get()
       }
 
       setPreferredViewMode(mode)
@@ -1180,15 +1176,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
       // A scroll only moves this node; find it again when tracking switches
       // pages or the layout replaces it.
+      const pageNumber = currentPage.get()
       let page = recentPageRef.current
 
       if (
         !page ||
-        page.dataset.pageNumber !== String(currentPage) ||
+        page.dataset.pageNumber !== String(pageNumber) ||
         !viewer.contains(page)
       ) {
         page = viewer.querySelector<HTMLElement>(
-          `[data-page-number="${currentPage}"]`,
+          `[data-page-number="${pageNumber}"]`,
         )
         recentPageRef.current = page
       }
@@ -1196,7 +1193,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       const pageRect = page?.getBoundingClientRect()
       const anchor = pageRect
         ? anchorOnPage(
-            currentPage,
+            pageNumber,
             pageRect,
             viewerRect.left + viewerRect.width / 2,
             viewerRect.top,
@@ -1311,13 +1308,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewer.addEventListener("scroll", scheduleRememberCurrentView, {
         passive: true,
       })
+      // The tracker settles the page a frame after the scroll that moved it,
+      // possibly after this frame's sample: anchor on the page it settles on.
+      const stopFollowingPage = currentPage.subscribe(scheduleRememberCurrentView)
       rememberCurrentView()
 
       return () => {
         viewer.removeEventListener("scroll", scheduleRememberCurrentView)
+        stopFollowingPage()
         cancelAnimationFrame(frame)
       }
-    }, [rememberCurrentView])
+    }, [currentPage, rememberCurrentView])
 
     /**
      * The retry is the point: the note's text is in `unfontedEdit` and nowhere
@@ -1525,16 +1526,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       ],
     )
 
-    const submitPageNumber = () => {
-      if (!pdfDocument) {
-        setPageInput("0")
-        return
-      }
+    const submitPageNumber = (value: string) => {
+      const requestedPage = Number(value)
 
-      const requestedPage = Number(pageInput)
-
-      if (!Number.isInteger(requestedPage)) {
-        setPageInput(String(currentPage))
+      if (!pdfDocument || !Number.isInteger(requestedPage)) {
         return
       }
 
@@ -1542,7 +1537,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         pdfDocument.numPages,
         Math.max(1, requestedPage),
       )
-      setPageInput(String(pageNumber))
       scrollToPage(pageNumber)
     }
 
@@ -1614,10 +1608,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onUndo={undoStep}
           page={{
             current: currentPage,
-            input: pageInput,
-            inputFocused: pageInputFocused,
-            onFocusedChange: setPageInputFocused,
-            onInput: setPageInput,
             onSubmit: submitPageNumber,
           }}
           print={print}
@@ -1788,7 +1778,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           pageNumbers={pageNumbers}
           watermarkPreview={{
             document: pdfDocument,
-            initialPage: currentPage,
+            // Read as the dialog opens, which re-renders the session: the
+            // preview takes the page it starts on once, at mount.
+            initialPage: currentPage.get(),
             renderEpochs: annotations.renderEpochs,
           }}
           print={print}

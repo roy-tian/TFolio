@@ -25,33 +25,14 @@ import {
 } from "@/lib/pdf"
 import { POINT_TO_PX } from "@/lib/zoom"
 import { searchHighlightRects } from "@/lib/searchHighlightGeometry"
-import { registerTextPage, textPageLayout } from "@/lib/textSelectionPage"
+import { buildTextLayer } from "@/lib/textLayerBuild"
+import { registerPageRuns, registerTextPage, textPageLayout } from "@/lib/textSelectionPage"
 
-// Fragmented PDFs can give every glyph a different ink-box height. Changing
-// the measurement font for each glyph stalls the WebView; use one font and
-// scale both axes to the PDF bounds in the selectable DOM as well.
-const TEXT_LAYER_FONT_FAMILY = "sans-serif"
-const TEXT_LAYER_FONT_SIZE = 100
 // Stable, so a page awaiting its text does not redo memos and registration.
 const NO_TEXT_SPANS: PdfTextSpan[] = []
-
-let measureContext: CanvasRenderingContext2D | null = null
-
-function measureTextWidth(text: string) {
-  if (!measureContext) {
-    measureContext = document.createElement("canvas").getContext("2d")
-
-    if (measureContext) {
-      measureContext.font = `${TEXT_LAYER_FONT_SIZE}px ${TEXT_LAYER_FONT_FAMILY}`
-    }
-  }
-
-  if (!measureContext) {
-    return 0
-  }
-
-  return measureContext.measureText(text).width
-}
+// Spans follow the view more closely than the surface, whose 800px lead is
+// for the bitmap: see `buildTextLayer` for what a page's spans cost.
+const TEXT_LAYER_MARGIN = "200px 0px"
 
 type IndexedSearchMatch = {
   index: number
@@ -105,6 +86,8 @@ type PdfPageSurfaceProps = {
   searchMatches: IndexedSearchMatch[]
   textEpoch: number
   textSelectAll: boolean
+  /** Near enough to the view, or holding the selection, to want its spans. */
+  textWanted: boolean
 }
 
 /** Exists only around the viewport: leaving a page releases its canvas backing
@@ -127,6 +110,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
   searchMatches,
   textEpoch,
   textSelectAll,
+  textWanted,
 }: PdfPageSurfaceProps) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -136,6 +120,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const [loadedSpans, setLoadedSpans] = useState<PdfTextSpan[] | null>(null)
   const textSpans = loadedSpans ?? NO_TEXT_SPANS
   const textLayerRef = useRef<HTMLDivElement>(null)
+  const [spansRegistered, setSpansRegistered] = useState(0)
 
   const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -158,11 +143,6 @@ const PdfPageSurface = memo(function PdfPageSurface({
         ? Math.round(Math.max(MIN_PAGE_RENDER_WIDTH, renderWidth))
         : 0,
   })
-
-  useLayoutEffect(() => {
-    const layer = textLayerRef.current
-    if (layer) return registerTextPage(layer, textSpans)
-  }, [hasRendered, textSpans])
 
   useEffect(() => {
     const cached = cachedPageText(documentId, pageNumber, textEpoch)
@@ -210,6 +190,12 @@ const PdfPageSurface = memo(function PdfPageSurface({
     }
   }, [documentId, pageNumber, textEpoch])
 
+  // Ahead of the bands' effect, which reads them for a page taken in whole.
+  useLayoutEffect(() => {
+    const element = surfaceRef.current?.closest("[data-page-number]")
+    if (element && loadedSpans) return registerPageRuns(element, loadedSpans)
+  }, [loadedSpans])
+
   // Spans are in the page's unrotated space; for 90°/270° the dimensions are
   // swapped and the layer itself is rotated to line back up with the bitmap.
   const { height: layoutHeight, width: layoutWidth } = dimensionsForRotation(
@@ -218,25 +204,36 @@ const PdfPageSurface = memo(function PdfPageSurface({
     page.height,
   )
 
-  // Positions are page-relative and scale is resolution-independent, so only
-  // the spans themselves — not a resize — call for recomputing this.
-  const positionedSpans = useMemo(
-    () =>
-      textSpans.map((span) => {
-        const naturalWidth = measureTextWidth(span.text)
-        const scaleY = span.height / TEXT_LAYER_FONT_SIZE
-        const scaleX = naturalWidth > 0 ? span.width / naturalWidth : scaleY
+  useEffect(() => {
+    const layer = textLayerRef.current
 
-        return {
-          fontSize: TEXT_LAYER_FONT_SIZE,
-          left: `${(span.left / layoutWidth) * 100}%`,
-          text: span.text,
-          top: `${(span.top / layoutHeight) * 100}%`,
-          transform: `scale(${scaleX}, ${scaleY})`,
-        }
-      }),
-    [layoutHeight, layoutWidth, textSpans],
-  )
+    if (!layer || !textWanted) {
+      return
+    }
+
+    let unregister: (() => void) | undefined
+    const build = buildTextLayer(layer, textSpans, layoutWidth, layoutHeight, (spans) => {
+      unregister = registerTextPage(layer, textSpans, spans)
+      const selection = window.getSelection()
+
+      // A selection already spanning the page takes in spans built inside its
+      // range without a selectionchange, so the bands must be told. With none
+      // there are no bands, and re-rendering the surface would buy nothing.
+      if (selection && !selection.isCollapsed && selection.containsNode(layer, true)) {
+        setSpansRegistered((count) => count + 1)
+      }
+    })
+    // Pointer events precede the mousedown a selection starts from, so a
+    // press on a page still being built selects from all of its spans.
+    layer.addEventListener("pointerdown", build.finish)
+
+    return () => {
+      layer.removeEventListener("pointerdown", build.finish)
+      unregister?.()
+      build.release()
+    }
+  }, [hasRendered, layoutHeight, layoutWidth, textSpans, textWanted])
+
   const pageLayerStyle = {
     height: `${(layoutHeight / page.height) * 100}%`,
     left: "50%",
@@ -264,6 +261,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
     rotation,
     selectAll: textSelectAll,
     spans: textSpans,
+    spansRegistered,
   })
 
   return (
@@ -341,27 +339,13 @@ const PdfPageSurface = memo(function PdfPageSurface({
             ))}
           </div>
         ) : null}
-        {hasRendered && positionedSpans.length > 0 ? (
+        {hasRendered && textSpans.length > 0 ? (
           <PageTextMenu
             captureHighlight={captureHighlight}
             onCopyAll={onCopyAllText}
             style={pageLayerStyle}
             textLayerRef={textLayerRef}
-          >
-            {positionedSpans.map((span, index) => (
-              <span
-                key={index}
-                style={{
-                  fontSize: span.fontSize,
-                  left: span.left,
-                  top: span.top,
-                  transform: span.transform,
-                }}
-              >
-                {span.text}
-              </span>
-            ))}
-          </PageTextMenu>
+          />
         ) : null}
       </div>
       {!hasRendered && !renderFailed ? (
@@ -413,8 +397,13 @@ export const PdfPage = memo(function PdfPage({
 }: PdfPageProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const hold = useContext(ViewportHoldContext)
   const isNearViewport = useNearViewport(wrapperRef, "800px 0px", {
-    hold: useContext(ViewportHoldContext),
+    hold,
+    retainSelection: true,
+  })
+  const textWanted = useNearViewport(wrapperRef, TEXT_LAYER_MARGIN, {
+    hold,
     retainSelection: true,
   })
 
@@ -466,6 +455,7 @@ export const PdfPage = memo(function PdfPage({
             searchMatches={searchMatches}
             textEpoch={textEpoch}
             textSelectAll={textSelectAll}
+            textWanted={textWanted}
           />
         </div>
       ) : null}

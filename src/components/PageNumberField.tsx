@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { PageOdometer } from "@/components/PageOdometer"
@@ -6,24 +7,33 @@ import { cn } from "@/lib/utils"
 type PageNumberFieldProps = {
   currentPage: number
   disabled: boolean
-  focused: boolean
-  onFocusedChange: (focused: boolean) => void
-  onInput: (value: string) => void
-  onSubmit: () => void
-  value: string
+  /** Takes the typed text as it stands; a jump is the session's to clamp. */
+  onSubmit: (value: string) => void
 }
 
 /** The page-number field, with the odometer drawn over its transparent text. */
 export function PageNumberField({
   currentPage,
   disabled,
-  focused,
-  onFocusedChange,
-  onInput,
   onSubmit,
-  value,
 }: PageNumberFieldProps) {
   const { t } = useTranslation()
+  const inputRef = useRef<HTMLInputElement>(null)
+  // A press that focuses the field: its release would put the caret where it
+  // landed, undoing the selection focusing made.
+  const pressFocusing = useRef(false)
+  const [focused, setFocused] = useState(false)
+  // Typed text, once there is any: until then a focused field still follows
+  // the scroll, and what the reader types must not be overwritten by it.
+  const [draft, setDraft] = useState<string | null>(null)
+
+  // Setting the value drops the selection focusing made, so typing would
+  // append to the new number instead of replacing it.
+  useLayoutEffect(() => {
+    if (focused && draft === null) {
+      inputRef.current?.select()
+    }
+  }, [currentPage, draft, focused])
 
   return (
     <div className="relative">
@@ -38,23 +48,41 @@ export function PageNumberField({
         disabled={disabled}
         inputMode="numeric"
         onBlur={() => {
-          onFocusedChange(false)
-          onInput(String(currentPage))
+          setFocused(false)
+          setDraft(null)
         }}
-        onChange={(event) => onInput(event.target.value.replaceAll(/[^0-9]/g, ""))}
+        onChange={(event) => setDraft(event.target.value.replaceAll(/[^0-9]/g, ""))}
         onFocus={(event) => {
-          onFocusedChange(true)
+          setFocused(true)
           event.currentTarget.select()
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault()
-            onSubmit()
+            onSubmit(draft ?? String(currentPage))
             event.currentTarget.blur()
           }
         }}
+        onMouseDown={(event) => {
+          pressFocusing.current = document.activeElement !== event.currentTarget
+        }}
+        onMouseUp={(event) => {
+          const input = event.currentTarget
+
+          // A drag across the digits keeps the stretch it chose.
+          if (
+            pressFocusing.current &&
+            input.selectionStart === 0 &&
+            input.selectionEnd === input.value.length
+          ) {
+            event.preventDefault()
+          }
+
+          pressFocusing.current = false
+        }}
+        ref={inputRef}
         type="text"
-        value={value}
+        value={draft ?? String(currentPage)}
       />
       {/* Deaf to the pointer, so a click lands in the field it covers;
           forced colours un-hide the field's text, so this stands down. */}

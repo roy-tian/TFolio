@@ -28,6 +28,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
+import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import type { CaptureHighlight } from "@/hooks/useHighlightTool"
 import {
@@ -684,10 +685,11 @@ function ThumbnailLayout({
   pages,
   renderEpochs,
 }: LayoutProps & {
-  currentPage: number
+  currentPage: CurrentPage
   pageEdit: PageEditProps
 }) {
   const { t } = useTranslation()
+  const current = useCurrentPage(currentPage)
   const columns = computeThumbnailColumns(contentWidth)
   const gridRef = useRef<HTMLDivElement>(null)
   const { drag, wasDragClick } = usePageDrag({
@@ -853,7 +855,7 @@ function ThumbnailLayout({
               dragging={dragging}
               insertActive={dropIndex === pageNumber}
               intrinsicRotation={page.rotation}
-              isCurrent={currentPage === pageNumber}
+              isCurrent={current === pageNumber}
               isCut={cut.has(pageNumber)}
               isSelected={isSelected}
               key={`${documentId}-${pageEdit.thumbnailKeys[index]}`}
@@ -936,7 +938,7 @@ type PdfViewerLayoutProps = {
   /** The page holding the active match, the one page told which it is. */
   activeSearchPage: number | null
   captureHighlight: CaptureHighlight
-  currentPage: number
+  currentPage: CurrentPage
   documentId: number
   drafts: RectDraft[]
   notes: TextNotePreview[]

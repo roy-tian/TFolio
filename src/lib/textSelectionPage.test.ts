@@ -19,7 +19,6 @@ function surface() {
   } as unknown as HTMLElement
   const layer = {
     closest: (selector: string) => selector === "[data-page-number]" ? page : viewer,
-    querySelectorAll: () => [],
   } as unknown as HTMLElement
   return { page, viewer, layer, measurements: () => measurements }
 }
@@ -28,7 +27,7 @@ describe("mounted text page geometry", () => {
   it("shares one immutable layout across repeated hit tests and painting lookups", () => {
     const { page, viewer, layer } = surface()
     const layout = textPageLayout(rects)
-    const release = registerTextPage(layer, rects)!
+    const release = registerTextPage(layer, rects, [])!
     try {
       for (let index = 0; index < 100; index++) {
         expect(textPage(page)?.layout).toBe(layout)
@@ -51,7 +50,7 @@ describe("mounted text page geometry", () => {
       width: 40,
       height: 10,
     }]
-    const release = registerTextPage(layer, counted)!
+    const release = registerTextPage(layer, counted, [])!
     try {
       expect(reads).toBe(0)
       expect(textPage(page)?.layout.lines).toHaveLength(1)
@@ -63,9 +62,9 @@ describe("mounted text page geometry", () => {
 
   it("replaces geometry with the text layer and cannot erase a replacement on late cleanup", () => {
     const { page, viewer, layer } = surface()
-    const releaseOld = registerTextPage(layer, rects)!
+    const releaseOld = registerTextPage(layer, rects, [])!
     const next = [{ ...rects[0], top: 30 }]
-    const releaseNext = registerTextPage(layer, next)!
+    const releaseNext = registerTextPage(layer, next, [])!
     releaseOld()
     expect(textPage(page)?.layout).toBe(textPageLayout(next))
     expect(textPageAtPoint(viewer, 5, 5)?.layout).toBe(textPageLayout(next))
@@ -76,7 +75,7 @@ describe("mounted text page geometry", () => {
   it("does not measure mounted pages when the native hit already names the page", () => {
     const { page, viewer, layer, measurements } = surface()
     viewer.ownerDocument.elementFromPoint = () => ({ closest: () => page }) as unknown as Element
-    const release = registerTextPage(layer, rects)!
+    const release = registerTextPage(layer, rects, [])!
     expect(textPageAtPoint(viewer, 5, 5)?.element).toBe(page)
     expect(measurements()).toBe(0)
     release()

@@ -5,12 +5,16 @@ import type { PdfTextSpan } from "../../src/lib/pdf"
 import {
   dropZoneButton,
   fragmentedTextPdf,
+  GLYPH_PAGE_ROWS,
+  glyphPagesPdf,
   mixedSizeColumnsPdf,
   openPdfFromDisk,
+  pageInk,
   refreshApp,
   renderedPage,
   seedSettings,
   textPdf,
+  wrappedSearchPdf,
 } from "./helpers"
 
 type ClipboardWatch = Window & { __tfolioCopied?: string | null }
@@ -259,6 +263,225 @@ describe("TFolio select all", () => {
       timeoutMsg: "nothing reached the clipboard",
     })
     expect((await copiedText()) ?? "").toContain("Highlight me please 20")
+  })
+
+  // A shift-click far down the document: the pages between were passed while
+  // nothing was selected, so they hold no spans for the WebView to copy.
+  it("copies the pages a selection runs over without spans", async () => {
+    await openPdfFromDisk("span-copy.pdf", textPdf(20))
+    await $("[data-page-number='1'] .pdf-text-layer span").waitForExist({ timeout: 15_000 })
+    await watchClipboard()
+    await browser.execute(() => {
+      const text = document.querySelector("[data-page-number='1'] .pdf-text-layer span")!.firstChild!
+      window.getSelection()!.setBaseAndExtent(text, 0, text, 9)
+      document.querySelector("[data-page-number='10']")!.scrollIntoView({ block: "start" })
+    })
+    await $("[data-page-number='10'] .pdf-text-layer span").waitForExist({ timeout: 15_000 })
+    const unbuilt = await browser.execute(() => {
+      const selection = window.getSelection()!
+      const end = document.querySelector("[data-page-number='10'] .pdf-text-layer span")!.firstChild!
+      selection.setBaseAndExtent(selection.anchorNode!, selection.anchorOffset, end, 9)
+
+      return [2, 3, 4, 5, 6, 7, 8].filter((page) =>
+        !document.querySelector(`[data-page-number='${page}'] .pdf-text-layer span`))
+    })
+    expect(unbuilt.length).toBeGreaterThan(0)
+
+    // Pages a blank line apart, as the whole document's copy sets them.
+    const expected = [
+      ...Array.from({ length: 9 }, (_, index) => `Highlight me please ${index + 1}`),
+      "Highlight",
+    ].join("\n\n")
+    // The WebView's own copy, as a key would start it; the pages between are
+    // read as the selection is made, so a later event finds them waiting.
+    const copied = await browser.waitUntil(
+      () => browser.execute(() => {
+        const data = new DataTransfer()
+        const event = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data })
+        document.dispatchEvent(event)
+
+        return event.defaultPrevented ? data.getData("text/plain") : ""
+      }),
+      { timeout: 15_000, timeoutMsg: "the copy never took over the pages without spans" },
+    )
+    expect(copied).toBe(expected)
+
+    // A copy above that found a page still being read wrote the clipboard
+    // late itself: clear the watch, or that write would pass for the menu's.
+    await watchClipboard()
+    await rightClick("[data-page-number='10'] .pdf-text-layer span")
+    const copyItem = await $("[data-action='copy-text']")
+    await copyItem.waitForDisplayed({ timeout: 15_000 })
+    await copyItem.click()
+    await browser.waitUntil(async () => (await copiedText()) !== null, {
+      timeout: 15_000,
+      timeoutMsg: "nothing reached the clipboard",
+    })
+    expect(await copiedText()).toBe(expected)
+  })
+
+  // Runs carry no line breaks; PDFium's text, which a copy follows, does.
+  it("copies a page's lines apart, as PDFium reads them", async () => {
+    await openPdfFromDisk("wrapped-copy.pdf", wrappedSearchPdf())
+    await $("[data-page-number='1'] .pdf-text-layer span").waitForExist({ timeout: 15_000 })
+    const copied = await browser.execute(() => {
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector("[data-page-number='1'] .pdf-text-layer")!)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+
+      const data = new DataTransfer()
+      const event = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data })
+      document.dispatchEvent(event)
+
+      return event.defaultPrevented ? data.getData("text/plain") : null
+    })
+    expect(copied).toBe("Wrapped\nphrase")
+  })
+
+  // Copied before PDFium has read the page between: waiting on it would write
+  // the clipboard after the key, so the page's own spans stand in.
+  it("copies a page with spans at once while PDFium still reads it", async () => {
+    await openPdfFromDisk("pending-copy.pdf", textPdf(3))
+    await renderedPage()
+    while (await $("button[aria-label='Zoom out']").isEnabled()) {
+      await $("button[aria-label='Zoom out']").click()
+    }
+    await browser.waitUntil(
+      () => browser.execute(() => [1, 2, 3].every((page) =>
+        document.querySelector(`[data-page-number='${page}'] .pdf-text-layer span`))),
+      { timeout: 15_000, timeoutMsg: "the three pages never all had spans" },
+    )
+
+    // One script: no frame passes between the selection and the copy, so no
+    // read of page 2 has even been queued.
+    const copied = await browser.execute(() => {
+      const start = document.querySelector("[data-page-number='1'] .pdf-text-layer span")!.firstChild!
+      const end = document.querySelector("[data-page-number='3'] .pdf-text-layer span")!.firstChild!
+      window.getSelection()!.setBaseAndExtent(start, 0, end, 9)
+
+      const data = new DataTransfer()
+      const event = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data })
+      document.dispatchEvent(event)
+
+      return event.defaultPrevented ? data.getData("text/plain") : null
+    })
+    expect(copied).toBe("Highlight me please 1\n\nHighlight me please 2\n\nHighlight")
+  })
+
+  // Spans come a batch a frame, and a selection reaching up into a page still
+  // building them runs past the built ones; the clipboard cannot wait.
+  it("copies all of a page whose spans are still being built", async () => {
+    await openPdfFromDisk("building-copy.pdf", glyphPagesPdf(6))
+    await renderedPage()
+    const whole = GLYPH_PAGE_ROWS.join("")
+    await browser.waitUntil(
+      () => browser.execute((text: string) =>
+        document.querySelector("[data-page-number='1'] .pdf-text-layer")?.textContent === text, whole),
+      { timeout: 15_000, timeoutMsg: "page 1 never built its spans" },
+    )
+    expect(await browser.execute(() =>
+      document.querySelectorAll("[data-page-number='1'] .pdf-text-layer span").length)).toBe(780)
+
+    // Past the band spans keep to, above the view, but still mounted.
+    await browser.execute(() => {
+      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const second = document.querySelector("[data-page-number='2']")!.getBoundingClientRect()
+      viewer.scrollTop += second.bottom - viewer.getBoundingClientRect().top + 400
+    })
+    await browser.waitUntil(
+      () => browser.execute(() =>
+        Boolean(document.querySelector("[data-page-number='2'] canvas[data-rendered='true']")) &&
+        !document.querySelector("[data-page-number='2'] .pdf-text-layer span") &&
+        Boolean(document.querySelector("[data-page-number='3'] .pdf-text-layer span"))),
+      { timeout: 15_000, timeoutMsg: "page 2 never stood mounted without spans" },
+    )
+
+    const copied = await browser.executeAsync((text: string, done: (copied: string) => void) => {
+      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const layer = document.querySelector("[data-page-number='2'] .pdf-text-layer")!
+      const deadline = performance.now() + 10_000
+      const poll = () => {
+        const built = layer.textContent ?? ""
+
+        if (built === text) {
+          done("page 2 finished building before a frame caught it")
+        } else if (built === "") {
+          if (performance.now() > deadline) {
+            done("page 2 never started building")
+          } else {
+            requestAnimationFrame(poll)
+          }
+        } else {
+          // From page 3 up into page 2, copied in the frame that caught it.
+          const below = document.querySelector("[data-page-number='3'] .pdf-text-layer span")!
+          window.getSelection()!.setBaseAndExtent(
+            below.firstChild!, 0, layer.querySelector("span")!.firstChild!, 0)
+
+          const data = new DataTransfer()
+          const event = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data })
+          document.dispatchEvent(event)
+
+          done(event.defaultPrevented ? data.getData("text/plain") : "the copy was left to the WebView")
+        }
+      }
+
+      // Page 2's foot back in view: its spans start to build.
+      viewer.scrollTop -= 500
+      requestAnimationFrame(poll)
+    }, whole)
+    expect(copied).toBe(GLYPH_PAGE_ROWS.join("\n"))
+  })
+
+  // The selection reaches the page only after it has left the band spans
+  // keep to: nothing to measure, yet the whole page is selected.
+  it("paints and highlights a page selected whole before it has spans", async () => {
+    await openPdfFromDisk("whole-page.pdf", textPdf(4))
+    await $("[data-page-number='1'] .pdf-text-layer span").waitForExist({ timeout: 15_000 })
+    await browser.execute(() => {
+      const text = document.querySelector("[data-page-number='1'] .pdf-text-layer span")!.firstChild!
+      window.getSelection()!.setBaseAndExtent(text, 0, text, 9)
+
+      // Page 2 goes past the 200px spans keep to but stays within the 800px
+      // a surface does, with page 3's text still in view.
+      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const second = document.querySelector("[data-page-number='2']")!.getBoundingClientRect()
+      const third = document.querySelector("[data-page-number='3']")!.getBoundingClientRect()
+      const textTop = 0.4 * third.height
+      const past = Math.min(500, third.top - second.bottom + textTop)
+      viewer.scrollTop += second.bottom - viewer.getBoundingClientRect().top + past
+    })
+    await browser.waitUntil(
+      () => browser.execute(() =>
+        Boolean(document.querySelector("[data-page-number='2'] canvas[data-rendered='true']")) &&
+        !document.querySelector("[data-page-number='2'] .pdf-text-layer span") &&
+        Boolean(document.querySelector("[data-page-number='3'] .pdf-text-layer span"))),
+      { timeout: 15_000, timeoutMsg: "page 2 never stood mounted without spans" },
+    )
+
+    const clean = await pageInk(2)
+    await browser.execute(() => {
+      const selection = window.getSelection()!
+      const end = document.querySelector("[data-page-number='3'] .pdf-text-layer span")!.firstChild!
+      selection.setBaseAndExtent(selection.anchorNode!, selection.anchorOffset, end, 9)
+    })
+    await browser.waitUntil(
+      () => browser.execute(() =>
+        document.querySelectorAll("[data-page-number='2'] .pdf-selection-layer span").length > 0),
+      { timeout: 5_000, timeoutMsg: "the page selected whole showed no selection" },
+    )
+    expect(await browser.execute(() =>
+      Boolean(document.querySelector("[data-page-number='2'] .pdf-text-layer span")))).toBe(false)
+
+    await rightClick("[data-page-number='3'] .pdf-text-layer span")
+    const highlightItem = await $("[data-action='highlight-text']")
+    await highlightItem.waitForDisplayed({ timeout: 15_000 })
+    await highlightItem.click()
+    await browser.waitUntil(async () => (await pageInk(2)) > clean, {
+      timeout: 15_000,
+      timeoutMsg: "the highlight left out the page selected whole",
+    })
   })
 
   it("selects every page in the thumbnail grid", async () => {

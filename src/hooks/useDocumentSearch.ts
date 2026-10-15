@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
+import type { CurrentPage } from "@/hooks/useCurrentPage"
 import type { RenderEpochs } from "@/lib/annotations"
 import type {
   PdfPageInfo,
@@ -23,7 +24,7 @@ type UseDocumentSearchOptions = {
   active: boolean
   /** The tracked page, read when a run lands: the first match is the one
       nearest where the reader is, not where they were when typing began. */
-  currentPageRef: RefObject<number>
+  currentPage: CurrentPage
   documentId: number | undefined
   documentPages: PdfPageInfo[]
   /** Steps the session aside for a match found while on the grid: queues the
@@ -31,7 +32,6 @@ type UseDocumentSearchOptions = {
   onMatchInGrid: (pageNumber: number) => void
   /** The panel's id in the DOM, which the input and result focus target. */
   sessionId: number
-  setCurrentPage: (pageNumber: number) => void
   /** Serves the reveal below: page text edits can redraw or drop highlights. */
   textEpochs: RenderEpochs
   viewerRef: RefObject<HTMLElement | null>
@@ -44,12 +44,11 @@ type UseDocumentSearchOptions = {
  */
 export function useDocumentSearch({
   active,
-  currentPageRef,
+  currentPage,
   documentId,
   documentPages,
   onMatchInGrid,
   sessionId,
-  setCurrentPage,
   textEpochs,
   viewerRef,
   viewMode,
@@ -152,7 +151,7 @@ export function useDocumentSearch({
             return
           }
 
-          const index = firstSearchMatchFromPage(outcome.matches, currentPageRef.current)
+          const index = firstSearchMatchFromPage(outcome.matches, currentPage.get())
           // Edits refresh counts and rectangles, not the reader's navigation.
           // Mark passive results as handled even if they were never scrolled to.
           if (completedSearchRef.current && index !== null) {
@@ -193,6 +192,7 @@ export function useDocumentSearch({
       }
     }
   }, [
+    currentPage,
     documentId,
     documentPages,
     searchOpen,
@@ -248,8 +248,7 @@ export function useDocumentSearch({
       return
     }
 
-    currentPageRef.current = match.pageNumber
-    setCurrentPage(match.pageNumber)
+    currentPage.set(match.pageNumber)
 
     if (viewMode === "thumbnail") {
       onMatchInGrid(match.pageNumber)
@@ -346,12 +345,12 @@ export function useDocumentSearch({
   }, [
     active,
     activeIndex,
+    currentPage,
     matches,
     onMatchInGrid,
     revealRequest,
     searchOpen,
     sessionId,
-    setCurrentPage,
     viewerRef,
     viewMode,
   ])

@@ -18,24 +18,16 @@ export async function documentPlainText(
   // takes the PDFium lock for its turn, and a bulk ask would fill the
   // blocking pool with tasks queued behind that lock.
   for (let pageNumber = 1; pageNumber <= numPages; pageNumber += 1) {
-    const text = await pageWork
-      .schedule(
-        () =>
-          invoke<string>("extract_pdf_page_plain_text", {
-            documentId,
-            pageNumber,
-          }),
-        { priority: () => Number.MAX_SAFE_INTEGER, signal },
-      )
-      .catch((error: unknown) => {
-        if (isAbortError(error)) {
-          throw error
-        }
+    const page = await pagePlainText(documentId, pageNumber, {
+      priority: () => Number.MAX_SAFE_INTEGER,
+      signal,
+    }).catch((error: unknown) => {
+      if (isAbortError(error)) {
+        throw error
+      }
 
-        return ""
-      })
-
-    const page = normalizeLineEndings(text).trim()
+      return ""
+    })
 
     if (page !== "") {
       pages.push(page)
@@ -43,6 +35,24 @@ export async function documentPlainText(
   }
 
   return pages.join("\n\n")
+}
+
+/** One page's text from PDFium, queued with the page work like a render. */
+export async function pagePlainText(
+  documentId: number,
+  pageNumber: number,
+  options: { priority: () => number; signal?: AbortSignal },
+): Promise<string> {
+  const text = await pageWork.schedule(
+    () =>
+      invoke<string>("extract_pdf_page_plain_text", {
+        documentId,
+        pageNumber,
+      }),
+    options,
+  )
+
+  return normalizeLineEndings(text).trim()
 }
 
 /** PDFium reports CRLF; the clipboard is handed the one line ending. */
