@@ -751,7 +751,10 @@ describe("independent document tabs", () => {
       "true",
     )
 
+    // The menu's exit still holds a layer over the workspace, which defers
+    // the switch: until it lands, `data-active` names anchor.pdf's panel.
     await tabButton("left.pdf").click()
+    await expect(tabButton("left.pdf")).toHaveAttribute("aria-selected", "true")
     await $("[data-active='true'] button[aria-label='Thumbnails']").click()
     const deletePage = $("[data-active='true'] button[aria-label='Delete page 1']")
     await deletePage.waitForExist()
