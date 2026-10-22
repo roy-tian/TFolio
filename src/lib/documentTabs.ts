@@ -55,6 +55,26 @@ export function activeTabAfterClose(
   return tabIds[closingIndex + 1] ?? tabIds[closingIndex - 1] ?? HOME_TAB_ID
 }
 
+export type OtherTabs = "all" | "right"
+
+/** The document tabs a tab's "close others" entries take: every one but it,
+    or those after it in strip order. An unknown anchor takes none. */
+export function otherTabIds(
+  tabIds: readonly number[],
+  anchorId: number,
+  which: OtherTabs,
+): number[] {
+  const anchorIndex = tabIds.indexOf(anchorId)
+
+  if (anchorIndex < 0) {
+    return []
+  }
+
+  return which === "all"
+    ? tabIds.filter((id) => id !== anchorId)
+    : tabIds.slice(anchorIndex + 1)
+}
+
 /** The document tabs' order after a strip drag of the one at `from` onto
     `to`, both indices among the documents — home leads and never moves. An
     out-of-range or same-place move returns the same list, reference and all. */

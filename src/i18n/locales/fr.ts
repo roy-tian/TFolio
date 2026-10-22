@@ -34,6 +34,8 @@ const fr = {
     list: "Onglets de l’espace de travail",
     listAll: "Tous les documents ouverts",
     close: "Fermer {{name}}",
+    closeOthers: "Fermer les autres onglets",
+    closeToRight: "Fermer les onglets à droite",
     unsaved: "Modifications non enregistrées",
     dropNow: "Déposez pour ouvrir les fichiers",
     dropHint: "Les PDF, images et documents Word s’ouvrent dans des onglets distincts",
@@ -43,7 +45,10 @@ const fr = {
       "Un ou plusieurs documents ouverts contiennent des modifications non enregistrées. Si vous fermez la fenêtre, elles seront perdues.",
     unsavedAllDescription:
       "Un ou plusieurs documents ouverts contiennent des modifications non enregistrées. Si vous les fermez tous, ces modifications seront perdues.",
+    unsavedTabsDescription:
+      "Un ou plusieurs de ces documents contiennent des modifications non enregistrées. Si vous fermez leurs onglets, ces modifications seront perdues.",
     discardAndCloseTab: "Abandonner et fermer l’onglet",
+    discardAndCloseTabs: "Abandonner et fermer les onglets",
     discardAndCloseAll: "Abandonner et tout fermer",
     saveBeforeClose: "Enregistrer",
     unsavedQuitDescription:

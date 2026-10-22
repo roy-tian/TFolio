@@ -34,6 +34,8 @@ const es = {
     list: "Pestañas del espacio de trabajo",
     listAll: "Todos los documentos abiertos",
     close: "Cerrar {{name}}",
+    closeOthers: "Cerrar las demás pestañas",
+    closeToRight: "Cerrar las pestañas de la derecha",
     unsaved: "Cambios sin guardar",
     dropNow: "Suelta para abrir los archivos",
     dropHint: "Los PDF, imágenes y documentos de Word se abren en pestañas separadas",
@@ -43,7 +45,10 @@ const es = {
       "Uno o más documentos abiertos tienen cambios sin guardar. Si cierras la ventana, se descartarán.",
     unsavedAllDescription:
       "Uno o más documentos abiertos tienen cambios sin guardar. Si los cierras todos, esos cambios se descartarán.",
+    unsavedTabsDescription:
+      "Uno o más de estos documentos tienen cambios sin guardar. Si cierras sus pestañas, esos cambios se descartarán.",
     discardAndCloseTab: "Descartar y cerrar pestaña",
+    discardAndCloseTabs: "Descartar y cerrar pestañas",
     discardAndCloseAll: "Descartar y cerrar todo",
     saveBeforeClose: "Guardar",
     unsavedQuitDescription:

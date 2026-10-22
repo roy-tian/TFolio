@@ -34,6 +34,8 @@ const zhTW = {
     list: "工作區分頁",
     listAll: "所有已開啟的文件",
     close: "關閉 {{name}}",
+    closeOthers: "關閉其他分頁",
+    closeToRight: "關閉右側分頁",
     unsaved: "有未儲存的變更",
     dropNow: "放開以開啟檔案",
     dropHint: "PDF、圖片和 Word 文件會分別在各自的分頁中開啟",
@@ -43,7 +45,10 @@ const zhTW = {
       "有一或多份已開啟的文件含有尚未儲存的變更，關閉視窗將會捨棄這些變更。",
     unsavedAllDescription:
       "有一或多份已開啟的文件含有尚未儲存的變更，全部關閉將會捨棄這些變更。",
+    unsavedTabsDescription:
+      "要關閉的文件中有一或多份含有尚未儲存的變更，關閉這些分頁將會捨棄這些變更。",
     discardAndCloseTab: "捨棄並關閉分頁",
+    discardAndCloseTabs: "捨棄並關閉這些分頁",
     discardAndCloseAll: "捨棄並全部關閉",
     saveBeforeClose: "儲存",
     unsavedQuitDescription:

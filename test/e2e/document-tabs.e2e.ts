@@ -35,6 +35,29 @@ function tabButton(name: string) {
   return $(`//button[@role='tab'][normalize-space()='${name}']`)
 }
 
+/** Opens a document tab's context menu where a right-click on its title would. */
+function openTabMenu(name: string) {
+  return browser.execute((tabName: string) => {
+    const tab = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-document-tab]"),
+    ).find(
+      (element) =>
+        element.querySelector("button[role='tab']")?.textContent?.trim() ===
+        tabName,
+    )!
+    const box = tab.getBoundingClientRect()
+
+    tab.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        clientX: box.left + 20,
+        clientY: box.top + 10,
+      }),
+    )
+  }, name)
+}
+
 function tabNames() {
   return browser.execute(() =>
     Array.from(document.querySelectorAll("[data-document-tab]"), (tab) =>
@@ -641,21 +664,7 @@ describe("independent document tabs", () => {
 
     const movedId = await tabDocumentId("menu-a.pdf")
 
-    await browser.execute(() => {
-      const tab = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-document-tab]"),
-      ).find((element) => element.textContent?.includes("menu-a.pdf"))!
-      const box = tab.getBoundingClientRect()
-
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          button: 2,
-          clientX: box.left + 20,
-          clientY: box.top + 10,
-        }),
-      )
-    })
+    await openTabMenu("menu-a.pdf")
     await $("[data-action='tab-move-new-window']").click()
 
     await browser.waitUntil(
@@ -672,6 +681,65 @@ describe("independent document tabs", () => {
     await browser.waitUntil(
       async () => (await tabNames()).join() === "menu-b.pdf",
       { timeoutMsg: "the moved tab never left the strip" },
+    )
+  })
+
+  it("closes the tabs to the right, or every other, from a tab's menu", async () => {
+    await openPdfFromDisk("left.pdf", minimalPdf(2))
+    await openPdfFromDisk("anchor.pdf", minimalPdf(1))
+    await openPdfFromDisk("right-a.pdf", minimalPdf(1))
+    await openPdfFromDisk("right-b.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(5)
+
+    await openTabMenu("right-b.pdf")
+    await expect($("[data-action='tab-close-right']")).toHaveAttribute(
+      "data-disabled",
+    )
+    await browser.keys("Escape")
+    await $("[data-action='tab-close-right']").waitForDisplayed({
+      reverse: true,
+    })
+
+    // The active tab goes with them, so the one asked from takes its place.
+    await openTabMenu("anchor.pdf")
+    await $("[data-action='tab-close-right']").click()
+    await browser.waitUntil(
+      async () => (await tabNames()).join() === "left.pdf,anchor.pdf",
+      { timeoutMsg: "the tabs to the right never closed" },
+    )
+    await expect(tabButton("anchor.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    await tabButton("left.pdf").click()
+    await $("[data-active='true'] button[aria-label='Thumbnails']").click()
+    const deletePage = $("[data-active='true'] button[aria-label='Delete page 1']")
+    await deletePage.waitForExist()
+    await deletePage.click()
+    await browser.waitUntil(
+      async () =>
+        (await $("[data-active='true'] [data-slot='page-status']").getAttribute("aria-label")) ===
+        "Page 1 of 1",
+      { timeoutMsg: "the page deletion never made the tab dirty" },
+    )
+
+    await openTabMenu("anchor.pdf")
+    await $("[data-action='tab-close-others']").click()
+    await expect($("[role='alertdialog']")).toBeDisplayed()
+    await $("button=Discard and close tabs").click()
+    await browser.waitUntil(
+      async () => (await tabNames()).join() === "anchor.pdf",
+      { timeoutMsg: "the other tabs never closed" },
+    )
+    await expect(tabButton("anchor.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    await openTabMenu("anchor.pdf")
+    await expect($("[data-action='tab-close-others']")).toHaveAttribute(
+      "data-disabled",
     )
   })
 

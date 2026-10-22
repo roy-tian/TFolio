@@ -34,6 +34,8 @@ const de = {
     list: "Tabs im Arbeitsbereich",
     listAll: "Alle geöffneten Dokumente",
     close: "{{name}} schließen",
+    closeOthers: "Andere Tabs schließen",
+    closeToRight: "Tabs rechts schließen",
     unsaved: "Nicht gespeicherte Änderungen",
     dropNow: "Ablegen, um Dateien zu öffnen",
     dropHint: "PDFs, Bilder und Word-Dokumente werden in eigenen Tabs geöffnet",
@@ -43,7 +45,10 @@ const de = {
       "Mindestens ein geöffnetes Dokument enthält nicht gespeicherte Änderungen. Wenn Sie das Fenster schließen, werden sie verworfen.",
     unsavedAllDescription:
       "Mindestens ein geöffnetes Dokument enthält nicht gespeicherte Änderungen. Wenn Sie alle schließen, werden diese Änderungen verworfen.",
+    unsavedTabsDescription:
+      "Mindestens eines dieser Dokumente enthält nicht gespeicherte Änderungen. Wenn Sie ihre Tabs schließen, werden diese Änderungen verworfen.",
     discardAndCloseTab: "Verwerfen und Tab schließen",
+    discardAndCloseTabs: "Verwerfen und Tabs schließen",
     discardAndCloseAll: "Verwerfen und alle schließen",
     saveBeforeClose: "Speichern",
     unsavedQuitDescription:
