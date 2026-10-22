@@ -199,14 +199,27 @@ impl RecentFiles {
     /// accusation against a document the reader may still have open.
     pub fn remove(&self, path: &Path) {
         // Checked first, as in `record_view`, so an unknown path rewrites nothing.
-        if !self
-            .0
-            .read(|document| document.files.iter().any(|entry| entry == path))
-        {
+        if !self.contains(path) {
             return;
         }
 
         self.0.write(|document| forget(document, path));
+    }
+
+    /// Only a listed path: any page code can call the command, and this names
+    /// a path to the file manager. A listed file that has since gone fails in
+    /// the plugin's canonicalize, before anything reaches the OS shell.
+    pub fn reveal(&self, path: &Path) -> Result<(), String> {
+        if !self.contains(path) {
+            return Err("not a recent file".into());
+        }
+
+        tauri_plugin_opener::reveal_item_in_dir(path).map_err(|error| error.to_string())
+    }
+
+    fn contains(&self, path: &Path) -> bool {
+        self.0
+            .read(|document| document.files.iter().any(|entry| entry == path))
     }
 
     pub fn view(&self, path: &Path) -> Option<RecentPdfView> {
@@ -232,11 +245,7 @@ impl RecentFiles {
     /// Only for a path already recent: a view never promotes a WebView-provided
     /// path, and the check runs before `Store::write` so an unknown path rewrites nothing.
     pub fn record_view(&self, path: &Path, view: RecentPdfView) -> bool {
-        if !view.is_valid()
-            || !self
-                .0
-                .read(|document| document.files.iter().any(|entry| entry == path))
-        {
+        if !view.is_valid() || !self.contains(path) {
             return false;
         }
 
@@ -321,6 +330,17 @@ pub async fn recent_pdf_view(
 pub async fn remove_recent_pdf(path: String, state: State<'_, RecentFiles>) -> Result<(), String> {
     state.remove(Path::new(&path));
     Ok(())
+}
+
+/// Off the main thread: the canonicalize can stall on a network mount, and the
+/// file manager is reached over D-Bus on Linux.
+#[tauri::command]
+pub async fn reveal_recent_pdf(path: String, state: State<'_, RecentFiles>) -> Result<(), String> {
+    let recent = state.inner().clone();
+
+    tauri::async_runtime::spawn_blocking(move || recent.reveal(Path::new(&path)))
+        .await
+        .map_err(|error| format!("recent reveal task failed: {error}"))?
 }
 
 /// Bounded here even though the frontend checks too: commands are callable by
@@ -463,6 +483,28 @@ mod tests {
             paths(&RecentFilesDocument::parse(&written).files),
             ["/docs/b.pdf"]
         );
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// Both refusals stop before the OS shell, so neither opens a file manager.
+    #[test]
+    fn reveals_only_a_listed_file_that_still_exists() {
+        let directory =
+            std::env::temp_dir().join(format!("tfolio-recent-reveal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        let recent = RecentFiles(Store::at(Some(
+            directory.join(RecentFilesDocument::FILE_NAME),
+        )));
+        let gone = directory.join("gone.pdf");
+
+        recent.record(&gone);
+
+        assert_eq!(
+            recent.reveal(&directory.join("other.pdf")),
+            Err("not a recent file".into())
+        );
+        assert!(recent.reveal(&gone).is_err());
 
         let _ = std::fs::remove_dir_all(&directory);
     }

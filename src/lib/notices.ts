@@ -170,6 +170,11 @@ export const noticeCatalogue = {
     tone: "info",
   },
   printFailed: { life: "transient", textKey: "print.failed", tone: "danger" },
+  revealFailed: {
+    life: "transient",
+    textKey: "home.revealFailed",
+    tone: "danger",
+  },
   saveFailed: {
     life: "transient",
     textKey: "annotate.saveFailed",

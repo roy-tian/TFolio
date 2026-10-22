@@ -174,6 +174,8 @@ const fr = {
     recent: "Fichiers récents",
     recentEmpty: "Les PDF que vous ouvrez apparaîtront ici.",
     removeRecent: "Retirer {{name}} des fichiers récents",
+    revealRecent: "Ouvrir le dossier contenant {{name}}",
+    revealFailed: "Le dossier du fichier n’a pas pu être ouvert.",
   },
   toolbar: {
     saveAsMenu: "Autres options d’enregistrement",

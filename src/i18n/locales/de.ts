@@ -174,6 +174,8 @@ const de = {
     recent: "Zuletzt geöffnet",
     recentEmpty: "Hier werden die PDFs aufgelistet, die Sie öffnen.",
     removeRecent: "{{name}} aus „Zuletzt geöffnet“ entfernen",
+    revealRecent: "Ordner mit {{name}} öffnen",
+    revealFailed: "Der Ordner der Datei konnte nicht geöffnet werden.",
   },
   toolbar: {
     saveAsMenu: "Weitere Speicheroptionen",

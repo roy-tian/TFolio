@@ -40,6 +40,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-dialog = "2"
+# Shows a recent file in the OS file manager, through its library function
+# alone: the plugin is never registered, so the WebView gets none of its
+# open-anything commands — only `reveal_recent_pdf`, which takes no path the
+# recent list does not hold.
+tauri-plugin-opener = "2"
 # The release check. Its network call, its signature check and its install are
 # all Rust-side: the WebView is granted none of the plugin's own commands, so
 # the endpoint and the key its bytes must match stay compiled-in rather than

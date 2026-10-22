@@ -174,6 +174,8 @@ const it = {
     recent: "File recenti",
     recentEmpty: "Qui compariranno i PDF che apri.",
     removeRecent: "Rimuovi {{name}} dai file recenti",
+    revealRecent: "Apri la cartella che contiene {{name}}",
+    revealFailed: "Impossibile aprire la cartella del file.",
   },
   toolbar: {
     saveAsMenu: "Altre opzioni di salvataggio",

@@ -1,4 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -272,6 +278,28 @@ function recentEntry(filePath: string) {
   )
 }
 
+/**
+ * A recent row's actions are hover-revealed and, hidden, hold no pointer
+ * events, and the WebDriver can flip CSS :hover for neither, so the click is
+ * dispatched in-page against the row's own button.
+ */
+function clickRecentAction(name: string, slot: string) {
+  return browser.execute(
+    (fileName: string, actionSlot: string) => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-slot='recent-file']"),
+      ).find((entry) => entry.textContent?.includes(fileName))
+
+      row
+        ?.closest("li")
+        ?.querySelector<HTMLElement>(`[data-slot='${actionSlot}']`)
+        ?.click()
+    },
+    name,
+    slot,
+  )
+}
+
 function activeScrollTop() {
   return browser.execute(() => {
     const viewer = document.querySelector<HTMLElement>(
@@ -451,19 +479,7 @@ describe("independent document tabs", () => {
     const removedEntry = recentEntry(removedPath)
     await removedEntry.waitForDisplayed()
 
-    // The remove key is hover-revealed and, hidden, holds no pointer events,
-    // and the WebDriver can flip CSS :hover for neither, so the click is
-    // dispatched in-page against the row's own button.
-    await browser.execute((name: string) => {
-      const row = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-slot='recent-file']"),
-      ).find((entry) => entry.textContent?.includes(name))
-      const remove = row
-        ?.closest("li")
-        ?.querySelector<HTMLElement>("[data-slot='remove-recent-file']")
-
-      remove?.click()
-    }, "removed-recent.pdf")
+    await clickRecentAction("removed-recent.pdf", "remove-recent-file")
 
     await browser.waitUntil(async () => !(await removedEntry.isExisting()), {
       timeout: 15_000,
@@ -485,6 +501,29 @@ describe("independent document tabs", () => {
       },
       { timeout: 15_000, timeoutMsg: "the removal never reached the store" },
     )
+  })
+
+  it("reports a recent file gone before its folder could be shown", async () => {
+    const filePath = await openPdfFromDisk("gone-recent.pdf", minimalPdf(1))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    await $("button[aria-label='Close gone-recent.pdf']").click()
+    await dropZoneButton().waitForDisplayed()
+    const entry = recentEntry(filePath)
+    await entry.waitForDisplayed()
+
+    // Gone after the home tab read the list, so its row is still on screen.
+    // The reveal then fails before any file manager is asked.
+    rmSync(filePath)
+    await clickRecentAction("gone-recent.pdf", "reveal-recent-file")
+
+    await expect($("[data-notice='revealFailed']")).toHaveText(
+      /The file's folder could not be opened\./,
+    )
+    await browser.waitUntil(async () => !(await entry.isExisting()), {
+      timeout: 15_000,
+      timeoutMsg: "the gone file's entry never left the list",
+    })
   })
 
   it("restores a recent file's view, zoom, and reading position", async () => {

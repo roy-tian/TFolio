@@ -73,6 +73,7 @@ import {
   readRecentFiles,
   readRecentPdfView,
   removeRecentFile,
+  revealRecentFile,
   type RecentFile,
   type RecentPdfView,
 } from "@/lib/recentFiles"
@@ -261,6 +262,20 @@ export default function App() {
       void removeRecentFile(path).then(refreshRecentFiles)
     },
     [refreshRecentFiles],
+  )
+
+  // A failed reveal is most often a file gone since the list was read: the
+  // re-read drops its entry, and the notice says why no folder opened.
+  const revealRecent = useCallback(
+    (path: string) => {
+      void revealRecentFile(path).then((revealed) => {
+        if (!revealed) {
+          notices.raise({ kind: "revealFailed", owner: workspaceOwner })
+          refreshRecentFiles()
+        }
+      })
+    },
+    [notices, refreshRecentFiles],
   )
 
   const showTab = useCallback((tabId: TabId) => {
@@ -1991,6 +2006,7 @@ export default function App() {
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
         onRemoveRecent={removeRecent}
+        onRevealRecent={revealRecent}
         opening={isOpening}
         recentFiles={recentFiles}
       />

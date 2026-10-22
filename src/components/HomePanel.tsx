@@ -3,7 +3,7 @@ import { Clock, FilePlus2, FolderOpen, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import fileSmallIcon from "@/assets/brand/file-small.svg"
-import { HintTooltip } from "@/components/HintTooltip"
+import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -15,12 +15,16 @@ import type { RecentFile } from "@/lib/recentFiles"
     hold every entry the backend keeps, so it is paged in rather than rendered. */
 const RECENT_PAGE_SIZE = 20
 
+const recentActionClass =
+  "grid size-7 cursor-pointer place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-0"
+
 type HomePanelProps = {
   active: boolean
   onNew: () => void
   onOpenFile: () => void
   onOpenRecent: (path: string) => void
   onRemoveRecent: (path: string) => void
+  onRevealRecent: (path: string) => void
   opening: boolean
   recentFiles: RecentFile[]
 }
@@ -31,6 +35,7 @@ export function HomePanel({
   onOpenFile,
   onOpenRecent,
   onRemoveRecent,
+  onRevealRecent,
   opening,
   recentFiles,
 }: HomePanelProps) {
@@ -68,6 +73,7 @@ export function HomePanel({
   }, [recentTotal])
 
   const removeRecentLabel = (name: string) => t("home.removeRecent", { name })
+  const revealRecentLabel = (name: string) => t("home.revealRecent", { name })
 
   const visibleRecentFiles = recentFiles.slice(0, visibleRecentCount)
   const moreRecentFiles = visibleRecentCount < recentTotal
@@ -148,53 +154,78 @@ export function HomePanel({
                   {t("home.recentEmpty")}
                 </p>
               ) : (
-                <ul
-                  className="mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto"
-                  ref={recentListRef}
-                >
-                  {visibleRecentFiles.map((file) => (
-                    <li className="group relative" key={file.path}>
-                      <HintTooltip label={file.path}>
-                        <button
-                          className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 pr-9 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
-                          data-slot="recent-file"
-                          disabled={opening}
-                          onClick={() => onOpenRecent(file.path)}
-                          type="button"
-                        >
-                          <img alt="" className="size-8 shrink-0" draggable={false} src={fileSmallIcon} />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm">
-                              {file.name}
+                // One delay group for every row's actions, so a hint read on
+                // one opens the next at once.
+                <HintTooltipGroup>
+                  <ul
+                    className="mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto"
+                    ref={recentListRef}
+                  >
+                    {visibleRecentFiles.map((file) => (
+                      <li className="group relative" key={file.path}>
+                        <HintTooltip label={file.path}>
+                          <button
+                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 pr-18 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
+                            data-slot="recent-file"
+                            disabled={opening}
+                            onClick={() => onOpenRecent(file.path)}
+                            type="button"
+                          >
+                            <img alt="" className="size-8 shrink-0" draggable={false} src={fileSmallIcon} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm">
+                                {file.name}
+                              </span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {file.directory}
+                              </span>
                             </span>
-                            <span className="block truncate text-xs text-muted-foreground">
-                              {file.directory}
-                            </span>
-                          </span>
-                        </button>
-                      </HintTooltip>
-                      {/* A sibling of the open button, not a child: interactive
-                          elements cannot nest. Revealed over its row — and
-                          hidden it takes no pointer events, so the corner it
-                          sits on stays part of the open button's hit area. */}
-                      <HintTooltip label={removeRecentLabel(file.name)}>
-                        <button
-                          aria-label={removeRecentLabel(file.name)}
-                          className="absolute top-1 right-1 grid size-6 place-items-center rounded-sm text-muted-foreground/60 opacity-0 pointer-events-none outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 disabled:opacity-0"
-                          data-slot="remove-recent-file"
-                          disabled={opening}
-                          onClick={() => onRemoveRecent(file.path)}
-                          type="button"
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                      </HintTooltip>
-                    </li>
-                  ))}
-                  {moreRecentFiles ? (
-                    <li aria-hidden className="h-px" ref={recentEndRef} />
-                  ) : null}
-                </ul>
+                          </button>
+                        </HintTooltip>
+                        {/* Siblings of the open button, not children: interactive
+                            elements cannot nest. Revealed over its row, by hover
+                            or by a keyboard focus anywhere in it — and hidden
+                            they take no pointer events, so the space they sit on
+                            stays part of the open button's hit area. */}
+                        <div className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-has-focus-visible:pointer-events-auto group-has-focus-visible:opacity-100">
+                          <HintTooltip
+                            inDelayGroup
+                            label={revealRecentLabel(file.name)}
+                          >
+                            <button
+                              aria-label={revealRecentLabel(file.name)}
+                              className={recentActionClass}
+                              data-slot="reveal-recent-file"
+                              disabled={opening}
+                              onClick={() => onRevealRecent(file.path)}
+                              type="button"
+                            >
+                              <FolderOpen className="size-4" />
+                            </button>
+                          </HintTooltip>
+                          <HintTooltip
+                            inDelayGroup
+                            label={removeRecentLabel(file.name)}
+                          >
+                            <button
+                              aria-label={removeRecentLabel(file.name)}
+                              className={recentActionClass}
+                              data-slot="remove-recent-file"
+                              disabled={opening}
+                              onClick={() => onRemoveRecent(file.path)}
+                              type="button"
+                            >
+                              <X className="size-4" />
+                            </button>
+                          </HintTooltip>
+                        </div>
+                      </li>
+                    ))}
+                    {moreRecentFiles ? (
+                      <li aria-hidden className="h-px" ref={recentEndRef} />
+                    ) : null}
+                  </ul>
+                </HintTooltipGroup>
               )}
             </section>
           </div>

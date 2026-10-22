@@ -172,6 +172,8 @@ const zhTW = {
     recent: "最近使用的檔案",
     recentEmpty: "您開啟過的 PDF 會列在這裡。",
     removeRecent: "從最近使用的檔案中移除 {{name}}",
+    revealRecent: "開啟 {{name}} 所在的資料夾",
+    revealFailed: "無法開啟此檔案所在的資料夾。",
   },
   toolbar: {
     saveAsMenu: "更多儲存選項",

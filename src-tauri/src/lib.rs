@@ -30,7 +30,10 @@ use pdfium::{
     rotate_pdf_pages, save_pdf, search_pdf_text, word_conversion_available, PdfiumState,
 };
 use quit::quit_app;
-use recent::{recent_pdf_view, recent_pdfs, remove_recent_pdf, set_recent_pdf_view, RecentFiles};
+use recent::{
+    recent_pdf_view, recent_pdfs, remove_recent_pdf, reveal_recent_pdf, set_recent_pdf_view,
+    RecentFiles,
+};
 use settings::{set_settings, settings};
 use tauri::Manager;
 use update::{check_updates, download_update, install_update, update_status, UpdateState};
@@ -155,6 +158,7 @@ pub fn run() {
             recent_pdf_view,
             set_recent_pdf_view,
             remove_recent_pdf,
+            reveal_recent_pdf,
             render_pdf_page,
             render_pdf_page_thumbnail,
             render_pdf_watermark_preview,

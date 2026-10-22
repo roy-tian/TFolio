@@ -174,6 +174,8 @@ const th = {
     recent: "ไฟล์ล่าสุด",
     recentEmpty: "PDF ที่คุณเปิดจะแสดงอยู่ที่นี่",
     removeRecent: "เอา {{name}} ออกจากไฟล์ล่าสุด",
+    revealRecent: "เปิดโฟลเดอร์ที่มี {{name}}",
+    revealFailed: "ไม่สามารถเปิดโฟลเดอร์ของไฟล์นี้ได้",
   },
   toolbar: {
     saveAsMenu: "ตัวเลือกการบันทึกเพิ่มเติม",

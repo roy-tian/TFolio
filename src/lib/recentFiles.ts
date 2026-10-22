@@ -165,6 +165,17 @@ export async function removeRecentFile(path: string): Promise<void> {
   }
 }
 
+/** False when the folder never opened, most often for a file gone since the
+    list was read. */
+export async function revealRecentFile(path: string): Promise<boolean> {
+  try {
+    await invoke("reveal_recent_pdf", { path })
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * A convenience, like the list itself: a failed write must not interrupt
  * scrolling or closing, and the backend ignores paths no open recorded.

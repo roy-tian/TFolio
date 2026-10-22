@@ -172,6 +172,8 @@ const en = {
     recent: "Recent files",
     recentEmpty: "The PDFs you open will be listed here.",
     removeRecent: "Remove {{name}} from recent files",
+    revealRecent: "Open the folder containing {{name}}",
+    revealFailed: "The file's folder could not be opened.",
   },
   toolbar: {
     saveAsMenu: "More save options",

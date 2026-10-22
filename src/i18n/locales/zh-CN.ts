@@ -165,6 +165,8 @@ const zhCN = {
     recent: "最近打开",
     recentEmpty: "打开过的 PDF 会显示在这里。",
     removeRecent: "从最近打开中移除 {{name}}",
+    revealRecent: "打开 {{name}} 所在的文件夹",
+    revealFailed: "无法打开此文件所在的文件夹。",
   },
   toolbar: {
     saveAsMenu: "更多保存方式",
