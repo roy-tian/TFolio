@@ -785,6 +785,54 @@ describe("independent document tabs", () => {
     )
   })
 
+  // A tab opened behind another was never laid out; were its size left to the
+  // resize observer, its first frame would show pages fitted to no width at all.
+  it("shows a tab opened in the background fitted from its first frame", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await emitDrag("drag-drop", { x: 400, y: 400 }, [
+      writePdf("in-front.pdf", 3),
+      writePdf("behind.pdf", 3),
+    ])
+    await tabButton("behind.pdf").waitForExist({ timeout: 20_000 })
+    await expect(tabButton("in-front.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await $(
+      "[data-document-session][data-active='true'] [data-page-number='1'] canvas[data-rendered='true']",
+    ).waitForExist()
+
+    // Pressed and sampled in the page: the frames a WebDriver click takes to
+    // return would hide the one that matters.
+    const widths = (await browser.executeAsync((done) => {
+      const tab = Array.from(
+        document.querySelectorAll<HTMLButtonElement>("button[role='tab']"),
+      ).find((button) => button.textContent?.trim() === "behind.pdf")!
+      const seen: number[] = []
+
+      const sample = () => {
+        const page = document.querySelector(
+          "[data-document-session][data-active='true'] [data-page-number='1']",
+        )
+        seen.push(page ? Math.round(page.getBoundingClientRect().width) : 0)
+
+        if (seen.length < 6) {
+          requestAnimationFrame(sample)
+        } else {
+          done(seen)
+        }
+      }
+
+      tab.click()
+      requestAnimationFrame(sample)
+    })) as number[]
+
+    await expect(tabButton("behind.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(widths[0]).toBeGreaterThan(100)
+    expect(new Set(widths).size).toBe(1)
+  })
+
   it("keeps a tab that arrives under a dialog behind it until it closes", async () => {
     await openPdfFromDisk("under-dialog.pdf", minimalPdf())
     await tabButton("under-dialog.pdf").waitForDisplayed()

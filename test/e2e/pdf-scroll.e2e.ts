@@ -113,6 +113,46 @@ describe("PDF scrolling", () => {
     }
   })
 
+  // Fitted beside a bar that comes and goes, a document whose height straddles
+  // the viewer's summons the bar, narrows, dismisses it, and widens, every frame.
+  it("fits pages to one width whether or not the scrollbar shows", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "book" } })
+    await refreshApp()
+    await openPdfFromDisk("gutter-fit.pdf", minimalPdf(2, "0 0 595 842"))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+
+    const fitted = () => browser.execute(() => {
+      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const page = viewer.querySelector("[data-page-number='1']")!
+
+      return {
+        gutter: viewer.offsetWidth - viewer.clientWidth,
+        width: page.getBoundingClientRect().width,
+      }
+    })
+    const setOverflowY = (value: "hidden" | "scroll") => browser.execute((overflowY: string) => {
+      document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!.style.overflowY = overflowY
+    }, value)
+
+    try {
+      await setOverflowY("scroll")
+      await browser.waitUntil(async () => (await fitted()).gutter === 12)
+      await browser.pause(300)
+      const beside = await fitted()
+
+      await setOverflowY("hidden")
+      await browser.waitUntil(async () => (await fitted()).gutter === 0)
+      // Room for a re-fit to land, were pages fitted to the client width.
+      await browser.pause(300)
+      expect((await fitted()).width).toBe(beside.width)
+    } finally {
+      await browser.execute(() => {
+        document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+          .style.removeProperty("overflow-y")
+      })
+    }
+  })
+
   it("keeps page navigation and fit-page below the tabs", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
