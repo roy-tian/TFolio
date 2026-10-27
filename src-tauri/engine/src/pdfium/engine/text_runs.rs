@@ -257,9 +257,10 @@ fn text_of(glyphs: &[Glyph], others_before: &[usize], matches: &[usize]) -> Stri
     }
 
     // pdfium-render reads invalid UTF-16 as no text at all. Unlike it, the
-    // whole run is decoded: it sized its buffer in wide characters, which cut
-    // short, or emptied, a run holding a character beyond the BMP where those
-    // are four bytes (Linux, macOS).
+    // whole run is decoded: `FPDFText_GetBoundedText` measures text in wide
+    // characters, not the UTF-16 units its header promises, so a buffer of
+    // that size cut short, or emptied, a run holding a character beyond the
+    // BMP where wide characters are four bytes (Linux, macOS).
     String::from_utf16(&units)
         .map(|text| text.trim_end_matches('\0').to_owned())
         .unwrap_or_default()
