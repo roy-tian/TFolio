@@ -117,7 +117,9 @@ function AlertDialogTitle({
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
       className={cn(
-        "font-heading text-base font-medium sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2",
+        // After the media rather than in content holding it: `group-has-*`
+        // costs Chromium a whole-document restyle per node added anywhere.
+        "font-heading text-base font-medium sm:group-data-[size=default]/alert-dialog-content:[[data-slot=alert-dialog-media]~&]:col-start-2",
         className
       )}
       {...props}

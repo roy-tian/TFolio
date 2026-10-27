@@ -131,7 +131,10 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="field-description"
       className={cn(
-        "text-left text-sm leading-normal font-normal text-muted-foreground group-has-data-horizontal/field:text-balance [[data-variant=legend]+&]:-mt-1.5",
+        // Without the registry's text balancing in a field holding a horizontal
+        // one, which no field here matched: `group-has-*` costs Chromium a
+        // whole-document restyle per node added anywhere.
+        "text-left text-sm leading-normal font-normal text-muted-foreground [[data-variant=legend]+&]:-mt-1.5",
         "last:mt-0 nth-last-2:-mt-1",
         "[&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
         className

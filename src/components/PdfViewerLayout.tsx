@@ -261,8 +261,10 @@ function BookLayout({
     pixels: half a button each, so the two hit areas meet without overlapping. */
 const PASTE_BUTTON_GAP = 14
 
-const ZONE_SHOWN =
-  "group-hover/zone:opacity-100 group-has-[:focus-visible]/zone:opacity-100"
+// The gap sets it for its line and buttons: `group-has-[:focus-visible]` on
+// them costs Chromium a restyle of the whole document for every node added
+// anywhere, while a `:has()` on the gap itself is checked against the gap alone.
+const ZONE_SHOWN = "opacity-(--zone-shown)"
 
 /**
  * Only its buttons act — the gap is a target for the eye and for a drop, not a
@@ -298,7 +300,7 @@ function InsertZone({
   return (
     <div
       className={cn(
-        "group/zone absolute top-0 z-10 flex h-full flex-col items-center justify-center",
+        "absolute top-0 z-10 flex h-full flex-col items-center justify-center [--zone-shown:0] hover:[--zone-shown:1] has-focus-visible:[--zone-shown:1]",
         dragging && "pointer-events-none",
       )}
       data-insert-index={index}

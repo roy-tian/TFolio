@@ -165,7 +165,7 @@ export function HomePanel({
                       <li className="group relative" key={file.path}>
                         <HintTooltip label={file.path}>
                           <button
-                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 pr-18 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
+                            className="peer flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 pr-18 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
                             data-slot="recent-file"
                             disabled={opening}
                             onClick={() => onOpenRecent(file.path)}
@@ -186,8 +186,11 @@ export function HomePanel({
                             elements cannot nest. Revealed over its row, by hover
                             or by a keyboard focus anywhere in it — and hidden
                             they take no pointer events, so the space they sit on
-                            stays part of the open button's hit area. */}
-                        <div className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-has-focus-visible:pointer-events-auto group-has-focus-visible:opacity-100">
+                            stays part of the open button's hit area. The focus
+                            is the open button's as the `peer`, or one of their
+                            own: `group-has-*` costs Chromium a restyle of the
+                            whole document for every node added anywhere. */}
+                        <div className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 peer-focus-visible:pointer-events-auto peer-focus-visible:opacity-100 has-focus-visible:pointer-events-auto has-focus-visible:opacity-100">
                           <HintTooltip
                             inDelayGroup
                             label={revealRecentLabel(file.name)}
