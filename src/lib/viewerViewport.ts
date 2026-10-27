@@ -41,12 +41,16 @@ function viewerScrollbarGutter(viewer: HTMLElement) {
   return scrollbarGutter
 }
 
-/** The width pages are laid out in, the scrollbar's gutter held out whether or not
-    it shows. Fitted to the client width, a document whose height rides the
-    viewport's edge summons the bar by fitting wider and dismisses it by fitting
-    narrower, every frame. */
-export function viewerLayoutWidth(viewer: HTMLElement) {
-  return Math.max(0, viewer.offsetWidth - viewerScrollbarGutter(viewer))
+/** The box pages are laid out in, the same whichever scrollbars show. The
+    vertical bar's gutter is held out: fitted to the client width, a document
+    whose height rides the viewport's edge summons the bar by fitting wider and
+    dismisses it by fitting narrower, every frame. The height is the box's own:
+    only a custom zoom overflows sideways, and no height decides its layout. */
+export function viewerLayoutSize(viewer: HTMLElement) {
+  return {
+    height: viewer.offsetHeight,
+    width: Math.max(0, viewer.offsetWidth - viewerScrollbarGutter(viewer)),
+  }
 }
 
 /** Whether the committed size is still the viewer's own, so what is measured now
@@ -55,8 +59,7 @@ export function viewerSizeCommitted(
   viewer: HTMLElement,
   committed: { height: number; width: number },
 ) {
-  return (
-    viewerLayoutWidth(viewer) === committed.width &&
-    viewer.clientHeight === committed.height
-  )
+  const size = viewerLayoutSize(viewer)
+
+  return size.width === committed.width && size.height === committed.height
 }

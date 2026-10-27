@@ -388,6 +388,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
     })
     const {
+      clientBoxRef,
       committedSizeRef,
       pendingScrollPageRef,
       scrollbarWidth,
@@ -1691,6 +1692,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               ref={viewerRef}
               tabIndex={-1}
             >
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0"
+                ref={clientBoxRef}
+              />
               <PdfViewerLayout
                 currentPage={currentPage}
                 documentId={pdfDocument.id}

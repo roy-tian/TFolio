@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { RefObject } from "react"
+import { flushSync } from "react-dom"
 
 import type { CurrentPage } from "@/hooks/useCurrentPage"
 import {
@@ -9,7 +10,7 @@ import {
 } from "@/lib/viewportAnchor"
 import type { ViewMode } from "@/lib/viewMode"
 import {
-  viewerLayoutWidth,
+  viewerLayoutSize,
   viewerReadingBounds,
   viewerSizeCommitted,
   viewerTopInset,
@@ -54,6 +55,8 @@ export function useViewerViewport({
   // the reader's place is that page, not wherever the scroll currently sits.
   const pendingScrollPageRef = useRef<number | null>(null)
   const commitSizeRef = useRef(() => {})
+  // Spans the viewer's client box, so it resizes as its scrollbars come and go.
+  const clientBoxRef = useRef<HTMLDivElement>(null)
 
   // Ahead of the activation effect below, which commits through what this sets.
   useLayoutEffect(() => {
@@ -88,8 +91,7 @@ export function useViewerViewport({
     // A hidden tab has no layout box and the observer reports 0x0; committing
     // that loses the reader's place. Hold the last real geometry instead.
     const commitSize = () => {
-      const width = viewerLayoutWidth(viewer)
-      const height = viewer.clientHeight
+      const { height, width } = viewerLayoutSize(viewer)
 
       if (width <= 0 || height <= 0) {
         return
@@ -123,7 +125,7 @@ export function useViewerViewport({
     let compositorTimer: ReturnType<typeof setTimeout> | undefined
 
     // Layout tracks the window in real time; only the PDFium renders are
-    // debounced. Measured off the element, the box the activation check reads.
+    // debounced.
     const resizeObserver = new ResizeObserver(() => {
       if (!viewer.dataset.resizeCompositing) {
         viewer.dataset.resizeCompositing = "true"
@@ -132,9 +134,19 @@ export function useViewerViewport({
       compositorTimer = setTimeout(() => {
         delete viewer.dataset.resizeCompositing
       }, RESIZE_COMPOSITOR_SETTLE_MS)
-      commitSize()
+      // Observers run between layout and paint; a scheduled render lands after
+      // the paint, which would show the new window holding the old layout.
+      flushSync(commitSize)
     })
-    resizeObserver.observe(viewer)
+    // The render flushed above adds and removes scrollbars, which resize the
+    // viewer's content box; reported off the viewer itself, that change would
+    // wait a frame behind a loop error. Its border box no render moves, and the
+    // client box is watched one level down, where the same frame reports it.
+    resizeObserver.observe(viewer, { box: "border-box" })
+
+    if (clientBoxRef.current) {
+      resizeObserver.observe(clientBoxRef.current)
+    }
 
     return () => {
       resizeObserver.disconnect()
@@ -228,6 +240,7 @@ export function useViewerViewport({
   }, [viewerHeight, viewerWidth, viewMode])
 
   return {
+    clientBoxRef,
     committedSizeRef,
     pendingScrollPageRef,
     scrollbarWidth,
