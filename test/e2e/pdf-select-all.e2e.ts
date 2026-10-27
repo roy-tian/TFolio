@@ -143,6 +143,12 @@ describe("TFolio select all", () => {
           Math.abs(range.getBoundingClientRect().width * 300 / pageBox.width - target.width),
         )
       })
+      // Positioned and transformed elements are WebKit layers, which every
+      // frame walks: a page's thousands of glyph runs must not each be one.
+      const layered = [...page.querySelectorAll(".pdf-text-layer *")].filter((element) => {
+        const style = getComputedStyle(element)
+        return style.position !== "static" || style.transform !== "none"
+      }).length
       const range = document.createRange()
       range.setStart(spans[0].firstChild!, 0)
       const last = spans[spans.length - 1].firstChild!
@@ -150,11 +156,13 @@ describe("TFolio select all", () => {
       const selection = window.getSelection()!
       selection.removeAllRanges()
       selection.addRange(range)
-      return { count: spans.length, expected: expected.length, max: Math.max(...errors) }
+      return { count: spans.length, expected: expected.length, layered, max: Math.max(...errors) }
     })
     expect(errors.count).toBe(errors.expected)
     expect(errors.count).toBeGreaterThan(40)
     expect(errors.max).toBeLessThan(0.5)
+    // One per row of glyphs, and their holder.
+    expect(errors.layered).toBeLessThanOrEqual(7)
 
     // Native Ctrl+C bypasses the clipboard seam; the page menu exercises the
     // same selected text through the app's observable copy path.

@@ -212,7 +212,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
     }
 
     let unregister: (() => void) | undefined
-    const build = buildTextLayer(layer, textSpans, layoutWidth, layoutHeight, (spans) => {
+    const build = buildTextLayer(layer, textSpans, (spans) => {
       unregister = registerTextPage(layer, textSpans, spans)
       const selection = window.getSelection()
 
@@ -232,7 +232,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
       unregister?.()
       build.release()
     }
-  }, [hasRendered, layoutHeight, layoutWidth, textSpans, textWanted])
+  }, [hasRendered, textSpans, textWanted])
 
   const pageLayerStyle = {
     height: `${(layoutHeight / page.height) * 100}%`,

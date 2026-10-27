@@ -2,15 +2,25 @@ import { distanceFromView } from "@/lib/pageWork"
 import type { PdfTextSpan } from "@/lib/pdf"
 
 // Fragmented PDFs can give every glyph a different ink-box height. Changing
-// the measurement font for each glyph stalls the WebView; use one font and
-// scale both axes to the PDF bounds in the selectable DOM as well. Both must
-// match `.pdf-text-layer span` in index.css.
+// the measurement font for each glyph stalls the WebView, so runs are measured
+// in one font. The family must match `.pdf-text-layer span` in index.css.
 const TEXT_LAYER_FONT_FAMILY = "sans-serif"
 const TEXT_LAYER_FONT_SIZE = 100
 
-// A fragmented PDF can give every glyph its own run — over a thousand
-// positioned spans on a page — and creating or dropping a page's worth in one
-// task stalled scrolling for 60–120 ms. Spans come and go a batch at a time
+// A positioned or transformed element is a layer of its own in WebKit, and
+// every scroll step, hit test and repaint walks them all: at one per run, a
+// page of 5,000 single-glyph runs held tooltip frames up for 200 ms. Runs are
+// grid items of a positioned line instead, laid out at this magnification
+// under one shrinking transform, since WebKitGTK rounds each glyph's advance to
+// a whole pixel of the font's size, up to half a point per glyph at page size.
+const LAYOUT_SCALE = 16
+// Every distinct font size is a font instance for the WebView to set up, and
+// one per run's exact size cost WebKitGTK 200 ms on a page's first build.
+const FONT_SIZE_STEP = 1.5
+
+// A fragmented PDF can give every glyph its own run — thousands of spans on a
+// page — and creating or dropping a page's worth in one task stalled
+// scrolling for 60–120 ms. Spans come and go a batch at a time
 // instead, within a per-frame budget shared by every page. The batch cap is
 // there because the clock sees only the script: the layout the new spans
 // cost the WebView lands after it, in the same frame.
@@ -148,18 +158,57 @@ function measureTextWidth(text: string) {
   return width
 }
 
-/** Positions are page-relative and scale is resolution-independent, so a
-    resize or zoom never calls for building the span again. */
-function spanElement(span: PdfTextSpan, layoutWidth: number, layoutHeight: number) {
+/** The step down from `size` to the nearest size the ladder holds: never above
+    it, so the letter-spacing making up the rest is never negative, which would
+    take a narrow glyph such as a space backwards. */
+function ladderFontSize(size: number) {
+  const steps = Math.floor(Math.log(size / TEXT_LAYER_FONT_SIZE) / Math.log(FONT_SIZE_STEP) + 1e-9)
+
+  return TEXT_LAYER_FONT_SIZE * FONT_SIZE_STEP ** steps
+}
+
+/** Runs on one row share a line; which line a run joins changes how many
+    there are, never where the run lies. */
+function sharesRow(a: PdfTextSpan, b: PdfTextSpan) {
+  const overlap = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top)
+
+  return overlap > Math.min(a.height, b.height) / 2
+}
+
+function lineElement(origin: PdfTextSpan) {
+  const element = document.createElement("div")
+
+  element.className = "pdf-text-line"
+  element.style.left = `${origin.left * LAYOUT_SCALE}px`
+  element.style.top = `${origin.top * LAYOUT_SCALE}px`
+
+  return element
+}
+
+/** Placed from its line's origin, not after the runs before it, so rounding
+    never accumulates along a line. Page coordinates under a fixed transform
+    mean a resize or zoom never calls for building the span again. */
+function spanElement(span: PdfTextSpan, origin: PdfTextSpan) {
   const element = document.createElement("span")
+  const width = span.width * LAYOUT_SCALE
+  const height = span.height * LAYOUT_SCALE
   const naturalWidth = measureTextWidth(span.text)
-  const scaleY = span.height / TEXT_LAYER_FONT_SIZE
-  const scaleX = naturalWidth > 0 ? span.width / naturalWidth : scaleY
+  // The font size stretches the advances to the run's width; letter-spacing
+  // makes up what the ladder's step leaves.
+  const fontSize = ladderFontSize(
+    Math.max(1, naturalWidth > 0 ? (TEXT_LAYER_FONT_SIZE * width) / naturalWidth : height),
+  )
+  const characters = span.text.length === 1 ? 1 : [...span.text].length
 
   element.textContent = span.text
-  element.style.left = `${(span.left / layoutWidth) * 100}%`
-  element.style.top = `${(span.top / layoutHeight) * 100}%`
-  element.style.transform = `scale(${scaleX}, ${scaleY})`
+  element.style.width = `${width}px`
+  element.style.height = `${height}px`
+  element.style.marginLeft = `${(span.left - origin.left) * LAYOUT_SCALE}px`
+  element.style.marginTop = `${(span.top - origin.top) * LAYOUT_SCALE}px`
+  element.style.fontSize = `${fontSize}px`
+  element.style.lineHeight = `${height}px`
+  element.style.letterSpacing =
+    `${(width - (naturalWidth * fontSize) / TEXT_LAYER_FONT_SIZE) / characters}px`
 
   return element
 }
@@ -177,7 +226,9 @@ function tearDown(holder: HTMLElement) {
         return true
       }
 
-      for (let count = 0; count < BATCH_SIZE && holder.lastChild; count += 1) {
+      // Whole lines, about a batch of runs' worth.
+      for (let count = 0; count < BATCH_SIZE && holder.lastChild; ) {
+        count += holder.lastChild.childNodes.length
         holder.lastChild.remove()
       }
 
@@ -201,32 +252,39 @@ export type TextLayerBuild = {
 
 /**
  * Fills `layer` with one span per run, in run order, then hands the spans to
- * `onBuilt`. They go into a holder of their own, so a replacement can start
- * while the spans it replaces are still being taken down; the holder is not
- * positioned, so the layer stays the box the spans' percentages refer to.
+ * `onBuilt`. Consecutive runs on one row share a line element. They go into a
+ * holder of their own, so a replacement can start while the spans it replaces
+ * are still being taken down.
  */
 export function buildTextLayer(
   layer: HTMLElement,
   spans: PdfTextSpan[],
-  layoutWidth: number,
-  layoutHeight: number,
   onBuilt: (elements: HTMLElement[]) => void,
 ): TextLayerBuild {
   const holder = document.createElement("div")
   const elements: HTMLElement[] = []
+  let line: { element: HTMLElement; origin: PdfTextSpan } | undefined
+
+  holder.className = "pdf-text-runs"
+  holder.style.transform = `scale(${1 / LAYOUT_SCALE})`
+
   const job: Job = {
     layer,
     step: () => {
       const end = Math.min(spans.length, elements.length + BATCH_SIZE)
-      const batch = document.createDocumentFragment()
 
       for (let index = elements.length; index < end; index += 1) {
-        const element = spanElement(spans[index], layoutWidth, layoutHeight)
-        elements.push(element)
-        batch.append(element)
-      }
+        const span = spans[index]
 
-      holder.append(batch)
+        if (!line || !sharesRow(spans[index - 1], span)) {
+          line = { element: lineElement(span), origin: span }
+          holder.append(line.element)
+        }
+
+        const element = spanElement(span, line.origin)
+        elements.push(element)
+        line.element.append(element)
+      }
 
       if (elements.length < spans.length) {
         return false
