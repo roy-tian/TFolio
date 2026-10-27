@@ -312,21 +312,36 @@ body {
 .pdf-text-layer {
   position: absolute;
   overflow: hidden;
-  line-height: 1;
   cursor: text;
   user-select: text;
   -webkit-user-select: text;
 }
 
-.pdf-text-layer span {
+/* Laid out magnified, shrunk back by its inline transform: see LAYOUT_SCALE in
+   textLayerBuild.ts. */
+.pdf-text-runs {
   position: absolute;
-  white-space: pre;
+  top: 0;
+  left: 0;
   transform-origin: 0 0;
+}
+
+/* Runs stack in the line's one grid cell, each placed by its margins from the
+   line's origin rather than positioned: WebKit makes a layer of every
+   positioned element. */
+.pdf-text-line {
+  position: absolute;
+  display: grid;
+}
+
+.pdf-text-layer span {
+  grid-area: 1 / 1;
+  place-self: start;
+  white-space: pre;
   color: transparent;
-  /* Must match TEXT_LAYER_FONT_* in textLayerBuild.ts: the run width is measured
-     with this font, so the span has to render with it too or scaleX skews. */
+  /* Must match TEXT_LAYER_FONT_FAMILY in textLayerBuild.ts: the run width is
+     measured with this font, so the span has to render with it too. */
   font-family: sans-serif;
-  font-size: 100px;
 }
 
 /* The selection is painted by the band layer, one rectangle per line; the

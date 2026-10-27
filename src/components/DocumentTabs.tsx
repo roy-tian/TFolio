@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ChevronDown, ExternalLink, FolderOpen, House, LoaderCircle, X } from "lucide-react"
+import {
+  ArrowRightToLine,
+  ChevronDown,
+  CopyX,
+  ExternalLink,
+  FolderOpen,
+  House,
+  LoaderCircle,
+  SquareX,
+  X,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
@@ -10,6 +20,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import {
@@ -25,6 +36,7 @@ import {
   panelElementId,
   tabElementId,
   tabIdForKey,
+  type OtherTabs,
   type TabId,
 } from "@/lib/documentTabs"
 import { TAB_SPRING_MS } from "@/lib/pageDrag"
@@ -48,6 +60,9 @@ type DocumentTabsProps = {
   armedTabId: number | null
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
+  onCloseAll: () => void
+  /** Closes the document tabs around this one, as `otherTabIds` picks them. */
+  onCloseOthers: (documentId: number, which: OtherTabs) => void
   onOpenFile: () => void
   /** Reorders the document tabs, both indices among them; home stays first. */
   onReorder: (from: number, to: number) => void
@@ -108,6 +123,8 @@ export function DocumentTabs({
   armedTabId,
   onActivate,
   onClose,
+  onCloseAll,
+  onCloseOthers,
   onOpenFile,
   onReorder,
   onTabDropOutside,
@@ -284,7 +301,7 @@ export function DocumentTabs({
               return (
                 <ContextMenu key={tab.id}>
                   {/* A tab is its own menu trigger: the entries below act on
-                      this tab alone, and no other surface here has any. */}
+                      or from this tab, and no other surface here has any. */}
                   <ContextMenuTrigger
                     render={
                       <div
@@ -381,6 +398,7 @@ export function DocumentTabs({
                       <ExternalLink />
                       {t("tabs.moveToNewWindow")}
                     </ContextMenuItem>
+                    <ContextMenuSeparator />
                     <ContextMenuItem
                       data-action="tab-close"
                       onClick={() => onClose(tab.id)}
@@ -388,6 +406,35 @@ export function DocumentTabs({
                       <X />
                       {t("tabs.close", { name: tab.name })}
                     </ContextMenuItem>
+                    {/* Absent rather than disabled when they would close no
+                        tab, or only this one, as its own entry already does. */}
+                    {tabs.length > 1 ? (
+                      <ContextMenuItem
+                        data-action="tab-close-others"
+                        onClick={() => onCloseOthers(tab.id, "all")}
+                      >
+                        <CopyX />
+                        {t("tabs.closeOthers")}
+                      </ContextMenuItem>
+                    ) : null}
+                    {index < tabs.length - 1 ? (
+                      <ContextMenuItem
+                        data-action="tab-close-right"
+                        onClick={() => onCloseOthers(tab.id, "right")}
+                      >
+                        <ArrowRightToLine />
+                        {t("tabs.closeToRight")}
+                      </ContextMenuItem>
+                    ) : null}
+                    {tabs.length > 1 ? (
+                      <ContextMenuItem
+                        data-action="tab-close-all"
+                        onClick={onCloseAll}
+                      >
+                        <SquareX />
+                        {t("tabs.closeAll")}
+                      </ContextMenuItem>
+                    ) : null}
                   </ContextMenuContent>
                 </ContextMenu>
               )

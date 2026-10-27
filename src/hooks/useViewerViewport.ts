@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { RefObject } from "react"
+import { flushSync } from "react-dom"
 
 import type { CurrentPage } from "@/hooks/useCurrentPage"
 import {
@@ -8,7 +9,12 @@ import {
   type ViewportAnchor,
 } from "@/lib/viewportAnchor"
 import type { ViewMode } from "@/lib/viewMode"
-import { viewerReadingBounds, viewerTopInset } from "@/lib/viewerViewport"
+import {
+  viewerLayoutSize,
+  viewerReadingBounds,
+  viewerSizeCommitted,
+  viewerTopInset,
+} from "@/lib/viewerViewport"
 
 const RESIZE_COMPOSITOR_SETTLE_MS = 150
 
@@ -48,8 +54,12 @@ export function useViewerViewport({
   // A seek waiting for the layout that can land it; between request and commit
   // the reader's place is that page, not wherever the scroll currently sits.
   const pendingScrollPageRef = useRef<number | null>(null)
+  const commitSizeRef = useRef(() => {})
+  // Spans the viewer's client box, so it resizes as its scrollbars come and go.
+  const clientBoxRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  // Ahead of the activation effect below, which commits through what this sets.
+  useLayoutEffect(() => {
     const viewer = viewerRef.current
 
     if (!viewer) {
@@ -80,21 +90,17 @@ export function useViewerViewport({
 
     // A hidden tab has no layout box and the observer reports 0x0; committing
     // that loses the reader's place. Hold the last real geometry instead.
-    const commitSize = (width: number, height: number) => {
-      const roundedWidth = Math.round(width)
-      const roundedHeight = Math.round(height)
+    const commitSize = () => {
+      const { height, width } = viewerLayoutSize(viewer)
 
-      if (roundedWidth <= 0 || roundedHeight <= 0) {
+      if (width <= 0 || height <= 0) {
         return
       }
 
       setScrollbarWidth(viewer.offsetWidth - viewer.clientWidth)
       const committed = committedSizeRef.current
 
-      if (
-        roundedWidth === committed.width &&
-        roundedHeight === committed.height
-      ) {
+      if (width === committed.width && height === committed.height) {
         return
       }
 
@@ -104,22 +110,22 @@ export function useViewerViewport({
         captureResizeAnchor()
       }
 
-      if (roundedWidth !== committed.width) {
-        committed.width = roundedWidth
-        setViewerWidth(roundedWidth)
+      if (width !== committed.width) {
+        committed.width = width
+        setViewerWidth(width)
       }
 
-      if (roundedHeight !== committed.height) {
-        committed.height = roundedHeight
-        setViewerHeight(Math.max(0, roundedHeight - viewerTopInset(viewer)))
+      if (height !== committed.height) {
+        committed.height = height
+        setViewerHeight(Math.max(0, height - viewerTopInset(viewer)))
       }
     }
 
-    commitSize(viewer.clientWidth, viewer.clientHeight)
+    commitSizeRef.current = commitSize
     let compositorTimer: ReturnType<typeof setTimeout> | undefined
 
     // Layout tracks the window in real time; only the PDFium renders are
-    // debounced. Measured off the element, the box the activation check reads.
+    // debounced.
     const resizeObserver = new ResizeObserver(() => {
       if (!viewer.dataset.resizeCompositing) {
         viewer.dataset.resizeCompositing = "true"
@@ -128,9 +134,19 @@ export function useViewerViewport({
       compositorTimer = setTimeout(() => {
         delete viewer.dataset.resizeCompositing
       }, RESIZE_COMPOSITOR_SETTLE_MS)
-      commitSize(viewer.clientWidth, viewer.clientHeight)
+      // Observers run between layout and paint; a scheduled render lands after
+      // the paint, which would show the new window holding the old layout.
+      flushSync(commitSize)
     })
-    resizeObserver.observe(viewer)
+    // The render flushed above adds and removes scrollbars, which resize the
+    // viewer's content box; reported off the viewer itself, that change would
+    // wait a frame behind a loop error. Its border box no render moves, and the
+    // client box is watched one level down, where the same frame reports it.
+    resizeObserver.observe(viewer, { box: "border-box" })
+
+    if (clientBoxRef.current) {
+      resizeObserver.observe(clientBoxRef.current)
+    }
 
     return () => {
       resizeObserver.disconnect()
@@ -167,25 +183,25 @@ export function useViewerViewport({
     viewer.scrollTop += correction.top
   }, [viewerHeight, viewerWidth])
 
-  // A tab hidden through a resize holds an offset into a stale layout; seek the
-  // page once the new size is committed, as a layout effect or never at all.
   useLayoutEffect(() => {
     const viewer = viewerRef.current
 
-    if (!active || !viewer || restoringRecentView) {
+    if (!active || !viewer) {
       return
     }
 
-    const committed = committedSizeRef.current
-
+    // A tab hidden through a resize holds an offset into a stale layout; seek the
+    // page once the new size is committed, as a layout effect or never at all.
     if (
-      viewer.clientWidth === committed.width &&
-      viewer.clientHeight === committed.height
+      !restoringRecentView &&
+      !viewerSizeCommitted(viewer, committedSizeRef.current)
     ) {
-      return
+      pendingScrollPageRef.current = currentPage.get()
     }
 
-    pendingScrollPageRef.current = currentPage.get()
+    // The observer's report lands after the browser paints the old layout: for a
+    // tab never shown, pages fitted to no width at all, so at the minimum zoom.
+    commitSizeRef.current()
   }, [active, currentPage, restoringRecentView])
 
   // For the switch nobody pressed: a merge past a one-page document's spread
@@ -216,19 +232,15 @@ export function useViewerViewport({
     // The jump reads as a view swap rather than a scroll, so it lands instantly.
     scrollToPage(pendingPage, "auto")
 
-    const committed = committedSizeRef.current
-
     // Leaving the grid closes the bookmark sidebar, widening the viewer after
     // the seek was measured; hold the page until settled, so the last seek stands.
-    if (
-      viewer.clientWidth === committed.width &&
-      viewer.clientHeight === committed.height
-    ) {
+    if (viewerSizeCommitted(viewer, committedSizeRef.current)) {
       pendingScrollPageRef.current = null
     }
   }, [viewerHeight, viewerWidth, viewMode])
 
   return {
+    clientBoxRef,
     committedSizeRef,
     pendingScrollPageRef,
     scrollbarWidth,

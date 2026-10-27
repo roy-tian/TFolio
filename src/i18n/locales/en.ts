@@ -32,6 +32,9 @@ const en = {
     list: "Workspace tabs",
     listAll: "All open documents",
     close: "Close {{name}}",
+    closeOthers: "Close other tabs",
+    closeToRight: "Close tabs to the right",
+    closeAll: "Close all tabs",
     unsaved: "Unsaved changes",
     dropNow: "Drop to open files",
     dropHint: "PDFs, images, and Word documents open in separate tabs",
@@ -41,7 +44,10 @@ const en = {
       "One or more open documents have changes that are not saved. Closing the window will discard them.",
     unsavedAllDescription:
       "One or more open documents have changes that are not saved. Closing them all will discard those changes.",
+    unsavedTabsDescription:
+      "One or more of these documents have changes that are not saved. Closing their tabs will discard those changes.",
     discardAndCloseTab: "Discard and close tab",
+    discardAndCloseTabs: "Discard and close tabs",
     discardAndCloseAll: "Discard and close all",
     saveBeforeClose: "Save",
     unsavedQuitDescription:
@@ -167,6 +173,8 @@ const en = {
     recent: "Recent files",
     recentEmpty: "The PDFs you open will be listed here.",
     removeRecent: "Remove {{name}} from recent files",
+    revealRecent: "Open the folder containing {{name}}",
+    revealFailed: "The file's folder could not be opened.",
   },
   toolbar: {
     saveAsMenu: "More save options",

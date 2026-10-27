@@ -34,6 +34,9 @@ const zhCN = {
     list: "工作区标签页",
     listAll: "全部已打开的文档",
     close: "关闭 {{name}}",
+    closeOthers: "关闭其他标签页",
+    closeToRight: "关闭右侧标签页",
+    closeAll: "关闭所有标签页",
     unsaved: "有未保存的修改",
     dropNow: "松开以打开文件",
     dropHint: "PDF、图片和 Word 文档将在独立标签页中打开",
@@ -42,7 +45,10 @@ const zhCN = {
       "一个或多个已打开文档尚有未保存的修改，关闭窗口将丢弃这些修改。",
     unsavedAllDescription:
       "一个或多个已打开文档尚有未保存的修改，全部关闭将丢弃这些修改。",
+    unsavedTabsDescription:
+      "要关闭的文档中有一个或多个尚有未保存的修改，关闭这些标签页将丢弃这些修改。",
     discardAndCloseTab: "丢弃并关闭标签页",
+    discardAndCloseTabs: "丢弃并关闭这些标签页",
     discardAndCloseAll: "丢弃并全部关闭",
     saveBeforeClose: "保存",
     unsavedQuitDescription: "已打开文档尚有未保存的修改，退出将丢弃这些修改。",
@@ -160,6 +166,8 @@ const zhCN = {
     recent: "最近打开",
     recentEmpty: "打开过的 PDF 会显示在这里。",
     removeRecent: "从最近打开中移除 {{name}}",
+    revealRecent: "打开 {{name}} 所在的文件夹",
+    revealFailed: "无法打开此文件所在的文件夹。",
   },
   toolbar: {
     saveAsMenu: "更多保存方式",

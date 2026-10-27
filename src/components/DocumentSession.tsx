@@ -113,7 +113,7 @@ import {
   type ViewMode,
 } from "@/lib/viewMode"
 import { isNoteWorthKeeping } from "@/lib/textNoteDraft"
-import { viewerReadingBounds } from "@/lib/viewerViewport"
+import { viewerReadingBounds, viewerSizeCommitted } from "@/lib/viewerViewport"
 import { anchorCorrection, anchorOnPage } from "@/lib/viewportAnchor"
 import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
@@ -388,6 +388,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
     })
     const {
+      clientBoxRef,
       committedSizeRef,
       pendingScrollPageRef,
       scrollbarWidth,
@@ -989,13 +990,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         return
       }
 
-      const committed = committedSizeRef.current
-
       if (
         viewerWidth <= 0 ||
         viewerHeight <= 0 ||
-        viewer.clientWidth !== committed.width ||
-        viewer.clientHeight !== committed.height
+        !viewerSizeCommitted(viewer, committedSizeRef.current)
       ) {
         return
       }
@@ -1165,12 +1163,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         return null
       }
 
-      const committed = committedSizeRef.current
-
-      if (
-        viewer.clientWidth !== committed.width ||
-        viewer.clientHeight !== committed.height
-      ) {
+      if (!viewerSizeCommitted(viewer, committedSizeRef.current)) {
         return null
       }
 
@@ -1699,6 +1692,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               ref={viewerRef}
               tabIndex={-1}
             >
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0"
+                ref={clientBoxRef}
+              />
               <PdfViewerLayout
                 currentPage={currentPage}
                 documentId={pdfDocument.id}

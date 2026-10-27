@@ -1,4 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -33,6 +39,29 @@ function tabButtons() {
 
 function tabButton(name: string) {
   return $(`//button[@role='tab'][normalize-space()='${name}']`)
+}
+
+/** Opens a document tab's context menu where a right-click on its title would. */
+function openTabMenu(name: string) {
+  return browser.execute((tabName: string) => {
+    const tab = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-document-tab]"),
+    ).find(
+      (element) =>
+        element.querySelector("button[role='tab']")?.textContent?.trim() ===
+        tabName,
+    )!
+    const box = tab.getBoundingClientRect()
+
+    tab.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        clientX: box.left + 20,
+        clientY: box.top + 10,
+      }),
+    )
+  }, name)
 }
 
 function tabNames() {
@@ -249,6 +278,28 @@ function recentEntry(filePath: string) {
   )
 }
 
+/**
+ * A recent row's actions are hover-revealed and, hidden, hold no pointer
+ * events, and the WebDriver can flip CSS :hover for neither, so the click is
+ * dispatched in-page against the row's own button.
+ */
+function clickRecentAction(name: string, slot: string) {
+  return browser.execute(
+    (fileName: string, actionSlot: string) => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-slot='recent-file']"),
+      ).find((entry) => entry.textContent?.includes(fileName))
+
+      row
+        ?.closest("li")
+        ?.querySelector<HTMLElement>(`[data-slot='${actionSlot}']`)
+        ?.click()
+    },
+    name,
+    slot,
+  )
+}
+
 function activeScrollTop() {
   return browser.execute(() => {
     const viewer = document.querySelector<HTMLElement>(
@@ -428,19 +479,7 @@ describe("independent document tabs", () => {
     const removedEntry = recentEntry(removedPath)
     await removedEntry.waitForDisplayed()
 
-    // The remove key is hover-revealed and, hidden, holds no pointer events,
-    // and the WebDriver can flip CSS :hover for neither, so the click is
-    // dispatched in-page against the row's own button.
-    await browser.execute((name: string) => {
-      const row = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-slot='recent-file']"),
-      ).find((entry) => entry.textContent?.includes(name))
-      const remove = row
-        ?.closest("li")
-        ?.querySelector<HTMLElement>("[data-slot='remove-recent-file']")
-
-      remove?.click()
-    }, "removed-recent.pdf")
+    await clickRecentAction("removed-recent.pdf", "remove-recent-file")
 
     await browser.waitUntil(async () => !(await removedEntry.isExisting()), {
       timeout: 15_000,
@@ -462,6 +501,29 @@ describe("independent document tabs", () => {
       },
       { timeout: 15_000, timeoutMsg: "the removal never reached the store" },
     )
+  })
+
+  it("reports a recent file gone before its folder could be shown", async () => {
+    const filePath = await openPdfFromDisk("gone-recent.pdf", minimalPdf(1))
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    await $("button[aria-label='Close gone-recent.pdf']").click()
+    await dropZoneButton().waitForDisplayed()
+    const entry = recentEntry(filePath)
+    await entry.waitForDisplayed()
+
+    // Gone after the home tab read the list, so its row is still on screen.
+    // The reveal then fails before any file manager is asked.
+    rmSync(filePath)
+    await clickRecentAction("gone-recent.pdf", "reveal-recent-file")
+
+    await expect($("[data-notice='revealFailed']")).toHaveText(
+      /The file's folder could not be opened\./,
+    )
+    await browser.waitUntil(async () => !(await entry.isExisting()), {
+      timeout: 15_000,
+      timeoutMsg: "the gone file's entry never left the list",
+    })
   })
 
   it("restores a recent file's view, zoom, and reading position", async () => {
@@ -641,21 +703,7 @@ describe("independent document tabs", () => {
 
     const movedId = await tabDocumentId("menu-a.pdf")
 
-    await browser.execute(() => {
-      const tab = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-document-tab]"),
-      ).find((element) => element.textContent?.includes("menu-a.pdf"))!
-      const box = tab.getBoundingClientRect()
-
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          button: 2,
-          clientX: box.left + 20,
-          clientY: box.top + 10,
-        }),
-      )
-    })
+    await openTabMenu("menu-a.pdf")
     await $("[data-action='tab-move-new-window']").click()
 
     await browser.waitUntil(
@@ -673,6 +721,128 @@ describe("independent document tabs", () => {
       async () => (await tabNames()).join() === "menu-b.pdf",
       { timeoutMsg: "the moved tab never left the strip" },
     )
+  })
+
+  it("closes the tabs to the right, every other, or all from a tab's menu", async () => {
+    await openPdfFromDisk("left.pdf", minimalPdf(2))
+    await openPdfFromDisk("anchor.pdf", minimalPdf(1))
+    await openPdfFromDisk("right-a.pdf", minimalPdf(1))
+    await openPdfFromDisk("right-b.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(5)
+
+    await openTabMenu("right-b.pdf")
+    await $("[data-action='tab-close-others']").waitForDisplayed()
+    await expect($("[data-action='tab-close-right']")).not.toExist()
+    await browser.keys("Escape")
+    await $("[data-action='tab-close-others']").waitForDisplayed({
+      reverse: true,
+    })
+
+    // The active tab goes with them, so the one asked from takes its place.
+    await openTabMenu("anchor.pdf")
+    await $("[data-action='tab-close-right']").click()
+    await browser.waitUntil(
+      async () => (await tabNames()).join() === "left.pdf,anchor.pdf",
+      { timeoutMsg: "the tabs to the right never closed" },
+    )
+    await expect(tabButton("anchor.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    // The menu's exit still holds a layer over the workspace, which defers
+    // the switch: until it lands, `data-active` names anchor.pdf's panel.
+    await tabButton("left.pdf").click()
+    await expect(tabButton("left.pdf")).toHaveAttribute("aria-selected", "true")
+    await $("[data-active='true'] button[aria-label='Thumbnails']").click()
+    const deletePage = $("[data-active='true'] button[aria-label='Delete page 1']")
+    await deletePage.waitForExist()
+    await deletePage.click()
+    await browser.waitUntil(
+      async () =>
+        (await $("[data-active='true'] [data-slot='page-status']").getAttribute("aria-label")) ===
+        "Page 1 of 1",
+      { timeoutMsg: "the page deletion never made the tab dirty" },
+    )
+
+    await openTabMenu("anchor.pdf")
+    await $("[data-action='tab-close-others']").click()
+    await expect($("[role='alertdialog']")).toBeDisplayed()
+    await $("button=Discard and close tabs").click()
+    await browser.waitUntil(
+      async () => (await tabNames()).join() === "anchor.pdf",
+      { timeoutMsg: "the other tabs never closed" },
+    )
+    await expect(tabButton("anchor.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    await openTabMenu("anchor.pdf")
+    await $("[data-action='tab-close']").waitForDisplayed()
+    for (const action of ["tab-close-others", "tab-close-right", "tab-close-all"]) {
+      await expect($(`[data-action='${action}']`)).not.toExist()
+    }
+    await browser.keys("Escape")
+    await $("[data-action='tab-close']").waitForDisplayed({ reverse: true })
+
+    await openPdfFromDisk("last.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
+    await openTabMenu("anchor.pdf")
+    await $("[data-action='tab-close-all']").click()
+    await expect(tabButtons()).toBeElementsArrayOfSize(1)
+    await expect($("#workspace-tab-home")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+  })
+
+  // A tab opened behind another was never laid out; were its size left to the
+  // resize observer, its first frame would show pages fitted to no width at all.
+  it("shows a tab opened in the background fitted from its first frame", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await emitDrag("drag-drop", { x: 400, y: 400 }, [
+      writePdf("in-front.pdf", 3),
+      writePdf("behind.pdf", 3),
+    ])
+    await tabButton("behind.pdf").waitForExist({ timeout: 20_000 })
+    await expect(tabButton("in-front.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await $(
+      "[data-document-session][data-active='true'] [data-page-number='1'] canvas[data-rendered='true']",
+    ).waitForExist()
+
+    // Pressed and sampled in the page: the frames a WebDriver click takes to
+    // return would hide the one that matters.
+    const widths = (await browser.executeAsync((done) => {
+      const tab = Array.from(
+        document.querySelectorAll<HTMLButtonElement>("button[role='tab']"),
+      ).find((button) => button.textContent?.trim() === "behind.pdf")!
+      const seen: number[] = []
+
+      const sample = () => {
+        const page = document.querySelector(
+          "[data-document-session][data-active='true'] [data-page-number='1']",
+        )
+        seen.push(page ? Math.round(page.getBoundingClientRect().width) : 0)
+
+        if (seen.length < 6) {
+          requestAnimationFrame(sample)
+        } else {
+          done(seen)
+        }
+      }
+
+      tab.click()
+      requestAnimationFrame(sample)
+    })) as number[]
+
+    await expect(tabButton("behind.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(widths[0]).toBeGreaterThan(100)
+    expect(new Set(widths).size).toBe(1)
   })
 
   it("keeps a tab that arrives under a dialog behind it until it closes", async () => {

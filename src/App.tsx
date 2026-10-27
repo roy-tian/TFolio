@@ -42,10 +42,12 @@ import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
+  otherTabIds,
   reorderedTabs,
   selectOpenedTabId,
   tabElementId,
   tabIdForPath,
+  type OtherTabs,
   type TabId,
 } from "@/lib/documentTabs"
 import {
@@ -71,6 +73,7 @@ import {
   readRecentFiles,
   readRecentPdfView,
   removeRecentFile,
+  revealRecentFile,
   type RecentFile,
   type RecentPdfView,
 } from "@/lib/recentFiles"
@@ -133,6 +136,9 @@ type PendingClose = (
       nothing this window can save. */
   | { kind: "quit"; elsewhere: boolean }
   | { kind: "tab"; documentId: number }
+  /** Some tabs, from another tab's menu: `anchorId` is that tab, where the
+      workspace lands if the active one goes with them. */
+  | { kind: "tabs"; anchorId: number; documentIds: number[] }
   | { kind: "window" }
 ) & { changes: boolean }
 
@@ -256,6 +262,20 @@ export default function App() {
       void removeRecentFile(path).then(refreshRecentFiles)
     },
     [refreshRecentFiles],
+  )
+
+  // A failed reveal is most often a file gone since the list was read: the
+  // re-read drops its entry, and the notice says why no folder opened.
+  const revealRecent = useCallback(
+    (path: string) => {
+      void revealRecentFile(path).then((revealed) => {
+        if (!revealed) {
+          notices.raise({ kind: "revealFailed", owner: workspaceOwner })
+          refreshRecentFiles()
+        }
+      })
+    },
+    [notices, refreshRecentFiles],
   )
 
   const showTab = useCallback((tabId: TabId) => {
@@ -883,6 +903,73 @@ export default function App() {
     [askToClose, hasUnsavedChangesNow, removeTabNow],
   )
 
+  const removeTabsNow = useCallback(
+    (documentIds: number[], anchorId: number) => {
+      const closing = new Set(documentIds)
+      // Captured before the panels go, as `removeTabNow` captures its own.
+      const remembered = Promise.all(
+        documentIds.map(
+          (id) =>
+            sessionRefs.current.get(id)?.rememberViewNow() ?? Promise.resolve(),
+        ),
+      ).then(() => undefined)
+      const next = replaceTabs((existing) =>
+        existing.filter((tab) => !closing.has(tab.id)),
+      )
+
+      for (const id of documentIds) {
+        notices.retract({ documentId: id, scope: "document" })
+      }
+
+      const currentActiveId = activeIdRef.current
+
+      if (currentActiveId !== HOME_TAB_ID && closing.has(currentActiveId)) {
+        const nextActiveId = next.some((tab) => tab.id === anchorId)
+          ? anchorId
+          : HOME_TAB_ID
+
+        activeIdRef.current = nextActiveId
+        setActiveId(nextActiveId)
+      }
+
+      focusWorkspaceTarget(activeIdRef.current, true)
+
+      return remembered
+    },
+    [notices, replaceTabs],
+  )
+
+  // One question for the lot, as closing all asks it.
+  const requestCloseOthers = useCallback(
+    (anchorId: number, which: OtherTabs) => {
+      const documentIds = otherTabIds(
+        tabsRef.current.map((tab) => tab.id),
+        anchorId,
+        which,
+      )
+
+      if (documentIds.length === 0) {
+        return
+      }
+
+      const anyUnsaved = documentIds.some((id) =>
+        sessionRefs.current.get(id)?.hasUnsavedWorkNow(),
+      )
+
+      if (anyUnsaved) {
+        askToClose({
+          anchorId,
+          changes: hasUnsavedChangesNow(documentIds),
+          documentIds,
+          kind: "tabs",
+        })
+      } else {
+        void removeTabsNow(documentIds, anchorId)
+      }
+    },
+    [askToClose, hasUnsavedChangesNow, removeTabsNow],
+  )
+
   const removeAllTabsNow = useCallback(() => {
     // `rememberAllViews` captures every visible value up front; the sessions
     // go now so no edit slips between the dirty check and the close.
@@ -925,6 +1012,8 @@ export default function App() {
     (action: PendingClose) => {
       if (action.kind === "tab") {
         void removeTabNow(action.documentId)
+      } else if (action.kind === "tabs") {
+        void removeTabsNow(action.documentIds, action.anchorId)
       } else if (action.kind === "all") {
         void removeAllTabsNow()
       } else if (action.kind === "window") {
@@ -933,7 +1022,7 @@ export default function App() {
         quitNow()
       }
     },
-    [quitNow, removeAllTabsNow, removeTabNow],
+    [quitNow, removeAllTabsNow, removeTabNow, removeTabsNow],
   )
 
   // Each document with changes in turn, in front, so a Save As dialog is
@@ -943,7 +1032,9 @@ export default function App() {
       const ids =
         action.kind === "tab"
           ? [action.documentId]
-          : tabsRef.current.map((tab) => tab.id)
+          : action.kind === "tabs"
+            ? action.documentIds
+            : tabsRef.current.map((tab) => tab.id)
 
       for (const id of ids) {
         const session = sessionRefs.current.get(id)
@@ -1853,9 +1944,11 @@ export default function App() {
 
     return action.kind === "tab"
       ? t("tabs.unsavedTabDescription")
-      : action.kind === "all"
-        ? t("tabs.unsavedAllDescription")
-        : t("tabs.unsavedWindowDescription")
+      : action.kind === "tabs"
+        ? t("tabs.unsavedTabsDescription")
+        : action.kind === "all"
+          ? t("tabs.unsavedAllDescription")
+          : t("tabs.unsavedWindowDescription")
   }
 
   const closeConfirmLabel = (action: PendingClose) => {
@@ -1869,9 +1962,11 @@ export default function App() {
 
     return action.kind === "tab"
       ? t("tabs.discardAndCloseTab")
-      : action.kind === "all"
-        ? t("tabs.discardAndCloseAll")
-        : t("viewer.unsavedCloseConfirm")
+      : action.kind === "tabs"
+        ? t("tabs.discardAndCloseTabs")
+        : action.kind === "all"
+          ? t("tabs.discardAndCloseAll")
+          : t("viewer.unsavedCloseConfirm")
   }
 
   // Read again on every visit, not just at startup: a file the list points at
@@ -1911,6 +2006,7 @@ export default function App() {
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
         onRemoveRecent={removeRecent}
+        onRevealRecent={revealRecent}
         opening={isOpening}
         recentFiles={recentFiles}
       />
@@ -1955,6 +2051,8 @@ export default function App() {
         armedTabId={armedTabId}
         onActivate={activateTab}
         onClose={requestCloseTab}
+        onCloseAll={requestCloseAll}
+        onCloseOthers={requestCloseOthers}
         onOpenFile={() => void chooseFile()}
         onReorder={reorderTabs}
         onTabDragMove={handleTabDragMove}

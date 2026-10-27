@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
+  otherTabIds,
   reorderedTabs,
   selectOpenedTabId,
   tabIdForKey,
@@ -36,6 +37,16 @@ describe("document tabs", () => {
 
   test("closing the last document falls back to home", () => {
     expect(activeTabAfterClose([HOME_TAB_ID, 1], 1, 1)).toBe(HOME_TAB_ID)
+  })
+
+  test("closing others takes every other document, or those to the right", () => {
+    const ids = [4, 7, 9]
+
+    expect(otherTabIds(ids, 7, "all")).toEqual([4, 9])
+    expect(otherTabIds(ids, 4, "right")).toEqual([7, 9])
+    expect(otherTabIds(ids, 9, "right")).toEqual([])
+    expect(otherTabIds([4], 4, "all")).toEqual([])
+    expect(otherTabIds(ids, 5, "all")).toEqual([])
   })
 
   test("keyboard navigation wraps through home and supports the ends", () => {

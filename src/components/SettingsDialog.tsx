@@ -255,9 +255,9 @@ export function SettingsDialog({
             id="settings-panel-appearance"
             role="tabpanel"
           >
-            <div className="space-y-6">
-              <section className="space-y-3">
-                <div className="space-y-1">
+            <div className="flex flex-col gap-6">
+              <section className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
                   <p className="text-sm font-medium" id="settings-theme-label">
                     {t("settings.theme")}
                   </p>
@@ -296,8 +296,8 @@ export function SettingsDialog({
                 </RadioGroup>
               </section>
 
-              <section className="space-y-3">
-                <div className="space-y-1">
+              <section className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
                   <Label htmlFor="settings-language">
                     {t("settings.language")}
                   </Label>

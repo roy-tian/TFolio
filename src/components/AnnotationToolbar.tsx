@@ -128,7 +128,7 @@ export function AnnotationToolbar({
                   </PopoverTrigger>
                 </ToolbarTooltip>
                 <PopoverContent align="end" className="w-auto p-3">
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     <p
                       className="text-xs font-medium"
                       id="highlight-color-label"

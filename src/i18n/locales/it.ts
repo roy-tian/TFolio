@@ -34,6 +34,9 @@ const it = {
     list: "Schede dell’area di lavoro",
     listAll: "Tutti i documenti aperti",
     close: "Chiudi {{name}}",
+    closeOthers: "Chiudi le altre schede",
+    closeToRight: "Chiudi le schede a destra",
+    closeAll: "Chiudi tutte le schede",
     unsaved: "Modifiche non salvate",
     dropNow: "Rilascia per aprire i file",
     dropHint: "PDF, immagini e documenti Word si aprono in schede separate",
@@ -43,7 +46,10 @@ const it = {
       "Uno o più documenti aperti contengono modifiche non salvate. Chiudendo la finestra, verranno scartate.",
     unsavedAllDescription:
       "Uno o più documenti aperti contengono modifiche non salvate. Chiudendoli tutti, le modifiche verranno scartate.",
+    unsavedTabsDescription:
+      "Uno o più di questi documenti contengono modifiche non salvate. Chiudendo le loro schede, le modifiche verranno scartate.",
     discardAndCloseTab: "Scarta e chiudi scheda",
+    discardAndCloseTabs: "Scarta e chiudi schede",
     discardAndCloseAll: "Scarta e chiudi tutto",
     saveBeforeClose: "Salva",
     unsavedQuitDescription:
@@ -169,6 +175,8 @@ const it = {
     recent: "File recenti",
     recentEmpty: "Qui compariranno i PDF che apri.",
     removeRecent: "Rimuovi {{name}} dai file recenti",
+    revealRecent: "Apri la cartella che contiene {{name}}",
+    revealFailed: "Impossibile aprire la cartella del file.",
   },
   toolbar: {
     saveAsMenu: "Altre opzioni di salvataggio",

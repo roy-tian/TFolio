@@ -1,7 +1,7 @@
 import { $, browser, expect } from "@wdio/globals"
 
 import { MIN_PAGE_OUTPUT_SCALE } from "../../src/lib/pdf"
-import { openPdfFromDisk, refreshApp, seedSettings, textPdf } from "./helpers"
+import { minimalPdf, openPdfFromDisk, refreshApp, seedSettings, textPdf } from "./helpers"
 
 type ResizeSample = {
   compositorHint: string
@@ -152,4 +152,74 @@ describe("PDF viewport resizing", () => {
       }
     })
   }
+
+  // Observers report between layout and paint; a render left to React's
+  // scheduler lands after the paint, so every frame of a drag would show the
+  // window at its new size holding the pages fitted to the last one.
+  it("paints each resized frame with pages fitted to it", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("resize-frames.pdf", minimalPdf(6))
+    await $("[data-page-number='1']").waitForDisplayed()
+    await $("button[aria-label='Fit page']").click()
+    await $("button[aria-label='Fit width']").click()
+    await browser.waitUntil(
+      async () =>
+        (
+          await $("[data-slot='button-group'][aria-label^='Zoom ']")
+            .getAttribute("aria-label")
+        )?.includes("fitting width") === true,
+      { timeout: 15_000, timeoutMsg: "fit width never became active" },
+    )
+
+    try {
+      const misfitFrames = (await browser.executeAsync((done) => {
+        const viewer = document.querySelector<HTMLElement>(
+          "[data-document-session][data-active='true'] main",
+        )!
+        const page = viewer.querySelector<HTMLElement>("[data-page-number='1']")!
+        const startBody = document.body.clientWidth
+        const startPage = page.getBoundingClientRect().width
+        const misfits: number[] = []
+        let frame = 0
+
+        const step = () => {
+          frame += 1
+          document.body.style.width = `${startBody - frame * 6}px`
+        }
+
+        // Observers are called in the order they were made, so this one reads
+        // after the viewer's own has had its say, still ahead of the paint:
+        // what it reads is what is painted. Fit width hands the page each pixel.
+        const watcher = new ResizeObserver(() => {
+          if (frame === 0) {
+            return
+          }
+
+          const narrowed = startBody - document.body.clientWidth
+          const width = page.getBoundingClientRect().width
+
+          if (Math.abs(startPage - narrowed - width) > 1) {
+            misfits.push(frame)
+          }
+
+          if (frame < 20) {
+            requestAnimationFrame(step)
+          } else {
+            watcher.disconnect()
+            done(misfits)
+          }
+        })
+
+        watcher.observe(viewer, { box: "border-box" })
+        requestAnimationFrame(step)
+      })) as number[]
+
+      expect(misfitFrames).toEqual([])
+    } finally {
+      await browser.execute(() => {
+        document.body.style.width = ""
+      })
+    }
+  })
 })
