@@ -72,4 +72,34 @@ describe("TFolio toolbar tooltips", () => {
 
     expect(natives).toEqual([])
   })
+
+  it("ships no last-child test that WebKit runs against every element", async () => {
+    // With its ancestor hidden in :is()/:where(), WebKit can neither bucket nor
+    // filter such a rule, so every parent counts as watching its last child,
+    // which it restyles whole when a sibling follows: each tooltip's portal
+    // restyled the app, 250 ms with a fragmented page mounted. Tailwind's
+    // space-*, divide-* and *:last: utilities compile to exactly these.
+    const offending = await browser.execute(() => {
+      const structural = "(?:last-child|only-child|last-of-type|only-of-type|nth-last-child|nth-last-of-type)"
+      const patterns = [
+        new RegExp(`:where\\([^()]*>\\s*:not\\(:${structural}\\)\\)`),
+        new RegExp(`:is\\([^()]*\\*\\)(?::is\\([a-z]+\\))?:${structural}`),
+      ]
+      const found: string[] = []
+      const walk = (rules: CSSRuleList) => {
+        for (const rule of rules) {
+          if (rule instanceof CSSStyleRule && patterns.some((pattern) => pattern.test(rule.selectorText))) {
+            found.push(rule.selectorText)
+          }
+          if ("cssRules" in rule) walk((rule as CSSGroupingRule).cssRules)
+        }
+      }
+
+      for (const sheet of document.styleSheets) walk(sheet.cssRules)
+
+      return found
+    })
+
+    expect(offending).toEqual([])
+  })
 })
