@@ -869,33 +869,29 @@ impl PdfiumEngine {
             .get(page_number - 1)
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
         let unrotated_height = unrotated_page_height(&page);
-        let text = page.text().map_err(|error| {
+        let runs = text_runs::page_runs(self.raw_bindings, &page).map_err(|error| {
             format!("PDFium could not read text on page {page_number}: {error}")
         })?;
         let mut spans = Vec::new();
 
-        for segment in text.segments().iter() {
-            let content = segment.text();
-
-            if content.is_empty() {
+        for run in runs {
+            if run.text.is_empty() {
                 continue;
             }
 
-            let bounds = segment.bounds();
-            let left = bounds.left().value;
-            let top = bounds.top().value;
-            let width = bounds.right().value - left;
-            let height = top - bounds.bottom().value;
+            let bounds = run.bounds;
+            let width = bounds.right - bounds.left;
+            let height = bounds.top - bounds.bottom;
 
             if !(width > 0.0 && height > 0.0) {
                 continue;
             }
 
             spans.push(PdfTextSpan {
-                text: content,
-                left,
+                text: run.text,
+                left: bounds.left,
                 // PDFium uses a bottom-left origin; flip to top-left for the DOM.
-                top: unrotated_height - top,
+                top: unrotated_height - bounds.top,
                 width,
                 height,
             });
@@ -1109,6 +1105,7 @@ mod owned_content;
 mod page_ops;
 mod page_reorder;
 mod raster;
+mod text_runs;
 mod watermark_preview;
 
 pub use io::is_merge_image;

@@ -36,6 +36,43 @@ async function expectShadcnTooltip(label: string) {
   return control
 }
 
+// Every style rule's selector the app ships, nested rules included.
+async function shippedSelectors() {
+  return browser.execute(() => {
+    const found: string[] = []
+    const walk = (rules: CSSRuleList) => {
+      for (const rule of rules) {
+        if (rule instanceof CSSStyleRule) found.push(rule.selectorText)
+        if ("cssRules" in rule) walk((rule as CSSGroupingRule).cssRules)
+      }
+    }
+
+    for (const sheet of document.styleSheets) walk(sheet.cssRules)
+
+    return found
+  })
+}
+
+/** Whether a combinator after a `:has()` reaches any element at all, as in
+    `:has(…) *` (group-has-*) or `:has(…) ~ *` (peer-has-*). */
+function hasOverEveryElement(selector: string) {
+  for (let start = selector.indexOf(":has("); start >= 0; start = selector.indexOf(":has(", start + 1)) {
+    let index = start + ":has(".length
+
+    // Bounded, and skipping escapes: an escaped class such as `.w-\(--x\)`
+    // or a parenthesis in an attribute string would otherwise never balance.
+    for (let level = 1; level > 0 && index < selector.length; index += 1) {
+      if (selector[index] === "\\") index += 1
+      else if (selector[index] === "(") level += 1
+      else if (selector[index] === ")") level -= 1
+    }
+
+    if (/^(?:\s*[>~+]\s*|\s+)\*/.test(selector.slice(index))) return true
+  }
+
+  return false
+}
+
 describe("TFolio toolbar tooltips", () => {
   before(async () => {
     await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
@@ -79,27 +116,24 @@ describe("TFolio toolbar tooltips", () => {
     // which it restyles whole when a sibling follows: each tooltip's portal
     // restyled the app, 250 ms with a fragmented page mounted. Tailwind's
     // space-*, divide-* and *:last: utilities compile to exactly these.
-    const offending = await browser.execute(() => {
-      const structural = "(?:last-child|only-child|last-of-type|only-of-type|nth-last-child|nth-last-of-type)"
-      const patterns = [
-        new RegExp(`:where\\([^()]*>\\s*:not\\(:${structural}\\)\\)`),
-        new RegExp(`:is\\([^()]*\\*\\)(?::is\\([a-z]+\\))?:${structural}`),
-      ]
-      const found: string[] = []
-      const walk = (rules: CSSRuleList) => {
-        for (const rule of rules) {
-          if (rule instanceof CSSStyleRule && patterns.some((pattern) => pattern.test(rule.selectorText))) {
-            found.push(rule.selectorText)
-          }
-          if ("cssRules" in rule) walk((rule as CSSGroupingRule).cssRules)
-        }
-      }
-
-      for (const sheet of document.styleSheets) walk(sheet.cssRules)
-
-      return found
-    })
+    const structural = "(?:last-child|only-child|last-of-type|only-of-type|nth-last-child|nth-last-of-type)"
+    const patterns = [
+      new RegExp(`:where\\([^()]*>\\s*:not\\(:${structural}\\)\\)`),
+      new RegExp(`:is\\([^()]*\\*\\)(?::is\\([a-z]+\\))?:${structural}`),
+    ]
+    const offending = (await shippedSelectors()).filter((selector) =>
+      patterns.some((pattern) => pattern.test(selector)),
+    )
 
     expect(offending).toEqual([])
+  })
+
+  it("ships no :has() over every element, which Chromium restyles all for", async () => {
+    // Tailwind's group-has-* compiles to `:is(:where(.group):has(…) *)`. For
+    // such a rule Chromium (WebView2) restyles the whole document whenever a
+    // node is added anywhere: 400–900 ms a frame with a fragmented page's text
+    // mounted, while scrolling and for every tooltip. A `:has()` whose
+    // combinator names its targets measured harmless.
+    expect((await shippedSelectors()).filter(hasOverEveryElement)).toEqual([])
   })
 })
