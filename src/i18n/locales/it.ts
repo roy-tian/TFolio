@@ -36,6 +36,7 @@ const it = {
     close: "Chiudi {{name}}",
     closeOthers: "Chiudi le altre schede",
     closeToRight: "Chiudi le schede a destra",
+    closeAll: "Chiudi tutte le schede",
     unsaved: "Modifiche non salvate",
     dropNow: "Rilascia per aprire i file",
     dropHint: "PDF, immagini e documenti Word si aprono in schede separate",

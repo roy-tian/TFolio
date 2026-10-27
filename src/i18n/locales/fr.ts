@@ -36,6 +36,7 @@ const fr = {
     close: "Fermer {{name}}",
     closeOthers: "Fermer les autres onglets",
     closeToRight: "Fermer les onglets à droite",
+    closeAll: "Fermer tous les onglets",
     unsaved: "Modifications non enregistrées",
     dropNow: "Déposez pour ouvrir les fichiers",
     dropHint: "Les PDF, images et documents Word s’ouvrent dans des onglets distincts",

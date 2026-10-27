@@ -2051,6 +2051,7 @@ export default function App() {
         armedTabId={armedTabId}
         onActivate={activateTab}
         onClose={requestCloseTab}
+        onCloseAll={requestCloseAll}
         onCloseOthers={requestCloseOthers}
         onOpenFile={() => void chooseFile()}
         onReorder={reorderTabs}

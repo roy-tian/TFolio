@@ -34,6 +34,7 @@ const en = {
     close: "Close {{name}}",
     closeOthers: "Close other tabs",
     closeToRight: "Close tabs to the right",
+    closeAll: "Close all tabs",
     unsaved: "Unsaved changes",
     dropNow: "Drop to open files",
     dropHint: "PDFs, images, and Word documents open in separate tabs",

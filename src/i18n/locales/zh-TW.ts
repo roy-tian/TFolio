@@ -36,6 +36,7 @@ const zhTW = {
     close: "關閉 {{name}}",
     closeOthers: "關閉其他分頁",
     closeToRight: "關閉右側分頁",
+    closeAll: "關閉所有分頁",
     unsaved: "有未儲存的變更",
     dropNow: "放開以開啟檔案",
     dropHint: "PDF、圖片和 Word 文件會分別在各自的分頁中開啟",

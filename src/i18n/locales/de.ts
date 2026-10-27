@@ -36,6 +36,7 @@ const de = {
     close: "{{name}} schließen",
     closeOthers: "Andere Tabs schließen",
     closeToRight: "Tabs rechts schließen",
+    closeAll: "Alle Tabs schließen",
     unsaved: "Nicht gespeicherte Änderungen",
     dropNow: "Ablegen, um Dateien zu öffnen",
     dropHint: "PDFs, Bilder und Word-Dokumente werden in eigenen Tabs geöffnet",

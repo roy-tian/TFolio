@@ -723,7 +723,7 @@ describe("independent document tabs", () => {
     )
   })
 
-  it("closes the tabs to the right, or every other, from a tab's menu", async () => {
+  it("closes the tabs to the right, every other, or all from a tab's menu", async () => {
     await openPdfFromDisk("left.pdf", minimalPdf(2))
     await openPdfFromDisk("anchor.pdf", minimalPdf(1))
     await openPdfFromDisk("right-a.pdf", minimalPdf(1))
@@ -731,11 +731,10 @@ describe("independent document tabs", () => {
     await expect(tabButtons()).toBeElementsArrayOfSize(5)
 
     await openTabMenu("right-b.pdf")
-    await expect($("[data-action='tab-close-right']")).toHaveAttribute(
-      "data-disabled",
-    )
+    await $("[data-action='tab-close-others']").waitForDisplayed()
+    await expect($("[data-action='tab-close-right']")).not.toExist()
     await browser.keys("Escape")
-    await $("[data-action='tab-close-right']").waitForDisplayed({
+    await $("[data-action='tab-close-others']").waitForDisplayed({
       reverse: true,
     })
 
@@ -780,8 +779,21 @@ describe("independent document tabs", () => {
     )
 
     await openTabMenu("anchor.pdf")
-    await expect($("[data-action='tab-close-others']")).toHaveAttribute(
-      "data-disabled",
+    await $("[data-action='tab-close']").waitForDisplayed()
+    for (const action of ["tab-close-others", "tab-close-right", "tab-close-all"]) {
+      await expect($(`[data-action='${action}']`)).not.toExist()
+    }
+    await browser.keys("Escape")
+    await $("[data-action='tab-close']").waitForDisplayed({ reverse: true })
+
+    await openPdfFromDisk("last.pdf", minimalPdf(1))
+    await expect(tabButtons()).toBeElementsArrayOfSize(3)
+    await openTabMenu("anchor.pdf")
+    await $("[data-action='tab-close-all']").click()
+    await expect(tabButtons()).toBeElementsArrayOfSize(1)
+    await expect($("#workspace-tab-home")).toHaveAttribute(
+      "aria-selected",
+      "true",
     )
   })
 

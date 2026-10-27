@@ -36,6 +36,7 @@ const es = {
     close: "Cerrar {{name}}",
     closeOthers: "Cerrar las demás pestañas",
     closeToRight: "Cerrar las pestañas de la derecha",
+    closeAll: "Cerrar todas las pestañas",
     unsaved: "Cambios sin guardar",
     dropNow: "Suelta para abrir los archivos",
     dropHint: "Los PDF, imágenes y documentos de Word se abren en pestañas separadas",

@@ -36,6 +36,7 @@ const zhCN = {
     close: "关闭 {{name}}",
     closeOthers: "关闭其他标签页",
     closeToRight: "关闭右侧标签页",
+    closeAll: "关闭所有标签页",
     unsaved: "有未保存的修改",
     dropNow: "松开以打开文件",
     dropHint: "PDF、图片和 Word 文档将在独立标签页中打开",

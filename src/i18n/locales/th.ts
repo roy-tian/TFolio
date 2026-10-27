@@ -36,6 +36,7 @@ const th = {
     close: "ปิด {{name}}",
     closeOthers: "ปิดแท็บอื่น",
     closeToRight: "ปิดแท็บทางขวา",
+    closeAll: "ปิดแท็บทั้งหมด",
     unsaved: "มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก",
     dropNow: "ปล่อยเพื่อเปิดไฟล์",
     dropHint: "PDF รูปภาพ และเอกสาร Word จะเปิดในแท็บแยกกัน",

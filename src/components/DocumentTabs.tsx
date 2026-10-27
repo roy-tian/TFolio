@@ -8,6 +8,7 @@ import {
   FolderOpen,
   House,
   LoaderCircle,
+  SquareX,
   X,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -59,6 +60,7 @@ type DocumentTabsProps = {
   armedTabId: number | null
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
+  onCloseAll: () => void
   /** Closes the document tabs around this one, as `otherTabIds` picks them. */
   onCloseOthers: (documentId: number, which: OtherTabs) => void
   onOpenFile: () => void
@@ -121,6 +123,7 @@ export function DocumentTabs({
   armedTabId,
   onActivate,
   onClose,
+  onCloseAll,
   onCloseOthers,
   onOpenFile,
   onReorder,
@@ -403,22 +406,35 @@ export function DocumentTabs({
                       <X />
                       {t("tabs.close", { name: tab.name })}
                     </ContextMenuItem>
-                    <ContextMenuItem
-                      data-action="tab-close-others"
-                      disabled={tabs.length === 1}
-                      onClick={() => onCloseOthers(tab.id, "all")}
-                    >
-                      <CopyX />
-                      {t("tabs.closeOthers")}
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      data-action="tab-close-right"
-                      disabled={index === tabs.length - 1}
-                      onClick={() => onCloseOthers(tab.id, "right")}
-                    >
-                      <ArrowRightToLine />
-                      {t("tabs.closeToRight")}
-                    </ContextMenuItem>
+                    {/* Absent rather than disabled when they would close no
+                        tab, or only this one, as its own entry already does. */}
+                    {tabs.length > 1 ? (
+                      <ContextMenuItem
+                        data-action="tab-close-others"
+                        onClick={() => onCloseOthers(tab.id, "all")}
+                      >
+                        <CopyX />
+                        {t("tabs.closeOthers")}
+                      </ContextMenuItem>
+                    ) : null}
+                    {index < tabs.length - 1 ? (
+                      <ContextMenuItem
+                        data-action="tab-close-right"
+                        onClick={() => onCloseOthers(tab.id, "right")}
+                      >
+                        <ArrowRightToLine />
+                        {t("tabs.closeToRight")}
+                      </ContextMenuItem>
+                    ) : null}
+                    {tabs.length > 1 ? (
+                      <ContextMenuItem
+                        data-action="tab-close-all"
+                        onClick={onCloseAll}
+                      >
+                        <SquareX />
+                        {t("tabs.closeAll")}
+                      </ContextMenuItem>
+                    ) : null}
                   </ContextMenuContent>
                 </ContextMenu>
               )
