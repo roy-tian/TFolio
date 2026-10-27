@@ -15,6 +15,8 @@ import { spawnSync } from "node:child_process"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 
+// src-tauri/engine/src/pdfium/engine/text_runs.rs replays this build's text
+// extraction; read its header before bumping.
 const PDFIUM_BUILD = "7881"
 const repositoryRoot = resolve(import.meta.dirname, "..")
 const outputDirectory = join(

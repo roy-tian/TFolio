@@ -24,6 +24,85 @@ fn wrapped_search_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
+// One text object per glyph or word, as fragmented PDFs have it: advances
+// shorter than the glyphs so boxes overlap, spaces of their own, a kerned TJ,
+// and a large glyph reaching into the lines around it.
+fn fragmented_text_pdf() -> Vec<u8> {
+    let content = concat!(
+        "BT\n/F1 24 Tf\n40 340 Td (F) Tj\n8 0 Td (r) Tj\n8 0 Td (a) Tj\n10 0 Td (g) Tj\n",
+        "20 0 Td ( ) Tj\n8 0 Td (m) Tj\nET\n",
+        "BT\n/F1 12 Tf\n40 300 Td (word) Tj ( ) Tj (next) Tj\n",
+        "0 -14 Td [(K) 400 (e) -300 (r) (n)] TJ\nET\n",
+        "BT\n/F1 40 Tf\n70 290 Td (B) Tj\nET\n",
+    );
+    let objects = [
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n".to_string(),
+        format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        ),
+        "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_string(),
+    ];
+
+    build_pdf(&objects)
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn reads_each_text_run_as_pdfium_reads_its_rect() {
+    let engine = test_engine();
+    let document = engine
+        .open(fragmented_text_pdf())
+        .expect("PDFium should open the fragmented fixture");
+
+    let (runs, segments) = with_page(engine, document.id, 1, |page| {
+        let runs: Vec<_> = crate::pdfium::engine::text_runs::page_runs(engine.raw_bindings, page)
+            .expect("the page's text should load")
+            .into_iter()
+            .map(|run| {
+                let bounds = run.bounds;
+
+                (
+                    run.text,
+                    [bounds.left, bounds.bottom, bounds.right, bounds.top],
+                )
+            })
+            .collect();
+        // pdfium-render's segments, which ask PDFium for each rect's text.
+        let text = page
+            .text()
+            .expect("pdfium-render should load the page's text");
+        let segments: Vec<_> = text
+            .segments()
+            .iter()
+            .map(|segment| {
+                let bounds = segment.bounds();
+
+                (
+                    segment.text(),
+                    [
+                        bounds.left().value,
+                        bounds.bottom().value,
+                        bounds.right().value,
+                        bounds.top().value,
+                    ],
+                )
+            })
+            .collect();
+
+        (runs, segments)
+    });
+
+    assert_eq!(runs, segments);
+    assert!(
+        segments.iter().any(|(text, _)| text.contains("\r\n"))
+            && segments.iter().any(|(text, _)| text.ends_with(' ')),
+        "the fixture should reach a line break and a kept space: {segments:?}"
+    );
+}
+
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn extracts_text_in_unrotated_space_for_rotated_page() {
