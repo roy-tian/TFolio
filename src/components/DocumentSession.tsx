@@ -1744,6 +1744,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 viewMode={viewMode}
                 viewerWidth={viewerWidth}
                 zoomPreviewing={zoom.zoomPreviewing}
+                zoomRequest={zoom.zoomRequest}
               />
             </main>
             {zoomApplies ? (
