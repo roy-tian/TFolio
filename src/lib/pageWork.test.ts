@@ -34,11 +34,26 @@ describe("PageWorkQueue", () => {
 
     const all = [run("first"), run("far"), run("near"), run("middle")]
 
+    await Promise.resolve()
     expect(started).toEqual(["first"])
     gate.resolve()
     await Promise.all(all)
 
     expect(started).toEqual(["first", "near", "middle", "far"])
+  })
+
+  it("starts the nearest of the work asked for together, not the first asked", async () => {
+    const queue = new PageWorkQueue(1)
+    const started: string[] = []
+    const run = (name: string, distance: number) =>
+      queue.schedule(async () => void started.push(name), {
+        priority: () => distance,
+      })
+
+    // Pages ask in tree order: the one above the view before the one in it.
+    await Promise.all([run("above", 20), run("in view", 0), run("below", 40)])
+
+    expect(started).toEqual(["in view", "above", "below"])
   })
 
   it("reads each waiting task's distance when a slot frees, not when asked", async () => {

@@ -15,6 +15,7 @@ type Task = {
 export class PageWorkQueue {
   private readonly limit: number
   private running = 0
+  private pumpQueued = false
   private readonly waiting = new Set<Task>()
 
   constructor(limit = 2) {
@@ -54,6 +55,21 @@ export class PageWorkQueue {
 
       signal?.addEventListener("abort", task.drop, { once: true })
       this.waiting.add(task)
+      this.queuePump()
+    })
+  }
+
+  /** Ranks what one task asks for together. A zoom asks every mounted page in
+      tree order, and started as asked, the page above the view took the
+      PDFium lock ahead of the one in it. */
+  private queuePump() {
+    if (this.pumpQueued) {
+      return
+    }
+
+    this.pumpQueued = true
+    queueMicrotask(() => {
+      this.pumpQueued = false
       this.pump()
     })
   }

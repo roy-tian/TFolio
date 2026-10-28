@@ -70,6 +70,7 @@ import { BOOK_GAP, CONTENT_PADDING_X } from "@/lib/zoom"
 
 // The wheel preview already collapsed a gesture into one commit; holding the
 // bitmap a little longer also coalesces rapid clicks and resize-driven fits.
+// A zoom asked for after a quiet spell renders at once: waiting bought nothing.
 const RENDER_SETTLE_MS = 150
 
 export type PageEditProps = {
@@ -962,6 +963,9 @@ type PdfViewerLayoutProps = {
   viewerWidth: number
   textSelectionDragging: boolean
   zoomPreviewing: boolean
+  /** Bumped by every zoom the reader asks for, as against a fit following
+      the viewer's size. */
+  zoomRequest: number
 }
 
 /**
@@ -992,9 +996,10 @@ export function PdfViewerLayout({
   viewerWidth,
   textSelectionDragging,
   zoomPreviewing,
+  zoomRequest,
 }: PdfViewerLayoutProps) {
   const contentWidth = Math.max(0, viewerWidth - CONTENT_PADDING_X)
-  const renderScale = useDebouncedValue(scale, RENDER_SETTLE_MS)
+  const renderScale = useDebouncedValue(scale, RENDER_SETTLE_MS, zoomRequest)
   // A zoom preview holds the page window still; a selection drag keeps what it
   // crossed mounted. Told to the pages' observers, never as a prop to each.
   const [hold] = useState(() => new ViewportHold())

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
@@ -36,21 +38,28 @@ async function expectShadcnTooltip(label: string) {
   return control
 }
 
-// Every style rule's selector the app ships, nested rules included.
-async function shippedSelectors() {
+// Every style rule's selector and media rule's condition the app ships,
+// nested rules included.
+async function shippedRules() {
   return browser.execute(() => {
-    const found: string[] = []
+    const selectors: string[] = []
+    const media: string[] = []
     const walk = (rules: CSSRuleList) => {
       for (const rule of rules) {
-        if (rule instanceof CSSStyleRule) found.push(rule.selectorText)
+        if (rule instanceof CSSStyleRule) selectors.push(rule.selectorText)
+        if (rule instanceof CSSMediaRule) media.push(rule.conditionText)
         if ("cssRules" in rule) walk((rule as CSSGroupingRule).cssRules)
       }
     }
 
     for (const sheet of document.styleSheets) walk(sheet.cssRules)
 
-    return found
+    return { media, selectors }
   })
+}
+
+async function shippedSelectors() {
+  return (await shippedRules()).selectors
 }
 
 /** Whether a combinator after a `:has()` reaches any element at all, as in
@@ -135,5 +144,21 @@ describe("TFolio toolbar tooltips", () => {
     // mounted, while scrolling and for every tooltip. A `:has()` whose
     // combinator names its targets measured harmless.
     expect((await shippedSelectors()).filter(hasOverEveryElement)).toEqual([])
+  })
+
+  it("ships no width media query a resizable window can flip", async () => {
+    // Chromium restyles the whole document when a media query flips: Tailwind's
+    // unused `.container` breakpoints stalled a window resize 300–700 ms per
+    // crossing with a fragmented page's text mounted. Narrower than the window
+    // can go, a breakpoint never flips.
+    const { minWidth } = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"))
+      .app.windows[0] as { minWidth: number }
+    const flipping = (await shippedRules()).media.filter((condition) =>
+      [...condition.matchAll(/width\s*(?::|[<>]=?)\s*([\d.]+)(px|r?em)/g)].some(
+        ([, value, unit]) => Number(value) * (unit === "px" ? 1 : 16) > minWidth,
+      ),
+    )
+
+    expect(flipping).toEqual([])
   })
 })

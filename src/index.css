@@ -3,6 +3,12 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
+/* Nothing uses it, but the word in any scanned file ships it, breakpoints and
+   all. A window crossing 1280 or 1536 px flipped them, and Chromium restyles
+   the whole document for a flipped media query: 300–700 ms with a fragmented
+   page's text mounted. */
+@source not inline("container");
+
 @custom-variant dark (&:is(.dark *));
 
 /* shadcn's `shimmer` makes the words transparent and paints them with a colour
