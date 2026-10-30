@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { decodeImage } from "@/lib/imageDecode"
 import { distanceFromView, pageWork } from "@/lib/pageWork"
-import { resolveOutputScale } from "@/lib/pdf"
+import { MIN_RENDER_WIDTH, resolveOutputScale } from "@/lib/pdf"
 
 type PageBitmapOptions = {
   canvasRef: RefObject<HTMLCanvasElement | null>
@@ -83,8 +83,13 @@ export function usePageBitmap({
         : 1
     // The output-scale floor is an intent, not a guarantee: past
     // `maxRenderWidth` the render is clamped and the backing ratio drops below it.
+    // The backend also rejects narrower than MIN_RENDER_WIDTH, which a tall,
+    // narrow page's thumbnail falls under.
     const renderWidth = Math.round(
-      Math.min(maxRenderWidth, targetWidth * outputScale * rotationScale),
+      Math.min(
+        maxRenderWidth,
+        Math.max(MIN_RENDER_WIDTH, targetWidth * outputScale * rotationScale),
+      ),
     )
     const lastRender = lastRenderRef.current
 

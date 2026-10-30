@@ -65,6 +65,37 @@ export function zoomToPercent(scale: number) {
 }
 
 /**
+ * A page's size at 100%, turned as the reader turned it. Converted from points
+ * at this one boundary, so every scale downstream is a plain pixels-over-pixels
+ * ratio.
+ */
+export function pageFootprint(
+  page: PdfPageInfo,
+  pageNumber: number,
+  rotations: PageRotations,
+) {
+  return dimensionsForRotation(
+    rotationForPage(rotations, pageNumber),
+    page.width * POINT_TO_PX,
+    page.height * POINT_TO_PX,
+  )
+}
+
+/** The CSS width `PdfPage` lays a page out at: a layout lining pages up by
+    their edges must use the same number. */
+export function pageDisplayWidth(
+  page: PdfPageInfo,
+  rotation: number,
+  scale: number,
+) {
+  return (
+    dimensionsForRotation(rotation, page.width, page.height).width *
+    POINT_TO_PX *
+    scale
+  )
+}
+
+/**
  * The page size the document is mostly made of, not its widest: one landscape
  * page among many portrait ones must not shrink the opening zoom for the rest.
  */
@@ -78,14 +109,7 @@ export function referenceDimensions(
   >()
 
   for (let index = 0; index < pages.length; index += 1) {
-    const page = pages[index]!
-    // Converted at this one boundary, so every scale downstream is a plain
-    // pixels-over-pixels ratio.
-    const { height, width } = dimensionsForRotation(
-      rotationForPage(rotations, index + 1),
-      page.width * POINT_TO_PX,
-      page.height * POINT_TO_PX,
-    )
+    const { height, width } = pageFootprint(pages[index]!, index + 1, rotations)
     const key = `${width}x${height}`
     const seen = counts.get(key)
 
@@ -149,34 +173,18 @@ export function autoScale(
 }
 
 /**
- * A spread's halves take the reference page's column whatever they measure, so
- * only their aspects are their own and the fit must clear the taller of the two.
+ * The box a fit measures: the asked-for page, or for a spread both of its pages.
+ * A spread meets at the spine with its pages at one scale, so each half is as
+ * wide as the wider page and the fit must clear the taller of the two.
  */
 export function fitDimensions(
   pages: PdfPageInfo[],
   pageNumbers: number[],
   rotations: PageRotations,
-  reference: { referenceHeight: number; referenceWidth: number },
-  sharedColumn: boolean,
+  fallback: { height: number; width: number },
 ) {
-  const fallback = {
-    height: reference.referenceHeight,
-    width: reference.referenceWidth,
-  }
-
-  if (!sharedColumn) {
-    const page = pages[pageNumbers[0] - 1]
-
-    return page
-      ? dimensionsForRotation(
-          rotationForPage(rotations, pageNumbers[0]),
-          page.width * POINT_TO_PX,
-          page.height * POINT_TO_PX,
-        )
-      : fallback
-  }
-
   let height = 0
+  let width = 0
 
   for (const pageNumber of pageNumbers) {
     const page = pages[pageNumber - 1]
@@ -185,21 +193,12 @@ export function fitDimensions(
       continue
     }
 
-    const footprint = dimensionsForRotation(
-      rotationForPage(rotations, pageNumber),
-      page.width * POINT_TO_PX,
-      page.height * POINT_TO_PX,
-    )
-
-    if (footprint.width > 0) {
-      height = Math.max(
-        height,
-        (reference.referenceWidth * footprint.height) / footprint.width,
-      )
-    }
+    const footprint = pageFootprint(page, pageNumber, rotations)
+    height = Math.max(height, footprint.height)
+    width = Math.max(width, footprint.width)
   }
 
-  return height > 0 ? { height, width: reference.referenceWidth } : fallback
+  return height > 0 && width > 0 ? { height, width } : fallback
 }
 
 export function fitWidthScale(availableWidth: number, pageWidth: number) {

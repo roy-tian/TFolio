@@ -23,7 +23,7 @@ import {
   type PdfSearchMatch,
   type PdfTextSpan,
 } from "@/lib/pdf"
-import { POINT_TO_PX } from "@/lib/zoom"
+import { pageDisplayWidth, POINT_TO_PX } from "@/lib/zoom"
 import { searchHighlightRects } from "@/lib/searchHighlightGeometry"
 import { buildTextLayer } from "@/lib/textLayerBuild"
 import { registerPageRuns, registerTextPage, textPageLayout } from "@/lib/textSelectionPage"
@@ -62,10 +62,6 @@ type PdfPageProps = {
   textSelectAll: boolean
   rotation: number
   scale: number
-  /** CSS pixels to lay the page out at, overriding `scale` — only for a layout
-      sharing one column across pages of different sizes, as a book spread. */
-  width?: number
-  renderWidth?: number
 }
 
 type PdfPageSurfaceProps = {
@@ -387,13 +383,11 @@ export const PdfPage = memo(function PdfPage({
   pageNumber,
   renderEpoch,
   renderScale,
-  renderWidth,
   rotation,
   scale,
   searchMatches,
   textEpoch,
   textSelectAll,
-  width,
 }: PdfPageProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -411,9 +405,8 @@ export const PdfPage = memo(function PdfPage({
   // rotation, so a 90°/270° page swaps the footprint it takes in the column.
   const { height: footprintHeight, width: footprintWidth } =
     dimensionsForRotation(rotation, page.width, page.height)
-  const displayWidth = width ?? footprintWidth * POINT_TO_PX * scale
-  const targetRenderWidth =
-    renderWidth ?? footprintWidth * POINT_TO_PX * renderScale
+  const displayWidth = pageDisplayWidth(page, rotation, scale)
+  const targetRenderWidth = footprintWidth * POINT_TO_PX * renderScale
   const surfaceScale = displayWidth / footprintWidth
 
   return (

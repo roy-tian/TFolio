@@ -754,7 +754,7 @@ describe("TFolio PDF viewer", () => {
     await browser.pause(500)
     await expect(zoomGroup()).toHaveAttribute("aria-label", zoomed)
 
-    // The thumbnail grid has one width for every page and so no single scale to
+    // The thumbnail grid sizes each page by its long side, so has no one scale to
     // report; the controls go away rather than sit there showing a stale figure.
     await $("button[aria-label='Thumbnails']").click()
     await $("button[aria-label='Select page 1']").waitForDisplayed()

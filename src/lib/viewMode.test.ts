@@ -9,6 +9,7 @@ import {
   spreadPages,
   THUMBNAIL_COLUMN_GAP,
   THUMBNAIL_WIDTH,
+  thumbnailPaper,
 } from "./viewMode"
 
 describe("isViewMode", () => {
@@ -96,6 +97,21 @@ describe("computeThumbnailColumns", () => {
   test("uses every column an even fit allows", () => {
     expect(computeThumbnailColumns(columnStride * 4 - THUMBNAIL_COLUMN_GAP)).toBe(4)
     expect(computeThumbnailColumns(columnStride * 6 - THUMBNAIL_COLUMN_GAP)).toBe(6)
+  })
+})
+
+describe("thumbnailPaper", () => {
+  test("spans the column with the long side", () => {
+    expect(thumbnailPaper({ height: 842, width: 595 }).height).toBe(THUMBNAIL_WIDTH)
+    expect(thumbnailPaper({ height: 595, width: 842 }).width).toBe(THUMBNAIL_WIDTH)
+  })
+
+  test("keeps one scale for a page turned either way", () => {
+    const portrait = thumbnailPaper({ height: 842, width: 595 })
+    const landscape = thumbnailPaper({ height: 595, width: 842 })
+
+    expect(landscape.width).toBeCloseTo(portrait.height)
+    expect(landscape.height).toBeCloseTo(portrait.width)
   })
 })
 

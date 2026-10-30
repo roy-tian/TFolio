@@ -8,7 +8,7 @@ import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
-import { THUMBNAIL_CAPTION_HEIGHT } from "@/lib/viewMode"
+import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
 
 // Many cells share a row; preloading whole rows would queue dozens of PDFium
 // renders at once. Keep the grid's window to what is visible.
@@ -40,7 +40,6 @@ type PdfThumbnailProps = {
   selectedCount: number
   /** Whether the delete button is mounted; the cell's own call, see `ThumbnailCell`. */
   showControls: boolean
-  width: number
 }
 
 /** A preview that selects rather than reads — no text layer, so a grid stays
@@ -63,22 +62,22 @@ export function PdfThumbnail({
   rotation,
   selectedCount,
   showControls,
-  width,
 }: PdfThumbnailProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const previewRef = useRef<HTMLDivElement>(null)
+  const spinRef = useRef<HTMLDivElement>(null)
   const isNearViewport = useNearViewport(wrapperRef, THUMBNAIL_ROOT_MARGIN)
-  // Keep the old bitmap's geometry until its replacement is painted; changing
-  // it with the document metadata would stretch the still-upright preview.
-  const [paintedPage, setPaintedPage] = useState({
-    height: pageHeight,
-    rotation: intrinsicRotation,
-    width: pageWidth,
-    ready: false,
-  })
-  const previousPageRef = useRef(paintedPage)
+  const page = { height: pageHeight, rotation: intrinsicRotation, width: pageWidth }
+  const isPage = (other: typeof page) =>
+    other.height === pageHeight &&
+    other.width === pageWidth &&
+    other.rotation === intrinsicRotation
+  // The page as the canvas holds it. The paper takes the page's new size at
+  // once, as the grid's columns and gaps do; until the replacement is painted,
+  // these pixels are turned and fitted to it rather than stretched.
+  const [paintedPage, setPaintedPage] = useState(page)
+  const shownPageRef = useRef(paintedPage)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -88,68 +87,64 @@ export function PdfThumbnail({
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
     onPaint: () =>
-      setPaintedPage((previous) =>
-        previous.ready &&
-        previous.height === pageHeight &&
-        previous.width === pageWidth &&
-        previous.rotation === intrinsicRotation
-          ? previous
-          : {
-              height: pageHeight,
-              rotation: intrinsicRotation,
-              width: pageWidth,
-              ready: true,
-            },
-      ),
+      setPaintedPage((previous) => (isPage(previous) ? previous : page)),
     pageHeight,
     pageNumber,
     pageWidth,
     renderEpoch,
     retainBitmap,
-    rotation,
-    targetWidth: width,
+    // The bitmap is drawn upright and a turn keeps the thumbnail's scale, so its
+    // upright width serves every rotation and a turn needs no fresh render. The
+    // page as it now measures, not as last painted: this sizes the replacement.
+    rotation: 0,
+    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }).width,
   })
 
+  // With no bitmap on show no pixels need the old geometry: the next paint
+  // then lands upright, not turned a second time until React catches up.
+  if (!hasRendered && !isPage(paintedPage)) {
+    setPaintedPage(page)
+  }
+
   useLayoutEffect(() => {
-    const previous = previousPageRef.current
-    previousPageRef.current = paintedPage
+    const previous = shownPageRef.current
+    shownPageRef.current = {
+      height: pageHeight,
+      rotation: intrinsicRotation,
+      width: pageWidth,
+    }
     const paper = wrapperRef.current
-    const preview = previewRef.current
-    const turn = ((paintedPage.rotation - previous.rotation + 540) % 360) - 180
+    const spinner = spinRef.current
+    const turn = ((intrinsicRotation - previous.rotation + 540) % 360) - 180
 
     if (
-      !previous.ready ||
+      !hasRendered ||
       !turn ||
       !paper ||
-      !preview ||
+      !spinner ||
       paper.getClientRects().length === 0 ||
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
       return
     }
 
-    // PDFium has already turned the new pixels. Start them counter-rotated at
-    // the old scale so their first frame matches the bitmap they replaced.
+    // Relative, so the replacement landing mid-turn — already turned by PDFium,
+    // its static transform dropping the turn — carries on the same spin.
     const timing = { duration: 250, easing: "ease-out" }
-    const spin = preview.animate(
-      [
-        {
-          transform: `translate(-50%, -50%) rotate(${rotation - turn}deg) scale(${paintedPage.width / previous.width})`,
-        },
-        { transform: `translate(-50%, -50%) rotate(${rotation}deg) scale(1)` },
-      ],
+    const spin = spinner.animate(
+      [{ transform: `rotate(${-turn}deg)` }, { transform: "rotate(0deg)" }],
       timing,
     )
-    const oldFootprint = dimensionsForRotation(
-      rotation, previous.width, previous.height,
+    const oldPaper = thumbnailPaper(
+      dimensionsForRotation(rotation, previous.width, previous.height),
     )
-    const newFootprint = dimensionsForRotation(
-      rotation, paintedPage.width, paintedPage.height,
+    const newPaper = thumbnailPaper(
+      dimensionsForRotation(rotation, pageWidth, pageHeight),
     )
     const resize = paper.animate(
       [
-        { height: `${(width * oldFootprint.height) / oldFootprint.width}px` },
-        { height: `${(width * newFootprint.height) / newFootprint.width}px` },
+        { height: `${oldPaper.height}px`, width: `${oldPaper.width}px` },
+        { height: `${newPaper.height}px`, width: `${newPaper.width}px` },
       ],
       timing,
     )
@@ -158,101 +153,120 @@ export function PdfThumbnail({
       spin.cancel()
       resize.cancel()
     }
-  }, [paintedPage, rotation, width])
+  }, [hasRendered, intrinsicRotation, pageHeight, pageWidth, rotation])
 
   // The user rotation spins the preview clockwise, swapping the footprint a
   // quarter turn leaves behind.
-  const { height: footprintHeight, width: footprintWidth } =
-    dimensionsForRotation(rotation, paintedPage.width, paintedPage.height)
+  const paperSize = thumbnailPaper(
+    dimensionsForRotation(rotation, pageWidth, pageHeight),
+  )
+  // Pixels painted before an edit turned or resized the page: a turn keeps the
+  // scale, so they fit exactly once turned along; a resize letterboxes them.
+  const pendingTurn = (intrinsicRotation - paintedPage.rotation + 360) % 360
+  const preview = thumbnailPaper(paintedPage)
+  const previewFootprint = dimensionsForRotation(
+    (rotation + pendingTurn) % 360,
+    preview.width,
+    preview.height,
+  )
+  const previewFit = Math.min(
+    paperSize.width / previewFootprint.width,
+    paperSize.height / previewFootprint.height,
+  )
   const label = t("viewer.thumbnailLabel", { pageNumber })
 
   return (
     <div
       className={cn(
-        "group/thumb relative flex flex-col items-center transition-opacity",
+        "group/thumb flex flex-col items-center transition-opacity",
         // Faded, the way a file manager marks a cut: the page is still here,
         // and a paste is what moves it.
         isCut && "opacity-45",
       )}
     >
-      {/* A page that could not be drawn says so instead: the cell is a white
-          card with a warning in it, and the reason is what a hover owes it. */}
-      <HintTooltip
-        label={renderFailed ? t("viewer.pageError", { pageNumber }) : label}
-      >
-        <button
-          aria-current={isCurrent ? "page" : undefined}
-          aria-label={label}
-          aria-pressed={isSelected}
-          className={cn(
-            "relative block w-full scroll-mt-5 bg-white shadow-md outline-none ring-1 ring-black/10 transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-3 focus-visible:ring-ring/50",
-            // The current page keeps its marker, faded: in the editing grid the
-            // selection is the louder voice.
-            isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
-            // Offset from the page, so the ring reads against the page's own
-            // white even when the theme paints the ring light. The last page
-            // clicked keeps focus, and WebKitGTK may show its focus ring, which
-            // would grey that one page out of the selection's.
-            isSelected &&
-              "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary focus-visible:ring-2 focus-visible:ring-primary dark:ring-offset-zinc-950",
-          )}
-          data-page-number={pageNumber}
-          data-rotation={rotation}
-          onClick={(event) =>
-            onSelect(pageNumber, {
-              range: event.shiftKey,
-              toggle: event.ctrlKey || event.metaKey,
-            })
-          }
-          onDoubleClick={() => onOpen(pageNumber)}
-          ref={wrapperRef}
-          style={{ height: (width * footprintHeight) / footprintWidth }}
-          type="button"
+      {/* As wide as the paper, which a portrait page leaves narrower than the
+          column, so the delete button keeps to the paper's corner. */}
+      <div className="relative">
+        {/* A page that could not be drawn says so instead: the cell is a white
+            card with a warning in it, and the reason is what a hover owes it. */}
+        <HintTooltip
+          label={renderFailed ? t("viewer.pageError", { pageNumber }) : label}
         >
-          <div
-            className="absolute"
-            ref={previewRef}
-            style={{
-              height: (width * paintedPage.height) / footprintWidth,
-              left: "50%",
-              top: "50%",
-              transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-              width: (width * paintedPage.width) / footprintWidth,
-            }}
+          <button
+            aria-current={isCurrent ? "page" : undefined}
+            aria-label={label}
+            aria-pressed={isSelected}
+            className={cn(
+              "relative block scroll-mt-5 bg-white shadow-md outline-none ring-1 ring-black/10 transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-3 focus-visible:ring-ring/50",
+              // The current page keeps its marker, faded: in the editing grid the
+              // selection is the louder voice.
+              isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
+              // Offset from the page, so the ring reads against the page's own
+              // white even when the theme paints the ring light. The last page
+              // clicked keeps focus, and WebKitGTK may show its focus ring, which
+              // would grey that one page out of the selection's.
+              isSelected &&
+                "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary focus-visible:ring-2 focus-visible:ring-primary dark:ring-offset-zinc-950",
+            )}
+            data-page-number={pageNumber}
+            data-rotation={rotation}
+            onClick={(event) =>
+              onSelect(pageNumber, {
+                range: event.shiftKey,
+                toggle: event.ctrlKey || event.metaKey,
+              })
+            }
+            onDoubleClick={() => onOpen(pageNumber)}
+            ref={wrapperRef}
+            style={{ height: paperSize.height, width: paperSize.width }}
+            type="button"
           >
-            <canvas
-              className="block h-full w-full"
-              height={1}
-              ref={canvasRef}
-              width={1}
-            />
-          </div>
-          {!hasRendered && !renderFailed ? (
-            <span className="absolute inset-0 grid place-items-center bg-white text-zinc-400">
-              {/* Only where a render is on its way: every spinning icon is
-                  style and paint work each frame, and a long document's grid
-                  would otherwise spin hundreds of them out of sight. */}
-              {isNearViewport ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : null}
-            </span>
-          ) : null}
-          {renderFailed ? (
-            <span className="absolute inset-0 grid place-items-center bg-white text-zinc-500">
-              <TriangleAlert className="size-4" />
-            </span>
-          ) : null}
-        </button>
-      </HintTooltip>
-      {showControls ? (
-        <DeleteButton
-          disabled={deleteDisabled}
-          isSelected={isSelected}
-          onDelete={onDelete}
-          pageNumber={pageNumber}
-          selectedCount={selectedCount}
-        />
-      ) : null}
+            <div className="absolute inset-0" ref={spinRef}>
+              <div
+                className="absolute"
+                style={{
+                  height: preview.height,
+                  left: "50%",
+                  top: "50%",
+                  transform: `translate(-50%, -50%) rotate(${rotation + pendingTurn}deg) scale(${previewFit})`,
+                  width: preview.width,
+                }}
+              >
+                <canvas
+                  className="block h-full w-full"
+                  height={1}
+                  ref={canvasRef}
+                  width={1}
+                />
+              </div>
+            </div>
+            {!hasRendered && !renderFailed ? (
+              <span className="absolute inset-0 grid place-items-center bg-white text-zinc-400">
+                {/* Only where a render is on its way: every spinning icon is
+                    style and paint work each frame, and a long document's grid
+                    would otherwise spin hundreds of them out of sight. */}
+                {isNearViewport ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : null}
+              </span>
+            ) : null}
+            {renderFailed ? (
+              <span className="absolute inset-0 grid place-items-center bg-white text-zinc-500">
+                <TriangleAlert className="size-4" />
+              </span>
+            ) : null}
+          </button>
+        </HintTooltip>
+        {showControls ? (
+          <DeleteButton
+            disabled={deleteDisabled}
+            isSelected={isSelected}
+            onDelete={onDelete}
+            pageNumber={pageNumber}
+            selectedCount={selectedCount}
+          />
+        ) : null}
+      </div>
       {/* The caption's height is its own box, not the column's gap — the known
           height is what lets the insertion line find the paper in a row. */}
       <span

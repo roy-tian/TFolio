@@ -1725,7 +1725,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                   thumbnailKeys: thumbnailIdentity.keys,
                 }}
                 pages={pdfDocument.pages}
-                referencePageWidth={zoom.referencePageWidth}
                 renderEpochs={annotations.renderEpochs}
                 rotations={pageRotations}
                 scale={zoom.scale}

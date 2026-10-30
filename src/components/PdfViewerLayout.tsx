@@ -63,10 +63,10 @@ import {
   THUMBNAIL_CAPTION_HEIGHT,
   THUMBNAIL_COLUMN_GAP,
   THUMBNAIL_ROW_GAP,
-  THUMBNAIL_WIDTH,
+  thumbnailPaper,
   type ViewMode,
 } from "@/lib/viewMode"
-import { BOOK_GAP, CONTENT_PADDING_X } from "@/lib/zoom"
+import { BOOK_GAP, CONTENT_PADDING_X, pageDisplayWidth } from "@/lib/zoom"
 
 // The wheel preview already collapsed a gesture into one commit; holding the
 // bitmap a little longer also coalesces rapid clicks and resize-driven fits.
@@ -145,8 +145,6 @@ type LayoutProps = {
   onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   pages: PdfPageInfo[]
-  /** The document's usual page width at 100%, for a layout sharing one column. */
-  referencePageWidth: number
   renderEpochs: RenderEpochs
   renderScale: number
   rotations: PageRotations
@@ -209,7 +207,6 @@ function BookLayout({
   onCopyAllText,
   onPagePaint,
   pages,
-  referencePageWidth,
   renderEpochs,
   renderScale,
   rotations,
@@ -218,44 +215,54 @@ function BookLayout({
   textEpochs,
   textSelectAll,
 }: LayoutProps) {
-  // Both halves of a spread share one width: two columns of visibly different
-  // widths would read as broken.
-  const columnWidth = Math.round(referencePageWidth * scale)
-  const renderColumnWidth = Math.round(referencePageWidth * renderScale)
+  return pairPages(pages.length).map((row) => {
+    // Each half is as wide as the spread's wider page, keeping every spine on
+    // the column's axis; the padding pushes the left page to the spine.
+    const widths = row.map((pageNumber) =>
+      pageDisplayWidth(
+        pages[pageNumber - 1]!,
+        rotationForPage(rotations, pageNumber),
+        scale,
+      ),
+    )
+    const halfWidth = Math.max(...widths)
 
-  return pairPages(pages.length).map((row) => (
-    <div
-      className="flex items-start"
-      key={`${documentId}-spread-${row[0]}`}
-      // Sized for a full spread even when holding a single trailing page, which
-      // keeps that page in the left cell instead of centring it in the column.
-      style={{ gap: BOOK_GAP, width: columnWidth * 2 + BOOK_GAP }}
-    >
-      {row.map((pageNumber) => (
-        <PdfPage
-          captureHighlight={captureHighlight}
-          documentId={documentId}
-          drafts={draftsByPage.get(pageNumber) ?? NO_DRAFTS}
-          notes={notesByPage.get(pageNumber) ?? NO_NOTES}
-          onCopyAllText={onCopyAllText}
-          onPagePaint={onPagePaint}
-          key={`${documentId}-${pageNumber}`}
-          page={pages[pageNumber - 1]}
-          pageNumber={pageNumber}
-          renderEpoch={renderEpochs[pageNumber] ?? 0}
-          renderScale={renderScale}
-          renderWidth={renderColumnWidth}
-          rotation={rotationForPage(rotations, pageNumber)}
-          scale={scale}
-          searchMatches={searchMatchesByPage.get(pageNumber) ?? NO_SEARCH_MATCHES}
-          activeSearchIndex={activeSearchPage === pageNumber ? activeSearchIndex : null}
-          textEpoch={textEpochs[pageNumber] ?? 0}
-          textSelectAll={textSelectAll}
-          width={columnWidth}
-        />
-      ))}
-    </div>
-  ))
+    return (
+      <div
+        className="flex items-start"
+        key={`${documentId}-spread-${row[0]}`}
+        // Sized for a full spread even when holding a single trailing page, which
+        // keeps that page in the left cell instead of centring it in the column.
+        style={{
+          gap: BOOK_GAP,
+          paddingLeft: halfWidth - widths[0]!,
+          width: halfWidth * 2 + BOOK_GAP,
+        }}
+      >
+        {row.map((pageNumber) => (
+          <PdfPage
+            captureHighlight={captureHighlight}
+            documentId={documentId}
+            drafts={draftsByPage.get(pageNumber) ?? NO_DRAFTS}
+            notes={notesByPage.get(pageNumber) ?? NO_NOTES}
+            onCopyAllText={onCopyAllText}
+            onPagePaint={onPagePaint}
+            key={`${documentId}-${pageNumber}`}
+            page={pages[pageNumber - 1]}
+            pageNumber={pageNumber}
+            renderEpoch={renderEpochs[pageNumber] ?? 0}
+            renderScale={renderScale}
+            rotation={rotationForPage(rotations, pageNumber)}
+            scale={scale}
+            searchMatches={searchMatchesByPage.get(pageNumber) ?? NO_SEARCH_MATCHES}
+            activeSearchIndex={activeSearchPage === pageNumber ? activeSearchIndex : null}
+            textEpoch={textEpochs[pageNumber] ?? 0}
+            textSelectAll={textSelectAll}
+          />
+        ))}
+      </div>
+    )
+  })
 }
 
 /** How far the + and the paste button sit from the middle of the line, in CSS
@@ -277,11 +284,13 @@ function InsertZone({
   dragging,
   index,
   label,
+  left,
+  line,
   onInsert,
   onPaste,
   paperHeight,
   pasteLabel,
-  trailing,
+  width,
 }: {
   /** Whether a file dragged in from the desktop would land in this gap; the
       caller resolves it so a drag re-renders two gaps, not every one. */
@@ -290,32 +299,36 @@ function InsertZone({
   dragging: boolean
   index: number
   label: string
+  /** Where the gap starts, from the cell's own left edge. */
+  left: number
+  /** Where the line stands, measured as `left` is: beside a row's end the gap
+      can run on past it. */
+  line: number
   onInsert: (index: number) => void
   onPaste: (index: number) => void
   /** The neighbouring page's own height: the gap's cell is taller — it holds
       the page number and row spacing — so the line sizes to the paper. */
   paperHeight: number
   pasteLabel: string
-  trailing?: boolean
+  width: number
 }) {
   return (
     <div
       className={cn(
-        "absolute top-0 z-10 flex h-full flex-col items-center justify-center [--zone-shown:0] hover:[--zone-shown:1] has-focus-visible:[--zone-shown:1]",
+        "absolute top-0 z-10 flex h-full flex-col justify-center [--zone-shown:0] hover:[--zone-shown:1] has-focus-visible:[--zone-shown:1]",
         dragging && "pointer-events-none",
       )}
       data-insert-index={index}
       // The whole gap, so every point over the grid names an insertion
       // position, and the line runs beside the paper, not the row's tallest.
-      style={{
-        [trailing ? "right" : "left"]: -THUMBNAIL_COLUMN_GAP,
-        paddingBottom: THUMBNAIL_ROW_GAP,
-        width: THUMBNAIL_COLUMN_GAP,
-      }}
+      style={{ left, paddingBottom: THUMBNAIL_ROW_GAP, width }}
     >
       <div
         className="relative w-0"
-        style={{ height: `calc(${paperHeight}px + ${THUMBNAIL_CAPTION_HEIGHT})` }}
+        style={{
+          height: `calc(${paperHeight}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
+          marginLeft: line - left,
+        }}
       >
         <span
           className={cn(
@@ -416,7 +429,7 @@ function DragGhost({
   })
 
   const footprint = dimensionsForRotation(rotation, page.width, page.height)
-  const height = (THUMBNAIL_WIDTH * footprint.height) / footprint.width
+  const paper = thumbnailPaper(footprint)
   const carried = drag.away === "carried"
 
   return (
@@ -429,14 +442,14 @@ function DragGhost({
         carried && "opacity-70",
       )}
       style={{
-        height,
+        height: paper.height,
         left: drag.pointer.x + drag.grip.x,
         top: drag.pointer.y + drag.grip.y,
         transform: carried ? "scale(0.4)" : undefined,
         // The grip's own point, so the card shrinks towards the pointer rather
         // than away from it and comes back to the same spot of itself.
         transformOrigin: `${-drag.grip.x}px ${-drag.grip.y}px`,
-        width: THUMBNAIL_WIDTH,
+        width: paper.width,
       }}
     >
       {/* Two cards for a block of any size: the stack says "more than this
@@ -505,6 +518,47 @@ function dropPreview(
   }
 }
 
+/**
+ * Laid out as a cell lays out its paper and caption, so the hole is the landing
+ * page's own paper, where that page will stand.
+ */
+function LandingHole({
+  box,
+  paper,
+}: {
+  box: CellBox
+  paper: { height: number; width: number }
+}) {
+  // The cell carries the row gap as its own bottom padding, which lies between
+  // two slots rather than in either.
+  const slotHeight = box.height - THUMBNAIL_ROW_GAP
+  // A row of shorter pages has no room for a taller one until the drop lays the
+  // grid out again: scaled down to fit, or the flex column squashes its shape.
+  const paperHeight = `min(${paper.height}px, ${slotHeight}px - ${THUMBNAIL_CAPTION_HEIGHT})`
+
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute flex flex-col items-center justify-center transition-all duration-200 ease-out"
+      style={{
+        height: slotHeight,
+        left: box.left,
+        top: box.top,
+        width: box.width,
+      }}
+    >
+      <div
+        className="shrink-0 border-2 border-dashed border-primary/60 bg-primary/5"
+        style={{
+          height: paperHeight,
+          width: `calc(${paperHeight} * ${paper.width / paper.height})`,
+        }}
+      />
+      <div className="shrink-0" style={{ height: THUMBNAIL_CAPTION_HEIGHT }} />
+    </div>
+  )
+}
+
 // The grid is not virtualized: every page keeps its cell and paper, but only
 // this near the view does a cell keep its pixels and its controls. Each control
 // carries a tooltip, and hundreds of them slowed opening and every selection.
@@ -516,6 +570,7 @@ const THUMBNAIL_RETAIN_MARGIN = "1500px 0px"
  */
 const ThumbnailCell = memo(function ThumbnailCell({
   canPaste,
+  columnWidth,
   deleteDisabled,
   documentId,
   dragging,
@@ -535,6 +590,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
   pageHeight,
   pageNumber,
   pageWidth,
+  previousPaperWidth,
   released,
   renderEpoch,
   rotation,
@@ -543,6 +599,7 @@ const ThumbnailCell = memo(function ThumbnailCell({
   trailingZone,
 }: {
   canPaste: boolean
+  columnWidth: number
   deleteDisabled: boolean
   documentId: number
   /** Whether a page drag has the grid — every cell carries the transition the
@@ -568,6 +625,8 @@ const ThumbnailCell = memo(function ThumbnailCell({
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  /** The paper before this one in its row, or 0 for a row's first cell. */
+  previousPaperWidth: number
   released: boolean
   renderEpoch: number
   rotation: number
@@ -582,8 +641,22 @@ const ThumbnailCell = memo(function ThumbnailCell({
   // it would drop keyboard focus back to the start of the document.
   const [focusWithin, setFocusWithin] = useState(false)
   const showControls = nearView || focusWithin
-  const footprint = dimensionsForRotation(rotation, pageWidth, pageHeight)
-  const paperHeight = (THUMBNAIL_WIDTH * footprint.height) / footprint.width
+  const paper = thumbnailPaper(
+    dimensionsForRotation(rotation, pageWidth, pageHeight),
+  )
+  const inset = (columnWidth - paper.width) / 2
+  // A gap spans the white between two papers, so its line stands mid-way
+  // between them. With no paper on that side the line stands half a gap out,
+  // and the gap still runs to the cell's edge: a narrow page among wider ones
+  // has more white beside it than one gap.
+  const leadingLeft =
+    previousPaperWidth > 0
+      ? -THUMBNAIL_COLUMN_GAP - (columnWidth - previousPaperWidth) / 2
+      : Math.min(0, inset - THUMBNAIL_COLUMN_GAP)
+  const leadingLine =
+    previousPaperWidth > 0
+      ? (leadingLeft + inset) / 2
+      : inset - THUMBNAIL_COLUMN_GAP / 2
 
   return (
     <div
@@ -637,7 +710,6 @@ const ThumbnailCell = memo(function ThumbnailCell({
         rotation={rotation}
         selectedCount={selectedCount}
         showControls={showControls}
-        width={THUMBNAIL_WIDTH}
       />
       {showControls ? (
         <InsertZone
@@ -646,10 +718,13 @@ const ThumbnailCell = memo(function ThumbnailCell({
           dragging={dragging}
           index={pageNumber}
           label={t("pageEdit.insertBefore", { pageNumber })}
+          left={leadingLeft}
+          line={leadingLine}
           onInsert={onInsert}
           onPaste={onPaste}
-          paperHeight={paperHeight}
+          paperHeight={paper.height}
           pasteLabel={t("pageEdit.pasteBefore", { pageNumber })}
+          width={inset - leadingLeft}
         />
       ) : null}
       {/* The gap after the last cell of every row: the same gap the next row's
@@ -665,15 +740,17 @@ const ThumbnailCell = memo(function ThumbnailCell({
               ? t("pageEdit.insertAtEnd")
               : t("pageEdit.insertBefore", { pageNumber: pageNumber + 1 })
           }
+          left={columnWidth - inset}
+          line={columnWidth - inset + THUMBNAIL_COLUMN_GAP / 2}
           onInsert={onInsert}
           onPaste={onPaste}
-          paperHeight={paperHeight}
+          paperHeight={paper.height}
           pasteLabel={
             trailingZone === "end"
               ? t("pageEdit.pasteAtEnd")
               : t("pageEdit.pasteBefore", { pageNumber: pageNumber + 1 })
           }
-          trailing
+          width={Math.max(THUMBNAIL_COLUMN_GAP, inset)}
         />
       ) : null}
     </div>
@@ -693,7 +770,18 @@ function ThumbnailLayout({
 }) {
   const { t } = useTranslation()
   const current = useCurrentPage(currentPage)
-  const columns = computeThumbnailColumns(contentWidth)
+  // Memoised: the grid re-renders on every pointer move of a drag.
+  const { columnWidth, paperWidths } = useMemo(() => {
+    const widths = pages.map((page) => thumbnailPaper(page).width)
+
+    // As wide as the widest paper: a document of one orientation keeps its
+    // papers a gap apart, and only a mixed one leaves white beside the narrower.
+    return {
+      columnWidth: widths.reduce((widest, width) => Math.max(widest, width), 0),
+      paperWidths: widths,
+    }
+  }, [pages])
+  const columns = computeThumbnailColumns(contentWidth, columnWidth)
   const gridRef = useRef<HTMLDivElement>(null)
   const { drag, wasDragClick } = usePageDrag({
     active: true,
@@ -757,6 +845,9 @@ function ThumbnailLayout({
     [drag, pages.length],
   )
   const ghostPage = drag ? pages[drag.lead - 1] : undefined
+  // The block's first page is the one whose slot the landing marks.
+  const landingPage = drag ? pages[drag.pages[0]! - 1] : undefined
+  const landingPaper = landingPage ? thumbnailPaper(landingPage) : undefined
   const dragging = Boolean(drag)
   const { canPaste, cutPages: cut, dropIndex, selectedPages } = pageEdit
 
@@ -800,8 +891,11 @@ function ThumbnailLayout({
         // Read here rather than from the open below, which is handed no event:
         // Base UI runs this before its own handler opens the menu.
         onContextMenu={(event) => {
+          // A gap is drawn inside the cell after it, and in a mixed document
+          // over the white beside the paper before it too.
           const cell =
-            event.target instanceof Element
+            event.target instanceof Element &&
+            !event.target.closest("[data-insert-index]")
               ? event.target.closest("[data-page-cell]")
               : null
 
@@ -814,25 +908,14 @@ function ThumbnailLayout({
         // two rows still names a position instead of falling to the workspace.
         style={{
           columnGap: THUMBNAIL_COLUMN_GAP,
-          gridTemplateColumns: `repeat(${columns}, ${THUMBNAIL_WIDTH}px)`,
+          gridTemplateColumns: `repeat(${columns}, ${columnWidth}px)`,
           rowGap: 0,
         }}
       >
         {/* The hole the block would drop into, drawn before the cells so a page
             sliding past it passes over it rather than under. */}
-        {preview?.landing ? (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute border-2 border-dashed border-primary/60 bg-primary/5 transition-all duration-200 ease-out"
-            style={{
-              // The cell carries the row gap as its own bottom padding, which
-              // lies between two slots rather than in either.
-              height: preview.landing.height - THUMBNAIL_ROW_GAP,
-              left: preview.landing.left,
-              top: preview.landing.top,
-              width: preview.landing.width,
-            }}
-          />
+        {preview?.landing && landingPaper ? (
+          <LandingHole box={preview.landing} paper={landingPaper} />
         ) : null}
         {pages.map((page, index) => {
           const pageNumber = index + 1
@@ -848,6 +931,7 @@ function ThumbnailLayout({
           return (
             <ThumbnailCell
               canPaste={canPaste}
+              columnWidth={columnWidth}
               deleteDisabled={
                 pages.length === 1 ||
                 // Deleting a selected page takes the whole selection; when that
@@ -873,6 +957,9 @@ function ThumbnailLayout({
               pageHeight={page.height}
               pageNumber={pageNumber}
               pageWidth={page.width}
+              previousPaperWidth={
+                index % columns === 0 ? 0 : paperWidths[index - 1]!
+              }
               released={drag?.released ?? false}
               renderEpoch={renderEpochs[pageNumber] ?? 0}
               // The grid shows the document as it will be saved (D2): a view
@@ -949,7 +1036,6 @@ type PdfViewerLayoutProps = {
   fileName: string
   pageEdit: PageEditProps
   pages: PdfPageInfo[]
-  referencePageWidth: number
   renderEpochs: RenderEpochs
   rotations: PageRotations
   scale: number
@@ -985,7 +1071,6 @@ export function PdfViewerLayout({
   fileName,
   pageEdit,
   pages,
-  referencePageWidth,
   renderEpochs,
   rotations,
   scale,
@@ -1020,7 +1105,6 @@ export function PdfViewerLayout({
     onCopyAllText: textSelectAll ? onCopyAllText : undefined,
     onPagePaint,
     pages,
-    referencePageWidth,
     renderEpochs,
     renderScale,
     rotations,
