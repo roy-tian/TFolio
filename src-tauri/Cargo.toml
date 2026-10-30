@@ -6,7 +6,7 @@ default-members = [".", "engine"]
 
 [package]
 name = "tfolio"
-version = "0.1.21"
+version = "0.1.22"
 description = "TFolio PDF Editor"
 authors = ["Roy Tian"]
 license = "MIT"
