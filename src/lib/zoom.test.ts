@@ -173,52 +173,35 @@ describe("fitWidthScale", () => {
 })
 
 describe("fitDimensions", () => {
-  const reference = {
-    referenceHeight: 842 * POINT_TO_PX,
-    referenceWidth: 595 * POINT_TO_PX,
-  }
+  const reference = { height: px(842), width: px(595) }
   const mixed = [a4, page(842, 595)]
 
   test("measures the page the fit was asked from, in CSS pixels", () => {
-    expect(fitDimensions(mixed, [2], [0, 0], reference, false)).toEqual({
-      height: 595 * POINT_TO_PX,
-      width: 842 * POINT_TO_PX,
+    expect(fitDimensions(mixed, [2], [0, 0], reference)).toEqual({
+      height: px(595),
+      width: px(842),
     })
   })
 
   test("takes the rotation with it", () => {
-    expect(fitDimensions(mixed, [2], [0, 90], reference, false)).toEqual({
-      height: 842 * POINT_TO_PX,
-      width: 595 * POINT_TO_PX,
+    expect(fitDimensions(mixed, [2], [0, 90], reference)).toEqual({
+      height: px(842),
+      width: px(595),
     })
   })
 
-  // A spread lays both halves out in the reference page's column, so an odd
-  // page's own width never reaches the screen — only its aspect does.
-  test("keeps only the aspect of a page in a spread", () => {
-    const spread = fitDimensions(mixed, [2], [0, 0], reference, true)
-
-    expect(spread.width).toBe(reference.referenceWidth)
-    expect(spread.height).toBeCloseTo((reference.referenceWidth * 595) / 842)
-  })
-
-  // Both halves are on screen, so the fit is of the taller one — here the
-  // portrait page beside the landscape one.
-  test("measures the taller half of a spread", () => {
-    const spread = fitDimensions(mixed, [1, 2], [0, 0], reference, true)
-
-    expect(spread.height).toBeCloseTo(reference.referenceHeight)
+  // Centred on its spine, a spread gives each half the wider page's width, and
+  // both pages are on screen: the landscape page sets one, the portrait the other.
+  test("measures a spread by its wider and its taller page", () => {
+    expect(fitDimensions(mixed, [1, 2], [0, 0], reference)).toEqual({
+      height: px(842),
+      width: px(842),
+    })
   })
 
   test("falls back to the reference page for a number out of range", () => {
-    expect(fitDimensions(mixed, [9], [0, 0], reference, false)).toEqual({
-      height: reference.referenceHeight,
-      width: reference.referenceWidth,
-    })
-    expect(fitDimensions(mixed, [9, 10], [0, 0], reference, true)).toEqual({
-      height: reference.referenceHeight,
-      width: reference.referenceWidth,
-    })
+    expect(fitDimensions(mixed, [9], [0, 0], reference)).toEqual(reference)
+    expect(fitDimensions(mixed, [9, 10], [0, 0], reference)).toEqual(reference)
   })
 })
 

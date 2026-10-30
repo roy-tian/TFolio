@@ -7,7 +7,8 @@ export type ViewMode = (typeof viewModes)[number]
 export const defaultViewMode: ViewMode = "single"
 
 /** The column gap holds the insertion line and its + button; the row gap is
-    spent as cell bottom padding so every band belongs to a cell. */
+    spent as cell bottom padding so every band belongs to a cell. The width is
+    the long side of every thumbnail's paper, so the widest a column gets. */
 export const THUMBNAIL_WIDTH = 160
 export const THUMBNAIL_ROW_GAP = 16
 export const THUMBNAIL_COLUMN_GAP = 32
@@ -15,6 +16,18 @@ export const THUMBNAIL_COLUMN_GAP = 32
 /** In `rem`, not pixels, because the number is `text-xs`: a WebView whose
     root font size is not 16px keeps the box and the insertion line agreed. */
 export const THUMBNAIL_CAPTION_HEIGHT = "1.375rem"
+
+/** CSS pixels per point of a thumbnail: its long side spans the column, so a
+    page keeps its scale whichever way it is turned. */
+function thumbnailScale(page: { height: number; width: number }) {
+  return THUMBNAIL_WIDTH / Math.max(page.width, page.height)
+}
+
+export function thumbnailPaper(page: { height: number; width: number }) {
+  const scale = thumbnailScale(page)
+
+  return { height: page.height * scale, width: page.width * scale }
+}
 
 export function isViewMode(value: unknown): value is ViewMode {
   return viewModes.includes(value as ViewMode)

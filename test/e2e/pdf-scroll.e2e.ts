@@ -13,7 +13,8 @@ describe("PDF scrolling", () => {
     it(`scrolls ${viewMode} pages behind the blurred tab strip`, async () => {
       await seedSettings({ ui: { language: "en", viewMode } })
       await refreshApp()
-      await openPdfFromDisk(`under-tabs-${viewMode}.pdf`, bandedPdf(12))
+      // Enough pages that the thumbnail grid, too, outgrows the window.
+      await openPdfFromDisk(`under-tabs-${viewMode}.pdf`, bandedPdf(48))
       await browser.waitUntil(() => browser.execute(() => {
         const canvas = document.querySelector<HTMLCanvasElement>("[data-page-number='1'] canvas")
         return !!canvas && canvas.width > 100

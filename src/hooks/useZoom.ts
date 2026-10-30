@@ -99,15 +99,12 @@ export function useZoom({
     [pages, rotations],
   )
 
+  // A spread is centred on its spine, so a page in it has half the column.
   const availableWidth =
     viewMode === "book" ? bookColumnWidth(contentWidth) : contentWidth
 
-  // Only the single view lets an odd wide page out-grow the reference: a spread
-  // hands both halves the reference column, so nothing in it can overflow.
-  const widestLaidOut = viewMode === "book" ? referenceWidth : widestWidth
-
-  // What a fit measures: the page the reader asked from, laid out as this view
-  // lays it; only `auto`, which precedes any reading position, uses the usual page.
+  // What a fit measures: the page the reader asked from, or its spread; only
+  // `auto`, which precedes any reading position, uses the usual page.
   const fitBox = useMemo(
     () =>
       fitDimensions(
@@ -116,15 +113,14 @@ export function useZoom({
           ? spreadPages(zoom.fitPage, pages.length)
           : [zoom.fitPage],
         rotations,
-        { referenceHeight, referenceWidth },
-        viewMode === "book",
+        { height: referenceHeight, width: referenceWidth },
       ),
     [pages, referenceHeight, referenceWidth, rotations, viewMode, zoom.fitPage],
   )
 
   const fits = useMemo(
     () => ({
-      auto: autoScale(availableWidth, referenceWidth, widestLaidOut),
+      auto: autoScale(availableWidth, referenceWidth, widestWidth),
       fitPage: fitPageScale(
         availableWidth,
         contentHeight,
@@ -133,7 +129,7 @@ export function useZoom({
       ),
       fitWidth: fitWidthScale(availableWidth, fitBox.width),
     }),
-    [availableWidth, contentHeight, fitBox, referenceWidth, widestLaidOut],
+    [availableWidth, contentHeight, fitBox, referenceWidth, widestWidth],
   )
 
   const scale = resolveZoomScale(zoom, fits)
@@ -469,7 +465,6 @@ export function useZoom({
   return {
     canZoomIn: percent < MAX_ZOOM * 100,
     canZoomOut: percent > MIN_ZOOM * 100,
-    referencePageWidth: referenceWidth,
     resetToDefault,
     scale,
     toggleFit,
