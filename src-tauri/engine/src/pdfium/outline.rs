@@ -253,7 +253,7 @@ fn find_in_name_tree<'a>(
         .and_then(Object::as_array)
         .ok()
         .and_then(|names| {
-            names.chunks_exact(2).find(|pair| {
+            names.as_chunks::<2>().0.iter().find(|pair| {
                 document
                     .dereference(&pair[0])
                     .ok()
