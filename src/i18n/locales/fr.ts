@@ -180,9 +180,6 @@ const fr = {
   },
   toolbar: {
     saveAsMenu: "Autres options d’enregistrement",
-    hideBookmarks: "Masquer les signets",
-    noBookmarks: "Ce document ne contient aucun signet",
-    showBookmarks: "Afficher les signets",
     viewMode: "Mode d’affichage",
     viewModeSingle: "Page unique",
     viewModeBook: "Livre",
@@ -224,11 +221,9 @@ const fr = {
   },
   annotate: {
     undo: "Annuler",
-    redo: "Rétablir",
     // Each action is a noun phrase with its article, so both "Annuler …" and
     // "Rétablir …" read as the system Edit menu does ("Annuler la saisie").
     undoAction: "Annuler {{action}}",
-    redoAction: "Rétablir {{action}}",
     actionHighlight: "le surlignage",
     actionRect: "le tracé d’un rectangle",
     actionTextNote: "l’ajout d’une note",
@@ -550,6 +545,16 @@ const fr = {
   bookmarks: {
     title: "Signets",
     untitled: "Signet sans titre",
+  },
+  sidebar: {
+    show: "Afficher la barre latérale",
+    hide: "Masquer la barre latérale",
+    panels: "Contenu de la barre latérale",
+    bookmarks: "Signets",
+    thumbnails: "Pages",
+    noBookmarks: "Ce document ne contient aucun signet",
+    noDocument: "Ouvrez un PDF pour voir ici ses pages et ses signets.",
+    thumbnailLabel: "Aller à la page {{pageNumber}}",
   },
   about: {
     title: "TFolio",

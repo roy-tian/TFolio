@@ -96,17 +96,21 @@ describe("TFolio notices", () => {
 
     await $("[data-slot='pdf-search-trigger']").click()
     await $("[data-slot='pdf-search']").waitForDisplayed()
+    const barBottom = await browser.execute(
+      () =>
+        document
+          .querySelector("[data-slot='pdf-search']")!
+          .getBoundingClientRect().bottom,
+    )
 
-    // The bar spans 88–128px, and the corner's own anchor is 100px, so the
-    // stack has to step down or it lands across the field being typed in.
+    // The corner's own anchor lies within the bar's band, so the stack has to
+    // step down or it lands across the field being typed in.
     await browser.waitUntil(
-      async () => Number.parseFloat(await cornerTop()) > 128,
+      async () => Number.parseFloat(await cornerTop()) > barBottom,
       { timeout: 5_000, timeoutMsg: "the corner never stepped below the find bar" },
     )
-    const open = await cornerTop()
 
-    expect(Number.parseFloat(closed)).toBe(100)
-    expect(Number.parseFloat(open)).toBeGreaterThan(128)
+    expect(Number.parseFloat(closed)).toBeLessThan(barBottom)
   })
 
   it("keeps the corner above a modal and out of its aria-hidden sweep", async () => {

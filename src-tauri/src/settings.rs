@@ -36,6 +36,10 @@ struct UiPreferences {
     language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     view_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sidebar: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sidebar_panel: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -197,6 +201,8 @@ mod tests {
                 theme: Some("dark".into()),
                 language: Some("en".into()),
                 view_mode: None,
+                sidebar: Some("hidden".into()),
+                sidebar_panel: Some("bookmarks".into()),
             }),
             annotate: Some(AnnotatePreferences {
                 highlight_color: Some("#ffd54a".into()),
@@ -237,6 +243,7 @@ mod tests {
         assert!(rendered.contains("[annotate.textNote]"));
         assert!(rendered.contains("[pageNumbers]"));
         assert!(rendered.contains("fontSize"));
+        assert!(rendered.contains("sidebarPanel"));
         assert!(!rendered.contains("[watermark]"));
     }
 

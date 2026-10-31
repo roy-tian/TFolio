@@ -6,6 +6,7 @@ import {
   refreshApp,
   seedSettings,
   wrappedSearchPdf,
+  pressRedo,
 } from "./helpers"
 
 describe("TFolio PDF search", () => {
@@ -20,36 +21,20 @@ describe("TFolio PDF search", () => {
     const toolbarOrder = await browser.execute(() =>
       Array.from(
         document.querySelectorAll(
-          "[data-document-session][data-active='true'] header button[aria-label]",
+          "[data-document-session][data-active='true'] [data-slot='toolbar'] button[aria-label]",
         ),
       ).map((button) => button.getAttribute("aria-label")),
     )
     expect(toolbarOrder).toEqual(
-      expect.arrayContaining([
-        "Menu",
-        "Show bookmarks",
-        "Save",
-        "Print…",
-        "Search this PDF",
-        "Undo",
-      ]),
+      expect.arrayContaining(["Undo", "Search this PDF", "Save"]),
     )
-    expect(toolbarOrder.indexOf("Menu")).toBeLessThan(
-      toolbarOrder.indexOf("Show bookmarks"),
-    )
-    // Search closes the group that saves and prints, and the whole group comes
-    // before the history keys, which lead the tools at the other end.
-    expect(toolbarOrder.indexOf("Show bookmarks")).toBeLessThan(
-      toolbarOrder.indexOf("Save"),
-    )
-    expect(toolbarOrder.indexOf("Save")).toBeLessThan(
-      toolbarOrder.indexOf("Print…"),
-    )
-    expect(toolbarOrder.indexOf("Print…")).toBeLessThan(
+    // The history key leads the editing tools; search and the file's own
+    // actions close the bar.
+    expect(toolbarOrder.indexOf("Undo")).toBeLessThan(
       toolbarOrder.indexOf("Search this PDF"),
     )
     expect(toolbarOrder.indexOf("Search this PDF")).toBeLessThan(
-      toolbarOrder.indexOf("Undo"),
+      toolbarOrder.indexOf("Save"),
     )
 
     await $("button[aria-label='Search this PDF']").click()
@@ -64,7 +49,9 @@ describe("TFolio PDF search", () => {
       const bar = document
         .querySelector<HTMLElement>("[data-slot='pdf-search']")!
         .getBoundingClientRect()
-      const title = document.querySelector("header")!.getBoundingClientRect()
+      const title = document
+        .querySelector("[data-document-session][data-active='true'] [data-slot='toolbar']")!
+        .getBoundingClientRect()
       const tabs = document
         .querySelector("[role='tablist']")!
         .parentElement!.getBoundingClientRect()
@@ -290,7 +277,7 @@ describe("TFolio PDF search", () => {
     await expectGridResults(1)
     await $("button[aria-label^='Undo']").click()
     await expectGridResults(2)
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await expectGridResults(1)
 
     // Refreshing the only match must not make an explicit Next a no-op.

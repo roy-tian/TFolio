@@ -28,6 +28,7 @@ export const shortcuts = {
   open: { key: "o" },
   pageNumbers: { alt: true, key: "p" },
   print: { key: "p" },
+  redo: { key: "z", shift: true },
   save: { key: "s" },
   saveAll: { alt: true, key: "s" },
   saveAs: { key: "s", shift: true },

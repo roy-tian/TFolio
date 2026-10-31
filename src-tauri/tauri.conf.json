@@ -15,9 +15,9 @@
       {
         "label": "main",
         "title": "TFolio",
-        "width": 1100,
+        "width": 1280,
         "height": 760,
-        "minWidth": 1080,
+        "minWidth": 960,
         "minHeight": 560,
         "center": true,
         "resizable": true,

@@ -180,9 +180,6 @@ const de = {
   },
   toolbar: {
     saveAsMenu: "Weitere Speicheroptionen",
-    hideBookmarks: "Lesezeichen ausblenden",
-    noBookmarks: "Dieses Dokument hat keine Lesezeichen",
-    showBookmarks: "Lesezeichen einblenden",
     viewMode: "Ansicht",
     viewModeSingle: "Einzelseite",
     viewModeBook: "Buchansicht",
@@ -224,11 +221,9 @@ const de = {
   },
   annotate: {
     undo: "Rückgängig",
-    redo: "Wiederholen",
     // German UIs name the step after a colon ("Rückgängig: Eingabe"), so every
     // action below is a capitalized infinitive phrase that also stands alone.
     undoAction: "Rückgängig: {{action}}",
-    redoAction: "Wiederholen: {{action}}",
     actionHighlight: "Hervorheben",
     actionRect: "Rechteck zeichnen",
     actionTextNote: "Notiz hinzufügen",
@@ -550,6 +545,16 @@ const de = {
   bookmarks: {
     title: "Lesezeichen",
     untitled: "Unbenanntes Lesezeichen",
+  },
+  sidebar: {
+    show: "Seitenleiste einblenden",
+    hide: "Seitenleiste ausblenden",
+    panels: "Inhalt der Seitenleiste",
+    bookmarks: "Lesezeichen",
+    thumbnails: "Seiten",
+    noBookmarks: "Dieses Dokument hat keine Lesezeichen",
+    noDocument: "Öffnen Sie eine PDF, um hier ihre Seiten und Lesezeichen zu sehen.",
+    thumbnailLabel: "Zu Seite {{pageNumber}}",
   },
   about: {
     title: "TFolio",

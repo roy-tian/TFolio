@@ -11,15 +11,17 @@ import {
 import { invoke } from "@tauri-apps/api/core"
 import { useTranslation } from "react-i18next"
 
-import type { AppMenuActions } from "@/components/AppMenu"
+import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
+import { AppSidebar } from "@/components/AppSidebar"
+import { BookmarkList } from "@/components/BookmarkList"
 import { CompressExportDialog } from "@/components/CompressExportDialog"
 import { ImageExportDialog } from "@/components/ImageExportDialog"
 import { SplitPdfDialog } from "@/components/SplitPdfDialog"
-import { BookmarkSidebar } from "@/components/BookmarkSidebar"
 import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SessionDialogs } from "@/components/SessionDialogs"
 import { SessionHeader } from "@/components/SessionHeader"
+import { SidebarThumbnails } from "@/components/SidebarThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import type { AnnotationTool } from "@/components/AnnotationToolbar"
@@ -40,6 +42,7 @@ import { useTextDragSelection } from "@/hooks/useTextDragSelection"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useRecentView } from "@/hooks/useRecentView"
 import { useRectTool } from "@/hooks/useRectTool"
+import { useSidebar } from "@/hooks/useSidebar"
 import { useTextNoteTool } from "@/hooks/useTextNoteTool"
 import { useTextSelectAll } from "@/hooks/useTextSelectAll"
 import { useThumbnailPageOps } from "@/hooks/useThumbnailPageOps"
@@ -102,6 +105,7 @@ import type {
   PdfProgress,
 } from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
+import { shownSidebarPanel } from "@/lib/sidebar"
 import {
   defaultViewMode,
   effectiveViewMode,
@@ -167,6 +171,7 @@ export type DocumentSessionHandle = {
   saveForClose: () => Promise<boolean>
   /** The Stop on a layer undo or redo's notice. */
   stopLayerWork: () => void
+  redo: () => void
   selectAll: () => void
   undo: () => void
   /** True only over this session's thumbnail grid, where a dropped PDF is
@@ -281,7 +286,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [pageRotations, setPageRotations] = useState<number[]>(
       () => movedSeed?.pageRotations ?? openedDocument.pages.map(() => 0),
     )
-    const [bookmarksOpen, setBookmarksOpen] = useState(false)
     const [imageExportOpen, setImageExportOpen] = useState(false)
     const [splitOpen, setSplitOpen] = useState(false)
     const [compressOpen, setCompressOpen] = useState(false)
@@ -363,9 +367,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // rather than disabled: disabled is what an unopened document means.
     const zoomApplies = viewMode === "single" || viewMode === "book"
     // An edit replaces the outline wholesale. Deriving what is shown, rather
-    // than closing the sidebar, lets the undo that restores bookmarks restore it.
+    // than switching the sidebar, lets the undo that restores bookmarks restore it.
     const bookmarksApply = pdfDocument.outline.length > 0
-    const bookmarksShown = bookmarksOpen && bookmarksApply
+    const sidebar = useSidebar()
+    const sidebarPanel = shownSidebarPanel(sidebar.panel, bookmarksApply)
 
     const scrollToPage = useCallback(
       (pageNumber: number, behavior: ScrollBehavior = "smooth") => {
@@ -394,7 +399,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       clientBoxRef,
       committedSizeRef,
       pendingScrollPageRef,
-      scrollbarWidth,
       viewerHeight,
       viewerWidth,
     } = viewport
@@ -1065,6 +1069,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       void annotations.undo()
     }, [annotations, cancelTextNote])
 
+    const redoStep = useCallback(() => {
+      // Only a page-moving step would strand the uncommitted note on a
+      // shifted page; the target is the head of the queue's live history.
+      const target = annotations.historyNow().future.at(-1)?.command
+
+      if (target && movesPages(target)) {
+        cancelTextNote()
+      }
+
+      void annotations.redo()
+    }, [annotations, cancelTextNote])
+
     useCurrentPageTracker(
       viewerRef,
       active ? pdfDocument.id : undefined,
@@ -1480,6 +1496,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         openSearch: search.openSearch,
         openWatermark: openWatermarkDialog,
         print: () => void startPrint(),
+        redo: () => {
+          if (annotations.canRedo) {
+            redoStep()
+          }
+        },
         rememberViewNow,
         save: saveDocument,
         saveAs: () => void exportPdf(),
@@ -1499,6 +1520,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         },
       }),
       [
+        annotations.canRedo,
         annotations.canUndo,
         clearNoteFontOffer,
         exportPdf,
@@ -1509,6 +1531,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         hasUnsavedWorkNow,
         openPageNumbersDialog,
         openWatermarkDialog,
+        redoStep,
         rememberViewNow,
         saveDocument,
         saveForClose,
@@ -1536,9 +1559,29 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       scrollToPage(pageNumber)
     }
 
-    const bookmarksLabel = bookmarksShown
-      ? t("toolbar.hideBookmarks")
-      : t("toolbar.showBookmarks")
+    const navigateFromSidebar = useCallback(
+      (pageNumber: number) => {
+        scrollToPage(pageNumber)
+        sidebar.dismiss()
+      },
+      [scrollToPage, sidebar],
+    )
+
+    // Only the tab on show has one: in the sidebar, or the toolbar while the
+    // sidebar is not docked.
+    const appMenu = active ? (
+      <AppMenu
+        {...menu}
+        canSave={canSave}
+        onCompress={() => setCompressOpen(true)}
+        onExportImages={() => setImageExportOpen(true)}
+        onPrint={print.preparing ? undefined : () => void startPrint()}
+        onSave={saveDocument}
+        onSaveAs={() => void exportPdf()}
+        onSplit={() => setSplitOpen(true)}
+        saveHint={saveHint}
+      />
+    ) : null
 
     // The offer is a condition rather than an event, so it is put back whenever
     // its button changes: raising a standing notice again only updates it.
@@ -1566,17 +1609,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         <SessionHeader
           active={active}
           annotations={annotations}
-          bookmarksApply={bookmarksApply}
-          bookmarksLabel={bookmarksLabel}
-          bookmarksOpen={bookmarksShown}
+          appMenu={appMenu}
           bookApplies={bookApplies}
           canSave={canSave}
           document={pdfDocument}
           drawingApplies={drawingApplies}
           macOS={macOS}
-          menu={menu}
-          onBookmarksOpenChange={setBookmarksOpen}
           onChangeViewMode={changeViewMode}
+          onCompress={() => setCompressOpen(true)}
+          onExportImages={() => setImageExportOpen(true)}
+          onMergeWizard={menu.onMergeWizard}
           onRotate={() => {
             if (viewMode === "thumbnail") {
               rotateThumbnailPages()
@@ -1584,32 +1626,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               setPageRotations(rotationsAfterRotate)
             }
           }}
-          onRedo={() => {
-            // Only a page-moving step would strand the uncommitted note on a
-            // shifted page; the target is the head of the queue's live history.
-            const target = annotations.historyNow().future.at(-1)?.command
-            if (target && movesPages(target)) {
-              cancelTextNote()
-            }
-            void annotations.redo()
-          }}
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
-          onExportImages={() => setImageExportOpen(true)}
-          onSplit={() => setSplitOpen(true)}
-          onCompress={() => setCompressOpen(true)}
           onSearchClose={search.closeSearch}
           onSearchOpen={search.openSearch}
+          onSplit={() => setSplitOpen(true)}
           onToolChange={setActiveTool}
           onUndo={undoStep}
           page={{
             current: currentPage,
             onSubmit: submitPageNumber,
           }}
-          print={print}
-          saveHint={saveHint}
           saveLabel={saveLabel}
-          scrollbarWidth={scrollbarWidth}
           searchOpen={search.searchOpen}
           tool={{
             activeTool,
@@ -1625,6 +1653,31 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           zoom={zoom}
           zoomApplies={zoomApplies}
         />
+
+        <AppSidebar
+          bookmarksApply={bookmarksApply}
+          macOS={macOS}
+          menu={appMenu}
+          panel={sidebarPanel}
+        >
+          {sidebarPanel === "bookmarks" ? (
+            <BookmarkList
+              items={pdfDocument.outline}
+              onNavigate={navigateFromSidebar}
+            />
+          ) : (
+            <SidebarThumbnails
+              active={active}
+              currentPage={currentPage}
+              documentId={pdfDocument.id}
+              onNavigate={navigateFromSidebar}
+              pages={pdfDocument.pages}
+              renderEpochs={annotations.renderEpochs}
+              rotations={pageRotations}
+              thumbnailKeys={thumbnailIdentity.keys}
+            />
+          )}
+        </AppSidebar>
 
         {/* Mounted while their tab is away too, only hidden: an export still
             running keeps its progress, its failure, and its busy guard. */}
@@ -1675,14 +1728,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           </div>
         ) : null}
 
-        <div className="flex h-full pt-[calc(3rem+var(--document-tabs-height))]">
-          {bookmarksShown ? (
-            <BookmarkSidebar
-              items={pdfDocument.outline}
-              onNavigate={scrollToPage}
-            />
-          ) : null}
-
+        <div className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pl-(--sidebar-inset)">
           {/* The viewer's scroll box cannot host the readout: anything absolute
               inside it is placed against scrolled content and would drift. */}
           <div className="relative min-w-0 flex-1">

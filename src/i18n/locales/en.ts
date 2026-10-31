@@ -178,9 +178,6 @@ const en = {
   },
   toolbar: {
     saveAsMenu: "More save options",
-    hideBookmarks: "Hide bookmarks",
-    noBookmarks: "This document has no bookmarks",
-    showBookmarks: "Show bookmarks",
     viewMode: "View mode",
     viewModeSingle: "Single page",
     viewModeBook: "Book",
@@ -222,11 +219,9 @@ const en = {
   },
   annotate: {
     undo: "Undo",
-    redo: "Redo",
     /** Named with the step they would take, so a tooltip says what is coming
         back rather than only that something is. */
     undoAction: "Undo {{action}}",
-    redoAction: "Redo {{action}}",
     actionHighlight: "highlighting",
     actionRect: "drawing a rectangle",
     actionTextNote: "adding a note",
@@ -550,6 +545,16 @@ const en = {
   bookmarks: {
     title: "Bookmarks",
     untitled: "Untitled bookmark",
+  },
+  sidebar: {
+    show: "Show sidebar",
+    hide: "Hide sidebar",
+    panels: "Sidebar contents",
+    bookmarks: "Bookmarks",
+    thumbnails: "Pages",
+    noBookmarks: "This document has no bookmarks",
+    noDocument: "Open a PDF to see its pages and bookmarks here.",
+    thumbnailLabel: "Go to page {{pageNumber}}",
   },
   about: {
     title: "TFolio",

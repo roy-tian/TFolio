@@ -69,6 +69,7 @@ export function ViewModeToggle({
               className={cn(
                 toolbarSelectionBarClassName,
                 toolbarCenteredStripButtonClassName,
+                "h-7 min-w-7 group-data-[spacing=0]/toggle-group:px-1.5",
               )}
               disabled={option.value === "book" && !bookApplies}
               value={option.value}

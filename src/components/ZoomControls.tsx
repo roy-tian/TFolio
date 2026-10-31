@@ -58,7 +58,7 @@ export function ZoomControls({
           aria-label={zoomOutLabel}
           disabled={disabled || !canZoomOut}
           onClick={onZoomOut}
-          size="icon"
+          size="icon-sm"
           variant="outline"
         >
           <ZoomOut />
@@ -69,7 +69,7 @@ export function ZoomControls({
           aria-label={zoomInLabel}
           disabled={disabled || !canZoomIn}
           onClick={onZoomIn}
-          size="icon"
+          size="icon-sm"
           variant="outline"
         >
           <ZoomIn />
@@ -81,7 +81,7 @@ export function ZoomControls({
           className={fitActive ? "border-border dark:border-input" : undefined}
           disabled={disabled}
           onClick={onToggleFit}
-          size="icon"
+          size="icon-sm"
           // Not a Toggle and no aria-pressed: it cycles, naming the fit it moves
           // to. The border stays explicit — secondary would make it transparent.
           variant={fitActive ? "secondary" : "outline"}

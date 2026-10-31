@@ -492,6 +492,15 @@ export async function appMenuItem(action: string) {
   return item
 }
 
+/** The shown tab's sidebar: every tab mounts its own, the others hidden. */
+export const activeSidebar =
+  "[data-document-session][data-active='true'] [data-slot='app-sidebar']"
+
+/** Redo has no toolbar button: it is the keyboard's alone. */
+export async function pressRedo() {
+  await browser.keys(["Control", "Shift", "z"])
+}
+
 export async function clickAppMenuItem(action: string) {
   await (await appMenuItem(action)).click()
 }

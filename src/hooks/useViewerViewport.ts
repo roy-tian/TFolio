@@ -42,7 +42,6 @@ export function useViewerViewport({
 }: UseViewerViewportOptions) {
   const [viewerWidth, setViewerWidth] = useState(0)
   const [viewerHeight, setViewerHeight] = useState(0)
-  const [scrollbarWidth, setScrollbarWidth] = useState(0)
   // The mode the last commit actually laid out, so a switch can be told from a
   // re-render — the layout is what strands an offset, not the stored choice.
   const laidOutViewModeRef = useRef(viewMode)
@@ -97,7 +96,6 @@ export function useViewerViewport({
         return
       }
 
-      setScrollbarWidth(viewer.offsetWidth - viewer.clientWidth)
       const committed = committedSizeRef.current
 
       if (width === committed.width && height === committed.height) {
@@ -232,8 +230,8 @@ export function useViewerViewport({
     // The jump reads as a view swap rather than a scroll, so it lands instantly.
     scrollToPage(pendingPage, "auto")
 
-    // Leaving the grid closes the bookmark sidebar, widening the viewer after
-    // the seek was measured; hold the page until settled, so the last seek stands.
+    // The viewer may still be resizing after the seek was measured; hold the
+    // page until settled, so the last seek stands.
     if (viewerSizeCommitted(viewer, committedSizeRef.current)) {
       pendingScrollPageRef.current = null
     }
@@ -243,7 +241,6 @@ export function useViewerViewport({
     clientBoxRef,
     committedSizeRef,
     pendingScrollPageRef,
-    scrollbarWidth,
     viewerHeight,
     viewerWidth,
   }

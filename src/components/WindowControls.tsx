@@ -54,7 +54,7 @@ export function WindowControls() {
 
   return (
     <div
-      className="-my-px -mr-2 flex h-12 items-stretch"
+      className="-my-px -mr-2 flex h-(--toolbar-height) items-stretch"
       data-slot="window-controls"
     >
       <ToolbarTooltip label={t("window.minimize")}>

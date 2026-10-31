@@ -247,7 +247,7 @@ export function DocumentTabs({
     // The whole strip is the workspace's, which `data-tab-strip` is what a page
     // drag hit-tests for: a release on it lands nothing rather than reordering.
     <div
-      className="fixed inset-x-0 top-12 z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted/70 px-2 backdrop-blur"
+      className="fixed top-(--toolbar-height) right-0 left-(--sidebar-inset) z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted px-2"
       data-tab-strip
       ref={stripRef}
     >
@@ -268,7 +268,7 @@ export function DocumentTabs({
             tabClassName,
             "shrink-0 gap-1.5 px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
             homeSelected
-              ? "bg-background/70 text-foreground"
+              ? "bg-background text-foreground"
               : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
           )}
           id={tabElementId(HOME_TAB_ID)}
@@ -309,7 +309,7 @@ export function DocumentTabs({
                           tabClassName,
                           "mb-[-1px] w-44 min-w-28 max-w-56",
                           selected
-                            ? "bg-background/70 text-foreground"
+                            ? "bg-background text-foreground"
                             : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
                           divided &&
                             "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",

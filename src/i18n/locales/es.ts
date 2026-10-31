@@ -180,9 +180,6 @@ const es = {
   },
   toolbar: {
     saveAsMenu: "Más opciones de guardado",
-    hideBookmarks: "Ocultar marcadores",
-    noBookmarks: "Este documento no tiene marcadores",
-    showBookmarks: "Mostrar marcadores",
     viewMode: "Modo de vista",
     viewModeSingle: "Una página",
     viewModeBook: "Libro",
@@ -224,11 +221,9 @@ const es = {
   },
   annotate: {
     undo: "Deshacer",
-    redo: "Rehacer",
     // The action keys are infinitive phrases; the colon keeps "Deshacer"/"Rehacer"
     // from stacking two bare infinitives.
     undoAction: "Deshacer: {{action}}",
-    redoAction: "Rehacer: {{action}}",
     actionHighlight: "resaltar texto",
     actionRect: "dibujar un rectángulo",
     actionTextNote: "añadir una nota",
@@ -549,6 +544,16 @@ const es = {
   bookmarks: {
     title: "Marcadores",
     untitled: "Marcador sin título",
+  },
+  sidebar: {
+    show: "Mostrar barra lateral",
+    hide: "Ocultar barra lateral",
+    panels: "Contenido de la barra lateral",
+    bookmarks: "Marcadores",
+    thumbnails: "Páginas",
+    noBookmarks: "Este documento no tiene marcadores",
+    noDocument: "Abre un PDF para ver aquí sus páginas y marcadores.",
+    thumbnailLabel: "Ir a la página {{pageNumber}}",
   },
   about: {
     title: "TFolio",

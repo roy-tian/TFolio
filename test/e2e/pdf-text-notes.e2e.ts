@@ -14,6 +14,7 @@ import {
   renderedPage,
   seedSettings,
   writeScratchPdf,
+  pressRedo,
 } from "./helpers"
 
 async function clickOnPage(atX = 0.3, atY = 0.3) {
@@ -95,7 +96,7 @@ describe("TFolio text notes", () => {
 
     // Exact, so a redo that ran the command twice would fail rather than pass
     // for carrying "more ink than clean".
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await browser.waitUntil(async () => (await pageInk()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the note exactly",

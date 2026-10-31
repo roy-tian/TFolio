@@ -178,9 +178,6 @@ const zhTW = {
   },
   toolbar: {
     saveAsMenu: "更多儲存選項",
-    hideBookmarks: "隱藏書籤",
-    noBookmarks: "此文件沒有書籤",
-    showBookmarks: "顯示書籤",
     viewMode: "檢視模式",
     viewModeSingle: "單頁檢視",
     viewModeBook: "書本檢視",
@@ -222,9 +219,7 @@ const zhTW = {
   },
   annotate: {
     undo: "復原",
-    redo: "重做",
     undoAction: "復原{{action}}",
-    redoAction: "重做{{action}}",
     actionHighlight: "醒目提示",
     actionRect: "繪製矩形",
     actionTextNote: "新增註解",
@@ -546,6 +541,16 @@ const zhTW = {
   bookmarks: {
     title: "書籤",
     untitled: "未命名書籤",
+  },
+  sidebar: {
+    show: "顯示側欄",
+    hide: "隱藏側欄",
+    panels: "側欄內容",
+    bookmarks: "書籤",
+    thumbnails: "縮圖",
+    noBookmarks: "此文件沒有書籤",
+    noDocument: "開啟 PDF 後，這裡會顯示它的頁面和書籤。",
+    thumbnailLabel: "前往第 {{pageNumber}} 頁",
   },
   about: {
     title: "TFolio",

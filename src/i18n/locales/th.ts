@@ -180,9 +180,6 @@ const th = {
   },
   toolbar: {
     saveAsMenu: "ตัวเลือกการบันทึกเพิ่มเติม",
-    hideBookmarks: "ซ่อนบุ๊กมาร์ก",
-    noBookmarks: "เอกสารนี้ไม่มีบุ๊กมาร์ก",
-    showBookmarks: "แสดงบุ๊กมาร์ก",
     viewMode: "โหมดมุมมอง",
     viewModeSingle: "หน้าเดียว",
     viewModeBook: "หนังสือ",
@@ -224,9 +221,7 @@ const th = {
   },
   annotate: {
     undo: "เลิกทำ",
-    redo: "ทำซ้ำ",
     undoAction: "เลิกทำ {{action}}",
-    redoAction: "ทำซ้ำ {{action}}",
     actionHighlight: "การไฮไลต์",
     actionRect: "การวาดสี่เหลี่ยม",
     actionTextNote: "การเพิ่มโน้ต",
@@ -548,6 +543,16 @@ const th = {
   bookmarks: {
     title: "บุ๊กมาร์ก",
     untitled: "บุ๊กมาร์กไม่มีชื่อ",
+  },
+  sidebar: {
+    show: "แสดงแถบด้านข้าง",
+    hide: "ซ่อนแถบด้านข้าง",
+    panels: "เนื้อหาแถบด้านข้าง",
+    bookmarks: "บุ๊กมาร์ก",
+    thumbnails: "หน้า",
+    noBookmarks: "เอกสารนี้ไม่มีบุ๊กมาร์ก",
+    noDocument: "เปิด PDF เพื่อดูหน้าและบุ๊กมาร์กที่นี่",
+    thumbnailLabel: "ไปที่หน้า {{pageNumber}}",
   },
   about: {
     title: "TFolio",

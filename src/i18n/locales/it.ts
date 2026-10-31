@@ -180,9 +180,6 @@ const it = {
   },
   toolbar: {
     saveAsMenu: "Altre opzioni di salvataggio",
-    hideBookmarks: "Nascondi segnalibri",
-    noBookmarks: "Questo documento non ha segnalibri",
-    showBookmarks: "Mostra segnalibri",
     viewMode: "Modalità di visualizzazione",
     viewModeSingle: "Pagina singola",
     viewModeBook: "Libro",
@@ -224,10 +221,8 @@ const it = {
   },
   annotate: {
     undo: "Annulla",
-    redo: "Ripeti",
     // Noun phrases without article, as in macOS/Office “Annulla digitazione”.
     undoAction: "Annulla {{action}}",
-    redoAction: "Ripeti {{action}}",
     actionHighlight: "evidenziazione",
     actionRect: "disegno rettangolo",
     actionTextNote: "aggiunta nota",
@@ -549,6 +544,16 @@ const it = {
   bookmarks: {
     title: "Segnalibri",
     untitled: "Segnalibro senza titolo",
+  },
+  sidebar: {
+    show: "Mostra barra laterale",
+    hide: "Nascondi barra laterale",
+    panels: "Contenuto della barra laterale",
+    bookmarks: "Segnalibri",
+    thumbnails: "Pagine",
+    noBookmarks: "Questo documento non ha segnalibri",
+    noDocument: "Apri un PDF per vederne qui le pagine e i segnalibri.",
+    thumbnailLabel: "Vai alla pagina {{pageNumber}}",
   },
   about: {
     title: "TFolio",

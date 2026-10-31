@@ -7,6 +7,7 @@ import { AppWindow, FileUp } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
+import { AppSidebar } from "@/components/AppSidebar"
 import {
   DocumentSession,
   type DocumentSessionHandle,
@@ -17,6 +18,11 @@ import { HomePanel } from "@/components/HomePanel"
 import { MergeWizard } from "@/components/MergeWizard"
 import { MergeWizardButton } from "@/components/MergeWizardButton"
 import { NoticeCenter } from "@/components/NoticeCenter"
+import {
+  SettingsDialog,
+  type SettingsSection,
+} from "@/components/SettingsDialog"
+import { ToolbarFrame } from "@/components/SessionHeader"
 import { UpdateInstallDialog } from "@/components/UpdateInstallDialog"
 import { WindowControls } from "@/components/WindowControls"
 import {
@@ -37,6 +43,7 @@ import {
   type MergeWizardResult,
 } from "@/hooks/useMergeWizard"
 import { usePageHandoff } from "@/hooks/usePageHandoff"
+import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import {
@@ -91,7 +98,6 @@ import {
 } from "@/lib/tabMove"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { unsavedWorkElsewhere } from "@/lib/unsavedWork"
-import { cn } from "@/lib/utils"
 import type { ViewMode } from "@/lib/viewMode"
 import type { WatermarkConfig } from "@/lib/watermark"
 
@@ -203,6 +209,7 @@ function focusWorkspaceTarget(activeId: TabId, force = false) {
 export default function App() {
   const { t } = useTranslation()
   const macOS = isMacOS()
+  const sidebar = useSidebarState(macOS)
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeId, setActiveId] = useState<TabId>(HOME_TAB_ID)
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])
@@ -1314,6 +1321,16 @@ export default function App() {
 
   const canSaveAll = tabs.some((tab) => tab.savable)
 
+  // The window's one settings dialog: the menu that opens it moves between the
+  // sidebar and the toolbar as the window narrows, and must not take it along.
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("appearance")
+  const showSettings = useCallback((section: SettingsSection) => {
+    setSettingsSection(section)
+    setSettingsOpen(true)
+  }, [])
+
   const menuActions: AppMenuActions = useMemo(
     () => ({
       canCloseAll: tabs.length > 0,
@@ -1327,6 +1344,7 @@ export default function App() {
       onOpenRecent: (path) => void openPaths([path]),
       onRefreshRecent: refreshRecentFiles,
       onSaveAll: saveAllDocuments,
+      onShowSettings: showSettings,
       recentFiles,
     }),
     [
@@ -1341,6 +1359,7 @@ export default function App() {
       requestCloseAll,
       requestQuit,
       saveAllDocuments,
+      showSettings,
       tabs.length,
     ],
   )
@@ -1524,6 +1543,11 @@ export default function App() {
         fieldFirst: true,
         run: () => activeSession()?.undo(),
         shortcut: shortcuts.undo,
+      },
+      {
+        fieldFirst: true,
+        run: () => activeSession()?.redo(),
+        shortcut: shortcuts.redo,
       },
     ]
 
@@ -1978,26 +2002,35 @@ export default function App() {
   }, [homeActive, refreshRecentFiles])
 
   const workspace = (
-    <div className="app-surface h-svh overflow-hidden">
+    <div className="app-surface h-svh overflow-hidden" data-sidebar={sidebar.mode}>
       {homeActive ? (
         // The document tools — bookmarks, view mode — have no document to act
-        // on here, so the home header carries only what still works.
-        <header
-          className="fixed inset-x-0 top-0 z-50 flex h-12 items-center justify-between border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
-          data-tauri-drag-region="deep"
-        >
-          <div className={cn("flex items-center", macOS && "pl-[72px]")}>
-            <AppMenu {...menuActions} />
-          </div>
-          <div className="flex items-center gap-2">
-            {/* The wizard is the one home tool that needs no document, so it
-                keeps the look it has in a document toolbar. */}
-            <ButtonGroup>
-              <MergeWizardButton onClick={mergeWizard.openWizard} />
-            </ButtonGroup>
-            {macOS ? null : <WindowControls />}
-          </div>
-        </header>
+        // on here, so the home toolbar carries only what still works.
+        <>
+          <AppSidebar
+            bookmarksApply={false}
+            macOS={macOS}
+            menu={<AppMenu {...menuActions} />}
+          >
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+              {t("sidebar.noDocument")}
+            </p>
+          </AppSidebar>
+          <ToolbarFrame
+            appMenu={<AppMenu {...menuActions} />}
+            end={
+              <>
+                {/* The wizard is the one home tool that needs no document, so
+                    it keeps the look it has in a document toolbar. */}
+                <ButtonGroup>
+                  <MergeWizardButton onClick={mergeWizard.openWizard} />
+                </ButtonGroup>
+                {macOS ? null : <WindowControls />}
+              </>
+            }
+            macOS={macOS}
+          />
+        </>
       ) : null}
 
       <HomePanel
@@ -2083,7 +2116,7 @@ export default function App() {
 
       {isDragging && !mergeWizard.open ? (
         <div
-          className="pointer-events-none fixed inset-3 top-24 z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm"
+          className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] right-3 bottom-3 left-[calc(var(--sidebar-inset)+0.75rem)] z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm"
           data-testid="workspace-file-drop"
         >
           <div className="flex flex-col items-center text-center">
@@ -2114,6 +2147,12 @@ export default function App() {
       />
 
       <MergeWizard draggingFiles={isDragging} wizard={mergeWizard} />
+      <SettingsDialog
+        onOpenChange={setSettingsOpen}
+        onSectionChange={setSettingsSection}
+        open={settingsOpen}
+        section={settingsSection}
+      />
 
       <AlertDialog
         onOpenChange={(open) => {
@@ -2171,7 +2210,7 @@ export default function App() {
 
   return (
     <AppUpdateContext.Provider value={appUpdate}>
-      {workspace}
+      <SidebarContext.Provider value={sidebar}>{workspace}</SidebarContext.Provider>
     </AppUpdateContext.Provider>
   )
 }

@@ -2,6 +2,7 @@ import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import {
+  activeSidebar,
   clickAppMenuItem,
   dropZoneButton,
   minimalPdf,
@@ -218,13 +219,11 @@ describe("TFolio PDF viewer", () => {
     await browser.keys("Enter")
     await expect(pageInput).toHaveValue("1")
 
-    const bookmarksToggle = $("button[aria-label='Show bookmarks']")
-    await expect(bookmarksToggle).toBeDisabled()
-    expect(await tooltipOn("button[aria-label='Show bookmarks']")).toBe(
-      "This document has no bookmarks",
-    )
+    const bookmarksPanel = `${activeSidebar} button[aria-label='Bookmarks']`
+    await expect($(bookmarksPanel)).toBeDisabled()
+    expect(await tooltipOn(bookmarksPanel)).toBe("This document has no bookmarks")
     await $("button[aria-label='Thumbnails']").click()
-    await expect(bookmarksToggle).toBeDisabled()
+    await expect($(bookmarksPanel)).toBeDisabled()
     await $("button[aria-label='Single page']").click()
 
     await clickAppMenuItem("settings")
@@ -326,20 +325,32 @@ describe("TFolio PDF viewer", () => {
     await $("[data-page-number='1']").waitForDisplayed()
 
     const toggle = (label: string) => $(`button[aria-label='${label}']`)
-    const bookmarks = $("nav[aria-label='Bookmarks']")
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    const pageInput = $("input[aria-label='Page number']")
 
-    await toggle("Show bookmarks").click()
+    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
     await expect(bookmarks).toHaveText("Second half")
     await bookmarks.$("button").click()
-    await expect($("input[aria-label='Page number']")).toHaveValue("2")
+    await expect(pageInput).toHaveValue("2")
 
     for (const mode of ["Book", "Thumbnails", "Single page"]) {
       await toggle(mode).click()
       await expect(bookmarks).toBeDisplayed()
     }
 
-    await toggle("Hide bookmarks").click()
+    // The other panel previews every page and follows the reader's — which
+    // the trip through the views may have moved, both pages being in sight.
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
     await expect(bookmarks).not.toBeExisting()
+    const preview = (page: string) =>
+      $(`${activeSidebar} button[aria-label='Go to page ${page}']`)
+    const current = await pageInput.getValue()
+    const other = current === "1" ? "2" : "1"
+
+    await expect(preview(current)).toHaveAttribute("aria-current", "page")
+    await preview(other).click()
+    await expect(pageInput).toHaveValue(other)
+    await expect(preview(other)).toHaveAttribute("aria-current", "page")
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

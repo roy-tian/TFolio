@@ -1,15 +1,15 @@
-import { Bookmark, ListTree } from "lucide-react"
+import { Bookmark } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
 import type { PdfOutlineItem } from "@/lib/pdf"
 
-type BookmarkSidebarProps = {
+type BookmarkListProps = {
   items: PdfOutlineItem[]
   onNavigate: (pageNumber: number) => void
 }
 
-type BookmarkItemsProps = BookmarkSidebarProps & {
+type BookmarkItemsProps = BookmarkListProps & {
   parentKey?: string
 }
 
@@ -53,26 +53,14 @@ function BookmarkItems({
   })
 }
 
-export function BookmarkSidebar({
-  items,
-  onNavigate,
-}: BookmarkSidebarProps) {
+export function BookmarkList({ items, onNavigate }: BookmarkListProps) {
   const { t } = useTranslation()
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b px-3 text-sm font-medium">
-        <ListTree className="size-4 text-muted-foreground" />
-        {t("bookmarks.title")}
-      </div>
-      <nav className="min-h-0 flex-1 overflow-auto p-2" aria-label={t("bookmarks.title")}>
-        <ul>
-          <BookmarkItems
-            items={items}
-            onNavigate={onNavigate}
-          />
-        </ul>
-      </nav>
-    </aside>
+    <nav className="h-full overflow-auto overscroll-contain p-2" aria-label={t("bookmarks.title")}>
+      <ul>
+        <BookmarkItems items={items} onNavigate={onNavigate} />
+      </ul>
+    </nav>
   )
 }

@@ -21,7 +21,7 @@ export function MergeWizardButton({ onClick }: MergeWizardButtonProps) {
         className="border-input"
         data-slot="merge-wizard-button"
         onClick={onClick}
-        size="icon"
+        size="icon-sm"
         variant="ghost"
       >
         <WandSparkles />

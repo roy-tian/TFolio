@@ -95,7 +95,7 @@ export function AnnotationToolbar({
                   aria-label={highlightLabel}
                   className={cn(
                     toolbarInkBarClassName,
-                    "size-8 border-r-transparent p-0 peer/highlight",
+                    "size-7 min-w-7 border-r-transparent p-0 peer/highlight",
                   )}
                   disabled={disabled}
                   onPressedChange={(pressed) =>
@@ -119,7 +119,7 @@ export function AnnotationToolbar({
                           "peer-hover/highlight:before:opacity-100",
                         )}
                         disabled={disabled}
-                        size="icon"
+                        size="icon-sm"
                         variant="ghost"
                       />
                     }
@@ -157,7 +157,7 @@ export function AnnotationToolbar({
                     rectBarFromColour
                       ? toolbarInkBarClassName
                       : toolbarSelectionBarClassName,
-                    "size-8 border-r-transparent p-0 peer/rect",
+                    "size-7 min-w-7 border-r-transparent p-0 peer/rect",
                     toolbarCenteredStripButtonClassName,
                   )}
                   disabled={disabled}
@@ -186,7 +186,7 @@ export function AnnotationToolbar({
                           "peer-hover/rect:before:opacity-100",
                         )}
                         disabled={disabled}
-                        size="icon"
+                        size="icon-sm"
                         variant="ghost"
                       />
                     }
@@ -210,7 +210,7 @@ export function AnnotationToolbar({
                 aria-label={textNoteLabel}
                 className={cn(
                   toolbarInkBarClassName,
-                  "size-8 p-0",
+                  "size-7 min-w-7 p-0",
                   toolbarCenteredStripButtonClassName,
                 )}
                 disabled={disabled}
@@ -234,7 +234,7 @@ export function AnnotationToolbar({
                 aria-label={eraserLabel}
                 className={cn(
                   toolbarSelectionBarClassName,
-                  "size-8 p-0",
+                  "size-7 min-w-7 p-0",
                   toolbarCenteredStripButtonClassName,
                 )}
                 disabled={disabled}
@@ -258,7 +258,7 @@ export function AnnotationToolbar({
             className="border-input"
             disabled={disabled}
             onClick={onWatermark}
-            size="icon"
+            size="icon-sm"
             variant="ghost"
           >
             <Stamp />
@@ -274,7 +274,7 @@ export function AnnotationToolbar({
             className="border-input"
             disabled={disabled}
             onClick={onPageNumbers}
-            size="icon"
+            size="icon-sm"
             variant="ghost"
           >
             <FileScan />

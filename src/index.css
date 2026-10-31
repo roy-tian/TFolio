@@ -200,28 +200,34 @@ body {
 
 .app-surface {
   --document-tabs-height: 2.25rem;
+  --toolbar-height: 2.5rem;
   background-color: var(--background);
 }
 
-/* The PDF must paint behind the tab strip for its backdrop blur to sample it.
-   Padding scrolls away with the document; scroll-padding keeps seeks below it. */
-.pdf-scroll-viewport {
-  margin-top: calc(-1 * var(--document-tabs-height));
-  height: calc(100% + var(--document-tabs-height));
-  padding-top: var(--document-tabs-height);
-  scroll-padding-top: var(--document-tabs-height);
+/* The workspace root names where the sidebar stands; everything right of it
+   starts at the inset, which an overlay leaves at the window's edge. */
+[data-sidebar] {
+  --sidebar-width: 16rem;
+  --sidebar-inset: 0px;
 }
 
-/* A native scrollbar runs the box's full height, under the tabs too; only a
-   styled track can start below them. Styled bars never overlay: on overlay
-   platforms too, they take their width from the pages. */
+[data-sidebar="docked"] {
+  --sidebar-inset: var(--sidebar-width);
+}
+
+.app-sidebar {
+  background-color: var(--sidebar);
+}
+
+/* Styled bars never overlay: on overlay platforms too, they take their width
+   from the pages. */
+.pdf-scroll-viewport {
+  height: 100%;
+}
+
 .pdf-scroll-viewport::-webkit-scrollbar {
   width: 12px;
   height: 12px;
-}
-
-.pdf-scroll-viewport::-webkit-scrollbar-track:vertical {
-  margin-top: var(--document-tabs-height);
 }
 
 .pdf-scroll-viewport::-webkit-scrollbar-thumb {
@@ -244,8 +250,10 @@ body {
   background-color: var(--workspace-background);
 }
 
-/* Native materials sit beneath the WebView; every covering app surface must
-   let them through. Screen-only so printing keeps its white paper ground. */
+/* Native materials sit beneath the WebView and show only through the docked
+   sidebar: every other surface paints over them, an overlaid sidebar too, which
+   lies over pages rather than over the desktop. Screen-only so printing keeps
+   its white paper ground. */
 @media screen {
   .native-workspace,
   .native-workspace body,
@@ -253,12 +261,8 @@ body {
     background-color: transparent;
   }
 
-  .native-workspace .workspace-background {
-    background-color: rgb(228 228 231 / 20%);
-  }
-
-  .native-workspace.dark .workspace-background {
-    background-color: rgb(9 9 11 / 30%);
+  .native-workspace .app-sidebar[data-sidebar-mode="docked"] {
+    background-color: color-mix(in oklab, var(--sidebar) 45%, transparent);
   }
 }
 
@@ -420,9 +424,10 @@ body {
 }
 
 /* The corner shares the find bar's band and outranks it, so it steps below the
-   bar: `top-22` plus `h-10` is 8rem, and 0.5rem more is the gap after it. */
+   bar: its 0.25rem offset plus `h-10` is 2.75rem, and 0.5rem more is the gap
+   after it. */
 :root:has([data-slot="pdf-search"]) [data-slot="notice-center"] {
-  top: 8.5rem;
+  top: calc(var(--toolbar-height) + var(--document-tabs-height) + 3.25rem);
 }
 
 /* These all need `both`: the default fill would spring a leaving digit back

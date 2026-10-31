@@ -16,6 +16,7 @@ import {
   renderedPage,
   seedSettings,
   tooltipOn,
+  pressRedo,
 } from "./helpers"
 
 async function openWatermarkDialog() {
@@ -123,7 +124,7 @@ describe("TFolio document watermark", () => {
       timeoutMsg: "undo did not restore the clean page",
     })
 
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 30_000,
       timeoutMsg: "redo did not restore the same watermark",
@@ -157,7 +158,7 @@ describe("TFolio document watermark", () => {
       timeoutMsg: "undo did not restore the replaced watermark",
     })
 
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
       timeout: 20_000,
     })

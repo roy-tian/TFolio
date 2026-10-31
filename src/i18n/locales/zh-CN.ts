@@ -171,9 +171,6 @@ const zhCN = {
   },
   toolbar: {
     saveAsMenu: "更多保存方式",
-    hideBookmarks: "隐藏书签",
-    noBookmarks: "此文档没有书签",
-    showBookmarks: "显示书签",
     viewMode: "视图模式",
     viewModeSingle: "单页视图",
     viewModeBook: "书籍视图",
@@ -215,9 +212,7 @@ const zhCN = {
   },
   annotate: {
     undo: "撤销",
-    redo: "重做",
     undoAction: "撤销{{action}}",
-    redoAction: "重做{{action}}",
     actionHighlight: "高亮",
     actionRect: "绘制方框",
     actionTextNote: "添加注释",
@@ -529,6 +524,16 @@ const zhCN = {
   bookmarks: {
     title: "书签",
     untitled: "未命名书签",
+  },
+  sidebar: {
+    show: "显示侧栏",
+    hide: "隐藏侧栏",
+    panels: "侧栏内容",
+    bookmarks: "书签",
+    thumbnails: "缩略图",
+    noBookmarks: "此文档没有书签",
+    noDocument: "打开 PDF 后，这里会显示它的页面和书签。",
+    thumbnailLabel: "转到第 {{pageNumber}} 页",
   },
   about: {
     title: "TFolio",

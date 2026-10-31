@@ -9,6 +9,7 @@ import {
   refreshApp,
   seedSettings,
   textPdf,
+  pressRedo,
 } from "./helpers"
 
 describe("TFolio annotations", () => {
@@ -83,16 +84,15 @@ describe("TFolio annotations", () => {
 
     // Exact, because a redo that ran the command twice would stack two highlights
     // and still pass any "more ink than clean" bar.
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await browser.waitUntil(async () => (await pageInk()) === highlighted, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the highlight exactly",
     })
   })
 
-  it("leaves undo and redo alone until there is something to take back", async () => {
+  it("leaves undo alone until there is something to take back", async () => {
     await expect($("button[aria-label^='Undo']")).toBeDisabled()
-    await expect($("button[aria-label^='Redo']")).toBeDisabled()
   })
 
   // A selection outlives its drag, and committing on any release would mark that

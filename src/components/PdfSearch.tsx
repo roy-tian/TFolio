@@ -75,7 +75,7 @@ export function PdfSearch({
   return (
     <div
       aria-label={t("search.title")}
-      className="fixed top-22 right-4 z-50 flex h-10 w-88 max-w-[calc(100vw-2rem)] items-center gap-1 rounded-lg border bg-background p-1 shadow-lg"
+      className="fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.25rem)] right-4 z-50 flex h-10 w-88 max-w-[calc(100vw-2rem)] items-center gap-1 rounded-lg border bg-background p-1 shadow-lg"
       data-slot="pdf-search"
       role="search"
     >

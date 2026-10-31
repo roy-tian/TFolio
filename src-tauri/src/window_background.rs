@@ -50,10 +50,12 @@ fn apply_background(
         };
         window.set_theme(theme).map_err(|error| error.to_string())?;
 
+        // Only the docked sidebar lets it through; a dense tint keeps the
+        // desktop behind it faint.
         let tint = if dark {
-            (9, 9, 11, 230)
+            (9, 9, 11, 245)
         } else {
-            (244, 244, 245, 230)
+            (244, 244, 245, 245)
         };
         window_vibrancy::apply_acrylic(window, Some(tint)).map_err(|error| error.to_string())?;
     }

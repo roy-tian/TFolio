@@ -14,6 +14,10 @@ import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
 // renders at once. Keep the grid's window to what is visible.
 const THUMBNAIL_ROOT_MARGIN = "0px"
 
+// The sidebar's previews stand in view beside the pages: ranked as this far
+// off, they wait for the pages the reader is looking at rather than tie them.
+const SIDEBAR_PRIORITY_BIAS = 2000
+
 type PdfThumbnailProps = {
   /** Whether the keep-one-page rule forbids this delete — the sole page, or a
       selection this page belongs to that spans the whole document. */
@@ -40,6 +44,9 @@ type PdfThumbnailProps = {
   selectedCount: number
   /** Whether the delete button is mounted; the cell's own call, see `ThumbnailCell`. */
   showControls: boolean
+  /** The sidebar's previews sit beside the pages they preview, so they must
+      not answer to `data-page-number`, which finds the pages themselves. */
+  surface?: "grid" | "sidebar"
 }
 
 /** A preview that selects rather than reads — no text layer, so a grid stays
@@ -62,6 +69,7 @@ export function PdfThumbnail({
   rotation,
   selectedCount,
   showControls,
+  surface = "grid",
 }: PdfThumbnailProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLButtonElement>(null)
@@ -91,6 +99,7 @@ export function PdfThumbnail({
     pageHeight,
     pageNumber,
     pageWidth,
+    priorityBias: surface === "sidebar" ? SIDEBAR_PRIORITY_BIAS : 0,
     renderEpoch,
     retainBitmap,
     // The bitmap is drawn upright and a turn keeps the thumbnail's scale, so its
@@ -173,7 +182,14 @@ export function PdfThumbnail({
     paperSize.width / previewFootprint.width,
     paperSize.height / previewFootprint.height,
   )
-  const label = t("viewer.thumbnailLabel", { pageNumber })
+  const label =
+    surface === "sidebar"
+      ? t("sidebar.thumbnailLabel", { pageNumber })
+      : t("viewer.thumbnailLabel", { pageNumber })
+  const pageAttribute =
+    surface === "sidebar"
+      ? { "data-thumbnail-page": pageNumber }
+      : { "data-page-number": pageNumber }
 
   return (
     <div
@@ -188,9 +204,17 @@ export function PdfThumbnail({
           column, so the delete button keeps to the paper's corner. */}
       <div className="relative">
         {/* A page that could not be drawn says so instead: the cell is a white
-            card with a warning in it, and the reason is what a hover owes it. */}
+            card with a warning in it, and the reason is what a hover owes it.
+            Otherwise the sidebar's previews let their caption speak: hundreds
+            of tooltips there would slow every long document. */}
         <HintTooltip
-          label={renderFailed ? t("viewer.pageError", { pageNumber }) : label}
+          label={
+            renderFailed
+              ? t("viewer.pageError", { pageNumber })
+              : surface === "sidebar"
+                ? undefined
+                : label
+          }
         >
           <button
             aria-current={isCurrent ? "page" : undefined}
@@ -208,7 +232,7 @@ export function PdfThumbnail({
               isSelected &&
                 "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary focus-visible:ring-2 focus-visible:ring-primary dark:ring-offset-zinc-950",
             )}
-            data-page-number={pageNumber}
+            {...pageAttribute}
             data-rotation={rotation}
             onClick={(event) =>
               onSelect(pageNumber, {

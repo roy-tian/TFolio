@@ -15,6 +15,7 @@ import {
   stripedPdf,
   tooltipOn,
   tooltipOpen,
+  pressRedo,
 } from "./helpers"
 
 /** Only the active document's cells are laid out, and only it is what a gesture
@@ -549,7 +550,7 @@ describe("TFolio page editing", () => {
     await waitForThumb(2, second!)
     await waitForThumb(4, fourth!)
 
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await browser.waitUntil(async () => (await thumbCount()) === 3, {
       timeoutMsg: "the redo never deleted again",
     })
@@ -799,7 +800,7 @@ describe("TFolio page editing", () => {
       await waitForThumb(1, first!)
       await waitForThumb(2, second!)
 
-      await $("button[aria-label^='Redo']").click()
+      await pressRedo()
       await waitForThumb(1, second!)
       await waitForThumb(2, first!)
       await $("button[aria-label^='Undo']").click()

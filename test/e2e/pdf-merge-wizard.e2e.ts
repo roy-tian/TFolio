@@ -3,6 +3,7 @@ import "@wdio/tauri-service"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
 import {
+  activeSidebar,
   bandedPdf,
   clickAppMenuItem,
   dropZoneButton,
@@ -499,7 +500,7 @@ describe("merge wizard", () => {
     await expect($("[data-testid='merge-wizard-merge']")).toBeEnabled()
     await $("[data-testid='merge-wizard-merge']").click()
     await browser.waitUntil(async () => (await thumbCount()) === 3, { timeout: 30_000 })
-    await expect($("[aria-label='Show bookmarks']")).toBeDisabled()
+    await expect($(`${activeSidebar} button[aria-label='Bookmarks']`)).toBeDisabled()
     await $("button[aria-label='Page numbers']").click()
     await expect($("//button[normalize-space()='Remove page numbers']")).not.toExist()
   })
@@ -583,12 +584,14 @@ describe("merge wizard", () => {
 
     // The sidebar reads the document's real outline, so this is PDFium's own
     // account of what the merge wrote.
-    await $("[aria-label='Show bookmarks']").click()
+    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
 
-    const titles = await browser.execute(() =>
-      [...document.querySelectorAll("aside nav button")].map(
-        (button) => button.textContent?.trim() ?? "",
-      ),
+    const titles = await browser.execute(
+      (sidebar: string) =>
+        [...document.querySelectorAll(`${sidebar} nav button`)].map(
+          (button) => button.textContent?.trim() ?? "",
+        ),
+      activeSidebar,
     )
 
     expect(titles).toEqual(["Front matter", "Chapters", "Second half"])

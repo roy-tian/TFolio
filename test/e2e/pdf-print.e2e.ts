@@ -2,7 +2,14 @@ import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
-import { minimalPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings } from "./helpers"
+import {
+  clickAppMenuItem,
+  minimalPdf,
+  openPdfFromDisk,
+  refreshApp,
+  renderedPage,
+  seedSettings,
+} from "./helpers"
 
 type PrintSeam = Window & {
   __tfolioE2E?: E2eOverrides
@@ -37,7 +44,7 @@ async function countPrintRequests() {
 
 async function printAndReadSheet(): Promise<SheetPage[]> {
   await countPrintRequests()
-  await $("[data-slot='pdf-print-trigger']").click()
+  await clickAppMenuItem("print")
   await browser.waitUntil(
     async () =>
       (await browser.execute(() => (window as PrintSeam).__tfolioPrints ?? 0)) >

@@ -21,6 +21,8 @@ type PageBitmapOptions = {
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  /** Pixels added to the distance the work queue ranks this render by. */
+  priorityBias?: number
   /**
    * Bumped when the page's content changes: drawing on it changes the render
    * at the same width, which nothing else about the request would reveal.
@@ -45,6 +47,7 @@ export function usePageBitmap({
   pageHeight,
   pageNumber,
   pageWidth,
+  priorityBias = 0,
   renderEpoch,
   retainBitmap = true,
   rotation,
@@ -111,7 +114,10 @@ export function usePageBitmap({
             pageNumber,
             width: renderWidth,
           }),
-        { priority: () => distanceFromView(canvas), signal: leaving.signal },
+        {
+          priority: () => distanceFromView(canvas) + priorityBias,
+          signal: leaving.signal,
+        },
       )
 
       if (cancelled) {
@@ -169,6 +175,7 @@ export function usePageBitmap({
     pageHeight,
     pageNumber,
     pageWidth,
+    priorityBias,
     renderEpoch,
     rotation,
     targetWidth,
