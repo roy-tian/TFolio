@@ -334,6 +334,11 @@ pub struct PdfiumEngine {
     operations: Mutex<HashMap<u64, RunningOperation>>,
     next_operation_id: AtomicU64,
     word: crate::convert::WordConverter,
+    /// The organize workspaces' sources, every window's. Taken only while
+    /// `documents` is held, or alone without touching a document.
+    organize: Mutex<organize::OrganizeSources>,
+    /// Apart from the store, so a release can mark its cutoff without a lock.
+    next_organize_id: AtomicU64,
 }
 
 /// Where the host keeps what the engine loads and writes. The host alone knows
@@ -374,6 +379,8 @@ impl PdfiumEngine {
                 &paths.retired_conversion_roots,
                 word_suites,
             ),
+            organize: Mutex::default(),
+            next_organize_id: AtomicU64::new(1),
         })
     }
 
@@ -1101,6 +1108,7 @@ mod image_dpi;
 mod inspection;
 mod io;
 mod marks;
+mod organize;
 mod owned_content;
 mod page_ops;
 mod page_reorder;
@@ -1110,6 +1118,9 @@ mod watermark_preview;
 
 pub use io::is_merge_image;
 use io::{image_page_document, read_image, read_pdf_bytes};
+pub use organize::{
+    AssembleOutlineItem, AssemblePlan, AssembleSlot, OrganizeSourceInfo, ORGANIZE_SOURCE_CHANGED,
+};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;

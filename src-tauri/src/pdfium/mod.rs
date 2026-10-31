@@ -2,6 +2,7 @@ mod archive;
 mod commands;
 mod compress;
 mod encode;
+mod organize;
 mod paths;
 
 use std::{
@@ -33,6 +34,9 @@ pub use commands::{
 pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
     export_compressed_pdf, release_pdf_compression,
+};
+pub use organize::{
+    add_organize_sources, assemble_pdf, release_organize_sources, render_organize_thumbnail,
 };
 
 /// Counts work units rather than bytes: pages for owned content, and
@@ -101,6 +105,19 @@ impl PdfiumState {
     /// Word conversions.
     pub fn cancel_window_work(&self, label: &str) {
         self.engine.cancel_scope_work(label);
+    }
+
+    /// A window's organize sources go with it. Dropping them is PDFium work,
+    /// which must not block the window event loop. Only after
+    /// `cancel_window_work`, which stops an add from keeping a source after this.
+    pub fn release_window_sources(&self, label: &str) {
+        let engine = Arc::clone(&self.engine);
+        let label = label.to_string();
+        // Taken now, not when the lock is free: by then a reloaded page may
+        // have added sources of its own under the same label.
+        let before = engine.organize_release_cutoff();
+
+        tauri::async_runtime::spawn_blocking(move || engine.release_organize_scope(&label, before));
     }
 
     pub fn remove_conversion_files(&self) {

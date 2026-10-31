@@ -395,13 +395,13 @@ pub(super) fn load_merge_source<'a>(
 /// own PDFium work. Closed under the lock however the run ends — early
 /// returns included — since closing is PDFium work too. Callers declare their
 /// lock guards after it, so a guard is always given back before this takes one.
-struct MergeDraft<'a> {
+pub(super) struct MergeDraft<'a> {
     engine: &'a PdfiumEngine,
     document: Option<PdfDocument<'static>>,
 }
 
 impl<'a> MergeDraft<'a> {
-    fn new(engine: &'a PdfiumEngine) -> Result<Self, String> {
+    pub(super) fn new(engine: &'a PdfiumEngine) -> Result<Self, String> {
         let _documents = engine.lock_documents()?;
         let document = engine
             .pdfium
@@ -415,14 +415,14 @@ impl<'a> MergeDraft<'a> {
     }
 
     /// Only while the caller holds the lock.
-    fn document(&mut self) -> &mut PdfDocument<'static> {
+    pub(super) fn document(&mut self) -> &mut PdfDocument<'static> {
         self.document
             .as_mut()
             .expect("a merge draft keeps its document until it is closed")
     }
 
     /// Also only while the caller holds the lock.
-    fn close(&mut self) {
+    pub(super) fn close(&mut self) {
         self.document = None;
     }
 }

@@ -39,7 +39,7 @@ pub struct MergePlan {
 /// A path is a string any page code can make up, so only paths the OS produced
 /// in this process's sight are acted on; the e2e build waives the check.
 #[cfg(not(feature = "e2e"))]
-fn ensure_approved(state: &PdfiumState, path: &Path) -> Result<(), String> {
+pub(super) fn ensure_approved(state: &PdfiumState, path: &Path) -> Result<(), String> {
     if state.is_approved(path) {
         Ok(())
     } else {
