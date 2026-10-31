@@ -40,10 +40,10 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, InsertOutcome, MergeBookmarks, MergeSourceError, MergeSourceKind, PagePoint,
-    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch,
-    PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle,
-    TextNoteStyle, MAX_PDF_BYTES,
+    ExportOutcome, InsertOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect,
+    PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
+    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
+    MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -67,7 +67,7 @@ const MAX_SEARCH_CHARS: usize = 256;
 // separate rectangle ceiling covers pathological wrapped occurrences too.
 const MAX_SEARCH_MATCHES: usize = 10_000;
 const MAX_SEARCH_RECTS: usize = 50_000;
-// Matched on the extension because the wizard must sort a dropped file before
+// Matched on the extension because the workspace must sort a dropped file before
 // anything reads it; the bytes are still header-checked when decoded.
 pub const MERGE_IMAGE_EXTENSIONS: [&str; 8] =
     ["bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"];
@@ -262,15 +262,6 @@ pub enum OperationTarget {
     /// A Word document opened on its own, apart from an inspection's: both may
     /// run in one scope, and neither's Stop is meant for the other.
     OpenConverted(String),
-}
-
-/// A merge's layout choices, and whether its Word sources may be converted.
-#[derive(Clone, Copy)]
-pub struct MergeOptions {
-    pub smart_padding: bool,
-    pub normalize_a4: bool,
-    pub bookmarks: MergeBookmarks,
-    pub word_conversion: bool,
 }
 
 struct RunningOperation {
@@ -1105,7 +1096,6 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
 mod archive_export;
 mod compress;
 mod image_dpi;
-mod inspection;
 mod io;
 mod marks;
 mod organize;

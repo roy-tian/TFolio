@@ -13,7 +13,7 @@ import {
 } from "@/lib/watermark"
 
 /** A4 in points: the sheet the preview stands in for where there is no page
-    yet to take one from — the merge wizard's. Sizes read as pt either way. */
+    to take one from. Sizes read as pt either way. */
 const A4_SHEET = { height: 841.89, width: 595.276 }
 
 /** Mirrors the backend's per-page ceiling so a dense grid cannot flood the DOM. */

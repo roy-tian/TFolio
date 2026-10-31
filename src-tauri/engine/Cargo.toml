@@ -17,7 +17,7 @@ getrandom = "0.4"
 # renders with. Every decoder here is pure Rust: an image the reader picked is
 # parsed in this process, and `MAX_IMAGE_PIXELS` bounds what one may expand to.
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
-# PDFium reads outlines but cannot write one, so the merge wizard hands the
+# PDFium reads outlines but cannot write one, so an assembly hands the
 # bytes PDFium just produced to lopdf to have their /Outlines written. It
 # only ever parses this app's own fresh output — a reader's file still
 # reaches PDFium alone. Default features are off: they are only date and

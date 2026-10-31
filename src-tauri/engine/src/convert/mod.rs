@@ -283,13 +283,6 @@ impl WordConverter {
         !self.detected().engines.is_empty()
     }
 
-    pub(crate) fn pending_count(&self, paths: &[PathBuf]) -> usize {
-        paths
-            .iter()
-            .filter(|path| is_word_document(path) && self.cached(path).is_none())
-            .count()
-    }
-
     pub(crate) fn resolve(
         &self,
         paths: &[PathBuf],
@@ -484,12 +477,6 @@ impl WordConverter {
         }
 
         Ok(entries)
-    }
-
-    fn cached(&self, path: &Path) -> Option<PathBuf> {
-        let facts = source_facts(path)?;
-
-        cached_pdf(&self.cache, &facts)
     }
 }
 

@@ -569,7 +569,7 @@ export async function openPathViaDialog(filePath: string) {
 
 /**
  * Writes `contents` to a scratch file and answers its path, unopened — the
- * merge wizard and the grid's insert read files they never open.
+ * organize workspace and the grid's insert read files they never open.
  */
 export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
@@ -581,7 +581,7 @@ export function writeScratchPdf(fileName: string, contents: Uint8Array): string 
   return filePath
 }
 
-/** The multi-select stand-in the merge wizard's add button reads, left beside
+/** The multi-select stand-in the organize workspace's add reads, left beside
     whatever other override is already in place. */
 export async function pointMultiPickerAt(filePaths: string[]) {
   await browser.execute((mockPaths: string[]) => {

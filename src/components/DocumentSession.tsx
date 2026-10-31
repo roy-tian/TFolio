@@ -12,7 +12,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
-import { AppSidebar } from "@/components/AppSidebar"
+import { AppSidebar, SidebarPanelSwitch } from "@/components/AppSidebar"
 import { BookmarkList } from "@/components/BookmarkList"
 import { CompressExportDialog } from "@/components/CompressExportDialog"
 import { ImageExportDialog } from "@/components/ImageExportDialog"
@@ -81,7 +81,6 @@ import {
   type PageClipboard,
 } from "@/lib/pageClipboard"
 import type { PageHandoff } from "@/lib/pageDrag"
-import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import {
   exportFailureNotice,
   fileNameFromPath,
@@ -99,11 +98,7 @@ import type {
   MovedSessionSnapshot,
   MovedTabSeed,
 } from "@/lib/tabMove"
-import type {
-  PdfOwnedLayer,
-  PdfOwnedLayerProgressHandler,
-  PdfProgress,
-} from "@/lib/progress"
+import type { PdfOwnedLayer, PdfProgress } from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
 import { shownSidebarPanel } from "@/lib/sidebar"
 import {
@@ -119,7 +114,6 @@ import {
 import { isNoteWorthKeeping } from "@/lib/textNoteDraft"
 import { viewerReadingBounds, viewerSizeCommitted } from "@/lib/viewerViewport"
 import { anchorCorrection, anchorOnPage } from "@/lib/viewportAnchor"
-import type { WatermarkConfig } from "@/lib/watermark"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 /** A file dragged in from the desktop: points in CSS pixels, and `over` with
@@ -192,20 +186,11 @@ type DocumentSessionProps = {
   /** Whether this app-created document has yet to be written to its first
       file. It remains unsaved even before the reader makes another edit. */
   initialSaveRequired?: boolean
-  /** Page numbers to lay on as the session opens — the merge wizard's ask, run
-      through the ordinary command so they stay one undo away. */
-  initialPageNumbers?: PageNumbersConfig | null
   /** A path-backed document's last reading view. */
   initialRecentView?: RecentPdfView
-  /** Overrides the stored preference where another view suits the document: a
-      merge opens on the thumbnail grid, where the whole result can be seen. */
+  /** Overrides the stored preference: a tab moved from another window keeps
+      the view it was being read in. */
   initialViewMode?: ViewMode
-  /** Reports the merge wizard's initial page-content work while it stays open. */
-  onInitialLayerProgress?: PdfOwnedLayerProgressHandler
-  /** Resolves the merge wizard once all requested initial layers have settled. */
-  onInitialLayersSettled?: () => void
-  /** A watermark to lay on as the session opens — see `initialPageNumbers`. */
-  initialWatermark?: WatermarkConfig | null
   /** The workspace half of the header's menu, which every tab shares. */
   menu: AppMenuActions
   /** Where this session says what happened. Write-only, and bound to this
@@ -238,15 +223,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       active,
       document: openedDocument,
       fileName,
-      initialPageNumbers,
       initialRecentView,
       initialSaveRequired = false,
       initialViewMode,
-      initialWatermark,
       menu,
       notices,
-      onInitialLayerProgress,
-      onInitialLayersSettled,
       onDirtyChange,
       onSavableChange,
       onSourceChange,
@@ -937,56 +918,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [])
 
-    // Applied once: the wizard's steps through the ordinary commands, so the
-    // reader can undo either. Numbers first, so the watermark lands above them.
-    const initialLayers = useRef({
-      pageNumbers: initialPageNumbers ?? null,
-      watermark: initialWatermark ?? null,
-    })
-
-    useEffect(() => {
-      const { pageNumbers, watermark } = initialLayers.current
-
-      if (!pageNumbers && !watermark) {
-        return
-      }
-
-      initialLayers.current = { pageNumbers: null, watermark: null }
-
-      void (async () => {
-        const pageCount = documentRef.current?.numPages ?? 0
-
-        try {
-          if (pageNumbers) {
-            const outcome = await annotations.setPageNumbers(
-              pageNumbers,
-              pageCount,
-              (progress) => onInitialLayerProgress?.("pageNumbers", progress),
-            )
-
-            // One stop ends the whole opening sequence: the reader asked to be
-            // out of it, not to sit through the layer after it.
-            if (outcome === "cancelled") {
-              return
-            }
-          }
-          if (watermark) {
-            await annotations.setWatermark(
-              watermark,
-              pageCount,
-              (progress) => onInitialLayerProgress?.("watermark", progress),
-            )
-          }
-        } finally {
-          // The wizard owns the progress surface; it closes whether a layer
-          // landed or reported its failure through the session's normal error.
-          onInitialLayersSettled?.()
-        }
-      })()
-      // The layers and their lifecycle callbacks belong to this one-shot ref
-      // effect. Strict Mode's second effect sees the ref already cleared.
-    }, [])
-
     // Restored against the first real layout, once size and saved zoom have both
     // sized the pages; normalized, so a new window size stays a useful position.
     useLayoutEffect(() => {
@@ -1618,7 +1549,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onChangeViewMode={changeViewMode}
           onCompress={() => setCompressOpen(true)}
           onExportImages={() => setImageExportOpen(true)}
-          onMergeWizard={menu.onMergeWizard}
           onRotate={() => {
             if (viewMode === "thumbnail") {
               rotateThumbnailPages()
@@ -1655,10 +1585,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         />
 
         <AppSidebar
-          bookmarksApply={bookmarksApply}
           macOS={macOS}
           menu={appMenu}
-          panel={sidebarPanel}
+          switcher={
+            <SidebarPanelSwitch bookmarksApply={bookmarksApply} panel={sidebarPanel} />
+          }
         >
           {sidebarPanel === "bookmarks" ? (
             <BookmarkList

@@ -440,19 +440,6 @@ impl PdfiumEngine {
         raw.into_rgb()
     }
 
-    pub fn release_organize_sources(&self, scope: &str, source_ids: &[u64]) -> Result<(), String> {
-        let _documents = self.lock_documents()?;
-        let mut organize = self.lock_organize();
-
-        for id in source_ids {
-            if organize.entry(scope, *id).is_ok() {
-                organize.remove(*id);
-            }
-        }
-
-        Ok(())
-    }
-
     /// Lets every parsed source go, as the budget would, so the next use reads
     /// the disk again.
     #[cfg(test)]

@@ -170,7 +170,7 @@ export function useGridDrop({
     [active, annotations, documentRef, notice, viewMode],
   )
 
-  // A drag finished elsewhere — a tab switch, the wizard taking the drop —
+  // A drag finished elsewhere — a tab switch, the organize workspace taking the drop —
   // never sends a `leave`, so the line it drew would outlive the drag.
   useEffect(() => {
     if (!active) {

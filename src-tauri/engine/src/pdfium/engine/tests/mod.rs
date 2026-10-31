@@ -21,7 +21,6 @@ mod compress;
 mod documents;
 mod image_dpi;
 mod insert_pages;
-mod inspection;
 mod merge;
 mod organize;
 mod page_numbers;

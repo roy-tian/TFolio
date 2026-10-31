@@ -50,9 +50,6 @@ export type AppMenuActions = {
   onCloseAll: () => void
   /** Quits the app, every window with it, after one unsaved check for all. */
   onExit: () => void
-  /** Not a menu entry: it is a toolbar button (`MergeWizardButton`), and this
-      bag is how it reaches every toolbar. */
-  onMergeWizard: () => void
   onNew: () => void
   onNewWindow: () => void
   onOpen: () => void

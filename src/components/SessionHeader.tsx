@@ -9,6 +9,7 @@ import { PageNumberField } from "@/components/PageNumberField"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
+import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
 import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -44,7 +45,6 @@ type SessionHeaderProps = {
   onChangeViewMode: (mode: ViewMode) => void
   onCompress: () => void
   onExportImages: () => void
-  onMergeWizard: () => void
   onRotate: () => void
   onSave: () => void
   onSaveAs: () => void
@@ -88,7 +88,6 @@ export function SessionHeader({
   onChangeViewMode,
   onCompress,
   onExportImages,
-  onMergeWizard,
   onRotate,
   onSave,
   onSaveAs,
@@ -127,7 +126,6 @@ export function SessionHeader({
             highlightApplies={drawingApplies}
             highlightColor={tool.highlightColor}
             onHighlightColorChange={tool.onHighlightColorChange}
-            onMergeWizard={onMergeWizard}
             onPageNumbers={tool.onPageNumbers}
             onRectStyleChange={tool.onRectStyleChange}
             onToolChange={onToolChange}
@@ -294,6 +292,7 @@ export function ToolbarFrame({
           <>
             {appMenu}
             <SidebarToggle />
+            <WorkspaceSwitch />
             <div className="mx-1 h-4 w-px shrink-0 bg-border" />
           </>
         )}

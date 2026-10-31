@@ -19,12 +19,15 @@ export const THUMBNAIL_CAPTION_HEIGHT = "1.375rem"
 
 /** CSS pixels per point of a thumbnail: its long side spans the column, so a
     page keeps its scale whichever way it is turned. */
-function thumbnailScale(page: { height: number; width: number }) {
-  return THUMBNAIL_WIDTH / Math.max(page.width, page.height)
+function thumbnailScale(page: { height: number; width: number }, longSide: number) {
+  return longSide / Math.max(page.width, page.height)
 }
 
-export function thumbnailPaper(page: { height: number; width: number }) {
-  const scale = thumbnailScale(page)
+export function thumbnailPaper(
+  page: { height: number; width: number },
+  longSide = THUMBNAIL_WIDTH,
+) {
+  const scale = thumbnailScale(page, longSide)
 
   return { height: page.height * scale, width: page.width * scale }
 }

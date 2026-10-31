@@ -62,24 +62,6 @@ pub async fn render_organize_thumbnail(
 }
 
 #[tauri::command]
-pub async fn release_organize_sources(
-    source_ids: Vec<u64>,
-    state: State<'_, PdfiumState>,
-    window: WebviewWindow,
-) -> Result<(), String> {
-    let engine = Arc::clone(&state.engine);
-    let label = window.label().to_string();
-
-    tauri::async_runtime::spawn_blocking(move || {
-        engine.release_organize_sources(&label, &source_ids)
-    })
-    .await
-    .map_err(|error| format!("PDFium release task failed: {error}"))?
-}
-
-/// Like a merge's, the result has no source path, and `None` is the reader
-/// stopping it — through `cancel_pdf_merge`, the window's one build to stop.
-#[tauri::command]
 pub async fn assemble_pdf(
     plan: AssemblePlan,
     on_progress: Channel<PdfProgress>,

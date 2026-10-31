@@ -10,7 +10,6 @@ import type { CSSProperties } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
-import { MergeWizardButton } from "@/components/MergeWizardButton"
 import { RectEffectIcon } from "@/components/RectEffectIcon"
 import { RectStylePopover } from "@/components/RectStylePopover"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
@@ -43,8 +42,6 @@ type AnnotationToolbarProps = {
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle, transient?: boolean) => void
-  /** Builds a document of its own rather than touching this one. */
-  onMergeWizard: () => void
   onPageNumbers: () => void
   onToolChange: (tool: AnnotationTool) => void
   onWatermark: () => void
@@ -61,7 +58,6 @@ export function AnnotationToolbar({
   highlightApplies,
   highlightColor,
   onHighlightColorChange,
-  onMergeWizard,
   onPageNumbers,
   onRectStyleChange,
   onToolChange,
@@ -280,8 +276,6 @@ export function AnnotationToolbar({
             <FileScan />
           </Button>
         </ToolbarTooltip>
-
-        <MergeWizardButton onClick={onMergeWizard} />
       </ButtonGroup>
     </div>
   )

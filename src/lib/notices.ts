@@ -35,6 +35,7 @@ export type NoticeActionKind =
   | "updateRetry"
   | "layerStop"
   | "wordConvertStop"
+  | "organizeAddStop"
 
 export type NoticeAction = {
   busy?: boolean
@@ -249,6 +250,38 @@ export const noticeCatalogue = {
     textKey: "annotate.watermarkRebuilding",
     tone: "info",
   },
+  // Standing while the workspace reads files it was given; the add retracts it.
+  organizeAdding: {
+    life: "standing",
+    running: true,
+    textKey: "organize.adding",
+    tone: "info",
+  },
+  organizeConverterMissing: {
+    life: "transient",
+    textKey: "organize.converterMissing",
+    tone: "warning",
+  },
+  organizeFailed: {
+    life: "transient",
+    textKey: "organize.failed",
+    tone: "danger",
+  },
+  organizeSourceChanged: {
+    life: "transient",
+    textKey: "organize.sourceChanged",
+    tone: "warning",
+  },
+  organizeTooManyFiles: {
+    life: "transient",
+    textKey: "organize.tooManyFiles",
+    tone: "warning",
+  },
+  organizeUnreadable: {
+    life: "transient",
+    textKey: "organize.unreadable",
+    tone: "danger",
+  },
   // Standing for as long as the conversion runs; the open retracts it.
   wordConverting: {
     life: "standing",
@@ -280,6 +313,10 @@ export const noticeActions = {
   wordConvertStop: {
     busyLabelKey: "viewer.wordConvertStopping",
     labelKey: "viewer.wordConvertStop",
+  },
+  organizeAddStop: {
+    busyLabelKey: "organize.stopping",
+    labelKey: "organize.stop",
   },
 } as const satisfies Record<
   NoticeActionKind,

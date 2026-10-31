@@ -44,9 +44,18 @@ type PdfThumbnailProps = {
   selectedCount: number
   /** Whether the delete button is mounted; the cell's own call, see `ThumbnailCell`. */
   showControls: boolean
-  /** The sidebar's previews sit beside the pages they preview, so they must
-      not answer to `data-page-number`, which finds the pages themselves. */
-  surface?: "grid" | "sidebar"
+  /** The paper's long side in CSS pixels; the organize grid's size control. */
+  paperWidth?: number
+  /** The sidebar's and the organize grid's previews sit beside, or above, the
+      pages a viewer shows, so they must not answer to `data-page-number`,
+      which finds those pages. An organize preview names a source's page. */
+  surface?: "grid" | "sidebar" | "organize"
+  /** Overrides the surface's own wording, for a page that is not this
+      document's — an organize source's. */
+  label?: string
+  /** The number under the paper, where it is not the page's own: an organize
+      preview shows where the page will stand. */
+  caption?: number
 }
 
 /** A preview that selects rather than reads — no text layer, so a grid stays
@@ -69,7 +78,10 @@ export function PdfThumbnail({
   rotation,
   selectedCount,
   showControls,
+  paperWidth,
   surface = "grid",
+  label: labelOverride,
+  caption,
 }: PdfThumbnailProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLButtonElement>(null)
@@ -89,8 +101,12 @@ export function PdfThumbnail({
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
-    command: "render_pdf_page_thumbnail",
+    command:
+      surface === "organize"
+        ? "render_organize_thumbnail"
+        : "render_pdf_page_thumbnail",
     documentId,
+    idArgument: surface === "organize" ? "sourceId" : "documentId",
     isNearViewport,
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
@@ -106,7 +122,8 @@ export function PdfThumbnail({
     // upright width serves every rotation and a turn needs no fresh render. The
     // page as it now measures, not as last painted: this sizes the replacement.
     rotation: 0,
-    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }).width,
+    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }, paperWidth)
+      .width,
   })
 
   // With no bitmap on show no pixels need the old geometry: the next paint
@@ -146,9 +163,11 @@ export function PdfThumbnail({
     )
     const oldPaper = thumbnailPaper(
       dimensionsForRotation(rotation, previous.width, previous.height),
+      paperWidth,
     )
     const newPaper = thumbnailPaper(
       dimensionsForRotation(rotation, pageWidth, pageHeight),
+      paperWidth,
     )
     const resize = paper.animate(
       [
@@ -168,11 +187,12 @@ export function PdfThumbnail({
   // quarter turn leaves behind.
   const paperSize = thumbnailPaper(
     dimensionsForRotation(rotation, pageWidth, pageHeight),
+    paperWidth,
   )
   // Pixels painted before an edit turned or resized the page: a turn keeps the
   // scale, so they fit exactly once turned along; a resize letterboxes them.
   const pendingTurn = (intrinsicRotation - paintedPage.rotation + 360) % 360
-  const preview = thumbnailPaper(paintedPage)
+  const preview = thumbnailPaper(paintedPage, paperWidth)
   const previewFootprint = dimensionsForRotation(
     (rotation + pendingTurn) % 360,
     preview.width,
@@ -183,13 +203,14 @@ export function PdfThumbnail({
     paperSize.height / previewFootprint.height,
   )
   const label =
-    surface === "sidebar"
+    labelOverride ??
+    (surface === "sidebar"
       ? t("sidebar.thumbnailLabel", { pageNumber })
-      : t("viewer.thumbnailLabel", { pageNumber })
+      : t("viewer.thumbnailLabel", { pageNumber }))
   const pageAttribute =
-    surface === "sidebar"
-      ? { "data-thumbnail-page": pageNumber }
-      : { "data-page-number": pageNumber }
+    surface === "grid"
+      ? { "data-page-number": pageNumber }
+      : { "data-thumbnail-page": pageNumber }
 
   return (
     <div
@@ -211,9 +232,9 @@ export function PdfThumbnail({
           label={
             renderFailed
               ? t("viewer.pageError", { pageNumber })
-              : surface === "sidebar"
-                ? undefined
-                : label
+              : surface === "grid"
+                ? label
+                : undefined
           }
         >
           <button
@@ -300,7 +321,7 @@ export function PdfThumbnail({
         )}
         style={{ height: THUMBNAIL_CAPTION_HEIGHT }}
       >
-        {pageNumber}
+        {caption ?? pageNumber}
       </span>
     </div>
   )

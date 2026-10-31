@@ -3,18 +3,16 @@ use std::{
     sync::Arc,
 };
 
-use serde::Deserialize;
 use tauri::{
     ipc::{Channel, InvokeBody, Request, Response},
     AppHandle, Manager, State, WebviewWindow,
 };
 use tauri_plugin_dialog::DialogExt;
 use tfolio_engine::{
-    download_fallback_font, size_limit_error, ExportOutcome, InsertOutcome, MergeBookmarks,
-    MergeOptions, OperationTarget, PageNumbersConfig, PagePoint, PagePointsRect, PdfDocumentInfo,
-    PdfFileSummary, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect,
-    RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS,
-    WORD_EXTENSIONS,
+    download_fallback_font, size_limit_error, ExportOutcome, InsertOutcome, OperationTarget,
+    PageNumbersConfig, PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome,
+    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, TextNoteStyle,
+    WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
@@ -23,18 +21,6 @@ use crate::windows::{page_generation, record_document, DocumentOwners};
 use super::encode::{encode_png, encode_webp};
 use super::paths::fallback_font_destination;
 use super::{PdfProgress, PdfiumState};
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MergePlan {
-    paths: Vec<String>,
-    /// A blank before any file that would otherwise open on an even page.
-    smart_padding: bool,
-    /// Every page laid on an A4 sheet of its own instead of keeping the size its
-    /// source gave it.
-    normalize_a4: bool,
-    bookmarks: MergeBookmarks,
-}
 
 /// A path is a string any page code can make up, so only paths the OS produced
 /// in this process's sight are acted on; the e2e build waives the check.
@@ -781,75 +767,6 @@ pub async fn pick_pdf_paths(
     })
     .await
     .map_err(|error| format!("dialog task failed: {error}"))?
-}
-
-#[tauri::command]
-pub async fn inspect_pdf_files(
-    paths: Vec<String>,
-    state: State<'_, PdfiumState>,
-    window: WebviewWindow,
-) -> Result<Vec<PdfFileSummary>, String> {
-    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-
-    // Reading a file the WebView merely named would let a page learn what
-    // any PDF on the disk holds, so an inspection is approved like an open.
-    #[cfg(not(feature = "e2e"))]
-    for path in &paths {
-        ensure_approved(&state, path)?;
-    }
-
-    let engine = Arc::clone(&state.engine);
-    let word = state.word_available();
-    let label = window.label().to_string();
-
-    tauri::async_runtime::spawn_blocking(move || engine.inspect_files(&label, paths, word))
-        .await
-        .map_err(|error| format!("PDFium inspection task failed: {error}"))?
-}
-
-/// The result has no source path, so it can only ever be exported to a copy.
-/// `None` is the reader stopping it: a stopped merge leaves nothing behind.
-#[tauri::command]
-pub async fn merge_pdf_files(
-    plan: MergePlan,
-    on_progress: Channel<PdfProgress>,
-    state: State<'_, PdfiumState>,
-    owners: State<'_, DocumentOwners>,
-    window: WebviewWindow,
-) -> Result<Option<PdfDocumentInfo>, String> {
-    let paths: Vec<PathBuf> = plan.paths.into_iter().map(PathBuf::from).collect();
-
-    #[cfg(not(feature = "e2e"))]
-    for path in &paths {
-        ensure_approved(&state, path)?;
-    }
-
-    let engine = Arc::clone(&state.engine);
-    let word = state.word_available();
-    let page = page_generation(&window);
-    let label = window.label().to_string();
-
-    let merged = tauri::async_runtime::spawn_blocking(move || {
-        engine.merge_files_with_progress(
-            &label,
-            paths,
-            MergeOptions {
-                smart_padding: plan.smart_padding,
-                normalize_a4: plan.normalize_a4,
-                bookmarks: plan.bookmarks,
-                word_conversion: word,
-            },
-            channel_progress(on_progress),
-        )
-    })
-    .await
-    .map_err(|error| format!("PDFium merge task failed: {error}"))??;
-
-    if let Some(document) = &merged {
-        record_document(&owners, &window, page, document.id(), None);
-    }
-
-    Ok(merged)
 }
 
 #[tauri::command]

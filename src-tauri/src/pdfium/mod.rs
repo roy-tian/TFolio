@@ -25,19 +25,17 @@ pub use commands::{
     create_pdf, delete_pdf_annotations, delete_pdf_pages, discard_pdf_stashes,
     download_pdf_note_font, duplicate_pdf_pages, export_pdf, extract_pdf_page_plain_text,
     extract_pdf_page_text, insert_pdf_blank_page, insert_pdf_from_path,
-    insert_pdf_pages_from_document, inspect_pdf_files, merge_pdf_files, open_converted_from_path,
-    open_pdf, open_pdf_from_path, pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path,
-    pick_pdf_paths, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
-    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_pdf, search_pdf_text, word_conversion_available,
+    insert_pdf_pages_from_document, open_converted_from_path, open_pdf, open_pdf_from_path,
+    pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path, pick_pdf_paths,
+    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
+    render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf,
+    search_pdf_text, word_conversion_available,
 };
 pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
     export_compressed_pdf, release_pdf_compression,
 };
-pub use organize::{
-    add_organize_sources, assemble_pdf, release_organize_sources, render_organize_thumbnail,
-};
+pub use organize::{add_organize_sources, assemble_pdf, render_organize_thumbnail};
 
 /// Counts work units rather than bytes: pages for owned content, and
 /// source/finishing stages for a merge.
@@ -93,7 +91,7 @@ impl PdfiumState {
             .unwrap_or(false)
     }
 
-    /// Whether the wizard may promise Word conversion: the machine's own
+    /// Whether a source may be a Word document: the machine's own
     /// suites, detected passively — never a reader setting.
     fn word_available(&self) -> bool {
         // E2e answers yes with no suite behind it, so specs can drive the row

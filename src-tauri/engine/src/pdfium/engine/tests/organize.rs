@@ -535,3 +535,236 @@ fn a_late_release_spares_what_the_reloaded_page_added_since() {
 
     fs::remove_dir_all(directory).ok();
 }
+
+/// The smallest box around every non-white pixel, as fractions of the render:
+/// fractions let an A4 sheet and the page it carries be compared directly.
+fn rendered_ink_box(image: &image::RgbImage) -> (f32, f32, f32, f32) {
+    let mut left = u32::MAX;
+    let mut top = u32::MAX;
+    let mut right = 0u32;
+    let mut bottom = 0u32;
+
+    for (x, y, pixel) in image.enumerate_pixels() {
+        // Anti-aliasing leaves a grey fringe around the bar; only ink well clear
+        // of the ground counts, so the box is the mark rather than its halo.
+        if pixel.0.iter().all(|channel| *channel > 200) {
+            continue;
+        }
+
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x + 1);
+        bottom = bottom.max(y + 1);
+    }
+
+    assert!(left < right && top < bottom, "the page should carry ink");
+
+    let width = image.width() as f32;
+    let height = image.height() as f32;
+
+    (
+        left as f32 / width,
+        top as f32 / height,
+        right as f32 / width,
+        bottom as f32 / height,
+    )
+}
+
+/// A JPEG carrying EXIF orientation 6 — what a phone records instead of
+/// rotating its pixels — built by hand because the `image` crate writes no EXIF.
+fn rotated_image_source(directory: &Path, name: &str, width: u32, height: u32) -> PathBuf {
+    let mut jpeg = Cursor::new(Vec::new());
+
+    DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        width,
+        height,
+        image::Rgb([20, 40, 160]),
+    ))
+    .write_to(&mut jpeg, ImageFormat::Jpeg)
+    .expect("the fixture should encode");
+
+    let jpeg = jpeg.into_inner();
+    let mut exif = b"Exif\0\0".to_vec();
+
+    // Little-endian TIFF header, IFD0 at offset 8.
+    exif.extend_from_slice(b"II\x2a\x00\x08\x00\x00\x00");
+    // One entry: tag 0x0112 (Orientation), SHORT, count 1, value 6.
+    exif.extend_from_slice(b"\x01\x00");
+    exif.extend_from_slice(b"\x12\x01\x03\x00\x01\x00\x00\x00\x06\x00\x00\x00");
+    // No IFD after this one.
+    exif.extend_from_slice(b"\x00\x00\x00\x00");
+
+    let mut bytes = jpeg[..2].to_vec();
+    let segment_length = (exif.len() + 2) as u16;
+
+    bytes.extend_from_slice(b"\xff\xe1");
+    bytes.extend_from_slice(&segment_length.to_be_bytes());
+    bytes.extend_from_slice(&exif);
+    bytes.extend_from_slice(&jpeg[2..]);
+
+    let path = directory.join(name);
+
+    fs::write(&path, bytes).expect("the image should write to disk");
+    path
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_image_stands_the_way_its_metadata_says_it_was_held() {
+    let _organize = organize_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("organize-image-orientation");
+    // Stored 1600x900 — landscape pixels — but recorded as a quarter turn from
+    // upright, which is how a phone stores a portrait photograph.
+    let upright = rotated_image_source(&directory, "portrait.jpg", 1600, 900);
+    let infos = engine
+        .add_organize_sources("main", vec![upright], false)
+        .expect("the image should be read");
+    let sheet = &infos[0].pages[0];
+
+    assert!(
+        (sheet.width - A4_SHORT_POINTS).abs() < 1.0,
+        "the sheet should stand upright, not follow the stored pixels: {sheet:?}"
+    );
+    assert!((sheet.height - A4_LONG_POINTS).abs() < 1.0, "{sheet:?}");
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_word_document_that_cannot_convert_is_its_own_kind_of_unreadable() {
+    let _organize = organize_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("organize-word");
+    let word = write_source(&directory, "letter.docx", b"not a document at all".to_vec());
+    let infos = engine
+        .add_organize_sources("main", vec![word.clone()], true)
+        .expect("the file should be answered for");
+
+    // It keeps its kind and says which failure it carries, rather than
+    // passing as an ordinary unreadable PDF.
+    assert!(matches!(infos[0].kind, MergeSourceKind::Word));
+    assert!(infos[0].id.is_none());
+    assert!(matches!(
+        infos[0].error,
+        Some(MergeSourceError::ConversionFailed)
+    ));
+
+    // With no converter on offer, the same file is unreadable the plain way.
+    let off = engine
+        .add_organize_sources("main", vec![word], false)
+        .expect("the file should still be answered for");
+
+    assert!(matches!(off[0].kind, MergeSourceKind::Pdf));
+    assert!(off[0].id.is_none());
+    assert!(off[0].error.is_none());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn writing_the_outline_leaves_the_pages_as_pdfium_saved_them() {
+    let _organize = organize_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("organize-outline-roundtrip");
+    let ids = added(
+        engine,
+        "main",
+        vec![
+            write_source(&directory, "first.pdf", banded_pdf(&[20, 60])),
+            write_source(&directory, "second.pdf", banded_pdf(&[110])),
+        ],
+    );
+    let slots = || vec![page(ids[1], 1, 0), page(ids[0], 2, 0), page(ids[0], 1, 0)];
+
+    // Only an outlined assembly is reparsed and rewritten by lopdf, so
+    // comparing it with a bare one says that pass changes nothing visible.
+    let bare = engine
+        .assemble_pdf("main", plan(slots(), Vec::new()), |_, _| {})
+        .expect("PDFium should assemble the pages")
+        .expect("an assembly nobody stopped hands back its document");
+    let outlined = engine
+        .assemble_pdf(
+            "main",
+            plan(
+                slots(),
+                vec![AssembleOutlineItem {
+                    title: "Second".into(),
+                    page_number: 1,
+                    items: Vec::new(),
+                }],
+            ),
+            |_, _| {},
+        )
+        .expect("PDFium should assemble the pages")
+        .expect("an assembly nobody stopped hands back its document");
+
+    assert_eq!(
+        page_fingerprints(engine, outlined.id, 3),
+        page_fingerprints(engine, bare.id, 3),
+        "the outline pass leaves every page rendering exactly as it did"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_fitted_assembly_carries_a_rotated_page_the_way_it_reads() {
+    let _organize = organize_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("organize-a4-rotation");
+    let source = rotated_text_pdf();
+    let ids = added(
+        engine,
+        "main",
+        vec![write_source(&directory, "rotated.pdf", source.clone())],
+    );
+
+    // `/Rotate 90` makes the page read 300x200, and that is the shape the sheet
+    // carries — the rotation cannot survive, since the sheet has one of its own.
+    let alone = engine.open(source).expect("PDFium should open the source");
+    let (left, top, right, bottom) = rendered_ink_box(&rendered_rgb(engine, alone.id));
+
+    engine.close(alone.id).expect("the source should close");
+
+    let assembled = engine
+        .assemble_pdf(
+            "main",
+            AssemblePlan {
+                slots: vec![page(ids[0], 1, 0)],
+                normalize_a4: true,
+                outline: Vec::new(),
+            },
+            |_, _| {},
+        )
+        .expect("PDFium should assemble onto A4")
+        .expect("an assembly nobody stopped hands back its document");
+    let sheet = rendered_ink_box(&rendered_rgb(engine, assembled.id));
+    let scale_x = 300.0 / A4_SHORT_POINTS;
+    let scale_y = 200.0 / A4_LONG_POINTS;
+    let margin_x = (1.0 - scale_x) / 2.0;
+    let margin_y = (1.0 - scale_y) / 2.0;
+    let expected = (
+        margin_x + left * scale_x,
+        margin_y + top * scale_y,
+        margin_x + right * scale_x,
+        margin_y + bottom * scale_y,
+    );
+
+    for (found, want) in [
+        (sheet.0, expected.0),
+        (sheet.1, expected.1),
+        (sheet.2, expected.2),
+        (sheet.3, expected.3),
+    ] {
+        assert!(
+            (found - want).abs() < 0.02,
+            "the rotated text should land at {want}, not {found} (whole box {sheet:?})"
+        );
+    }
+
+    fs::remove_dir_all(directory).ok();
+}

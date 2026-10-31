@@ -3,6 +3,7 @@ import { GalleryVertical, ListTree, PanelLeft } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
+import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useSidebar } from "@/hooks/useSidebar"
@@ -36,27 +37,71 @@ const panelOptions = [
   { icon: ListTree, labelKey: "sidebar.bookmarks", value: "bookmarks" },
 ] as const
 
-type AppSidebarProps = {
+/** Which of a document's two panels the sidebar shows. */
+export function SidebarPanelSwitch({
+  bookmarksApply,
+  panel,
+}: {
   bookmarksApply: boolean
+  panel: SidebarPanel
+}) {
+  const { t } = useTranslation()
+  const sidebar = useSidebar()
+
+  return (
+    <ToggleGroup
+      aria-label={t("sidebar.panels")}
+      onValueChange={([next]) => {
+        // Pressing the shown panel again would empty the group; one
+        // panel always shows.
+        if (isSidebarPanel(next)) {
+          sidebar.setPanel(next)
+        }
+      }}
+      size="sm"
+      spacing={0}
+      value={[panel]}
+      variant="outline"
+    >
+      {panelOptions.map((option) => {
+        const Icon = option.icon
+        const label = t(option.labelKey)
+        const unavailable = option.value === "bookmarks" && !bookmarksApply
+
+        return (
+          <ToolbarTooltip
+            key={option.value}
+            label={unavailable ? t("sidebar.noBookmarks") : label}
+          >
+            <ToggleGroupItem
+              aria-label={label}
+              className="gap-1.5 px-3"
+              disabled={unavailable}
+              value={option.value}
+            >
+              <Icon />
+              {label}
+            </ToggleGroupItem>
+          </ToolbarTooltip>
+        )
+      })}
+    </ToggleGroup>
+  )
+}
+
+type AppSidebarProps = {
   children?: ReactNode
   macOS: boolean
   /** The app menu, mounted here only while the sidebar shows: the toolbar
       carries it otherwise. */
   menu: ReactNode
-  /** Absent where there is no document to show either panel of. */
-  panel?: SidebarPanel
+  /** The second row: what the rest of the column shows. */
+  switcher?: ReactNode
 }
 
 /** The window's left column: its first row is the title bar's, the second
-    switches what the rest shows of the document in the tab. */
-export function AppSidebar({
-  bookmarksApply,
-  children,
-  macOS,
-  menu,
-  panel,
-}: AppSidebarProps) {
-  const { t } = useTranslation()
+    switches what the rest of it shows. */
+export function AppSidebar({ children, macOS, menu, switcher }: AppSidebarProps) {
   const sidebar = useSidebar()
   const asideRef = useRef<HTMLElement>(null)
   const overlay = sidebar.mode === "overlay"
@@ -122,47 +167,12 @@ export function AppSidebar({
       >
         {menu}
         <SidebarToggle />
+        <div className="ml-auto">
+          <WorkspaceSwitch />
+        </div>
       </div>
       <div className="flex h-(--document-tabs-height) shrink-0 items-center justify-center border-b px-2">
-        {panel ? (
-          <ToggleGroup
-            aria-label={t("sidebar.panels")}
-            onValueChange={([next]) => {
-              // Pressing the shown panel again would empty the group; one
-              // panel always shows.
-              if (isSidebarPanel(next)) {
-                sidebar.setPanel(next)
-              }
-            }}
-            size="sm"
-            spacing={0}
-            value={[panel]}
-            variant="outline"
-          >
-            {panelOptions.map((option) => {
-              const Icon = option.icon
-              const label = t(option.labelKey)
-              const unavailable = option.value === "bookmarks" && !bookmarksApply
-
-              return (
-                <ToolbarTooltip
-                  key={option.value}
-                  label={unavailable ? t("sidebar.noBookmarks") : label}
-                >
-                  <ToggleGroupItem
-                    aria-label={label}
-                    className="gap-1.5 px-3"
-                    disabled={unavailable}
-                    value={option.value}
-                  >
-                    <Icon />
-                    {label}
-                  </ToggleGroupItem>
-                </ToolbarTooltip>
-              )
-            })}
-          </ToggleGroup>
-        ) : null}
+        {switcher}
       </div>
       <div className="min-h-0 flex-1">{children}</div>
     </aside>
