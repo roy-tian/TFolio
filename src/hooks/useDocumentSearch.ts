@@ -27,9 +27,6 @@ type UseDocumentSearchOptions = {
   currentPage: CurrentPage
   documentId: number | undefined
   documentPages: PdfPageInfo[]
-  /** Steps the session aside for a match found while on the grid: queues the
-      page seek and leaves the grid for the page view that can draw it. */
-  onMatchInGrid: (pageNumber: number) => void
   /** The panel's id in the DOM, which the input and result focus target. */
   sessionId: number
   /** Serves the reveal below: page text edits can redraw or drop highlights. */
@@ -47,7 +44,6 @@ export function useDocumentSearch({
   currentPage,
   documentId,
   documentPages,
-  onMatchInGrid,
   sessionId,
   textEpochs,
   viewerRef,
@@ -250,12 +246,6 @@ export function useDocumentSearch({
 
     currentPage.set(match.pageNumber)
 
-    if (viewMode === "thumbnail") {
-      onMatchInGrid(match.pageNumber)
-
-      return
-    }
-
     revealedRef.current = { index: activeIndex, matches }
 
     const interruptScroll = () => viewer.scrollTo({
@@ -347,7 +337,6 @@ export function useDocumentSearch({
     activeIndex,
     currentPage,
     matches,
-    onMatchInGrid,
     revealRequest,
     searchOpen,
     sessionId,

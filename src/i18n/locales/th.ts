@@ -183,10 +183,8 @@ const th = {
     viewMode: "โหมดมุมมอง",
     viewModeSingle: "หน้าเดียว",
     viewModeBook: "หนังสือ",
-    viewModeThumbnail: "ภาพขนาดย่อ",
     pageStatus: "หน้า {{current}} จาก {{total}}",
     pageNumberInput: "เลขหน้า",
-    rotate: "หมุนตามเข็มนาฬิกา",
     rotateView: "หมุนมุมมองตามเข็มนาฬิกา",
     zoomOut: "ซูมออก",
     zoomIn: "ซูมเข้า",
@@ -239,9 +237,6 @@ const th = {
     actionDeletePages_one: "การลบ {{count}} หน้า",
     actionDeletePages_other: "การลบ {{count}} หน้า",
     actionInsertBlankPage: "การแทรกหน้าว่าง",
-    actionInsertFile: "การแทรกหน้าจากไฟล์",
-    actionInsertPages_one: "การแทรก {{count}} หน้า",
-    actionInsertPages_other: "การแทรก {{count}} หน้า",
     actionDuplicatePages_one: "การวาง {{count}} หน้า",
     actionDuplicatePages_other: "การวาง {{count}} หน้า",
     highlight: "ไฮไลต์ข้อความ",
@@ -280,8 +275,6 @@ const th = {
     saveNoSource: "ไม่มีไฟล์ให้บันทึกทับ การส่งออกจะบันทึกเป็นสำเนา",
     saveOwnedContent:
       "เอกสารที่เพิ่มลายน้ำหรือเลขหน้าในเซสชันนี้ส่งออกได้เป็นสำเนาเท่านั้น เพราะเมื่อปิดไฟล์แล้วจะเอาสิ่งเหล่านั้นออกไม่ได้อีก",
-    saveMerged:
-      "เอกสารที่มีหน้าจาก PDF อื่นส่งออกได้เป็นสำเนาเท่านั้น และบันทึกทับไฟล์ที่เปิดมาไม่ได้",
     saveFailed: "ไม่สามารถบันทึก PDF นี้ได้",
     exportFilter: "ไฟล์ PDF",
     exportFailed: "ไม่สามารถส่งออก PDF นี้ได้",
@@ -299,12 +292,8 @@ const th = {
     pageNumbersRebuilding: "กำลังอัปเดตเลขหน้า…",
     layerStop: "หยุด",
     layerStopping: "กำลังหยุด…",
-    dropWhileEditing:
-      "การแก้ไขหน้าอีกรายการหนึ่งยังทำงานอยู่ โปรดลากไฟล์มาปล่อยอีกครั้งในอีกสักครู่",
-    dropIgnoredFiles_one:
-      "ไม่ได้แทรกไฟล์ที่ลากมา {{count}} ไฟล์ เนื่องจากแทรกเป็นหน้าได้เฉพาะ PDF เท่านั้น",
-    dropIgnoredFiles_other:
-      "ไม่ได้แทรกไฟล์ที่ลากมา {{count}} ไฟล์ เนื่องจากแทรกเป็นหน้าได้เฉพาะ PDF เท่านั้น",
+    saveMerged:
+      "เอกสารที่มีสำเนาของหน้าที่มีลายน้ำส่งออกได้เป็นสำเนาเท่านั้น และบันทึกทับไฟล์ที่เปิดมาไม่ได้",
   },
   watermark: {
     open: "ลายน้ำ",
@@ -427,13 +416,10 @@ const th = {
     unsavedCancel: "แก้ไขต่อ",
     pageLabel: "หน้า {{pageNumber}}",
     pageError: "ไม่สามารถแสดงหน้า {{pageNumber}} ได้",
-    thumbnailLabel: "เลือกหน้า {{pageNumber}}",
     copyText: "คัดลอก",
     highlightText: "ไฮไลต์",
   },
   pageEdit: {
-    deletePage: "ลบหน้า {{pageNumber}}",
-    deleteSelected: "ลบ {{count}} หน้าที่เลือก",
     insertBefore: "แทรกหน้าว่างก่อนหน้าที่ {{pageNumber}}",
     insertAtEnd: "แทรกหน้าว่างที่ท้ายเอกสาร",
     cut_one: "ตัด {{count}} หน้า",

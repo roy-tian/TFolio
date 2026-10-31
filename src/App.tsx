@@ -11,7 +11,6 @@ import { AppSidebar } from "@/components/AppSidebar"
 import {
   DocumentSession,
   type DocumentSessionHandle,
-  type FileDragEvent,
 } from "@/components/DocumentSession"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
@@ -37,7 +36,6 @@ import {
 import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
 import { useOrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
-import { usePageHandoff } from "@/hooks/usePageHandoff"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import {
   WorkspaceModeContext,
@@ -68,7 +66,7 @@ import {
   fileNameFromPath,
   type PdfDocumentInfo,
 } from "@/lib/pdf"
-import { isMacOS, isWindows } from "@/lib/platform"
+import { isMacOS } from "@/lib/platform"
 import {
   classifyOpenSource,
   isSourcePath,
@@ -108,7 +106,7 @@ type OpenTab = {
   movedSeed?: MovedTabSeed
   name: string
   path: string
-  /** A document-specific name for Save As — a converted or merged document's,
+  /** A document-specific name for Save As — a converted or assembled document's,
       then the file Save As bound it to; ordinary PDFs use the annotation
       export name. */
   saveAsDefaultName?: string
@@ -363,12 +361,6 @@ export default function App() {
     },
     [replaceTabs],
   )
-
-  const { armedTabId, handoff } = usePageHandoff({
-    activeIdRef,
-    onActivate: activateTab,
-    sessions: sessionRefs,
-  })
 
   // Every open queues behind the last rather than racing over which tab ends
   // up active, and shares the one busy state the strip and home panel read.
@@ -1366,17 +1358,6 @@ export default function App() {
     }
   }, [notices])
 
-  // The active document's own take on a drag, for the one listener below. Read
-  // through the refs it already uses, so the subscription stays bound once.
-  const dragToSession = useCallback((event: FileDragEvent) => {
-    const tabId = shownTabId()
-
-    return (
-      tabId !== HOME_TAB_ID &&
-      (sessionRefs.current.get(tabId)?.onFileDrag(event) ?? false)
-    )
-  }, [])
-
   // The WebView's find bar is replaced by the document's own; consumed even on
   // Home, where there is no current PDF for the interface to search.
   useEffect(() => {
@@ -1456,7 +1437,7 @@ export default function App() {
       requestAnimationFrame(() => window.getSelection()?.removeAllRanges())
 
       // Consumed on every repeat, but answered once: a held key would rebuild
-      // the grid's selection set at the repeat rate for nothing.
+      // the page selection set at the repeat rate for nothing.
       if (event.repeat) {
         return
       }
@@ -1598,9 +1579,6 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
-    // Only `enter` and `drop` name the files — `over` carries a position and
-    // nothing else — and unknown (a listener bound mid-drag) is not "none".
-    let draggedPaths: string[] | null = null
     // The OS reports drags of anything at all, and one naming no file has
     // nothing to open: left alone rather than met with a drop target and an error.
     let namesNoFile = false
@@ -1613,55 +1591,34 @@ export default function App() {
           event.payload.type === "leave" ||
           (event.payload.type === "drop" && event.payload.paths.length === 0)
         ) {
-          draggedPaths = null
           namesNoFile = false
-          dragToSession({ kind: "leave" })
           setIsDragging(false)
           return
         }
 
-        // Tauri labels the pointer physical either way, but only WebView2
-        // really hands over device pixels; Cocoa and GTK give logical ones.
-        const scale = isWindows() ? window.devicePixelRatio : 1
-        const point = {
-          x: event.payload.position.x / scale,
-          y: event.payload.position.y / scale,
-        }
-
         if (event.payload.type === "drop") {
-          draggedPaths = null
           namesNoFile = false
           setIsDragging(false)
 
-          // The organize workspace takes every drop while it shows; the grid
-          // takes one pointing at a gap in it; anything else opens as tabs.
+          // The organize workspace takes every drop while it shows; anything
+          // else opens as tabs.
           if (workspaceModeRef.current === "organize") {
             organizeDrop(event.payload.paths)
-          } else if (
-            !dragToSession({ kind: "drop", paths: event.payload.paths, point })
-          ) {
+          } else {
             void openPaths(event.payload.paths, "first")
           }
 
           return
         }
 
+        // Only `enter` names the files; `over` carries a position and nothing else.
         if (event.payload.type === "enter") {
-          draggedPaths = event.payload.paths
-          namesNoFile = draggedPaths.length === 0
+          namesNoFile = event.payload.paths.length === 0
         }
 
-        if (namesNoFile) {
-          return
+        if (!namesNoFile) {
+          setIsDragging(true)
         }
-
-        // The grid draws its own insertion line, so the workspace's full-window
-        // drop target would only cover the answer the reader is aiming at.
-        const claimed =
-          workspaceModeRef.current !== "organize" &&
-          dragToSession({ kind: "over", paths: draggedPaths, point })
-
-        setIsDragging(!claimed)
       })
       .then((stop) => {
         if (cancelled) {
@@ -1675,7 +1632,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [dragToSession, openPaths, organizeDrop])
+  }, [openPaths, organizeDrop])
 
   // A double-clicked file reaches the app before this workspace exists, so
   // Rust holds it: the event carries no paths, only that a take will find some.
@@ -2082,7 +2039,6 @@ export default function App() {
           onDirtyChange={updateDirty}
           onSavableChange={updateSavable}
           onSourceChange={updateSource}
-          pageHandoff={handoff}
           ref={(handle) => {
             if (handle) {
               sessionRefs.current.set(tab.id, handle)
@@ -2107,7 +2063,6 @@ export default function App() {
       <div hidden={!viewing}>
         <DocumentTabs
           activeId={activeId}
-          armedTabId={armedTabId}
           onActivate={activateTab}
           onClose={requestCloseTab}
           onCloseAll={requestCloseAll}

@@ -40,10 +40,9 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, InsertOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect,
-    PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
-    MAX_PDF_BYTES,
+    ExportOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect, PdfDocumentInfo,
+    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
+    RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -150,8 +149,9 @@ struct OpenDocument {
     /// rewrite, where images are drawn, and the latest output. Retired with
     /// every content change, and released when the dialog closes.
     compress_cache: Option<compress::CompressCache>,
-    /// Page ids inserted from another file and still present: while any remain
-    /// the document holds another file's pages, so it may only export to a copy.
+    /// Page ids of copies of watermarked pages, still present: their watermark is
+    /// ordinary content now, out of the layer's reach, so the document may only
+    /// export to a copy while any remain.
     merged_page_ids: HashSet<u64>,
     /// The file a save writes back over; `None` for opened-from-bytes, whose
     /// first export adopts its destination as the source.

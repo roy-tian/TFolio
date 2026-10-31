@@ -183,10 +183,8 @@ const es = {
     viewMode: "Modo de vista",
     viewModeSingle: "Una página",
     viewModeBook: "Libro",
-    viewModeThumbnail: "Miniaturas",
     pageStatus: "Página {{current}} de {{total}}",
     pageNumberInput: "Número de página",
-    rotate: "Girar en sentido horario",
     rotateView: "Girar la vista en sentido horario",
     zoomOut: "Alejar",
     zoomIn: "Acercar",
@@ -240,9 +238,6 @@ const es = {
     actionDeletePages_one: "eliminar una página",
     actionDeletePages_other: "eliminar {{count}} páginas",
     actionInsertBlankPage: "insertar una página en blanco",
-    actionInsertFile: "insertar las páginas de un archivo",
-    actionInsertPages_one: "insertar una página",
-    actionInsertPages_other: "insertar {{count}} páginas",
     actionDuplicatePages_one: "pegar una página",
     actionDuplicatePages_other: "pegar {{count}} páginas",
     highlight: "Resaltar texto",
@@ -281,8 +276,6 @@ const es = {
     saveNoSource: "No hay ningún archivo que sobrescribir; al exportar se guardará una copia",
     saveOwnedContent:
       "Un documento con marca de agua o números de página añadidos en esta sesión solo puede exportarse como copia: una vez cerrado el archivo, ya no se pueden quitar",
-    saveMerged:
-      "Un documento con páginas de otro PDF solo puede exportarse como copia, nunca guardarse sobre el archivo desde el que se abrió",
     saveFailed: "No se pudo guardar este PDF.",
     exportFilter: "Archivo PDF",
     exportFailed: "No se pudo exportar este PDF.",
@@ -300,12 +293,8 @@ const es = {
     pageNumbersRebuilding: "Actualizando los números de página…",
     layerStop: "Detener",
     layerStopping: "Deteniendo…",
-    dropWhileEditing:
-      "Aún hay otra edición de páginas en curso; vuelve a soltar los archivos en un momento.",
-    dropIgnoredFiles_one:
-      "{{count}} archivo soltado no se insertó: solo los PDF se insertan como páginas.",
-    dropIgnoredFiles_other:
-      "{{count}} archivos soltados no se insertaron: solo los PDF se insertan como páginas.",
+    saveMerged:
+      "Un documento con copias de páginas con marca de agua solo puede exportarse como copia, nunca guardarse sobre el archivo desde el que se abrió",
   },
   watermark: {
     open: "Marca de agua",
@@ -428,13 +417,10 @@ const es = {
     unsavedCancel: "Seguir editando",
     pageLabel: "Página {{pageNumber}}",
     pageError: "No se pudo mostrar la página {{pageNumber}}",
-    thumbnailLabel: "Seleccionar la página {{pageNumber}}",
     copyText: "Copiar",
     highlightText: "Resaltar",
   },
   pageEdit: {
-    deletePage: "Eliminar la página {{pageNumber}}",
-    deleteSelected: "Eliminar {{count}} páginas seleccionadas",
     insertBefore: "Insertar una página en blanco antes de la página {{pageNumber}}",
     insertAtEnd: "Insertar una página en blanco al final",
     cut_one: "Cortar página",

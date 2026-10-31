@@ -1,7 +1,13 @@
 import { $, browser, expect } from "@wdio/globals"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
-import { minimalPdf, openPdfFromDisk, refreshApp, seedSettings } from "./helpers"
+import {
+  deletePageFromSidebar,
+  minimalPdf,
+  openPdfFromDisk,
+  refreshApp,
+  seedSettings,
+} from "./helpers"
 
 async function offerUpdate() {
   await browser.execute(async () => {
@@ -35,7 +41,7 @@ async function expectInstalled() {
 
 describe("update installation confirmation", () => {
   beforeEach(async () => {
-    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
   })
 
@@ -47,7 +53,7 @@ describe("update installation confirmation", () => {
 
   it("asks before discarding edits in a background tab and respects cancel", async () => {
     await openPdfFromDisk("edited-update.pdf", minimalPdf(2))
-    await $("button[aria-label='Delete page 1']").click()
+    await deletePageFromSidebar(1)
     await $("[aria-label='Unsaved changes']").waitForExist()
     await $("#workspace-tab-home").click()
     await offerUpdate()
@@ -69,7 +75,7 @@ describe("update installation confirmation", () => {
 
   it("skips confirmation after edits are undone", async () => {
     await openPdfFromDisk("undo-update.pdf", minimalPdf(2))
-    await $("button[aria-label='Delete page 1']").click()
+    await deletePageFromSidebar(1)
     await $("[aria-label='Unsaved changes']").waitForExist()
     await $("[data-active='true'] button[aria-label^='Undo']").click()
     await $("[aria-label='Unsaved changes']").waitForExist({ reverse: true })

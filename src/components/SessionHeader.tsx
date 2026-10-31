@@ -40,7 +40,6 @@ type SessionHeaderProps = {
   bookApplies: boolean
   canSave: boolean
   document: PdfDocumentInfo | null
-  drawingApplies: boolean
   macOS: boolean
   onChangeViewMode: (mode: ViewMode) => void
   onCompress: () => void
@@ -71,7 +70,6 @@ type SessionHeaderProps = {
   }
   viewMode: ViewMode
   zoom: ReturnType<typeof useZoom>
-  zoomApplies: boolean
 }
 
 /** The toolbar every document tab shares: reading controls on the left, the
@@ -83,7 +81,6 @@ export function SessionHeader({
   bookApplies,
   canSave,
   document: pdfDocument,
-  drawingApplies,
   macOS,
   onChangeViewMode,
   onCompress,
@@ -102,11 +99,9 @@ export function SessionHeader({
   tool,
   viewMode,
   zoom,
-  zoomApplies,
 }: SessionHeaderProps) {
   const { t } = useTranslation()
-  const rotateLabel =
-    viewMode === "thumbnail" ? t("toolbar.rotate") : t("toolbar.rotateView")
+  const rotateLabel = t("toolbar.rotateView")
 
   return (
     <ToolbarFrame
@@ -122,17 +117,13 @@ export function SessionHeader({
           <AnnotationToolbar
             activeTool={tool.activeTool}
             disabled={!pdfDocument}
-            eraserApplies={drawingApplies}
-            highlightApplies={drawingApplies}
             highlightColor={tool.highlightColor}
             onHighlightColorChange={tool.onHighlightColorChange}
             onPageNumbers={tool.onPageNumbers}
             onRectStyleChange={tool.onRectStyleChange}
             onToolChange={onToolChange}
             onWatermark={tool.onWatermark}
-            rectApplies={drawingApplies}
             rectStyle={tool.rectStyle}
-            textNoteApplies={drawingApplies}
             textNoteColor={tool.textNoteColor}
           />
           <ButtonGroup>
@@ -228,20 +219,18 @@ export function SessionHeader({
         onChange={onChangeViewMode}
         value={viewMode}
       />
-      {zoomApplies ? (
-        <ZoomControls
-          canZoomIn={zoom.canZoomIn}
-          canZoomOut={zoom.canZoomOut}
-          disabled={!pdfDocument}
-          onToggleFit={zoom.toggleFit}
-          onZoomIn={zoom.zoomIn}
-          onZoomOut={zoom.zoomOut}
-          zoomMode={zoom.zoomMode}
-          zoomPercent={zoom.zoomPercent}
-        />
-      ) : null}
-      {/* The grid turns the chosen pages in the document; the reading view
-          turns only the way they are looked at (D2). */}
+      <ZoomControls
+        canZoomIn={zoom.canZoomIn}
+        canZoomOut={zoom.canZoomOut}
+        disabled={!pdfDocument}
+        onToggleFit={zoom.toggleFit}
+        onZoomIn={zoom.zoomIn}
+        onZoomOut={zoom.zoomOut}
+        zoomMode={zoom.zoomMode}
+        zoomPercent={zoom.zoomPercent}
+      />
+      {/* Turns only the way the pages are looked at (D2); the sidebar's
+          previews turn the pages themselves. */}
       <ToolbarTooltip label={rotateLabel}>
         <Button
           aria-label={rotateLabel}

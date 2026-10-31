@@ -525,6 +525,93 @@ fn reorder_keeps_outline_destinations() {
     );
 }
 
+// A restore puts back copies, not the deleted page objects, so a bookmark aimed
+// at the old object could stop resolving; undoing a delete must bring it back.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn restore_brings_back_a_deleted_pages_bookmark() {
+    let engine = test_engine();
+    let document = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the outlined PDF");
+
+    assert_eq!(document.outline[0].page_number, Some(3));
+
+    let deleted = engine
+        .delete_pages(document.id, &[3], 5)
+        .expect("PDFium should delete the bookmarked page");
+
+    assert_eq!(
+        deleted.outline.first().and_then(|item| item.page_number),
+        None,
+        "with its page gone the bookmark has nowhere to go",
+    );
+
+    let restored = engine
+        .restore_pages(document.id, 5)
+        .expect("PDFium should restore the page");
+
+    assert_eq!(
+        restored.outline.first().and_then(|item| item.page_number),
+        Some(3),
+        "the undone delete should leave the bookmark on its page again",
+    );
+
+    let directory = scratch_directory("restore-bookmark");
+    let copy = directory.join("restored.pdf");
+    engine
+        .export_to(document.id, &copy)
+        .expect("PDFium should write the document");
+    let reopened = engine
+        .open(fs::read(&copy).expect("the copy should be readable"))
+        .expect("PDFium should reopen what it wrote");
+    fs::remove_dir_all(&directory).ok();
+
+    assert_eq!(
+        reopened.outline.first().and_then(|item| item.page_number),
+        Some(3),
+        "the saved file should keep the bookmark on its page",
+    );
+}
+
+// The same through a GoTo action naming its destination, the indirection most
+// generated outlines use: the name tree's entry is what must move.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn restore_relinks_a_named_destination() {
+    let engine = test_engine();
+    let document = engine
+        .open(build_pdf(&[
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 7 0 R /Names << /Dests 9 0 R >> >>\nendobj\n".into(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>\nendobj\n".into(),
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".into(),
+            "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".into(),
+            "5 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 6 0 R >>\nendobj\n".into(),
+            "6 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".into(),
+            "7 0 obj\n<< /Type /Outlines /First 8 0 R /Last 8 0 R /Count 1 >>\nendobj\n".into(),
+            "8 0 obj\n<< /Title (Chapter) /Parent 7 0 R /A << /S /GoTo /D (chapter) >> >>\nendobj\n".into(),
+            "9 0 obj\n<< /Names [(chapter) [4 0 R /Fit]] >>\nendobj\n".into(),
+        ]))
+        .expect("PDFium should open the outlined PDF");
+
+    assert_eq!(document.outline[0].page_number, Some(2));
+
+    engine
+        .delete_pages(document.id, &[1, 2], 6)
+        .expect("PDFium should delete the pages");
+
+    let restored = engine
+        .restore_pages(document.id, 6)
+        .expect("PDFium should restore the pages");
+
+    assert_eq!(restored.num_pages, 3);
+    assert_eq!(
+        restored.outline.first().and_then(|item| item.page_number),
+        Some(2),
+        "the named destination should lead to the restored page",
+    );
+}
+
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn delete_then_restore_is_lossless() {

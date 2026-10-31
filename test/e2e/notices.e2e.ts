@@ -1,12 +1,14 @@
 import { browser, expect, $, $$ } from "@wdio/globals"
 
 import {
+  activeSidebar,
   bandedPdf,
   openFileButton,
   openPdfFromDisk,
   pointPickerAt,
   refreshApp,
   seedSettings,
+  sidebarPageAction,
   writeScratchPdf,
 } from "./helpers"
 
@@ -15,26 +17,12 @@ function tabNamed(name: string) {
 }
 
 async function cutPage(pageNumber: number) {
-  await $(`button[data-page-number='${pageNumber}']`).click()
-  await browser.execute((page: number) => {
-    const thumb = document.querySelector(`button[data-page-number='${page}']`)!
-    const box = thumb.getBoundingClientRect()
-
-    thumb.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        button: 2,
-        clientX: box.left + 20,
-        clientY: box.top + 20,
-      }),
-    )
-  }, pageNumber)
-  await $("[data-action='cut-pages']").click()
+  await sidebarPageAction(pageNumber, "cut-pages")
 }
 
 describe("TFolio notices", () => {
   beforeEach(async () => {
-    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
   })
 
@@ -45,7 +33,7 @@ describe("TFolio notices", () => {
     )
 
     await openPdfFromDisk("notices.pdf", bandedPdf(4))
-    await $("button[data-page-number='2']").waitForDisplayed()
+    await $(`${activeSidebar} button[data-thumbnail-page='2']`).waitForDisplayed()
 
     // The refusal first and the cut second: the open attempt is the slow half,
     // and the notice waiting through it spends its five seconds on the harness.
@@ -66,7 +54,7 @@ describe("TFolio notices", () => {
 
   it("holds a document's notice until its own tab is back in front", async () => {
     await openPdfFromDisk("held.pdf", bandedPdf(4))
-    await $("button[data-page-number='2']").waitForDisplayed()
+    await $(`${activeSidebar} button[data-thumbnail-page='2']`).waitForDisplayed()
     await cutPage(2)
     await expect($("[data-page-notice]")).toHaveText("Page 2 cut")
 
@@ -82,7 +70,7 @@ describe("TFolio notices", () => {
 
   it("steps the corner below the find bar while it is open", async () => {
     await openPdfFromDisk("find.pdf", bandedPdf(2))
-    await $("button[data-page-number='1']").waitForDisplayed()
+    await $(`${activeSidebar} button[data-thumbnail-page='1']`).waitForDisplayed()
 
     const cornerTop = () =>
       browser.execute(
@@ -115,7 +103,7 @@ describe("TFolio notices", () => {
 
   it("keeps the corner above a modal and out of its aria-hidden sweep", async () => {
     await openPdfFromDisk("modal.pdf", bandedPdf(2))
-    await $("button[data-page-number='1']").waitForDisplayed()
+    await $(`${activeSidebar} button[data-thumbnail-page='1']`).waitForDisplayed()
 
     await $("button[aria-label='Watermark']").click()
     await $("[data-testid='watermark-dialog']").waitForDisplayed({

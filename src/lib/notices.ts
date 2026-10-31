@@ -48,8 +48,8 @@ type NoticeEntry = {
   /** Work that reports no measure of its own: a spinner and shimmering words
       stand in for the bar a progress notice draws. */
   running?: true
-  /** What this notice replaces, where that is not itself: the grid's six
-      clipboard notices are one running report, not six that stand together. */
+  /** What this notice replaces, where that is not itself: the page
+      clipboard's six notices are one running report, not six that stand together. */
   slot?: string
   textKey: ParseKeys
   tone: NoticeTone
@@ -62,11 +62,6 @@ export const noticeCatalogue = {
     tone: "danger",
   },
   createFailed: { life: "transient", textKey: "menu.newFailed", tone: "danger" },
-  editInFlight: {
-    life: "transient",
-    textKey: "annotate.dropWhileEditing",
-    tone: "warning",
-  },
   exportCopyOnly: {
     life: "transient",
     textKey: "annotate.exportCopyOnly",
@@ -100,11 +95,6 @@ export const noticeCatalogue = {
   markWhileEditing: {
     life: "transient",
     textKey: "annotate.markWhileEditing",
-    tone: "warning",
-  },
-  insertIgnoredFiles: {
-    life: "transient",
-    textKey: "annotate.dropIgnoredFiles",
     tone: "warning",
   },
   newWindowFailed: {
@@ -323,11 +313,10 @@ export const noticeActions = {
   { busyLabelKey?: ParseKeys; labelKey: ParseKeys }
 >
 
-/** A mark that lands puts every refusal behind the reader; the grid's
-    clipboard notices report what worked, and nothing later disproves them. */
+/** A mark that lands puts every refusal behind the reader; the page
+    clipboard's notices report what worked, and nothing later disproves them. */
 export const documentRefusals = [
   "annotateFailed",
-  "editInFlight",
   "exportCopyOnly",
   "exportDenied",
   "exportFailed",
@@ -395,7 +384,7 @@ export function noticeClockKey(notice: Notice): string {
   return `${notice.id}@${notice.token}`
 }
 
-/** True for the grid's clipboard notices, which the page-edit suite reads by
+/** True for the page clipboard's notices, which the page-edit suite reads by
     an attribute of their own. */
 export function isPageNotice(kind: NoticeKind): boolean {
   return noticeEntry(kind).slot === "pageClipboard"

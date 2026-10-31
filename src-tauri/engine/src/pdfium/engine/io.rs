@@ -564,11 +564,11 @@ impl PdfiumEngine {
             );
         }
 
-        // Another file's pages carry the same restriction, for the same reason:
-        // again enforced here, not trusted to the disabled key.
+        // Copies of watermarked pages carry the same restriction, for the same
+        // reason: again enforced here, not trusted to the disabled key.
         if !entry.merged_page_ids.is_empty() {
             return Err(
-                "a document holding another PDF's pages may only be exported as a copy, not saved over its own file"
+                "a document holding copies of watermarked pages may only be exported as a copy, not saved over its own file"
                     .into(),
             );
         }

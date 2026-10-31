@@ -9,10 +9,10 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 use tfolio_engine::{
-    download_fallback_font, size_limit_error, ExportOutcome, InsertOutcome, OperationTarget,
-    PageNumbersConfig, PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, TextNoteStyle,
-    WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+    download_fallback_font, size_limit_error, ExportOutcome, OperationTarget, PageNumbersConfig,
+    PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
+    PdfiumEngine, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
+    MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
@@ -670,53 +670,6 @@ pub async fn open_converted_from_path(
     record_document(&owners, &window, page, document.id(), None);
 
     Ok(document)
-}
-
-#[tauri::command]
-pub async fn insert_pdf_from_path(
-    document_id: u64,
-    path: String,
-    index: i32,
-    state: State<'_, PdfiumState>,
-) -> Result<InsertOutcome, String> {
-    let path = PathBuf::from(path);
-
-    #[cfg(not(feature = "e2e"))]
-    ensure_approved(&state, &path)?;
-
-    let engine = Arc::clone(&state.engine);
-
-    tauri::async_runtime::spawn_blocking(move || engine.insert_from_path(document_id, path, index))
-        .await
-        .map_err(|error| format!("PDFium insert task failed: {error}"))?
-}
-
-/// Nothing is read from disk, so there is no path to approve; what is checked
-/// instead is that this window holds both documents.
-#[tauri::command]
-pub async fn insert_pdf_pages_from_document(
-    document_id: u64,
-    source_document_id: u64,
-    page_numbers: Vec<i32>,
-    index: i32,
-    state: State<'_, PdfiumState>,
-    owners: State<'_, DocumentOwners>,
-    window: WebviewWindow,
-) -> Result<PdfStructureUpdate, String> {
-    // The drag crosses two tabs of one window, and documents are owned per
-    // window: neither end may be a document this window does not hold.
-    if !owners.owns(document_id, window.label()) || !owners.owns(source_document_id, window.label())
-    {
-        return Err("both documents must be open in this window".into());
-    }
-
-    let engine = Arc::clone(&state.engine);
-
-    tauri::async_runtime::spawn_blocking(move || {
-        engine.insert_pages_from_document(document_id, source_document_id, &page_numbers, index)
-    })
-    .await
-    .map_err(|error| format!("PDFium insert task failed: {error}"))?
 }
 
 #[tauri::command]

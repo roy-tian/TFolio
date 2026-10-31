@@ -15,6 +15,7 @@ import type { E2eOverrides } from "../../src/lib/e2e"
 
 import {
   clickAppMenuItem,
+  deletePageFromSidebar,
   dropZoneButton,
   emitDrag,
   minimalPdf,
@@ -406,15 +407,16 @@ describe("independent document tabs", () => {
 
     await openPathViaDialog(secondPath)
     await tabButton("first.pdf").click()
-    await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Delete page 1']").waitForExist()
-    await $("button[aria-label='Delete page 1']").click()
-    await browser.waitUntil(
-      async () =>
-        (await $("[data-active='true'] [data-slot='page-status']").getAttribute("aria-label")) ===
-        "Page 1 of 2",
-      { timeoutMsg: "the page deletion never made the tab dirty" },
-    )
+    const pageStatus = () =>
+      $("[data-active='true'] [data-slot='page-status']").getAttribute("aria-label")
+    // The sidebar acted on is the shown tab's, so wait until that is first.pdf.
+    await browser.waitUntil(async () => (await pageStatus())?.endsWith(" of 3"), {
+      timeoutMsg: "first.pdf never came to the front",
+    })
+    await deletePageFromSidebar(1)
+    await browser.waitUntil(async () => (await pageStatus())?.endsWith(" of 2"), {
+      timeoutMsg: "the page deletion never made the tab dirty",
+    })
 
     await tabButton("second.pdf").click()
     await expect(
@@ -754,16 +756,15 @@ describe("independent document tabs", () => {
     // the switch: until it lands, `data-active` names anchor.pdf's panel.
     await tabButton("left.pdf").click()
     await expect(tabButton("left.pdf")).toHaveAttribute("aria-selected", "true")
-    await $("[data-active='true'] button[aria-label='Thumbnails']").click()
-    const deletePage = $("[data-active='true'] button[aria-label='Delete page 1']")
-    await deletePage.waitForExist()
-    await deletePage.click()
-    await browser.waitUntil(
-      async () =>
-        (await $("[data-active='true'] [data-slot='page-status']").getAttribute("aria-label")) ===
-        "Page 1 of 1",
-      { timeoutMsg: "the page deletion never made the tab dirty" },
-    )
+    const pageStatus = () =>
+      $("[data-active='true'] [data-slot='page-status']").getAttribute("aria-label")
+    await browser.waitUntil(async () => (await pageStatus()) === "Page 1 of 2", {
+      timeoutMsg: "left.pdf's panel never came to the front",
+    })
+    await deletePageFromSidebar(1)
+    await browser.waitUntil(async () => (await pageStatus()) === "Page 1 of 1", {
+      timeoutMsg: "the page deletion never made the tab dirty",
+    })
 
     await openTabMenu("anchor.pdf")
     await $("[data-action='tab-close-others']").click()

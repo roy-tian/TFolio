@@ -104,13 +104,6 @@ export type PdfStructureUpdate = {
   pages: PdfPageInfo[]
 }
 
-/** `pageCount` is the one thing the frontend cannot know until the backend
-    has read the file; it is what the insert's undo takes out again. */
-export type PdfInsertOutcome = {
-  pageCount: number
-  update: PdfStructureUpdate
-}
-
 /** Widest a single page may render on screen, in CSS pixels. */
 export const MAX_PAGE_WIDTH = 896
 

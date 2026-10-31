@@ -496,6 +496,38 @@ export async function appMenuItem(action: string) {
 export const activeSidebar =
   "[data-document-session][data-active='true'] [data-slot='app-sidebar']"
 
+/** Opens a page's menu in the shown tab's sidebar, which also chooses the
+    page if it was not chosen, and takes the action named by `data-action`. */
+export async function sidebarPageAction(pageNumber: number, action: string) {
+  const selector = `${activeSidebar} button[data-thumbnail-page='${pageNumber}']`
+
+  await $(selector).waitForExist({ timeout: 30_000 })
+  await browser.execute((target: string) => {
+    const page = document.querySelector(target)!
+    const box = page.getBoundingClientRect()
+
+    page.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        clientX: box.left + box.width / 2,
+        clientY: box.top + box.height / 2,
+      }),
+    )
+  }, selector)
+
+  const item = $(`[data-action='${action}']`)
+
+  await item.waitForDisplayed({ timeout: 5_000 })
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 5_000 })
+}
+
+/** A small, undoable edit: one page deleted through the shown tab's sidebar. */
+export function deletePageFromSidebar(pageNumber = 1) {
+  return sidebarPageAction(pageNumber, "delete-pages")
+}
+
 /** Redo has no toolbar button: it is the keyboard's alone. */
 export async function pressRedo() {
   await browser.keys(["Control", "Shift", "z"])
@@ -779,14 +811,4 @@ export function emitDrag(
     point.y,
     paths,
   )
-}
-
-export function gapPoint(index: number) {
-  return browser.execute((at: number) => {
-    const rect = document
-      .querySelector(`[data-insert-index='${at}']`)!
-      .getBoundingClientRect()
-
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-  }, index)
 }

@@ -147,11 +147,4 @@ describe("TFolio eraser", () => {
     await $("button[aria-label^='Undo']").click()
     await settledAt(clean, "undo did not take the first rectangle back")
   })
-
-  it("is offered only where there is a page to rub a mark off", async () => {
-    await expect($("button[aria-label='Erase a mark']")).toExist()
-
-    await $("button[aria-label='Thumbnails']").click()
-    await expect($("button[aria-label='Erase a mark']")).not.toExist()
-  })
 })

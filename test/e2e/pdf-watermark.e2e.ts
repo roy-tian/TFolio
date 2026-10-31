@@ -17,6 +17,7 @@ import {
   seedSettings,
   tooltipOn,
   pressRedo,
+  activeSidebar,
 } from "./helpers"
 
 async function openWatermarkDialog() {
@@ -294,16 +295,16 @@ describe("TFolio document watermark", () => {
     const sourcePath = await openPdfFromDisk("watermark-save.pdf", blankPdf())
     await renderedPage()
 
-    await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Select page 1']").waitForDisplayed()
-    const cleanThumbnail = await pagePixelFingerprint()
+    const sidebarPreview = `${activeSidebar} button[data-thumbnail-page='1']`
+    await $(`${sidebarPreview} canvas`).waitForDisplayed()
+    const cleanThumbnail = await pagePixelFingerprint(sidebarPreview)
     const original = readFileSync(sourcePath)
 
     // The document-level action remains available even though drawing tools do
     // not: it acts on every page, not on a page under the pointer.
     await applyWatermark("ARCHIVE", true)
     await browser.waitUntil(
-      async () => (await pagePixelFingerprint()) !== cleanThumbnail,
+      async () => (await pagePixelFingerprint(sidebarPreview)) !== cleanThumbnail,
       { timeout: 30_000, timeoutMsg: "the thumbnail did not refresh" },
     )
 

@@ -9,7 +9,7 @@ describe("PDF scrolling", () => {
     await refreshApp()
   })
 
-  for (const viewMode of ["single", "book", "thumbnail"] as const) {
+  for (const viewMode of ["single", "book"] as const) {
     it(`lays ${viewMode} pages out below the tab strip and beside the sidebar`, async () => {
       await seedSettings({ ui: { language: "en", viewMode } })
       await refreshApp()

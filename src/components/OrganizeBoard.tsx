@@ -211,7 +211,7 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
       document.removeEventListener("pointermove", move)
       document.removeEventListener("pointerup", release)
       document.removeEventListener("pointercancel", cancel)
-      document.removeEventListener("keydown", escape)
+      document.removeEventListener("keydown", escape, true)
 
       if (moving) {
         dragEndedAtRef.current = performance.now()
@@ -229,8 +229,12 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
     const release = () => finish(true)
     const cancel = () => finish(false)
     const escape = (pressed: KeyboardEvent) => {
-      if (pressed.key === "Escape") {
+      // A press not yet a drag leaves Esc to its usual owners.
+      if (pressed.key === "Escape" && moving) {
+        // Ahead of the selection's and the clipboard's own Esc: this one ends
+        // the drag and nothing else.
         pressed.preventDefault()
+        pressed.stopPropagation()
         finish(false)
       }
     }
@@ -238,7 +242,7 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
     document.addEventListener("pointermove", move)
     document.addEventListener("pointerup", release)
     document.addEventListener("pointercancel", cancel)
-    document.addEventListener("keydown", escape)
+    document.addEventListener("keydown", escape, true)
   }
 
   const outputNumber = new Map<number, number>()
@@ -543,14 +547,12 @@ const SlotCell = memo(function SlotCell({
       ) : (
         <PdfThumbnail
           caption={caption}
-          deleteDisabled
           documentId={sourceId}
           intrinsicRotation={intrinsicRotation}
           isCurrent={false}
           isCut={isCut}
           isSelected={isSelected}
           label={label}
-          onDelete={noop}
           onOpen={noop}
           onSelect={noop}
           pageHeight={pageHeight}
@@ -560,8 +562,6 @@ const SlotCell = memo(function SlotCell({
           renderEpoch={0}
           retainBitmap={nearView}
           rotation={turn}
-          selectedCount={0}
-          showControls={false}
           surface="organize"
         />
       )}

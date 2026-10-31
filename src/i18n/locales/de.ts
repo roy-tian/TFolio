@@ -183,10 +183,8 @@ const de = {
     viewMode: "Ansicht",
     viewModeSingle: "Einzelseite",
     viewModeBook: "Buchansicht",
-    viewModeThumbnail: "Miniaturansicht",
     pageStatus: "Seite {{current}} von {{total}}",
     pageNumberInput: "Seitennummer",
-    rotate: "Im Uhrzeigersinn drehen",
     rotateView: "Ansicht im Uhrzeigersinn drehen",
     zoomOut: "Verkleinern",
     zoomIn: "Vergrößern",
@@ -240,10 +238,7 @@ const de = {
     actionDeletePages_one: "Seite löschen",
     actionDeletePages_other: "{{count}} Seiten löschen",
     actionInsertBlankPage: "Leere Seite einfügen",
-    actionInsertFile: "Seiten einer Datei einfügen",
     // "Insert" and "paste" are both "einfügen"; the cross-tab drag names its source.
-    actionInsertPages_one: "Seite aus anderem Tab einfügen",
-    actionInsertPages_other: "{{count}} Seiten aus anderem Tab einfügen",
     actionDuplicatePages_one: "Seite einfügen",
     actionDuplicatePages_other: "{{count}} Seiten einfügen",
     highlight: "Text hervorheben",
@@ -282,8 +277,6 @@ const de = {
     saveNoSource: "Keine Datei zum Überschreiben – beim Exportieren wird eine Kopie gespeichert",
     saveOwnedContent:
       "Ein Dokument, dem in dieser Sitzung ein Wasserzeichen oder Seitenzahlen hinzugefügt wurden, kann nur als Kopie exportiert werden – nach dem Schließen der Datei lassen sie sich nicht mehr entfernen",
-    saveMerged:
-      "Ein Dokument mit Seiten aus einem anderen PDF kann nur als Kopie exportiert und nie über die Datei gespeichert werden, aus der es geöffnet wurde",
     saveFailed: "Dieses PDF konnte nicht gespeichert werden.",
     exportFilter: "PDF-Datei",
     exportFailed: "Dieses PDF konnte nicht exportiert werden.",
@@ -301,12 +294,8 @@ const de = {
     pageNumbersRebuilding: "Seitenzahlen werden aktualisiert…",
     layerStop: "Stoppen",
     layerStopping: "Wird gestoppt…",
-    dropWhileEditing:
-      "Eine andere Seitenbearbeitung läuft noch – legen Sie die Dateien gleich noch einmal ab.",
-    dropIgnoredFiles_one:
-      "{{count}} abgelegte Datei wurde nicht eingefügt: Nur PDFs können als Seiten eingefügt werden.",
-    dropIgnoredFiles_other:
-      "{{count}} abgelegte Dateien wurden nicht eingefügt: Nur PDFs können als Seiten eingefügt werden.",
+    saveMerged:
+      "Ein Dokument mit Kopien von Seiten mit Wasserzeichen kann nur als Kopie exportiert und nie über die Datei gespeichert werden, aus der es geöffnet wurde",
   },
   watermark: {
     open: "Wasserzeichen",
@@ -429,13 +418,10 @@ const de = {
     unsavedCancel: "Weiter bearbeiten",
     pageLabel: "Seite {{pageNumber}}",
     pageError: "Seite {{pageNumber}} konnte nicht dargestellt werden",
-    thumbnailLabel: "Seite {{pageNumber}} auswählen",
     copyText: "Kopieren",
     highlightText: "Hervorheben",
   },
   pageEdit: {
-    deletePage: "Seite {{pageNumber}} löschen",
-    deleteSelected: "{{count}} ausgewählte Seiten löschen",
     insertBefore: "Leere Seite vor Seite {{pageNumber}} einfügen",
     insertAtEnd: "Leere Seite am Ende einfügen",
     cut_one: "Seite ausschneiden",

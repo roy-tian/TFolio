@@ -174,10 +174,8 @@ const zhCN = {
     viewMode: "视图模式",
     viewModeSingle: "单页视图",
     viewModeBook: "书籍视图",
-    viewModeThumbnail: "缩略图视图",
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
-    rotate: "顺时针旋转",
     rotateView: "顺时针旋转视图",
     zoomOut: "缩小",
     zoomIn: "放大",
@@ -229,9 +227,6 @@ const zhCN = {
     actionDeletePages_one: "删除页面",
     actionDeletePages_other: "删除 {{count}} 页",
     actionInsertBlankPage: "插入空白页",
-    actionInsertFile: "插入文件页面",
-    actionInsertPages_one: "插入页面",
-    actionInsertPages_other: "插入 {{count}} 页",
     actionDuplicatePages_one: "粘贴页面",
     actionDuplicatePages_other: "粘贴 {{count}} 页",
     highlight: "文字高亮",
@@ -269,7 +264,6 @@ const zhCN = {
     saveNoSource: "没有可覆盖的源文件——导出将另存为副本",
     saveOwnedContent:
       "本次会话添加了水印或页码的文档只能导出副本——文件一旦关闭，它们便无法再由本应用移除",
-    saveMerged: "含有其他 PDF 页面的文档只能导出副本，不能保存回原文件",
     saveFailed: "无法保存此 PDF。",
     exportFilter: "PDF 文件",
     exportFailed: "无法导出此 PDF。",
@@ -284,11 +278,7 @@ const zhCN = {
     pageNumbersRebuilding: "正在更新页码…",
     layerStop: "停止",
     layerStopping: "正在停止…",
-    dropWhileEditing: "另一项页面修改仍在进行——请稍后再拖放一次。",
-    dropIgnoredFiles_one:
-      "{{count}} 个拖入的文件未插入：只有 PDF 可以作为页面插入。",
-    dropIgnoredFiles_other:
-      "{{count}} 个拖入的文件未插入：只有 PDF 可以作为页面插入。",
+    saveMerged: "含有带水印页面副本的文档只能导出副本，不能保存回原文件",
   },
   watermark: {
     open: "水印",
@@ -406,13 +396,10 @@ const zhCN = {
     unsavedCancel: "继续编辑",
     pageLabel: "第 {{pageNumber}} 页",
     pageError: "第 {{pageNumber}} 页渲染失败",
-    thumbnailLabel: "选中第 {{pageNumber}} 页",
     copyText: "复制",
     highlightText: "文字高亮",
   },
   pageEdit: {
-    deletePage: "删除第 {{pageNumber}} 页",
-    deleteSelected: "删除选中的 {{count}} 页",
     insertBefore: "在第 {{pageNumber}} 页前插入空白页",
     insertAtEnd: "在末尾插入空白页",
     /** Chinese has one plural form, so `_one` never renders: keep it identical. */

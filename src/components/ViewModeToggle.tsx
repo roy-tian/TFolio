@@ -1,9 +1,4 @@
-import {
-  BookOpen,
-  LayoutGrid,
-  RectangleVertical,
-  type LucideIcon,
-} from "lucide-react"
+import { BookOpen, RectangleVertical, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
@@ -17,15 +12,11 @@ import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 const options: Array<{
   icon: LucideIcon
-  labelKey:
-    | "toolbar.viewModeSingle"
-    | "toolbar.viewModeBook"
-    | "toolbar.viewModeThumbnail"
+  labelKey: "toolbar.viewModeSingle" | "toolbar.viewModeBook"
   value: ViewMode
 }> = [
   { icon: RectangleVertical, labelKey: "toolbar.viewModeSingle", value: "single" },
   { icon: BookOpen, labelKey: "toolbar.viewModeBook", value: "book" },
-  { icon: LayoutGrid, labelKey: "toolbar.viewModeThumbnail", value: "thumbnail" },
 ]
 
 type ViewModeToggleProps = {

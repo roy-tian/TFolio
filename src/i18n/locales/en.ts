@@ -181,10 +181,8 @@ const en = {
     viewMode: "View mode",
     viewModeSingle: "Single page",
     viewModeBook: "Book",
-    viewModeThumbnail: "Thumbnails",
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
-    rotate: "Rotate clockwise",
     rotateView: "Rotate the view clockwise",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
@@ -238,9 +236,6 @@ const en = {
     actionDeletePages_one: "deleting a page",
     actionDeletePages_other: "deleting {{count}} pages",
     actionInsertBlankPage: "inserting a blank page",
-    actionInsertFile: "inserting a file’s pages",
-    actionInsertPages_one: "inserting a page",
-    actionInsertPages_other: "inserting {{count}} pages",
     actionDuplicatePages_one: "pasting a page",
     actionDuplicatePages_other: "pasting {{count}} pages",
     highlight: "Highlight text",
@@ -279,8 +274,6 @@ const en = {
     saveNoSource: "No file to save over — exporting will save a copy",
     saveOwnedContent:
       "A document with a watermark or page numbers added this session can only be exported as a copy — they cannot be lifted once the file is closed",
-    saveMerged:
-      "A document holding pages from another PDF can only be exported as a copy, never saved back over the file it was opened from",
     saveFailed: "This PDF could not be saved.",
     exportFilter: "PDF file",
     exportFailed: "This PDF could not be exported.",
@@ -298,12 +291,8 @@ const en = {
     pageNumbersRebuilding: "Updating the page numbers…",
     layerStop: "Stop",
     layerStopping: "Stopping…",
-    dropWhileEditing:
-      "Another page edit is still running — try the drop again in a moment.",
-    dropIgnoredFiles_one:
-      "{{count}} dropped file was not inserted: only PDFs insert as pages.",
-    dropIgnoredFiles_other:
-      "{{count}} dropped files were not inserted: only PDFs insert as pages.",
+    saveMerged:
+      "A document holding copies of watermarked pages can only be exported as a copy, never saved back over the file it was opened from",
   },
   watermark: {
     open: "Watermark",
@@ -426,13 +415,10 @@ const en = {
     unsavedCancel: "Keep editing",
     pageLabel: "Page {{pageNumber}}",
     pageError: "Page {{pageNumber}} could not be rendered",
-    thumbnailLabel: "Select page {{pageNumber}}",
     copyText: "Copy",
     highlightText: "Highlight",
   },
   pageEdit: {
-    deletePage: "Delete page {{pageNumber}}",
-    deleteSelected: "Delete {{count}} selected pages",
     insertBefore: "Insert a blank page before page {{pageNumber}}",
     insertAtEnd: "Insert a blank page at the end",
     cut_one: "Cut page",

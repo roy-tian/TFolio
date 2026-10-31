@@ -189,7 +189,7 @@ export function usePageBitmap({
     const canvas = canvasRef.current
 
     // A hidden tab reports every cell out of view; it is away, not far, and
-    // clearing would re-render the whole grid on the way back.
+    // clearing would re-render every preview on the way back.
     if (
       retainBitmap ||
       !canvas ||

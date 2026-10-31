@@ -181,10 +181,8 @@ const zhTW = {
     viewMode: "檢視模式",
     viewModeSingle: "單頁檢視",
     viewModeBook: "書本檢視",
-    viewModeThumbnail: "縮圖檢視",
     pageStatus: "第 {{current}} 頁，共 {{total}} 頁",
     pageNumberInput: "頁碼",
-    rotate: "順時針旋轉",
     rotateView: "順時針旋轉檢視畫面",
     zoomOut: "縮小",
     zoomIn: "放大",
@@ -237,9 +235,6 @@ const zhTW = {
     actionDeletePages_one: "刪除 {{count}} 頁",
     actionDeletePages_other: "刪除 {{count}} 頁",
     actionInsertBlankPage: "插入空白頁",
-    actionInsertFile: "插入檔案頁面",
-    actionInsertPages_one: "插入 {{count}} 頁",
-    actionInsertPages_other: "插入 {{count}} 頁",
     actionDuplicatePages_one: "貼上 {{count}} 頁",
     actionDuplicatePages_other: "貼上 {{count}} 頁",
     highlight: "醒目提示文字",
@@ -278,8 +273,6 @@ const zhTW = {
     saveNoSource: "沒有可覆寫的原始檔案——匯出時會另存為複本",
     saveOwnedContent:
       "在本次開啟期間新增了浮水印或頁碼的文件只能匯出為複本——檔案關閉後就無法再移除它們",
-    saveMerged:
-      "含有其他 PDF 頁面的文件只能匯出為複本，無法存回原本開啟的檔案",
     saveFailed: "無法儲存此 PDF。",
     exportFilter: "PDF 檔案",
     exportFailed: "無法匯出此 PDF。",
@@ -297,12 +290,8 @@ const zhTW = {
     pageNumbersRebuilding: "正在更新頁碼…",
     layerStop: "停止",
     layerStopping: "正在停止…",
-    dropWhileEditing:
-      "另一項頁面編輯仍在進行中——請稍後再拖放一次。",
-    dropIgnoredFiles_one:
-      "有 {{count}} 個拖放的檔案未插入：只有 PDF 能以頁面形式插入。",
-    dropIgnoredFiles_other:
-      "有 {{count}} 個拖放的檔案未插入：只有 PDF 能以頁面形式插入。",
+    saveMerged:
+      "含有帶浮水印頁面複本的文件只能匯出為複本，無法存回原本開啟的檔案",
   },
   watermark: {
     open: "浮水印",
@@ -425,13 +414,10 @@ const zhTW = {
     unsavedCancel: "繼續編輯",
     pageLabel: "第 {{pageNumber}} 頁",
     pageError: "無法顯示第 {{pageNumber}} 頁",
-    thumbnailLabel: "選取第 {{pageNumber}} 頁",
     copyText: "複製",
     highlightText: "醒目提示",
   },
   pageEdit: {
-    deletePage: "刪除第 {{pageNumber}} 頁",
-    deleteSelected: "刪除選取的 {{count}} 頁",
     insertBefore: "在第 {{pageNumber}} 頁前插入空白頁",
     insertAtEnd: "在結尾插入空白頁",
     cut_one: "剪下 {{count}} 頁",

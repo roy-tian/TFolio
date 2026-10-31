@@ -183,10 +183,8 @@ const it = {
     viewMode: "Modalità di visualizzazione",
     viewModeSingle: "Pagina singola",
     viewModeBook: "Libro",
-    viewModeThumbnail: "Miniature",
     pageStatus: "Pagina {{current}} di {{total}}",
     pageNumberInput: "Numero di pagina",
-    rotate: "Ruota in senso orario",
     rotateView: "Ruota la vista in senso orario",
     zoomOut: "Zoom indietro",
     zoomIn: "Zoom avanti",
@@ -239,9 +237,6 @@ const it = {
     actionDeletePages_one: "eliminazione pagina",
     actionDeletePages_other: "eliminazione di {{count}} pagine",
     actionInsertBlankPage: "inserimento pagina vuota",
-    actionInsertFile: "inserimento pagine da file",
-    actionInsertPages_one: "inserimento pagina",
-    actionInsertPages_other: "inserimento di {{count}} pagine",
     actionDuplicatePages_one: "incollamento pagina",
     actionDuplicatePages_other: "incollamento di {{count}} pagine",
     highlight: "Evidenzia testo",
@@ -280,8 +275,6 @@ const it = {
     saveNoSource: "Nessun file da sovrascrivere — l’esportazione salverà una copia",
     saveOwnedContent:
       "Un documento a cui in questa sessione sono stati aggiunti una filigrana o i numeri di pagina può essere esportato solo come copia — una volta chiuso il file, non è più possibile rimuoverli",
-    saveMerged:
-      "Un documento che contiene pagine di un altro PDF può essere esportato solo come copia, mai salvato sopra il file da cui è stato aperto",
     saveFailed: "Impossibile salvare questo PDF.",
     exportFilter: "File PDF",
     exportFailed: "Impossibile esportare questo PDF.",
@@ -299,12 +292,8 @@ const it = {
     pageNumbersRebuilding: "Aggiornamento dei numeri di pagina…",
     layerStop: "Interrompi",
     layerStopping: "Interruzione…",
-    dropWhileEditing:
-      "Un’altra modifica alle pagine è ancora in corso — riprova a trascinare tra poco.",
-    dropIgnoredFiles_one:
-      "{{count}} file trascinato non è stato inserito: solo i PDF possono essere inseriti come pagine.",
-    dropIgnoredFiles_other:
-      "{{count}} file trascinati non sono stati inseriti: solo i PDF possono essere inseriti come pagine.",
+    saveMerged:
+      "Un documento che contiene copie di pagine con filigrana può essere esportato solo come copia, mai salvato sopra il file da cui è stato aperto",
   },
   watermark: {
     open: "Filigrana",
@@ -427,13 +416,10 @@ const it = {
     unsavedCancel: "Continua a modificare",
     pageLabel: "Pagina {{pageNumber}}",
     pageError: "Impossibile visualizzare la pagina {{pageNumber}}",
-    thumbnailLabel: "Seleziona pagina {{pageNumber}}",
     copyText: "Copia",
     highlightText: "Evidenzia",
   },
   pageEdit: {
-    deletePage: "Elimina pagina {{pageNumber}}",
-    deleteSelected: "Elimina {{count}} pagine selezionate",
     insertBefore: "Inserisci una pagina vuota prima della pagina {{pageNumber}}",
     insertAtEnd: "Inserisci una pagina vuota alla fine",
     cut_one: "Taglia pagina",

@@ -183,10 +183,8 @@ const fr = {
     viewMode: "Mode d’affichage",
     viewModeSingle: "Page unique",
     viewModeBook: "Livre",
-    viewModeThumbnail: "Miniatures",
     pageStatus: "Page {{current}} sur {{total}}",
     pageNumberInput: "Numéro de page",
-    rotate: "Faire pivoter dans le sens horaire",
     rotateView: "Faire pivoter l’affichage dans le sens horaire",
     zoomOut: "Zoom arrière",
     zoomIn: "Zoom avant",
@@ -240,9 +238,6 @@ const fr = {
     actionDeletePages_one: "la suppression d’une page",
     actionDeletePages_other: "la suppression de {{count}} pages",
     actionInsertBlankPage: "l’insertion d’une page vierge",
-    actionInsertFile: "l’insertion des pages d’un fichier",
-    actionInsertPages_one: "l’insertion d’une page",
-    actionInsertPages_other: "l’insertion de {{count}} pages",
     actionDuplicatePages_one: "le collage d’une page",
     actionDuplicatePages_other: "le collage de {{count}} pages",
     highlight: "Surligner le texte",
@@ -281,8 +276,6 @@ const fr = {
     saveNoSource: "Aucun fichier à remplacer — l’exportation enregistrera une copie",
     saveOwnedContent:
       "Un document auquel un filigrane ou des numéros de page ont été ajoutés pendant cette session ne peut être exporté que sous forme de copie — ils ne pourront plus être retirés une fois le fichier fermé",
-    saveMerged:
-      "Un document contenant des pages d’un autre PDF ne peut être exporté que sous forme de copie, jamais enregistré à la place du fichier d’origine",
     saveFailed: "Ce PDF n’a pas pu être enregistré.",
     exportFilter: "Fichier PDF",
     exportFailed: "Ce PDF n’a pas pu être exporté.",
@@ -300,12 +293,8 @@ const fr = {
     pageNumbersRebuilding: "Mise à jour des numéros de page…",
     layerStop: "Arrêter",
     layerStopping: "Arrêt…",
-    dropWhileEditing:
-      "Une autre modification de pages est en cours — réessayez de déposer dans un instant.",
-    dropIgnoredFiles_one:
-      "{{count}} fichier déposé n’a pas été inséré : seuls les PDF peuvent être insérés comme pages.",
-    dropIgnoredFiles_other:
-      "{{count}} fichiers déposés n’ont pas été insérés : seuls les PDF peuvent être insérés comme pages.",
+    saveMerged:
+      "Un document contenant des copies de pages filigranées ne peut être exporté que sous forme de copie, jamais enregistré à la place du fichier d’origine",
   },
   watermark: {
     open: "Filigrane",
@@ -428,13 +417,10 @@ const fr = {
     unsavedCancel: "Continuer à modifier",
     pageLabel: "Page {{pageNumber}}",
     pageError: "Impossible d’afficher la page {{pageNumber}}",
-    thumbnailLabel: "Sélectionner la page {{pageNumber}}",
     copyText: "Copier",
     highlightText: "Surligner",
   },
   pageEdit: {
-    deletePage: "Supprimer la page {{pageNumber}}",
-    deleteSelected: "Supprimer les {{count}} pages sélectionnées",
     insertBefore: "Insérer une page vierge avant la page {{pageNumber}}",
     insertAtEnd: "Insérer une page vierge à la fin",
     cut_one: "Couper la page",

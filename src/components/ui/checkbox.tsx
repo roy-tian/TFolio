@@ -6,7 +6,7 @@ import { CheckIcon } from "lucide-react"
 // Dimmed by the field's own `data-disabled` rather than the registry's
 // `group-has-disabled/field`: WebKit re-checks a `:has(:disabled)` rule against
 // the whole document on every `:disabled` change anywhere, ~2 ms each beside a
-// long document's thumbnail grid. The registry's `group-has-[:focus-visible]/
+// long document's thumbnails. The registry's `group-has-[:focus-visible]/
 // field-label` variants cost Chromium a whole-document restyle for every node
 // added anywhere; the only one that won over `focus-visible:` keeps its effect
 // through `in-data-[slot=field-label]`.

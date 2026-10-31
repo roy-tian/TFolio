@@ -32,10 +32,8 @@ import { useDocumentNotices, type NoticeChannel } from "@/hooks/useNotices"
 import { usePageClipboard } from "@/hooks/usePageClipboard"
 import { usePrint } from "@/hooks/usePrint"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
-import type { PageHandoffTarget } from "@/hooks/usePageHandoff"
 import { useDocumentSearch } from "@/hooks/useDocumentSearch"
 import { useEraserTool } from "@/hooks/useEraserTool"
-import { useGridDrop } from "@/hooks/useGridDrop"
 import { useHighlightTool } from "@/hooks/useHighlightTool"
 import { useSelectionPageText } from "@/hooks/useSelectionPageText"
 import { useTextDragSelection } from "@/hooks/useTextDragSelection"
@@ -80,7 +78,6 @@ import {
   formatPageRanges,
   type PageClipboard,
 } from "@/lib/pageClipboard"
-import type { PageHandoff } from "@/lib/pageDrag"
 import {
   exportFailureNotice,
   fileNameFromPath,
@@ -116,27 +113,6 @@ import { viewerReadingBounds, viewerSizeCommitted } from "@/lib/viewerViewport"
 import { anchorCorrection, anchorOnPage } from "@/lib/viewportAnchor"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
-/** A file dragged in from the desktop: points in CSS pixels, and `over` with
-    null paths when the OS never named them to this window. */
-export type FileDragEvent =
-  | { kind: "over"; paths: string[] | null; point: { x: number; y: number } }
-  | { kind: "drop"; paths: string[]; point: { x: number; y: number } }
-  | { kind: "leave" }
-
-/**
- * Pages dragged out of another document's grid, as the workspace passes them
- * down; only the drop names the pages, there being nothing yet to do with them.
- */
-export type PageDragEvent =
-  | { kind: "over"; point: { x: number; y: number } }
-  | {
-      kind: "drop"
-      pages: number[]
-      point: { x: number; y: number }
-      sourceDocumentId: number
-    }
-  | { kind: "leave" }
-
 export type DocumentSessionHandle = {
   /** Lets go of the edit it held: the note's text lives nowhere else by then. */
   dismissNoteFont: () => void
@@ -168,15 +144,6 @@ export type DocumentSessionHandle = {
   redo: () => void
   selectAll: () => void
   undo: () => void
-  /** True only over this session's thumbnail grid, where a dropped PDF is
-      inserted at the gap under the pointer instead of opening as a tab. */
-  onFileDrag: (event: FileDragEvent) => boolean
-  /** The same answer for pages dragged from another document's grid, which land
-      in the gap under the pointer as copies — their source keeps them. */
-  onPageDrag: (event: PageDragEvent) => boolean
-  /** Called for a drag the workspace has just brought here: the grid is the
-      one view a page can be dropped into. */
-  showThumbnails: () => void
 }
 
 type DocumentSessionProps = {
@@ -203,9 +170,6 @@ type DocumentSessionProps = {
   /** An export that gave a document its first file: the tab now stands for
       that file, not for the bytes it opened from. */
   onSourceChange: (documentId: number, path: string) => void
-  /** The workspace's answer for a page drag that has left this document's grid,
-      and the way another document's pages reach it. */
-  pageHandoff: PageHandoffTarget
   recentPath?: string
   saveAsDefaultName?: string
   /** A tab that arrived from another window, replayed here: the state the
@@ -231,7 +195,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onDirtyChange,
       onSavableChange,
       onSourceChange,
-      pageHandoff,
       recentPath,
       saveAsDefaultName,
       movedSeed,
@@ -249,7 +212,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       keys: openedDocument.pages.map((_, index) => index),
       nextKey: openedDocument.numPages,
     }))
-    // Pages another file brought in leave the document export-only, like a
+    // A copy of a watermarked page leaves the document export-only, like the
     // watermark. The backend answers with every structure update, so no replay.
     const [hasMergedPages, setHasMergedPages] = useState(
       () => movedSeed?.hasMergedPages ?? false,
@@ -344,9 +307,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const bookApplies = hasBookSpread(pdfDocument.numPages)
     const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
 
-    // The grid has no single scale for a zoom to act on. The controls are absent
-    // rather than disabled: disabled is what an unopened document means.
-    const zoomApplies = viewMode === "single" || viewMode === "book"
     // An edit replaces the outline wholesale. Deriving what is shown, rather
     // than switching the sidebar, lets the undo that restores bookmarks restore it.
     const bookmarksApply = pdfDocument.outline.length > 0
@@ -388,7 +348,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       contentHeight: Math.max(0, viewerHeight - CONTENT_PADDING_Y),
       contentWidth: Math.max(0, viewerWidth - CONTENT_PADDING_X),
       currentPage,
-      disabled: !active || !zoomApplies,
+      disabled: !active,
       initialZoom: initialRecentView
         ? {
             ...initialRecentView.zoom,
@@ -403,13 +363,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewMode,
       viewerRef,
     })
-    // Every drawing tool needs a page under the pointer, which the grid does not
-    // show; the watermark and page numbers act on the document, so they stay.
-    const drawingApplies = viewMode === "single" || viewMode === "book"
-    // In the thumbnail grid a click is a selection, so the grid doubles as the
-    // page-editing surface; leaving it clears what was chosen.
+    // The sidebar's previews are where pages are chosen while they show;
+    // hiding them lets go of what was chosen.
+    const thumbnailsShown =
+      sidebar.mode !== "hidden" && sidebarPanel === "thumbnails"
+    // The clipboard and select-all keys are the pages' only while focus is in
+    // that column: elsewhere they are the text's, as they always were.
+    const [thumbnailsFocused, setThumbnailsFocused] = useState(false)
     const thumbnailSelection = useThumbnailSelection({
-      active: active && viewMode === "thumbnail",
+      active: active && thumbnailsShown,
       numPages: pdfDocument.numPages,
     })
     const clearThumbnailSelection = thumbnailSelection.clear
@@ -417,7 +379,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // the hook only ever calls it from a keypress, by which time it is here.
     const pastePagesRef = useRef<(index: number) => void>(() => {})
     const pageClipboard = usePageClipboard({
-      active: active && viewMode === "thumbnail",
+      active: active && thumbnailsShown && thumbnailsFocused,
       onPaste: useCallback((index: number) => pastePagesRef.current(index), []),
       onTaken: useCallback(
         (taken: PageClipboard) =>
@@ -433,7 +395,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     })
     const pageClipboardStructureChanged = pageClipboard.structureChanged
     const { clipboard } = pageClipboard
-    // Only a cut marks its pages in the grid: a copy takes nothing away, so the
+    // Only a cut marks its pages: a copy takes nothing away, so the
     // pages it named go on reading as the pages they are.
     const cutThumbnailPages = useMemo(
       () => new Set(clipboard?.mode === "cut" ? clipboard.pages : []),
@@ -501,23 +463,23 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       read.copying = true
       void read.text.then(copyPlainText).catch(() => undefined)
     }, [readDocumentText])
-    // The page views' half of a select-all; the grid's half is the selection
-    // above, and the view in front decides which of the two answers.
+    // The page views' half of a select-all; the previews' half is the page
+    // selection above, and focus decides which of the two answers.
     const textSelectAll = useTextSelectAll({
-      active: active && viewMode !== "thumbnail",
+      active: active && !thumbnailsFocused,
       onCopy: copyDocumentText,
     })
     const selectAllPages = thumbnailSelection.selectAll
     const selectAllText = textSelectAll.selectAll
-    // Where the workspace's select-all shortcut lands: the grid holds pages, and
-    // the page views hold the text laid over them.
+    // Where the workspace's select-all shortcut lands: the sidebar's previews
+    // hold pages, and the page views hold the text laid over them.
     const selectAll = useCallback(() => {
-      if (viewMode === "thumbnail") {
+      if (thumbnailsFocused && thumbnailsShown) {
         selectAllPages()
       } else {
         selectAllText()
       }
-    }, [selectAllPages, selectAllText, viewMode])
+    }, [selectAllPages, selectAllText, thumbnailsFocused, thumbnailsShown])
     const annotations = useAnnotations({
       documentId: pdfDocument?.id,
       initial: movedSeed && { history: movedSeed.history, marks: movedSeed.marks },
@@ -672,43 +634,26 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       currentPage,
       documentId: pdfDocument?.id,
       documentPages: pdfDocument.pages,
-      onMatchInGrid: useCallback((pageNumber: number) => {
-        pendingScrollPageRef.current = pageNumber
-        setPreferredViewMode("single")
-      }, []),
       sessionId: openedDocument.id,
       textEpochs: annotations.textEpochs,
       viewerRef,
       viewMode,
     })
 
-    const gridDrop = useGridDrop({
-      active,
-      annotations,
-      documentRef,
-      notice,
-      viewMode,
-      viewerRef,
-    })
-
     const pageOps = useThumbnailPageOps({
       annotations,
       pageClipboard,
-      pendingScrollPageRef,
       pdfDocument,
       notice,
-      setPreferredViewMode,
       thumbnailSelection,
     })
     const {
       deleteThumbnailPage,
       insertBlankPage,
       menuThumbnailPage,
-      openThumbnailPage,
       pastePages,
       reorderPages,
       rotateThumbnailPages,
-      selectThumbnailPage,
     } = pageOps
 
     const watermark = useWatermark({
@@ -747,7 +692,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     }, [active, discardPrint])
 
     const textSelectable =
-      active && drawingApplies && (activeTool === null || activeTool === "highlight")
+      active && (activeTool === null || activeTool === "highlight")
 
     const finishTextDrag = useTextDragSelection({
       enabled: textSelectable,
@@ -764,7 +709,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     })
 
     const highlightTool = useHighlightTool({
-      active: active && drawingApplies && activeTool === "highlight",
+      active: active && activeTool === "highlight",
       color: highlightColor,
       finishTextDrag,
       onCommit: annotations.commit,
@@ -775,7 +720,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
     })
 
-    const drawingRect = drawingApplies && activeTool === "rect"
+    const drawingRect = activeTool === "rect"
     const rectTool = useRectTool({
       active: active && drawingRect,
       onCommit: annotations.commit,
@@ -785,7 +730,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
     })
 
-    const erasing = drawingApplies && activeTool === "eraser"
+    const erasing = activeTool === "eraser"
     useEraserTool({
       active: active && erasing,
       onErase: annotations.eraseAt,
@@ -794,7 +739,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
     })
 
-    const drawingTextNote = drawingApplies && activeTool === "textNote"
+    const drawingTextNote = activeTool === "textNote"
     const textNote = useTextNoteTool({
       active: drawingTextNote,
       onCommit: annotations.commit,
@@ -807,7 +752,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     // Keyed to the `[data-tool-cursor]` rules in `index.css`; null wherever a
     // tool would not draw, so the reader gets the plain pointer back.
-    const toolCursor = drawingApplies ? activeTool : null
+    const toolCursor = activeTool
 
     // Both drawing tools hold previews that only a page's own paint may retire;
     // each ignores a paint covering nothing of its own.
@@ -877,7 +822,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [],
     )
 
-    // What every export names its file after: a converted or merged
+    // What every export names its file after: a converted or assembled
     // document's own PDF name, else the file the document came from, else the
     // tab's — never a Word or image source's name with its extension still on.
     const exportBaseName =
@@ -1022,7 +967,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
 
     useEffect(() => {
-      if (!active || viewMode === "thumbnail") {
+      if (!active) {
         return
       }
 
@@ -1302,7 +1247,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [annotations, unfontedEdit])
 
-    // Owned page content (watermark, numbers) and merged pages leave a document
+    // Owned page content (watermark, numbers) and copies of it leave a document
     // export-only; one opened from bytes has no file to write back to at all.
     const hasOwnedContent =
       annotations.watermarkConfig !== null || annotations.pageNumbersConfig !== null
@@ -1322,8 +1267,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // disabled save names it there rather than repeating the action's name.
     const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
 
-    // The toolbar's and menu's action, refusal included: a watermarked or
-    // merged document may only ever be exported as a copy.
+    // The toolbar's and menu's action, refusal included: a watermarked
+    // document, or one holding copies of watermarked pages, may only ever be
+    // exported as a copy.
     const saveDocument = useCallback(() => {
       if (canSave) {
         void annotations.save()
@@ -1388,28 +1334,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onSavableChange(openedDocument.id, canSave)
     }, [canSave, onSavableChange, openedDocument.id])
 
-    // Opened for a drag made of pages, so the view must be the one with gaps —
-    // and for a drag rather than a press, it is not stored as a preference.
-    const showThumbnails = useCallback(() => {
-      if (preferredViewMode === "thumbnail") {
-        return
-      }
-
-      viewModeChosen.current = false
-      setPreferredViewMode("thumbnail")
-    }, [preferredViewMode])
-
-    // The workspace's handoff with this document's own id filled in, so its grid
-    // asks whether a drag has left for somewhere the workspace answers for.
-    const handoff = useMemo<PageHandoff>(
-      () => ({
-        cancel: pageHandoff.cancel,
-        claim: (point) => pageHandoff.claim(openedDocument.id, point),
-        drop: (point, pages) => pageHandoff.drop(openedDocument.id, point, pages),
-      }),
-      [openedDocument.id, pageHandoff],
-    )
-
     // Armed when the paste handler lands, so a keypress ahead of the render
     // still pastes what the clipboard holds.
     pastePagesRef.current = pastePages
@@ -1421,8 +1345,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         fetchNoteFont: () => void fetchNoteFont(),
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
-        onFileDrag: gridDrop.handleFileDrag,
-        onPageDrag: gridDrop.handlePageDrag,
         openPageNumbers: openPageNumbersDialog,
         openSearch: search.openSearch,
         openWatermark: openWatermarkDialog,
@@ -1442,7 +1364,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           layerStoppingRef.current = true
           void annotations.cancelOperation()
         },
-        showThumbnails,
         snapshotForMove,
         undo: () => {
           if (annotations.canUndo) {
@@ -1456,8 +1377,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         clearNoteFontOffer,
         exportPdf,
         fetchNoteFont,
-        gridDrop.handleFileDrag,
-        gridDrop.handlePageDrag,
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         openPageNumbersDialog,
@@ -1469,7 +1388,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         saveFromKey,
         search.openSearch,
         selectAll,
-        showThumbnails,
         snapshotForMove,
         startPrint,
         undoStep,
@@ -1544,18 +1462,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           bookApplies={bookApplies}
           canSave={canSave}
           document={pdfDocument}
-          drawingApplies={drawingApplies}
           macOS={macOS}
           onChangeViewMode={changeViewMode}
           onCompress={() => setCompressOpen(true)}
           onExportImages={() => setImageExportOpen(true)}
-          onRotate={() => {
-            if (viewMode === "thumbnail") {
-              rotateThumbnailPages()
-            } else {
-              setPageRotations(rotationsAfterRotate)
-            }
-          }}
+          onRotate={() => setPageRotations(rotationsAfterRotate)}
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
           onSearchClose={search.closeSearch}
@@ -1581,7 +1492,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }}
           viewMode={viewMode}
           zoom={zoom}
-          zoomApplies={zoomApplies}
         />
 
         <AppSidebar
@@ -1599,12 +1509,27 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           ) : (
             <SidebarThumbnails
               active={active}
+              canPaste={clipboard !== null}
               currentPage={currentPage}
+              cutPages={cutThumbnailPages}
               documentId={pdfDocument.id}
+              onCopyPages={pageClipboard.copy}
+              onCutPages={pageClipboard.cut}
+              onDeletePage={deleteThumbnailPage}
+              onFocusChange={setThumbnailsFocused}
+              onInsertBlankPage={insertBlankPage}
+              onMenuPage={menuThumbnailPage}
               onNavigate={navigateFromSidebar}
+              onPastePages={pastePages}
+              onReorderPages={reorderPages}
+              onRotatePages={rotateThumbnailPages}
+              // Stable across renders, unlike a wrapper, so the column's
+              // memoised previews skip the session's every re-render.
+              onSelectPage={thumbnailSelection.select}
               pages={pdfDocument.pages}
               renderEpochs={annotations.renderEpochs}
               rotations={pageRotations}
+              selectedPages={thumbnailSelection.selectedPages}
               thumbnailKeys={thumbnailIdentity.keys}
             />
           )}
@@ -1678,32 +1603,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 ref={clientBoxRef}
               />
               <PdfViewerLayout
-                currentPage={currentPage}
                 documentId={pdfDocument.id}
                 drafts={rectTool.drafts}
                 notes={textNote.previews}
                 onPagePaint={onPagePaint}
                 fileName={fileName}
                 key={pdfDocument.id}
-                pageEdit={{
-                  canPaste: pageClipboard.clipboard !== null,
-                  cutPages: cutThumbnailPages,
-                  dropIndex: gridDrop.dropIndex,
-                  handoff,
-                  onClearSelection: clearThumbnailSelection,
-                  onCopyPages: pageClipboard.copy,
-                  onCutPages: pageClipboard.cut,
-                  onDeletePage: deleteThumbnailPage,
-                  onInsertBlankPage: insertBlankPage,
-                  onMenuPage: menuThumbnailPage,
-                  onOpenPage: openThumbnailPage,
-                  onPastePages: pastePages,
-                  onReorderPages: reorderPages,
-                  onRotatePages: rotateThumbnailPages,
-                  onSelectPage: selectThumbnailPage,
-                  selectedPages: thumbnailSelection.selectedPages,
-                  thumbnailKeys: thumbnailIdentity.keys,
-                }}
                 pages={pdfDocument.pages}
                 renderEpochs={annotations.renderEpochs}
                 rotations={pageRotations}
@@ -1726,9 +1631,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 zoomRequest={zoom.zoomRequest}
               />
             </main>
-            {zoomApplies ? (
-              <ZoomIndicator flash={zoom.zoomRequest} percent={zoom.zoomPercent} />
-            ) : null}
+            <ZoomIndicator flash={zoom.zoomRequest} percent={zoom.zoomPercent} />
           </div>
         </div>
 

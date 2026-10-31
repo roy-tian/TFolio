@@ -221,16 +221,22 @@ fn a_copy_only_export_leaves_the_document_on_its_source() {
         .apply_watermark(watermarked.id, watermark_config("DRAFT"))
         .expect("PDFium should apply the watermark");
 
+    // A copy of a watermarked page keeps the watermark as its own content, so
+    // the document stays copy-only after the layer itself is taken off.
     let merged_source = directory.join("merged.pdf");
-    let inserted = directory.join("inserted.pdf");
     fs::write(&merged_source, minimal_pdf()).expect("the fixture should be writable");
-    fs::write(&inserted, minimal_pdf()).expect("the fixture should be writable");
     let merged = engine
         .open_from_path(merged_source.clone())
         .expect("PDFium should open the PDF by path");
     engine
-        .insert_from_path(merged.id, inserted, 1)
-        .expect("PDFium should insert the other file's page");
+        .apply_watermark(merged.id, watermark_config("COPY"))
+        .expect("PDFium should apply the watermark");
+    engine
+        .duplicate_pages(merged.id, &[1], 2)
+        .expect("PDFium should copy the watermarked page");
+    engine
+        .remove_watermark(merged.id)
+        .expect("PDFium should remove the watermark");
 
     for (document_id, source) in [
         (watermarked.id, &watermarked_source),

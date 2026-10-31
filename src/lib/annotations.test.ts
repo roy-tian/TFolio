@@ -9,12 +9,10 @@ import {
   droppedStashIds,
   emptyHistory,
   fillErasedPages,
-  fillInsertFileOutcome,
   historyHead,
   inversePermutation,
   isDirty,
   markSaved,
-  insertFilePages,
   insertPagesRange,
   movesPages,
   nextRedoCommand,
@@ -24,8 +22,6 @@ import {
   planDuplicatePages,
   planEraseAnnotation,
   planInsertBlankPage,
-  planInsertFile,
-  planInsertPages,
   planPageNumbersChange,
   planReorderPages,
   planRotatePages,
@@ -360,16 +356,15 @@ describe("movesPages", () => {
     const reorder: AnnotationCommand = { inverse: [2, 1], kind: "reorderPages", order: [2, 1] }
     const del: AnnotationCommand = { kind: "deletePages", pageCount: 3, pages: [2], stashId: 1 }
     const insert: AnnotationCommand = { index: 2, kind: "insertBlankPage", pageCount: 3, stashId: 1 }
-    const insertFile: AnnotationCommand = {
+    const duplicate: AnnotationCommand = {
       index: 2,
-      insertedCount: 0,
-      kind: "insertFile",
-      pageCount: 3,
-      path: "/b.pdf",
+      kind: "duplicatePages",
+      pageCount: 4,
+      sourcePages: [1],
       stashId: 1,
     }
 
-    for (const command of [reorder, del, insert, insertFile]) {
+    for (const command of [reorder, del, insert, duplicate]) {
       expect(movesPages(command)).toBe(true)
     }
 
@@ -483,107 +478,6 @@ describe("structure commands", () => {
     expect(commandPages({ ...reorder, order: reorder.inverse })).toEqual([
       1, 2, 3,
     ])
-  })
-})
-
-describe("insert-file commands", () => {
-  it("plans an insert with the file's page count unknown until it is read", () => {
-    const history = historyOf(highlight(1))
-    const planned = planInsertFile(history, "/b.pdf", 2, 3)!
-
-    expect(planned.command).toEqual({
-      index: 2,
-      insertedCount: 0,
-      kind: "insertFile",
-      pageCount: 3,
-      path: "/b.pdf",
-      stashId: history.nextId,
-    })
-    // The stash rides the entry id, so the undo's delete and its redo's restore
-    // pair up exactly, as every structure command's do.
-    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
-  })
-
-  it("refuses a position the document does not have", () => {
-    expect(planInsertFile(emptyHistory, "/b.pdf", 0, 3)).toBeNull()
-    expect(planInsertFile(emptyHistory, "/b.pdf", 5, 3)).toBeNull()
-    // One past the end is a position: the file goes after the last page.
-    expect(planInsertFile(emptyHistory, "/b.pdf", 4, 3)).not.toBeNull()
-  })
-
-  it("invalidates the gap and everything after it, not the pages before", () => {
-    const command = planInsertFile(emptyHistory, "/b.pdf", 2, 3)!.command
-
-    expect(commandPages(command)).toEqual([2, 3])
-    expect(commandTextPages(command)).toEqual([2, 3])
-  })
-
-  it("invalidates nothing when the file goes after the last page", () => {
-    const command = planInsertFile(emptyHistory, "/b.pdf", 4, 3)!.command
-
-    // Pages 1-3 keep their numbers and their pixels; the pages the file brings
-    // are components that mount for the first time and fetch on their own.
-    expect(commandPages(command)).toEqual([])
-  })
-
-  it("invalidates the file's own pages once the apply has counted them", () => {
-    const planned = planInsertFile(emptyHistory, "/b.pdf", 4, 3)!
-    const id = planned.history.past.at(-1)!.id
-    const filled = fillInsertFileOutcome(planned.history, id, 2)
-
-    // What the undo takes back out, so the undo invalidates it.
-    expect(commandPages(filled.past.at(-1)!.command)).toEqual([4, 5])
-  })
-
-  it("fills the page count the first apply learned", () => {
-    const planned = planInsertFile(historyOf(highlight(1)), "/b.pdf", 3, 4)!
-    const id = planned.history.past.at(-1)!.id
-    const filled = fillInsertFileOutcome(planned.history, id, 4)
-    const command = filled.past.at(-1)!.command
-
-    expect(command).toMatchObject({ insertedCount: 4, pageCount: 8 })
-    expect(insertFilePages(command as never)).toEqual([3, 4, 5, 6])
-  })
-})
-
-describe("cross-document insert commands", () => {
-  it("plans an insert of the pages a drag brought from another document", () => {
-    const history = historyOf(highlight(1))
-    const planned = planInsertPages(history, 7, [4, 2], 2, 3)!
-
-    expect(planned.command).toEqual({
-      index: 2,
-      kind: "insertPages",
-      pageCount: 5,
-      sourceDocumentId: 7,
-      // Sorted and deduplicated: the block lands in the order the source grid
-      // shows it, whichever page of it the reader happened to grab.
-      sourcePages: [2, 4],
-      stashId: history.nextId,
-    })
-    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
-  })
-
-  it("refuses a position the document does not have, and an empty block", () => {
-    expect(planInsertPages(emptyHistory, 7, [1], 0, 3)).toBeNull()
-    expect(planInsertPages(emptyHistory, 7, [1], 5, 3)).toBeNull()
-    expect(planInsertPages(emptyHistory, 7, [], 2, 3)).toBeNull()
-    // One past the end is a position: the pages go after the last one.
-    expect(planInsertPages(emptyHistory, 7, [1], 4, 3)).not.toBeNull()
-  })
-
-  it("invalidates the gap and everything after it, and moves the pages", () => {
-    const command = planInsertPages(emptyHistory, 7, [1, 2], 2, 3)!.command
-
-    expect(commandPages(command)).toEqual([2, 3, 4, 5])
-    expect(commandTextPages(command)).toEqual([2, 3, 4, 5])
-    expect(movesPages(command)).toBe(true)
-  })
-
-  it("names the block its undo deletes and its redo restores", () => {
-    const command = planInsertPages(emptyHistory, 7, [1, 3, 4], 3, 5)!.command
-
-    expect(insertPagesRange(command as never)).toEqual([3, 4, 5])
   })
 })
 
@@ -784,5 +678,19 @@ describe("retargetCommand", () => {
     const command = highlight(1, 2)
 
     expect(retargetCommand(command, [])).toBe(command)
+  })
+})
+
+describe("insertPagesRange", () => {
+  it("names the run the copies took, which the undo deletes", () => {
+    expect(
+      insertPagesRange({
+        index: 3,
+        kind: "duplicatePages",
+        pageCount: 8,
+        sourcePages: [1, 2, 5],
+        stashId: 4,
+      }),
+    ).toEqual([3, 4, 5])
   })
 })

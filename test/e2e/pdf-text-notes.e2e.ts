@@ -1,19 +1,14 @@
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
-import type { E2eOverrides } from "../../src/lib/e2e"
-import type { PdfInsertOutcome } from "../../src/lib/pdf"
 
 import {
   blankPdf,
   dropZoneButton,
-  emitDrag,
-  gapPoint,
   openPdfFromDisk,
   pageInk,
   refreshApp,
   renderedPage,
   seedSettings,
-  writeScratchPdf,
   pressRedo,
 } from "./helpers"
 
@@ -174,55 +169,6 @@ describe("TFolio text notes", () => {
     await expect($("button[aria-label^='Undo']")).toBeEnabled()
     await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => await pageInk() === first)
-  })
-
-  it("discards a refused note before an insertion changes its page number", async () => {
-    const filePath = writeScratchPdf("insert-before-note.pdf", blankPdf())
-    await browser.execute(() => {
-      const app = window as unknown as Window & {
-        __TAURI__: typeof import("@tauri-apps/api")
-        __tfolioE2E?: E2eOverrides
-        __finishNoteInsertion?: () => void
-      }
-      app.__tfolioE2E = {
-        ...app.__tfolioE2E,
-        insertPdfFromPath: async (args) => {
-          await new Promise<void>((resolve) => { app.__finishNoteInsertion = resolve })
-          return app.__TAURI__.core.invoke<PdfInsertOutcome>("insert_pdf_from_path", args)
-        },
-      }
-    })
-    await $("button[aria-label='Thumbnails']").click()
-    await $("[data-insert-index='1']").waitForExist()
-    await emitDrag("drag-drop", await gapPoint(1), [filePath])
-    await browser.waitUntil(() => browser.execute(() => Boolean(
-      (window as Window & { __finishNoteInsertion?: () => void }).__finishNoteInsertion,
-    )))
-
-    await $("button[aria-label='Single page']").click()
-    await renderedPage()
-    await $("button[aria-label='Add a note']").click()
-    await clickOnPage()
-    const editor = $("textarea[aria-label='Note text']")
-    await editor.setValue("不能写到插入的新页面")
-    await $("button[aria-label='Add this note']").click()
-    await $("[data-notice='markWhileEditing']").waitForDisplayed()
-    await editor.waitForExist({ reverse: true })
-
-    await browser.execute(() => {
-      (window as Window & { __finishNoteInsertion?: () => void }).__finishNoteInsertion!()
-    })
-    await $("[data-page-number='2']").waitForExist()
-    await renderedPage()
-    await expect(editor).not.toExist()
-    await expect($("[data-slot='text-note-preview']")).not.toExist()
-    expect(await pageInk()).toBe(0)
-
-    // Once the page edit finishes, a newly placed note still works normally.
-    await clickOnPage()
-    await editor.setValue("新批注")
-    await $("button[aria-label='Add this note']").click()
-    await browser.waitUntil(async () => await pageInk() > 0)
   })
 
   // The note must stay on screen from confirm until the page repaints carrying

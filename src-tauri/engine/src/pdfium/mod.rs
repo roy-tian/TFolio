@@ -61,18 +61,9 @@ pub struct PdfStructureUpdate {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
-    /// Like a watermark, any page another file brought in leaves the document
+    /// Like a watermark, a copy of a watermarked page leaves the document
     /// export-only; the frontend's save key reads this, not its own history.
     has_merged_pages: bool,
-}
-
-/// `page_count` is the one thing the frontend cannot know until the file is
-/// read — and what its undo needs to know which pages to take back out.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InsertOutcome {
-    page_count: i32,
-    update: PdfStructureUpdate,
 }
 
 /// An image is laid on a sheet of its own; a Word document arrives as the PDF

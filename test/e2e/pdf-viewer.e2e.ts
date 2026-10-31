@@ -69,7 +69,7 @@ describe("TFolio PDF viewer", () => {
 
   // The page tracker revises only once a navigation's scroll has landed and a
   // frame has passed, so an early assertion would pass against the stale value.
-  async function trackerSettled(mode?: "book" | "single" | "thumbnail") {
+  async function trackerSettled(mode?: "book" | "single") {
     // Until a switched-to layout mounts, the outgoing one's scroll reads as
     // settled, so `mode` first waits for that layout's own container.
     if (mode) {
@@ -222,9 +222,6 @@ describe("TFolio PDF viewer", () => {
     const bookmarksPanel = `${activeSidebar} button[aria-label='Bookmarks']`
     await expect($(bookmarksPanel)).toBeDisabled()
     expect(await tooltipOn(bookmarksPanel)).toBe("This document has no bookmarks")
-    await $("button[aria-label='Thumbnails']").click()
-    await expect($(bookmarksPanel)).toBeDisabled()
-    await $("button[aria-label='Single page']").click()
 
     await clickAppMenuItem("settings")
     await expect($("[role='dialog']")).toBeDisplayed()
@@ -302,19 +299,12 @@ describe("TFolio PDF viewer", () => {
     await trackerSettled("book")
     await expect(pageInput).toHaveValue("5")
 
-    // Thumbnails are an image and no selectable text layer; since M7 a click
-    // selects, and it is the double-click that navigates.
-    await toggle("Thumbnails").click()
-    const thirdThumbnail = await $("button[aria-label='Select page 3']")
-    await thirdThumbnail.waitForDisplayed()
-    await expect($$(".pdf-text-layer")).toBeElementsArrayOfSize(0)
-
-    await browser.execute(() => {
-      document
-        .querySelector("button[aria-label='Select page 3']")!
-        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
-    })
-    await expect(toggle("Single page")).toHaveAttribute("aria-pressed", "true")
+    // A sidebar preview is an image with no selectable text, and a click on
+    // it goes to its page.
+    const thirdPreview = $(`${activeSidebar} button[data-thumbnail-page='3']`)
+    await thirdPreview.waitForDisplayed()
+    await expect($$(`${activeSidebar} .pdf-text-layer`)).toBeElementsArrayOfSize(0)
+    await thirdPreview.click()
     await expect(pageInput).toHaveValue("3")
   })
 
@@ -333,7 +323,7 @@ describe("TFolio PDF viewer", () => {
     await bookmarks.$("button").click()
     await expect(pageInput).toHaveValue("2")
 
-    for (const mode of ["Book", "Thumbnails", "Single page"]) {
+    for (const mode of ["Book", "Single page"]) {
       await toggle(mode).click()
       await expect(bookmarks).toBeDisplayed()
     }
@@ -764,16 +754,6 @@ describe("TFolio PDF viewer", () => {
     await wheelOverViewer({ ctrlKey: false, deltaY: -300 })
     await browser.pause(500)
     await expect(zoomGroup()).toHaveAttribute("aria-label", zoomed)
-
-    // The thumbnail grid sizes each page by its long side, so has no one scale to
-    // report; the controls go away rather than sit there showing a stale figure.
-    await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Select page 1']").waitForDisplayed()
-    await expect($("button[aria-label='Zoom in']")).not.toBeExisting()
-    await expect(zoomGroup()).not.toBeExisting()
-
-    await $("button[aria-label='Single page']").click()
-    await expect(zoomGroup()).toHaveAttribute("aria-label", zoomed)
   })
 
   // A fit is of the page the reader is on: in a document of two page sizes, the
@@ -944,35 +924,16 @@ describe("TFolio PDF viewer", () => {
     expect(finalSurfaces.canvases).toBeLessThan(finalSurfaces.pages)
   })
 
-  // Landscape rows are a fraction of a page's height, so tracking must not assume
-  // a row is tall enough to reach some fixed depth — the report would run ahead.
-  it("stays on the requested page in a grid of landscape pages", async () => {
-    await seedSettings({ ui: { language: "en" } })
+  // Landscape pages are a fraction of a portrait page's height, so tracking must
+  // not assume a page is tall enough to reach some fixed depth — the report
+  // would run ahead.
+  it("stays on the requested page among landscape pages", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await openPdfFromDisk("landscape.pdf", minimalPdf(40, "0 0 300 200"))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Select page 1']").waitForDisplayed()
-
-    // The grid fits as many columns as the window allows, so derive a page that
-    // really does start a row rather than hard-coding one.
-    const columns = await browser.execute(() => {
-      const cellTop = (pageNumber: number) =>
-        document
-          .querySelector(`[data-page-number='${pageNumber}']`)!
-          .getBoundingClientRect().top
-      const firstTop = cellTop(1)
-      let count = 0
-
-      for (let pageNumber = 1; pageNumber <= 40; pageNumber += 1) {
-        if (Math.abs(cellTop(pageNumber) - firstTop) < 1) count += 1
-      }
-
-      return count
-    })
-
-    const target = String(1 + columns * 3) // leftmost cell of the fourth row
+    const target = "13"
     const pageInput = await $("input[aria-label='Page number']")
 
     await pageInput.setValue(target)
