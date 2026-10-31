@@ -295,7 +295,7 @@ const de = {
     layerStop: "Stoppen",
     layerStopping: "Wird gestoppt…",
     saveMerged:
-      "Ein Dokument mit Kopien von Seiten mit Wasserzeichen kann nur als Kopie exportiert und nie über die Datei gespeichert werden, aus der es geöffnet wurde",
+      "Ein Dokument mit Kopien von Seiten mit Wasserzeichen oder Seitenzahlen kann nur als Kopie exportiert und nie über die Datei gespeichert werden, aus der es geöffnet wurde",
   },
   watermark: {
     open: "Wasserzeichen",

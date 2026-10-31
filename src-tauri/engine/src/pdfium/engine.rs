@@ -149,9 +149,9 @@ struct OpenDocument {
     /// rewrite, where images are drawn, and the latest output. Retired with
     /// every content change, and released when the dialog closes.
     compress_cache: Option<compress::CompressCache>,
-    /// Page ids of copies of watermarked pages, still present: their watermark is
-    /// ordinary content now, out of the layer's reach, so the document may only
-    /// export to a copy while any remain.
+    /// Page ids of copies of pages carrying a watermark or page numbers, still
+    /// present: those are ordinary content now, out of the layers' reach, so the
+    /// document may only export to a copy while any remain.
     merged_page_ids: HashSet<u64>,
     /// The file a save writes back over; `None` for opened-from-bytes, whose
     /// first export adopts its destination as the source.

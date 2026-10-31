@@ -564,11 +564,11 @@ impl PdfiumEngine {
             );
         }
 
-        // Copies of watermarked pages carry the same restriction, for the same
+        // Copies of such pages carry the same restriction, for the same
         // reason: again enforced here, not trusted to the disabled key.
         if !entry.merged_page_ids.is_empty() {
             return Err(
-                "a document holding copies of watermarked pages may only be exported as a copy, not saved over its own file"
+                "a document holding copies of pages with a watermark or page numbers may only be exported as a copy, not saved over its own file"
                     .into(),
             );
         }

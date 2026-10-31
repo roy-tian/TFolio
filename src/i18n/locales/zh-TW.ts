@@ -291,7 +291,7 @@ const zhTW = {
     layerStop: "停止",
     layerStopping: "正在停止…",
     saveMerged:
-      "含有帶浮水印頁面複本的文件只能匯出為複本，無法存回原本開啟的檔案",
+      "含有帶浮水印或頁碼頁面複本的文件只能匯出為複本，無法存回原本開啟的檔案",
   },
   watermark: {
     open: "浮水印",

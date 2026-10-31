@@ -278,7 +278,7 @@ const zhCN = {
     pageNumbersRebuilding: "正在更新页码…",
     layerStop: "停止",
     layerStopping: "正在停止…",
-    saveMerged: "含有带水印页面副本的文档只能导出副本，不能保存回原文件",
+    saveMerged: "含有带水印或页码页面副本的文档只能导出副本，不能保存回原文件",
   },
   watermark: {
     open: "水印",

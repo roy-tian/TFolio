@@ -294,7 +294,7 @@ const es = {
     layerStop: "Detener",
     layerStopping: "Deteniendo…",
     saveMerged:
-      "Un documento con copias de páginas con marca de agua solo puede exportarse como copia, nunca guardarse sobre el archivo desde el que se abrió",
+      "Un documento con copias de páginas con marca de agua o números de página solo puede exportarse como copia, nunca guardarse sobre el archivo desde el que se abrió",
   },
   watermark: {
     open: "Marca de agua",

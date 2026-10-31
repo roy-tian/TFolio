@@ -47,7 +47,7 @@ pub(super) struct StashedPage {
     pub(super) marks: Vec<u64>,
     pub(super) revision: u64,
     pub(super) owned: Option<OwnedTailState>,
-    /// Whether the page is a copy of watermarked content, so a restore puts it
+    /// Whether the page is a copy of owned content, so a restore puts it
     /// back into the set that forbids overwriting the document's file.
     pub(super) merged: bool,
 }
@@ -701,7 +701,7 @@ impl PdfiumEngine {
             entry.next_page_id += 1;
             entry.page_ids.insert(slot + offset, page_id);
 
-            // A copy of watermarked content, out of the layer's reach: while it
+            // A copy of owned content, out of the layers' reach: while it
             // stays, the document's file may only be exported to, never saved.
             if copy_only {
                 entry.merged_page_ids.insert(page_id);

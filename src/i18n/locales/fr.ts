@@ -294,7 +294,7 @@ const fr = {
     layerStop: "Arrêter",
     layerStopping: "Arrêt…",
     saveMerged:
-      "Un document contenant des copies de pages filigranées ne peut être exporté que sous forme de copie, jamais enregistré à la place du fichier d’origine",
+      "Un document contenant des copies de pages avec filigrane ou numéros de page ne peut être exporté que sous forme de copie, jamais enregistré à la place du fichier d’origine",
   },
   watermark: {
     open: "Filigrane",

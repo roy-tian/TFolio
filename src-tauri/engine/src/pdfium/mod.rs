@@ -61,8 +61,8 @@ pub struct PdfStructureUpdate {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
-    /// Like a watermark, a copy of a watermarked page leaves the document
-    /// export-only; the frontend's save key reads this, not its own history.
+    /// Like a watermark, a copy of a page carrying one or page numbers leaves the
+    /// document export-only; the frontend's save key reads this, not its history.
     has_merged_pages: bool,
 }
 

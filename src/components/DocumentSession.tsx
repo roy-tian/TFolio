@@ -212,8 +212,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       keys: openedDocument.pages.map((_, index) => index),
       nextKey: openedDocument.numPages,
     }))
-    // A copy of a watermarked page leaves the document export-only, like the
-    // watermark. The backend answers with every structure update, so no replay.
+    // A copy of a page carrying a watermark or page numbers leaves the document
+    // export-only, like those layers. The backend answers with every structure
+    // update, so no replay.
     const [hasMergedPages, setHasMergedPages] = useState(
       () => movedSeed?.hasMergedPages ?? false,
     )
@@ -1268,8 +1269,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
 
     // The toolbar's and menu's action, refusal included: a watermarked
-    // document, or one holding copies of watermarked pages, may only ever be
-    // exported as a copy.
+    // document, or one holding copies of such pages, may only ever be exported
+    // as a copy.
     const saveDocument = useCallback(() => {
       if (canSave) {
         void annotations.save()

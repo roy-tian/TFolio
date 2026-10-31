@@ -292,7 +292,7 @@ const en = {
     layerStop: "Stop",
     layerStopping: "Stopping…",
     saveMerged:
-      "A document holding copies of watermarked pages can only be exported as a copy, never saved back over the file it was opened from",
+      "A document holding copies of pages with a watermark or page numbers can only be exported as a copy, never saved back over the file it was opened from",
   },
   watermark: {
     open: "Watermark",

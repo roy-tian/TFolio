@@ -293,7 +293,7 @@ const it = {
     layerStop: "Interrompi",
     layerStopping: "Interruzione…",
     saveMerged:
-      "Un documento che contiene copie di pagine con filigrana può essere esportato solo come copia, mai salvato sopra il file da cui è stato aperto",
+      "Un documento che contiene copie di pagine con filigrana o numeri di pagina può essere esportato solo come copia, mai salvato sopra il file da cui è stato aperto",
   },
   watermark: {
     open: "Filigrana",
