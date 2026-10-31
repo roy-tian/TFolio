@@ -229,7 +229,8 @@ function BookLayout({
 
     return (
       <div
-        className="flex items-start"
+        className="flex scroll-mt-5 items-center"
+        data-book-spread
         key={`${documentId}-spread-${row[0]}`}
         // Sized for a full spread even when holding a single trailing page, which
         // keeps that page in the left cell instead of centring it in the column.

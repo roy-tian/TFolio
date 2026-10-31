@@ -374,7 +374,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         )
 
         currentPage.set(pageNumber)
-        page?.scrollIntoView({ behavior, block: "start" })
+        // A spread centres its pages, so the shorter one's top sits below the
+        // row's: seeking it would cut off the top of the taller one.
+        const target = page?.closest<HTMLElement>("[data-book-spread]") ?? page
+        target?.scrollIntoView({ behavior, block: "start" })
       },
       [currentPage],
     )
