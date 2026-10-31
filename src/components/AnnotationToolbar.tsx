@@ -10,7 +10,6 @@ import type { CSSProperties } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
-import { MergeWizardButton } from "@/components/MergeWizardButton"
 import { RectEffectIcon } from "@/components/RectEffectIcon"
 import { RectStylePopover } from "@/components/RectStylePopover"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
@@ -38,37 +37,26 @@ export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
   disabled: boolean
-  eraserApplies: boolean
-  highlightApplies: boolean
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle, transient?: boolean) => void
-  /** Builds a document of its own rather than touching this one. */
-  onMergeWizard: () => void
   onPageNumbers: () => void
   onToolChange: (tool: AnnotationTool) => void
   onWatermark: () => void
-  rectApplies: boolean
   rectStyle: RectStyle
-  textNoteApplies: boolean
   textNoteColor: HexColor
 }
 
 export function AnnotationToolbar({
   activeTool,
   disabled,
-  eraserApplies,
-  highlightApplies,
   highlightColor,
   onHighlightColorChange,
-  onMergeWizard,
   onPageNumbers,
   onRectStyleChange,
   onToolChange,
   onWatermark,
-  rectApplies,
   rectStyle,
-  textNoteApplies,
   textNoteColor,
 }: AnnotationToolbarProps) {
   const { t } = useTranslation()
@@ -84,172 +72,158 @@ export function AnnotationToolbar({
 
   return (
     <div className="flex items-center gap-1">
-      {highlightApplies || rectApplies || textNoteApplies || eraserApplies ? (
-        <ButtonGroup>
-          {highlightApplies ? (
-            <>
-              {/* A Toggle rather than a Button: unlike the fit control next to it, a
-              tool really is on or off, and pressing the active one puts it away. */}
-              <ToolbarTooltip label={highlightLabel}>
-                <Toggle
-                  aria-label={highlightLabel}
+      <ButtonGroup>
+        {/* A Toggle rather than a Button: unlike the fit control next to it, a
+        tool really is on or off, and pressing the active one puts it away. */}
+        <ToolbarTooltip label={highlightLabel}>
+          <Toggle
+            aria-label={highlightLabel}
+            className={cn(
+              toolbarInkBarClassName,
+              "size-7 min-w-7 border-r-transparent p-0 peer/highlight",
+            )}
+            disabled={disabled}
+            onPressedChange={(pressed) =>
+              onToolChange(pressed ? "highlight" : null)
+            }
+            pressed={activeTool === "highlight"}
+            style={{ "--tool-ink": highlightColor } as CSSProperties}
+            variant="outline"
+          >
+            <Highlighter />
+          </Toggle>
+        </ToolbarTooltip>
+        <Popover>
+          <ToolbarTooltip label={t("annotate.highlightOptions")}>
+            <PopoverTrigger
+              render={
+                <Button
+                  aria-label={t("annotate.highlightOptions")}
                   className={cn(
-                    toolbarInkBarClassName,
-                    "size-8 border-r-transparent p-0 peer/highlight",
+                    splitMenuButtonClassName,
+                    "peer-hover/highlight:before:opacity-100",
                   )}
                   disabled={disabled}
-                  onPressedChange={(pressed) =>
-                    onToolChange(pressed ? "highlight" : null)
-                  }
-                  pressed={activeTool === "highlight"}
-                  style={{ "--tool-ink": highlightColor } as CSSProperties}
-                  variant="outline"
-                >
-                  <Highlighter />
-                </Toggle>
-              </ToolbarTooltip>
-              <Popover>
-                <ToolbarTooltip label={t("annotate.highlightOptions")}>
-                  <PopoverTrigger
-                    render={
-                      <Button
-                        aria-label={t("annotate.highlightOptions")}
-                        className={cn(
-                          splitMenuButtonClassName,
-                          "peer-hover/highlight:before:opacity-100",
-                        )}
-                        disabled={disabled}
-                        size="icon"
-                        variant="ghost"
-                      />
-                    }
-                  >
-                    <ChevronDown className="size-3" />
-                  </PopoverTrigger>
-                </ToolbarTooltip>
-                <PopoverContent align="end" className="w-auto p-3">
-                  <div className="flex flex-col gap-2">
-                    <p
-                      className="text-xs font-medium"
-                      id="highlight-color-label"
-                    >
-                      {t("annotate.highlightColor")}
-                    </p>
-                    <ColorSwatchPicker
-                      allowCustom={false}
-                      labelledBy="highlight-color-label"
-                      onChange={onHighlightColorChange}
-                      swatches={highlightSwatches}
-                      value={highlightColor}
-                    />
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </>
-          ) : null}
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <ChevronDown className="size-3" />
+            </PopoverTrigger>
+          </ToolbarTooltip>
+          <PopoverContent align="end" className="w-auto p-3">
+            <div className="flex flex-col gap-2">
+              <p
+                className="text-xs font-medium"
+                id="highlight-color-label"
+              >
+                {t("annotate.highlightColor")}
+              </p>
+              <ColorSwatchPicker
+                allowCustom={false}
+                labelledBy="highlight-color-label"
+                onChange={onHighlightColorChange}
+                swatches={highlightSwatches}
+                value={highlightColor}
+              />
+            </div>
+          </PopoverContent>
+        </Popover>
 
-          {rectApplies ? (
-            <>
-              <ToolbarTooltip label={rectLabel}>
-                <Toggle
-                  aria-label={rectLabel}
+        <ToolbarTooltip label={rectLabel}>
+          <Toggle
+            aria-label={rectLabel}
+            className={cn(
+              rectBarFromColour
+                ? toolbarInkBarClassName
+                : toolbarSelectionBarClassName,
+              "size-7 min-w-7 border-r-transparent p-0 peer/rect",
+              toolbarCenteredStripButtonClassName,
+            )}
+            disabled={disabled}
+            onPressedChange={(pressed) =>
+              onToolChange(pressed ? "rect" : null)
+            }
+            pressed={activeTool === "rect"}
+            style={
+              rectBarFromColour
+                ? ({ "--tool-ink": rectStyle.color } as CSSProperties)
+                : undefined
+            }
+            variant="outline"
+          >
+            <RectEffectIcon effect={rectStyle.effect} />
+          </Toggle>
+        </ToolbarTooltip>
+        <Popover>
+          <ToolbarTooltip label={t("annotate.rectOptions")}>
+            <PopoverTrigger
+              render={
+                <Button
+                  aria-label={t("annotate.rectOptions")}
                   className={cn(
-                    rectBarFromColour
-                      ? toolbarInkBarClassName
-                      : toolbarSelectionBarClassName,
-                    "size-8 border-r-transparent p-0 peer/rect",
-                    toolbarCenteredStripButtonClassName,
+                    splitMenuButtonClassName,
+                    "peer-hover/rect:before:opacity-100",
                   )}
                   disabled={disabled}
-                  onPressedChange={(pressed) =>
-                    onToolChange(pressed ? "rect" : null)
-                  }
-                  pressed={activeTool === "rect"}
-                  style={
-                    rectBarFromColour
-                      ? ({ "--tool-ink": rectStyle.color } as CSSProperties)
-                      : undefined
-                  }
-                  variant="outline"
-                >
-                  <RectEffectIcon effect={rectStyle.effect} />
-                </Toggle>
-              </ToolbarTooltip>
-              <Popover>
-                <ToolbarTooltip label={t("annotate.rectOptions")}>
-                  <PopoverTrigger
-                    render={
-                      <Button
-                        aria-label={t("annotate.rectOptions")}
-                        className={cn(
-                          splitMenuButtonClassName,
-                          "peer-hover/rect:before:opacity-100",
-                        )}
-                        disabled={disabled}
-                        size="icon"
-                        variant="ghost"
-                      />
-                    }
-                  >
-                    <ChevronDown className="size-3" />
-                  </PopoverTrigger>
-                </ToolbarTooltip>
-                <PopoverContent align="end" className="w-auto p-3">
-                  <RectStylePopover
-                    onChange={onRectStyleChange}
-                    style={rectStyle}
-                  />
-                </PopoverContent>
-              </Popover>
-            </>
-          ) : null}
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <ChevronDown className="size-3" />
+            </PopoverTrigger>
+          </ToolbarTooltip>
+          <PopoverContent align="end" className="w-auto p-3">
+            <RectStylePopover
+              onChange={onRectStyleChange}
+              style={rectStyle}
+            />
+          </PopoverContent>
+        </Popover>
 
-          {textNoteApplies ? (
-            <ToolbarTooltip label={textNoteLabel}>
-              <Toggle
-                aria-label={textNoteLabel}
-                className={cn(
-                  toolbarInkBarClassName,
-                  "size-8 p-0",
-                  toolbarCenteredStripButtonClassName,
-                )}
-                disabled={disabled}
-                onPressedChange={(pressed) =>
-                  onToolChange(pressed ? "textNote" : null)
-                }
-                pressed={activeTool === "textNote"}
-                style={{ "--tool-ink": textNoteColor } as CSSProperties}
-                variant="outline"
-              >
-                <SquarePen />
-              </Toggle>
-            </ToolbarTooltip>
-          ) : null}
+        <ToolbarTooltip label={textNoteLabel}>
+          <Toggle
+            aria-label={textNoteLabel}
+            className={cn(
+              toolbarInkBarClassName,
+              "size-7 min-w-7 p-0",
+              toolbarCenteredStripButtonClassName,
+            )}
+            disabled={disabled}
+            onPressedChange={(pressed) =>
+              onToolChange(pressed ? "textNote" : null)
+            }
+            pressed={activeTool === "textNote"}
+            style={{ "--tool-ink": textNoteColor } as CSSProperties}
+            variant="outline"
+          >
+            <SquarePen />
+          </Toggle>
+        </ToolbarTooltip>
 
-          {/* The one that undoes the others' work: it takes off a mark this
-              session made, wherever in the stack — what plain undo cannot. */}
-          {eraserApplies ? (
-            <ToolbarTooltip label={eraserLabel}>
-              <Toggle
-                aria-label={eraserLabel}
-                className={cn(
-                  toolbarSelectionBarClassName,
-                  "size-8 p-0",
-                  toolbarCenteredStripButtonClassName,
-                )}
-                disabled={disabled}
-                onPressedChange={(pressed) =>
-                  onToolChange(pressed ? "eraser" : null)
-                }
-                pressed={activeTool === "eraser"}
-                variant="outline"
-              >
-                <Eraser />
-              </Toggle>
-            </ToolbarTooltip>
-          ) : null}
-        </ButtonGroup>
-      ) : null}
+        {/* The one that undoes the others' work: it takes off a mark this
+            session made, wherever in the stack — what plain undo cannot. */}
+        <ToolbarTooltip label={eraserLabel}>
+          <Toggle
+            aria-label={eraserLabel}
+            className={cn(
+              toolbarSelectionBarClassName,
+              "size-7 min-w-7 p-0",
+              toolbarCenteredStripButtonClassName,
+            )}
+            disabled={disabled}
+            onPressedChange={(pressed) =>
+              onToolChange(pressed ? "eraser" : null)
+            }
+            pressed={activeTool === "eraser"}
+            variant="outline"
+          >
+            <Eraser />
+          </Toggle>
+        </ToolbarTooltip>
+      </ButtonGroup>
 
       <ButtonGroup>
         <ToolbarTooltip label={watermarkLabel} shortcut={shortcuts.watermark}>
@@ -258,7 +232,7 @@ export function AnnotationToolbar({
             className="border-input"
             disabled={disabled}
             onClick={onWatermark}
-            size="icon"
+            size="icon-sm"
             variant="ghost"
           >
             <Stamp />
@@ -274,14 +248,12 @@ export function AnnotationToolbar({
             className="border-input"
             disabled={disabled}
             onClick={onPageNumbers}
-            size="icon"
+            size="icon-sm"
             variant="ghost"
           >
             <FileScan />
           </Button>
         </ToolbarTooltip>
-
-        <MergeWizardButton onClick={onMergeWizard} />
       </ButtonGroup>
     </div>
   )

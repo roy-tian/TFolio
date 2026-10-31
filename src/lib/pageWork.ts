@@ -111,7 +111,8 @@ export function distanceFromView(element: Element | null): number {
   }
 
   const root =
-    element.closest("[data-pdf-scroll-root]") ?? document.documentElement
+    element.closest("[data-pdf-scroll-root], [data-thumbnail-scroll-root]") ??
+    document.documentElement
   const view = root.getBoundingClientRect()
   const box = element.getBoundingClientRect()
 

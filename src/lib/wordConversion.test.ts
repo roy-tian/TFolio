@@ -56,7 +56,7 @@ describe("wordConversion", () => {
     })
   })
 
-  it("opens the wizard's Word promise when a suite was detected", async () => {
+  it("opens the Word promise when a suite was detected", async () => {
     await withBackend(() => true, async () => {
       await loadWordConversionAvailability()
 

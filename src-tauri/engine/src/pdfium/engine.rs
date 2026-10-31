@@ -40,10 +40,9 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, InsertOutcome, MergeBookmarks, MergeSourceError, MergeSourceKind, PagePoint,
-    PagePointsRect, PdfDocumentInfo, PdfFileSummary, PdfOutlineItem, PdfPageInfo, PdfSearchMatch,
-    PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle,
-    TextNoteStyle, MAX_PDF_BYTES,
+    ExportOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect, PdfDocumentInfo,
+    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
+    RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -67,7 +66,7 @@ const MAX_SEARCH_CHARS: usize = 256;
 // separate rectangle ceiling covers pathological wrapped occurrences too.
 const MAX_SEARCH_MATCHES: usize = 10_000;
 const MAX_SEARCH_RECTS: usize = 50_000;
-// Matched on the extension because the wizard must sort a dropped file before
+// Matched on the extension because the workspace must sort a dropped file before
 // anything reads it; the bytes are still header-checked when decoded.
 pub const MERGE_IMAGE_EXTENSIONS: [&str; 8] =
     ["bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"];
@@ -150,8 +149,9 @@ struct OpenDocument {
     /// rewrite, where images are drawn, and the latest output. Retired with
     /// every content change, and released when the dialog closes.
     compress_cache: Option<compress::CompressCache>,
-    /// Page ids inserted from another file and still present: while any remain
-    /// the document holds another file's pages, so it may only export to a copy.
+    /// Page ids of copies of pages carrying a watermark or page numbers, still
+    /// present: those are ordinary content now, out of the layers' reach, so the
+    /// document may only export to a copy while any remain.
     merged_page_ids: HashSet<u64>,
     /// The file a save writes back over; `None` for opened-from-bytes, whose
     /// first export adopts its destination as the source.
@@ -264,15 +264,6 @@ pub enum OperationTarget {
     OpenConverted(String),
 }
 
-/// A merge's layout choices, and whether its Word sources may be converted.
-#[derive(Clone, Copy)]
-pub struct MergeOptions {
-    pub smart_padding: bool,
-    pub normalize_a4: bool,
-    pub bookmarks: MergeBookmarks,
-    pub word_conversion: bool,
-}
-
 struct RunningOperation {
     cancelled: Arc<AtomicBool>,
     target: OperationTarget,
@@ -334,6 +325,11 @@ pub struct PdfiumEngine {
     operations: Mutex<HashMap<u64, RunningOperation>>,
     next_operation_id: AtomicU64,
     word: crate::convert::WordConverter,
+    /// The organize workspaces' sources, every window's. Taken only while
+    /// `documents` is held, or alone without touching a document.
+    organize: Mutex<organize::OrganizeSources>,
+    /// Apart from the store, so a release can mark its cutoff without a lock.
+    next_organize_id: AtomicU64,
 }
 
 /// Where the host keeps what the engine loads and writes. The host alone knows
@@ -374,6 +370,8 @@ impl PdfiumEngine {
                 &paths.retired_conversion_roots,
                 word_suites,
             ),
+            organize: Mutex::default(),
+            next_organize_id: AtomicU64::new(1),
         })
     }
 
@@ -1098,9 +1096,9 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
 mod archive_export;
 mod compress;
 mod image_dpi;
-mod inspection;
 mod io;
 mod marks;
+mod organize;
 mod owned_content;
 mod page_ops;
 mod page_reorder;
@@ -1110,6 +1108,9 @@ mod watermark_preview;
 
 pub use io::is_merge_image;
 use io::{image_page_document, read_image, read_pdf_bytes};
+pub use organize::{
+    AssembleOutlineItem, AssemblePlan, AssembleSlot, OrganizeSourceInfo, ORGANIZE_SOURCE_CHANGED,
+};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;

@@ -18,7 +18,7 @@ export function rotationsAfterRotate(rotations: PageRotations): number[] {
 }
 
 /**
- * In the grid the turn is an edit of the document: the selection, or every
+ * From the previews the turn is an edit of the document: the selection, or every
  * page when there is none — which come to the same list when all are selected.
  */
 export function pagesToRotate(

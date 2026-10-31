@@ -102,6 +102,13 @@ describe("matchesShortcut", () => {
       false,
     )
   })
+
+  test("tells redo apart from undo by Shift alone", () => {
+    const redo = keyDown({ ctrlKey: true, key: "Z", shiftKey: true })
+
+    expect(matchesShortcut(redo, shortcuts.redo, false)).toBe(true)
+    expect(matchesShortcut(redo, shortcuts.undo, false)).toBe(false)
+  })
 })
 
 describe("formatShortcut", () => {

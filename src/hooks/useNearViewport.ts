@@ -70,9 +70,9 @@ function observeNearViewport(
   rootMargin: string,
   onChange: (intersecting: boolean) => void,
 ) {
-  // The pages scroll inside the viewer, not the window. Rooting the observer
-  // there makes its margin reach pages before the viewer clips them.
-  const root = element.closest("[data-pdf-scroll-root]")
+  // Pages scroll inside the viewer or the sidebar, not the window. Rooting the
+  // observer there makes its margin reach pages before their box clips them.
+  const root = element.closest("[data-pdf-scroll-root], [data-thumbnail-scroll-root]")
   let margins = observers.get(root)
 
   if (!margins) {

@@ -4,7 +4,13 @@ import { listen } from "@tauri-apps/api/event"
 /** Lives in `settings.toml` in app data, never WebView storage. Values stay
     `unknown`: the reader may edit the file, so each feature's guard validates. */
 export type Settings = {
-  ui?: { theme?: unknown; language?: unknown; viewMode?: unknown }
+  ui?: {
+    theme?: unknown
+    language?: unknown
+    viewMode?: unknown
+    sidebar?: unknown
+    sidebarPanel?: unknown
+  }
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }
   watermark?: unknown
   pageNumbers?: unknown

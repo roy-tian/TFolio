@@ -46,13 +46,12 @@ type WatermarkSettingsProps = {
   className?: string
   draft: WatermarkConfig
   onDraftChange: (draft: WatermarkConfig) => void
-  /** The document dialog supplies live pages; the merge wizard uses A4. */
+  /** The document dialog supplies live pages; without them an A4 sheet stands in. */
   preview?: ReactNode
   validationError: WatermarkValidationError | null
 }
 
-/** The watermark's own controls, shared by the applying dialog and the merge
-    wizard's last step, so the two can never drift apart. */
+/** The watermark's own controls, apart from the dialog that applies them. */
 export function WatermarkSettings({
   autoFocus = false,
   className,

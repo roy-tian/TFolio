@@ -49,6 +49,16 @@ describe("recent files", () => {
     expect(parseRecentPdfView(view)).toEqual(view)
   })
 
+  test("keeps the place of a view saved in the old thumbnail grid", () => {
+    const view: RecentPdfView = {
+      position: { fractionX: 0.5, fractionY: 0.4, pageNumber: 3 },
+      viewMode: "single",
+      zoom: { customScale: 1.25, fitPage: 3, mode: "custom" },
+    }
+
+    expect(parseRecentPdfView({ ...view, viewMode: "thumbnail" })).toEqual(view)
+  })
+
   test("drops a persisted view with unusable geometry", () => {
     const view: RecentPdfView = {
       position: { fractionX: 0.5, fractionY: 0.4, pageNumber: 3 },

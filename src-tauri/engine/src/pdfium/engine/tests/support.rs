@@ -94,6 +94,8 @@ pub(super) fn test_engine() -> &'static PdfiumEngine {
         page_number_font: OnceLock::new(),
         operations: Mutex::new(HashMap::new()),
         next_operation_id: AtomicU64::new(1),
+        organize: Mutex::default(),
+        next_organize_id: AtomicU64::new(1),
     })
 }
 
@@ -353,6 +355,8 @@ pub(super) fn font_engine(
         page_number_font: OnceLock::new(),
         operations: Mutex::new(HashMap::new()),
         next_operation_id: AtomicU64::new(1),
+        organize: Mutex::default(),
+        next_organize_id: AtomicU64::new(1),
     }
 }
 

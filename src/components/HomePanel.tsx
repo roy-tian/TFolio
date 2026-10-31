@@ -89,8 +89,10 @@ export function HomePanel({
       role="tabpanel"
     >
       {/* The page itself stays put and the recent list scrolls alone, so the
-          welcome and the actions never move under the reader. */}
-      <main className="workspace-background h-full overflow-y-auto p-8 pt-29">
+          welcome and the actions never move under the reader. A margin, not
+          padding, keeps this background off the native material the sidebar
+          shows through. */}
+      <main className="workspace-background ml-(--sidebar-inset) h-full overflow-y-auto p-8 pt-[calc(var(--toolbar-height)+var(--document-tabs-height)+2rem)]">
         <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center">
           <h1 className="text-2xl font-semibold">{t("home.welcome")}</h1>
           <p className="mt-2 text-center text-sm text-muted-foreground">

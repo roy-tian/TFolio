@@ -93,7 +93,7 @@ export function NoticeCenter({
     <div
       aria-live="off"
       // The anchor moves in `index.css` while the find bar shares this band.
-      className="pointer-events-none fixed top-25 right-4 z-70 flex w-88 flex-col gap-2 transition-[top] duration-150"
+      className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+1rem)] right-4 z-70 flex w-88 flex-col gap-2 transition-[top] duration-150"
       data-slot="notice-center"
     >
       {shown.map((notice) => (

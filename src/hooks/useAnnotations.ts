@@ -10,21 +10,16 @@ import {
   droppedStashIds,
   emptyHistory,
   fillErasedPages,
-  fillInsertFileOutcome,
-  insertFilePages,
   insertPagesRange,
   isDirty,
   markSaved,
   movesPages,
-  nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
   planDuplicatePages,
   planEraseAnnotation,
   planInsertBlankPage,
-  planInsertFile,
-  planInsertPages,
   planPageNumbersChange,
   planReorderPages,
   planRotatePages,
@@ -46,7 +41,6 @@ import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
   PdfExportOutcome,
-  PdfInsertOutcome,
   PdfStructureUpdate,
 } from "@/lib/pdf"
 import {
@@ -256,11 +250,9 @@ async function applyCommand(
         }),
       )
       return []
-    case "insertFile":
-    case "insertPages":
     case "duplicatePages":
-      // Only ever a redo here — the first apply reads the pages across below.
-      // A redo restores the stash rather than re-reading a source that moved on.
+      // Only ever a redo here — the first apply copies the pages below. A redo
+      // restores the stash rather than copying again.
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("restore_pdf_pages", {
@@ -395,19 +387,6 @@ async function retractCommand(
         }),
       )
       return []
-    case "insertFile":
-      // Undo an insert by deleting the range it brought in, stashed under this
-      // entry's id so a redo can restore exactly those bytes.
-      onStructureChange(
-        documentId,
-        await invoke<PdfStructureUpdate>("delete_pdf_pages", {
-          documentId,
-          pageNumbers: insertFilePages(command),
-          stashId: command.stashId,
-        }),
-      )
-      return []
-    case "insertPages":
     case "duplicatePages":
       onStructureChange(
         documentId,
@@ -460,7 +439,7 @@ export function useAnnotations({
   // The synchronous counterpart to `pending`: guards cannot wait for React to
   // render before deciding whether a tab may be discarded.
   const pendingRef = useRef(0)
-  // Page-moving edits in flight: a grid edit must not plan against positions one
+  // Page-moving edits in flight: a page edit must not plan against positions one
   // is about to change, and a mark made meanwhile would land on the wrong page.
   const structurePendingRef = useRef(0)
   // React state lags until a re-render: an operation starting inside another's
@@ -718,136 +697,8 @@ export function useAnnotations({
     [commitStructure],
   )
 
-  /** Cannot go through `commitStructure`: the file's page count is unknown
-      until the backend reads it, so `reconcile` writes back what it learned. */
-  const insertFile = useCallback(
-    async (path: string, index: number, pageCount: number) => {
-      if (documentId === undefined) {
-        return 0
-      }
-
-      let inserted = 0
-
-      structurePendingRef.current += 1
-
-      try {
-        await enqueue((current) => {
-          const planned = planInsertFile(current, path, index, pageCount)
-
-          if (!planned) {
-            // A position the document does not have — the grid has since been
-            // renumbered. A null plan reaches neither path, so it is said here.
-            onAnnotateError()
-            return null
-          }
-
-          const entryId = planned.history.past.at(-1)!.id
-          let outcome: PdfInsertOutcome | null = null
-
-          return {
-            next: planned.history,
-            // Every page from the gap on shows different content afterwards;
-            // the pages past the old end are new components that fetch on mount.
-            pages: commandPages(planned.command),
-            textPages: commandTextPages(planned.command),
-            work: async () => {
-              const args = {
-                documentId,
-                index,
-                path,
-              }
-              const insert = e2eOverride("insertPdfFromPath")
-              outcome = await (insert
-                ? insert(args)
-                : invoke<PdfInsertOutcome>("insert_pdf_from_path", args))
-              onStructureChange(documentId, outcome.update)
-              inserted = outcome.pageCount
-              return true
-            },
-            reconcile: () =>
-              outcome
-                ? fillInsertFileOutcome(planned.history, entryId, outcome.pageCount)
-                : planned.history,
-          }
-        }, onAnnotateError)
-      } finally {
-        structurePendingRef.current -= 1
-      }
-
-      return inserted
-    },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
-  )
-
-  /** Like `insertFile` it cannot go through `commitStructure`: the first apply
-      reads the pages across, and only a redo restores the undo's stash. */
-  const insertPages = useCallback(
-    async (
-      sourceDocumentId: number,
-      sourcePages: number[],
-      index: number,
-      pageCount: number,
-    ) => {
-      if (documentId === undefined) {
-        return false
-      }
-
-      let landed = false
-
-      structurePendingRef.current += 1
-
-      try {
-        await enqueue((current) => {
-          const planned = planInsertPages(
-            current,
-            sourceDocumentId,
-            sourcePages,
-            index,
-            pageCount,
-          )
-
-          if (!planned) {
-            // A position this document does not have — the grid has since been
-            // renumbered. A null plan reaches neither path, so it is said here.
-            onAnnotateError()
-            return null
-          }
-
-          return {
-            next: planned.history,
-            pages: commandPages(planned.command),
-            textPages: commandTextPages(planned.command),
-            work: async () => {
-              onStructureChange(
-                documentId,
-                await invoke<PdfStructureUpdate>(
-                  "insert_pdf_pages_from_document",
-                  {
-                    documentId,
-                    index,
-                    // The plan's own block: sorted and deduplicated, so the
-                    // range the undo deletes is the one the backend copied.
-                    pageNumbers: planned.command.sourcePages,
-                    sourceDocumentId,
-                  },
-                ),
-              )
-              landed = true
-              return true
-            },
-          }
-        }, onAnnotateError)
-      } finally {
-        structurePendingRef.current -= 1
-      }
-
-      return landed
-    },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
-  )
-
-  /** Takes `insertPages`' path rather than `commitStructure`'s for the same
-      reason: there the apply *is* the redo, restoring the undo's stash. */
+  /** Not through `commitStructure`: the first apply copies the pages, and a
+      redo is what restores the undo's stash. */
   const duplicatePages = useCallback(
     async (sourcePages: number[], index: number, pageCount: number) => {
       if (documentId === undefined) {
@@ -868,7 +719,7 @@ export function useAnnotations({
           )
 
           if (!planned) {
-            // A page or position it no longer has — the grid has since been
+            // A page or position it no longer has — the pages have since been
             // renumbered. A null plan reaches neither path, so it is said here.
             onAnnotateError()
             return null
@@ -1379,7 +1230,7 @@ export function useAnnotations({
       discarded must not trust a value that can lag the queue by a render. */
   const isDirtyNow = useCallback(() => isDirty(historyRef.current), [])
 
-  /** Whether a structure edit is in flight this instant — the guard a grid edit
+  /** Whether a structure edit is in flight this instant — the guard a page edit
       checks so it never plans against positions one is about to change. */
   const hasPendingWorkNow = useCallback(() => pendingRef.current > 0, [])
   const isStructureBusyNow = useCallback(() => structurePendingRef.current > 0, [])
@@ -1430,12 +1281,9 @@ export function useAnnotations({
       hasPendingWorkNow,
       historyNow,
       insertBlankPage,
-      insertFile,
-      insertPages,
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,
-      nextRedo: nextRedoCommand(history),
       nextUndo: nextUndoCommand(history),
       pageNumbersConfig: currentPageNumbersConfig(history),
       redo: redoCommand,
@@ -1466,8 +1314,6 @@ export function useAnnotations({
       history,
       historyNow,
       insertBlankPage,
-      insertFile,
-      insertPages,
       isBusy,
       isDirtyNow,
       isStructureBusyNow,

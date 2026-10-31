@@ -3,6 +3,7 @@ import "@wdio/tauri-service"
 import type { PdfTextSpan } from "../../src/lib/pdf"
 
 import {
+  activeSidebar,
   dropZoneButton,
   fragmentedTextPdf,
   GLYPH_PAGE_ROWS,
@@ -65,11 +66,11 @@ function nativeSelection() {
 }
 
 function selectedThumbs() {
-  return browser.execute(() =>
-    [...document.querySelectorAll("button[data-page-number][aria-pressed='true']")]
-      .map((page) => Number(page.getAttribute("data-page-number")))
+  return browser.execute((scope: string) =>
+    [...document.querySelectorAll(`${scope} button[data-thumbnail-page][aria-pressed='true']`)]
+      .map((page) => Number(page.getAttribute("data-thumbnail-page")))
       .sort((left, right) => left - right),
-  )
+  activeSidebar)
 }
 
 describe("TFolio select all", () => {
@@ -492,25 +493,31 @@ describe("TFolio select all", () => {
     })
   })
 
-  it("selects every page in the thumbnail grid", async () => {
-    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
-    await refreshApp()
-    await dropZoneButton().waitForExist({ timeout: 30_000 })
+  it("selects every page while the sidebar's previews have focus", async () => {
     await openPdfFromDisk("grid-all.pdf", textPdf(4))
-    await $("button[data-page-number='4']").waitForDisplayed({ timeout: 30_000 })
+    const fourth = $(`${activeSidebar} button[data-thumbnail-page='4']`)
+    await fourth.waitForExist({ timeout: 30_000 })
+    await browser.execute((selector: string) => {
+      document.querySelector<HTMLElement>(selector)!.focus()
+    }, `${activeSidebar} button[data-thumbnail-page='1']`)
 
     await browser.keys(["Control", "a"])
 
     await browser.waitUntil(async () => (await selectedThumbs()).length === 4, {
       timeout: 5_000,
-      timeoutMsg: "the grid never took every page",
+      timeoutMsg: "the previews never took every page",
     })
+    // The pages were chosen, not the text on them.
+    await expect($("[data-pdf-viewer-layout]")).toHaveAttribute(
+      "data-select-all",
+      "false",
+    )
 
     await browser.keys("Escape")
 
     await browser.waitUntil(async () => (await selectedThumbs()).length === 0, {
       timeout: 5_000,
-      timeoutMsg: "the grid kept its pages after Esc",
+      timeoutMsg: "the previews kept their pages after Esc",
     })
   })
 

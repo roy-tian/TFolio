@@ -9,109 +9,73 @@ describe("PDF scrolling", () => {
     await refreshApp()
   })
 
-  for (const viewMode of ["single", "book", "thumbnail"] as const) {
-    it(`scrolls ${viewMode} pages behind the blurred tab strip`, async () => {
+  for (const viewMode of ["single", "book"] as const) {
+    it(`lays ${viewMode} pages out below the tab strip and beside the sidebar`, async () => {
       await seedSettings({ ui: { language: "en", viewMode } })
       await refreshApp()
-      // Enough pages that the thumbnail grid, too, outgrows the window.
-      await openPdfFromDisk(`under-tabs-${viewMode}.pdf`, bandedPdf(48))
+      await openPdfFromDisk(`beside-sidebar-${viewMode}.pdf`, bandedPdf(48))
       await browser.waitUntil(() => browser.execute(() => {
         const canvas = document.querySelector<HTMLCanvasElement>("[data-page-number='1'] canvas")
         return !!canvas && canvas.width > 100
       }))
 
-      const initial = await browser.execute(() => {
-        const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
+      const layout = await browser.execute(() => {
+        const session = "[data-document-session][data-active='true']"
+        const viewer = document.querySelector<HTMLElement>(`${session} [data-pdf-scroll-root]`)!
         const strip = document.querySelector<HTMLElement>("[data-tab-strip]")!
+        const sidebar = document.querySelector<HTMLElement>(`${session} [data-slot='app-sidebar']`)!
         const page = viewer.querySelector<HTMLElement>("[data-page-number='1']")!
+        const viewerBox = viewer.getBoundingClientRect()
         const stripBox = strip.getBoundingClientRect()
+        const sidebarBox = sidebar.getBoundingClientRect()
 
         return {
-          viewerTop: viewer.getBoundingClientRect().top,
-          stripTop: stripBox.top,
-          pageGap: page.getBoundingClientRect().top - stripBox.bottom,
           blur: getComputedStyle(strip).backdropFilter,
+          pageGap: page.getBoundingClientRect().top - viewerBox.top,
+          sidebarRight: sidebarBox.right,
+          stripBottom: stripBox.bottom,
+          stripLeft: stripBox.left,
+          stripRight: stripBox.right,
+          viewerLeft: viewerBox.left,
+          viewerTop: viewerBox.top,
+          windowWidth: window.innerWidth,
         }
       })
-      expect(initial.viewerTop).toBe(initial.stripTop)
+      // The strip is opaque now: pages start below it rather than under it.
+      expect(layout.blur).toBe("none")
+      expect(layout.viewerTop).toBe(layout.stripBottom)
+      expect(layout.viewerLeft).toBe(layout.sidebarRight)
+      expect(layout.stripLeft).toBe(layout.sidebarRight)
+      expect(layout.stripRight).toBe(layout.windowWidth)
       // An initial seek uses the page's 20px scroll margin; an untouched
-      // layout keeps its 32px padding. Neither may start beneath the tabs.
-      expect(initial.pageGap).toBeGreaterThanOrEqual(20)
-      expect(initial.pageGap).toBeLessThanOrEqual(32)
-      expect(initial.blur).toContain("blur(")
-
-      await browser.execute(() => {
-        document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!.scrollTop = 100
-      })
-      await browser.waitUntil(() => browser.execute(() => {
-        const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-        const strip = document.querySelector<HTMLElement>("[data-tab-strip]")!
-        const paper = viewer.querySelector("[data-page-number='1'] canvas")!
-        const pageBox = paper.getBoundingClientRect()
-        const stripBox = strip.getBoundingClientRect()
-        const layers = document.elementsFromPoint(
-          pageBox.left + pageBox.width / 2,
-          stripBox.top + stripBox.height / 2,
-        )
-        const stripIndex = layers.indexOf(strip)
-        const paperIndex = layers.indexOf(paper)
-
-        // A page rectangle alone is insufficient: the old scrollport clipped
-        // those pixels away before backdrop-filter could sample them.
-        return stripIndex >= 0 && paperIndex > stripIndex
-      }))
+      // layout keeps its 32px padding.
+      expect(layout.pageGap).toBeGreaterThanOrEqual(20)
+      expect(layout.pageGap).toBeLessThanOrEqual(32)
     })
   }
 
-  it("spans the tab strip over the scrollbar and centres the page status on the pages", async () => {
+  it("gives the pages the sidebar's width when it is hidden, and moves the menu to the toolbar", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
-    await openPdfFromDisk("scrollbar-gutter.pdf", minimalPdf(100, "0 0 595 842"))
+    await openPdfFromDisk("sidebar-toggle.pdf", minimalPdf(3, "0 0 595 842"))
     await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
 
-    const layout = () => browser.execute(() => {
-      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-      const strip = document.querySelector<HTMLElement>("[data-tab-strip]")!
-      const status = document.querySelector(
-        "[data-document-session][data-active='true'] [data-slot='page-status']",
-      )!.getBoundingClientRect()
-      const box = viewer.getBoundingClientRect()
-      const stripBox = strip.getBoundingClientRect()
+    const session = "[data-document-session][data-active='true']"
+    const viewerLeft = () => browser.execute((scope: string) =>
+      document.querySelector(`${scope} [data-pdf-scroll-root]`)!.getBoundingClientRect().left, session)
+    const toolbarMenu = $(`${session} [data-slot='toolbar'] [data-slot='app-menu']`)
 
-      return {
-        gutter: viewer.offsetWidth - viewer.clientWidth,
-        pagesCentre: box.left + viewer.clientWidth / 2,
-        statusCentre: status.left + status.width / 2,
-        stripCoversGutter: strip.contains(
-          document.elementFromPoint(box.right - 4, stripBox.top + stripBox.height / 2),
-        ),
-        stripRight: stripBox.right,
-        windowWidth: window.innerWidth,
-      }
-    })
+    expect(await viewerLeft()).toBeGreaterThan(200)
+    await expect(toolbarMenu).not.toBeExisting()
 
-    try {
-      // Styled, the scrollbar takes its width even where the host overlays.
-      await browser.waitUntil(async () => (await layout()).gutter === 12)
-      const scrolling = await layout()
-      expect(scrolling.stripRight).toBe(scrolling.windowWidth)
-      expect(scrolling.stripCoversGutter).toBe(true)
-      expect(Math.abs(scrolling.statusCentre - scrolling.pagesCentre)).toBeLessThanOrEqual(1)
+    await $(`${session} [data-slot='app-sidebar'] button[aria-label='Hide sidebar']`).click()
+    await expect($(`${session} [data-slot='app-sidebar']`)).not.toBeExisting()
+    await browser.waitUntil(async () => (await viewerLeft()) === 0)
+    await expect(toolbarMenu).toBeDisplayed()
 
-      await browser.execute(() => {
-        document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!.style.overflowY = "hidden"
-      })
-      await browser.waitUntil(async () => {
-        const still = await layout()
-        return still.gutter === 0 &&
-          Math.abs(still.statusCentre - still.windowWidth / 2) <= 1
-      })
-    } finally {
-      await browser.execute(() => {
-        document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-          .style.removeProperty("overflow-y")
-      })
-    }
+    await $(`${session} [data-slot='toolbar'] button[aria-label='Show sidebar']`).click()
+    await expect($(`${session} [data-slot='app-sidebar']`)).toBeDisplayed()
+    await expect(toolbarMenu).not.toBeExisting()
   })
 
   // Fitted beside a bar that comes and goes, a document whose height straddles

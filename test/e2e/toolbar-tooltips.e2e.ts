@@ -98,7 +98,7 @@ describe("TFolio toolbar tooltips", () => {
     await browser.keys("Escape")
     await newItem.waitForDisplayed({ reverse: true })
 
-    for (const label of ["单页视图", "书籍视图", "缩略图视图"]) {
+    for (const label of ["单页视图", "书籍视图"]) {
       await expectShadcnTooltip(label)
     }
 

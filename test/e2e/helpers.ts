@@ -492,6 +492,47 @@ export async function appMenuItem(action: string) {
   return item
 }
 
+/** The shown tab's sidebar: every tab mounts its own, the others hidden. */
+export const activeSidebar =
+  "[data-document-session][data-active='true'] [data-slot='app-sidebar']"
+
+/** Opens a page's menu in the shown tab's sidebar, which also chooses the
+    page if it was not chosen, and takes the action named by `data-action`. */
+export async function sidebarPageAction(pageNumber: number, action: string) {
+  const selector = `${activeSidebar} button[data-thumbnail-page='${pageNumber}']`
+
+  await $(selector).waitForExist({ timeout: 30_000 })
+  await browser.execute((target: string) => {
+    const page = document.querySelector(target)!
+    const box = page.getBoundingClientRect()
+
+    page.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        clientX: box.left + box.width / 2,
+        clientY: box.top + box.height / 2,
+      }),
+    )
+  }, selector)
+
+  const item = $(`[data-action='${action}']`)
+
+  await item.waitForDisplayed({ timeout: 5_000 })
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 5_000 })
+}
+
+/** A small, undoable edit: one page deleted through the shown tab's sidebar. */
+export function deletePageFromSidebar(pageNumber = 1) {
+  return sidebarPageAction(pageNumber, "delete-pages")
+}
+
+/** Redo has no toolbar button: it is the keyboard's alone. */
+export async function pressRedo() {
+  await browser.keys(["Control", "Shift", "z"])
+}
+
 export async function clickAppMenuItem(action: string) {
   await (await appMenuItem(action)).click()
 }
@@ -560,7 +601,7 @@ export async function openPathViaDialog(filePath: string) {
 
 /**
  * Writes `contents` to a scratch file and answers its path, unopened — the
- * merge wizard and the grid's insert read files they never open.
+ * organize workspace and the grid's insert read files they never open.
  */
 export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
@@ -572,7 +613,7 @@ export function writeScratchPdf(fileName: string, contents: Uint8Array): string 
   return filePath
 }
 
-/** The multi-select stand-in the merge wizard's add button reads, left beside
+/** The multi-select stand-in the organize workspace's add reads, left beside
     whatever other override is already in place. */
 export async function pointMultiPickerAt(filePaths: string[]) {
   await browser.execute((mockPaths: string[]) => {
@@ -770,14 +811,4 @@ export function emitDrag(
     point.y,
     paths,
   )
-}
-
-export function gapPoint(index: number) {
-  return browser.execute((at: number) => {
-    const rect = document
-      .querySelector(`[data-insert-index='${at}']`)!
-      .getBoundingClientRect()
-
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-  }, index)
 }

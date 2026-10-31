@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 pub use archive::{ArchiveOptions, ImageFormat};
 pub use compress::{CompressionEstimate, CompressionOptions};
 pub use engine::{
-    is_merge_image, EnginePaths, MergeOptions, OperationTarget, PdfiumEngine,
-    MERGE_IMAGE_EXTENSIONS,
+    is_merge_image, AssembleOutlineItem, AssemblePlan, AssembleSlot, EnginePaths, OperationTarget,
+    OrganizeSourceInfo, PdfiumEngine, MERGE_IMAGE_EXTENSIONS, ORGANIZE_SOURCE_CHANGED,
 };
 pub use font::{download_fallback_font, CJK_FONT_NAME};
 pub use library::PDFIUM_LIBRARY_NAME;
@@ -61,35 +61,9 @@ pub struct PdfStructureUpdate {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
-    /// Like a watermark, any page another file brought in leaves the document
-    /// export-only; the frontend's save key reads this, not its own history.
+    /// Like a watermark, a copy of a page carrying one or page numbers leaves the
+    /// document export-only; the frontend's save key reads this, not its history.
     has_merged_pages: bool,
-}
-
-/// `page_count` is the one thing the frontend cannot know until the file is
-/// read — and what its undo needs to know which pages to take back out.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InsertOutcome {
-    page_count: i32,
-    update: PdfStructureUpdate,
-}
-
-/// How a merge turns its sources' bookmarks into the merged outline. Every
-/// mode but `None` needs an outline written, which PDFium cannot do.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum MergeBookmarks {
-    /// No outline at all — the shape a merge already produces, since imported
-    /// pages leave their source's bookmarks behind.
-    None,
-    /// One top-level bookmark per file, on the file's first page.
-    PerFile,
-    /// Each file's own bookmarks, remapped onto their merged positions and laid
-    /// out one file after another at the top level.
-    KeepExisting,
-    /// One bookmark per file, with that file's own bookmarks beneath it.
-    PerFileWithExisting,
 }
 
 /// An image is laid on a sheet of its own; a Word document arrives as the PDF
@@ -102,33 +76,13 @@ pub enum MergeSourceKind {
     Word,
 }
 
-/// Why a Word document could not become a PDF. The wizard words these itself;
+/// Why a Word document could not become a PDF. The workspace words these itself;
 /// the detail an engine reported stays in the error it came with.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MergeSourceError {
     ConverterMissing,
     ConversionFailed,
-}
-
-/// Read before anything is merged, so the wizard can show page counts and
-/// total up the result.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfFileSummary {
-    path: String,
-    kind: MergeSourceKind,
-    /// `None` when the file could not be read, so the row shows as
-    /// unusable rather than silently going missing from the list.
-    page_count: Option<i32>,
-    all_pages_a4: Option<bool>,
-    /// Whether the file brings bookmarks of its own — what makes the
-    /// bookmark-keeping modes worth offering.
-    has_outline: bool,
-    /// Set only where "unreadable" would understate the row: a Word document
-    /// that no installed application could convert, or none could be found.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<MergeSourceError>,
 }
 
 #[derive(Debug, Serialize)]

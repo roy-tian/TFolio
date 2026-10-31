@@ -382,6 +382,7 @@ fn release_window(app: &AppHandle, label: &str) {
     };
 
     pdfium.cancel_window_work(label);
+    pdfium.release_window_sources(label);
 
     let pending = app
         .try_state::<HandoffQueue>()

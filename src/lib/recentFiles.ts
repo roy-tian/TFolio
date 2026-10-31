@@ -66,7 +66,9 @@ export function parseRecentPdfView(value: unknown): RecentPdfView | null {
   const fractionX = position.fractionX
   const fractionY = position.fractionY
   const customScale = zoom.customScale
-  const viewMode = value.viewMode
+  // The grid view, which views saved before it moved to the sidebar may name,
+  // reads as the single page it now opens on, keeping the place it held.
+  const viewMode = value.viewMode === "thumbnail" ? "single" : value.viewMode
   const zoomMode = zoom.mode
 
   if (

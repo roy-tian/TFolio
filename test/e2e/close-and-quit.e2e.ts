@@ -6,6 +6,7 @@ import "@wdio/tauri-service"
 import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   clickAppMenuItem,
+  deletePageFromSidebar,
   minimalPdf,
   openFileButton,
   openPathViaDialog,
@@ -42,13 +43,13 @@ function prompt() {
 }
 
 async function deleteFirstPage() {
-  await $("button[aria-label='Delete page 1']").click()
+  await deletePageFromSidebar(1)
   await $("[aria-label='Unsaved changes']").waitForExist()
 }
 
 describe("closing and quitting with unsaved work", () => {
   beforeEach(async () => {
-    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await openFileButton().waitForExist({ timeout: 30_000 })
   })

@@ -5,11 +5,6 @@ export type PdfProgress = {
 
 export type PdfOwnedLayer = "pageNumbers" | "watermark"
 
-export type PdfOwnedLayerProgressHandler = (
-  layer: PdfOwnedLayer,
-  progress: PdfProgress,
-) => void
-
 export function progressPercent({ completed, total }: PdfProgress) {
   if (!Number.isFinite(completed) || !Number.isFinite(total) || total <= 0) {
     return 0

@@ -15,6 +15,7 @@ import {
   refreshApp,
   seedSettings,
   tooltipOn,
+  pressRedo,
 } from "./helpers"
 
 async function openPageNumbersDialog() {
@@ -78,7 +79,7 @@ describe("TFolio page numbers", () => {
       timeoutMsg: "undo did not restore the clean page",
     })
 
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 30_000,
       timeoutMsg: "redo did not restore the same page number",

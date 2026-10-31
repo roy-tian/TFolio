@@ -2,9 +2,13 @@ import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import {
+  activeSidebar,
+  deletePageFromSidebar,
   openPdfFromDisk,
+  pressRedo,
   refreshApp,
   seedSettings,
+  sidebarPageAction,
   wrappedSearchPdf,
 } from "./helpers"
 
@@ -20,36 +24,20 @@ describe("TFolio PDF search", () => {
     const toolbarOrder = await browser.execute(() =>
       Array.from(
         document.querySelectorAll(
-          "[data-document-session][data-active='true'] header button[aria-label]",
+          "[data-document-session][data-active='true'] [data-slot='toolbar'] button[aria-label]",
         ),
       ).map((button) => button.getAttribute("aria-label")),
     )
     expect(toolbarOrder).toEqual(
-      expect.arrayContaining([
-        "Menu",
-        "Show bookmarks",
-        "Save",
-        "Print…",
-        "Search this PDF",
-        "Undo",
-      ]),
+      expect.arrayContaining(["Undo", "Search this PDF", "Save"]),
     )
-    expect(toolbarOrder.indexOf("Menu")).toBeLessThan(
-      toolbarOrder.indexOf("Show bookmarks"),
-    )
-    // Search closes the group that saves and prints, and the whole group comes
-    // before the history keys, which lead the tools at the other end.
-    expect(toolbarOrder.indexOf("Show bookmarks")).toBeLessThan(
-      toolbarOrder.indexOf("Save"),
-    )
-    expect(toolbarOrder.indexOf("Save")).toBeLessThan(
-      toolbarOrder.indexOf("Print…"),
-    )
-    expect(toolbarOrder.indexOf("Print…")).toBeLessThan(
+    // The history key leads the editing tools; search and the file's own
+    // actions close the bar.
+    expect(toolbarOrder.indexOf("Undo")).toBeLessThan(
       toolbarOrder.indexOf("Search this PDF"),
     )
     expect(toolbarOrder.indexOf("Search this PDF")).toBeLessThan(
-      toolbarOrder.indexOf("Undo"),
+      toolbarOrder.indexOf("Save"),
     )
 
     await $("button[aria-label='Search this PDF']").click()
@@ -64,7 +52,9 @@ describe("TFolio PDF search", () => {
       const bar = document
         .querySelector<HTMLElement>("[data-slot='pdf-search']")!
         .getBoundingClientRect()
-      const title = document.querySelector("header")!.getBoundingClientRect()
+      const title = document
+        .querySelector("[data-document-session][data-active='true'] [data-slot='toolbar']")!
+        .getBoundingClientRect()
       const tabs = document
         .querySelector("[role='tablist']")!
         .parentElement!.getBoundingClientRect()
@@ -256,7 +246,7 @@ describe("TFolio PDF search", () => {
     await expect(status).toHaveText("1 / 2")
   })
 
-  it("keeps refreshed search results from leaving the grid after page edits", async () => {
+  it("refreshes search results as the sidebar edits pages", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await openPdfFromDisk("search-page-edits.pdf", wrappedSearchPdf())
@@ -264,49 +254,34 @@ describe("TFolio PDF search", () => {
     await $("input[aria-label='Search text in current PDF']").setValue("wrapped phrase")
     const status = $("[data-slot='pdf-search-status']")
     await expect(status).toHaveText("1 / 2", { wait: 10_000 })
+    const previews = () => $$(`${activeSidebar} button[data-thumbnail-page]`)
 
-    await $("button[aria-label='Thumbnails']").click()
-    await $("button[data-page-number='2']").click()
-    await $("button[aria-label='Rotate clockwise']").click()
-    await expect($("button[aria-label='Undo turning a page']")).toExist()
-    await browser.pause(1_000)
-    await expect(status).toHaveText(/^\d+ \/ 2$/)
-    await expect($("[data-view-mode='thumbnail']")).toExist()
-    await expect($("button[data-page-number='2']")).toHaveAttribute("aria-pressed", "true")
-
-    const expectGridResults = async (count: number) => {
+    const expectResults = async (count: number) => {
       // The query itself is unchanged; wait beyond the debounce so a stale
-      // count cannot make the assertion pass before the refresh can navigate.
+      // count cannot make the assertion pass before the refresh lands.
       await browser.pause(1_000)
       await expect(status).toHaveText(new RegExp(`^\\d+ / ${count}$`))
-      await expect($("[data-view-mode='thumbnail']")).toExist()
     }
 
-    await $("button[aria-label='Insert a blank page before page 2']").click()
-    await expect($$("button[data-page-number]")).toBeElementsArrayOfSize(3)
-    await expectGridResults(2)
-    await $("button[aria-label='Delete page 1']").click()
-    await expect($$("button[data-page-number]")).toBeElementsArrayOfSize(2)
-    await expectGridResults(1)
+    await sidebarPageAction(2, "rotate-pages")
+    await expect($("button[aria-label='Undo turning a page']")).toExist()
+    await expectResults(2)
+
+    await sidebarPageAction(2, "insert-blank-before")
+    await expect(previews()).toBeElementsArrayOfSize(3)
+    await expectResults(2)
+    await deletePageFromSidebar(1)
+    await expect(previews()).toBeElementsArrayOfSize(2)
+    await expectResults(1)
     await $("button[aria-label^='Undo']").click()
-    await expectGridResults(2)
-    await $("button[aria-label^='Redo']").click()
-    await expectGridResults(1)
+    await expectResults(2)
+    await pressRedo()
+    await expectResults(1)
 
     // Refreshing the only match must not make an explicit Next a no-op.
     await $("button[aria-label='Next result']").click()
-    await expect($("button[aria-label='Single page']")).toHaveAttribute("aria-pressed", "true")
     await expect($("input[aria-label='Page number']")).toHaveValue("2")
     await expect($("[data-search-match='0'][data-active='true']")).toBeDisplayed()
-
-    await $("button[aria-label='Thumbnails']").click()
-    await $("button[aria-label='Previous result']").click()
-    await expect($("button[aria-label='Single page']")).toHaveAttribute("aria-pressed", "true")
-
-    // A genuinely new query from the grid still requests navigation.
-    await $("button[aria-label='Thumbnails']").click()
-    await $("input[aria-label='Search text in current PDF']").setValue("phrase")
-    await expect(status).toHaveText("1 / 1", { wait: 10_000 })
-    await expect($("button[aria-label='Single page']")).toHaveAttribute("aria-pressed", "true")
   })
+
 })

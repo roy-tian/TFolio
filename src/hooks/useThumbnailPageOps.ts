@@ -1,5 +1,3 @@
-import type { RefObject } from "react"
-
 import type { DocumentNotices } from "@/hooks/useNotices"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import type { usePageClipboard } from "@/hooks/usePageClipboard"
@@ -10,51 +8,30 @@ import {
   QUARTER_TURN,
 } from "@/lib/pageRotation"
 import { pastePlan } from "@/lib/pageClipboard"
-import type { SelectionModifiers } from "@/lib/thumbnailSelection"
-import type { ViewMode } from "@/lib/viewMode"
 
 type UseThumbnailPageOpsOptions = {
   annotations: ReturnType<typeof useAnnotations>
   pageClipboard: ReturnType<typeof usePageClipboard>
-  /** The gap a grid-initiated jump owes a seek to, once the page view is back. */
-  pendingScrollPageRef: RefObject<number | null>
   pdfDocument: PdfDocumentInfo
   notice: DocumentNotices
-  setPreferredViewMode: (mode: ViewMode) => void
   thumbnailSelection: ReturnType<typeof useThumbnailSelection>
 }
 
 /**
- * The thumbnail grid's page edits: delete, insert, rotate, reorder, and the
+ * The sidebar previews' page edits: delete, insert, rotate, reorder, and the
  * clipboard's paste — all through the ordinary annotation commands, so each
  * stays one undo away.
  */
 export function useThumbnailPageOps({
   annotations,
   pageClipboard,
-  pendingScrollPageRef,
   pdfDocument,
   notice,
-  setPreferredViewMode,
   thumbnailSelection,
 }: UseThumbnailPageOpsOptions) {
   // Gestures name pages read off the screen, so they are dropped while a
   // page-shifting edit is in flight; an annotation in flight shifts nothing.
   const editingBusy = () => annotations.isStructureBusyNow()
-
-  // Double-clicking a thumbnail leaves the grid for the page itself; a single
-  // click is selection now, so navigation moved to the second click.
-  const openThumbnailPage = (pageNumber: number) => {
-    pendingScrollPageRef.current = pageNumber
-    setPreferredViewMode("single")
-  }
-
-  const selectThumbnailPage = (
-    pageNumber: number,
-    modifiers: SelectionModifiers,
-  ) => {
-    thumbnailSelection.select(pageNumber, modifiers)
-  }
 
   // A right-click on a page the selection does not hold takes the selection to
   // it, as every file manager does: the menu then acts on what is on screen.
@@ -87,7 +64,7 @@ export function useThumbnailPageOps({
   }
 
   /**
-   * The rotate button over the grid, where turning a page edits the document —
+   * Rotate in a preview's menu, where turning a page edits the document —
    * undone and saved like any other — taking the selection, or all of it.
    */
   const rotateThumbnailPages = () => {
@@ -151,24 +128,20 @@ export function useThumbnailPageOps({
       })
   }
 
-  // Answered with, rather than voided: the grid holds the pages where the drop
-  // put them until this settles, since nothing moves before the backend has.
   const reorderPages = (order: number[]) => {
     if (editingBusy()) {
       return
     }
 
-    return annotations.reorderPages(order)
+    void annotations.reorderPages(order)
   }
 
   return {
     deleteThumbnailPage,
     insertBlankPage,
     menuThumbnailPage,
-    openThumbnailPage,
     pastePages,
     reorderPages,
     rotateThumbnailPages,
-    selectThumbnailPage,
   }
 }

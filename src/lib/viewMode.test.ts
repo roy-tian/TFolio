@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
 import {
-  computeThumbnailColumns,
   effectiveViewMode,
   isViewMode,
   pageTurnTarget,
   pairPages,
   spreadPages,
-  THUMBNAIL_COLUMN_GAP,
   THUMBNAIL_WIDTH,
   thumbnailPaper,
 } from "./viewMode"
@@ -16,7 +14,8 @@ describe("isViewMode", () => {
   test("accepts the supported modes", () => {
     expect(isViewMode("single")).toBe(true)
     expect(isViewMode("book")).toBe(true)
-    expect(isViewMode("thumbnail")).toBe(true)
+    // The grid a stored setting may still name went with the sidebar's previews.
+    expect(isViewMode("thumbnail")).toBe(false)
   })
 
   test("rejects anything else", () => {
@@ -80,26 +79,6 @@ describe("pageTurnTarget", () => {
   })
 })
 
-describe("computeThumbnailColumns", () => {
-  const columnStride = THUMBNAIL_WIDTH + THUMBNAIL_COLUMN_GAP
-
-  test("never drops below two columns", () => {
-    expect(computeThumbnailColumns(0)).toBe(2)
-    expect(computeThumbnailColumns(THUMBNAIL_WIDTH)).toBe(2)
-  })
-
-  test("rounds an odd fit down to an even count", () => {
-    // Exactly three columns fit; a row must stay even.
-    expect(computeThumbnailColumns(columnStride * 3 - THUMBNAIL_COLUMN_GAP)).toBe(2)
-    expect(computeThumbnailColumns(columnStride * 5 - THUMBNAIL_COLUMN_GAP)).toBe(4)
-  })
-
-  test("uses every column an even fit allows", () => {
-    expect(computeThumbnailColumns(columnStride * 4 - THUMBNAIL_COLUMN_GAP)).toBe(4)
-    expect(computeThumbnailColumns(columnStride * 6 - THUMBNAIL_COLUMN_GAP)).toBe(6)
-  })
-})
-
 describe("thumbnailPaper", () => {
   test("spans the column with the long side", () => {
     expect(thumbnailPaper({ height: 842, width: 595 }).height).toBe(THUMBNAIL_WIDTH)
@@ -125,8 +104,7 @@ describe("effectiveViewMode", () => {
     expect(effectiveViewMode("book", 2)).toBe("book")
   })
 
-  test("leaves every other mode to stand on its own", () => {
+  test("leaves single page to stand on its own", () => {
     expect(effectiveViewMode("single", 1)).toBe("single")
-    expect(effectiveViewMode("thumbnail", 1)).toBe("thumbnail")
   })
 })

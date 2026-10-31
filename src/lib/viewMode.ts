@@ -1,30 +1,29 @@
 import { rememberSettings, storedSettings } from "@/lib/settings"
 
-export const viewModes = ["single", "book", "thumbnail"] as const
+export const viewModes = ["single", "book"] as const
 
 export type ViewMode = (typeof viewModes)[number]
 
 export const defaultViewMode: ViewMode = "single"
 
-/** The column gap holds the insertion line and its + button; the row gap is
-    spent as cell bottom padding so every band belongs to a cell. The width is
-    the long side of every thumbnail's paper, so the widest a column gets. */
+/** The long side of a thumbnail's paper, whichever way the page is turned. */
 export const THUMBNAIL_WIDTH = 160
-export const THUMBNAIL_ROW_GAP = 16
-export const THUMBNAIL_COLUMN_GAP = 32
 
 /** In `rem`, not pixels, because the number is `text-xs`: a WebView whose
-    root font size is not 16px keeps the box and the insertion line agreed. */
+    root font size is not 16px keeps the box the same height as its text. */
 export const THUMBNAIL_CAPTION_HEIGHT = "1.375rem"
 
 /** CSS pixels per point of a thumbnail: its long side spans the column, so a
     page keeps its scale whichever way it is turned. */
-function thumbnailScale(page: { height: number; width: number }) {
-  return THUMBNAIL_WIDTH / Math.max(page.width, page.height)
+function thumbnailScale(page: { height: number; width: number }, longSide: number) {
+  return longSide / Math.max(page.width, page.height)
 }
 
-export function thumbnailPaper(page: { height: number; width: number }) {
-  const scale = thumbnailScale(page)
+export function thumbnailPaper(
+  page: { height: number; width: number },
+  longSide = THUMBNAIL_WIDTH,
+) {
+  const scale = thumbnailScale(page, longSide)
 
   return { height: page.height * scale, width: page.width * scale }
 }
@@ -83,7 +82,7 @@ export function spreadPages(pageNumber: number, numPages: number): number[] {
 export function pageTurnTarget(
   pageNumber: number,
   numPages: number,
-  viewMode: Exclude<ViewMode, "thumbnail">,
+  viewMode: ViewMode,
   direction: -1 | 1,
 ): number {
   const lastPage = Math.max(1, numPages)
@@ -97,18 +96,4 @@ export function pageTurnTarget(
   const lastSpreadStart = lastPage % 2 === 1 ? lastPage : lastPage - 1
 
   return Math.min(lastSpreadStart, Math.max(1, spreadStart + direction * 2))
-}
-
-/** Rounded down to an even count, so a row never splits a spread; never
-    fewer than two. */
-export function computeThumbnailColumns(
-  containerWidth: number,
-  columnWidth = THUMBNAIL_WIDTH,
-  gap = THUMBNAIL_COLUMN_GAP,
-): number {
-  // `n` columns occupy `n * columnWidth + (n - 1) * gap`, so lending the row one
-  // extra gap makes the fit a plain division.
-  const fit = Math.floor((containerWidth + gap) / (columnWidth + gap))
-
-  return Math.max(2, Math.floor(fit / 2) * 2)
 }

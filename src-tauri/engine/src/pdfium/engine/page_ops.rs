@@ -1,4 +1,3 @@
-use super::io::read_pdf_bytes;
 use super::owned_content::OwnedTailState;
 use super::*;
 
@@ -9,6 +8,34 @@ pub(super) struct PageStash {
     /// One record per deleted page, ascending by original position — the order
     /// their copies sit in `document`, and the order a restore reinserts them.
     pub(super) pages: Vec<StashedPage>,
+    /// Bookmarks aimed at a deleted page, which a restore points at its copy.
+    pub(super) bookmarks: Vec<outline::Relink>,
+}
+
+/// The bookmarks whose target is one of `pages` (0-based), by place in the tree.
+fn bookmarks_on_pages(
+    items: &[PdfOutlineItem],
+    pages: &HashSet<usize>,
+    path: &mut Vec<usize>,
+    found: &mut Vec<outline::Relink>,
+) {
+    for (index, item) in items.iter().enumerate() {
+        path.push(index);
+
+        if let Some(page) = item
+            .page_number
+            .and_then(|number| usize::try_from(number - 1).ok())
+            .filter(|page| pages.contains(page))
+        {
+            found.push(outline::Relink {
+                path: path.clone(),
+                page,
+            });
+        }
+
+        bookmarks_on_pages(&item.items, pages, path, found);
+        path.pop();
+    }
 }
 
 pub(super) struct StashedPage {
@@ -20,8 +47,8 @@ pub(super) struct StashedPage {
     pub(super) marks: Vec<u64>,
     pub(super) revision: u64,
     pub(super) owned: Option<OwnedTailState>,
-    /// Whether the page came from a merge, so a restore puts it back into the
-    /// merged-content set that forbids overwriting the first file.
+    /// Whether the page is a copy of owned content, so a restore puts it
+    /// back into the set that forbids overwriting the document's file.
     pub(super) merged: bool,
 }
 
@@ -302,6 +329,14 @@ impl PdfiumEngine {
             .save_to_bytes()
             .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
 
+        let mut bookmarks = Vec::new();
+        bookmarks_on_pages(
+            &collect_bookmark_siblings(entry.document.bookmarks().root()),
+            &indices.iter().copied().collect(),
+            &mut Vec::new(),
+            &mut bookmarks,
+        );
+
         let stashed = (|| -> Result<PdfDocument<'static>, String> {
             let mut stash_document = self
                 .pdfium
@@ -352,7 +387,7 @@ impl PdfiumEngine {
                     .owned_content
                     .as_mut()
                     .and_then(|state| state.per_page.remove(&page_id)),
-                // A deleted merged page leaves the document; the guard follows.
+                // A deleted copy leaves the document; the guard follows it out.
                 merged: entry.merged_page_ids.remove(&page_id),
             });
         }
@@ -364,12 +399,67 @@ impl PdfiumEngine {
             PageStash {
                 document: stash_document,
                 pages,
+                bookmarks,
             },
         );
         entry.needs_compaction = true;
         entry.invalidate_all_page_revisions();
 
         Ok(structure_update(entry))
+    }
+
+    /// The restored pages are copies, so a bookmark aimed at a deleted page
+    /// still names the old object. Best effort: the pages are back either way,
+    /// and a failure here leaves only the bookmark unresolved, as before.
+    fn relink_restored_bookmarks(&self, entry: &mut OpenDocument, bookmarks: &[outline::Relink]) {
+        if bookmarks.is_empty() {
+            return;
+        }
+
+        let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
+        let dangling: Vec<outline::Relink> = bookmarks
+            .iter()
+            .filter(|relink| {
+                let mut items = outline.as_slice();
+                let mut found = None;
+
+                for &index in &relink.path {
+                    found = items.get(index);
+                    items = found.map_or(&[], |item| item.items.as_slice());
+                }
+
+                found.is_some_and(|item| item.page_number.is_none())
+            })
+            .cloned()
+            .collect();
+
+        if dangling.is_empty() {
+            return;
+        }
+
+        let Ok(bytes) = entry.document.save_to_bytes() else {
+            return;
+        };
+        let Ok(Some(bytes)) = outline::relink_pages(&bytes, &dangling) else {
+            return;
+        };
+        let Ok(reloaded) = self.pdfium.load_pdf_from_byte_vec(bytes, None) else {
+            return;
+        };
+
+        if reloaded.pages().len() as usize != entry.page_ids.len() {
+            return;
+        }
+
+        if let Some(state) = &entry.owned_content {
+            if Self::verify_owned_tail(&reloaded, &entry.page_ids, state, None, &mut |_, _| {})
+                .is_err()
+            {
+                return;
+            }
+        }
+
+        entry.document = reloaded;
     }
 
     /// Drops the stashes of undone inserts the reader has branched away from:
@@ -493,6 +583,8 @@ impl PdfiumEngine {
             entry.revisions.insert(stashed.page_id, stashed.revision);
         }
 
+        self.relink_restored_bookmarks(entry, &stash.bookmarks);
+
         // The delete already set this, and the import may leave orphans of its
         // own; keep the next write on the compacting path either way.
         entry.needs_compaction = true;
@@ -564,75 +656,6 @@ impl PdfiumEngine {
         Ok(structure_update(entry))
     }
 
-    /// Inserts every page of the PDF at `path` as one edit, under the same
-    /// limits as a fresh open; its pages become this document's own.
-    pub fn insert_from_path(
-        &self,
-        document_id: u64,
-        path: PathBuf,
-        index: i32,
-    ) -> Result<InsertOutcome, String> {
-        // The same read an open makes, under the same MiB ceiling: an insert is
-        // another door onto a reader's file, not a looser one.
-        let bytes = read_pdf_bytes(&path)?;
-
-        let mut documents = self.lock_documents()?;
-        // Opened inside the lock — loading is PDFium work — and dropped at
-        // scope's end, never entering the store; errors worded like `open`'s.
-        let source = self
-            .pdfium
-            .load_pdf_from_byte_vec(bytes, None)
-            .map_err(|error| format!("PDFium could not open the document: {error}"))?;
-        let added_count = source.pages().len();
-
-        if added_count < 1 {
-            return Err("the inserted PDF has no pages".into());
-        }
-
-        let entry = open_entry_mut(&mut documents, document_id)?;
-        let page_count = entry.page_ids.len();
-        // One past the end is a position too, exactly as a blank page's is.
-        let Some(slot) = page_index(index, page_count + 1) else {
-            return Err(format!("a page cannot go to position {index}"));
-        };
-
-        // The import may fail partway; snapshot first so a failure rolls the
-        // document back whole, as every multi-page structure change does.
-        let snapshot = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
-
-        if let Err(error) = entry.document.pages_mut().copy_page_range_from_document(
-            &source,
-            0..=added_count - 1,
-            slot as i32,
-        ) {
-            return Err(self.restore_document_snapshot(
-                entry,
-                snapshot,
-                format!("PDFium could not insert the document: {error}"),
-            ));
-        }
-
-        if let Err(error) =
-            Self::record_inserted_pages(entry, slot, &vec![true; added_count as usize])
-        {
-            return Err(self.restore_document_snapshot(entry, snapshot, error));
-        }
-
-        // Nothing was removed, so no compaction is owed; but content moved, so
-        // an effect captured before the insert fails its revision check.
-        entry.invalidate_all_page_revisions();
-
-        Ok(InsertOutcome {
-            page_count: added_count,
-            update: structure_update(entry),
-        })
-    }
-
-    /// Records a copy's pages into bookkeeping; everything failable is measured
-    /// first, so an error leaves the entry as it was.
     pub(super) fn record_inserted_pages(
         entry: &mut OpenDocument,
         slot: usize,
@@ -672,15 +695,15 @@ impl PdfiumEngine {
         }
         .into_iter();
 
-        for (offset, &from_elsewhere) in merged.iter().enumerate() {
+        for (offset, &copy_only) in merged.iter().enumerate() {
             let page_id = entry.next_page_id;
 
             entry.next_page_id += 1;
             entry.page_ids.insert(slot + offset, page_id);
 
-            // This page holds content from outside this document's own file:
-            // while it stays, that file may only be exported to, never saved.
-            if from_elsewhere {
+            // A copy of owned content, out of the layers' reach: while it
+            // stays, the document's file may only be exported to, never saved.
+            if copy_only {
                 entry.merged_page_ids.insert(page_id);
             }
 
@@ -700,69 +723,7 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// The cross-tab thumbnail drag: pages copied from another open document as
-    /// the reader has it, marks and all, export-only like an inserted file's.
-    pub fn insert_pages_from_document(
-        &self,
-        document_id: u64,
-        source_document_id: u64,
-        page_numbers: &[i32],
-        index: i32,
-    ) -> Result<PdfStructureUpdate, String> {
-        // Both a real refusal and what makes the two entries below disjoint.
-        // Within one document a drag reorders, which is a different command.
-        if document_id == source_document_id {
-            return Err("a document cannot take pages from itself".into());
-        }
-
-        let mut documents = self.lock_documents()?;
-        let source_count = open_entry(&documents, source_document_id)?.page_ids.len();
-        let source_pages = validate_distinct_pages(page_numbers, source_count, "an insert")?;
-        let page_count = open_entry(&documents, document_id)?.page_ids.len();
-        // One past the end is a position too, exactly as a blank page's is.
-        let Some(slot) = page_index(index, page_count + 1) else {
-            return Err(format!("a page cannot go to position {index}"));
-        };
-
-        let [Some(entry), Some(source)] =
-            documents.get_disjoint_mut([&document_id, &source_document_id])
-        else {
-            return Err("PDF document is no longer open".into());
-        };
-
-        // The import may fail partway; snapshot first so a failure rolls the
-        // document back whole, as every multi-page structure change does.
-        let snapshot = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
-
-        if let Err(error) = entry.document.pages_mut().copy_pages_from_document(
-            &source.document,
-            &page_range_argument(&source_pages),
-            slot as i32,
-        ) {
-            return Err(self.restore_document_snapshot(
-                entry,
-                snapshot,
-                format!("PDFium could not insert the pages: {error}"),
-            ));
-        }
-
-        if let Err(error) =
-            Self::record_inserted_pages(entry, slot, &vec![true; source_pages.len()])
-        {
-            return Err(self.restore_document_snapshot(entry, snapshot, error));
-        }
-
-        // Every page's content now sits in a longer document, so an M5 effect
-        // captured before this must fail its revision check after it.
-        entry.invalidate_all_page_revisions();
-
-        Ok(structure_update(entry))
-    }
-
-    /// The grid's copy-and-paste; PDFium cannot import into itself, so the
+    /// The sidebar's copy-and-paste; PDFium cannot import into itself, so the
     /// pages detour through a scratch document, as a delete's stash does.
     pub fn duplicate_pages(
         &self,

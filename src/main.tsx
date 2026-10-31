@@ -15,8 +15,8 @@ async function bootstrap() {
   // have to be settled before the first paint is made in them.
   await loadSettings()
   watchSettings()
-  // The wizard's Word promise is the machine's own answer; it too is settled
-  // before the first window can act on it.
+  // Whether Word documents are accepted is the machine's own answer; it too is
+  // settled before the first window can act on it.
   await loadWordConversionAvailability()
   await initializeTheme()
   suppressNativeContextMenu()

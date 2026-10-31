@@ -9,6 +9,8 @@ type PageBitmapOptions = {
   canvasRef: RefObject<HTMLCanvasElement | null>
   command: string
   documentId: number
+  /** What the command calls the id: an organize source is not a document. */
+  idArgument?: "documentId" | "sourceId"
   isNearViewport: boolean
   /** Backend ceiling for the render width; the backend rejects wider. */
   maxRenderWidth: number
@@ -21,6 +23,8 @@ type PageBitmapOptions = {
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  /** Pixels added to the distance the work queue ranks this render by. */
+  priorityBias?: number
   /**
    * Bumped when the page's content changes: drawing on it changes the render
    * at the same width, which nothing else about the request would reveal.
@@ -37,6 +41,7 @@ export function usePageBitmap({
   canvasRef,
   command,
   documentId,
+  idArgument = "documentId",
   isNearViewport,
   maxRenderWidth,
   mimeType,
@@ -45,6 +50,7 @@ export function usePageBitmap({
   pageHeight,
   pageNumber,
   pageWidth,
+  priorityBias = 0,
   renderEpoch,
   retainBitmap = true,
   rotation,
@@ -107,11 +113,14 @@ export function usePageBitmap({
       const bytes = await pageWork.schedule(
         () =>
           invoke<ArrayBuffer>(command, {
-            documentId,
+            [idArgument]: documentId,
             pageNumber,
             width: renderWidth,
           }),
-        { priority: () => distanceFromView(canvas), signal: leaving.signal },
+        {
+          priority: () => distanceFromView(canvas) + priorityBias,
+          signal: leaving.signal,
+        },
       )
 
       if (cancelled) {
@@ -162,6 +171,7 @@ export function usePageBitmap({
     canvasRef,
     command,
     documentId,
+    idArgument,
     isNearViewport,
     maxRenderWidth,
     mimeType,
@@ -169,6 +179,7 @@ export function usePageBitmap({
     pageHeight,
     pageNumber,
     pageWidth,
+    priorityBias,
     renderEpoch,
     rotation,
     targetWidth,
@@ -178,7 +189,7 @@ export function usePageBitmap({
     const canvas = canvasRef.current
 
     // A hidden tab reports every cell out of view; it is away, not far, and
-    // clearing would re-render the whole grid on the way back.
+    // clearing would re-render every preview on the way back.
     if (
       retainBitmap ||
       !canvas ||

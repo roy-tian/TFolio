@@ -1,5 +1,5 @@
-/** The scroll box extends behind the tabs, but reading/navigation geometry
-    starts below them. Its top padding also keeps the first page unobscured. */
+/** Reading and navigation geometry starts below the scroll box's top
+    padding, should it ever have any. */
 export function viewerTopInset(viewer: HTMLElement) {
   return Number.parseFloat(getComputedStyle(viewer).paddingTop) || 0
 }

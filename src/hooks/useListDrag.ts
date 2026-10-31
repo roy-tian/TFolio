@@ -119,7 +119,7 @@ export function useListDrag({
 }: UseListDragOptions): { drag: ListDragState | null } {
   const [drag, setDrag] = useState<ListDragState | null>(null)
   // Read through refs so an owner re-render mid-gesture cannot resubscribe the
-  // listeners and drop the gesture in flight, as in `usePageDrag`.
+  // listeners and drop the gesture in flight.
   const onReorderRef = useRef(onReorder)
   const onDropOutsideRef = useRef(onDropOutside)
 

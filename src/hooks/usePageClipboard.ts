@@ -8,8 +8,8 @@ import {
 } from "@/lib/pageClipboard"
 
 type UsePageClipboardOptions = {
-  /** True only while the grid is on screen; the clipboard itself outlives that,
-      so a paste can still happen once the reader comes back to it. */
+  /** True only while the sidebar's previews have focus; the clipboard itself
+      outlives that, so a paste can still happen once the reader comes back. */
   active: boolean
   /** Runs a paste into the gap before this 1-based page — the owner's, since
       only it can say what the paste costs the document. */
@@ -87,7 +87,7 @@ export function usePageClipboard({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       // A field being typed in keeps its own editing keys, and a dialog or
-      // popup in front of the grid owns the keyboard while it stands.
+      // popup in front of the previews owns the keyboard while it stands.
       if (
         event.defaultPrevented ||
         isTypingTarget(event.target) ||
@@ -115,8 +115,8 @@ export function usePageClipboard({
         return
       }
 
-      // Consumed whether or not there is anything to do with it: in the grid
-      // these keys are about pages, and there is nothing else here to cut.
+      // Consumed whether or not there is anything to do with it: with the
+      // previews focused these keys are about pages, and nothing else is cut.
       event.preventDefault()
 
       if (event.repeat) {

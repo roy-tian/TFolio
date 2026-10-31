@@ -120,8 +120,7 @@ type PageNumbersSettingsProps = {
   validationError: PageNumbersValidationError | null
 }
 
-/** The page numbers' own controls, shared by the applying dialog and the merge
-    wizard's third step, so the two can never drift apart. */
+/** The page numbers' own controls, apart from the dialog that applies them. */
 export function PageNumbersSettings({
   className,
   draft,

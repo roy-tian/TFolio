@@ -1,4 +1,3 @@
-import { useState } from "react"
 import {
   AppWindow,
   FileImage,
@@ -8,6 +7,7 @@ import {
   Info,
   LogOut,
   Menu,
+  Printer,
   Save,
   SaveAll,
   Scissors,
@@ -20,10 +20,7 @@ import { useTranslation } from "react-i18next"
 
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip } from "@/components/HintTooltip"
-import {
-  SettingsDialog,
-  type SettingsSection,
-} from "@/components/SettingsDialog"
+import type { SettingsSection } from "@/components/SettingsDialog"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import {
@@ -53,9 +50,6 @@ export type AppMenuActions = {
   onCloseAll: () => void
   /** Quits the app, every window with it, after one unsaved check for all. */
   onExit: () => void
-  /** Not a menu entry: it is a toolbar button (`MergeWizardButton`), and this
-      bag is how it reaches every header. */
-  onMergeWizard: () => void
   onNew: () => void
   onNewWindow: () => void
   onOpen: () => void
@@ -66,6 +60,8 @@ export type AppMenuActions = {
   /** One keystroke for a session spread over several tabs. Workspace-wide, so
       it is the menu's alone — no document's toolbar speaks for the tabs. */
   onSaveAll: () => void
+  /** The window's settings dialog, which outlives whichever menu opened it. */
+  onShowSettings: (section: SettingsSection) => void
   recentFiles: RecentFile[]
 }
 
@@ -76,6 +72,7 @@ type AppMenuProps = AppMenuActions & {
   onExportImages?: () => void
   onSplit?: () => void
   onCompress?: () => void
+  onPrint?: () => void
   saveHint?: string
 }
 
@@ -93,197 +90,194 @@ export function AppMenu({
   onSave,
   onSaveAll,
   onSaveAs,
+  onShowSettings,
   onExportImages,
   onSplit,
   onCompress,
+  onPrint,
   recentFiles,
   saveHint,
 }: AppMenuProps) {
   const { t } = useTranslation()
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [section, setSection] = useState<SettingsSection>("appearance")
-
-  const showSettings = (target: SettingsSection) => {
-    setSection(target)
-    setSettingsOpen(true)
-  }
 
   return (
-    <>
-      <DropdownMenu
-        onOpenChange={(open) => {
-          if (open) {
-            onRefreshRecent()
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) {
+          onRefreshRecent()
+        }
+      }}
+    >
+      <ToolbarTooltip label={t("menu.title")}>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={t("menu.title")}
+              className="text-brand hover:text-brand-strong aria-expanded:text-brand-strong"
+              data-slot="app-menu"
+              size="icon-sm"
+              variant="outline"
+            />
           }
-        }}
-      >
-        <ToolbarTooltip label={t("menu.title")}>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label={t("menu.title")}
-                className="text-brand hover:text-brand-strong aria-expanded:text-brand-strong"
-                data-slot="app-menu"
-                size="icon"
-                variant="outline"
-              />
-            }
-          >
-            <Menu />
-          </DropdownMenuTrigger>
-        </ToolbarTooltip>
-        <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuGroup>
-            <DropdownMenuItem data-action="new" onClick={onNew}>
-              <FilePlus2 />
-              {t("menu.new")}
-              <DropdownMenuShortcut>
-                {formatShortcut(shortcuts.new)}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem data-action="new-window" onClick={onNewWindow}>
-              <AppWindow />
-              {t("menu.newWindow")}
-              <DropdownMenuShortcut>
-                {formatShortcut(shortcuts.newWindow)}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem data-action="open" onClick={onOpen}>
-              <FolderOpen />
-              {t("menu.openFile")}
-              <DropdownMenuShortcut>
-                {formatShortcut(shortcuts.open)}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger data-action="open-recent">
-                <History />
-                {t("menu.openRecent")}
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-72">
-                {recentFiles.length === 0 ? (
-                  <DropdownMenuItem disabled>
-                    {t("menu.recentEmpty")}
-                  </DropdownMenuItem>
-                ) : (
-                  recentFiles.slice(0, RECENT_MENU_LIMIT).map((file) => (
-                    <HintTooltip key={file.path} label={file.path} side="right">
-                      <DropdownMenuItem
-                        data-action="recent"
-                        onClick={() => onOpenRecent(file.path)}
-                      >
-                        <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
-                        <span className="truncate">{file.name}</span>
-                      </DropdownMenuItem>
-                    </HintTooltip>
-                  ))
-                )}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuSeparator />
-            <HintTooltip label={saveHint} side="right">
-              <DropdownMenuItem
-                // A disabled item is `pointer-events: none`, which would leave
-                // the tooltip with no hover to open on.
-                className="data-disabled:pointer-events-auto"
-                data-action="save"
-                disabled={!canSave}
-                onClick={onSave}
-              >
-                <Save />
-                {t("annotate.save")}
-                <DropdownMenuShortcut>
-                  {formatShortcut(shortcuts.save)}
-                </DropdownMenuShortcut>
-              </DropdownMenuItem>
-            </HintTooltip>
-            <DropdownMenuItem
-              data-action="save-all"
-              disabled={!canSaveAll}
-              onClick={onSaveAll}
-            >
-              <SaveAll />
-              {t("menu.saveAll")}
-              <DropdownMenuShortcut>
-                {formatShortcut(shortcuts.saveAll)}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              data-action="save-as"
-              disabled={!onSaveAs}
-              onClick={onSaveAs}
-            >
-              <Upload />
-              {t("menu.saveAs")}
-              <DropdownMenuShortcut>
-                {formatShortcut(shortcuts.saveAs)}
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              data-action="export-images"
-              disabled={!onExportImages}
-              onClick={onExportImages}
-            >
-              <FileImage />
-              {t("imageExport.menuLabel")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              data-action="split"
-              disabled={!onSplit}
-              onClick={onSplit}
-            >
-              <Scissors />
-              {t("splitExport.menuLabel")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              data-action="compress"
-              disabled={!onCompress}
-              onClick={onCompress}
-            >
-              <Shrink />
-              {t("compressExport.menuLabel")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              data-action="close-all"
-              disabled={!canCloseAll}
-              onClick={onCloseAll}
-            >
-              <SquareX />
-              {t("menu.closeAll")}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-
+        >
+          <Menu />
+        </DropdownMenuTrigger>
+      </ToolbarTooltip>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuItem data-action="new" onClick={onNew}>
+            <FilePlus2 />
+            {t("menu.new")}
+            <DropdownMenuShortcut>
+              {formatShortcut(shortcuts.new)}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem data-action="new-window" onClick={onNewWindow}>
+            <AppWindow />
+            {t("menu.newWindow")}
+            <DropdownMenuShortcut>
+              {formatShortcut(shortcuts.newWindow)}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem data-action="open" onClick={onOpen}>
+            <FolderOpen />
+            {t("menu.openFile")}
+            <DropdownMenuShortcut>
+              {formatShortcut(shortcuts.open)}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger data-action="open-recent">
+              <History />
+              {t("menu.openRecent")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-72">
+              {recentFiles.length === 0 ? (
+                <DropdownMenuItem disabled>
+                  {t("menu.recentEmpty")}
+                </DropdownMenuItem>
+              ) : (
+                recentFiles.slice(0, RECENT_MENU_LIMIT).map((file) => (
+                  <HintTooltip key={file.path} label={file.path} side="right">
+                    <DropdownMenuItem
+                      data-action="recent"
+                      onClick={() => onOpenRecent(file.path)}
+                    >
+                      <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
+                      <span className="truncate">{file.name}</span>
+                    </DropdownMenuItem>
+                  </HintTooltip>
+                ))
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSeparator />
-
-          <DropdownMenuGroup>
+          <HintTooltip label={saveHint} side="right">
             <DropdownMenuItem
-              data-action="settings"
-              onClick={() => showSettings("appearance")}
+              // A disabled item is `pointer-events: none`, which would leave
+              // the tooltip with no hover to open on.
+              className="data-disabled:pointer-events-auto"
+              data-action="save"
+              disabled={!canSave}
+              onClick={onSave}
             >
-              <Settings />
-              {t("settings.open")}
+              <Save />
+              {t("annotate.save")}
+              <DropdownMenuShortcut>
+                {formatShortcut(shortcuts.save)}
+              </DropdownMenuShortcut>
             </DropdownMenuItem>
-            <DropdownMenuItem
-              data-action="about"
-              onClick={() => showSettings("about")}
-            >
-              <Info />
-              {t("settings.about")}
-            </DropdownMenuItem>
-            <DropdownMenuItem data-action="exit" onClick={onExit}>
-              <LogOut />
-              {t("menu.exit")}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </HintTooltip>
+          <DropdownMenuItem
+            data-action="save-all"
+            disabled={!canSaveAll}
+            onClick={onSaveAll}
+          >
+            <SaveAll />
+            {t("menu.saveAll")}
+            <DropdownMenuShortcut>
+              {formatShortcut(shortcuts.saveAll)}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="save-as"
+            disabled={!onSaveAs}
+            onClick={onSaveAs}
+          >
+            <Upload />
+            {t("menu.saveAs")}
+            <DropdownMenuShortcut>
+              {formatShortcut(shortcuts.saveAs)}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="export-images"
+            disabled={!onExportImages}
+            onClick={onExportImages}
+          >
+            <FileImage />
+            {t("imageExport.menuLabel")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="split"
+            disabled={!onSplit}
+            onClick={onSplit}
+          >
+            <Scissors />
+            {t("splitExport.menuLabel")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="compress"
+            disabled={!onCompress}
+            onClick={onCompress}
+          >
+            <Shrink />
+            {t("compressExport.menuLabel")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="print"
+            disabled={!onPrint}
+            onClick={onPrint}
+          >
+            <Printer />
+            {t("print.open")}
+            <DropdownMenuShortcut>
+              {formatShortcut(shortcuts.print)}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="close-all"
+            disabled={!canCloseAll}
+            onClick={onCloseAll}
+          >
+            <SquareX />
+            {t("menu.closeAll")}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
 
-      <SettingsDialog
-        onOpenChange={setSettingsOpen}
-        onSectionChange={setSection}
-        open={settingsOpen}
-        section={section}
-      />
-    </>
+        <DropdownMenuSeparator />
+
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            data-action="settings"
+            onClick={() => onShowSettings("appearance")}
+          >
+            <Settings />
+            {t("settings.open")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="about"
+            onClick={() => onShowSettings("about")}
+          >
+            <Info />
+            {t("settings.about")}
+          </DropdownMenuItem>
+          <DropdownMenuItem data-action="exit" onClick={onExit}>
+            <LogOut />
+            {t("menu.exit")}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

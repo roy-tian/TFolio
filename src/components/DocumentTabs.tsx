@@ -39,7 +39,6 @@ import {
   type OtherTabs,
   type TabId,
 } from "@/lib/documentTabs"
-import { TAB_SPRING_MS } from "@/lib/pageDrag"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
@@ -55,9 +54,6 @@ const GHOST_EDGE_MARGIN = 4
 
 type DocumentTabsProps = {
   activeId: TabId
-  /** The tab a page drag is resting on, which the workspace is about to open
-      under it — see `usePageHandoff`. The bar beneath counts the rest out. */
-  armedTabId: number | null
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
   onCloseAll: () => void
@@ -120,7 +116,6 @@ function TabDragGhost({ drag, tab }: {
 
 export function DocumentTabs({
   activeId,
-  armedTabId,
   onActivate,
   onClose,
   onCloseAll,
@@ -247,7 +242,7 @@ export function DocumentTabs({
     // The whole strip is the workspace's, which `data-tab-strip` is what a page
     // drag hit-tests for: a release on it lands nothing rather than reordering.
     <div
-      className="fixed inset-x-0 top-12 z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted/70 px-2 backdrop-blur"
+      className="fixed top-(--toolbar-height) right-0 left-(--sidebar-inset) z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted px-2"
       data-tab-strip
       ref={stripRef}
     >
@@ -268,7 +263,7 @@ export function DocumentTabs({
             tabClassName,
             "shrink-0 gap-1.5 px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
             homeSelected
-              ? "bg-background/70 text-foreground"
+              ? "bg-background text-foreground"
               : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
           )}
           id={tabElementId(HOME_TAB_ID)}
@@ -291,7 +286,6 @@ export function DocumentTabs({
           <HintTooltipGroup>
             {tabs.map((tab, index) => {
               const selected = tab.id === activeId
-              const armed = tab.id === armedTabId
               // A selected tab is parted from its neighbours by its own border;
               // between two unselected ones nothing marks where one ends.
               const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
@@ -309,13 +303,10 @@ export function DocumentTabs({
                           tabClassName,
                           "mb-[-1px] w-44 min-w-28 max-w-56",
                           selected
-                            ? "bg-background/70 text-foreground"
+                            ? "bg-background text-foreground"
                             : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
                           divided &&
                             "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
-                          // Held pages are over this tab: it reads as the one they are
-                          // about to be taken to, ahead of it actually opening.
-                          armed && "border-primary bg-background text-foreground",
                           drag &&
                             drag.index !== index &&
                             "transition-transform duration-200 ease-out",
@@ -368,15 +359,6 @@ export function DocumentTabs({
                       <span className="truncate">{tab.name}</span>
                     </button>
                   </HintTooltip>
-                  {/* Runs the length of the wait the tab is about to end: the
-                      dwell itself, so the bar cannot promise a different one. */}
-                  {armed ? (
-                    <span
-                      aria-hidden
-                      className="pointer-events-none absolute inset-x-1 bottom-1 h-1 origin-left rounded-full animate-tab-spring bg-primary"
-                      style={{ animationDuration: `${TAB_SPRING_MS}ms` }}
-                    />
-                  ) : null}
                   <HintTooltip label={t("tabs.close", { name: tab.name })}>
                     <button
                       aria-label={t("tabs.close", { name: tab.name })}

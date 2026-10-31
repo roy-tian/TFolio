@@ -4,6 +4,7 @@ import type { E2eOverrides } from "../../src/lib/e2e"
 import type { AppUpdateStatus } from "../../src/lib/update"
 import {
   clickAppMenuItem,
+  deletePageFromSidebar,
   minimalPdf,
   openPdfFromDisk,
   refreshApp,
@@ -54,7 +55,7 @@ const installed = () => browser.execute(() => document.documentElement.dataset.i
 
 describe("About updates", () => {
   beforeEach(async () => {
-    await seedSettings({ ui: { language: "en", viewMode: "thumbnail" } })
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await mockUpdater()
   })
@@ -95,7 +96,7 @@ describe("About updates", () => {
 
   it("asks before installing from About even when the update notice was dismissed", async () => {
     await openPdfFromDisk("about-unsaved.pdf", minimalPdf(2))
-    await $("button[aria-label='Delete page 1']").click()
+    await deletePageFromSidebar(1)
     await $("[aria-label='Unsaved changes']").waitForExist()
     await mockUpdater({ state: "ready", version: "0.1.15" })
     await publish({ state: "ready", version: "0.1.15" })

@@ -10,6 +10,7 @@ import {
   renderedPage,
   seedSettings,
   stripedPdf,
+  pressRedo,
 } from "./helpers"
 
 // A reader's drag — press on the page, move, release: letting go only commits
@@ -326,7 +327,7 @@ describe("TFolio rectangle annotations", () => {
 
     // Exact, not merely "different from clean": a redo that applied the command
     // twice would stack two rectangles and still clear that lower bar.
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 15_000,
       timeoutMsg: "redo did not restore the rectangle exactly",

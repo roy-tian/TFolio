@@ -134,9 +134,10 @@ describe("TFolio keyboard shortcuts", () => {
     await openPdfFromDisk("shortcuts.pdf", textPdf())
     await renderedVisiblePage("shortcuts.pdf")
 
-    expect(await tooltipOn("[data-slot='pdf-print-trigger']")).toContain(
-      "Ctrl+P",
-    )
+    const print = await appMenuItem("print")
+    await expect(print).toHaveText(expect.stringContaining("Ctrl+P"))
+    await closeAppMenu(print)
+
     expect(await tooltipOn("[data-slot='pdf-search-trigger']")).toContain(
       "Ctrl+F",
     )

@@ -15,8 +15,6 @@ type HistoryActionKey =
   | "annotate.actionRotatePages"
   | "annotate.actionDeletePages"
   | "annotate.actionInsertBlankPage"
-  | "annotate.actionInsertFile"
-  | "annotate.actionInsertPages"
   | "annotate.actionDuplicatePages"
 
 /** The name of an edit, for the undo and redo labels: the locale key that
@@ -64,13 +62,6 @@ export function historyAction(command: AnnotationCommand): HistoryAction {
       return { count: command.pages.length, key: "annotate.actionDeletePages" }
     case "insertBlankPage":
       return { key: "annotate.actionInsertBlankPage" }
-    case "insertFile":
-      return { key: "annotate.actionInsertFile" }
-    case "insertPages":
-      return {
-        count: command.sourcePages.length,
-        key: "annotate.actionInsertPages",
-      }
     case "duplicatePages":
       return {
         count: command.sourcePages.length,

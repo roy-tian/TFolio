@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react"
-import { LoaderCircle, TriangleAlert, X } from "lucide-react"
+import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
@@ -10,14 +10,15 @@ import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
 
-// Many cells share a row; preloading whole rows would queue dozens of PDFium
-// renders at once. Keep the grid's window to what is visible.
+// An organize row holds many cells; preloading whole rows would queue dozens of
+// PDFium renders at once. Keep the window to what is visible.
 const THUMBNAIL_ROOT_MARGIN = "0px"
 
+// The sidebar's previews stand in view beside the pages: ranked as this far
+// off, they wait for the pages the reader is looking at rather than tie them.
+const SIDEBAR_PRIORITY_BIAS = 2000
+
 type PdfThumbnailProps = {
-  /** Whether the keep-one-page rule forbids this delete — the sole page, or a
-      selection this page belongs to that spans the whole document. */
-  deleteDisabled: boolean
   documentId: number
   intrinsicRotation: number
   isCurrent: boolean
@@ -25,7 +26,6 @@ type PdfThumbnailProps = {
       is what would move it. */
   isCut: boolean
   isSelected: boolean
-  onDelete: (pageNumber: number) => void
   onOpen: (pageNumber: number) => void
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
   /** The page's size in points, taken apart rather than as a `PdfPageInfo`:
@@ -37,21 +37,29 @@ type PdfThumbnailProps = {
   /** False once the cell is well away from the view: it gives its pixels back. */
   retainBitmap: boolean
   rotation: number
-  selectedCount: number
-  /** Whether the delete button is mounted; the cell's own call, see `ThumbnailCell`. */
-  showControls: boolean
+  /** The paper's long side in CSS pixels; the organize grid's size control. */
+  paperWidth?: number
+  /** The sidebar's previews and the organize grid's sit beside, or above, the
+      pages a viewer shows, so they never answer to `data-page-number`, which
+      finds those pages. An organize preview names a source's page. */
+  surface: "sidebar" | "organize"
+  /** Overrides the surface's own wording, for a page that is not this
+      document's — an organize source's. */
+  label?: string
+  /** The number under the paper, where it is not the page's own: an organize
+      preview shows where the page will stand. */
+  caption?: number
 }
 
-/** A preview that selects rather than reads — no text layer, so a grid stays
-    cheap. The right-click page menu belongs to the grid: see `ThumbnailLayout`. */
+/** A preview that selects rather than reads — no text layer, so a long column
+    stays cheap. Its page menu belongs to the owner: `SidebarThumbnails`,
+    `OrganizeBoard`. */
 export function PdfThumbnail({
-  deleteDisabled,
   documentId,
   intrinsicRotation,
   isCurrent,
   isCut,
   isSelected,
-  onDelete,
   onOpen,
   onSelect,
   pageHeight,
@@ -60,8 +68,10 @@ export function PdfThumbnail({
   renderEpoch,
   retainBitmap,
   rotation,
-  selectedCount,
-  showControls,
+  paperWidth,
+  surface,
+  label: labelOverride,
+  caption,
 }: PdfThumbnailProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLButtonElement>(null)
@@ -74,15 +84,19 @@ export function PdfThumbnail({
     other.width === pageWidth &&
     other.rotation === intrinsicRotation
   // The page as the canvas holds it. The paper takes the page's new size at
-  // once, as the grid's columns and gaps do; until the replacement is painted,
+  // once, as the layout around it does; until the replacement is painted,
   // these pixels are turned and fitted to it rather than stretched.
   const [paintedPage, setPaintedPage] = useState(page)
   const shownPageRef = useRef(paintedPage)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
-    command: "render_pdf_page_thumbnail",
+    command:
+      surface === "organize"
+        ? "render_organize_thumbnail"
+        : "render_pdf_page_thumbnail",
     documentId,
+    idArgument: surface === "organize" ? "sourceId" : "documentId",
     isNearViewport,
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
@@ -91,13 +105,15 @@ export function PdfThumbnail({
     pageHeight,
     pageNumber,
     pageWidth,
+    priorityBias: surface === "sidebar" ? SIDEBAR_PRIORITY_BIAS : 0,
     renderEpoch,
     retainBitmap,
     // The bitmap is drawn upright and a turn keeps the thumbnail's scale, so its
     // upright width serves every rotation and a turn needs no fresh render. The
     // page as it now measures, not as last painted: this sizes the replacement.
     rotation: 0,
-    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }).width,
+    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }, paperWidth)
+      .width,
   })
 
   // With no bitmap on show no pixels need the old geometry: the next paint
@@ -137,9 +153,11 @@ export function PdfThumbnail({
     )
     const oldPaper = thumbnailPaper(
       dimensionsForRotation(rotation, previous.width, previous.height),
+      paperWidth,
     )
     const newPaper = thumbnailPaper(
       dimensionsForRotation(rotation, pageWidth, pageHeight),
+      paperWidth,
     )
     const resize = paper.animate(
       [
@@ -159,11 +177,12 @@ export function PdfThumbnail({
   // quarter turn leaves behind.
   const paperSize = thumbnailPaper(
     dimensionsForRotation(rotation, pageWidth, pageHeight),
+    paperWidth,
   )
   // Pixels painted before an edit turned or resized the page: a turn keeps the
   // scale, so they fit exactly once turned along; a resize letterboxes them.
   const pendingTurn = (intrinsicRotation - paintedPage.rotation + 360) % 360
-  const preview = thumbnailPaper(paintedPage)
+  const preview = thumbnailPaper(paintedPage, paperWidth)
   const previewFootprint = dimensionsForRotation(
     (rotation + pendingTurn) % 360,
     preview.width,
@@ -173,7 +192,7 @@ export function PdfThumbnail({
     paperSize.width / previewFootprint.width,
     paperSize.height / previewFootprint.height,
   )
-  const label = t("viewer.thumbnailLabel", { pageNumber })
+  const label = labelOverride ?? t("sidebar.thumbnailLabel", { pageNumber })
 
   return (
     <div
@@ -184,13 +203,13 @@ export function PdfThumbnail({
         isCut && "opacity-45",
       )}
     >
-      {/* As wide as the paper, which a portrait page leaves narrower than the
-          column, so the delete button keeps to the paper's corner. */}
       <div className="relative">
-        {/* A page that could not be drawn says so instead: the cell is a white
-            card with a warning in it, and the reason is what a hover owes it. */}
+        {/* A page that could not be drawn says so instead: the paper is a white
+            card with a warning in it, and the reason is what a hover owes it.
+            Otherwise the caption speaks: hundreds of tooltips would slow every
+            long document. */}
         <HintTooltip
-          label={renderFailed ? t("viewer.pageError", { pageNumber }) : label}
+          label={renderFailed ? t("viewer.pageError", { pageNumber }) : undefined}
         >
           <button
             aria-current={isCurrent ? "page" : undefined}
@@ -198,8 +217,8 @@ export function PdfThumbnail({
             aria-pressed={isSelected}
             className={cn(
               "relative block scroll-mt-5 bg-white shadow-md outline-none ring-1 ring-black/10 transition-shadow hover:ring-2 hover:ring-foreground/30 focus-visible:ring-3 focus-visible:ring-ring/50",
-              // The current page keeps its marker, faded: in the editing grid the
-              // selection is the louder voice.
+              // The current page keeps its marker, faded: the selection is the
+              // louder voice.
               isCurrent && "ring-2 ring-primary/40 hover:ring-primary/40",
               // Offset from the page, so the ring reads against the page's own
               // white even when the theme paints the ring light. The last page
@@ -208,7 +227,7 @@ export function PdfThumbnail({
               isSelected &&
                 "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary focus-visible:ring-2 focus-visible:ring-primary dark:ring-offset-zinc-950",
             )}
-            data-page-number={pageNumber}
+            data-thumbnail-page={pageNumber}
             data-rotation={rotation}
             onClick={(event) =>
               onSelect(pageNumber, {
@@ -243,7 +262,7 @@ export function PdfThumbnail({
             {!hasRendered && !renderFailed ? (
               <span className="absolute inset-0 grid place-items-center bg-white text-zinc-400">
                 {/* Only where a render is on its way: every spinning icon is
-                    style and paint work each frame, and a long document's grid
+                    style and paint work each frame, and a long document's previews
                     would otherwise spin hundreds of them out of sight. */}
                 {isNearViewport ? (
                   <LoaderCircle className="size-4 animate-spin" />
@@ -257,18 +276,7 @@ export function PdfThumbnail({
             ) : null}
           </button>
         </HintTooltip>
-        {showControls ? (
-          <DeleteButton
-            disabled={deleteDisabled}
-            isSelected={isSelected}
-            onDelete={onDelete}
-            pageNumber={pageNumber}
-            selectedCount={selectedCount}
-          />
-        ) : null}
       </div>
-      {/* The caption's height is its own box, not the column's gap — the known
-          height is what lets the insertion line find the paper in a row. */}
       <span
         className={cn(
           "flex items-end font-mono text-xs tabular-nums",
@@ -276,51 +284,8 @@ export function PdfThumbnail({
         )}
         style={{ height: THUMBNAIL_CAPTION_HEIGHT }}
       >
-        {pageNumber}
+        {caption ?? pageNumber}
       </span>
     </div>
-  )
-}
-
-function DeleteButton({
-  disabled,
-  isSelected,
-  onDelete,
-  pageNumber,
-  selectedCount,
-}: {
-  disabled: boolean
-  isSelected: boolean
-  onDelete: (pageNumber: number) => void
-  pageNumber: number
-  selectedCount: number
-}) {
-  const { t } = useTranslation()
-  const label =
-    isSelected && selectedCount > 1
-      ? t("pageEdit.deleteSelected", { count: selectedCount })
-      : t("pageEdit.deletePage", { pageNumber })
-
-  return (
-    <HintTooltip label={label}>
-      <button
-        aria-label={label}
-        className={cn(
-          "absolute -left-2 -top-2 z-20 grid size-6 place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm outline-none transition-opacity hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-0",
-          // No hover on a touch screen, so a selected page shows its button.
-          isSelected
-            ? "opacity-100"
-            : "opacity-0 group-hover/thumb:opacity-100",
-        )}
-        disabled={disabled}
-        onClick={() => onDelete(pageNumber)}
-        // A press here is a press on the button, never the start of a page
-        // drag under it.
-        onPointerDown={(event) => event.stopPropagation()}
-        type="button"
-      >
-        <X className="size-3.5" />
-      </button>
-    </HintTooltip>
   )
 }

@@ -492,7 +492,7 @@ mod tests {
         assert!(is_blank_sample(&speck));
 
         let mut printed = white.clone();
-        for pixel in printed.chunks_exact_mut(4).take(100) {
+        for pixel in printed.as_chunks_mut::<4>().0.iter_mut().take(100) {
             pixel.copy_from_slice(&[0, 0, 0, 255]);
         }
         assert!(!is_blank_sample(&printed));

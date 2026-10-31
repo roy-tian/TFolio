@@ -132,41 +132,8 @@ export type InsertBlankPageCommand = {
   stashId: number
 }
 
-/** The pages become the document's own, which the save guard keeps export-only.
-    Counts settle at the first apply; a redo restores the stash, never re-reads. */
-export type InsertFileCommand = {
-  kind: "insertFile"
-  path: string
-  /** 1-based position the file's first page takes, from 1 to page count + 1. */
-  index: number
-  /** Pages the file brought; 0 until the first apply learns it. */
-  insertedCount: number
-  /** Pages in the document after the insertion; the count before it until the
-      first apply learns how many the file brings. */
-  pageCount: number
-  /** The history entry's own id: the undo deletes the inserted range under it,
-      and the redo restores exactly that stash. */
-  stashId: number
-}
-
-/** The cross-tab thumbnail drag. The pages become this document's own and leave
-    it export-only; a redo restores the stash, so the source may be gone by then. */
-export type InsertPagesCommand = {
-  kind: "insertPages"
-  /** 1-based position the first copied page takes, from 1 to page count + 1. */
-  index: number
-  /** Pages in the document after the insertion. */
-  pageCount: number
-  sourceDocumentId: number
-  /** Ascending 1-based page numbers, as the source document stands. */
-  sourcePages: number[]
-  /** The history entry's own id: the undo deletes the copied range under it,
-      and the redo restores exactly that stash. */
-  stashId: number
-}
-
-/** The grid's copy-and-paste. The copies are the document's own content, so it
-    stays saveable; a redo restores the undo's stash rather than copying again. */
+/** The sidebar's copy-and-paste. A redo restores the undo's stash rather than
+    copying again. */
 export type DuplicatePagesCommand = {
   kind: "duplicatePages"
   /** 1-based position the first copy takes, from 1 to page count + 1. */
@@ -203,8 +170,6 @@ export type AnnotationCommand =
   | RotatePagesCommand
   | DeletePagesCommand
   | InsertBlankPageCommand
-  | InsertFileCommand
-  | InsertPagesCommand
   | DuplicatePagesCommand
   | EraseAnnotationCommand
 
@@ -277,11 +242,9 @@ export function commandPages(command: AnnotationCommand): number[] {
       // pixels; `pageCount` is the larger, pre-delete shape the undo restores.
       return pagesFrom(Math.min(...command.pages), command.pageCount)
     case "insertBlankPage":
-      // From the gap on, as an inserted file is, and against the count after
-      // the insertion — again the larger of the two shapes.
+      // From the gap on, and against the count after the insertion — again
+      // the larger of the two shapes.
       return pagesFrom(command.index, command.pageCount)
-    case "insertFile":
-    case "insertPages":
     case "duplicatePages":
       // Only from the gap on — an append at the very end invalidates nothing.
       // `pageCount` spans before and after, covering the apply and the undo alike.
@@ -302,8 +265,6 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "reorderPages":
     case "deletePages":
     case "insertBlankPage":
-    case "insertFile":
-    case "insertPages":
     case "duplicatePages":
       return true
     case "highlight":
@@ -331,8 +292,6 @@ export function commandTextPages(command: AnnotationCommand): number[] {
     case "reorderPages":
     case "deletePages":
     case "insertBlankPage":
-    case "insertFile":
-    case "insertPages":
     case "duplicatePages":
       return commandPages(command)
     // A rotation moves no text: the spans keep their places in the page's own
@@ -374,7 +333,7 @@ export function planEraseAnnotation(history: AnnotationHistory, entryId: number)
 }
 
 /** Records where the erased annotations actually were, which only the apply
-    learns — the counterpart of `fillInsertFileOutcome`. */
+    learns. */
 export function fillErasedPages(
   history: AnnotationHistory,
   entryId: number,
@@ -419,12 +378,6 @@ export function retargetCommand(
 
 function pageRange(index: number, count: number): number[] {
   return Array.from({ length: count }, (_, offset) => index + offset)
-}
-
-/** The pages an insert's undo deletes, and its redo restores: the file's own
-    range, valid at the LIFO moment the insert sits at the top of history. */
-export function insertFilePages(command: InsertFileCommand): number[] {
-  return pageRange(command.index, command.insertedCount)
 }
 
 export function inversePermutation(order: number[]): number[] {
@@ -522,87 +475,10 @@ export function planInsertBlankPage(
   return { command, history: commit(history, command) }
 }
 
-/** The file is unread at plan time: counts settle at the first apply. An
-    out-of-range position is the reader's own — refused, never clamped. */
-export function planInsertFile(
-  history: AnnotationHistory,
-  path: string,
-  index: number,
-  pageCount: number,
-) {
-  if (index < 1 || index > pageCount + 1) {
-    return null
-  }
-
-  const command: InsertFileCommand = {
-    index,
-    insertedCount: 0,
-    kind: "insertFile",
-    pageCount,
-    path,
-    stashId: history.nextId,
-  }
-
-  return { command, history: commit(history, command) }
-}
-
-/** Writes in the page count the first apply learned — the one fact an insert
-    gains only by reading the file — so an undo reads a range known all along. */
-export function fillInsertFileOutcome(
-  history: AnnotationHistory,
-  entryId: number,
-  insertedCount: number,
-): AnnotationHistory {
-  return {
-    ...history,
-    past: history.past.map((entry) =>
-      entry.id === entryId && entry.command.kind === "insertFile"
-        ? {
-            ...entry,
-            command: {
-              ...entry.command,
-              insertedCount,
-              pageCount: entry.command.pageCount + insertedCount,
-            },
-          }
-        : entry,
-    ),
-  }
-}
-
 /** The pages a copied block's undo deletes and its redo restores, valid at the
     LIFO moment the insert sits at the top of history. */
-export function insertPagesRange(
-  command: InsertPagesCommand | DuplicatePagesCommand,
-): number[] {
+export function insertPagesRange(command: DuplicatePagesCommand): number[] {
   return pageRange(command.index, command.sourcePages.length)
-}
-
-/** An out-of-range position is the reader's own: refused, never clamped. The
-    backend checks the source pages against the document they name. */
-export function planInsertPages(
-  history: AnnotationHistory,
-  sourceDocumentId: number,
-  sourcePages: number[],
-  index: number,
-  pageCount: number,
-) {
-  const pages = [...new Set(sourcePages)].sort((left, right) => left - right)
-
-  if (pages.length === 0 || index < 1 || index > pageCount + 1) {
-    return null
-  }
-
-  const command: InsertPagesCommand = {
-    index,
-    kind: "insertPages",
-    pageCount: pageCount + pages.length,
-    sourceDocumentId,
-    sourcePages: pages,
-    stashId: history.nextId,
-  }
-
-  return { command, history: commit(history, command) }
 }
 
 /** An out-of-range position is the reader's own: refused, never clamped. The
@@ -817,8 +693,6 @@ export function droppedStashIds(
 
     switch (entry.command.kind) {
       case "insertBlankPage":
-      case "insertFile":
-      case "insertPages":
       case "duplicatePages":
         return [entry.command.stashId]
       default:

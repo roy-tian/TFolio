@@ -9,6 +9,7 @@ import {
   refreshApp,
   seedSettings,
   stripedPdf,
+  pressRedo,
 } from "./helpers"
 
 async function dragRect(from: [number, number], to: [number, number]) {
@@ -135,7 +136,7 @@ describe("TFolio eraser", () => {
     await $("button[aria-label^='Undo']").click()
     await settledAt(both, "undo did not put the erased rectangle back")
 
-    await $("button[aria-label^='Redo']").click()
+    await pressRedo()
     await settledAt(erased, "redo did not take the rectangle off again")
 
     // And the marks either side of it still answer to their own undo.
@@ -145,12 +146,5 @@ describe("TFolio eraser", () => {
     await changedFrom(both, "undo did not take the second rectangle back")
     await $("button[aria-label^='Undo']").click()
     await settledAt(clean, "undo did not take the first rectangle back")
-  })
-
-  it("is offered only where there is a page to rub a mark off", async () => {
-    await expect($("button[aria-label='Erase a mark']")).toExist()
-
-    await $("button[aria-label='Thumbnails']").click()
-    await expect($("button[aria-label='Erase a mark']")).not.toExist()
   })
 })

@@ -1,24 +1,15 @@
-import {
-  Bookmark,
-  ChevronDown,
-  FileImage,
-  Printer,
-  RotateCw,
-  Save,
-  Scissors,
-  Search,
-  Shrink,
-  Upload,
-} from "lucide-react"
+import { ChevronDown, FileImage, RotateCw, Save, Scissors, Search, Shrink, Upload } from "lucide-react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
-import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
+import { SidebarToggle } from "@/components/AppSidebar"
 import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumberField } from "@/components/PageNumberField"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
+import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
 import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -32,7 +23,7 @@ import {
 import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
-import type { usePrint } from "@/hooks/usePrint"
+import { useSidebar } from "@/hooks/useSidebar"
 import type { useZoom } from "@/hooks/useZoom"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import type { PdfDocumentInfo } from "@/lib/pdf"
@@ -44,36 +35,28 @@ import { cn } from "@/lib/utils"
 type SessionHeaderProps = {
   active: boolean
   annotations: ReturnType<typeof useAnnotations>
-  bookmarksApply: boolean
-  bookmarksLabel: string
-  bookmarksOpen: boolean
+  /** The app menu; the sidebar carries it while it shows. */
+  appMenu: ReactNode
   bookApplies: boolean
   canSave: boolean
   document: PdfDocumentInfo | null
-  drawingApplies: boolean
   macOS: boolean
-  menu: AppMenuActions
-  onBookmarksOpenChange: (open: boolean) => void
   onChangeViewMode: (mode: ViewMode) => void
+  onCompress: () => void
+  onExportImages: () => void
   onRotate: () => void
-  onRedo: () => void
   onSave: () => void
   onSaveAs: () => void
-  onExportImages: () => void
-  onSplit: () => void
-  onCompress: () => void
   onSearchClose: () => void
   onSearchOpen: () => void
+  onSplit: () => void
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
   page: {
     current: CurrentPage
     onSubmit: (value: string) => void
   }
-  print: ReturnType<typeof usePrint>
-  saveHint: string | undefined
   saveLabel: string
-  scrollbarWidth: number
   searchOpen: boolean
   tool: {
     activeTool: AnnotationTool
@@ -87,248 +70,224 @@ type SessionHeaderProps = {
   }
   viewMode: ViewMode
   zoom: ReturnType<typeof useZoom>
-  zoomApplies: boolean
 }
 
-/** The fixed header every document tab shares: file actions, view controls,
-    the page odometer, and the annotation tools. */
+/** The toolbar every document tab shares: reading controls on the left, the
+    editing tools and the file's own actions on the right. */
 export function SessionHeader({
   active,
   annotations,
-  bookmarksApply,
-  bookmarksLabel,
-  bookmarksOpen,
+  appMenu,
   bookApplies,
   canSave,
   document: pdfDocument,
-  drawingApplies,
   macOS,
-  menu,
-  onBookmarksOpenChange,
   onChangeViewMode,
+  onCompress,
+  onExportImages,
   onRotate,
-  onRedo,
   onSave,
   onSaveAs,
-  onExportImages,
-  onSplit,
-  onCompress,
   onSearchClose,
   onSearchOpen,
+  onSplit,
   onToolChange,
   onUndo,
   page,
-  print,
-  saveHint,
   saveLabel,
-  scrollbarWidth,
   searchOpen,
   tool,
   viewMode,
   zoom,
-  zoomApplies,
 }: SessionHeaderProps) {
   const { t } = useTranslation()
-  const rotateLabel =
-    viewMode === "thumbnail" ? t("toolbar.rotate") : t("toolbar.rotateView")
+  const rotateLabel = t("toolbar.rotateView")
 
   return (
-    // pb-px keeps the content box even: a 47px row centres a 32px control
-    // on a half pixel, which the WebView rounds per element, fringing it.
-    <header
-      className="fixed inset-x-0 top-0 z-50 grid h-12 grid-cols-[1fr_auto_1fr] items-center border-b bg-background/95 px-2 pb-px shadow-xs backdrop-blur"
-      data-tauri-drag-region="deep"
-    >
-      <div
-        className={cn(
-          "flex items-center gap-1 justify-self-start",
-          macOS && "pl-[72px]",
-        )}
-      >
-        {active ? (
-          <AppMenu
-            {...menu}
-            canSave={canSave}
-            onSave={onSave}
-            onSaveAs={onSaveAs}
-            onExportImages={pdfDocument ? onExportImages : undefined}
-            onSplit={pdfDocument ? onSplit : undefined}
-            onCompress={pdfDocument ? onCompress : undefined}
-            saveHint={saveHint}
+    <ToolbarFrame
+      appMenu={appMenu}
+      end={
+        <>
+          <HistoryControls
+            canUndo={annotations.canUndo}
+            disabled={!pdfDocument}
+            nextUndo={annotations.nextUndo}
+            onUndo={onUndo}
           />
-        ) : null}
-        <ToolbarTooltip
-          label={bookmarksApply ? bookmarksLabel : t("toolbar.noBookmarks")}
-        >
-          <Toggle
-            aria-label={bookmarksLabel}
-            className="size-8"
-            disabled={!pdfDocument || !bookmarksApply}
-            onPressedChange={onBookmarksOpenChange}
-            pressed={bookmarksOpen}
-            variant="outline"
-          >
-            <Bookmark className={bookmarksOpen ? "fill-current" : undefined} />
-          </Toggle>
-        </ToolbarTooltip>
-        <ButtonGroup>
-          {/* The outline variant's dark: border outranks a plain border-r override. */}
-          <ToolbarTooltip label={saveLabel} shortcut={shortcuts.save}>
-            <Button
-              aria-label={t("annotate.save")}
-              className="border-r-transparent peer/save dark:border-r-transparent"
-              data-slot="pdf-save-trigger"
-              disabled={!canSave}
-              onClick={onSave}
-              size="icon"
-              variant="outline"
-            >
-              <Save />
-            </Button>
-          </ToolbarTooltip>
-          <DropdownMenu>
-            <ToolbarTooltip label={t("toolbar.saveAsMenu")}>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    aria-label={t("toolbar.saveAsMenu")}
-                    className={cn(
-                      splitMenuButtonClassName,
-                      "peer-hover/save:before:opacity-100",
-                    )}
-                    data-slot="pdf-save-menu-trigger"
-                    disabled={!pdfDocument}
-                    size="icon"
-                    variant="outline"
-                  />
-                }
+          <AnnotationToolbar
+            activeTool={tool.activeTool}
+            disabled={!pdfDocument}
+            highlightColor={tool.highlightColor}
+            onHighlightColorChange={tool.onHighlightColorChange}
+            onPageNumbers={tool.onPageNumbers}
+            onRectStyleChange={tool.onRectStyleChange}
+            onToolChange={onToolChange}
+            onWatermark={tool.onWatermark}
+            rectStyle={tool.rectStyle}
+            textNoteColor={tool.textNoteColor}
+          />
+          <ButtonGroup>
+            <ToolbarTooltip label={t("search.open")} shortcut={shortcuts.search}>
+              <Toggle
+                aria-label={t("search.open")}
+                className="size-7 min-w-7 p-0"
+                data-slot="pdf-search-trigger"
+                disabled={!pdfDocument}
+                onPressedChange={(pressed) => {
+                  if (pressed) {
+                    onSearchOpen()
+                  } else {
+                    onSearchClose()
+                  }
+                }}
+                pressed={searchOpen}
+                variant="outline"
               >
-                <ChevronDown className="size-3" />
-              </DropdownMenuTrigger>
+                <Search />
+              </Toggle>
             </ToolbarTooltip>
-            <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuItem data-action="save-as" onClick={onSaveAs}>
-                <Upload />
-                {t("menu.saveAs")}
-                <DropdownMenuShortcut>
-                  {formatShortcut(shortcuts.saveAs)}
-                </DropdownMenuShortcut>
-              </DropdownMenuItem>
-              <DropdownMenuItem data-action="export-images" onClick={onExportImages}>
-                <FileImage />
-                {t("imageExport.menuLabel")}
-              </DropdownMenuItem>
-              <DropdownMenuItem data-action="split" onClick={onSplit}>
-                <Scissors />
-                {t("splitExport.menuLabel")}
-              </DropdownMenuItem>
-              <DropdownMenuItem data-action="compress" onClick={onCompress}>
-                <Shrink />
-                {t("compressExport.menuLabel")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <ToolbarTooltip label={t("print.open")} shortcut={shortcuts.print}>
-            <Button
-              aria-label={t("print.open")}
-              data-slot="pdf-print-trigger"
-              disabled={!pdfDocument || print.preparing}
-              onClick={() => void print.start()}
-              size="icon"
-              variant="outline"
-            >
-              <Printer />
-            </Button>
-          </ToolbarTooltip>
-          <ToolbarTooltip label={t("search.open")} shortcut={shortcuts.search}>
-            <Toggle
-              aria-label={t("search.open")}
-              className="size-8"
-              data-slot="pdf-search-trigger"
-              disabled={!pdfDocument}
-              onPressedChange={(pressed) => {
-                if (pressed) {
-                  onSearchOpen()
-                } else {
-                  onSearchClose()
-                }
-              }}
-              pressed={searchOpen}
-              variant="outline"
-            >
-              <Search />
-            </Toggle>
-          </ToolbarTooltip>
-        </ButtonGroup>
-        <ViewModeToggle
-          bookApplies={bookApplies}
-          disabled={!pdfDocument}
-          onChange={onChangeViewMode}
-          value={viewMode}
-        />
-        {zoomApplies ? (
-          <ZoomControls
-            canZoomIn={zoom.canZoomIn}
-            canZoomOut={zoom.canZoomOut}
-            disabled={!pdfDocument}
-            onToggleFit={zoom.toggleFit}
-            onZoomIn={zoom.zoomIn}
-            onZoomOut={zoom.zoomOut}
-            zoomMode={zoom.zoomMode}
-            zoomPercent={zoom.zoomPercent}
-          />
-        ) : null}
-        {/* The grid turns the chosen pages in the document; the reading view
-            turns only the way they are looked at (D2). */}
-        <ToolbarTooltip label={rotateLabel}>
-          <Button
-            aria-label={rotateLabel}
-            disabled={!pdfDocument}
-            onClick={onRotate}
-            size="icon"
-            variant="outline"
-          >
-            <RotateCw />
-          </Button>
-        </ToolbarTooltip>
-      </div>
-
+            {/* The outline variant's dark: border outranks a plain border-r override. */}
+            <ToolbarTooltip label={saveLabel} shortcut={shortcuts.save}>
+              <Button
+                aria-label={t("annotate.save")}
+                className="border-r-transparent peer/save dark:border-r-transparent"
+                data-slot="pdf-save-trigger"
+                disabled={!canSave}
+                onClick={onSave}
+                size="icon-sm"
+                variant="outline"
+              >
+                <Save />
+              </Button>
+            </ToolbarTooltip>
+            <DropdownMenu>
+              <ToolbarTooltip label={t("toolbar.saveAsMenu")}>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      aria-label={t("toolbar.saveAsMenu")}
+                      className={cn(
+                        splitMenuButtonClassName,
+                        "peer-hover/save:before:opacity-100",
+                      )}
+                      data-slot="pdf-save-menu-trigger"
+                      disabled={!pdfDocument}
+                      size="icon-sm"
+                      variant="outline"
+                    />
+                  }
+                >
+                  <ChevronDown className="size-3" />
+                </DropdownMenuTrigger>
+              </ToolbarTooltip>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem data-action="save-as" onClick={onSaveAs}>
+                  <Upload />
+                  {t("menu.saveAs")}
+                  <DropdownMenuShortcut>
+                    {formatShortcut(shortcuts.saveAs)}
+                  </DropdownMenuShortcut>
+                </DropdownMenuItem>
+                <DropdownMenuItem data-action="export-images" onClick={onExportImages}>
+                  <FileImage />
+                  {t("imageExport.menuLabel")}
+                </DropdownMenuItem>
+                <DropdownMenuItem data-action="split" onClick={onSplit}>
+                  <Scissors />
+                  {t("splitExport.menuLabel")}
+                </DropdownMenuItem>
+                <DropdownMenuItem data-action="compress" onClick={onCompress}>
+                  <Shrink />
+                  {t("compressExport.menuLabel")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
+          {active && !macOS ? <WindowControls /> : null}
+        </>
+      }
+      macOS={macOS}
+    >
       <PageStatus
         currentPage={page.current}
         onSubmit={page.onSubmit}
         pageCount={pdfDocument?.numPages}
-        scrollbarWidth={scrollbarWidth}
       />
+      <ViewModeToggle
+        bookApplies={bookApplies}
+        disabled={!pdfDocument}
+        onChange={onChangeViewMode}
+        value={viewMode}
+      />
+      <ZoomControls
+        canZoomIn={zoom.canZoomIn}
+        canZoomOut={zoom.canZoomOut}
+        disabled={!pdfDocument}
+        onToggleFit={zoom.toggleFit}
+        onZoomIn={zoom.zoomIn}
+        onZoomOut={zoom.zoomOut}
+        zoomMode={zoom.zoomMode}
+        zoomPercent={zoom.zoomPercent}
+      />
+      {/* Turns only the way the pages are looked at (D2); the sidebar's
+          previews turn the pages themselves. */}
+      <ToolbarTooltip label={rotateLabel}>
+        <Button
+          aria-label={rotateLabel}
+          disabled={!pdfDocument}
+          onClick={onRotate}
+          size="icon-sm"
+          variant="outline"
+        >
+          <RotateCw />
+        </Button>
+      </ToolbarTooltip>
+    </ToolbarFrame>
+  )
+}
 
-      <div className="flex items-center gap-1 justify-self-end">
-        <HistoryControls
-          canRedo={annotations.canRedo}
-          canUndo={annotations.canUndo}
-          disabled={!pdfDocument}
-          nextRedo={annotations.nextRedo}
-          nextUndo={annotations.nextUndo}
-          onRedo={onRedo}
-          onUndo={onUndo}
-        />
-        <AnnotationToolbar
-          activeTool={tool.activeTool}
-          disabled={!pdfDocument}
-          eraserApplies={drawingApplies}
-          highlightApplies={drawingApplies}
-          highlightColor={tool.highlightColor}
-          onHighlightColorChange={tool.onHighlightColorChange}
-          onMergeWizard={menu.onMergeWizard}
-          onPageNumbers={tool.onPageNumbers}
-          onRectStyleChange={tool.onRectStyleChange}
-          onToolChange={onToolChange}
-          onWatermark={tool.onWatermark}
-          rectApplies={drawingApplies}
-          rectStyle={tool.rectStyle}
-          textNoteApplies={drawingApplies}
-          textNoteColor={tool.textNoteColor}
-        />
-        {active && !macOS ? <WindowControls /> : null}
+type ToolbarFrameProps = {
+  appMenu: ReactNode
+  children?: ReactNode
+  end: ReactNode
+  macOS: boolean
+}
+
+/** The title bar right of the sidebar. Without a docked sidebar beside it, it
+    takes over the sidebar's first row: the menu, the toggle, the traffic lights. */
+export function ToolbarFrame({
+  appMenu,
+  children,
+  end,
+  macOS,
+}: ToolbarFrameProps) {
+  const docked = useSidebar().mode === "docked"
+
+  return (
+    // pb-px keeps the content box even: an odd row centres a 28px control on a
+    // half pixel, which the WebView rounds per element, fringing it.
+    <header
+      className="fixed top-0 right-0 left-(--sidebar-inset) z-40 flex h-(--toolbar-height) items-center justify-between gap-2 border-b bg-background px-2 pb-px"
+      data-slot="toolbar"
+      data-tauri-drag-region="deep"
+    >
+      <div
+        className={cn(
+          "flex min-w-0 items-center gap-1",
+          !docked && macOS && "pl-[68px]",
+        )}
+      >
+        {docked ? null : (
+          <>
+            {appMenu}
+            <SidebarToggle />
+            <WorkspaceSwitch />
+            <div className="mx-1 h-4 w-px shrink-0 bg-border" />
+          </>
+        )}
+        {children}
       </div>
+      <div className="flex items-center gap-1">{end}</div>
     </header>
   )
 }
@@ -338,12 +297,11 @@ type PageStatusProps = {
   onSubmit: (value: string) => void
   /** Absent until a document is open. */
   pageCount: number | undefined
-  scrollbarWidth: number
 }
 
 /** The one part of the toolbar that follows scrolling, so the only part that
     re-renders as the reader crosses into another page. */
-function PageStatus({ currentPage, onSubmit, pageCount, scrollbarWidth }: PageStatusProps) {
+function PageStatus({ currentPage, onSubmit, pageCount }: PageStatusProps) {
   const { t } = useTranslation()
   const current = useCurrentPage(currentPage)
   const status = t("toolbar.pageStatus", { current, total: pageCount ?? 0 })
@@ -351,12 +309,9 @@ function PageStatus({ currentPage, onSubmit, pageCount, scrollbarWidth }: PageSt
   return (
     <div
       aria-label={status}
-      className="flex min-w-24 items-center justify-center gap-2 font-mono text-sm tabular-nums"
+      className="mr-1 flex items-center gap-1.5 font-mono text-sm tabular-nums"
       data-slot="page-status"
       role="group"
-      // The pages centre in what the viewer's scrollbar leaves; widening the
-      // middle column by that gutter moves this centre half of it to match.
-      style={{ marginRight: scrollbarWidth }}
     >
       <PageNumberField
         currentPage={current}
