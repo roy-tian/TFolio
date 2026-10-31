@@ -73,7 +73,7 @@
   known `style-src-elem` violation; new sources are regressions.
 - Capabilities do not gate custom `generate_handler!` commands: validate arguments in Rust.
   Do not register the transitive `tauri-plugin-fs` plugin.
-- Path-based open, insert, inspect, and merge require `ensure_approved` except in e2e.
+- Path-based open and organize sources require `ensure_approved` except in e2e.
   Approval must come from Rust-observed OS paths, dialogs, or the separate recent-files store.
 - Editable settings must never approve paths: an approved open also binds a later save destination.
 - `export_pdf` reduces suggested names with `Path::file_name()`; `save_pdf` uses only the
@@ -81,8 +81,8 @@
 
 ## PDF editing and cancellation
 
-- Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for outlines,
-  which PDFium cannot write.
+- Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what
+  PDFium cannot do: writing outlines, relinking bookmarks and split links, recompressing images.
 - Render in Rust; transfer bytes/images as raw IPC binary and decode with `createImageBitmap`
   in the decode worker (`imageDecode.ts`), never `blob:`. Page canvases take bitmaps through
   `bitmaprenderer`: they have no 2d context, so read pixels through a 2d copy; resizing keeps
@@ -91,11 +91,24 @@
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool
   may wait on the PDFium lock held by the operation being cancelled.
 - Long loops under the shared PDFium lock need cancellation checks between pages/files and an
-  explicit completion result. Roll back rebuild snapshots on cancellation; publish merges only on completion.
+  explicit completion result. Roll back rebuild snapshots on cancellation; publish assembled
+  documents only on completion.
 - Annotation deletion and hit testing target only this session's mark IDs, never existing
   annotations or positions inferred from undo history.
-- Watermarks are session-owned appended content, not redaction; after reopening they are input
-  content. Save watermarked documents only to copies, checking symlink-resolved source paths on every write.
+- Watermarks and page numbers are session-owned appended content, not redaction; after reopening
+  they are input content. Save documents carrying them, or copies of pages that did, only to
+  copies, checking symlink-resolved source paths on every write.
+
+## Organize workspace
+
+- Organize sources are read-only and are not documents: no `record_document`, recent files,
+  save binding, or `focus_pdf_path`. They live in a per-window registry whose parsed files sit
+  in a byte-budgeted LRU, and are released on window destruction and page reload up to the id
+  cutoff taken at release, so a reloaded page keeps the sources it has added since.
+- A source whose fingerprint (mtime and size) changed blocks assembly until removed or re-added.
+- The assembled PDF is a sourceless in-memory document recorded through `record_document`; its
+  first export adopts the destination. The workspace never writes to a source file itself;
+  exports refuse only open documents' files, so one chosen over a source then blocks assembly.
 
 ## Fonts
 
