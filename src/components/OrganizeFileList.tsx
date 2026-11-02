@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip } from "@/components/HintTooltip"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { Button } from "@/components/ui/button"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import type { OrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
@@ -136,51 +137,54 @@ export function OrganizeFileList({ onShow, organize }: OrganizeFileListProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ol
-        aria-label={t("organize.files")}
-        className="flex min-h-0 flex-1 select-none flex-col gap-0.5 overflow-y-auto overscroll-contain p-2"
-        data-slot="organize-files"
-        ref={listRef}
-      >
-        {plan.groups.map((group, index) => {
-          const offset = drag?.cellOffsets[index] ?? 0
+      <div className="relative min-h-0 flex-1">
+        <ol
+          aria-label={t("organize.files")}
+          className="overlay-scroll-viewport flex h-full select-none flex-col gap-0.5 overflow-y-auto overscroll-contain p-2"
+          data-slot="organize-files"
+          ref={listRef}
+        >
+          {plan.groups.map((group, index) => {
+            const offset = drag?.cellOffsets[index] ?? 0
 
-          return (
-            <li
-              className={cn(
-                "group/file relative flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 hover:bg-sidebar-accent",
-                plan.groups.length > 1 && !busy && "cursor-grab",
-                drag && drag.index !== index && "transition-transform duration-200 ease-out",
-                drag?.index === index && "opacity-0",
-              )}
-              data-list-index={index}
-              key={group.id}
-              onClick={() => onShow(group.id)}
-              style={{ transform: offset === 0 ? undefined : `translateY(${offset}px)` }}
-            >
-              {drag &&
-              (drag.gap === index ||
-                (drag.gap === plan.groups.length && index === plan.groups.length - 1)) ? (
-                <span
-                  className={cn(
-                    "pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-primary",
-                    drag.gap === index ? "-top-px" : "-bottom-px",
-                  )}
-                  style={{
-                    transform: offset === 0 ? undefined : `translateY(${-offset}px)`,
-                  }}
+            return (
+              <li
+                className={cn(
+                  "group/file relative flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 hover:bg-sidebar-accent",
+                  plan.groups.length > 1 && !busy && "cursor-grab",
+                  drag && drag.index !== index && "transition-transform duration-200 ease-out",
+                  drag?.index === index && "opacity-0",
+                )}
+                data-list-index={index}
+                key={group.id}
+                onClick={() => onShow(group.id)}
+                style={{ transform: offset === 0 ? undefined : `translateY(${offset}px)` }}
+              >
+                {drag &&
+                (drag.gap === index ||
+                  (drag.gap === plan.groups.length && index === plan.groups.length - 1)) ? (
+                  <span
+                    className={cn(
+                      "pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-primary",
+                      drag.gap === index ? "-top-px" : "-bottom-px",
+                    )}
+                    style={{
+                      transform: offset === 0 ? undefined : `translateY(${-offset}px)`,
+                    }}
+                  />
+                ) : null}
+                <FileRowContent
+                  group={group}
+                  kind={kindOf(group)}
+                  onRemove={busy ? undefined : (id) => organize.removeFiles(new Set([id]))}
+                  showHandle={plan.groups.length > 1}
                 />
-              ) : null}
-              <FileRowContent
-                group={group}
-                kind={kindOf(group)}
-                onRemove={busy ? undefined : (id) => organize.removeFiles(new Set([id]))}
-                showHandle={plan.groups.length > 1}
-              />
-            </li>
-          )
-        })}
-      </ol>
+              </li>
+            )
+          })}
+        </ol>
+        <OverlayScrollbars viewportRef={listRef} />
+      </div>
       {/* One undo away, like taking any one file off the list. */}
       <div className="shrink-0 border-t p-2">
         <Button

@@ -1,7 +1,9 @@
 import { Trash2 } from "lucide-react"
+import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 
 import { OperationProgress } from "@/components/OperationProgress"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { PageNumbersSettings } from "@/components/PageNumbersSettings"
 import { Button } from "@/components/ui/button"
 import {
@@ -51,6 +53,7 @@ export function PageNumbersDialog({
   validationError,
 }: PageNumbersDialogProps) {
   const { t } = useTranslation()
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -90,14 +93,20 @@ export function PageNumbersDialog({
           </div>
         ) : (
           /* The body scrolls as a whole, so the columns keep their natural
-              heights and short content never earns a scrollbar. */
-          <PageNumbersSettings
-            className="min-h-0 flex-1 overflow-y-auto p-5"
-            draft={draft}
-            onDraftChange={onDraftChange}
-            pageCount={pageCount}
-            validationError={validationError}
-          />
+              heights and short content never earns a scrollbar. Flexed, not
+              `h-full`: the dialog has only a max height, which no percentage
+              resolves against. */
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <PageNumbersSettings
+              className="overlay-scroll-viewport min-h-0 flex-1 overflow-y-auto p-5"
+              draft={draft}
+              onDraftChange={onDraftChange}
+              pageCount={pageCount}
+              ref={bodyRef}
+              validationError={validationError}
+            />
+            <OverlayScrollbars viewportRef={bodyRef} />
+          </div>
         )}
 
         <DialogFooter className="mx-0 mb-0 rounded-none border-t px-5 py-4">

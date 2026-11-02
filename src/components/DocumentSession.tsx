@@ -21,6 +21,7 @@ import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SessionDialogs } from "@/components/SessionDialogs"
 import { SessionHeader } from "@/components/SessionHeader"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { SidebarThumbnails } from "@/components/SidebarThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
@@ -1594,13 +1595,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         ) : null}
 
         <div className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pb-(--status-bar-height) pl-(--sidebar-inset)">
-          {/* The viewer's scroll box cannot host the readout: anything absolute
-              inside it is placed against scrolled content and would drift. */}
+          {/* The viewer's scroll box cannot host the readout or the bars:
+              anything absolute inside it is placed against scrolled content
+              and would drift. */}
           <div className="relative min-w-0 flex-1">
             {/* Text drags focus this from script, which can inherit a text
                 field's focus ring; it is never a Tab stop, so it needs none. */}
             <main
-              className="pdf-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
+              className="pdf-scroll-viewport overlay-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
               data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}
@@ -1640,6 +1642,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 zoomRequest={zoom.zoomRequest}
               />
             </main>
+            <OverlayScrollbars viewportRef={viewerRef} />
             <ZoomIndicator flash={zoom.zoomAnnouncement} percent={zoom.zoomPercent} />
             <ViewerControls
               bookApplies={bookApplies}

@@ -103,7 +103,7 @@ export function useViewerViewport({
       // nothing, so a later unrelated resize cannot land on a stale place.
       const moveAnchor = moveAnchorRef.current
       moveAnchorRef.current = null
-      const { height, width } = viewerLayoutSize(viewer)
+      const { height, width } = viewerLayoutSize(viewer, true)
 
       if (width <= 0 || height <= 0) {
         return

@@ -19,6 +19,7 @@ import { BookmarkList } from "@/components/BookmarkList"
 import { OperationProgress } from "@/components/OperationProgress"
 import { OrganizeBoard } from "@/components/OrganizeBoard"
 import { OrganizeFileList } from "@/components/OrganizeFileList"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { ToolbarFrame } from "@/components/SessionHeader"
 import { SliderStepper } from "@/components/SliderStepper"
 import { StatusBar } from "@/components/StatusBar"
@@ -333,36 +334,40 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
         </span>
       </ToolbarFrame>
 
-      <main
-        className="workspace-background ml-(--sidebar-inset) h-[calc(100%-var(--status-bar-height))] overflow-auto pt-(--toolbar-height)"
-        data-thumbnail-scroll-root
-        ref={scrollRef}
-      >
-        {empty ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-            <Layers className="size-12 text-muted-foreground" />
-            <h1 className="text-lg font-semibold">{t("organize.emptyTitle")}</h1>
-            <p className="max-w-md text-sm text-muted-foreground">
-              {t("organize.emptyHint")}
-            </p>
-            <Button
-              className="mt-2"
-              data-slot="organize-empty-add"
-              disabled={busy}
-              onClick={() => void organize.chooseFiles()}
-            >
-              <FolderPlus />
-              {t("organize.addFiles")}
-            </Button>
-          </div>
-        ) : (
-          <OrganizeBoard
-            organize={organize}
-            paperWidth={PAPER_WIDTHS[size]!}
-            scrollRef={scrollRef}
-          />
-        )}
-      </main>
+      <div className="relative ml-(--sidebar-inset) h-[calc(100%-var(--status-bar-height))]">
+        <main
+          className="overlay-scroll-viewport workspace-background h-full overflow-auto pt-(--toolbar-height)"
+          data-thumbnail-scroll-root
+          ref={scrollRef}
+        >
+          {empty ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+              <Layers className="size-12 text-muted-foreground" />
+              <h1 className="text-lg font-semibold">{t("organize.emptyTitle")}</h1>
+              <p className="max-w-md text-sm text-muted-foreground">
+                {t("organize.emptyHint")}
+              </p>
+              <Button
+                className="mt-2"
+                data-slot="organize-empty-add"
+                disabled={busy}
+                onClick={() => void organize.chooseFiles()}
+              >
+                <FolderPlus />
+                {t("organize.addFiles")}
+              </Button>
+            </div>
+          ) : (
+            <OrganizeBoard
+              organize={organize}
+              paperWidth={PAPER_WIDTHS[size]!}
+              scrollRef={scrollRef}
+            />
+          )}
+        </main>
+        {/* The board runs on under the toolbar; its bar starts below it. */}
+        <OverlayScrollbars className="top-(--toolbar-height)" viewportRef={scrollRef} />
+      </div>
 
       {/* Shown while empty too, disabled: the strip is reserved either way. */}
       <StatusBar label={t("organize.size")}>

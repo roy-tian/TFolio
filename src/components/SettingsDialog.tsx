@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 
 import appLargeIcon from "@/assets/brand/app-large.svg"
 import { AboutUpdate } from "@/components/AboutUpdate"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -159,6 +160,8 @@ export function SettingsDialog({
   const { i18n, t } = useTranslation()
   const preference = useThemePreference()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const appearanceRef = useRef<HTMLDivElement>(null)
+  const aboutRef = useRef<HTMLDivElement>(null)
 
   const activeLanguage: SupportedLanguage =
     resolveSupportedLanguage(i18n.resolvedLanguage) ?? fallbackLanguage
@@ -250,9 +253,10 @@ export function SettingsDialog({
         <div className="relative flex min-w-0 flex-1 flex-col">
           <div
             aria-labelledby="settings-tab-appearance"
-            className="flex-1 overflow-y-auto p-6"
+            className="overlay-scroll-viewport flex-1 overflow-y-auto p-6"
             hidden={section !== "appearance"}
             id="settings-panel-appearance"
+            ref={appearanceRef}
             role="tabpanel"
           >
             <div className="flex flex-col gap-6">
@@ -339,9 +343,10 @@ export function SettingsDialog({
 
           <div
             aria-labelledby="settings-tab-about"
-            className="flex-1 overflow-y-auto p-6"
+            className="overlay-scroll-viewport flex-1 overflow-y-auto p-6"
             hidden={section !== "about"}
             id="settings-panel-about"
+            ref={aboutRef}
             role="tabpanel"
           >
             <div className="flex h-full flex-col">
@@ -359,6 +364,8 @@ export function SettingsDialog({
               </p>
             </div>
           </div>
+          {/* The shown panel fills this box; the hidden one has none. */}
+          <OverlayScrollbars viewportRef={section === "about" ? aboutRef : appearanceRef} />
         </div>
       </DialogContent>
     </Dialog>

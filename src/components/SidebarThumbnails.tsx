@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
 import {
   ContextMenu,
@@ -304,167 +305,170 @@ export function SidebarThumbnails({
     menuPage !== null && selectedPages.has(menuPage) ? selectedPages.size : 1
 
   return (
-    <ContextMenu
-      onOpenChange={(open) => {
-        if (!open) {
-          setMenu(null)
-        }
-      }}
-      // Opened by a press on a page alone: elsewhere in the column there is
-      // nothing for the entries to act on.
-      open={menuPage !== null}
-    >
-      <ContextMenuTrigger
-        render={
-          <div
-            aria-label={t("sidebar.thumbnails")}
-            className="h-full overflow-y-auto overscroll-contain px-2 pt-3 pb-4 outline-none select-none"
-            data-slot="sidebar-thumbnails"
-            data-thumbnail-scroll-root
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) {
-                onFocusChange(false)
-              }
-            }}
-            onContextMenu={(event) => {
-              const paper = (event.target as Element).closest<HTMLElement>(
-                "[data-thumbnail-page]",
-              )
-
-              // Only a page has a menu; elsewhere the WebView's own stays away.
-              if (!paper) {
-                event.preventDefault()
-                return
-              }
-
-              const pageNumber = Number(paper.dataset.thumbnailPage)
-
-              onMenuPage(pageNumber)
-              setMenu({ pageNumber, pages })
-            }}
-            onFocus={() => onFocusChange(true)}
-            onKeyDown={(event) => {
-              const first = Math.min(...selectionRef.current)
-
-              if (
-                (event.key === "Delete" || event.key === "Backspace") &&
-                Number.isFinite(first)
-              ) {
-                event.preventDefault()
-                onDeletePage(first)
-              }
-            }}
-            onPointerDown={startDrag}
-            ref={listRef}
-            role="navigation"
-            // WebKit on macOS never focuses a clicked button; the column takes
-            // the focus instead, so the page keys still reach it.
-            tabIndex={-1}
-          />
-        }
+    <div className="relative h-full">
+      <ContextMenu
+        onOpenChange={(open) => {
+          if (!open) {
+            setMenu(null)
+          }
+        }}
+        // Opened by a press on a page alone: elsewhere in the column there is
+        // nothing for the entries to act on.
+        open={menuPage !== null}
       >
-        <ol className="flex flex-col items-center gap-3">
-          {pages.map((page, index) => {
-            const pageNumber = index + 1
-
-            return (
-              <SidebarThumbnail
-                documentId={documentId}
-                dropAfter={dropGap === numPages && pageNumber === numPages}
-                dropBefore={dropGap === index}
-                intrinsicRotation={page.rotation}
-                isCurrent={current === pageNumber}
-                isCut={cutPages.has(pageNumber)}
-                isSelected={selectedPages.has(pageNumber)}
-                key={thumbnailKeys[index] ?? index}
-                onNavigate={onNavigate}
-                onSelect={select}
-                pageHeight={page.height}
-                pageNumber={pageNumber}
-                pageWidth={page.width}
-                renderEpoch={renderEpochs[pageNumber] ?? 0}
-                rotation={rotations[index] ?? 0}
-              />
-            )
-          })}
-        </ol>
-      </ContextMenuTrigger>
-      {menuPage !== null ? (
-        <ContextMenuContent>
-          <ContextMenuItem data-action="cut-pages" onClick={onCutPages}>
-            <Scissors />
-            {t("pageEdit.cut", { count: menuCount })}
-          </ContextMenuItem>
-          <ContextMenuItem data-action="copy-pages" onClick={onCopyPages}>
-            <Copy />
-            {t("pageEdit.copy", { count: menuCount })}
-          </ContextMenuItem>
-          {canPaste ? (
-            <ContextMenuItem
-              data-action="paste-pages"
-              onClick={() => onPastePages(menuPage)}
-            >
-              <ClipboardPaste />
-              {t("pageEdit.pasteBefore", { pageNumber: menuPage })}
-            </ContextMenuItem>
-          ) : null}
-          {canPaste && menuPage === numPages ? (
-            <ContextMenuItem
-              data-action="paste-pages-end"
-              onClick={() => onPastePages(numPages + 1)}
-            >
-              <ClipboardPaste />
-              {t("pageEdit.pasteAtEnd")}
-            </ContextMenuItem>
-          ) : null}
-          <ContextMenuSeparator />
-          <ContextMenuItem data-action="rotate-pages" onClick={onRotatePages}>
-            <RotateCw />
-            {t("pageEdit.rotate", { count: menuCount })}
-          </ContextMenuItem>
-          <ContextMenuItem
-            data-action="insert-blank-before"
-            onClick={() => onInsertBlankPage(menuPage)}
-          >
-            <FilePlus2 />
-            {t("pageEdit.insertBefore", { pageNumber: menuPage })}
-          </ContextMenuItem>
-          <ContextMenuItem
-            data-action="insert-blank-after"
-            onClick={() => onInsertBlankPage(menuPage + 1)}
-          >
-            <FilePlus2 />
-            {menuPage === numPages
-              ? t("pageEdit.insertAtEnd")
-              : t("pageEdit.insertBefore", { pageNumber: menuPage + 1 })}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem
-            data-action="delete-pages"
-            // A document keeps one page; the backend refuses a delete of them all.
-            disabled={menuCount >= numPages}
-            onClick={() => onDeletePage(menuPage)}
-            variant="destructive"
-          >
-            <Trash2 />
-            {t("pageEdit.delete", { count: menuCount })}
-          </ContextMenuItem>
-        </ContextMenuContent>
-      ) : null}
-      {ghost
-        ? createPortal(
+        <ContextMenuTrigger
+          render={
             <div
-              aria-hidden
-              className="pointer-events-none fixed z-60 flex items-center gap-1.5 rounded-md border bg-popover px-2 py-1 text-sm shadow-xl ring-1 ring-primary/20"
-              style={{ left: ghost.x + 12, top: ghost.y + 12 }}
+              aria-label={t("sidebar.thumbnails")}
+              className="overlay-scroll-viewport h-full overflow-y-auto overscroll-contain px-2 pt-3 pb-4 outline-none select-none"
+              data-slot="sidebar-thumbnails"
+              data-thumbnail-scroll-root
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  onFocusChange(false)
+                }
+              }}
+              onContextMenu={(event) => {
+                const paper = (event.target as Element).closest<HTMLElement>(
+                  "[data-thumbnail-page]",
+                )
+
+                // Only a page has a menu; elsewhere the WebView's own stays away.
+                if (!paper) {
+                  event.preventDefault()
+                  return
+                }
+
+                const pageNumber = Number(paper.dataset.thumbnailPage)
+
+                onMenuPage(pageNumber)
+                setMenu({ pageNumber, pages })
+              }}
+              onFocus={() => onFocusChange(true)}
+              onKeyDown={(event) => {
+                const first = Math.min(...selectionRef.current)
+
+                if (
+                  (event.key === "Delete" || event.key === "Backspace") &&
+                  Number.isFinite(first)
+                ) {
+                  event.preventDefault()
+                  onDeletePage(first)
+                }
+              }}
+              onPointerDown={startDrag}
+              ref={listRef}
+              role="navigation"
+              // WebKit on macOS never focuses a clicked button; the column takes
+              // the focus instead, so the page keys still reach it.
+              tabIndex={-1}
+            />
+          }
+        >
+          <ol className="flex flex-col items-center gap-3">
+            {pages.map((page, index) => {
+              const pageNumber = index + 1
+
+              return (
+                <SidebarThumbnail
+                  documentId={documentId}
+                  dropAfter={dropGap === numPages && pageNumber === numPages}
+                  dropBefore={dropGap === index}
+                  intrinsicRotation={page.rotation}
+                  isCurrent={current === pageNumber}
+                  isCut={cutPages.has(pageNumber)}
+                  isSelected={selectedPages.has(pageNumber)}
+                  key={thumbnailKeys[index] ?? index}
+                  onNavigate={onNavigate}
+                  onSelect={select}
+                  pageHeight={page.height}
+                  pageNumber={pageNumber}
+                  pageWidth={page.width}
+                  renderEpoch={renderEpochs[pageNumber] ?? 0}
+                  rotation={rotations[index] ?? 0}
+                />
+              )
+            })}
+          </ol>
+        </ContextMenuTrigger>
+        {menuPage !== null ? (
+          <ContextMenuContent>
+            <ContextMenuItem data-action="cut-pages" onClick={onCutPages}>
+              <Scissors />
+              {t("pageEdit.cut", { count: menuCount })}
+            </ContextMenuItem>
+            <ContextMenuItem data-action="copy-pages" onClick={onCopyPages}>
+              <Copy />
+              {t("pageEdit.copy", { count: menuCount })}
+            </ContextMenuItem>
+            {canPaste ? (
+              <ContextMenuItem
+                data-action="paste-pages"
+                onClick={() => onPastePages(menuPage)}
+              >
+                <ClipboardPaste />
+                {t("pageEdit.pasteBefore", { pageNumber: menuPage })}
+              </ContextMenuItem>
+            ) : null}
+            {canPaste && menuPage === numPages ? (
+              <ContextMenuItem
+                data-action="paste-pages-end"
+                onClick={() => onPastePages(numPages + 1)}
+              >
+                <ClipboardPaste />
+                {t("pageEdit.pasteAtEnd")}
+              </ContextMenuItem>
+            ) : null}
+            <ContextMenuSeparator />
+            <ContextMenuItem data-action="rotate-pages" onClick={onRotatePages}>
+              <RotateCw />
+              {t("pageEdit.rotate", { count: menuCount })}
+            </ContextMenuItem>
+            <ContextMenuItem
+              data-action="insert-blank-before"
+              onClick={() => onInsertBlankPage(menuPage)}
             >
-              <Layers className="size-4 text-muted-foreground" />
-              {t("organize.movingPages", { count: ghost.count })}
-            </div>,
-            document.body,
-          )
-        : null}
-    </ContextMenu>
+              <FilePlus2 />
+              {t("pageEdit.insertBefore", { pageNumber: menuPage })}
+            </ContextMenuItem>
+            <ContextMenuItem
+              data-action="insert-blank-after"
+              onClick={() => onInsertBlankPage(menuPage + 1)}
+            >
+              <FilePlus2 />
+              {menuPage === numPages
+                ? t("pageEdit.insertAtEnd")
+                : t("pageEdit.insertBefore", { pageNumber: menuPage + 1 })}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              data-action="delete-pages"
+              // A document keeps one page; the backend refuses a delete of them all.
+              disabled={menuCount >= numPages}
+              onClick={() => onDeletePage(menuPage)}
+              variant="destructive"
+            >
+              <Trash2 />
+              {t("pageEdit.delete", { count: menuCount })}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        ) : null}
+        {ghost
+          ? createPortal(
+              <div
+                aria-hidden
+                className="pointer-events-none fixed z-60 flex items-center gap-1.5 rounded-md border bg-popover px-2 py-1 text-sm shadow-xl ring-1 ring-primary/20"
+                style={{ left: ghost.x + 12, top: ghost.y + 12 }}
+              >
+                <Layers className="size-4 text-muted-foreground" />
+                {t("organize.movingPages", { count: ghost.count })}
+              </div>,
+              document.body,
+            )
+          : null}
+      </ContextMenu>
+      <OverlayScrollbars viewportRef={listRef} />
+    </div>
   )
 }
 

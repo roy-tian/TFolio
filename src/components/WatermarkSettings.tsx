@@ -1,5 +1,5 @@
 import { Info } from "lucide-react"
-import type { ReactNode } from "react"
+import type { ReactNode, Ref } from "react"
 import { useTranslation } from "react-i18next"
 
 import { SliderRow } from "@/components/SliderRow"
@@ -48,6 +48,7 @@ type WatermarkSettingsProps = {
   onDraftChange: (draft: WatermarkConfig) => void
   /** The document dialog supplies live pages; without them an A4 sheet stands in. */
   preview?: ReactNode
+  ref?: Ref<HTMLDivElement>
   validationError: WatermarkValidationError | null
 }
 
@@ -59,6 +60,7 @@ export function WatermarkSettings({
   idPrefix = "watermark",
   onDraftChange,
   preview,
+  ref,
   validationError,
 }: WatermarkSettingsProps) {
   const { t } = useTranslation()
@@ -73,7 +75,7 @@ export function WatermarkSettings({
   return (
     // From `sm` the sheet sticks, so it stays in view while the controls pass
     // it; natural heights keep short content from earning a scrollbar.
-    <div className={cn("flex flex-col gap-5 sm:flex-row", className)}>
+    <div className={cn("flex flex-col gap-5 sm:flex-row", className)} ref={ref}>
       <Field className="sm:sticky sm:top-0 sm:w-[14rem] sm:shrink-0 sm:self-start">
         <div className="flex items-center gap-0.5">
           <FieldLabel>{t("watermark.preview")}</FieldLabel>
