@@ -24,14 +24,11 @@ describe("PDF viewport resizing", () => {
       await refreshApp()
       await openPdfFromDisk("resize-text.pdf", textPdf(4))
       await $("[data-page-number='1'] .pdf-text-layer span").waitForDisplayed()
-      await $("button[aria-label='Fit page']").click()
       await $("button[aria-label='Fit width']").click()
       await browser.waitUntil(
         async () =>
-          (
-            await $("[data-slot='button-group'][aria-label^='Zoom ']")
-              .getAttribute("aria-label")
-          )?.includes("fitting width") === true,
+          (await $("button[aria-label='Fit width']").getAttribute("aria-pressed")) ===
+            "true",
         { timeout: 15_000, timeoutMsg: "fit width never became active" },
       )
       await browser.waitUntil(
@@ -161,14 +158,11 @@ describe("PDF viewport resizing", () => {
     await refreshApp()
     await openPdfFromDisk("resize-frames.pdf", minimalPdf(6))
     await $("[data-page-number='1']").waitForDisplayed()
-    await $("button[aria-label='Fit page']").click()
     await $("button[aria-label='Fit width']").click()
     await browser.waitUntil(
       async () =>
-        (
-          await $("[data-slot='button-group'][aria-label^='Zoom ']")
-            .getAttribute("aria-label")
-        )?.includes("fitting width") === true,
+        (await $("button[aria-label='Fit width']").getAttribute("aria-pressed")) ===
+          "true",
       { timeout: 15_000, timeoutMsg: "fit width never became active" },
     )
 

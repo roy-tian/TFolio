@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { MAX_PAGE_WIDTH, type PdfPageInfo } from "./pdf"
 import {
+  activeZoomPreset,
   applyWheelZoom,
   autoScale,
   bookColumnWidth,
@@ -10,10 +11,9 @@ import {
   fitDimensions,
   fitPageScale,
   fitWidthScale,
-  isFitActive,
+  isZoomPreset,
   MAX_ZOOM,
   MIN_ZOOM,
-  nextFitMode,
   normalizeWheelDelta,
   POINT_TO_PX,
   referenceDimensions,
@@ -293,21 +293,30 @@ describe("applyWheelZoom", () => {
   })
 })
 
-describe("nextFitMode", () => {
-  test("offers fit-page from anywhere but fit-page itself", () => {
-    expect(nextFitMode("fit-page")).toBe("fit-width")
-    expect(nextFitMode("fit-width")).toBe("fit-page")
-    expect(nextFitMode("custom")).toBe("fit-page")
-    expect(nextFitMode("auto")).toBe("fit-page")
+describe("activeZoomPreset", () => {
+  test("presses the fit that is on, whatever level it lands on", () => {
+    expect(activeZoomPreset("fit-width", 100)).toBe("fit-width")
+    expect(activeZoomPreset("fit-page", 87)).toBe("fit-page")
+  })
+
+  // The opening sizing and a stepped zoom both press actual size at 100%.
+  test("presses actual size at 100% outside a fit", () => {
+    expect(activeZoomPreset("custom", 100)).toBe("actual-size")
+    expect(activeZoomPreset("auto", 100)).toBe("actual-size")
+  })
+
+  test("presses nothing at any other level", () => {
+    expect(activeZoomPreset("custom", 125)).toBeNull()
+    expect(activeZoomPreset("auto", 93)).toBeNull()
   })
 })
 
-describe("isFitActive", () => {
-  // `auto` is the opening sizing, not a fit the reader chose, so it reads as off.
-  test("counts only the two fit modes", () => {
-    expect(isFitActive("fit-width")).toBe(true)
-    expect(isFitActive("fit-page")).toBe(true)
-    expect(isFitActive("auto")).toBe(false)
-    expect(isFitActive("custom")).toBe(false)
+describe("isZoomPreset", () => {
+  test("accepts the three presets only", () => {
+    expect(isZoomPreset("actual-size")).toBe(true)
+    expect(isZoomPreset("fit-page")).toBe(true)
+    expect(isZoomPreset("fit-width")).toBe(true)
+    expect(isZoomPreset("custom")).toBe(false)
+    expect(isZoomPreset(undefined)).toBe(false)
   })
 })

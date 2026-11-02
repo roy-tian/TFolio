@@ -28,13 +28,13 @@ import {
   fitWidthScale,
   MAX_ZOOM,
   MIN_ZOOM,
-  nextFitMode,
   normalizeWheelDelta,
   referenceDimensions,
   resolveZoomScale,
   stepZoomPercent,
   zoomToPercent,
   ZOOM_PREVIEW_EVENT,
+  type ZoomPreset,
   type ZoomState,
 } from "@/lib/zoom"
 
@@ -346,17 +346,25 @@ export function useZoom({
     zoomTo(stepZoomPercent(zoomToPercent(liveScale), -1) / 100)
   }, [zoomTo])
 
-  const toggleFit = useCallback(() => {
-    cancelPreview()
-    captureCentreAnchor()
-      // The custom scale rides along untouched, so leaving a fit resumes the
-      // zoom last picked; the page is fresh — "fit" means the page in front.
-    requestZoom((current) => ({
-      ...current,
-      fitPage: currentPage.get(),
-      mode: nextFitMode(current.mode),
-    }))
-  }, [cancelPreview, captureCentreAnchor, currentPage, requestZoom])
+  const applyPreset = useCallback(
+    (preset: ZoomPreset) => {
+      if (preset === "actual-size") {
+        zoomTo(1)
+        return
+      }
+
+      cancelPreview()
+      captureCentreAnchor()
+      // The page is fresh even when the fit is already on — "fit" means the
+      // page in front, so pressing it again re-measures against that one.
+      requestZoom((current) => ({
+        ...current,
+        fitPage: currentPage.get(),
+        mode: preset,
+      }))
+    },
+    [cancelPreview, captureCentreAnchor, currentPage, requestZoom, zoomTo],
+  )
 
   /** For a newly opened document, which has no reading position to keep. */
   const resetToDefault = useCallback(() => {
@@ -463,11 +471,11 @@ export function useZoom({
   ])
 
   return {
+    applyPreset,
     canZoomIn: percent < MAX_ZOOM * 100,
     canZoomOut: percent > MIN_ZOOM * 100,
     resetToDefault,
     scale,
-    toggleFit,
     zoomIn,
     zoomMode: zoom.mode,
     zoomState: zoom,

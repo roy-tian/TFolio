@@ -22,7 +22,6 @@ import {
 } from "@/components/SettingsDialog"
 import { ToolbarFrame } from "@/components/SessionHeader"
 import { UpdateInstallDialog } from "@/components/UpdateInstallDialog"
-import { WindowControls } from "@/components/WindowControls"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1997,14 +1996,14 @@ export default function App() {
         // The document tools — bookmarks, view mode — have no document to act
         // on here, so the home toolbar carries only what still works.
         <>
-          <AppSidebar macOS={macOS} menu={<AppMenu {...menuActions} />}>
+          <AppSidebar macOS={macOS}>
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               {t("sidebar.noDocument")}
             </p>
           </AppSidebar>
           <ToolbarFrame
+            active
             appMenu={<AppMenu {...menuActions} />}
-            end={macOS ? null : <WindowControls />}
             macOS={macOS}
           />
         </>

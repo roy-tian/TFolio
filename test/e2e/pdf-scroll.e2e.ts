@@ -54,7 +54,7 @@ describe("PDF scrolling", () => {
     })
   }
 
-  it("gives the pages the sidebar's width when it is hidden, and moves the menu to the toolbar", async () => {
+  it("gives the pages the sidebar's width when it is hidden, and keeps the menu in the toolbar", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await openPdfFromDisk("sidebar-toggle.pdf", minimalPdf(3, "0 0 595 842"))
@@ -64,18 +64,27 @@ describe("PDF scrolling", () => {
     const viewerLeft = () => browser.execute((scope: string) =>
       document.querySelector(`${scope} [data-pdf-scroll-root]`)!.getBoundingClientRect().left, session)
     const toolbarMenu = $(`${session} [data-slot='toolbar'] [data-slot='app-menu']`)
+    // The menu ends the bar, just before the window controls (this suite runs on Linux only).
+    const menuEndsToolbar = () => browser.execute((scope: string) => {
+      const menu = document.querySelector(`${scope} [data-slot='toolbar'] [data-slot='app-menu']`)!
+      const next = menu.closest("[data-slot='toolbar'] > div > *")?.nextElementSibling
+      return next?.getAttribute("data-slot") === "window-controls"
+    }, session)
 
     expect(await viewerLeft()).toBeGreaterThan(200)
-    await expect(toolbarMenu).not.toBeExisting()
+    await expect(toolbarMenu).toBeDisplayed()
+    await expect($(`${session} [data-slot='app-sidebar'] [data-slot='app-menu']`)).not.toBeExisting()
+    expect(await menuEndsToolbar()).toBe(true)
 
     await $(`${session} [data-slot='app-sidebar'] button[aria-label='Hide sidebar']`).click()
     await expect($(`${session} [data-slot='app-sidebar']`)).not.toBeExisting()
     await browser.waitUntil(async () => (await viewerLeft()) === 0)
     await expect(toolbarMenu).toBeDisplayed()
+    expect(await menuEndsToolbar()).toBe(true)
 
     await $(`${session} [data-slot='toolbar'] button[aria-label='Show sidebar']`).click()
     await expect($(`${session} [data-slot='app-sidebar']`)).toBeDisplayed()
-    await expect(toolbarMenu).not.toBeExisting()
+    await expect(toolbarMenu).toBeDisplayed()
   })
 
   // Fitted beside a bar that comes and goes, a document whose height straddles

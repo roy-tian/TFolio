@@ -466,33 +466,36 @@ describe("TFolio PDF viewer", () => {
     const indicator = () =>
       $("[data-document-session][data-active='true'] [data-slot='zoom-indicator']")
 
-    // No button names a level now, so the ladder is the only way back: out until
-    // `-` gives up at the 10% floor, then in along the rungs to 100%.
-    const zoomToActualSize = async () => {
-      const zoomOut = () => $("button[aria-label='Zoom out']")
-
-      while (await zoomOut().isEnabled()) {
-        await zoomOut().click()
-      }
-
-      for (let rung = 0; rung < 6; rung += 1) {
-        await $("button[aria-label='Zoom in']").click()
-      }
-    }
+    const preset = (label: string) => $(`button[aria-label='${label}']`)
 
     expect((await pageBox()).scrollableX).toBe(0)
+
+    // Out until `-` gives up at the 10% floor, then in along the rungs to 100%,
+    // which presses actual size though no preset was chosen.
+    const zoomOut = () => $("button[aria-label='Zoom out']")
+
+    while (await zoomOut().isEnabled()) {
+      await zoomOut().click()
+    }
+
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
+
+    for (let rung = 0; rung < 6; rung += 1) {
+      await $("button[aria-label='Zoom in']").click()
+    }
 
     // A point is 1/72 inch against a CSS pixel's 1/96, so 200pt measures 200 *
     // 96/72 on screen — point-for-pixel would be a quarter short of every reader.
     const actualSize = (percent: number) =>
       Math.round((200 * 96 * percent) / (72 * 100))
 
-    await zoomToActualSize()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
     expect((await pageBox()).width).toBe(actualSize(100))
 
     await $("button[aria-label='Zoom in']").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 125%")
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
     expect((await pageBox()).width).toBe(actualSize(125))
 
     await $("button[aria-label='Zoom out']").click()
@@ -548,47 +551,28 @@ describe("TFolio PDF viewer", () => {
 
     // A fit takes the tighter dimension — height, for a portrait page in a
     // landscape window — and must actually fit, padding aside.
-    await $("button[aria-label='Fit page']").click()
+    await preset("Fit page").click()
     const fittedPage = await pageBox()
     expect(fittedPage.height).toBe(Math.round(fittedPage.availableHeight))
     expect(fittedPage.width).toBeLessThanOrEqual(
       Math.round(fittedPage.availableWidth),
     )
+    await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "true")
 
-    // The button offers the fit that is not on, and which one *is* on is said by
-    // the group rather than by a pressed state that would contradict that name.
-    await expect($("button[aria-label='Fit width']")).toBeExisting()
-    await expect(zoomGroup()).toHaveAttribute(
-      "aria-label",
-      expect.stringContaining("fitting the page"),
-    )
+    // Pressing the fit that is on keeps it on rather than leaving the group empty.
+    await preset("Fit page").click()
+    await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "true")
 
-    await $("button[aria-label='Fit width']").click()
+    await preset("Fit width").click()
     const fittedWide = await pageBox()
     expect(fittedWide.width).toBe(Math.round(fittedWide.availableWidth))
+    await expect(preset("Fit width")).toHaveAttribute("aria-pressed", "true")
+    await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "false")
 
-    // Fit width is now active, so the button offers fit page while retaining
-    // the selected fill. Its outer edge must stay visible in the joined group.
-    const fitButtonBorder = await browser.execute(() => {
-      const button = document.querySelector<HTMLButtonElement>(
-        "button[aria-label='Fit page']",
-      )!
-      const style = window.getComputedStyle(button)
-
-      return {
-        color: style.borderTopColor,
-        style: style.borderTopStyle,
-        width: style.borderTopWidth,
-      }
-    })
-    expect(fitButtonBorder.width).not.toBe("0px")
-    expect(fitButtonBorder.style).not.toBe("none")
-    expect(["transparent", "rgba(0, 0, 0, 0)"]).not.toContain(
-      fitButtonBorder.color,
-    )
-
-    await zoomToActualSize()
+    await preset("Actual size").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
+    expect((await pageBox()).width).toBe(actualSize(100))
     const widthBeforePreview = (await pageBox()).width
     const preview = (await browser.executeAsync((done) => {
       const viewer = document.querySelector<HTMLElement>(
@@ -795,9 +779,7 @@ describe("TFolio PDF viewer", () => {
     await openPdfFromDisk("resized.pdf", minimalPdf(12))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    // Fit width is where the drift is worst and a mode readers sit in. The button
-    // cycles fit-page first, so reaching fit width takes both rungs.
-    await $("button[aria-label='Fit page']").click()
+    // Fit width is where the drift is worst and a mode readers sit in.
     await $("button[aria-label='Fit width']").click()
 
     const readingLine = () =>

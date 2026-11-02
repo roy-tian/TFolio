@@ -1417,9 +1417,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [scrollToPage, sidebar],
     )
 
-    // Only the tab on show has one: in the sidebar, or the toolbar while the
-    // sidebar is not docked.
-    const appMenu = active ? (
+    const appMenu = (
       <AppMenu
         {...menu}
         canSave={canSave}
@@ -1431,7 +1429,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         onSplit={() => setSplitOpen(true)}
         saveHint={saveHint}
       />
-    ) : null
+    )
 
     // The offer is a condition rather than an event, so it is put back whenever
     // its button changes: raising a standing notice again only updates it.
@@ -1497,7 +1495,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         <AppSidebar
           macOS={macOS}
-          menu={appMenu}
           switcher={
             <SidebarPanelSwitch bookmarksApply={bookmarksApply} panel={sidebarPanel} />
           }

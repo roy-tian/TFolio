@@ -23,7 +23,6 @@ import { OrganizeBoard } from "@/components/OrganizeBoard"
 import { OrganizeFileList } from "@/components/OrganizeFileList"
 import { ToolbarFrame } from "@/components/SessionHeader"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
-import { WindowControls } from "@/components/WindowControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -128,7 +127,6 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     }
   }
 
-  const appMenu = active ? <AppMenu {...menu} /> : null
   const bookmarksLabel = t("organize.bookmarks")
 
   return (
@@ -140,7 +138,6 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     >
       <AppSidebar
         macOS={macOS}
-        menu={appMenu}
         switcher={
           <ToggleGroup
             aria-label={t("sidebar.panels")}
@@ -177,7 +174,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
       </AppSidebar>
 
       <ToolbarFrame
-        appMenu={appMenu}
+        active={active}
+        appMenu={<AppMenu {...menu} />}
         end={
           <>
             <ToolbarTooltip label={t("organize.addFiles")}>
@@ -323,7 +321,6 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
               <FileOutput />
               {t("organize.assemble")}
             </Button>
-            {active && !macOS ? <WindowControls /> : null}
           </>
         }
         macOS={macOS}

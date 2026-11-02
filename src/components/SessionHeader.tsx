@@ -35,7 +35,6 @@ import { cn } from "@/lib/utils"
 type SessionHeaderProps = {
   active: boolean
   annotations: ReturnType<typeof useAnnotations>
-  /** The app menu; the sidebar carries it while it shows. */
   appMenu: ReactNode
   bookApplies: boolean
   canSave: boolean
@@ -105,6 +104,7 @@ export function SessionHeader({
 
   return (
     <ToolbarFrame
+      active={active}
       appMenu={appMenu}
       end={
         <>
@@ -203,7 +203,6 @@ export function SessionHeader({
               </DropdownMenuContent>
             </DropdownMenu>
           </ButtonGroup>
-          {active && !macOS ? <WindowControls /> : null}
         </>
       }
       macOS={macOS}
@@ -223,7 +222,7 @@ export function SessionHeader({
         canZoomIn={zoom.canZoomIn}
         canZoomOut={zoom.canZoomOut}
         disabled={!pdfDocument}
-        onToggleFit={zoom.toggleFit}
+        onPreset={zoom.applyPreset}
         onZoomIn={zoom.zoomIn}
         onZoomOut={zoom.zoomOut}
         zoomMode={zoom.zoomMode}
@@ -247,15 +246,19 @@ export function SessionHeader({
 }
 
 type ToolbarFrameProps = {
+  /** Only the bar on show carries the menu and the window controls. */
+  active: boolean
   appMenu: ReactNode
   children?: ReactNode
-  end: ReactNode
+  end?: ReactNode
   macOS: boolean
 }
 
-/** The title bar right of the sidebar. Without a docked sidebar beside it, it
-    takes over the sidebar's first row: the menu, the toggle, the traffic lights. */
+/** The title bar right of the sidebar, ending in the app menu and the window
+    controls. Without a docked sidebar beside it, it takes over the sidebar's
+    first row: the toggle, the workspace switch, the traffic lights. */
 export function ToolbarFrame({
+  active,
   appMenu,
   children,
   end,
@@ -279,7 +282,6 @@ export function ToolbarFrame({
       >
         {docked ? null : (
           <>
-            {appMenu}
             <SidebarToggle />
             <WorkspaceSwitch />
             <div className="mx-1 h-4 w-px shrink-0 bg-border" />
@@ -287,7 +289,15 @@ export function ToolbarFrame({
         )}
         {children}
       </div>
-      <div className="flex items-center gap-1">{end}</div>
+      <div className="flex items-center gap-1">
+        {end}
+        {active ? (
+          <>
+            {appMenu}
+            {macOS ? null : <WindowControls />}
+          </>
+        ) : null}
+      </div>
     </header>
   )
 }

@@ -123,7 +123,7 @@ export function AppMenu({
           <Menu />
         </DropdownMenuTrigger>
       </ToolbarTooltip>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuGroup>
           <DropdownMenuItem data-action="new" onClick={onNew}>
             <FilePlus2 />
