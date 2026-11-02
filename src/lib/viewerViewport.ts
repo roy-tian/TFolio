@@ -1,3 +1,10 @@
+/**
+ * Sent on `window` just before a change moves the viewer's left edge, while the
+ * old layout still stands. The resize observer reports only the moved box, its
+ * pages already carried along by the scroll offset the browser keeps.
+ */
+export const VIEWER_WILL_MOVE_EVENT = "tfolio:viewer-will-move"
+
 /** Reading and navigation geometry starts below the scroll box's top
     padding, should it ever have any. */
 export function viewerTopInset(viewer: HTMLElement) {

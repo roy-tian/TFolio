@@ -17,6 +17,7 @@ import {
   type SidebarMode,
   type SidebarPanel,
 } from "@/lib/sidebar"
+import { VIEWER_WILL_MOVE_EVENT } from "@/lib/viewerViewport"
 
 export type SidebarState = {
   /** Lets an overlay go; a docked sidebar stays until the reader hides it. */
@@ -71,6 +72,7 @@ export function useSidebarState(macOS: boolean): SidebarState {
 
   const toggle = useCallback(() => {
     if (docked) {
+      window.dispatchEvent(new Event(VIEWER_WILL_MOVE_EVENT))
       setOpen(!open)
       storeSidebarOpen(!open)
     } else {

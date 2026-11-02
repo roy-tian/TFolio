@@ -87,6 +87,53 @@ describe("PDF scrolling", () => {
     await expect(toolbarMenu).toBeDisplayed()
   })
 
+  // The browser keeps the scroll offset, so a page wider than the viewer would
+  // ride the viewer's left edge across the sidebar's whole width.
+  it("keeps a page wider than the viewer centred as the sidebar hides and shows", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("sidebar-centre.pdf", minimalPdf(3, "0 0 595 842"))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+
+    const session = "[data-document-session][data-active='true']"
+    await $(`${session} button[aria-label='Actual size']`).click()
+    for (let rung = 0; rung < 3; rung += 1) {
+      await $(`${session} button[aria-label='Zoom in']`).click()
+    }
+    await expect($(`${session} [data-slot='zoom-controls']`))
+      .toHaveAttribute("aria-label", "Zoom 200%")
+
+    const centring = () => browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      const box = viewer.getBoundingClientRect()
+      const page = viewer.querySelector("[data-page-number='1']")!.getBoundingClientRect()
+
+      return {
+        left: box.left,
+        offCentre: page.left + page.width / 2 - (box.left + viewer.clientWidth / 2),
+        overflow: viewer.scrollWidth - viewer.clientWidth,
+      }
+    }, session)
+
+    await browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      viewer.scrollLeft = (viewer.scrollWidth - viewer.clientWidth) / 2
+    }, session)
+    const shown = await centring()
+    expect(shown.overflow).toBeGreaterThan(0)
+    expect(Math.abs(shown.offCentre)).toBeLessThanOrEqual(1)
+
+    await $(`${session} [data-slot='app-sidebar'] button[aria-label='Hide sidebar']`).click()
+    await browser.waitUntil(async () => (await centring()).left < shown.left)
+    const hidden = await centring()
+    expect(hidden.overflow).toBeGreaterThan(0)
+    expect(Math.abs(hidden.offCentre)).toBeLessThanOrEqual(1)
+
+    await $(`${session} [data-slot='toolbar'] button[aria-label='Show sidebar']`).click()
+    await browser.waitUntil(async () => (await centring()).left > hidden.left)
+    expect(Math.abs((await centring()).offCentre)).toBeLessThanOrEqual(1)
+  })
+
   // Fitted beside a bar that comes and goes, a document whose height straddles
   // the viewer's summons the bar, narrows, dismisses it, and widens, every frame.
   it("fits pages to one width whether or not the scrollbar shows", async () => {
