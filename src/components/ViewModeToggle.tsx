@@ -3,10 +3,7 @@ import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  toolbarCenteredStripButtonClassName,
-  toolbarSelectionBarClassName,
-} from "@/lib/toolbarStyles"
+import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
@@ -47,7 +44,6 @@ export function ViewModeToggle({
       }}
       spacing={0}
       value={[value]}
-      variant="outline"
     >
       {options.map((option) => {
         const Icon = option.icon
@@ -59,7 +55,6 @@ export function ViewModeToggle({
               aria-label={label}
               className={cn(
                 toolbarSelectionBarClassName,
-                toolbarCenteredStripButtonClassName,
                 "h-7 min-w-7 group-data-[spacing=0]/toggle-group:px-1.5",
               )}
               disabled={option.value === "book" && !bookApplies}

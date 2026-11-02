@@ -1,20 +1,23 @@
-import { Brackets, Maximize, ZoomIn, ZoomOut } from "lucide-react"
+import { Brackets, Maximize } from "lucide-react"
 import type { ComponentType, SVGProps } from "react"
 import { useTranslation } from "react-i18next"
 
+import { SliderStepper } from "@/components/SliderStepper"
+import { StatusBarDivider } from "@/components/StatusBar"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
-import { Button } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  toolbarCenteredStripButtonClassName,
-  toolbarSelectionBarClassName,
-} from "@/lib/toolbarStyles"
+import type { useZoom } from "@/hooks/useZoom"
+import { shortcuts, type Shortcut } from "@/lib/shortcuts"
+import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 import {
   activeZoomPreset,
   isZoomPreset,
-  type ZoomMode,
+  sliderValueToZoom,
+  ZOOM_SLIDER_MAX,
+  ZOOM_SLIDER_MIN,
+  zoomToPercent,
+  zoomToSliderValue,
   type ZoomPreset,
 } from "@/lib/zoom"
 
@@ -43,67 +46,55 @@ function ActualSizeIcon(props: SVGProps<SVGSVGElement>) {
 const presets: Array<{
   icon: ComponentType<SVGProps<SVGSVGElement>>
   labelKey: "toolbar.zoomActualSize" | "toolbar.zoomFitWidth" | "toolbar.zoomFitPage"
+  shortcut?: Shortcut
   value: ZoomPreset
 }> = [
-  { icon: ActualSizeIcon, labelKey: "toolbar.zoomActualSize", value: "actual-size" },
+  {
+    icon: ActualSizeIcon,
+    labelKey: "toolbar.zoomActualSize",
+    shortcut: shortcuts.actualSize,
+    value: "actual-size",
+  },
   { icon: Brackets, labelKey: "toolbar.zoomFitWidth", value: "fit-width" },
   { icon: Maximize, labelKey: "toolbar.zoomFitPage", value: "fit-page" },
 ]
 
 type ZoomControlsProps = {
-  canZoomIn: boolean
-  canZoomOut: boolean
   disabled: boolean
-  onPreset: (preset: ZoomPreset) => void
-  onZoomIn: () => void
-  onZoomOut: () => void
-  zoomMode: ZoomMode
-  zoomPercent: number
+  zoom: ReturnType<typeof useZoom>
 }
 
-export function ZoomControls({
-  canZoomIn,
-  canZoomOut,
-  disabled,
-  onPreset,
-  onZoomIn,
-  onZoomOut,
-  zoomMode,
-  zoomPercent,
-}: ZoomControlsProps) {
+/** The zoom half of the status bar: minus, slider, plus and the level, then
+    the sizings named by the toolbar. */
+export function ZoomControls({ disabled, zoom }: ZoomControlsProps) {
   const { t } = useTranslation()
-  const zoomOutLabel = t("toolbar.zoomOut")
-  const zoomInLabel = t("toolbar.zoomIn")
-  const active = activeZoomPreset(zoomMode, zoomPercent)
+  const active = activeZoomPreset(zoom.zoomMode, zoom.zoomPercent)
+  const percentText = (step: number) =>
+    t("toolbar.zoomPercent", { percent: zoomToPercent(sliderValueToZoom(step)) })
 
   return (
     <>
-      {/* No readout: a toolbar figure is read once then ignored, so the
-          viewport flashes it; the group's name holds the level for a reader. */}
-      <ButtonGroup aria-label={t("toolbar.zoomLevel", { percent: zoomPercent })}>
-        <ToolbarTooltip label={zoomOutLabel}>
-          <Button
-            aria-label={zoomOutLabel}
-            disabled={disabled || !canZoomOut}
-            onClick={onZoomOut}
-            size="icon-sm"
-            variant="outline"
-          >
-            <ZoomOut />
-          </Button>
-        </ToolbarTooltip>
-        <ToolbarTooltip label={zoomInLabel}>
-          <Button
-            aria-label={zoomInLabel}
-            disabled={disabled || !canZoomIn}
-            onClick={onZoomIn}
-            size="icon-sm"
-            variant="outline"
-          >
-            <ZoomIn />
-          </Button>
-        </ToolbarTooltip>
-      </ButtonGroup>
+      <SliderStepper
+        canDecrease={zoom.canZoomOut}
+        canIncrease={zoom.canZoomIn}
+        decrease={{ label: t("toolbar.zoomOut"), shortcut: shortcuts.zoomOut }}
+        disabled={disabled}
+        groupLabel={t("toolbar.zoomLevel", { percent: zoom.zoomPercent })}
+        increase={{ label: t("toolbar.zoomIn"), shortcut: shortcuts.zoomIn }}
+        max={ZOOM_SLIDER_MAX}
+        min={ZOOM_SLIDER_MIN}
+        // The pages are only laid out again once the drag lets go.
+        onCommit={zoom.commitPreview}
+        onDecrease={zoom.zoomOut}
+        onIncrease={zoom.zoomIn}
+        onPreview={(step) => zoom.previewScale(sliderValueToZoom(step))}
+        readout={percentText}
+        sliderLabel={t("toolbar.zoom")}
+        slot="zoom-controls"
+        value={zoomToSliderValue(zoom.scale)}
+        valueText={percentText}
+      />
+      <StatusBarDivider />
       <ToggleGroup
         aria-label={t("toolbar.zoomPresets")}
         disabled={disabled}
@@ -113,24 +104,22 @@ export function ZoomControls({
           const preset = isZoomPreset(next) ? next : active
 
           if (preset) {
-            onPreset(preset)
+            zoom.applyPreset(preset)
           }
         }}
         spacing={0}
         value={active ? [active] : []}
-        variant="outline"
       >
         {presets.map((preset) => {
           const Icon = preset.icon
           const label = t(preset.labelKey)
 
           return (
-            <ToolbarTooltip key={preset.value} label={label}>
+            <ToolbarTooltip key={preset.value} label={label} shortcut={preset.shortcut}>
               <ToggleGroupItem
                 aria-label={label}
                 className={cn(
                   toolbarSelectionBarClassName,
-                  toolbarCenteredStripButtonClassName,
                   "h-7 min-w-7 group-data-[spacing=0]/toggle-group:px-1.5",
                 )}
                 value={preset.value}

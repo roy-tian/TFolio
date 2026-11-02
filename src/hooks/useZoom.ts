@@ -22,6 +22,7 @@ import {
   applyWheelZoom,
   autoScale,
   bookColumnWidth,
+  clampZoom,
   defaultZoomState,
   fitDimensions,
   fitPageScale,
@@ -39,14 +40,26 @@ import {
 } from "@/lib/zoom"
 
 type ZoomPreview = {
+  /** Whether its commit flashes the level: a wheel's does, a slider's has its
+      own readout beside the thumb. */
+  announce: boolean
   baseScale: number
   clientX: number
   clientY: number
+  /** Held by a slider drag: only its release commits it, never a settle or a
+      scroll, which could reach React after the next step began a preview. */
+  held: boolean
   layoutLeft: number
   layoutTop: number
   scale: number
   scrollLeft: number
   scrollTop: number
+}
+
+type ZoomRequestOptions = {
+  /** Flash the level over the pages, for a zoom asked for away from the
+      status bar's readout. */
+  announce?: boolean
 }
 
 // One viewer-level timer replaces a former timer in every mounted page; the
@@ -86,6 +99,9 @@ export function useZoom({
   // What the anchor is paid back against; watching the scale instead would
   // strand it when a zoom resolves to the scale already showing (`+` at max).
   const [zoomRequest, setZoomRequest] = useState(0)
+  // Only zooms asked for away from the status bar's readout — the wheel, a
+  // pinch, a key — flash the level over the pages.
+  const [zoomAnnouncement, setZoomAnnouncement] = useState(0)
   // The point the reader is looking at, held still across a zoom.
   const anchorRef = useRef<ViewportAnchor | null>(null)
   const previewRef = useRef<ZoomPreview | null>(null)
@@ -136,10 +152,11 @@ export function useZoom({
   const percent = zoomToPercent(scale)
 
   // Written on commit rather than in render, so a render React throws away
-  // cannot leave behind a scale that was never shown.
+  // cannot leave behind a scale that was never shown; in the layout phase, so a
+  // preview begun before the passive effects run starts from the laid-out scale.
   const scaleRef = useRef(scale)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     scaleRef.current = scale
   }, [scale])
 
@@ -219,9 +236,13 @@ export function useZoom({
    * changing the mode cannot drop the custom scale or the page a fit measures.
    */
   const requestZoom = useCallback(
-    (next: (current: ZoomState) => ZoomState) => {
+    (next: (current: ZoomState) => ZoomState, announce: boolean) => {
       setZoom(next)
       setZoomRequest((request) => request + 1)
+
+      if (announce) {
+        setZoomAnnouncement((announcement) => announcement + 1)
+      }
     },
     [],
   )
@@ -247,13 +268,16 @@ export function useZoom({
     previewTimerRef.current = undefined
     previewDeadlineRef.current = 0
     previewRef.current = null
-    // Also what flashes the level the gesture landed on; the gesture never
-    // leaves the compositor, so this is its one commit and costs no extra render.
-    requestZoom((current) => ({
-      ...current,
-      customScale: preview.scale,
-      mode: "custom",
-    }))
+    // Also what flashes the level a wheel landed on; the gesture never leaves
+    // the compositor, so this is its one commit and costs no extra render.
+    requestZoom(
+      (current) => ({
+        ...current,
+        customScale: preview.scale,
+        mode: "custom",
+      }),
+      preview.announce,
+    )
     setZoomPreviewing(false)
   }, [requestZoom, viewerRef])
 
@@ -281,7 +305,8 @@ export function useZoom({
         requestAnimationFrame(() => {
           if (
             previewTimerRef.current !== undefined ||
-            !previewRef.current
+            !previewRef.current ||
+            previewRef.current.held
           ) {
             return
           }
@@ -293,6 +318,105 @@ export function useZoom({
 
     previewTimerRef.current = setTimeout(settle, WHEEL_PREVIEW_SETTLE_MS)
   }, [commitPreview])
+
+  /**
+   * A zoom shown as a compositor transform about a fixed point, not yet laid
+   * out: every following frame of the gesture is only a transform, and page
+   * geometry is not read again until it commits.
+   */
+  const previewZoomAt = useCallback(
+    (
+      // Called only to begin a preview, so later steps read no geometry.
+      anchorPoint: () => { clientX: number; clientY: number },
+      next: (scale: number) => number,
+      { announce, settle }: { announce: boolean; settle: boolean },
+    ) => {
+      const viewer = viewerRef.current
+      const viewerLayout = viewer?.querySelector<HTMLElement>(
+        "[data-pdf-viewer-layout]",
+      )
+
+      if (!viewer || !viewerLayout) {
+        return
+      }
+
+      let preview = previewRef.current
+
+      if (!preview) {
+        const { clientX, clientY } = anchorPoint()
+        captureAnchor(clientX, clientY)
+        const layoutRect = viewerLayout.getBoundingClientRect()
+        preview = {
+          announce,
+          baseScale: scaleRef.current,
+          clientX,
+          clientY,
+          held: false,
+          layoutLeft: layoutRect.left,
+          layoutTop: layoutRect.top,
+          scale: scaleRef.current,
+          scrollLeft: viewer.scrollLeft,
+          scrollTop: viewer.scrollTop,
+        }
+        previewRef.current = preview
+        viewerLayout.style.transformOrigin = "0 0"
+        viewerLayout.style.willChange = "transform"
+        setZoomPreviewing(true)
+      }
+
+      // A slider taking over a wheel's preview drops its pending settle.
+      if (!settle && !preview.held) {
+        preview.held = true
+        preview.announce = false
+        clearTimeout(previewTimerRef.current)
+        previewTimerRef.current = undefined
+        previewDeadlineRef.current = 0
+      }
+
+      preview.scale = clampZoom(next(preview.scale))
+      const ratio = preview.scale / preview.baseScale
+      const anchorX = preview.clientX - preview.layoutLeft
+      const anchorY = preview.clientY - preview.layoutTop
+      const translateX = anchorX * (1 - ratio)
+      const translateY = anchorY * (1 - ratio)
+      viewerLayout.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${ratio})`
+      viewer.dispatchEvent(new Event(ZOOM_PREVIEW_EVENT))
+
+      if (settle && !preview.held) {
+        schedulePreviewCommit()
+      }
+    },
+    [captureAnchor, schedulePreviewCommit, viewerRef],
+  )
+
+  /**
+   * A slider drag: previewed like a pinch, about the middle of the viewer, but
+   * held until the slider lets go. A commit mid-drag could reach React after
+   * the next step had begun a preview, which would scale from the old layout
+   * and lose its anchor to that commit.
+   */
+  const previewScale = useCallback(
+    (nextScale: number) => {
+      const viewer = viewerRef.current
+
+      if (!viewer || disabled) {
+        return
+      }
+
+      previewZoomAt(
+        () => {
+          const rect = viewerReadingBounds(viewer)
+          return {
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }
+        },
+        () => nextScale,
+        { announce: false, settle: false },
+      )
+    },
+    [disabled, previewZoomAt, viewerRef],
+  )
 
   // Page shells only resize on a zoom, so the anchor can be paid back
   // synchronously against the real post-zoom rect and never be seen.
@@ -324,32 +448,44 @@ export function useZoom({
   }, [clearPreviewTransform, viewerRef, zoomRequest])
 
   const zoomTo = useCallback(
-    (nextScale: number) => {
+    (nextScale: number, announce: boolean) => {
       cancelPreview()
       captureCentreAnchor()
-      requestZoom((current) => ({
-        ...current,
-        customScale: nextScale,
-        mode: "custom",
-      }))
+      requestZoom(
+        (current) => ({
+          ...current,
+          customScale: nextScale,
+          mode: "custom",
+        }),
+        announce,
+      )
     },
     [cancelPreview, captureCentreAnchor, requestZoom],
   )
 
-  const zoomIn = useCallback(() => {
-    const liveScale = previewRef.current?.scale ?? scaleRef.current
-    zoomTo(stepZoomPercent(zoomToPercent(liveScale), 1) / 100)
-  }, [zoomTo])
+  // `announce` for a key: the status bar's own buttons sit beside its readout.
+  const zoomIn = useCallback(
+    (options: ZoomRequestOptions = {}) => {
+      const liveScale = previewRef.current?.scale ?? scaleRef.current
+      zoomTo(stepZoomPercent(zoomToPercent(liveScale), 1) / 100, Boolean(options.announce))
+    },
+    [zoomTo],
+  )
 
-  const zoomOut = useCallback(() => {
-    const liveScale = previewRef.current?.scale ?? scaleRef.current
-    zoomTo(stepZoomPercent(zoomToPercent(liveScale), -1) / 100)
-  }, [zoomTo])
+  const zoomOut = useCallback(
+    (options: ZoomRequestOptions = {}) => {
+      const liveScale = previewRef.current?.scale ?? scaleRef.current
+      zoomTo(stepZoomPercent(zoomToPercent(liveScale), -1) / 100, Boolean(options.announce))
+    },
+    [zoomTo],
+  )
 
   const applyPreset = useCallback(
-    (preset: ZoomPreset) => {
+    (preset: ZoomPreset, options: ZoomRequestOptions = {}) => {
+      const announce = Boolean(options.announce)
+
       if (preset === "actual-size") {
-        zoomTo(1)
+        zoomTo(1, announce)
         return
       }
 
@@ -357,11 +493,14 @@ export function useZoom({
       captureCentreAnchor()
       // The page is fresh even when the fit is already on — "fit" means the
       // page in front, so pressing it again re-measures against that one.
-      requestZoom((current) => ({
-        ...current,
-        fitPage: currentPage.get(),
-        mode: preset,
-      }))
+      requestZoom(
+        (current) => ({
+          ...current,
+          fitPage: currentPage.get(),
+          mode: preset,
+        }),
+        announce,
+      )
     },
     [cancelPreview, captureCentreAnchor, currentPage, requestZoom, zoomTo],
   )
@@ -408,72 +547,38 @@ export function useZoom({
         frame = 0
         const delta = pendingDelta
         pendingDelta = 0
-        const viewerLayout = viewer.querySelector<HTMLElement>(
-          "[data-pdf-viewer-layout]",
-        )
-
-        if (!viewerLayout) {
-          return
-        }
-
-        let preview = previewRef.current
-
-        if (!preview) {
-          // Captured once: every following frame is a compositor transform, and
-          // page geometry is not read again until the final scale commits.
-          captureAnchor(pointerX, pointerY)
-          const layoutRect = viewerLayout.getBoundingClientRect()
-          preview = {
-            baseScale: scaleRef.current,
-            clientX: pointerX,
-            clientY: pointerY,
-            layoutLeft: layoutRect.left,
-            layoutTop: layoutRect.top,
-            scale: scaleRef.current,
-            scrollLeft: viewer.scrollLeft,
-            scrollTop: viewer.scrollTop,
-          }
-          previewRef.current = preview
-          viewerLayout.style.transformOrigin = "0 0"
-          viewerLayout.style.willChange = "transform"
-          setZoomPreviewing(true)
-        }
-
-        preview.scale = applyWheelZoom(preview.scale, delta)
-        const ratio = preview.scale / preview.baseScale
-        const anchorX = preview.clientX - preview.layoutLeft
-        const anchorY = preview.clientY - preview.layoutTop
-        const translateX = anchorX * (1 - ratio)
-        const translateY = anchorY * (1 - ratio)
-        viewerLayout.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${ratio})`
-        viewer.dispatchEvent(new Event(ZOOM_PREVIEW_EVENT))
-
-        schedulePreviewCommit()
+        const anchorPoint = { clientX: pointerX, clientY: pointerY }
+        previewZoomAt(() => anchorPoint, (scale) => applyWheelZoom(scale, delta), {
+          announce: true,
+          settle: true,
+        })
       })
     }
 
+    // A held preview carries the scroll into its anchor when it commits.
+    const commitOnScroll = () => {
+      if (!previewRef.current?.held) {
+        commitPreview()
+      }
+    }
+
     viewer.addEventListener("wheel", handleWheel, { passive: false })
-    viewer.addEventListener("scroll", commitPreview, { passive: true })
+    viewer.addEventListener("scroll", commitOnScroll, { passive: true })
 
     return () => {
       viewer.removeEventListener("wheel", handleWheel)
-      viewer.removeEventListener("scroll", commitPreview)
+      viewer.removeEventListener("scroll", commitOnScroll)
       cancelAnimationFrame(frame)
       cancelPreview()
     }
-  }, [
-    cancelPreview,
-    captureAnchor,
-    commitPreview,
-    disabled,
-    schedulePreviewCommit,
-    viewerRef,
-  ])
+  }, [cancelPreview, commitPreview, disabled, previewZoomAt, viewerRef])
 
   return {
     applyPreset,
     canZoomIn: percent < MAX_ZOOM * 100,
     canZoomOut: percent > MIN_ZOOM * 100,
+    commitPreview,
+    previewScale,
     resetToDefault,
     scale,
     zoomIn,
@@ -481,6 +586,7 @@ export function useZoom({
     zoomState: zoom,
     zoomOut,
     zoomPercent: percent,
+    zoomAnnouncement,
     zoomPreviewing,
     zoomRequest,
   }

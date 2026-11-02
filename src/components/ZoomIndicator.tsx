@@ -8,14 +8,15 @@ import { cn } from "@/lib/utils"
 const HOLD_MS = 900
 
 type ZoomIndicatorProps = {
-  /** Bumped by every zoom the reader asks for, including one that resolves to
-      the level already showing: pressing `+` at the maximum still answers. */
+  /** Bumped by each zoom asked for away from the status bar — the wheel, a
+      pinch, a key — including one that resolves to the level already
+      showing: ctrl+= at the maximum still answers. */
   flash: number
   percent: number
 }
 
-/** Flashed over the viewport then faded: it answers the press just made, where
-    a permanent toolbar readout would sit there being read long after. */
+/** Flashed over the viewport then faded, where the eye is during a wheel or a
+    key; a zoom made on the status bar is answered by the bar's readout. */
 export function ZoomIndicator({ flash, percent }: ZoomIndicatorProps) {
   const [visible, setVisible] = useState(false)
   // Seeded from the counter as it stands, because a mount is not a zoom: only a

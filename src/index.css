@@ -200,6 +200,7 @@ body {
 
 .app-surface {
   --document-tabs-height: 2.25rem;
+  --status-bar-height: 2rem;
   --toolbar-height: 2.5rem;
   background-color: var(--background);
 }

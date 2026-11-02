@@ -10,8 +10,6 @@ import {
   Scaling,
   Trash2,
   Undo2,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -22,6 +20,8 @@ import { OperationProgress } from "@/components/OperationProgress"
 import { OrganizeBoard } from "@/components/OrganizeBoard"
 import { OrganizeFileList } from "@/components/OrganizeFileList"
 import { ToolbarFrame } from "@/components/SessionHeader"
+import { SliderStepper } from "@/components/SliderStepper"
+import { StatusBar } from "@/components/StatusBar"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -46,7 +46,7 @@ import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
-/** The thumbnails' long side, smallest to largest; the toolbar steps along. */
+/** The thumbnails' long side, smallest to largest; the status bar steps along. */
 const PAPER_WIDTHS = [120, 160, 200, 240] as const
 
 type OrganizeWorkspaceProps = {
@@ -331,36 +331,10 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
         >
           {t("organize.totalPages", { count: organize.pages.length })}
         </span>
-        <ButtonGroup>
-          <ToolbarTooltip label={t("organize.smaller")}>
-            <Button
-              aria-label={t("organize.smaller")}
-              disabled={size === 0}
-              onClick={() => setSize((current) => Math.max(0, current - 1))}
-              size="icon-sm"
-              variant="outline"
-            >
-              <ZoomOut />
-            </Button>
-          </ToolbarTooltip>
-          <ToolbarTooltip label={t("organize.larger")}>
-            <Button
-              aria-label={t("organize.larger")}
-              disabled={size === PAPER_WIDTHS.length - 1}
-              onClick={() =>
-                setSize((current) => Math.min(PAPER_WIDTHS.length - 1, current + 1))
-              }
-              size="icon-sm"
-              variant="outline"
-            >
-              <ZoomIn />
-            </Button>
-          </ToolbarTooltip>
-        </ButtonGroup>
       </ToolbarFrame>
 
       <main
-        className="workspace-background ml-(--sidebar-inset) h-full overflow-auto pt-(--toolbar-height)"
+        className="workspace-background ml-(--sidebar-inset) h-[calc(100%-var(--status-bar-height))] overflow-auto pt-(--toolbar-height)"
         data-thumbnail-scroll-root
         ref={scrollRef}
       >
@@ -389,6 +363,33 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           />
         )}
       </main>
+
+      {/* Shown while empty too, disabled: the strip is reserved either way. */}
+      <StatusBar label={t("organize.size")}>
+        <SliderStepper
+          canDecrease={size > 0}
+          disabled={empty}
+          canIncrease={size < PAPER_WIDTHS.length - 1}
+          decrease={{ label: t("organize.smaller") }}
+          groupLabel={t("organize.size")}
+          increase={{ label: t("organize.larger") }}
+          max={PAPER_WIDTHS.length - 1}
+          min={0}
+          // Four sizes only, so each is laid out as the thumb reaches it.
+          onCommit={setSize}
+          onDecrease={() => setSize((current) => Math.max(0, current - 1))}
+          onIncrease={() =>
+            setSize((current) => Math.min(PAPER_WIDTHS.length - 1, current + 1))
+          }
+          onPreview={setSize}
+          sliderLabel={t("organize.size")}
+          slot="organize-size"
+          value={size}
+          valueText={(step) =>
+            t("organize.sizeStep", { current: step + 1, total: PAPER_WIDTHS.length })
+          }
+        />
+      </StatusBar>
 
       <Dialog open={active && organize.assembling}>
         <DialogContent data-testid="organize-progress" showCloseButton={false}>

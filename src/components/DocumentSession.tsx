@@ -23,6 +23,7 @@ import { SessionDialogs } from "@/components/SessionDialogs"
 import { SessionHeader } from "@/components/SessionHeader"
 import { SidebarThumbnails } from "@/components/SidebarThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
+import { ViewerControls } from "@/components/ViewerControls"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import type { AnnotationTool } from "@/components/AnnotationToolbar"
 import { useAnnotations } from "@/hooks/useAnnotations"
@@ -97,6 +98,7 @@ import type {
 } from "@/lib/tabMove"
 import type { PdfOwnedLayer, PdfProgress } from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
+import type { ZoomShortcut } from "@/lib/shortcuts"
 import { shownSidebarPanel } from "@/lib/sidebar"
 import {
   defaultViewMode,
@@ -144,6 +146,7 @@ export type DocumentSessionHandle = {
   redo: () => void
   selectAll: () => void
   undo: () => void
+  zoom: (action: ZoomShortcut) => void
 }
 
 type DocumentSessionProps = {
@@ -1371,6 +1374,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             undoStep()
           }
         },
+        // A key leaves the eye on the page, far from the bar's readout.
+        zoom: (action) => {
+          if (action === "in") {
+            zoom.zoomIn({ announce: true })
+          } else if (action === "out") {
+            zoom.zoomOut({ announce: true })
+          } else {
+            zoom.applyPreset("actual-size", { announce: true })
+          }
+        },
       }),
       [
         annotations.canRedo,
@@ -1392,6 +1405,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         snapshotForMove,
         startPrint,
         undoStep,
+        zoom.applyPreset,
+        zoom.zoomIn,
+        zoom.zoomOut,
       ],
     )
 
@@ -1458,14 +1474,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           active={active}
           annotations={annotations}
           appMenu={appMenu}
-          bookApplies={bookApplies}
           canSave={canSave}
           document={pdfDocument}
           macOS={macOS}
-          onChangeViewMode={changeViewMode}
           onCompress={() => setCompressOpen(true)}
           onExportImages={() => setImageExportOpen(true)}
-          onRotate={() => setPageRotations(rotationsAfterRotate)}
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
           onSearchClose={search.closeSearch}
@@ -1489,8 +1502,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             rectStyle,
             textNoteColor: textNoteStyle.color,
           }}
-          viewMode={viewMode}
-          zoom={zoom}
         />
 
         <AppSidebar
@@ -1582,7 +1593,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           </div>
         ) : null}
 
-        <div className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pl-(--sidebar-inset)">
+        <div className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pb-(--status-bar-height) pl-(--sidebar-inset)">
           {/* The viewer's scroll box cannot host the readout: anything absolute
               inside it is placed against scrolled content and would drift. */}
           <div className="relative min-w-0 flex-1">
@@ -1629,7 +1640,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 zoomRequest={zoom.zoomRequest}
               />
             </main>
-            <ZoomIndicator flash={zoom.zoomRequest} percent={zoom.zoomPercent} />
+            <ZoomIndicator flash={zoom.zoomAnnouncement} percent={zoom.zoomPercent} />
+            <ViewerControls
+              bookApplies={bookApplies}
+              disabled={!pdfDocument}
+              onChangeViewMode={changeViewMode}
+              onRotate={() => setPageRotations(rotationsAfterRotate)}
+              viewMode={viewMode}
+              zoom={zoom}
+            />
           </div>
         </div>
 

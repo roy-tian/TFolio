@@ -18,8 +18,12 @@ import {
   POINT_TO_PX,
   referenceDimensions,
   resolveZoomScale,
+  sliderValueToZoom,
   stepZoomPercent,
+  ZOOM_SLIDER_MAX,
+  ZOOM_SLIDER_MIN,
   zoomToPercent,
+  zoomToSliderValue,
 } from "./zoom"
 
 const a4: PdfPageInfo = { height: 842, rotation: 0, width: 595 }
@@ -318,5 +322,31 @@ describe("isZoomPreset", () => {
     expect(isZoomPreset("fit-width")).toBe(true)
     expect(isZoomPreset("custom")).toBe(false)
     expect(isZoomPreset(undefined)).toBe(false)
+  })
+})
+
+describe("zoom slider", () => {
+  test("puts 100% on a whole step", () => {
+    expect(zoomToSliderValue(1)).toBe(0)
+    expect(sliderValueToZoom(0)).toBe(1)
+  })
+
+  test("reaches both ends of the zoom range", () => {
+    expect(sliderValueToZoom(ZOOM_SLIDER_MIN)).toBe(MIN_ZOOM)
+    expect(sliderValueToZoom(ZOOM_SLIDER_MAX)).toBe(MAX_ZOOM)
+    expect(zoomToSliderValue(MIN_ZOOM)).toBe(ZOOM_SLIDER_MIN)
+    expect(zoomToSliderValue(MAX_ZOOM)).toBe(ZOOM_SLIDER_MAX)
+  })
+
+  // Equal travel is an equal ratio, so a step is the same feel at any zoom.
+  test("moves by the same ratio per step anywhere on the track", () => {
+    const low = sliderValueToZoom(-30) / sliderValueToZoom(-31)
+    const high = sliderValueToZoom(40) / sliderValueToZoom(39)
+
+    expect(low).toBeCloseTo(high)
+  })
+
+  test("round-trips a zoom between the ends", () => {
+    expect(sliderValueToZoom(zoomToSliderValue(1.37))).toBeCloseTo(1.37)
   })
 })

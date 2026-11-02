@@ -23,6 +23,7 @@ export type ShortcutEvent = {
  * that promises it. None is registered with the OS.
  */
 export const shortcuts = {
+  actualSize: { key: "0" },
   new: { key: "n" },
   newWindow: { key: "n", shift: true },
   open: { key: "o" },
@@ -36,7 +37,38 @@ export const shortcuts = {
   selectAll: { key: "a" },
   undo: { key: "z" },
   watermark: { alt: true, key: "w" },
+  zoomIn: { key: "=" },
+  zoomOut: { key: "-" },
 } as const satisfies Record<string, Shortcut>
+
+export type ZoomShortcut = "actual-size" | "in" | "out"
+
+/**
+ * By the character typed rather than an exact chord: `+` takes Shift on some
+ * layouts and none on others or the keypad, and a layout that shifts its digits
+ * types `0` with Shift held.
+ */
+export function zoomShortcut(
+  event: ShortcutEvent,
+  macOS = isMacOS(),
+): ZoomShortcut | null {
+  const primary = macOS ? event.metaKey : event.ctrlKey
+  const foreign = macOS ? event.ctrlKey : event.metaKey
+
+  if (!primary || foreign || event.altKey) {
+    return null
+  }
+
+  if (event.key === shortcuts.zoomIn.key || event.key === "+") {
+    return "in"
+  }
+
+  if (event.key === shortcuts.zoomOut.key) {
+    return "out"
+  }
+
+  return event.key === shortcuts.actualSize.key ? "actual-size" : null
+}
 
 function namesLetter(event: ShortcutEvent, key: string) {
   if (event.key.toLowerCase() === key) {

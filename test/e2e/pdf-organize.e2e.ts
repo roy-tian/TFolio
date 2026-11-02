@@ -82,6 +82,60 @@ describe("TFolio organize workspace", () => {
     expect(await groupCount()).toBe(2)
   })
 
+  it("sizes the thumbnails from the status bar's slider once a file is in", async () => {
+    const bar = `${workspace} [data-slot='status-bar']`
+    await $("button[aria-label='Organize pages']").click()
+    await $(`${workspace} [data-slot='organize-empty-add']`).waitForDisplayed()
+    await expect($(`${bar} button[aria-label='Larger thumbnails']`)).toBeDisabled()
+
+    await pointMultiPickerAt([portrait()])
+    await $(`${workspace} [data-slot='organize-empty-add']`).click()
+    await browser.waitUntil(async () => (await groupCount()) === 1, {
+      timeout: 30_000,
+      timeoutMsg: "the picked file never reached the board",
+    })
+
+    const slider = $(`${bar} input[aria-label='Thumbnail size']`)
+    const slotWidth = () =>
+      browser.execute((scope: string) =>
+        document.querySelector(`${scope} [data-slot-key]`)!.getBoundingClientRect().width,
+      workspace)
+    await expect(slider).toHaveAttribute("aria-valuetext", "2 of 4")
+    const before = await slotWidth()
+
+    await $(`${bar} button[aria-label='Larger thumbnails']`).click()
+    await expect(slider).toHaveAttribute("aria-valuetext", "3 of 4")
+    expect(await slotWidth()).toBeGreaterThan(before)
+
+    await $(`${bar} button[aria-label='Smaller thumbnails']`).click()
+    await $(`${bar} button[aria-label='Smaller thumbnails']`).click()
+    await expect(slider).toHaveAttribute("aria-valuetext", "1 of 4")
+    await expect($(`${bar} button[aria-label='Smaller thumbnails']`)).toBeDisabled()
+    expect(await slotWidth()).toBeLessThan(before)
+  })
+
+  it("keeps the status bar's slider in place though it mounted hidden", async () => {
+    // The size bar mounts while the workspace is still hidden behind the
+    // viewer, before anything could measure its thumb.
+    await refreshApp()
+    await organizeWith([portrait()])
+
+    const thumb = await browser.execute((scope: string) => {
+      const element = document.querySelector<HTMLElement>(
+        `${scope} [data-slot='status-bar'] [data-slot='slider-thumb']`,
+      )!
+      const track = element.parentElement!.getBoundingClientRect()
+      const box = element.getBoundingClientRect()
+      return {
+        at: (box.left + box.width / 2 - track.left) / track.width,
+        visibility: window.getComputedStyle(element).visibility,
+      }
+    }, workspace)
+    expect(thumb.visibility).toBe("visible")
+    // The second of four sizes sits a third of the way along.
+    expect(thumb.at).toBeCloseTo(1 / 3, 1)
+  })
+
   it("moves a page across files and assembles the plan's order", async () => {
     await organizeWith([portrait(), landscape()])
 

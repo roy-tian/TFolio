@@ -1,4 +1,4 @@
-import { ChevronDown, FileImage, RotateCw, Save, Scissors, Search, Shrink, Upload } from "lucide-react"
+import { ChevronDown, FileImage, Save, Scissors, Search, Shrink, Upload } from "lucide-react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -7,10 +7,8 @@ import { SidebarToggle } from "@/components/AppSidebar"
 import { HistoryControls } from "@/components/HistoryControls"
 import { PageNumberField } from "@/components/PageNumberField"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
-import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
 import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
-import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -24,26 +22,21 @@ import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useSidebar } from "@/hooks/useSidebar"
-import type { useZoom } from "@/hooks/useZoom"
 import type { HexColor, RectStyle } from "@/lib/annotations"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { formatShortcut, shortcuts } from "@/lib/shortcuts"
 import { splitMenuButtonClassName } from "@/lib/toolbarStyles"
-import type { ViewMode } from "@/lib/viewMode"
 import { cn } from "@/lib/utils"
 
 type SessionHeaderProps = {
   active: boolean
   annotations: ReturnType<typeof useAnnotations>
   appMenu: ReactNode
-  bookApplies: boolean
   canSave: boolean
   document: PdfDocumentInfo | null
   macOS: boolean
-  onChangeViewMode: (mode: ViewMode) => void
   onCompress: () => void
   onExportImages: () => void
-  onRotate: () => void
   onSave: () => void
   onSaveAs: () => void
   onSearchClose: () => void
@@ -67,24 +60,20 @@ type SessionHeaderProps = {
     rectStyle: RectStyle
     textNoteColor: string
   }
-  viewMode: ViewMode
-  zoom: ReturnType<typeof useZoom>
 }
 
-/** The toolbar every document tab shares: reading controls on the left, the
-    editing tools and the file's own actions on the right. */
+/** The toolbar every document tab shares: where the reader is on the left,
+    the editing tools and the file's own actions on the right. How the pages
+    are looked at sits in the status bar under the viewer (ViewerControls). */
 export function SessionHeader({
   active,
   annotations,
   appMenu,
-  bookApplies,
   canSave,
   document: pdfDocument,
   macOS,
-  onChangeViewMode,
   onCompress,
   onExportImages,
-  onRotate,
   onSave,
   onSaveAs,
   onSearchClose,
@@ -96,11 +85,8 @@ export function SessionHeader({
   saveLabel,
   searchOpen,
   tool,
-  viewMode,
-  zoom,
 }: SessionHeaderProps) {
   const { t } = useTranslation()
-  const rotateLabel = t("toolbar.rotateView")
 
   return (
     <ToolbarFrame
@@ -212,35 +198,6 @@ export function SessionHeader({
         onSubmit={page.onSubmit}
         pageCount={pdfDocument?.numPages}
       />
-      <ViewModeToggle
-        bookApplies={bookApplies}
-        disabled={!pdfDocument}
-        onChange={onChangeViewMode}
-        value={viewMode}
-      />
-      <ZoomControls
-        canZoomIn={zoom.canZoomIn}
-        canZoomOut={zoom.canZoomOut}
-        disabled={!pdfDocument}
-        onPreset={zoom.applyPreset}
-        onZoomIn={zoom.zoomIn}
-        onZoomOut={zoom.zoomOut}
-        zoomMode={zoom.zoomMode}
-        zoomPercent={zoom.zoomPercent}
-      />
-      {/* Turns only the way the pages are looked at (D2); the sidebar's
-          previews turn the pages themselves. */}
-      <ToolbarTooltip label={rotateLabel}>
-        <Button
-          aria-label={rotateLabel}
-          disabled={!pdfDocument}
-          onClick={onRotate}
-          size="icon-sm"
-          variant="outline"
-        >
-          <RotateCw />
-        </Button>
-      </ToolbarTooltip>
     </ToolbarFrame>
   )
 }

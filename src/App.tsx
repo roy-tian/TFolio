@@ -80,7 +80,12 @@ import {
   type RecentFile,
   type RecentPdfView,
 } from "@/lib/recentFiles"
-import { matchesShortcut, shortcuts, type Shortcut } from "@/lib/shortcuts"
+import {
+  matchesShortcut,
+  shortcuts,
+  zoomShortcut,
+  type Shortcut,
+} from "@/lib/shortcuts"
 import {
   fetchWindowRects,
   globalPointFrom,
@@ -1415,6 +1420,32 @@ export default function App() {
     document.addEventListener("keydown", printDocument)
 
     return () => document.removeEventListener("keydown", printDocument)
+  }, [macOS])
+
+  // Only a document tab's pages zoom; a dialog in front takes the keys from them.
+  useEffect(() => {
+    const zoomDocument = (event: KeyboardEvent) => {
+      const action = event.defaultPrevented ? null : zoomShortcut(event, macOS)
+
+      if (!action) {
+        return
+      }
+
+      event.preventDefault()
+
+      if (hasLayerOverWorkspace()) {
+        return
+      }
+
+      const tabId = shownTabId()
+      if (tabId !== HOME_TAB_ID) {
+        sessionRefs.current.get(tabId)?.zoom(action)
+      }
+    }
+
+    document.addEventListener("keydown", zoomDocument)
+
+    return () => document.removeEventListener("keydown", zoomDocument)
   }, [macOS])
 
   // The WebView's select-all takes the whole interface, never what a reader
