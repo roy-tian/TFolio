@@ -60,13 +60,12 @@ const presets: Array<{
 ]
 
 type ZoomControlsProps = {
-  disabled: boolean
   zoom: ReturnType<typeof useZoom>
 }
 
 /** The zoom half of the status bar: minus, slider, plus and the level, then
     the sizings named by the toolbar. */
-export function ZoomControls({ disabled, zoom }: ZoomControlsProps) {
+export function ZoomControls({ zoom }: ZoomControlsProps) {
   const { t } = useTranslation()
   const active = activeZoomPreset(zoom.zoomMode, zoom.zoomPercent)
   const percentText = (step: number) =>
@@ -78,7 +77,6 @@ export function ZoomControls({ disabled, zoom }: ZoomControlsProps) {
         canDecrease={zoom.canZoomOut}
         canIncrease={zoom.canZoomIn}
         decrease={{ label: t("toolbar.zoomOut"), shortcut: shortcuts.zoomOut }}
-        disabled={disabled}
         groupLabel={t("toolbar.zoomLevel", { percent: zoom.zoomPercent })}
         increase={{ label: t("toolbar.zoomIn"), shortcut: shortcuts.zoomIn }}
         max={ZOOM_SLIDER_MAX}
@@ -97,7 +95,6 @@ export function ZoomControls({ disabled, zoom }: ZoomControlsProps) {
       <StatusBarDivider />
       <ToggleGroup
         aria-label={t("toolbar.zoomPresets")}
-        disabled={disabled}
         onValueChange={([next]) => {
           // Base UI empties the group when the pressed item is pressed again;
           // that re-applies it, so a fit re-measures against the page in front.

@@ -11,7 +11,6 @@ import type { ViewMode } from "@/lib/viewMode"
 
 type ViewerControlsProps = {
   bookApplies: boolean
-  disabled: boolean
   onChangeViewMode: (mode: ViewMode) => void
   onRotate: () => void
   viewMode: ViewMode
@@ -22,7 +21,6 @@ type ViewerControlsProps = {
     leaving the title bar to where the reader is and what they edit. */
 export function ViewerControls({
   bookApplies,
-  disabled,
   onChangeViewMode,
   onRotate,
   viewMode,
@@ -35,19 +33,17 @@ export function ViewerControls({
     <StatusBar label={t("toolbar.viewControls")}>
       <ViewModeToggle
         bookApplies={bookApplies}
-        disabled={disabled}
         onChange={onChangeViewMode}
         value={viewMode}
       />
       <StatusBarDivider />
-      <ZoomControls disabled={disabled} zoom={zoom} />
+      <ZoomControls zoom={zoom} />
       <StatusBarDivider />
       {/* Turns only the way the pages are looked at (D2); the sidebar's
           previews turn the pages themselves. */}
       <ToolbarTooltip label={rotateLabel}>
         <Button
           aria-label={rotateLabel}
-          disabled={disabled}
           onClick={onRotate}
           size="icon-sm"
           variant="ghost"

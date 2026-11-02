@@ -13,7 +13,7 @@ type UseWatermarkOptions = {
   activeConfig: WatermarkConfig | null
   /** The mark a reader who has never applied one starts from, translated. */
   defaultText: string
-  documentId?: number
+  documentId: number
   /** Stops the run in flight, which rolls the document back. Resolves to
       whether the backend had one listed to stop. */
   onCancel: () => Promise<boolean>

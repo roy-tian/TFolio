@@ -25,7 +25,7 @@ type UseDocumentSearchOptions = {
   /** The tracked page, read when a run lands: the first match is the one
       nearest where the reader is, not where they were when typing began. */
   currentPage: CurrentPage
-  documentId: number | undefined
+  documentId: number
   documentPages: PdfPageInfo[]
   /** The panel's id in the DOM, which the input and result focus target. */
   sessionId: number
@@ -110,7 +110,7 @@ export function useDocumentSearch({
 
     const trimmed = query.trim()
 
-    if (!searchOpen || trimmed.length === 0 || !documentId) {
+    if (!searchOpen || trimmed.length === 0) {
       completedSearchRef.current = null
       setSearching(false)
 

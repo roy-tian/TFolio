@@ -362,7 +362,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             ),
           }
         : undefined,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       viewMode,
       viewerRef,
@@ -485,7 +485,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [selectAllPages, selectAllText, thumbnailsFocused, thumbnailsShown])
     const annotations = useAnnotations({
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       initial: movedSeed && { history: movedSeed.history, marks: movedSeed.marks },
       onAnnotateError: useCallback(
         (error?: unknown, command?: AnnotationCommand) => {
@@ -636,7 +636,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const search = useDocumentSearch({
       active,
       currentPage,
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       documentPages: pdfDocument.pages,
       sessionId: openedDocument.id,
       textEpochs: annotations.textEpochs,
@@ -663,26 +663,26 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const watermark = useWatermark({
       activeConfig: annotations.watermarkConfig,
       defaultText: t("watermark.defaultText"),
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       onCancel: annotations.cancelOperation,
       onSet: annotations.setWatermark,
-      pageCount: pdfDocument?.numPages ?? 0,
+      pageCount: pdfDocument.numPages,
     })
     const pageNumbers = usePageNumbers({
       activeConfig: annotations.pageNumbersConfig,
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       onCancel: annotations.cancelOperation,
       onSet: annotations.setPageNumbers,
-      pageCount: pdfDocument?.numPages ?? 0,
+      pageCount: pdfDocument.numPages,
     })
     // Named apart from the hooks so the window's keys and the toolbar's buttons
     // open the one dialog; both openers are stable.
     const openWatermarkDialog = watermark.openDialog
     const openPageNumbersDialog = pageNumbers.openDialog
     const print = usePrint({
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       onError: () => notice.raise("printFailed"),
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
     })
     const discardPrint = print.discard
     const startPrint = print.start
@@ -718,7 +718,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       finishTextDrag,
       onCommit: annotations.commit,
       opacity: HIGHLIGHT_OPACITY,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       selectable: textSelectable,
       viewerRef,
@@ -728,7 +728,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const rectTool = useRectTool({
       active: active && drawingRect,
       onCommit: annotations.commit,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       style: rectStyle,
       viewerRef,
@@ -738,7 +738,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useEraserTool({
       active: active && erasing,
       onErase: annotations.eraseAt,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       viewerRef,
     })
@@ -1255,7 +1255,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // export-only; one opened from bytes has no file to write back to at all.
     const hasOwnedContent =
       annotations.watermarkConfig !== null || annotations.pageNumbersConfig !== null
-    const hasSourceFile = Boolean(pdfDocument?.path)
+    const hasSourceFile = Boolean(pdfDocument.path)
     const canSave =
       hasSourceFile && annotations.isDirty && !hasOwnedContent && !hasMergedPages
     // Only where the reason is not already in front of the reader. Owned page
@@ -1414,7 +1414,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const submitPageNumber = (value: string) => {
       const requestedPage = Number(value)
 
-      if (!pdfDocument || !Number.isInteger(requestedPage)) {
+      if (!Number.isInteger(requestedPage)) {
         return
       }
 
@@ -1546,7 +1546,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         {/* Mounted while their tab is away too, only hidden: an export still
             running keeps its progress, its failure, and its busy guard. */}
-        {imageExportOpen && pdfDocument ? (
+        {imageExportOpen ? (
           <ImageExportDialog
             document={pdfDocument}
             hidden={!active}
@@ -1556,7 +1556,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           />
         ) : null}
 
-        {splitOpen && pdfDocument ? (
+        {splitOpen ? (
           <SplitPdfDialog
             document={pdfDocument}
             hidden={!active}
@@ -1566,7 +1566,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           />
         ) : null}
 
-        {compressOpen && pdfDocument ? (
+        {compressOpen ? (
           <CompressExportDialog
             document={pdfDocument}
             hidden={!active}
@@ -1643,7 +1643,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             <ZoomIndicator flash={zoom.zoomAnnouncement} percent={zoom.zoomPercent} />
             <ViewerControls
               bookApplies={bookApplies}
-              disabled={!pdfDocument}
               onChangeViewMode={changeViewMode}
               onRotate={() => setPageRotations(rotationsAfterRotate)}
               viewMode={viewMode}
@@ -1654,7 +1653,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         {/* Outside the viewer's scroll box, in the screen space it positions
             itself against — inside, it would scroll away with the page it is on. */}
-        {textNote.draft && pdfDocument?.pages[textNote.draft.pageNumber - 1] ? (
+        {textNote.draft && pdfDocument.pages[textNote.draft.pageNumber - 1] ? (
           <TextNoteEditor
             draft={textNote.draft}
             editorRef={textNote.editorRef}
@@ -1672,7 +1671,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         <SessionDialogs
           active={active}
-          pageCount={pdfDocument?.numPages ?? 0}
+          pageCount={pdfDocument.numPages}
           pageNumbers={pageNumbers}
           watermarkPreview={{
             document: pdfDocument,

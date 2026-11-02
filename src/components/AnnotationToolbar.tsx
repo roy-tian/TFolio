@@ -36,7 +36,6 @@ export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
-  disabled: boolean
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle, transient?: boolean) => void
@@ -49,7 +48,6 @@ type AnnotationToolbarProps = {
 
 export function AnnotationToolbar({
   activeTool,
-  disabled,
   highlightColor,
   onHighlightColorChange,
   onPageNumbers,
@@ -82,7 +80,6 @@ export function AnnotationToolbar({
               toolbarInkBarClassName,
               "size-7 min-w-7 border-r-transparent p-0 peer/highlight",
             )}
-            disabled={disabled}
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "highlight" : null)
             }
@@ -103,7 +100,6 @@ export function AnnotationToolbar({
                     splitMenuButtonClassName,
                     "peer-hover/highlight:before:opacity-100",
                   )}
-                  disabled={disabled}
                   size="icon-sm"
                   variant="ghost"
                 />
@@ -141,7 +137,6 @@ export function AnnotationToolbar({
               "size-7 min-w-7 border-r-transparent p-0 peer/rect",
               toolbarCenteredStripButtonClassName,
             )}
-            disabled={disabled}
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "rect" : null)
             }
@@ -166,7 +161,6 @@ export function AnnotationToolbar({
                     splitMenuButtonClassName,
                     "peer-hover/rect:before:opacity-100",
                   )}
-                  disabled={disabled}
                   size="icon-sm"
                   variant="ghost"
                 />
@@ -191,7 +185,6 @@ export function AnnotationToolbar({
               "size-7 min-w-7 p-0",
               toolbarCenteredStripButtonClassName,
             )}
-            disabled={disabled}
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "textNote" : null)
             }
@@ -213,7 +206,6 @@ export function AnnotationToolbar({
               "size-7 min-w-7 p-0",
               toolbarCenteredStripButtonClassName,
             )}
-            disabled={disabled}
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "eraser" : null)
             }
@@ -230,7 +222,6 @@ export function AnnotationToolbar({
           <Button
             aria-label={watermarkLabel}
             className="border-input"
-            disabled={disabled}
             onClick={onWatermark}
             size="icon-sm"
             variant="ghost"
@@ -246,7 +237,6 @@ export function AnnotationToolbar({
           <Button
             aria-label={pageNumbersLabel}
             className="border-input"
-            disabled={disabled}
             onClick={onPageNumbers}
             size="icon-sm"
             variant="ghost"

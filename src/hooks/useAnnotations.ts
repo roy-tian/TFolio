@@ -72,7 +72,7 @@ type StructureChangeHandler = (
 ) => void
 
 type UseAnnotationsOptions = {
-  documentId: number | undefined
+  documentId: number
   /** A moved tab's history and marks, replayed as this session's own: undo,
       the dirty flag, and the export-only refusals keep answering as they did
       in the window the tab came from. Read once, at the first mount. */
@@ -500,10 +500,6 @@ export function useAnnotations({
       } | null,
       onFailure: (error: unknown) => void,
     ) => {
-      if (documentId === undefined) {
-        return queueRef.current
-      }
-
       const generation = generationRef.current
 
       pendingRef.current += 1
@@ -579,10 +575,6 @@ export function useAnnotations({
       onApplied?: (epochs: RenderEpochs) => void,
       prepare?: () => Promise<boolean>,
     ) => {
-      if (documentId === undefined) {
-        return false
-      }
-
       // A drawing or note carries the page it was made on; a page-moving edit in
       // flight would land it on the wrong page. Refused rather than misplaced,
       // and said so: the reader's stroke is gone.
@@ -632,10 +624,6 @@ export function useAnnotations({
         history: AnnotationHistory,
       ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
     ): Promise<boolean> => {
-      if (documentId === undefined) {
-        return false
-      }
-
       let landed = false
 
       structurePendingRef.current += 1
@@ -701,10 +689,6 @@ export function useAnnotations({
       redo is what restores the undo's stash. */
   const duplicatePages = useCallback(
     async (sourcePages: number[], index: number, pageCount: number) => {
-      if (documentId === undefined) {
-        return false
-      }
-
       let landed = false
 
       structurePendingRef.current += 1
@@ -760,7 +744,7 @@ export function useAnnotations({
     async (pageNumber: number, point: PagePoint) => {
       // The same guard a drawing takes: a page-moving edit in flight is about
       // to renumber the page this hit test would name.
-      if (documentId === undefined || structurePendingRef.current > 0) {
+      if (structurePendingRef.current > 0) {
         return
       }
 
@@ -832,10 +816,6 @@ export function useAnnotations({
       pageCount: number,
       onProgress?: ProgressHandler,
     ): Promise<PdfLayerOutcome> => {
-      if (documentId === undefined) {
-        return "failed"
-      }
-
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
@@ -887,10 +867,6 @@ export function useAnnotations({
       pageCount: number,
       onProgress?: ProgressHandler,
     ): Promise<PdfLayerOutcome> => {
-      if (documentId === undefined) {
-        return "failed"
-      }
-
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
@@ -937,10 +913,6 @@ export function useAnnotations({
   /** The one gesture that reaches a rebuild in flight. `false` is a miss, not a
       failure — the ask came before the command listed itself, and is repeated. */
   const cancelOperation = useCallback(async () => {
-    if (documentId === undefined) {
-      return false
-    }
-
     try {
       return await invoke<boolean>("cancel_pdf_operation", { documentId })
     } catch {
@@ -1041,10 +1013,6 @@ export function useAnnotations({
   )
 
   const undoCommand = useCallback(async () => {
-    if (documentId === undefined) {
-      return
-    }
-
     await runHistoryStep(
       undo,
       (entry, onProgress) =>
@@ -1061,10 +1029,6 @@ export function useAnnotations({
   }, [documentId, mayShiftPages, onStructureChange, runHistoryStep])
 
   const redoCommand = useCallback(async () => {
-    if (documentId === undefined) {
-      return
-    }
-
     await runHistoryStep(
       redo,
       (entry, onProgress) =>
@@ -1085,10 +1049,6 @@ export function useAnnotations({
   const exportCopy = useCallback(
     async (suggestedName: string, filterLabel: string) => {
       let result: "saved" | "cancelled" | "failed" = "cancelled"
-
-      if (documentId === undefined) {
-        return result
-      }
 
       await enqueue(
         (current) => ({
@@ -1125,7 +1085,6 @@ export function useAnnotations({
   const exportArchive = useCallback(
     async (request: ArchiveExportRequest, onProgress: ProgressHandler) => {
       let outcome: "saved" | "cancelled" | "failed" = "cancelled"
-      if (documentId === undefined) return outcome
       await enqueue((current) => ({
         next: current,
         pages: [],
@@ -1153,7 +1112,6 @@ export function useAnnotations({
   const exportCompressed = useCallback(
     async (request: CompressedExportRequest, onProgress: ProgressHandler) => {
       let outcome: "saved" | "cancelled" | "failed" = "cancelled"
-      if (documentId === undefined) return outcome
       await enqueue((current) => ({
         next: current,
         pages: [],
@@ -1180,10 +1138,6 @@ export function useAnnotations({
       judged inside the queue, against the history it has actually reached. */
   const save = useCallback(async () => {
     let saved = true
-
-    if (documentId === undefined) {
-      return saved
-    }
 
     await enqueue(
       (current) =>

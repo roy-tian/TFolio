@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils"
 
 type PageNumberFieldProps = {
   currentPage: number
-  disabled: boolean
   /** Takes the typed text as it stands; a jump is the session's to clamp. */
   onSubmit: (value: string) => void
 }
@@ -14,7 +13,6 @@ type PageNumberFieldProps = {
 /** The page-number field, with the odometer drawn over its transparent text. */
 export function PageNumberField({
   currentPage,
-  disabled,
   onSubmit,
 }: PageNumberFieldProps) {
   const { t } = useTranslation()
@@ -40,12 +38,11 @@ export function PageNumberField({
       <input
         aria-label={t("toolbar.pageNumberInput")}
         className={cn(
-          "h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground",
+          "h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30",
           // The field holds the value for typed jumps and screen readers,
           // but the odometer does the drawing, over transparent text.
-          !focused && "text-transparent disabled:text-transparent",
+          !focused && "text-transparent",
         )}
-        disabled={disabled}
         inputMode="numeric"
         onBlur={() => {
           setFocused(false)
@@ -88,10 +85,7 @@ export function PageNumberField({
           forced colours un-hide the field's text, so this stands down. */}
       {focused ? null : (
         <PageOdometer
-          className={cn(
-            "pointer-events-none absolute inset-0 justify-center forced-colors:hidden",
-            disabled && "text-muted-foreground",
-          )}
+          className="pointer-events-none absolute inset-0 justify-center forced-colors:hidden"
           value={currentPage}
         />
       )}

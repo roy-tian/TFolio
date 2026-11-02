@@ -9,7 +9,6 @@ import { shortcuts } from "@/lib/shortcuts"
 
 type HistoryControlsProps = {
   canUndo: boolean
-  disabled: boolean
   nextUndo: AnnotationCommand | null
   onUndo: () => void
 }
@@ -19,7 +18,6 @@ type HistoryControlsProps = {
     keyboard's alone. */
 export function HistoryControls({
   canUndo,
-  disabled,
   nextUndo,
   onUndo,
 }: HistoryControlsProps) {
@@ -35,7 +33,7 @@ export function HistoryControls({
     <ToolbarTooltip label={undoLabel} shortcut={shortcuts.undo}>
       <Button
         aria-label={undoLabel}
-        disabled={disabled || !canUndo}
+        disabled={!canUndo}
         onClick={onUndo}
         size="icon-sm"
         variant="outline"

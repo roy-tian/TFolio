@@ -13,7 +13,7 @@ import {
 
 type UsePageNumbersOptions = {
   activeConfig: PageNumbersConfig | null
-  documentId?: number
+  documentId: number
   /** Stops the run in flight, which rolls the document back. Resolves to
       whether the backend had one listed to stop. */
   onCancel: () => Promise<boolean>

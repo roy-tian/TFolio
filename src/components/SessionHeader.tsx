@@ -33,7 +33,7 @@ type SessionHeaderProps = {
   annotations: ReturnType<typeof useAnnotations>
   appMenu: ReactNode
   canSave: boolean
-  document: PdfDocumentInfo | null
+  document: PdfDocumentInfo
   macOS: boolean
   onCompress: () => void
   onExportImages: () => void
@@ -96,13 +96,11 @@ export function SessionHeader({
         <>
           <HistoryControls
             canUndo={annotations.canUndo}
-            disabled={!pdfDocument}
             nextUndo={annotations.nextUndo}
             onUndo={onUndo}
           />
           <AnnotationToolbar
             activeTool={tool.activeTool}
-            disabled={!pdfDocument}
             highlightColor={tool.highlightColor}
             onHighlightColorChange={tool.onHighlightColorChange}
             onPageNumbers={tool.onPageNumbers}
@@ -118,7 +116,6 @@ export function SessionHeader({
                 aria-label={t("search.open")}
                 className="size-7 min-w-7 p-0"
                 data-slot="pdf-search-trigger"
-                disabled={!pdfDocument}
                 onPressedChange={(pressed) => {
                   if (pressed) {
                     onSearchOpen()
@@ -157,7 +154,6 @@ export function SessionHeader({
                         "peer-hover/save:before:opacity-100",
                       )}
                       data-slot="pdf-save-menu-trigger"
-                      disabled={!pdfDocument}
                       size="icon-sm"
                       variant="outline"
                     />
@@ -196,7 +192,7 @@ export function SessionHeader({
       <PageStatus
         currentPage={page.current}
         onSubmit={page.onSubmit}
-        pageCount={pdfDocument?.numPages}
+        pageCount={pdfDocument.numPages}
       />
     </ToolbarFrame>
   )
@@ -262,8 +258,7 @@ export function ToolbarFrame({
 type PageStatusProps = {
   currentPage: CurrentPage
   onSubmit: (value: string) => void
-  /** Absent until a document is open. */
-  pageCount: number | undefined
+  pageCount: number
 }
 
 /** The one part of the toolbar that follows scrolling, so the only part that
@@ -271,7 +266,7 @@ type PageStatusProps = {
 function PageStatus({ currentPage, onSubmit, pageCount }: PageStatusProps) {
   const { t } = useTranslation()
   const current = useCurrentPage(currentPage)
-  const status = t("toolbar.pageStatus", { current, total: pageCount ?? 0 })
+  const status = t("toolbar.pageStatus", { current, total: pageCount })
 
   return (
     <div
@@ -282,11 +277,10 @@ function PageStatus({ currentPage, onSubmit, pageCount }: PageStatusProps) {
     >
       <PageNumberField
         currentPage={current}
-        disabled={pageCount === undefined}
         onSubmit={onSubmit}
       />
       <span className="text-muted-foreground">/</span>
-      <span>{pageCount ?? 0}</span>
+      <span>{pageCount}</span>
       <span aria-live="polite" className="sr-only">
         {status}
       </span>

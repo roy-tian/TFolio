@@ -18,14 +18,12 @@ const options: Array<{
 
 type ViewModeToggleProps = {
   bookApplies: boolean
-  disabled: boolean
   onChange: (mode: ViewMode) => void
   value: ViewMode
 }
 
 export function ViewModeToggle({
   bookApplies,
-  disabled,
   onChange,
   value,
 }: ViewModeToggleProps) {
@@ -34,7 +32,6 @@ export function ViewModeToggle({
   return (
     <ToggleGroup
       aria-label={t("toolbar.viewMode")}
-      disabled={disabled}
       onValueChange={([next]) => {
         // Base UI empties the array when the active item is pressed again, but
         // a view mode always has to stay selected.
