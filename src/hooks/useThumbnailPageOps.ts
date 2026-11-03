@@ -128,13 +128,8 @@ export function useThumbnailPageOps({
       })
   }
 
-  const reorderPages = (order: number[]) => {
-    if (editingBusy()) {
-      return
-    }
-
-    void annotations.reorderPages(order)
-  }
+  const reorderPages = (order: number[]) =>
+    editingBusy() ? Promise.resolve(false) : annotations.reorderPages(order)
 
   return {
     deleteThumbnailPage,

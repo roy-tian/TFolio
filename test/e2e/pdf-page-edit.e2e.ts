@@ -191,6 +191,40 @@ function dragThumbBefore(from: number, target: number) {
   )
 }
 
+/** A drag that carries a page over the column and then off it, beside the
+    sidebar, before letting go there. */
+function dragThumbAway(from: number, over: number) {
+  return browser.execute(
+    (fromSelector: string, overSelector: string) => {
+      const source = document.querySelector(fromSelector)!
+      const fromBox = source.getBoundingClientRect()
+      const overBox = document.querySelector(overSelector)!.getBoundingClientRect()
+      const start = { x: fromBox.left + fromBox.width / 2, y: fromBox.top + fromBox.height / 2 }
+      const away = { x: overBox.right + 400, y: overBox.top + 6 }
+      const move = (x: number, y: number) =>
+        document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: x, clientY: y }))
+
+      source.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: start.x,
+          clientY: start.y,
+          isPrimary: true,
+        }),
+      )
+      move(start.x, start.y + 12)
+      move(start.x, overBox.top + 6)
+      move(away.x, away.y)
+      document.dispatchEvent(
+        new PointerEvent("pointerup", { bubbles: true, clientX: away.x, clientY: away.y }),
+      )
+    },
+    preview(from),
+    preview(over),
+  )
+}
+
 const pageInput = () => $("input[aria-label='Page number']")
 
 describe("TFolio page editing in the sidebar", () => {
@@ -340,6 +374,39 @@ describe("TFolio page editing in the sidebar", () => {
     await browser.keys(["Control", "z"])
     await waitForThumb(2, second!)
     await waitForThumb(4, fourth!)
+  })
+
+  it("puts a page back that is let go beside the column", async () => {
+    await openPdfFromDisk("put-back.pdf", bandedPdf(4))
+    const painted = await paintedFingerprints(4)
+
+    await dragThumbAway(1, 3)
+    // The ghost flies home before the drag lets the column go.
+    await browser.waitUntil(
+      async () =>
+        browser.execute(
+          () =>
+            !document.querySelector("[data-drag-ghost]") &&
+            !document.querySelector("[data-drag-hole]"),
+        ),
+      { timeoutMsg: "the drag never settled" },
+    )
+    // A reorder still in flight shows in this order alone: until it lands, each
+    // preview keeps its old page number, and with it its old fingerprint.
+    expect(
+      await browser.execute(
+        (scope: string) =>
+          Array.from(
+            document.querySelectorAll(`${scope} button[data-thumbnail-page]`),
+            (button) => Number(button.getAttribute("data-thumbnail-page")),
+          ),
+        activeSidebar,
+      ),
+    ).toEqual([1, 2, 3, 4])
+
+    for (const [index, fingerprint] of painted.entries()) {
+      expect(await thumbFingerprint(index + 1)).toBe(fingerprint)
+    }
   })
 
   it("saves the edited structure into the file itself", async () => {

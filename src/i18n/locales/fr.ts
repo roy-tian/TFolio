@@ -475,8 +475,6 @@ const fr = {
     pageLabel: "Page {{pageNumber}} de {{name}}",
     blankPage: "Page blanche",
     padding: "Page blanche ajoutée pour que le fichier suivant commence sur une page impaire",
-    movingPages_one: "Déplacement de {{count}} page",
-    movingPages_other: "Déplacement de {{count}} pages",
     rotate: "Faire pivoter vers la droite",
     rotateLeft_one: "Faire pivoter la page vers la gauche",
     rotateLeft_other: "Faire pivoter {{count}} pages vers la gauche",

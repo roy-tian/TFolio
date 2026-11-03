@@ -472,8 +472,6 @@ const en = {
     pageLabel: "Page {{pageNumber}} of {{name}}",
     blankPage: "Blank page",
     padding: "A blank page added so the next file starts on an odd page",
-    movingPages_one: "Moving {{count}} page",
-    movingPages_other: "Moving {{count}} pages",
     rotate: "Rotate clockwise",
     rotateLeft_one: "Rotate page counterclockwise",
     rotateLeft_other: "Rotate {{count}} pages counterclockwise",

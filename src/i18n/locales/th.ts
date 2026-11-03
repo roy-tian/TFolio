@@ -473,8 +473,6 @@ const th = {
     pageLabel: "หน้า {{pageNumber}} ของ {{name}}",
     blankPage: "หน้าว่าง",
     padding: "หน้าว่างที่เพิ่มให้ไฟล์ถัดไปเริ่มที่หน้าคี่",
-    movingPages_one: "กำลังย้าย {{count}} หน้า",
-    movingPages_other: "กำลังย้าย {{count}} หน้า",
     rotate: "หมุนตามเข็มนาฬิกา",
     rotateLeft_one: "หมุน {{count}} หน้าทวนเข็มนาฬิกา",
     rotateLeft_other: "หมุน {{count}} หน้าทวนเข็มนาฬิกา",

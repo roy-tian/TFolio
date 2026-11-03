@@ -471,8 +471,6 @@ const zhTW = {
     pageLabel: "{{name}} 第 {{pageNumber}} 頁",
     blankPage: "空白頁",
     padding: "自動補上的空白頁，讓下一個檔案從奇數頁開始",
-    movingPages_one: "移動 {{count}} 頁",
-    movingPages_other: "移動 {{count}} 頁",
     rotate: "順時針旋轉",
     rotateLeft_one: "逆時針旋轉 {{count}} 頁",
     rotateLeft_other: "逆時針旋轉 {{count}} 頁",

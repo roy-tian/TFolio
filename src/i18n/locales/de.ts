@@ -475,8 +475,6 @@ const de = {
     pageLabel: "Seite {{pageNumber}} von {{name}}",
     blankPage: "Leere Seite",
     padding: "Leere Seite, damit die nächste Datei auf einer ungeraden Seite beginnt",
-    movingPages_one: "{{count}} Seite wird verschoben",
-    movingPages_other: "{{count}} Seiten werden verschoben",
     rotate: "Im Uhrzeigersinn drehen",
     rotateLeft_one: "Seite gegen den Uhrzeigersinn drehen",
     rotateLeft_other: "{{count}} Seiten gegen den Uhrzeigersinn drehen",

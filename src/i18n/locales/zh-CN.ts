@@ -454,8 +454,6 @@ const zhCN = {
     pageLabel: "{{name}} 第 {{pageNumber}} 页",
     blankPage: "空白页",
     padding: "自动补的空白页，让下一个文件从奇数页开始",
-    movingPages_one: "移动 {{count}} 页",
-    movingPages_other: "移动 {{count}} 页",
     rotate: "顺时针旋转",
     rotateLeft_one: "逆时针旋转 {{count}} 页",
     rotateLeft_other: "逆时针旋转 {{count}} 页",

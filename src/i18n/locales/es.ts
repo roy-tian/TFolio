@@ -474,8 +474,6 @@ const es = {
     pageLabel: "Página {{pageNumber}} de {{name}}",
     blankPage: "Página en blanco",
     padding: "Página en blanco añadida para que el siguiente archivo empiece en una página impar",
-    movingPages_one: "Moviendo {{count}} página",
-    movingPages_other: "Moviendo {{count}} páginas",
     rotate: "Girar a la derecha",
     rotateLeft_one: "Girar la página a la izquierda",
     rotateLeft_other: "Girar {{count}} páginas a la izquierda",

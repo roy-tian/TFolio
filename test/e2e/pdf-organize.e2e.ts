@@ -181,6 +181,57 @@ describe("TFolio organize workspace", () => {
     expect(shapes).toEqual(["tall", "wide", "tall", "wide", "wide"])
   })
 
+  it("drags a page into another file, in before the page it is let go on", async () => {
+    await organizeWith([portrait(), landscape()])
+
+    await browser.execute(
+      (fromSelector: string, ontoSelector: string) => {
+        const source = document.querySelector(fromSelector)!
+        const fromBox = source.getBoundingClientRect()
+        const ontoBox = document.querySelector(ontoSelector)!.getBoundingClientRect()
+        const start = { x: fromBox.left + fromBox.width / 2, y: fromBox.top + fromBox.height / 2 }
+        // The page's left half: the stack goes in ahead of it.
+        const onto = { x: ontoBox.left + 8, y: ontoBox.top + ontoBox.height / 2 }
+
+        source.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            button: 0,
+            clientX: start.x,
+            clientY: start.y,
+            isPrimary: true,
+          }),
+        )
+        document.dispatchEvent(
+          new PointerEvent("pointermove", { bubbles: true, clientX: start.x + 12, clientY: start.y }),
+        )
+        document.dispatchEvent(
+          new PointerEvent("pointermove", { bubbles: true, clientX: onto.x, clientY: onto.y }),
+        )
+        document.dispatchEvent(
+          new PointerEvent("pointerup", { bubbles: true, clientX: onto.x, clientY: onto.y }),
+        )
+      },
+      `${workspace} [data-slot-key] button[aria-label='Page 1 of landscape']`,
+      `${workspace} [data-slot-key] button[aria-label='Page 2 of portrait']`,
+    )
+
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(await slotLabels("portrait")) ===
+        JSON.stringify(["Page 1 of portrait", "Page 1 of landscape", "Page 2 of portrait"]),
+      { timeout: 10_000, timeoutMsg: "the dragged page never moved into the other file" },
+    )
+    expect(await slotLabels("landscape")).toEqual([
+      "Page 2 of landscape",
+      "Page 3 of landscape",
+    ])
+    await browser.waitUntil(
+      async () => browser.execute(() => !document.querySelector("[data-drag-hole]")),
+      { timeoutMsg: "the dropped page stayed a hole" },
+    )
+  })
+
   it("deletes, turns and inserts pages, each one undo away", async () => {
     await organizeWith([portrait()])
 

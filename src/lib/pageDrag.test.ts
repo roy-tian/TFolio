@@ -1,10 +1,13 @@
 import { describe, expect, it } from "bun:test"
 
 import {
+  columnLanding,
   dropGapForRow,
   exceedsDragThreshold,
+  flowCellAt,
   indexAfterMove,
   orderAfterMove,
+  orderWithBlockAt,
 } from "@/lib/pageDrag"
 
 describe("exceedsDragThreshold", () => {
@@ -68,3 +71,70 @@ describe("indexAfterMove", () => {
   })
 })
 
+
+describe("orderWithBlockAt", () => {
+  it("puts the block among the pages that stay, in page order", () => {
+    expect(orderWithBlockAt([4], 1, 5)).toEqual([1, 4, 2, 3, 5])
+    expect(orderWithBlockAt([5, 2], 0, 5)).toEqual([2, 5, 1, 3, 4])
+    expect(orderWithBlockAt([1, 2], 3, 5)).toEqual([3, 4, 5, 1, 2])
+  })
+
+  it("answers the identity for a block landing where it stands", () => {
+    expect(orderWithBlockAt([2, 3], 1, 5)).toEqual([1, 2, 3, 4, 5])
+  })
+})
+
+describe("columnLanding", () => {
+  const rows = [
+    { height: 40, moving: false, top: 0 },
+    { height: 40, moving: true, top: 50 },
+    { height: 40, moving: false, top: 100 },
+  ]
+
+  it("lands before or after the staying row under the pointer", () => {
+    expect(columnLanding(-30, rows, null)).toBe(0)
+    expect(columnLanding(30, rows, null)).toBe(1)
+    expect(columnLanding(105, rows, null)).toBe(1)
+    expect(columnLanding(300, rows, null)).toBe(2)
+  })
+
+  it("splits the gap between rows halfway", () => {
+    expect(columnLanding(44, rows, 7)).toBe(1)
+    expect(columnLanding(46, rows, 7)).toBe(7)
+  })
+
+  it("keeps the landing while the pointer is over the block's holes", () => {
+    expect(columnLanding(70, rows, 2)).toBe(2)
+    expect(columnLanding(70, rows, null)).toBeNull()
+  })
+})
+
+describe("flowCellAt", () => {
+  // Two lines: three cells, then a narrower and a wider one.
+  const cells = [
+    { height: 100, left: 0, top: 0, width: 80 },
+    { height: 100, left: 100, top: 0, width: 80 },
+    { height: 60, left: 200, top: 40, width: 120 },
+    { height: 100, left: 0, top: 120, width: 60 },
+    { height: 60, left: 80, top: 160, width: 120 },
+  ]
+
+  it("finds the cell and its half under the pointer", () => {
+    expect(flowCellAt({ x: 10, y: 50 }, cells)).toEqual({ after: false, index: 0 })
+    expect(flowCellAt({ x: 170, y: 50 }, cells)).toEqual({ after: true, index: 1 })
+    expect(flowCellAt({ x: 150, y: 200 }, cells)).toEqual({ after: true, index: 4 })
+  })
+
+  it("gives gaps and the space past a line's end to the nearest cell", () => {
+    expect(flowCellAt({ x: 85, y: 50 }, cells)).toEqual({ after: true, index: 0 })
+    expect(flowCellAt({ x: 95, y: 50 }, cells)).toEqual({ after: false, index: 1 })
+    expect(flowCellAt({ x: 600, y: 50 }, cells)).toEqual({ after: true, index: 2 })
+    expect(flowCellAt({ x: 600, y: 900 }, cells)).toEqual({ after: true, index: 4 })
+    expect(flowCellAt({ x: 10, y: 109 }, cells)).toEqual({ after: false, index: 0 })
+    expect(flowCellAt({ x: 10, y: 111 }, cells)).toEqual({ after: false, index: 3 })
+  })
+
+  it("has nothing to answer in an empty flow", () => {
+    expect(flowCellAt({ x: 0, y: 0 }, [])).toBeNull()
+  })
+})

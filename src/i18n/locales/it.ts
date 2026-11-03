@@ -473,8 +473,6 @@ const it = {
     pageLabel: "Pagina {{pageNumber}} di {{name}}",
     blankPage: "Pagina vuota",
     padding: "Pagina vuota aggiunta perché il file successivo inizi su una pagina dispari",
-    movingPages_one: "Spostamento di {{count}} pagina",
-    movingPages_other: "Spostamento di {{count}} pagine",
     rotate: "Ruota in senso orario",
     rotateLeft_one: "Ruota la pagina in senso antiorario",
     rotateLeft_other: "Ruota {{count}} pagine in senso antiorario",
