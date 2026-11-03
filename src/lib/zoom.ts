@@ -1,13 +1,15 @@
 import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import { dimensionsForRotation, MAX_PAGE_WIDTH, type PdfPageInfo } from "@/lib/pdf"
 
-// `auto` is the sizing a document opens with and is not one of the modes the fit
-// button cycles through: the reader never picks it, they only ever leave it.
+// `auto` is the sizing a document opens with and has no toolbar toggle: the
+// reader never picks it, they only ever leave it.
 export type ZoomMode = "auto" | "custom" | "fit-page" | "fit-width"
 
+/** The sizings the toolbar names. Actual size is a custom scale of 1, not a mode. */
+export type ZoomPreset = "actual-size" | "fit-page" | "fit-width"
+
 export type ZoomState = {
-  // Only read in "custom" mode, but kept across a stint in a fit mode so that
-  // returning to an explicit zoom resumes where the reader left it.
+  // Only read in "custom" mode; every way back to it sets a fresh scale.
   customScale: number
   // The page a fit measures itself against, fixed at the one the reader asked
   // from: re-fitting on the way past another size would resize every page.
@@ -58,6 +60,29 @@ export const ZOOM_PREVIEW_EVENT = "tfolio:zoom-preview"
 
 export function clampZoom(scale: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale))
+}
+
+// The zoom slider moves in twentieths of a doubling: equal travel is an equal
+// ratio at 30% as at 300%, and 100% falls on a step (0).
+const SLIDER_STEPS_PER_DOUBLING = 20
+
+/** Whole steps, so stepping from either end still lands on 100%. */
+export const ZOOM_SLIDER_MIN = Math.ceil(Math.log2(MIN_ZOOM) * SLIDER_STEPS_PER_DOUBLING)
+export const ZOOM_SLIDER_MAX = Math.floor(Math.log2(MAX_ZOOM) * SLIDER_STEPS_PER_DOUBLING)
+
+export function zoomToSliderValue(scale: number) {
+  const value = Math.log2(clampZoom(scale)) * SLIDER_STEPS_PER_DOUBLING
+
+  return Math.min(ZOOM_SLIDER_MAX, Math.max(ZOOM_SLIDER_MIN, value))
+}
+
+/** The first step stands for MIN_ZOOM itself, which lies just short of it. */
+export function sliderValueToZoom(value: number) {
+  if (value <= ZOOM_SLIDER_MIN) {
+    return MIN_ZOOM
+  }
+
+  return clampZoom(2 ** (value / SLIDER_STEPS_PER_DOUBLING))
 }
 
 export function zoomToPercent(scale: number) {
@@ -284,14 +309,18 @@ export function applyWheelZoom(scale: number, delta: number) {
   return clampZoom(scale * Math.exp(-delta * WHEEL_SENSITIVITY))
 }
 
-/**
- * Anything but fit-page offers fit-page, the order a browser's own viewer
- * cycles in: a press from an arbitrary zoom puts the whole page back in view.
- */
-export function nextFitMode(mode: ZoomMode): "fit-page" | "fit-width" {
-  return mode === "fit-page" ? "fit-width" : "fit-page"
+export function isZoomPreset(value: unknown): value is ZoomPreset {
+  return value === "actual-size" || value === "fit-page" || value === "fit-width"
 }
 
-export function isFitActive(mode: ZoomMode) {
-  return mode === "fit-page" || mode === "fit-width"
+/**
+ * Read off the percent shown rather than the mode, so stepping or wheeling onto
+ * 100% presses actual size too; any other custom level presses nothing.
+ */
+export function activeZoomPreset(mode: ZoomMode, percent: number): ZoomPreset | null {
+  if (mode === "fit-page" || mode === "fit-width") {
+    return mode
+  }
+
+  return percent === 100 ? "actual-size" : null
 }

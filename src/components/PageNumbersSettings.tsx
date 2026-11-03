@@ -1,5 +1,5 @@
 import { Info, Sparkles } from "lucide-react"
-import { useId, type ReactNode } from "react"
+import { useId, type ReactNode, type Ref } from "react"
 import { useTranslation } from "react-i18next"
 
 import { PageNumbersPreview } from "@/components/PageNumbersPreview"
@@ -117,6 +117,7 @@ type PageNumbersSettingsProps = {
   idPrefix?: string
   onDraftChange: (draft: PageNumbersDraft) => void
   pageCount: number
+  ref?: Ref<HTMLDivElement>
   validationError: PageNumbersValidationError | null
 }
 
@@ -127,6 +128,7 @@ export function PageNumbersSettings({
   idPrefix = "page-numbers",
   onDraftChange,
   pageCount,
+  ref,
   validationError,
 }: PageNumbersSettingsProps) {
   const { t } = useTranslation()
@@ -152,7 +154,7 @@ export function PageNumbersSettings({
   return (
     // From `sm` the sheet sticks, so it stays in view while the controls pass
     // it; natural heights keep short content from earning a scrollbar.
-    <div className={cn("flex flex-col gap-5 sm:flex-row", className)}>
+    <div className={cn("flex flex-col gap-5 sm:flex-row", className)} ref={ref}>
       <Field className="sm:sticky sm:top-0 sm:w-[12rem] sm:shrink-0 sm:self-start">
         <FieldLabel>{t("pageNumbers.preview")}</FieldLabel>
         <PageNumbersPreview

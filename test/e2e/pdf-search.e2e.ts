@@ -170,7 +170,7 @@ describe("TFolio PDF search", () => {
     for (let rung = 0; rung < 7; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
     }
-    await expect($("[data-slot='button-group'][aria-label^='Zoom ']"))
+    await expect($("[data-slot='zoom-controls']"))
       .toHaveAttribute("aria-label", "Zoom 125%")
     await browser.pause(800)
     await browser.execute(() => {

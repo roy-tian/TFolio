@@ -14,7 +14,7 @@ import { pngDataUrl, printDpi, printRenderWidth } from "@/lib/printSheet"
 import type { PdfProgress } from "@/lib/progress"
 
 type PrintOptions = {
-  documentId: number | undefined
+  documentId: number
   onError: () => void
   pages: PdfPageInfo[]
 }
@@ -51,7 +51,7 @@ export function usePrint({
   }, [])
 
   const start = useCallback(async () => {
-    if (documentId === undefined || pages.length === 0) {
+    if (pages.length === 0) {
       return
     }
 

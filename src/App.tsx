@@ -22,7 +22,6 @@ import {
 } from "@/components/SettingsDialog"
 import { ToolbarFrame } from "@/components/SessionHeader"
 import { UpdateInstallDialog } from "@/components/UpdateInstallDialog"
-import { WindowControls } from "@/components/WindowControls"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,7 +80,12 @@ import {
   type RecentFile,
   type RecentPdfView,
 } from "@/lib/recentFiles"
-import { matchesShortcut, shortcuts, type Shortcut } from "@/lib/shortcuts"
+import {
+  matchesShortcut,
+  shortcuts,
+  zoomShortcut,
+  type Shortcut,
+} from "@/lib/shortcuts"
 import {
   fetchWindowRects,
   globalPointFrom,
@@ -1418,6 +1422,32 @@ export default function App() {
     return () => document.removeEventListener("keydown", printDocument)
   }, [macOS])
 
+  // Only a document tab's pages zoom; a dialog in front takes the keys from them.
+  useEffect(() => {
+    const zoomDocument = (event: KeyboardEvent) => {
+      const action = event.defaultPrevented ? null : zoomShortcut(event, macOS)
+
+      if (!action) {
+        return
+      }
+
+      event.preventDefault()
+
+      if (hasLayerOverWorkspace()) {
+        return
+      }
+
+      const tabId = shownTabId()
+      if (tabId !== HOME_TAB_ID) {
+        sessionRefs.current.get(tabId)?.zoom(action)
+      }
+    }
+
+    document.addEventListener("keydown", zoomDocument)
+
+    return () => document.removeEventListener("keydown", zoomDocument)
+  }, [macOS])
+
   // The WebView's select-all takes the whole interface, never what a reader
   // means; consumed everywhere, answered only by a document tab.
   useEffect(() => {
@@ -1997,14 +2027,14 @@ export default function App() {
         // The document tools — bookmarks, view mode — have no document to act
         // on here, so the home toolbar carries only what still works.
         <>
-          <AppSidebar macOS={macOS} menu={<AppMenu {...menuActions} />}>
+          <AppSidebar macOS={macOS}>
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               {t("sidebar.noDocument")}
             </p>
           </AppSidebar>
           <ToolbarFrame
+            active
             appMenu={<AppMenu {...menuActions} />}
-            end={macOS ? null : <WindowControls />}
             macOS={macOS}
           />
         </>

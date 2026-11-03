@@ -54,7 +54,7 @@ describe("PDF scrolling", () => {
     })
   }
 
-  it("gives the pages the sidebar's width when it is hidden, and moves the menu to the toolbar", async () => {
+  it("gives the pages the sidebar's width when it is hidden, and keeps the menu in the toolbar", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
     await openPdfFromDisk("sidebar-toggle.pdf", minimalPdf(3, "0 0 595 842"))
@@ -64,58 +64,174 @@ describe("PDF scrolling", () => {
     const viewerLeft = () => browser.execute((scope: string) =>
       document.querySelector(`${scope} [data-pdf-scroll-root]`)!.getBoundingClientRect().left, session)
     const toolbarMenu = $(`${session} [data-slot='toolbar'] [data-slot='app-menu']`)
+    // The menu ends the bar, just before the window controls (this suite runs on Linux only).
+    const menuEndsToolbar = () => browser.execute((scope: string) => {
+      const menu = document.querySelector(`${scope} [data-slot='toolbar'] [data-slot='app-menu']`)!
+      const next = menu.closest("[data-slot='toolbar'] > div > *")?.nextElementSibling
+      return next?.getAttribute("data-slot") === "window-controls"
+    }, session)
 
     expect(await viewerLeft()).toBeGreaterThan(200)
-    await expect(toolbarMenu).not.toBeExisting()
+    await expect(toolbarMenu).toBeDisplayed()
+    await expect($(`${session} [data-slot='app-sidebar'] [data-slot='app-menu']`)).not.toBeExisting()
+    expect(await menuEndsToolbar()).toBe(true)
 
     await $(`${session} [data-slot='app-sidebar'] button[aria-label='Hide sidebar']`).click()
     await expect($(`${session} [data-slot='app-sidebar']`)).not.toBeExisting()
     await browser.waitUntil(async () => (await viewerLeft()) === 0)
     await expect(toolbarMenu).toBeDisplayed()
+    expect(await menuEndsToolbar()).toBe(true)
 
     await $(`${session} [data-slot='toolbar'] button[aria-label='Show sidebar']`).click()
     await expect($(`${session} [data-slot='app-sidebar']`)).toBeDisplayed()
-    await expect(toolbarMenu).not.toBeExisting()
+    await expect(toolbarMenu).toBeDisplayed()
   })
 
-  // Fitted beside a bar that comes and goes, a document whose height straddles
-  // the viewer's summons the bar, narrows, dismisses it, and widens, every frame.
-  it("fits pages to one width whether or not the scrollbar shows", async () => {
-    await seedSettings({ ui: { language: "en", viewMode: "book" } })
+  // The browser keeps the scroll offset, so a page wider than the viewer would
+  // ride the viewer's left edge across the sidebar's whole width.
+  it("keeps a page wider than the viewer centred as the sidebar hides and shows", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
-    await openPdfFromDisk("gutter-fit.pdf", minimalPdf(2, "0 0 595 842"))
+    await openPdfFromDisk("sidebar-centre.pdf", minimalPdf(3, "0 0 595 842"))
     await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
 
-    const fitted = () => browser.execute(() => {
-      const viewer = document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-      const page = viewer.querySelector("[data-page-number='1']")!
+    const session = "[data-document-session][data-active='true']"
+    await $(`${session} button[aria-label='Actual size']`).click()
+    for (let rung = 0; rung < 3; rung += 1) {
+      await $(`${session} button[aria-label='Zoom in']`).click()
+    }
+    await expect($(`${session} [data-slot='zoom-controls']`))
+      .toHaveAttribute("aria-label", "Zoom 200%")
+
+    const centring = () => browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      const box = viewer.getBoundingClientRect()
+      const page = viewer.querySelector("[data-page-number='1']")!.getBoundingClientRect()
 
       return {
-        gutter: viewer.offsetWidth - viewer.clientWidth,
-        width: page.getBoundingClientRect().width,
+        left: box.left,
+        offCentre: page.left + page.width / 2 - (box.left + viewer.clientWidth / 2),
+        overflow: viewer.scrollWidth - viewer.clientWidth,
       }
+    }, session)
+
+    await browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      viewer.scrollLeft = (viewer.scrollWidth - viewer.clientWidth) / 2
+    }, session)
+    const shown = await centring()
+    expect(shown.overflow).toBeGreaterThan(0)
+    expect(Math.abs(shown.offCentre)).toBeLessThanOrEqual(1)
+
+    await $(`${session} [data-slot='app-sidebar'] button[aria-label='Hide sidebar']`).click()
+    await browser.waitUntil(async () => (await centring()).left < shown.left)
+    const hidden = await centring()
+    expect(hidden.overflow).toBeGreaterThan(0)
+    expect(Math.abs(hidden.offCentre)).toBeLessThanOrEqual(1)
+
+    await $(`${session} [data-slot='toolbar'] button[aria-label='Show sidebar']`).click()
+    await browser.waitUntil(async () => (await centring()).left > hidden.left)
+    expect(Math.abs((await centring()).offCentre)).toBeLessThanOrEqual(1)
+  })
+
+  // Everywhere but macOS the app lays its own bar over the pages: no gutter takes
+  // width from them, so nothing re-fits as a bar comes and goes.
+  it("lays its own scrollbar over the pages", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("overlay-bar.pdf", bandedPdf(12))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+
+    const session = "[data-document-session][data-active='true']"
+    const bar = () => browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      const root = viewer.parentElement!.querySelector<HTMLElement>(
+        ":scope > [data-slot='overlay-scrollbars']",
+      )!
+      const track = root.querySelector<HTMLElement>("[data-axis='y']")!
+      const box = track.getBoundingClientRect()
+      const thumb = track.firstElementChild!.getBoundingClientRect()
+
+      return {
+        centre: { x: thumb.left + thumb.width / 2, y: thumb.top + thumb.height / 2 },
+        expanded: track.dataset.expanded !== undefined,
+        gutter: viewer.offsetWidth - viewer.clientWidth,
+        maxScroll: viewer.scrollHeight - viewer.clientHeight,
+        scrollPerPixel:
+          (viewer.scrollHeight - viewer.clientHeight) / (box.height - thumb.height),
+        scrollTop: viewer.scrollTop,
+        shown: root.dataset.visible !== undefined,
+        trackHidden: track.hidden,
+        // 0 with the thumb at the top of its travel, 1 at the bottom.
+        travel: (thumb.top - box.top) / (box.height - thumb.height),
+      }
+    }, session)
+    const wheelOverBar = (init: WheelEventInit) => browser.execute(
+      (scope: string, init: WheelEventInit) => {
+        const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+        viewer.parentElement!
+          .querySelector(":scope > [data-slot='overlay-scrollbars'] [data-axis='y']")!
+          .dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ...init }))
+      },
+      session,
+      init,
+    )
+
+    const resting = await bar()
+    expect(resting.gutter).toBe(0)
+    expect(resting.trackHidden).toBe(false)
+    expect(resting.maxScroll).toBeGreaterThan(0)
+
+    await browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      viewer.scrollTop = Math.round((viewer.scrollHeight - viewer.clientHeight) / 2)
+    }, session)
+    await browser.waitUntil(async () => (await bar()).shown, {
+      timeoutMsg: "scrolling never showed the bar",
     })
-    const setOverflowY = (value: "hidden" | "scroll") => browser.execute((overflowY: string) => {
-      document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!.style.overflowY = overflowY
-    }, value)
+    expect((await bar()).travel).toBeCloseTo(0.5, 1)
+    await browser.waitUntil(async () => !(await bar()).shown, {
+      timeout: 3000,
+      timeoutMsg: "the bar never faded once the scroll stopped",
+    })
 
+    // Pointed at, the thumb widens; dragged, it carries the pages along.
+    const offset = await calibratePointer()
+    const grabbed = await bar()
+    const at = { x: grabbed.centre.x + offset.x, y: grabbed.centre.y + offset.y }
+    pointer(at)
+    await browser.waitUntil(async () => (await bar()).expanded, {
+      timeoutMsg: "pointing at the bar never widened it",
+    })
+    pointer({ down: true })
     try {
-      await setOverflowY("scroll")
-      await browser.waitUntil(async () => (await fitted()).gutter === 12)
-      await browser.pause(300)
-      const beside = await fitted()
-
-      await setOverflowY("hidden")
-      await browser.waitUntil(async () => (await fitted()).gutter === 0)
-      // Room for a re-fit to land, were pages fitted to the client width.
-      await browser.pause(300)
-      expect((await fitted()).width).toBe(beside.width)
+      pointer({ x: at.x, y: at.y + 20 })
+      pointer({ x: at.x, y: at.y + 40 })
+      await browser.waitUntil(async () => {
+        const moved = (await bar()).scrollTop - grabbed.scrollTop
+        return Math.abs(moved - 40 * grabbed.scrollPerPixel) <= 2 * grabbed.scrollPerPixel
+      }, { timeoutMsg: "dragging the thumb never carried the pages along" })
     } finally {
-      await browser.execute(() => {
-        document.querySelector<HTMLElement>("[data-pdf-scroll-root]")!
-          .style.removeProperty("overflow-y")
-      })
+      pointer({ down: false })
+      pointer({ x: 300 + offset.x, y: 300 + offset.y })
     }
+    await browser.waitUntil(async () => !(await bar()).expanded, {
+      timeoutMsg: "the bar stayed wide after the pointer left",
+    })
+
+    // The bar is no part of the scroll box, yet a wheel over it scrolls the
+    // pages, and a ctrl-wheel still zooms them rather than the whole app.
+    const beforeWheel = (await bar()).scrollTop
+    await wheelOverBar({ deltaY: 200 })
+    await browser.waitUntil(async () => Math.abs((await bar()).scrollTop - beforeWheel - 200) < 1, {
+      timeoutMsg: "a wheel over the bar never scrolled the pages",
+    })
+    const zoomGroup = $(`${session} [data-slot='zoom-controls']`)
+    const zoomBefore = await zoomGroup.getAttribute("aria-label")
+    await wheelOverBar({ ctrlKey: true, deltaY: -100 })
+    await browser.waitUntil(async () => (await zoomGroup.getAttribute("aria-label")) !== zoomBefore, {
+      timeoutMsg: "a ctrl-wheel over the bar never zoomed the pages",
+    })
   })
 
   it("keeps page navigation and fit-page below the tabs", async () => {

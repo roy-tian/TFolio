@@ -363,8 +363,14 @@ export function useOrganizeWorkspace({
   )
   const remove = useCallback(
     (keys: ReadonlySet<number>) => {
+      // A refused delete leaves its pages chosen.
+      if (busyRef.current) {
+        return
+      }
+
       edit((current) => deleteSlots(current, keys))
-      setSelection(new Set())
+      // A page's own delete button may leave the rest of the selection standing.
+      setSelection((current) => new Set([...current].filter((key) => !keys.has(key))))
     },
     [edit],
   )

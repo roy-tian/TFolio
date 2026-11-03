@@ -360,7 +360,7 @@ describe("TFolio PDF viewer", () => {
       await $("button[aria-label='Zoom in']").click()
     }
     await expect(
-      $("[data-slot='button-group'][aria-label^='Zoom ']"),
+      $("[data-slot='zoom-controls']"),
     ).toHaveAttribute("aria-label", "Zoom 75%")
 
     const pageInput = $("input[aria-label='Page number']")
@@ -458,41 +458,44 @@ describe("TFolio PDF viewer", () => {
     await openPdfFromDisk("two-pages.pdf", minimalPdf(2))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    // The toolbar no longer prints the level — it flashes over the page — so the
-    // group's aria-label is the readout always there to be read.
-    const zoomGroup = () => $("[data-slot='button-group'][aria-label^='Zoom ']")
+    // The group's aria-label holds the committed level; the bar's own readout
+    // follows the thumb mid-drag, so it is not what these steps check.
+    const zoomGroup = () => $("[data-slot='zoom-controls']")
     const zoomLevel = async () =>
       (await zoomGroup().getAttribute("aria-label")) ?? ""
     const indicator = () =>
       $("[data-document-session][data-active='true'] [data-slot='zoom-indicator']")
 
-    // No button names a level now, so the ladder is the only way back: out until
-    // `-` gives up at the 10% floor, then in along the rungs to 100%.
-    const zoomToActualSize = async () => {
-      const zoomOut = () => $("button[aria-label='Zoom out']")
-
-      while (await zoomOut().isEnabled()) {
-        await zoomOut().click()
-      }
-
-      for (let rung = 0; rung < 6; rung += 1) {
-        await $("button[aria-label='Zoom in']").click()
-      }
-    }
+    const preset = (label: string) => $(`button[aria-label='${label}']`)
 
     expect((await pageBox()).scrollableX).toBe(0)
+
+    // Out until `-` gives up at the 10% floor, then in along the rungs to 100%,
+    // which presses actual size though no preset was chosen.
+    const zoomOut = () => $("button[aria-label='Zoom out']")
+
+    while (await zoomOut().isEnabled()) {
+      await zoomOut().click()
+    }
+
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
+
+    for (let rung = 0; rung < 6; rung += 1) {
+      await $("button[aria-label='Zoom in']").click()
+    }
 
     // A point is 1/72 inch against a CSS pixel's 1/96, so 200pt measures 200 *
     // 96/72 on screen — point-for-pixel would be a quarter short of every reader.
     const actualSize = (percent: number) =>
       Math.round((200 * 96 * percent) / (72 * 100))
 
-    await zoomToActualSize()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
     expect((await pageBox()).width).toBe(actualSize(100))
 
     await $("button[aria-label='Zoom in']").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 125%")
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
     expect((await pageBox()).width).toBe(actualSize(125))
 
     await $("button[aria-label='Zoom out']").click()
@@ -500,95 +503,98 @@ describe("TFolio PDF viewer", () => {
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 75%")
     expect((await pageBox()).width).toBe(actualSize(75))
 
-    // The zooms above left a flash of their own on screen, and a HUD already up
-    // would let the poll below settle on it instead of on the press it makes.
+    // A HUD already up would let the poll below settle on it instead of on the
+    // press it makes.
     await expect(indicator()).toHaveAttribute("data-visible", "false")
 
     // The flash is shorter than a WebDriver round trip, so press and read happen
     // together in the page; only the fade is slow enough to assert from out here.
-    const flashed = (await browser.executeAsync((done) => {
-      const hud = document.querySelector<HTMLElement>(
-        "[data-document-session][data-active='true'] [data-slot='zoom-indicator']",
-      )!
-      document
-        .querySelector<HTMLButtonElement>("button[aria-label='Zoom in']")!
-        .click()
-      const deadline = performance.now() + 500
+    const pressAndWatch = (press: "bar" | "key") =>
+      browser.executeAsync(
+        (how: string, done: (result: { opacity: string; text: string; visible: string }) => void) => {
+          const hud = document.querySelector<HTMLElement>(
+            "[data-document-session][data-active='true'] [data-slot='zoom-indicator']",
+          )!
 
-      const read = () =>
-        done({
-          opacity: window.getComputedStyle(hud).opacity,
-          text: hud.textContent ?? "",
-          visible: hud.dataset.visible ?? "",
-        })
+          if (how === "key") {
+            document.dispatchEvent(
+              new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ctrlKey: true, key: "=" }),
+            )
+          } else {
+            document
+              .querySelector<HTMLButtonElement>(
+                "[data-document-session][data-active='true'] [data-slot='status-bar'] button[aria-label='Zoom in']",
+              )!
+              .click()
+          }
 
-      const poll = () => {
-        if (performance.now() > deadline) {
-          read()
-          return
-        }
+          const deadline = performance.now() + 500
 
-        // One frame after the flag turns: a transition queried on the very frame
-        // its class lands still reports the level it is coming from.
-        if (hud.dataset.visible === "true") {
-          requestAnimationFrame(read)
-          return
-        }
+          const read = () =>
+            done({
+              opacity: window.getComputedStyle(hud).opacity,
+              text: hud.textContent ?? "",
+              visible: hud.dataset.visible ?? "",
+            })
 
-        requestAnimationFrame(poll)
-      }
+          const poll = () => {
+            if (performance.now() > deadline) {
+              read()
+              return
+            }
 
-      requestAnimationFrame(poll)
-    })) as { opacity: string; text: string; visible: string }
+            // One frame after the flag turns: a transition queried on the very
+            // frame its class lands still reports the level it is coming from.
+            if (hud.dataset.visible === "true") {
+              requestAnimationFrame(read)
+              return
+            }
 
-    expect(flashed.visible).toBe("true")
-    expect(flashed.text).toBe("100%")
-    expect(Number(flashed.opacity)).toBeGreaterThan(0)
+            requestAnimationFrame(poll)
+          }
+
+          requestAnimationFrame(poll)
+        },
+        press,
+      )
+
+    // A key leaves the eye on the page, so the level flashes there.
+    const fromKey = await pressAndWatch("key")
+    expect(fromKey.visible).toBe("true")
+    expect(fromKey.text).toBe("100%")
+    expect(Number(fromKey.opacity)).toBeGreaterThan(0)
     await expect(indicator()).toHaveAttribute("data-visible", "false")
+
+    // A zoom made on the status bar is answered by the bar's own readout.
+    const fromBar = await pressAndWatch("bar")
+    expect(fromBar.visible).toBe("false")
+    await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 125%")
+    await expect($("[data-slot='zoom-controls-readout']")).toHaveText("125%")
 
     // A fit takes the tighter dimension — height, for a portrait page in a
     // landscape window — and must actually fit, padding aside.
-    await $("button[aria-label='Fit page']").click()
+    await preset("Fit page").click()
     const fittedPage = await pageBox()
     expect(fittedPage.height).toBe(Math.round(fittedPage.availableHeight))
     expect(fittedPage.width).toBeLessThanOrEqual(
       Math.round(fittedPage.availableWidth),
     )
+    await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "true")
 
-    // The button offers the fit that is not on, and which one *is* on is said by
-    // the group rather than by a pressed state that would contradict that name.
-    await expect($("button[aria-label='Fit width']")).toBeExisting()
-    await expect(zoomGroup()).toHaveAttribute(
-      "aria-label",
-      expect.stringContaining("fitting the page"),
-    )
+    // Pressing the fit that is on keeps it on rather than leaving the group empty.
+    await preset("Fit page").click()
+    await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "true")
 
-    await $("button[aria-label='Fit width']").click()
+    await preset("Fit width").click()
     const fittedWide = await pageBox()
     expect(fittedWide.width).toBe(Math.round(fittedWide.availableWidth))
+    await expect(preset("Fit width")).toHaveAttribute("aria-pressed", "true")
+    await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "false")
 
-    // Fit width is now active, so the button offers fit page while retaining
-    // the selected fill. Its outer edge must stay visible in the joined group.
-    const fitButtonBorder = await browser.execute(() => {
-      const button = document.querySelector<HTMLButtonElement>(
-        "button[aria-label='Fit page']",
-      )!
-      const style = window.getComputedStyle(button)
-
-      return {
-        color: style.borderTopColor,
-        style: style.borderTopStyle,
-        width: style.borderTopWidth,
-      }
-    })
-    expect(fitButtonBorder.width).not.toBe("0px")
-    expect(fitButtonBorder.style).not.toBe("none")
-    expect(["transparent", "rgba(0, 0, 0, 0)"]).not.toContain(
-      fitButtonBorder.color,
-    )
-
-    await zoomToActualSize()
+    await preset("Actual size").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
+    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
+    expect((await pageBox()).width).toBe(actualSize(100))
     const widthBeforePreview = (await pageBox()).width
     const preview = (await browser.executeAsync((done) => {
       const viewer = document.querySelector<HTMLElement>(
@@ -629,7 +635,7 @@ describe("TFolio PDF viewer", () => {
               zoomText:
                 document
                   .querySelector<HTMLElement>(
-                    "[data-slot='button-group'][aria-label^='Zoom ']",
+                    "[data-slot='zoom-controls']",
                   )!
                   .getAttribute("aria-label") ?? "",
             })
@@ -795,9 +801,7 @@ describe("TFolio PDF viewer", () => {
     await openPdfFromDisk("resized.pdf", minimalPdf(12))
     await $("[data-page-number='1']").waitForDisplayed()
 
-    // Fit width is where the drift is worst and a mode readers sit in. The button
-    // cycles fit-page first, so reaching fit width takes both rungs.
-    await $("button[aria-label='Fit page']").click()
+    // Fit width is where the drift is worst and a mode readers sit in.
     await $("button[aria-label='Fit width']").click()
 
     const readingLine = () =>
@@ -959,11 +963,11 @@ describe("TFolio PDF viewer", () => {
       return {
         input: rightClick("input[aria-label='Page number']"),
         page: rightClick("[data-page-number='1']"),
-        toolbar: rightClick("[data-slot='page-status']"),
+        statusBar: rightClick("[data-slot='page-status']"),
       }
     })
 
-    expect(prevented).toEqual({ input: false, page: true, toolbar: true })
+    expect(prevented).toEqual({ input: false, page: true, statusBar: true })
   })
   // readText is refused and the driver's keys are events, not native input, so
   // the clipboard cannot be read: the real writeText is wrapped and awaited instead.

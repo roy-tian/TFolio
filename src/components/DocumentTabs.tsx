@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next"
 
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import {
   ContextMenu,
@@ -277,151 +278,155 @@ export function DocumentTabs({
           <span>{t("tabs.home")}</span>
         </button>
 
-        {/* `overflow-x` alone promotes the other axis to `auto`, and each tab's
-            `mb-[-1px]` is then overflow enough for a scrollbar to appear. */}
-        <div
-          className="flex h-full min-w-0 items-end overflow-x-auto overflow-y-hidden"
-          ref={scrollerRef}
-        >
-          <HintTooltipGroup>
-            {tabs.map((tab, index) => {
-              const selected = tab.id === activeId
-              // A selected tab is parted from its neighbours by its own border;
-              // between two unselected ones nothing marks where one ends.
-              const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
-              const divided = !selected && previousId !== activeId
-              const wayOffset = drag?.cellOffsets[index] ?? 0
+        <div className="relative flex h-full min-w-0">
+          {/* `overflow-x` alone promotes the other axis to `auto`, and each tab's
+              `mb-[-1px]` is then overflow enough for a scrollbar to appear. */}
+          <div
+            className="overlay-scroll-viewport flex h-full min-w-0 items-end overflow-x-auto overflow-y-hidden"
+            ref={scrollerRef}
+          >
+            <HintTooltipGroup>
+              {tabs.map((tab, index) => {
+                const selected = tab.id === activeId
+                // A selected tab is parted from its neighbours by its own border;
+                // between two unselected ones nothing marks where one ends.
+                const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
+                const divided = !selected && previousId !== activeId
+                const wayOffset = drag?.cellOffsets[index] ?? 0
 
-              return (
-                <ContextMenu key={tab.id}>
-                  {/* A tab is its own menu trigger: the entries below act on
-                      or from this tab, and no other surface here has any. */}
-                  <ContextMenuTrigger
-                    render={
-                      <div
-                        className={cn(
-                          tabClassName,
-                          "mb-[-1px] w-44 min-w-28 max-w-56",
-                          selected
-                            ? "bg-background text-foreground"
-                            : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
-                          divided &&
-                            "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
-                          drag &&
-                            drag.index !== index &&
-                            "transition-transform duration-200 ease-out",
-                          // The portal ghost carries this tab; the real one stays as
-                          // the hole the others slide around to fill.
-                          drag?.index === index && "opacity-0",
-                        )}
-                        data-document-tab={tab.id}
-                        data-list-index={index}
-                        style={{
-                          transform:
-                            wayOffset === 0
-                              ? undefined
-                              : `translateX(${wayOffset}px)`,
-                        }}
-                      />
-                    }
-                  >
-                  {/* The workspace puts focus on this button after every open,
-                      and a hint opened by that would stand over the strip. */}
-                  <HintTooltip inDelayGroup label={tab.name} openOnFocus={false}>
-                    <button
-                      aria-controls={panelElementId(tab.id)}
-                      aria-selected={selected}
-                      className="flex h-full min-w-0 flex-1 cursor-default items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                      id={tabElementId(tab.id)}
-                      onClick={(event) => {
-                        if (draggedClickRef.current === tab.id) {
-                          draggedClickRef.current = null
-                          return
-                        }
-
-                        // Starting a drag cancels the press's native focus, so
-                        // the click that survives puts it back itself.
-                        event.currentTarget.focus()
-                        onActivate(tab.id)
-                      }}
-                      onKeyDown={(event) => handleKeyDown(event, tab.id)}
-                      role="tab"
-                      tabIndex={selected ? 0 : -1}
-                      type="button"
-                    >
-                      <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
-                      {tab.dirty ? (
-                        <span
-                          aria-label={t("tabs.unsaved")}
-                          className="size-2 shrink-0 rounded-full bg-primary"
+                return (
+                  <ContextMenu key={tab.id}>
+                    {/* A tab is its own menu trigger: the entries below act on
+                        or from this tab, and no other surface here has any. */}
+                    <ContextMenuTrigger
+                      render={
+                        <div
+                          className={cn(
+                            tabClassName,
+                            "mb-[-1px] w-44 min-w-28 max-w-56",
+                            selected
+                              ? "bg-background text-foreground"
+                              : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                            divided &&
+                              "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
+                            drag &&
+                              drag.index !== index &&
+                              "transition-transform duration-200 ease-out",
+                            // The portal ghost carries this tab; the real one stays as
+                            // the hole the others slide around to fill.
+                            drag?.index === index && "opacity-0",
+                          )}
+                          data-document-tab={tab.id}
+                          data-list-index={index}
+                          style={{
+                            transform:
+                              wayOffset === 0
+                                ? undefined
+                                : `translateX(${wayOffset}px)`,
+                          }}
                         />
+                      }
+                    >
+                    {/* The workspace puts focus on this button after every open,
+                        and a hint opened by that would stand over the strip. */}
+                    <HintTooltip inDelayGroup label={tab.name} openOnFocus={false}>
+                      <button
+                        aria-controls={panelElementId(tab.id)}
+                        aria-selected={selected}
+                        className="flex h-full min-w-0 flex-1 cursor-default items-center gap-1.5 px-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        id={tabElementId(tab.id)}
+                        onClick={(event) => {
+                          if (draggedClickRef.current === tab.id) {
+                            draggedClickRef.current = null
+                            return
+                          }
+
+                          // Starting a drag cancels the press's native focus, so
+                          // the click that survives puts it back itself.
+                          event.currentTarget.focus()
+                          onActivate(tab.id)
+                        }}
+                        onKeyDown={(event) => handleKeyDown(event, tab.id)}
+                        role="tab"
+                        tabIndex={selected ? 0 : -1}
+                        type="button"
+                      >
+                        <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
+                        {tab.dirty ? (
+                          <span
+                            aria-label={t("tabs.unsaved")}
+                            className="size-2 shrink-0 rounded-full bg-primary"
+                          />
+                        ) : null}
+                        <span className="truncate">{tab.name}</span>
+                      </button>
+                    </HintTooltip>
+                    <HintTooltip label={t("tabs.close", { name: tab.name })}>
+                      <button
+                        aria-label={t("tabs.close", { name: tab.name })}
+                        className="mr-1 grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        data-tab-close
+                        onClick={() => onClose(tab.id)}
+                        tabIndex={selected ? 0 : -1}
+                        type="button"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </HintTooltip>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem
+                        data-action="tab-move-new-window"
+                        onClick={() => onMoveToNewWindow?.(tab.id)}
+                      >
+                        <ExternalLink />
+                        {t("tabs.moveToNewWindow")}
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        data-action="tab-close"
+                        onClick={() => onClose(tab.id)}
+                      >
+                        <X />
+                        {t("tabs.close", { name: tab.name })}
+                      </ContextMenuItem>
+                      {/* Absent rather than disabled when they would close no
+                          tab, or only this one, as its own entry already does. */}
+                      {tabs.length > 1 ? (
+                        <ContextMenuItem
+                          data-action="tab-close-others"
+                          onClick={() => onCloseOthers(tab.id, "all")}
+                        >
+                          <CopyX />
+                          {t("tabs.closeOthers")}
+                        </ContextMenuItem>
                       ) : null}
-                      <span className="truncate">{tab.name}</span>
-                    </button>
-                  </HintTooltip>
-                  <HintTooltip label={t("tabs.close", { name: tab.name })}>
-                    <button
-                      aria-label={t("tabs.close", { name: tab.name })}
-                      className="mr-1 grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                      data-tab-close
-                      onClick={() => onClose(tab.id)}
-                      tabIndex={selected ? 0 : -1}
-                      type="button"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  </HintTooltip>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent>
-                    <ContextMenuItem
-                      data-action="tab-move-new-window"
-                      onClick={() => onMoveToNewWindow?.(tab.id)}
-                    >
-                      <ExternalLink />
-                      {t("tabs.moveToNewWindow")}
-                    </ContextMenuItem>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem
-                      data-action="tab-close"
-                      onClick={() => onClose(tab.id)}
-                    >
-                      <X />
-                      {t("tabs.close", { name: tab.name })}
-                    </ContextMenuItem>
-                    {/* Absent rather than disabled when they would close no
-                        tab, or only this one, as its own entry already does. */}
-                    {tabs.length > 1 ? (
-                      <ContextMenuItem
-                        data-action="tab-close-others"
-                        onClick={() => onCloseOthers(tab.id, "all")}
-                      >
-                        <CopyX />
-                        {t("tabs.closeOthers")}
-                      </ContextMenuItem>
-                    ) : null}
-                    {index < tabs.length - 1 ? (
-                      <ContextMenuItem
-                        data-action="tab-close-right"
-                        onClick={() => onCloseOthers(tab.id, "right")}
-                      >
-                        <ArrowRightToLine />
-                        {t("tabs.closeToRight")}
-                      </ContextMenuItem>
-                    ) : null}
-                    {tabs.length > 1 ? (
-                      <ContextMenuItem
-                        data-action="tab-close-all"
-                        onClick={onCloseAll}
-                      >
-                        <SquareX />
-                        {t("tabs.closeAll")}
-                      </ContextMenuItem>
-                    ) : null}
-                  </ContextMenuContent>
-                </ContextMenu>
-              )
-            })}
-          </HintTooltipGroup>
+                      {index < tabs.length - 1 ? (
+                        <ContextMenuItem
+                          data-action="tab-close-right"
+                          onClick={() => onCloseOthers(tab.id, "right")}
+                        >
+                          <ArrowRightToLine />
+                          {t("tabs.closeToRight")}
+                        </ContextMenuItem>
+                      ) : null}
+                      {tabs.length > 1 ? (
+                        <ContextMenuItem
+                          data-action="tab-close-all"
+                          onClick={onCloseAll}
+                        >
+                          <SquareX />
+                          {t("tabs.closeAll")}
+                        </ContextMenuItem>
+                      ) : null}
+                    </ContextMenuContent>
+                  </ContextMenu>
+                )
+              })}
+            </HintTooltipGroup>
+          </div>
+          {/* Thin: a full bar would take the bottom third of every tab. */}
+          <OverlayScrollbars thin viewportRef={scrollerRef} />
         </div>
       </div>
 

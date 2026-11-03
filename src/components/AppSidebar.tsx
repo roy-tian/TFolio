@@ -92,16 +92,13 @@ export function SidebarPanelSwitch({
 type AppSidebarProps = {
   children?: ReactNode
   macOS: boolean
-  /** The app menu, mounted here only while the sidebar shows: the toolbar
-      carries it otherwise. */
-  menu: ReactNode
   /** The second row: what the rest of the column shows. */
   switcher?: ReactNode
 }
 
 /** The window's left column: its first row is the title bar's, the second
     switches what the rest of it shows. */
-export function AppSidebar({ children, macOS, menu, switcher }: AppSidebarProps) {
+export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
   const sidebar = useSidebar()
   const asideRef = useRef<HTMLElement>(null)
   const overlay = sidebar.mode === "overlay"
@@ -117,7 +114,7 @@ export function AppSidebar({ children, macOS, menu, switcher }: AppSidebarProps)
     const shown = () => (asideRef.current?.getClientRects().length ?? 0) > 0
 
     // An open menu is a portal outside the sidebar: a press inside it must
-    // reach the menu, not take the sidebar — and its menu — away.
+    // reach the menu, not take the sidebar away.
     const dismissOutside = (event: PointerEvent) => {
       if (
         shown() &&
@@ -165,7 +162,6 @@ export function AppSidebar({ children, macOS, menu, switcher }: AppSidebarProps)
         )}
         data-tauri-drag-region="deep"
       >
-        {menu}
         <SidebarToggle />
         <div className="ml-auto">
           <WorkspaceSwitch />

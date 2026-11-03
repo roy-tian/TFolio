@@ -1,7 +1,9 @@
+import { useRef } from "react"
 import { Bookmark } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import type { PdfOutlineItem } from "@/lib/pdf"
 
 type BookmarkListProps = {
@@ -55,12 +57,20 @@ function BookmarkItems({
 
 export function BookmarkList({ items, onNavigate }: BookmarkListProps) {
   const { t } = useTranslation()
+  const navRef = useRef<HTMLElement>(null)
 
   return (
-    <nav className="h-full overflow-auto overscroll-contain p-2" aria-label={t("bookmarks.title")}>
-      <ul>
-        <BookmarkItems items={items} onNavigate={onNavigate} />
-      </ul>
-    </nav>
+    <div className="relative h-full">
+      <nav
+        aria-label={t("bookmarks.title")}
+        className="overlay-scroll-viewport h-full overflow-auto overscroll-contain p-2"
+        ref={navRef}
+      >
+        <ul>
+          <BookmarkItems items={items} onNavigate={onNavigate} />
+        </ul>
+      </nav>
+      <OverlayScrollbars viewportRef={navRef} />
+    </div>
   )
 }

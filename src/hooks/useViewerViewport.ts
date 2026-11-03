@@ -10,6 +10,7 @@ import {
 } from "@/lib/viewportAnchor"
 import type { ViewMode } from "@/lib/viewMode"
 import {
+  VIEWER_WILL_MOVE_EVENT,
   viewerLayoutSize,
   viewerReadingBounds,
   viewerSizeCommitted,
@@ -48,6 +49,9 @@ export function useViewerViewport({
   // Where the reader was when the viewport last changed size, taken before the
   // layout that change resolves to, and paid back once it has been made.
   const resizeAnchorRef = useRef<ViewportAnchor | null>(null)
+  // Where the reader was before the viewer's left edge moved, which only a
+  // warning ahead of the change can catch: the observer sees the moved box.
+  const moveAnchorRef = useRef<ViewportAnchor | null>(null)
   // The last geometry the viewer really had, which a hidden tab keeps.
   const committedSizeRef = useRef({ height: 0, width: 0 })
   // A seek waiting for the layout that can land it; between request and commit
@@ -65,9 +69,9 @@ export function useViewerViewport({
       return
     }
 
-    // Taken while the old layout stands: fitting pages to a new width slides
-    // the page away. The reading line is the viewer's own top edge.
-    const captureResizeAnchor = () => {
+    // Taken while the pages keep their old scale: fitting them to a new width
+    // slides the page away. The reading line is the viewer's own top edge.
+    const readingAnchor = () => {
       const page = viewer.querySelector<HTMLElement>(
         `[data-page-number="${currentPage.get()}"]`,
       )
@@ -75,22 +79,31 @@ export function useViewerViewport({
       const pageRect = page?.getBoundingClientRect()
 
       // Only a page on screen can hold the reader's place: mid-seek the tracked
-      // page is pages off, and anchoring to it lands nowhere the reader was.
-      resizeAnchorRef.current =
-        pageRect && pageRect.bottom > rect.top && pageRect.top < rect.bottom
-          ? anchorOnPage(
-              currentPage.get(),
-              pageRect,
-              rect.left + rect.width / 2,
-              rect.top,
-            )
-          : null
+      // page is pages off, and anchoring to it lands nowhere the reader was. A
+      // background tab has no boxes at all, so it takes none either.
+      return pageRect && pageRect.bottom > rect.top && pageRect.top < rect.bottom
+        ? anchorOnPage(
+            currentPage.get(),
+            pageRect,
+            rect.left + rect.width / 2,
+            rect.top,
+          )
+        : null
+    }
+
+    const anchorBeforeMove = () => {
+      moveAnchorRef.current =
+        pendingScrollPageRef.current === null ? readingAnchor() : null
     }
 
     // A hidden tab has no layout box and the observer reports 0x0; committing
     // that loses the reader's place. Hold the last real geometry instead.
     const commitSize = () => {
-      const { height, width } = viewerLayoutSize(viewer)
+      // Spent on the first report after the warning, even one that changes
+      // nothing, so a later unrelated resize cannot land on a stale place.
+      const moveAnchor = moveAnchorRef.current
+      moveAnchorRef.current = null
+      const { height, width } = viewerLayoutSize(viewer, true)
 
       if (width <= 0 || height <= 0) {
         return
@@ -105,7 +118,13 @@ export function useViewerViewport({
       // Skip the first size, which has no reading position behind it, and any
       // pending seek — a returning tab finds its page its own way.
       if (committed.width > 0 && pendingScrollPageRef.current === null) {
-        captureResizeAnchor()
+        const rect = viewerReadingBounds(viewer)
+
+        // Landed at the moved box's centre, not where it was taken: what the
+        // reader centred stays centred instead of riding the left edge.
+        resizeAnchorRef.current = moveAnchor
+          ? { ...moveAnchor, clientX: rect.left + rect.width / 2, clientY: rect.top }
+          : readingAnchor()
       }
 
       if (width !== committed.width) {
@@ -146,7 +165,10 @@ export function useViewerViewport({
       resizeObserver.observe(clientBoxRef.current)
     }
 
+    window.addEventListener(VIEWER_WILL_MOVE_EVENT, anchorBeforeMove)
+
     return () => {
+      window.removeEventListener(VIEWER_WILL_MOVE_EVENT, anchorBeforeMove)
       resizeObserver.disconnect()
       clearTimeout(compositorTimer)
       delete viewer.dataset.resizeCompositing

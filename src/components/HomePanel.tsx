@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import fileSmallIcon from "@/assets/brand/file-small.svg"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -43,6 +44,7 @@ export function HomePanel({
   const [visibleRecentCount, setVisibleRecentCount] = useState(
     RECENT_PAGE_SIZE,
   )
+  const pageRef = useRef<HTMLElement>(null)
   const recentListRef = useRef<HTMLUListElement>(null)
   const recentEndRef = useRef<HTMLLIElement>(null)
   const recentTotal = recentFiles.length
@@ -92,150 +94,163 @@ export function HomePanel({
           welcome and the actions never move under the reader. A margin, not
           padding, keeps this background off the native material the sidebar
           shows through. */}
-      <main className="workspace-background ml-(--sidebar-inset) h-full overflow-y-auto p-8 pt-[calc(var(--toolbar-height)+var(--document-tabs-height)+2rem)]">
-        <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center">
-          <h1 className="text-2xl font-semibold">{t("home.welcome")}</h1>
-          <p className="mt-2 text-center text-sm text-muted-foreground">
-            {t("home.tagline")}
-          </p>
+      <div className="relative ml-(--sidebar-inset) h-full">
+        <main
+          className="overlay-scroll-viewport workspace-background h-full overflow-y-auto p-8 pt-[calc(var(--toolbar-height)+var(--document-tabs-height)+2rem)]"
+          ref={pageRef}
+        >
+          <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center">
+            <h1 className="text-2xl font-semibold">{t("home.welcome")}</h1>
+            <p className="mt-2 text-center text-sm text-muted-foreground">
+              {t("home.tagline")}
+            </p>
 
-          {/* `items-start` keeps the action column its own height; the recent
-              column stretches to the row's full height so the list has a
-              bounded box to scroll inside. The row itself is `minmax(0,1fr)`:
-              an auto row would grow to the list's content and push the scroll
-              back out to the page. */}
-          <div className="mt-8 grid w-full min-h-0 flex-1 grid-cols-[2fr_8fr] grid-rows-[minmax(0,1fr)] items-start gap-6">
-            <div className="flex flex-col gap-6">
-              <button
-                className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
-                data-slot="new-document"
-                disabled={opening}
-                onClick={onNew}
-                type="button"
-              >
-                <FilePlus2 className="mb-4 size-10 transition-transform group-hover:-translate-y-0.5" />
-                <span className="text-lg font-semibold">{t("home.new")}</span>
-                <span className="mt-2 text-sm text-muted-foreground">
-                  {t("home.newHint")}
-                </span>
-              </button>
+            {/* `items-start` keeps the action column its own height; the recent
+                column stretches to the row's full height so the list has a
+                bounded box to scroll inside. The row itself is `minmax(0,1fr)`:
+                an auto row would grow to the list's content and push the scroll
+                back out to the page. */}
+            <div className="mt-8 grid w-full min-h-0 flex-1 grid-cols-[2fr_8fr] grid-rows-[minmax(0,1fr)] items-start gap-6">
+              <div className="flex flex-col gap-6">
+                <button
+                  className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+                  data-slot="new-document"
+                  disabled={opening}
+                  onClick={onNew}
+                  type="button"
+                >
+                  <FilePlus2 className="mb-4 size-10 transition-transform group-hover:-translate-y-0.5" />
+                  <span className="text-lg font-semibold">{t("home.new")}</span>
+                  <span className="mt-2 text-sm text-muted-foreground">
+                    {t("home.newHint")}
+                  </span>
+                </button>
 
-              <button
-                aria-label={t("viewer.chooseFile")}
-                className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
-                data-slot="drop-zone"
-                disabled={opening}
-                onClick={onOpenFile}
-                type="button"
+                <button
+                  aria-label={t("viewer.chooseFile")}
+                  className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+                  data-slot="drop-zone"
+                  disabled={opening}
+                  onClick={onOpenFile}
+                  type="button"
+                >
+                  {opening ? (
+                    <LoaderCircle className="mb-4 size-10 animate-spin text-muted-foreground" />
+                  ) : (
+                    <FolderOpen className="mb-4 size-10 transition-transform group-hover:-translate-y-0.5" />
+                  )}
+                  <span className="text-lg font-semibold">
+                    {opening ? t("viewer.loading") : t("home.open")}
+                  </span>
+                  <span className="mt-2 text-sm text-muted-foreground">
+                    {t("viewer.dropTitle")}
+                  </span>
+                </button>
+              </div>
+
+              <section
+                aria-label={t("home.recent")}
+                className="flex min-w-0 flex-col self-stretch"
+                data-slot="recent-files"
               >
-                {opening ? (
-                  <LoaderCircle className="mb-4 size-10 animate-spin text-muted-foreground" />
+                <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  <Clock className="size-3.5" />
+                  {t("home.recent")}
+                </h2>
+                {recentFiles.length === 0 ? (
+                  <p className="mt-3 px-1 text-sm text-muted-foreground">
+                    {t("home.recentEmpty")}
+                  </p>
                 ) : (
-                  <FolderOpen className="mb-4 size-10 transition-transform group-hover:-translate-y-0.5" />
+                  // One delay group for every row's actions, so a hint read on
+                  // one opens the next at once.
+                  <HintTooltipGroup>
+                    <div className="relative mt-2 min-h-0 flex-1">
+                      <ul
+                        className="overlay-scroll-viewport flex h-full flex-col overflow-y-auto"
+                        ref={recentListRef}
+                      >
+                        {visibleRecentFiles.map((file) => (
+                          <li className="group relative" key={file.path}>
+                            <HintTooltip label={file.path}>
+                              <button
+                                className="peer flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 pr-18 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
+                                data-slot="recent-file"
+                                disabled={opening}
+                                onClick={() => onOpenRecent(file.path)}
+                                type="button"
+                              >
+                                <img alt="" className="size-8 shrink-0" draggable={false} src={fileSmallIcon} />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm">
+                                    {file.name}
+                                  </span>
+                                  <span className="block truncate text-xs text-muted-foreground">
+                                    {file.directory}
+                                  </span>
+                                </span>
+                              </button>
+                            </HintTooltip>
+                            {/* Siblings of the open button, not children: interactive
+                                elements cannot nest. Revealed over its row, by hover
+                                or by a keyboard focus anywhere in it — and hidden
+                                they take no pointer events, so the space they sit on
+                                stays part of the open button's hit area. The focus
+                                is the open button's as the `peer`, or one of their
+                                own: `group-has-*` costs Chromium a restyle of the
+                                whole document for every node added anywhere. */}
+                            <div className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 peer-focus-visible:pointer-events-auto peer-focus-visible:opacity-100 has-focus-visible:pointer-events-auto has-focus-visible:opacity-100">
+                              <HintTooltip
+                                inDelayGroup
+                                label={revealRecentLabel(file.name)}
+                              >
+                                <button
+                                  aria-label={revealRecentLabel(file.name)}
+                                  className={recentActionClass}
+                                  data-slot="reveal-recent-file"
+                                  disabled={opening}
+                                  onClick={() => onRevealRecent(file.path)}
+                                  type="button"
+                                >
+                                  <FolderOpen className="size-4" />
+                                </button>
+                              </HintTooltip>
+                              <HintTooltip
+                                inDelayGroup
+                                label={removeRecentLabel(file.name)}
+                              >
+                                <button
+                                  aria-label={removeRecentLabel(file.name)}
+                                  className={recentActionClass}
+                                  data-slot="remove-recent-file"
+                                  disabled={opening}
+                                  onClick={() => onRemoveRecent(file.path)}
+                                  type="button"
+                                >
+                                  <X className="size-4" />
+                                </button>
+                              </HintTooltip>
+                            </div>
+                          </li>
+                        ))}
+                        {moreRecentFiles ? (
+                          <li aria-hidden className="h-px" ref={recentEndRef} />
+                        ) : null}
+                      </ul>
+                      <OverlayScrollbars viewportRef={recentListRef} />
+                    </div>
+                  </HintTooltipGroup>
                 )}
-                <span className="text-lg font-semibold">
-                  {opening ? t("viewer.loading") : t("home.open")}
-                </span>
-                <span className="mt-2 text-sm text-muted-foreground">
-                  {t("viewer.dropTitle")}
-                </span>
-              </button>
+              </section>
             </div>
-
-            <section
-              aria-label={t("home.recent")}
-              className="flex min-w-0 flex-col self-stretch"
-              data-slot="recent-files"
-            >
-              <h2 className="flex items-center gap-1.5 px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                <Clock className="size-3.5" />
-                {t("home.recent")}
-              </h2>
-              {recentFiles.length === 0 ? (
-                <p className="mt-3 px-1 text-sm text-muted-foreground">
-                  {t("home.recentEmpty")}
-                </p>
-              ) : (
-                // One delay group for every row's actions, so a hint read on
-                // one opens the next at once.
-                <HintTooltipGroup>
-                  <ul
-                    className="mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto"
-                    ref={recentListRef}
-                  >
-                    {visibleRecentFiles.map((file) => (
-                      <li className="group relative" key={file.path}>
-                        <HintTooltip label={file.path}>
-                          <button
-                            className="peer flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 pr-18 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-50"
-                            data-slot="recent-file"
-                            disabled={opening}
-                            onClick={() => onOpenRecent(file.path)}
-                            type="button"
-                          >
-                            <img alt="" className="size-8 shrink-0" draggable={false} src={fileSmallIcon} />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm">
-                                {file.name}
-                              </span>
-                              <span className="block truncate text-xs text-muted-foreground">
-                                {file.directory}
-                              </span>
-                            </span>
-                          </button>
-                        </HintTooltip>
-                        {/* Siblings of the open button, not children: interactive
-                            elements cannot nest. Revealed over its row, by hover
-                            or by a keyboard focus anywhere in it — and hidden
-                            they take no pointer events, so the space they sit on
-                            stays part of the open button's hit area. The focus
-                            is the open button's as the `peer`, or one of their
-                            own: `group-has-*` costs Chromium a restyle of the
-                            whole document for every node added anywhere. */}
-                        <div className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 peer-focus-visible:pointer-events-auto peer-focus-visible:opacity-100 has-focus-visible:pointer-events-auto has-focus-visible:opacity-100">
-                          <HintTooltip
-                            inDelayGroup
-                            label={revealRecentLabel(file.name)}
-                          >
-                            <button
-                              aria-label={revealRecentLabel(file.name)}
-                              className={recentActionClass}
-                              data-slot="reveal-recent-file"
-                              disabled={opening}
-                              onClick={() => onRevealRecent(file.path)}
-                              type="button"
-                            >
-                              <FolderOpen className="size-4" />
-                            </button>
-                          </HintTooltip>
-                          <HintTooltip
-                            inDelayGroup
-                            label={removeRecentLabel(file.name)}
-                          >
-                            <button
-                              aria-label={removeRecentLabel(file.name)}
-                              className={recentActionClass}
-                              data-slot="remove-recent-file"
-                              disabled={opening}
-                              onClick={() => onRemoveRecent(file.path)}
-                              type="button"
-                            >
-                              <X className="size-4" />
-                            </button>
-                          </HintTooltip>
-                        </div>
-                      </li>
-                    ))}
-                    {moreRecentFiles ? (
-                      <li aria-hidden className="h-px" ref={recentEndRef} />
-                    ) : null}
-                  </ul>
-                </HintTooltipGroup>
-              )}
-            </section>
           </div>
-        </div>
-      </main>
+        </main>
+        {/* The page runs on under the toolbar and the tabs; its bar starts below them. */}
+        <OverlayScrollbars
+          className="top-[calc(var(--toolbar-height)+var(--document-tabs-height))]"
+          viewportRef={pageRef}
+        />
+      </div>
     </div>
   )
 }

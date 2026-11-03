@@ -548,7 +548,7 @@ describe("independent document tabs", () => {
       await $("button[aria-label='Zoom in']").click()
     }
     await expect(
-      $("[data-slot='button-group'][aria-label^='Zoom ']"),
+      $("[data-slot='zoom-controls']"),
     ).toHaveAttribute("aria-label", "Zoom 100%")
 
     const pageInput = $("[data-active='true'] input[aria-label='Page number']")
@@ -584,7 +584,7 @@ describe("independent document tabs", () => {
       "true",
     )
     await expect(
-      $("[data-slot='button-group'][aria-label^='Zoom ']"),
+      $("[data-slot='zoom-controls']"),
     ).toHaveAttribute("aria-label", "Zoom 100%")
     await expect(
       $("[data-active='true'] input[aria-label='Page number']"),

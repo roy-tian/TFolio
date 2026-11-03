@@ -4,6 +4,7 @@ import {
   formatShortcut,
   matchesShortcut,
   shortcuts,
+  zoomShortcut,
   type ShortcutEvent,
 } from "./shortcuts"
 
@@ -120,5 +121,26 @@ describe("formatShortcut", () => {
     expect(formatShortcut(shortcuts.save, true)).toBe("⌘S")
     expect(formatShortcut(shortcuts.saveAs, true)).toBe("⇧⌘S")
     expect(formatShortcut(shortcuts.saveAll, true)).toBe("⌥⌘S")
+  })
+})
+
+describe("zoomShortcut", () => {
+  test("zooms in from = and from + however it was typed", () => {
+    expect(zoomShortcut(keyDown({ ctrlKey: true, key: "=" }), false)).toBe("in")
+    expect(zoomShortcut(keyDown({ ctrlKey: true, key: "+", shiftKey: true }), false)).toBe("in")
+    expect(zoomShortcut(keyDown({ code: "NumpadAdd", ctrlKey: true, key: "+" }), false)).toBe("in")
+  })
+
+  test("zooms out and back to actual size", () => {
+    expect(zoomShortcut(keyDown({ ctrlKey: true, key: "-" }), false)).toBe("out")
+    expect(zoomShortcut(keyDown({ ctrlKey: true, key: "0" }), false)).toBe("actual-size")
+    expect(zoomShortcut(keyDown({ ctrlKey: true, key: "0", shiftKey: true }), false)).toBe("actual-size")
+  })
+
+  test("answers only the platform's primary modifier, without Alt", () => {
+    expect(zoomShortcut(keyDown({ key: "=" }), false)).toBeNull()
+    expect(zoomShortcut(keyDown({ ctrlKey: true, key: "=" }), true)).toBeNull()
+    expect(zoomShortcut(keyDown({ key: "=", metaKey: true }), true)).toBe("in")
+    expect(zoomShortcut(keyDown({ altKey: true, ctrlKey: true, key: "=" }), false)).toBeNull()
   })
 })

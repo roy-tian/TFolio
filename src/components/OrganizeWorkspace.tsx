@@ -3,27 +3,28 @@ import {
   BetweenHorizontalStart,
   Bookmark,
   FileOutput,
-  FilePlus2,
   FolderPlus,
   Layers,
+  RotateCcw,
   RotateCw,
   Scaling,
   Trash2,
   Undo2,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { AppSidebar } from "@/components/AppSidebar"
 import { BookmarkList } from "@/components/BookmarkList"
+import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
 import { OperationProgress } from "@/components/OperationProgress"
 import { OrganizeBoard } from "@/components/OrganizeBoard"
 import { OrganizeFileList } from "@/components/OrganizeFileList"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { ToolbarFrame } from "@/components/SessionHeader"
+import { SliderStepper } from "@/components/SliderStepper"
+import { StatusBar } from "@/components/StatusBar"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
-import { WindowControls } from "@/components/WindowControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -47,7 +48,7 @@ import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
-/** The thumbnails' long side, smallest to largest; the toolbar steps along. */
+/** The thumbnails' long side, smallest to largest; the status bar steps along. */
 const PAPER_WIDTHS = [120, 160, 200, 240] as const
 
 type OrganizeWorkspaceProps = {
@@ -128,7 +129,6 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     }
   }
 
-  const appMenu = active ? <AppMenu {...menu} /> : null
   const bookmarksLabel = t("organize.bookmarks")
 
   return (
@@ -140,7 +140,6 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     >
       <AppSidebar
         macOS={macOS}
-        menu={appMenu}
         switcher={
           <ToggleGroup
             aria-label={t("sidebar.panels")}
@@ -177,7 +176,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
       </AppSidebar>
 
       <ToolbarFrame
-        appMenu={appMenu}
+        active={active}
+        appMenu={<AppMenu {...menu} />}
         end={
           <>
             <ToolbarTooltip label={t("organize.addFiles")}>
@@ -204,9 +204,21 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
               </Button>
             </ToolbarTooltip>
             <ButtonGroup>
-              <ToolbarTooltip label={t("organize.rotate")}>
+              <ToolbarTooltip label={t("organize.rotateCounterclockwise")}>
                 <Button
-                  aria-label={t("organize.rotate")}
+                  aria-label={t("organize.rotateCounterclockwise")}
+                  data-slot="organize-rotate-left"
+                  disabled={busy || chosen.size === 0}
+                  onClick={() => organize.rotate(chosen, 270)}
+                  size="icon-sm"
+                  variant="outline"
+                >
+                  <RotateCcw />
+                </Button>
+              </ToolbarTooltip>
+              <ToolbarTooltip label={t("organize.rotateClockwise")}>
+                <Button
+                  aria-label={t("organize.rotateClockwise")}
                   data-slot="organize-rotate"
                   disabled={busy || chosen.size === 0}
                   onClick={() => organize.rotate(chosen, 90)}
@@ -216,16 +228,29 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   <RotateCw />
                 </Button>
               </ToolbarTooltip>
-              <ToolbarTooltip label={t("organize.insertBlank")}>
+              {/* With nothing chosen, either one adds at the last file's end. */}
+              <ToolbarTooltip label={t("organize.insertBlankBefore")}>
                 <Button
-                  aria-label={t("organize.insertBlank")}
-                  data-slot="organize-insert-blank"
+                  aria-label={t("organize.insertBlankBefore")}
+                  data-slot="organize-insert-blank-before"
                   disabled={busy || empty}
                   onClick={() => organize.insertBlankAt(chosen, "before")}
                   size="icon-sm"
                   variant="outline"
                 >
-                  <FilePlus2 />
+                  <InsertBeforeIcon />
+                </Button>
+              </ToolbarTooltip>
+              <ToolbarTooltip label={t("organize.insertBlankAfter")}>
+                <Button
+                  aria-label={t("organize.insertBlankAfter")}
+                  data-slot="organize-insert-blank-after"
+                  disabled={busy || empty}
+                  onClick={() => organize.insertBlankAt(chosen, "after")}
+                  size="icon-sm"
+                  variant="outline"
+                >
+                  <InsertAfterIcon />
                 </Button>
               </ToolbarTooltip>
               <ToolbarTooltip label={t("organize.delete")}>
@@ -323,75 +348,85 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
               <FileOutput />
               {t("organize.assemble")}
             </Button>
-            {active && !macOS ? <WindowControls /> : null}
           </>
         }
         macOS={macOS}
-      >
-        <span
-          className="mr-1 text-sm tabular-nums text-muted-foreground"
-          data-slot="organize-total"
-        >
-          {t("organize.totalPages", { count: organize.pages.length })}
-        </span>
-        <ButtonGroup>
-          <ToolbarTooltip label={t("organize.smaller")}>
-            <Button
-              aria-label={t("organize.smaller")}
-              disabled={size === 0}
-              onClick={() => setSize((current) => Math.max(0, current - 1))}
-              size="icon-sm"
-              variant="outline"
-            >
-              <ZoomOut />
-            </Button>
-          </ToolbarTooltip>
-          <ToolbarTooltip label={t("organize.larger")}>
-            <Button
-              aria-label={t("organize.larger")}
-              disabled={size === PAPER_WIDTHS.length - 1}
-              onClick={() =>
-                setSize((current) => Math.min(PAPER_WIDTHS.length - 1, current + 1))
-              }
-              size="icon-sm"
-              variant="outline"
-            >
-              <ZoomIn />
-            </Button>
-          </ToolbarTooltip>
-        </ButtonGroup>
-      </ToolbarFrame>
+      />
 
-      <main
-        className="workspace-background ml-(--sidebar-inset) h-full overflow-auto pt-(--toolbar-height)"
-        data-thumbnail-scroll-root
-        ref={scrollRef}
+      <div className="relative ml-(--sidebar-inset) h-[calc(100%-var(--status-bar-height))]">
+        <main
+          className="overlay-scroll-viewport workspace-background h-full overflow-auto pt-(--toolbar-height)"
+          data-thumbnail-scroll-root
+          ref={scrollRef}
+        >
+          {empty ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+              <Layers className="size-12 text-muted-foreground" />
+              <h1 className="text-lg font-semibold">{t("organize.emptyTitle")}</h1>
+              <p className="max-w-md text-sm text-muted-foreground">
+                {t("organize.emptyHint")}
+              </p>
+              <Button
+                className="mt-2"
+                data-slot="organize-empty-add"
+                disabled={busy}
+                onClick={() => void organize.chooseFiles()}
+              >
+                <FolderPlus />
+                {t("organize.addFiles")}
+              </Button>
+            </div>
+          ) : (
+            <OrganizeBoard
+              organize={organize}
+              paperWidth={PAPER_WIDTHS[size]!}
+              scrollRef={scrollRef}
+            />
+          )}
+        </main>
+        {/* The board runs on under the toolbar; its bar starts below it. */}
+        <OverlayScrollbars className="top-(--toolbar-height)" viewportRef={scrollRef} />
+      </div>
+
+      {/* Shown while empty too, disabled: the strip is reserved either way. */}
+      <StatusBar
+        label={t("organize.size")}
+        start={
+          <span
+            className="truncate text-sm tabular-nums text-muted-foreground"
+            data-slot="organize-total"
+          >
+            {t("organize.pagesFromFiles", {
+              files: t("organize.fileCount", { count: organize.plan.groups.length }),
+              pages: t("organize.pageCount", { count: organize.pages.length }),
+            })}
+          </span>
+        }
       >
-        {empty ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-            <Layers className="size-12 text-muted-foreground" />
-            <h1 className="text-lg font-semibold">{t("organize.emptyTitle")}</h1>
-            <p className="max-w-md text-sm text-muted-foreground">
-              {t("organize.emptyHint")}
-            </p>
-            <Button
-              className="mt-2"
-              data-slot="organize-empty-add"
-              disabled={busy}
-              onClick={() => void organize.chooseFiles()}
-            >
-              <FolderPlus />
-              {t("organize.addFiles")}
-            </Button>
-          </div>
-        ) : (
-          <OrganizeBoard
-            organize={organize}
-            paperWidth={PAPER_WIDTHS[size]!}
-            scrollRef={scrollRef}
-          />
-        )}
-      </main>
+        <SliderStepper
+          canDecrease={size > 0}
+          disabled={empty}
+          canIncrease={size < PAPER_WIDTHS.length - 1}
+          decrease={{ label: t("organize.smaller") }}
+          groupLabel={t("organize.size")}
+          increase={{ label: t("organize.larger") }}
+          max={PAPER_WIDTHS.length - 1}
+          min={0}
+          // Four sizes only, so each is laid out as the thumb reaches it.
+          onCommit={setSize}
+          onDecrease={() => setSize((current) => Math.max(0, current - 1))}
+          onIncrease={() =>
+            setSize((current) => Math.min(PAPER_WIDTHS.length - 1, current + 1))
+          }
+          onPreview={setSize}
+          sliderLabel={t("organize.size")}
+          slot="organize-size"
+          value={size}
+          valueText={(step) =>
+            t("organize.sizeStep", { current: step + 1, total: PAPER_WIDTHS.length })
+          }
+        />
+      </StatusBar>
 
       <Dialog open={active && organize.assembling}>
         <DialogContent data-testid="organize-progress" showCloseButton={false}>

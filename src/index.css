@@ -200,6 +200,7 @@ body {
 
 .app-surface {
   --document-tabs-height: 2.25rem;
+  --status-bar-height: 2rem;
   --toolbar-height: 2.5rem;
   background-color: var(--background);
 }
@@ -219,31 +220,19 @@ body {
   background-color: var(--sidebar);
 }
 
-/* Styled bars never overlay: on overlay platforms too, they take their width
-   from the pages. */
 .pdf-scroll-viewport {
   height: 100%;
 }
 
-.pdf-scroll-viewport::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+/* `OverlayScrollbars` draws over the content instead, so no box loses width to
+   a gutter. macOS keeps its own bars, which overlay already or are the user's
+   choice. */
+.emulated-scrollbars .overlay-scroll-viewport {
+  scrollbar-width: none;
 }
 
-.pdf-scroll-viewport::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 9999px;
-  background-clip: padding-box;
-  background-color: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
-}
-
-.pdf-scroll-viewport::-webkit-scrollbar-thumb:hover,
-.pdf-scroll-viewport::-webkit-scrollbar-thumb:active {
-  background-color: var(--muted-foreground);
-}
-
-.pdf-scroll-viewport::-webkit-scrollbar-corner {
-  background-color: transparent;
+.emulated-scrollbars .overlay-scroll-viewport::-webkit-scrollbar {
+  display: none;
 }
 
 .workspace-background {

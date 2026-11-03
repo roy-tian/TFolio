@@ -106,18 +106,20 @@ async function markVisibleDocument(message: string) {
   return clean
 }
 
-/** A hint the dialog's own autofocus opened takes the first Escape for itself. */
+/** A hint the dialog's own autofocus opened takes the first Escape for itself.
+    Closed means gone: `isDisplayed` reads a dialog still fading in at opacity
+    0 as closed, and that dialog then stays open over the next test. */
 async function closeDialog() {
-  const dialog = $("[role='dialog']")
-
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await browser.keys("Escape")
 
-    if (!(await dialog.isDisplayed())) {
+    const gone = await browser
+      .waitUntil(async () => !(await $("[role='dialog']").isExisting()), { timeout: 500 })
+      .catch(() => false)
+
+    if (gone) {
       return
     }
-
-    await browser.pause(300)
   }
 
   throw new Error("the dialog never closed")
@@ -151,6 +153,23 @@ describe("TFolio keyboard shortcuts", () => {
     const saveAll = await appMenuItem("save-all")
     await expect(saveAll).toHaveText(expect.stringContaining("Ctrl+Alt+S"))
     await closeAppMenu(saveAll)
+  })
+
+  it("zooms with ctrl+=, ctrl+- and ctrl+0", async () => {
+    const zoomGroup = $(`${visible} [data-slot='zoom-controls']`)
+    await browser.keys(["Control", "0"])
+    await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 100%")
+
+    // The buttons' rungs: 100% steps to 125% and back down to 75%.
+    await browser.keys(["Control", "="])
+    await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 125%")
+    await browser.keys(["Control", "-"])
+    await browser.keys(["Control", "-"])
+    await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 75%")
+
+    await browser.keys(["Control", "0"])
+    await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 100%")
+    expect(await tooltipOn(`${visible} button[aria-label='Zoom in']`)).toContain("Ctrl+=")
   })
 
   it("opens the layer dialogs without starting a print", async () => {

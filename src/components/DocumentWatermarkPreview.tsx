@@ -119,7 +119,10 @@ export function DocumentWatermarkPreview({
           />
         </WatermarkPreview>
         {document.pages.length > 1 ? (
-          <div className="pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity group-hover/preview:opacity-100 group-focus-within/preview:opacity-100 [@media(hover:none)]:opacity-100">
+          // Its own `focus-within`, as it holds the preview's only controls:
+          // `group-focus-within` compiles to `:focus-within *`, for which
+          // WebKit restyles the whole document on every focus change anywhere.
+          <div className="pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity group-hover/preview:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
             <Button
               aria-label={t("watermark.previousPage")}
               className={`${buttonClass} left-2`}

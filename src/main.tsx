@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import App from "./App"
 import { initializeI18n } from "./i18n"
 import { suppressNativeContextMenu } from "./lib/contextMenu"
+import { applyScrollbarEmulation } from "./lib/overlayScrollbars"
 import { loadSettings, watchSettings } from "./lib/settings"
 import { initializeTheme } from "./lib/theme"
 import { loadWordConversionAvailability } from "./lib/wordConversion"
@@ -19,6 +20,7 @@ async function bootstrap() {
   // settled before the first window can act on it.
   await loadWordConversionAvailability()
   await initializeTheme()
+  applyScrollbarEmulation()
   suppressNativeContextMenu()
 
   if (import.meta.env.MODE === "e2e") {

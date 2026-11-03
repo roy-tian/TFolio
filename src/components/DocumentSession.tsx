@@ -21,8 +21,10 @@ import { PdfSearch } from "@/components/PdfSearch"
 import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SessionDialogs } from "@/components/SessionDialogs"
 import { SessionHeader } from "@/components/SessionHeader"
+import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { SidebarThumbnails } from "@/components/SidebarThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
+import { ViewerControls } from "@/components/ViewerControls"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import type { AnnotationTool } from "@/components/AnnotationToolbar"
 import { useAnnotations } from "@/hooks/useAnnotations"
@@ -97,6 +99,7 @@ import type {
 } from "@/lib/tabMove"
 import type { PdfOwnedLayer, PdfProgress } from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
+import type { ZoomShortcut } from "@/lib/shortcuts"
 import { shownSidebarPanel } from "@/lib/sidebar"
 import {
   defaultViewMode,
@@ -144,6 +147,7 @@ export type DocumentSessionHandle = {
   redo: () => void
   selectAll: () => void
   undo: () => void
+  zoom: (action: ZoomShortcut) => void
 }
 
 type DocumentSessionProps = {
@@ -359,7 +363,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             ),
           }
         : undefined,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       viewMode,
       viewerRef,
@@ -482,7 +486,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [selectAllPages, selectAllText, thumbnailsFocused, thumbnailsShown])
     const annotations = useAnnotations({
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       initial: movedSeed && { history: movedSeed.history, marks: movedSeed.marks },
       onAnnotateError: useCallback(
         (error?: unknown, command?: AnnotationCommand) => {
@@ -633,7 +637,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const search = useDocumentSearch({
       active,
       currentPage,
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       documentPages: pdfDocument.pages,
       sessionId: openedDocument.id,
       textEpochs: annotations.textEpochs,
@@ -660,26 +664,26 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const watermark = useWatermark({
       activeConfig: annotations.watermarkConfig,
       defaultText: t("watermark.defaultText"),
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       onCancel: annotations.cancelOperation,
       onSet: annotations.setWatermark,
-      pageCount: pdfDocument?.numPages ?? 0,
+      pageCount: pdfDocument.numPages,
     })
     const pageNumbers = usePageNumbers({
       activeConfig: annotations.pageNumbersConfig,
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       onCancel: annotations.cancelOperation,
       onSet: annotations.setPageNumbers,
-      pageCount: pdfDocument?.numPages ?? 0,
+      pageCount: pdfDocument.numPages,
     })
     // Named apart from the hooks so the window's keys and the toolbar's buttons
     // open the one dialog; both openers are stable.
     const openWatermarkDialog = watermark.openDialog
     const openPageNumbersDialog = pageNumbers.openDialog
     const print = usePrint({
-      documentId: pdfDocument?.id,
+      documentId: pdfDocument.id,
       onError: () => notice.raise("printFailed"),
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
     })
     const discardPrint = print.discard
     const startPrint = print.start
@@ -715,7 +719,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       finishTextDrag,
       onCommit: annotations.commit,
       opacity: HIGHLIGHT_OPACITY,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       selectable: textSelectable,
       viewerRef,
@@ -725,7 +729,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const rectTool = useRectTool({
       active: active && drawingRect,
       onCommit: annotations.commit,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       style: rectStyle,
       viewerRef,
@@ -735,7 +739,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useEraserTool({
       active: active && erasing,
       onErase: annotations.eraseAt,
-      pages: pdfDocument?.pages ?? [],
+      pages: pdfDocument.pages,
       rotations: pageRotations,
       viewerRef,
     })
@@ -1252,7 +1256,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // export-only; one opened from bytes has no file to write back to at all.
     const hasOwnedContent =
       annotations.watermarkConfig !== null || annotations.pageNumbersConfig !== null
-    const hasSourceFile = Boolean(pdfDocument?.path)
+    const hasSourceFile = Boolean(pdfDocument.path)
     const canSave =
       hasSourceFile && annotations.isDirty && !hasOwnedContent && !hasMergedPages
     // Only where the reason is not already in front of the reader. Owned page
@@ -1371,6 +1375,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             undoStep()
           }
         },
+        // A key leaves the eye on the page, far from the bar's readout.
+        zoom: (action) => {
+          if (action === "in") {
+            zoom.zoomIn({ announce: true })
+          } else if (action === "out") {
+            zoom.zoomOut({ announce: true })
+          } else {
+            zoom.applyPreset("actual-size", { announce: true })
+          }
+        },
       }),
       [
         annotations.canRedo,
@@ -1392,13 +1406,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         snapshotForMove,
         startPrint,
         undoStep,
+        zoom.applyPreset,
+        zoom.zoomIn,
+        zoom.zoomOut,
       ],
     )
 
     const submitPageNumber = (value: string) => {
       const requestedPage = Number(value)
 
-      if (!pdfDocument || !Number.isInteger(requestedPage)) {
+      if (!Number.isInteger(requestedPage)) {
         return
       }
 
@@ -1417,9 +1434,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [scrollToPage, sidebar],
     )
 
-    // Only the tab on show has one: in the sidebar, or the toolbar while the
-    // sidebar is not docked.
-    const appMenu = active ? (
+    const appMenu = (
       <AppMenu
         {...menu}
         canSave={canSave}
@@ -1431,7 +1446,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         onSplit={() => setSplitOpen(true)}
         saveHint={saveHint}
       />
-    ) : null
+    )
 
     // The offer is a condition rather than an event, so it is put back whenever
     // its button changes: raising a standing notice again only updates it.
@@ -1460,14 +1475,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           active={active}
           annotations={annotations}
           appMenu={appMenu}
-          bookApplies={bookApplies}
           canSave={canSave}
-          document={pdfDocument}
           macOS={macOS}
-          onChangeViewMode={changeViewMode}
           onCompress={() => setCompressOpen(true)}
           onExportImages={() => setImageExportOpen(true)}
-          onRotate={() => setPageRotations(rotationsAfterRotate)}
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
           onSearchClose={search.closeSearch}
@@ -1475,10 +1486,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onSplit={() => setSplitOpen(true)}
           onToolChange={setActiveTool}
           onUndo={undoStep}
-          page={{
-            current: currentPage,
-            onSubmit: submitPageNumber,
-          }}
           saveLabel={saveLabel}
           searchOpen={search.searchOpen}
           tool={{
@@ -1491,13 +1498,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             rectStyle,
             textNoteColor: textNoteStyle.color,
           }}
-          viewMode={viewMode}
-          zoom={zoom}
         />
 
         <AppSidebar
           macOS={macOS}
-          menu={appMenu}
           switcher={
             <SidebarPanelSwitch bookmarksApply={bookmarksApply} panel={sidebarPanel} />
           }
@@ -1538,7 +1542,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         {/* Mounted while their tab is away too, only hidden: an export still
             running keeps its progress, its failure, and its busy guard. */}
-        {imageExportOpen && pdfDocument ? (
+        {imageExportOpen ? (
           <ImageExportDialog
             document={pdfDocument}
             hidden={!active}
@@ -1548,7 +1552,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           />
         ) : null}
 
-        {splitOpen && pdfDocument ? (
+        {splitOpen ? (
           <SplitPdfDialog
             document={pdfDocument}
             hidden={!active}
@@ -1558,7 +1562,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           />
         ) : null}
 
-        {compressOpen && pdfDocument ? (
+        {compressOpen ? (
           <CompressExportDialog
             document={pdfDocument}
             hidden={!active}
@@ -1585,14 +1589,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           </div>
         ) : null}
 
-        <div className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pl-(--sidebar-inset)">
-          {/* The viewer's scroll box cannot host the readout: anything absolute
-              inside it is placed against scrolled content and would drift. */}
+        <div className="flex h-full pt-[calc(var(--toolbar-height)+var(--document-tabs-height))] pb-(--status-bar-height) pl-(--sidebar-inset)">
+          {/* The viewer's scroll box cannot host the readout or the bars:
+              anything absolute inside it is placed against scrolled content
+              and would drift. */}
           <div className="relative min-w-0 flex-1">
             {/* Text drags focus this from script, which can inherit a text
                 field's focus ring; it is never a Tab stop, so it needs none. */}
             <main
-              className="pdf-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
+              className="pdf-scroll-viewport overlay-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
               data-pdf-scroll-root
               data-tool-cursor={toolCursor}
               ref={viewerRef}
@@ -1632,13 +1637,26 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 zoomRequest={zoom.zoomRequest}
               />
             </main>
-            <ZoomIndicator flash={zoom.zoomRequest} percent={zoom.zoomPercent} />
+            <OverlayScrollbars viewportRef={viewerRef} />
+            <ZoomIndicator flash={zoom.zoomAnnouncement} percent={zoom.zoomPercent} />
+            <ViewerControls
+              bookApplies={bookApplies}
+              onChangeViewMode={changeViewMode}
+              onRotate={() => setPageRotations(rotationsAfterRotate)}
+              page={{
+                count: pdfDocument.numPages,
+                current: currentPage,
+                onSubmit: submitPageNumber,
+              }}
+              viewMode={viewMode}
+              zoom={zoom}
+            />
           </div>
         </div>
 
         {/* Outside the viewer's scroll box, in the screen space it positions
             itself against — inside, it would scroll away with the page it is on. */}
-        {textNote.draft && pdfDocument?.pages[textNote.draft.pageNumber - 1] ? (
+        {textNote.draft && pdfDocument.pages[textNote.draft.pageNumber - 1] ? (
           <TextNoteEditor
             draft={textNote.draft}
             editorRef={textNote.editorRef}
@@ -1656,7 +1674,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         <SessionDialogs
           active={active}
-          pageCount={pdfDocument?.numPages ?? 0}
+          pageCount={pdfDocument.numPages}
           pageNumbers={pageNumbers}
           watermarkPreview={{
             document: pdfDocument,

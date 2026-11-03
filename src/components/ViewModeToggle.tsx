@@ -3,32 +3,27 @@ import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  toolbarCenteredStripButtonClassName,
-  toolbarSelectionBarClassName,
-} from "@/lib/toolbarStyles"
+import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 const options: Array<{
   icon: LucideIcon
-  labelKey: "toolbar.viewModeSingle" | "toolbar.viewModeBook"
+  labelKey: "statusBar.viewModeSingle" | "statusBar.viewModeBook"
   value: ViewMode
 }> = [
-  { icon: RectangleVertical, labelKey: "toolbar.viewModeSingle", value: "single" },
-  { icon: BookOpen, labelKey: "toolbar.viewModeBook", value: "book" },
+  { icon: RectangleVertical, labelKey: "statusBar.viewModeSingle", value: "single" },
+  { icon: BookOpen, labelKey: "statusBar.viewModeBook", value: "book" },
 ]
 
 type ViewModeToggleProps = {
   bookApplies: boolean
-  disabled: boolean
   onChange: (mode: ViewMode) => void
   value: ViewMode
 }
 
 export function ViewModeToggle({
   bookApplies,
-  disabled,
   onChange,
   value,
 }: ViewModeToggleProps) {
@@ -36,8 +31,7 @@ export function ViewModeToggle({
 
   return (
     <ToggleGroup
-      aria-label={t("toolbar.viewMode")}
-      disabled={disabled}
+      aria-label={t("statusBar.viewMode")}
       onValueChange={([next]) => {
         // Base UI empties the array when the active item is pressed again, but
         // a view mode always has to stay selected.
@@ -47,7 +41,6 @@ export function ViewModeToggle({
       }}
       spacing={0}
       value={[value]}
-      variant="outline"
     >
       {options.map((option) => {
         const Icon = option.icon
@@ -59,7 +52,6 @@ export function ViewModeToggle({
               aria-label={label}
               className={cn(
                 toolbarSelectionBarClassName,
-                toolbarCenteredStripButtonClassName,
                 "h-7 min-w-7 group-data-[spacing=0]/toggle-group:px-1.5",
               )}
               disabled={option.value === "book" && !bookApplies}

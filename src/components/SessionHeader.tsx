@@ -1,16 +1,13 @@
-import { ChevronDown, FileImage, RotateCw, Save, Scissors, Search, Shrink, Upload } from "lucide-react"
+import { ChevronDown, FileImage, Save, Scissors, Search, Shrink, Upload } from "lucide-react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { SidebarToggle } from "@/components/AppSidebar"
 import { HistoryControls } from "@/components/HistoryControls"
-import { PageNumberField } from "@/components/PageNumberField"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
-import { ViewModeToggle } from "@/components/ViewModeToggle"
 import { WindowControls } from "@/components/WindowControls"
 import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
-import { ZoomControls } from "@/components/ZoomControls"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -22,29 +19,20 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
-import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useSidebar } from "@/hooks/useSidebar"
-import type { useZoom } from "@/hooks/useZoom"
 import type { HexColor, RectStyle } from "@/lib/annotations"
-import type { PdfDocumentInfo } from "@/lib/pdf"
 import { formatShortcut, shortcuts } from "@/lib/shortcuts"
 import { splitMenuButtonClassName } from "@/lib/toolbarStyles"
-import type { ViewMode } from "@/lib/viewMode"
 import { cn } from "@/lib/utils"
 
 type SessionHeaderProps = {
   active: boolean
   annotations: ReturnType<typeof useAnnotations>
-  /** The app menu; the sidebar carries it while it shows. */
   appMenu: ReactNode
-  bookApplies: boolean
   canSave: boolean
-  document: PdfDocumentInfo | null
   macOS: boolean
-  onChangeViewMode: (mode: ViewMode) => void
   onCompress: () => void
   onExportImages: () => void
-  onRotate: () => void
   onSave: () => void
   onSaveAs: () => void
   onSearchClose: () => void
@@ -52,10 +40,6 @@ type SessionHeaderProps = {
   onSplit: () => void
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
-  page: {
-    current: CurrentPage
-    onSubmit: (value: string) => void
-  }
   saveLabel: string
   searchOpen: boolean
   tool: {
@@ -68,24 +52,19 @@ type SessionHeaderProps = {
     rectStyle: RectStyle
     textNoteColor: string
   }
-  viewMode: ViewMode
-  zoom: ReturnType<typeof useZoom>
 }
 
-/** The toolbar every document tab shares: reading controls on the left, the
-    editing tools and the file's own actions on the right. */
+/** The toolbar every document tab shares: the editing tools and the file's
+    own actions. Where the reader is and how the pages are looked at sit in
+    the status bar under the viewer (ViewerControls). */
 export function SessionHeader({
   active,
   annotations,
   appMenu,
-  bookApplies,
   canSave,
-  document: pdfDocument,
   macOS,
-  onChangeViewMode,
   onCompress,
   onExportImages,
-  onRotate,
   onSave,
   onSaveAs,
   onSearchClose,
@@ -93,30 +72,25 @@ export function SessionHeader({
   onSplit,
   onToolChange,
   onUndo,
-  page,
   saveLabel,
   searchOpen,
   tool,
-  viewMode,
-  zoom,
 }: SessionHeaderProps) {
   const { t } = useTranslation()
-  const rotateLabel = t("toolbar.rotateView")
 
   return (
     <ToolbarFrame
+      active={active}
       appMenu={appMenu}
       end={
         <>
           <HistoryControls
             canUndo={annotations.canUndo}
-            disabled={!pdfDocument}
             nextUndo={annotations.nextUndo}
             onUndo={onUndo}
           />
           <AnnotationToolbar
             activeTool={tool.activeTool}
-            disabled={!pdfDocument}
             highlightColor={tool.highlightColor}
             onHighlightColorChange={tool.onHighlightColorChange}
             onPageNumbers={tool.onPageNumbers}
@@ -132,7 +106,6 @@ export function SessionHeader({
                 aria-label={t("search.open")}
                 className="size-7 min-w-7 p-0"
                 data-slot="pdf-search-trigger"
-                disabled={!pdfDocument}
                 onPressedChange={(pressed) => {
                   if (pressed) {
                     onSearchOpen()
@@ -171,7 +144,6 @@ export function SessionHeader({
                         "peer-hover/save:before:opacity-100",
                       )}
                       data-slot="pdf-save-menu-trigger"
-                      disabled={!pdfDocument}
                       size="icon-sm"
                       variant="outline"
                     />
@@ -203,61 +175,27 @@ export function SessionHeader({
               </DropdownMenuContent>
             </DropdownMenu>
           </ButtonGroup>
-          {active && !macOS ? <WindowControls /> : null}
         </>
       }
       macOS={macOS}
-    >
-      <PageStatus
-        currentPage={page.current}
-        onSubmit={page.onSubmit}
-        pageCount={pdfDocument?.numPages}
-      />
-      <ViewModeToggle
-        bookApplies={bookApplies}
-        disabled={!pdfDocument}
-        onChange={onChangeViewMode}
-        value={viewMode}
-      />
-      <ZoomControls
-        canZoomIn={zoom.canZoomIn}
-        canZoomOut={zoom.canZoomOut}
-        disabled={!pdfDocument}
-        onToggleFit={zoom.toggleFit}
-        onZoomIn={zoom.zoomIn}
-        onZoomOut={zoom.zoomOut}
-        zoomMode={zoom.zoomMode}
-        zoomPercent={zoom.zoomPercent}
-      />
-      {/* Turns only the way the pages are looked at (D2); the sidebar's
-          previews turn the pages themselves. */}
-      <ToolbarTooltip label={rotateLabel}>
-        <Button
-          aria-label={rotateLabel}
-          disabled={!pdfDocument}
-          onClick={onRotate}
-          size="icon-sm"
-          variant="outline"
-        >
-          <RotateCw />
-        </Button>
-      </ToolbarTooltip>
-    </ToolbarFrame>
+    />
   )
 }
 
 type ToolbarFrameProps = {
+  /** Only the bar on show carries the menu and the window controls. */
+  active: boolean
   appMenu: ReactNode
-  children?: ReactNode
-  end: ReactNode
+  end?: ReactNode
   macOS: boolean
 }
 
-/** The title bar right of the sidebar. Without a docked sidebar beside it, it
-    takes over the sidebar's first row: the menu, the toggle, the traffic lights. */
+/** The title bar right of the sidebar, ending in the app menu and the window
+    controls. Without a docked sidebar beside it, it takes over the sidebar's
+    first row: the toggle, the workspace switch, the traffic lights. */
 export function ToolbarFrame({
+  active,
   appMenu,
-  children,
   end,
   macOS,
 }: ToolbarFrameProps) {
@@ -279,50 +217,20 @@ export function ToolbarFrame({
       >
         {docked ? null : (
           <>
-            {appMenu}
             <SidebarToggle />
             <WorkspaceSwitch />
-            <div className="mx-1 h-4 w-px shrink-0 bg-border" />
           </>
         )}
-        {children}
       </div>
-      <div className="flex items-center gap-1">{end}</div>
+      <div className="flex items-center gap-1">
+        {end}
+        {active ? (
+          <>
+            {appMenu}
+            {macOS ? null : <WindowControls />}
+          </>
+        ) : null}
+      </div>
     </header>
-  )
-}
-
-type PageStatusProps = {
-  currentPage: CurrentPage
-  onSubmit: (value: string) => void
-  /** Absent until a document is open. */
-  pageCount: number | undefined
-}
-
-/** The one part of the toolbar that follows scrolling, so the only part that
-    re-renders as the reader crosses into another page. */
-function PageStatus({ currentPage, onSubmit, pageCount }: PageStatusProps) {
-  const { t } = useTranslation()
-  const current = useCurrentPage(currentPage)
-  const status = t("toolbar.pageStatus", { current, total: pageCount ?? 0 })
-
-  return (
-    <div
-      aria-label={status}
-      className="mr-1 flex items-center gap-1.5 font-mono text-sm tabular-nums"
-      data-slot="page-status"
-      role="group"
-    >
-      <PageNumberField
-        currentPage={current}
-        disabled={pageCount === undefined}
-        onSubmit={onSubmit}
-      />
-      <span className="text-muted-foreground">/</span>
-      <span>{pageCount ?? 0}</span>
-      <span aria-live="polite" className="sr-only">
-        {status}
-      </span>
-    </div>
   )
 }
