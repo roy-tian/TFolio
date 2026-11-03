@@ -171,6 +171,8 @@ const zhCN = {
   },
   toolbar: {
     saveAsMenu: "更多保存方式",
+  },
+  statusBar: {
     viewMode: "视图模式",
     viewModeSingle: "单页视图",
     viewModeBook: "书籍视图",

@@ -180,6 +180,8 @@ const fr = {
   },
   toolbar: {
     saveAsMenu: "Autres options d’enregistrement",
+  },
+  statusBar: {
     viewMode: "Mode d’affichage",
     viewModeSingle: "Page unique",
     viewModeBook: "Livre",

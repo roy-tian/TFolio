@@ -45,18 +45,18 @@ function ActualSizeIcon(props: SVGProps<SVGSVGElement>) {
 
 const presets: Array<{
   icon: ComponentType<SVGProps<SVGSVGElement>>
-  labelKey: "toolbar.zoomActualSize" | "toolbar.zoomFitWidth" | "toolbar.zoomFitPage"
+  labelKey: "statusBar.zoomActualSize" | "statusBar.zoomFitWidth" | "statusBar.zoomFitPage"
   shortcut?: Shortcut
   value: ZoomPreset
 }> = [
   {
     icon: ActualSizeIcon,
-    labelKey: "toolbar.zoomActualSize",
+    labelKey: "statusBar.zoomActualSize",
     shortcut: shortcuts.actualSize,
     value: "actual-size",
   },
-  { icon: Brackets, labelKey: "toolbar.zoomFitWidth", value: "fit-width" },
-  { icon: Maximize, labelKey: "toolbar.zoomFitPage", value: "fit-page" },
+  { icon: Brackets, labelKey: "statusBar.zoomFitWidth", value: "fit-width" },
+  { icon: Maximize, labelKey: "statusBar.zoomFitPage", value: "fit-page" },
 ]
 
 type ZoomControlsProps = {
@@ -69,16 +69,16 @@ export function ZoomControls({ zoom }: ZoomControlsProps) {
   const { t } = useTranslation()
   const active = activeZoomPreset(zoom.zoomMode, zoom.zoomPercent)
   const percentText = (step: number) =>
-    t("toolbar.zoomPercent", { percent: zoomToPercent(sliderValueToZoom(step)) })
+    t("statusBar.zoomPercent", { percent: zoomToPercent(sliderValueToZoom(step)) })
 
   return (
     <>
       <SliderStepper
         canDecrease={zoom.canZoomOut}
         canIncrease={zoom.canZoomIn}
-        decrease={{ label: t("toolbar.zoomOut"), shortcut: shortcuts.zoomOut }}
-        groupLabel={t("toolbar.zoomLevel", { percent: zoom.zoomPercent })}
-        increase={{ label: t("toolbar.zoomIn"), shortcut: shortcuts.zoomIn }}
+        decrease={{ label: t("statusBar.zoomOut"), shortcut: shortcuts.zoomOut }}
+        groupLabel={t("statusBar.zoomLevel", { percent: zoom.zoomPercent })}
+        increase={{ label: t("statusBar.zoomIn"), shortcut: shortcuts.zoomIn }}
         max={ZOOM_SLIDER_MAX}
         min={ZOOM_SLIDER_MIN}
         // The pages are only laid out again once the drag lets go.
@@ -87,14 +87,14 @@ export function ZoomControls({ zoom }: ZoomControlsProps) {
         onIncrease={zoom.zoomIn}
         onPreview={(step) => zoom.previewScale(sliderValueToZoom(step))}
         readout={percentText}
-        sliderLabel={t("toolbar.zoom")}
+        sliderLabel={t("statusBar.zoom")}
         slot="zoom-controls"
         value={zoomToSliderValue(zoom.scale)}
         valueText={percentText}
       />
       <StatusBarDivider />
       <ToggleGroup
-        aria-label={t("toolbar.zoomPresets")}
+        aria-label={t("statusBar.zoomPresets")}
         onValueChange={([next]) => {
           // Base UI empties the group when the pressed item is pressed again;
           // that re-applies it, so a fit re-measures against the page in front.

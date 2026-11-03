@@ -9,11 +9,11 @@ import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 const options: Array<{
   icon: LucideIcon
-  labelKey: "toolbar.viewModeSingle" | "toolbar.viewModeBook"
+  labelKey: "statusBar.viewModeSingle" | "statusBar.viewModeBook"
   value: ViewMode
 }> = [
-  { icon: RectangleVertical, labelKey: "toolbar.viewModeSingle", value: "single" },
-  { icon: BookOpen, labelKey: "toolbar.viewModeBook", value: "book" },
+  { icon: RectangleVertical, labelKey: "statusBar.viewModeSingle", value: "single" },
+  { icon: BookOpen, labelKey: "statusBar.viewModeBook", value: "book" },
 ]
 
 type ViewModeToggleProps = {
@@ -31,7 +31,7 @@ export function ViewModeToggle({
 
   return (
     <ToggleGroup
-      aria-label={t("toolbar.viewMode")}
+      aria-label={t("statusBar.viewMode")}
       onValueChange={([next]) => {
         // Base UI empties the array when the active item is pressed again, but
         // a view mode always has to stay selected.

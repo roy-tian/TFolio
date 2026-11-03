@@ -178,6 +178,8 @@ const en = {
   },
   toolbar: {
     saveAsMenu: "More save options",
+  },
+  statusBar: {
     viewMode: "View mode",
     viewModeSingle: "Single page",
     viewModeBook: "Book",

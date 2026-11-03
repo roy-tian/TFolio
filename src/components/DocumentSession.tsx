@@ -1476,7 +1476,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           annotations={annotations}
           appMenu={appMenu}
           canSave={canSave}
-          document={pdfDocument}
           macOS={macOS}
           onCompress={() => setCompressOpen(true)}
           onExportImages={() => setImageExportOpen(true)}
@@ -1487,10 +1486,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onSplit={() => setSplitOpen(true)}
           onToolChange={setActiveTool}
           onUndo={undoStep}
-          page={{
-            current: currentPage,
-            onSubmit: submitPageNumber,
-          }}
           saveLabel={saveLabel}
           searchOpen={search.searchOpen}
           tool={{
@@ -1648,6 +1643,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               bookApplies={bookApplies}
               onChangeViewMode={changeViewMode}
               onRotate={() => setPageRotations(rotationsAfterRotate)}
+              page={{
+                count: pdfDocument.numPages,
+                current: currentPage,
+                onSubmit: submitPageNumber,
+              }}
               viewMode={viewMode}
               zoom={zoom}
             />

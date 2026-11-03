@@ -180,6 +180,8 @@ const th = {
   },
   toolbar: {
     saveAsMenu: "ตัวเลือกการบันทึกเพิ่มเติม",
+  },
+  statusBar: {
     viewMode: "โหมดมุมมอง",
     viewModeSingle: "หน้าเดียว",
     viewModeBook: "หนังสือ",

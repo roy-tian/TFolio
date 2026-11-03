@@ -178,6 +178,8 @@ const zhTW = {
   },
   toolbar: {
     saveAsMenu: "更多儲存選項",
+  },
+  statusBar: {
     viewMode: "檢視模式",
     viewModeSingle: "單頁檢視",
     viewModeBook: "書本檢視",

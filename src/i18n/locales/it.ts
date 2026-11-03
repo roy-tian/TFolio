@@ -180,6 +180,8 @@ const it = {
   },
   toolbar: {
     saveAsMenu: "Altre opzioni di salvataggio",
+  },
+  statusBar: {
     viewMode: "Modalità di visualizzazione",
     viewModeSingle: "Pagina singola",
     viewModeBook: "Libro",

@@ -30,12 +30,13 @@ describe("TFolio viewer controls", () => {
     offset = await calibratePointer()
   })
 
-  it("puts how the pages are looked at in a status bar under the viewer", async () => {
+  it("puts where the reader is and how the pages are looked at in a status bar under the viewer", async () => {
     const titleBar = await labelsIn(`${session} [data-slot='toolbar']`)
-    expect(titleBar).toContain("Page number")
 
-    // The order reads left to right: layout, zoom, the named sizings, the turn.
+    // The order reads left to right: the page, then layout, zoom, the named
+    // sizings, the turn.
     const viewing = [
+      "Page number",
       "Single page",
       "Book",
       "Zoom out",

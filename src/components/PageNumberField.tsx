@@ -36,7 +36,7 @@ export function PageNumberField({
   return (
     <div className="relative">
       <input
-        aria-label={t("toolbar.pageNumberInput")}
+        aria-label={t("statusBar.pageNumberInput")}
         className={cn(
           "h-7 w-10 rounded-md border bg-background px-1 text-center font-mono text-sm tabular-nums outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30",
           // The field holds the value for typed jumps and screen readers,

@@ -351,17 +351,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           </>
         }
         macOS={macOS}
-      >
-        <span
-          className="mr-1 text-sm tabular-nums text-muted-foreground"
-          data-slot="organize-total"
-        >
-          {t("organize.pagesFromFiles", {
-            files: t("organize.fileCount", { count: organize.plan.groups.length }),
-            pages: t("organize.pageCount", { count: organize.pages.length }),
-          })}
-        </span>
-      </ToolbarFrame>
+      />
 
       <div className="relative ml-(--sidebar-inset) h-[calc(100%-var(--status-bar-height))]">
         <main
@@ -399,7 +389,20 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
       </div>
 
       {/* Shown while empty too, disabled: the strip is reserved either way. */}
-      <StatusBar label={t("organize.size")}>
+      <StatusBar
+        label={t("organize.size")}
+        start={
+          <span
+            className="truncate text-sm tabular-nums text-muted-foreground"
+            data-slot="organize-total"
+          >
+            {t("organize.pagesFromFiles", {
+              files: t("organize.fileCount", { count: organize.plan.groups.length }),
+              pages: t("organize.pageCount", { count: organize.pages.length }),
+            })}
+          </span>
+        }
+      >
         <SliderStepper
           canDecrease={size > 0}
           disabled={empty}

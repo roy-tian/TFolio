@@ -963,11 +963,11 @@ describe("TFolio PDF viewer", () => {
       return {
         input: rightClick("input[aria-label='Page number']"),
         page: rightClick("[data-page-number='1']"),
-        toolbar: rightClick("[data-slot='page-status']"),
+        statusBar: rightClick("[data-slot='page-status']"),
       }
     })
 
-    expect(prevented).toEqual({ input: false, page: true, toolbar: true })
+    expect(prevented).toEqual({ input: false, page: true, statusBar: true })
   })
   // readText is refused and the driver's keys are events, not native input, so
   // the clipboard cannot be read: the real writeText is wrapped and awaited instead.

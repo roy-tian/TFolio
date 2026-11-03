@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next"
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { SidebarToggle } from "@/components/AppSidebar"
 import { HistoryControls } from "@/components/HistoryControls"
-import { PageNumberField } from "@/components/PageNumberField"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WindowControls } from "@/components/WindowControls"
 import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
@@ -20,10 +19,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
 import type { useAnnotations } from "@/hooks/useAnnotations"
-import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useSidebar } from "@/hooks/useSidebar"
 import type { HexColor, RectStyle } from "@/lib/annotations"
-import type { PdfDocumentInfo } from "@/lib/pdf"
 import { formatShortcut, shortcuts } from "@/lib/shortcuts"
 import { splitMenuButtonClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
@@ -33,7 +30,6 @@ type SessionHeaderProps = {
   annotations: ReturnType<typeof useAnnotations>
   appMenu: ReactNode
   canSave: boolean
-  document: PdfDocumentInfo
   macOS: boolean
   onCompress: () => void
   onExportImages: () => void
@@ -44,10 +40,6 @@ type SessionHeaderProps = {
   onSplit: () => void
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
-  page: {
-    current: CurrentPage
-    onSubmit: (value: string) => void
-  }
   saveLabel: string
   searchOpen: boolean
   tool: {
@@ -62,15 +54,14 @@ type SessionHeaderProps = {
   }
 }
 
-/** The toolbar every document tab shares: where the reader is on the left,
-    the editing tools and the file's own actions on the right. How the pages
-    are looked at sits in the status bar under the viewer (ViewerControls). */
+/** The toolbar every document tab shares: the editing tools and the file's
+    own actions. Where the reader is and how the pages are looked at sit in
+    the status bar under the viewer (ViewerControls). */
 export function SessionHeader({
   active,
   annotations,
   appMenu,
   canSave,
-  document: pdfDocument,
   macOS,
   onCompress,
   onExportImages,
@@ -81,7 +72,6 @@ export function SessionHeader({
   onSplit,
   onToolChange,
   onUndo,
-  page,
   saveLabel,
   searchOpen,
   tool,
@@ -188,13 +178,7 @@ export function SessionHeader({
         </>
       }
       macOS={macOS}
-    >
-      <PageStatus
-        currentPage={page.current}
-        onSubmit={page.onSubmit}
-        pageCount={pdfDocument.numPages}
-      />
-    </ToolbarFrame>
+    />
   )
 }
 
@@ -202,7 +186,6 @@ type ToolbarFrameProps = {
   /** Only the bar on show carries the menu and the window controls. */
   active: boolean
   appMenu: ReactNode
-  children?: ReactNode
   end?: ReactNode
   macOS: boolean
 }
@@ -213,7 +196,6 @@ type ToolbarFrameProps = {
 export function ToolbarFrame({
   active,
   appMenu,
-  children,
   end,
   macOS,
 }: ToolbarFrameProps) {
@@ -237,10 +219,8 @@ export function ToolbarFrame({
           <>
             <SidebarToggle />
             <WorkspaceSwitch />
-            <div className="mx-1 h-4 w-px shrink-0 bg-border" />
           </>
         )}
-        {children}
       </div>
       <div className="flex items-center gap-1">
         {end}
@@ -252,38 +232,5 @@ export function ToolbarFrame({
         ) : null}
       </div>
     </header>
-  )
-}
-
-type PageStatusProps = {
-  currentPage: CurrentPage
-  onSubmit: (value: string) => void
-  pageCount: number
-}
-
-/** The one part of the toolbar that follows scrolling, so the only part that
-    re-renders as the reader crosses into another page. */
-function PageStatus({ currentPage, onSubmit, pageCount }: PageStatusProps) {
-  const { t } = useTranslation()
-  const current = useCurrentPage(currentPage)
-  const status = t("toolbar.pageStatus", { current, total: pageCount })
-
-  return (
-    <div
-      aria-label={status}
-      className="mr-1 flex items-center gap-1.5 font-mono text-sm tabular-nums"
-      data-slot="page-status"
-      role="group"
-    >
-      <PageNumberField
-        currentPage={current}
-        onSubmit={onSubmit}
-      />
-      <span className="text-muted-foreground">/</span>
-      <span>{pageCount}</span>
-      <span aria-live="polite" className="sr-only">
-        {status}
-      </span>
-    </div>
   )
 }
