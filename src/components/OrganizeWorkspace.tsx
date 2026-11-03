@@ -180,6 +180,17 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
         appMenu={<AppMenu {...menu} />}
         end={
           <>
+            <ToolbarTooltip label={t("annotate.undo")} shortcut={shortcuts.undo}>
+              <Button
+                aria-label={t("annotate.undo")}
+                disabled={busy || !organize.canUndo}
+                onClick={organize.undo}
+                size="icon-sm"
+                variant="outline"
+              >
+                <Undo2 />
+              </Button>
+            </ToolbarTooltip>
             <ToolbarTooltip label={t("organize.addFiles")}>
               <Button
                 aria-label={t("organize.addFiles")}
@@ -190,17 +201,6 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                 variant="outline"
               >
                 <FolderPlus />
-              </Button>
-            </ToolbarTooltip>
-            <ToolbarTooltip label={t("annotate.undo")} shortcut={shortcuts.undo}>
-              <Button
-                aria-label={t("annotate.undo")}
-                disabled={busy || !organize.canUndo}
-                onClick={organize.undo}
-                size="icon-sm"
-                variant="outline"
-              >
-                <Undo2 />
               </Button>
             </ToolbarTooltip>
             <ButtonGroup>
