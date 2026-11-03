@@ -185,8 +185,9 @@ export function OrganizeFileList({ onShow, organize }: OrganizeFileListProps) {
         </ol>
         <OverlayScrollbars viewportRef={listRef} />
       </div>
-      {/* One undo away, like taking any one file off the list. */}
-      <div className="shrink-0 border-t p-2">
+      {/* One undo away, like taking any one file off the list. Boxed as the
+          status bar beside it is, so their top borders run as one line. */}
+      <div className="flex h-(--status-bar-height) shrink-0 items-center border-t px-2 pb-px">
         <Button
           className="w-full justify-start text-muted-foreground"
           data-slot="organize-remove-all"
