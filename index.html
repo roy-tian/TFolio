@@ -4,13 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TFolio — 你手边的 PDF 工作伴侣</title>
-<meta name="description" content="TFolio 是一款轻快的开源 PDF 桌面工具：阅读批注、水印页码、遮盖合订都在本机完成。MIT 开源，支持 Windows、macOS 与 Linux。">
+<meta name="description" content="TFolio 是一款轻巧、快速、占内存少的 PDF 桌面应用：查看编辑与页面组织两个工作区，智能添加空白页、水印和页码。MIT 开源，支持 Windows、macOS 与 Linux。">
+<meta name="theme-color" content="#050f26">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://roy-tian.github.io/TFolio/">
 <meta property="og:title" content="TFolio — 你手边的 PDF 工作伴侣">
-<meta property="og:description" content="轻快的开源 PDF 桌面工具：水印、国标页码、全文搜索、遮盖方框、合订成册，全在本机完成。">
-<meta property="og:image" content="https://roy-tian.github.io/TFolio/assets/zh/hero.png">
+<meta property="og:description" content="轻巧、快速、占内存少的 PDF 桌面应用。查看编辑与页面组织，智能添加空白页、水印和页码，MIT 开源。">
+<meta property="og:image" content="https://roy-tian.github.io/TFolio/assets/og.png">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<link rel="preload" href="assets/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <script>
 (function () {
   var lang = "zh"
@@ -21,1052 +26,1301 @@
     } else if ((navigator.language || "").toLowerCase().indexOf("zh") !== 0) {
       lang = "en"
     }
-  } catch (error) { /* private mode keeps zh */ }
+  } catch (error) { /* storage blocked: keep the default */ }
   document.documentElement.dataset.lang = lang
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
-  // hero src is assigned per-language at the end of <body>; preload the right
-  // file from here so the fetch outruns the parser
+  // The hero's src is set per language at the end of <body>; preloading it
+  // here lets the fetch start before the parser gets there.
   var preload = document.createElement("link")
   preload.rel = "preload"
   preload.as = "image"
-  preload.href = "assets/" + lang + "/hero.png"
+  preload.href = "assets/" + lang + "/view.webp"
   preload.setAttribute("fetchpriority", "high")
   document.head.appendChild(preload)
 })()
 </script>
 <style>
-:root {
-  --paper: #fafbfd;
-  --ink: #0b1b33;
-  --blue: #155dfb;
-  --blue-deep: #0a3bbf;
-  --blue-wash: #e8f0fe;
-  --slate: #5a6b85;
-  --hairline: #d8e0ec;
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Noto Sans SC", "MiSans", "Microsoft YaHei", sans-serif;
+@font-face {
+  font-family: "Geist";
+  src: url("assets/fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* Chinese text takes its quotes, dashes, middle dot and ellipsis from the CJK face:
+   Geist's are Latin-width and look broken between Han characters. */
+@font-face {
+  font-family: "Geist Han";
+  src: url("assets/fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00B6, U+00B8-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-2013, U+2015-2017, U+2020-2025, U+2027-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-* { box-sizing: border-box; }
+:root {
+  --night: #050f26;
+  --navy: #0a1d45;
+  --deep: #103366;
+  --blue: #155dfb;
+  --blue-press: #0d47cf;
+  --sky: #a9c2ff;
+  --paper: #ffffff;
+  --mist: #f1f4f9;
+  --ink: #0b1b33;
+  --slate: #56657e;
+  --line: #dbe2ee;
+  --on-dark: #eaf0ff;
+  --on-dark-muted: #a7b6d4;
+  --line-dark: rgba(169, 194, 255, 0.18);
+  --hit: #ffe58a;
+  --hit-current: #f5b83d;
+  --han: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  --sans: "Geist", var(--han);
+  /* The page-number face: TFolio prints "— n —" in a Song/Times serif. */
+  --folio: "Times New Roman", "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif;
+  --page-serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun",
+    "Iowan Old Style", "Georgia", serif;
+  --wrap: 1200px;
+  --gutter: 24px;
+  --radius: 14px;
+}
 
-html { scroll-behavior: smooth; }
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 72px;
+  -webkit-text-size-adjust: 100%;
+}
 
 body {
   margin: 0;
-  background: var(--paper);
+  background: var(--night);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 16px;
-  line-height: 1.75;
+  font-size: 17px;
+  line-height: 1.72;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* 语言开关：只显示当前语言的文本 */
+html[data-lang="zh"] { --sans: "Geist Han", var(--han); }
+
 html[data-lang="zh"] [lang="en"],
-html[data-lang="en"] [lang="zh"] { display: none; }
+html[data-lang="en"] [lang="zh-CN"] { display: none !important; }
+
+img { display: block; max-width: 100%; height: auto; }
+
+figure { margin: 0; }
+
+a { color: inherit; }
 
 ::selection { background: var(--blue); color: #fff; }
-
-a { color: var(--blue); text-decoration: none; }
-a:hover { text-decoration: underline; }
 
 :focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 3px;
-  border-radius: 2px;
+  border-radius: 6px;
 }
+.is-dark :focus-visible, .masthead :focus-visible { outline-color: var(--sky); }
 
-.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
-
-.mono { font-family: var(--mono); }
+.wrap {
+  width: 100%;
+  max-width: calc(var(--wrap) + var(--gutter) * 2);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
 
 .skip-link {
   position: absolute;
-  left: -9999px;
-  top: 12px;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
   background: var(--blue);
   color: #fff;
   padding: 8px 16px;
-  border-radius: 6px;
-  z-index: 100;
+  border-radius: 8px;
+  text-decoration: none;
 }
-.skip-link:focus { left: 12px; }
+.skip-link:focus { top: 12px; }
 
-/* ---------- 顶部导航 ---------- */
-.nav {
+/* ---------- masthead ---------- */
+
+.masthead {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(250, 251, 253, 0.92);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--hairline);
+  color: var(--on-dark);
+  background: rgba(5, 15, 38, 0.74);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  backdrop-filter: saturate(140%) blur(14px);
+  border-bottom: 1px solid rgba(169, 194, 255, 0.1);
 }
-.nav-inner {
+.masthead-inner {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 60px;
+  gap: 20px;
+  height: 64px;
 }
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  font-size: 1.05rem;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-.brand img { width: 26px; height: 26px; display: block; }
-.nav-links {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  font-size: 0.92rem;
-}
-.nav-links a { color: var(--slate); }
-.nav-links a:hover { color: var(--blue); }
-.lang-toggle {
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--ink);
-  background: #fff;
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  padding: 5px 13px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-.lang-toggle:hover { border-color: var(--blue); color: var(--blue); }
-.nav-star {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border: 1px solid var(--hairline);
+  gap: 10px;
+  font-weight: 650;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.brand img { width: 28px; height: 28px; }
+.nav-links {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 15px;
+}
+.nav-links a {
+  padding: 6px 12px;
   border-radius: 8px;
-  padding: 5px 12px;
-  color: var(--ink);
-  background: #fff;
+  color: var(--on-dark-muted);
+  text-decoration: none;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
-.nav-star:hover { border-color: var(--blue); color: var(--blue); text-decoration: none; }
-.nav-star svg { width: 15px; height: 15px; fill: #e8a90c; }
+.nav-links a:hover { color: #fff; background: rgba(169, 194, 255, 0.1); }
+.nav-tools { display: flex; align-items: center; gap: 8px; }
+.nav-links + .nav-tools { margin-left: 8px; }
+.chip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(169, 194, 255, 0.24);
+  background: transparent;
+  color: var(--on-dark);
+  font: 500 14px/1 var(--sans);
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.chip-button:hover { border-color: rgba(169, 194, 255, 0.5); background: rgba(169, 194, 255, 0.08); }
+.chip-button svg { width: 16px; height: 16px; flex: none; }
 
-/* ---------- 英雄区 ---------- */
-.hero {
+/* ---------- sheets: every section is a page and ends with its page number ---------- */
+
+.sheet {
   position: relative;
-  overflow: hidden;
-  border-bottom: 1px solid var(--hairline);
+  padding: 120px 0 0;
 }
-.hero-grid {
+.sheet--light { background: var(--paper); }
+.sheet--mist { background: var(--mist); }
+.is-dark { color: var(--on-dark); }
+.sheet--dark { background: var(--navy); }
+
+.folio {
+  margin: 0;
+  padding: 88px 0 34px;
+  text-align: center;
+  font-family: var(--folio);
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  user-select: none;
+}
+.is-dark .folio { color: #fff; }
+
+.section-head { max-width: 760px; }
+.section-head h2 {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.18;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+html[data-lang="en"] .section-head h2 { letter-spacing: -0.025em; }
+.section-head p {
+  margin: 18px 0 0;
+  font-size: 19px;
+  color: var(--slate);
+  max-width: 38em;
+}
+.is-dark .section-head p { color: var(--on-dark-muted); }
+
+/* ---------- hero ---------- */
+
+.hero {
+  overflow: hidden;
+  padding-top: 88px;
+  background:
+    radial-gradient(1100px 620px at 78% -8%, rgba(21, 93, 251, 0.34), transparent 62%),
+    radial-gradient(900px 560px at 4% 18%, rgba(16, 51, 102, 0.75), transparent 70%),
+    linear-gradient(180deg, var(--night) 0%, #071736 46%, var(--navy) 100%);
+}
+.hero-stars {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 100%;
+  height: 760px;
+  fill: #fff;
+  pointer-events: none;
+}
+.hero-head {
   position: relative;
   display: grid;
-  grid-template-columns: 1.02fr 1fr;
-  gap: 48px;
-  align-items: center;
-  padding: 72px 0 84px;
-}
-/* 签名元素：平铺水印背景——产品最标志性功能的自我引用 */
-.hero-watermark {
-  position: absolute;
-  inset: -40% -20%;
-  pointer-events: none;
-  user-select: none;
-  z-index: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='340' height='300'%3E%3Ctext x='170' y='150' font-family='Helvetica,Arial,sans-serif' font-size='38' font-weight='700' fill='%23155dfb' fill-opacity='0.055' text-anchor='middle' transform='rotate(-22 170 150)'%3ETFolio%3C/text%3E%3C/svg%3E");
-  background-repeat: repeat;
-}
-.hero-copy { position: relative; z-index: 1; }
-.eyebrow {
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
-  color: var(--blue);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 18px;
-}
-.eyebrow::before {
-  content: "";
-  width: 22px;
-  height: 2px;
-  background: var(--blue);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 32px 64px;
+  align-items: end;
 }
 .hero h1 {
-  font-size: clamp(2.35rem, 5.2vw, 3.55rem);
-  line-height: 1.18;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-size: clamp(46px, 7.4vw, 96px);
+  line-height: 1.04;
   font-weight: 750;
-  margin: 0 0 20px;
+  letter-spacing: 0.01em;
+  color: #fff;
 }
-.hero h1 em {
-  font-style: normal;
-  color: var(--blue);
+.hero h1 .line { display: block; }
+html[data-lang="en"] .hero h1 {
+  font-size: clamp(42px, 6.2vw, 80px);
+  letter-spacing: -0.035em;
+  line-height: 1.02;
 }
+.hero-side { padding-bottom: 8px; }
 .hero-sub {
-  font-size: 1.08rem;
-  color: var(--slate);
-  max-width: 34em;
-  margin: 0 0 30px;
+  margin: 0 0 28px;
+  font-size: 19px;
+  line-height: 1.7;
+  color: #c9d6f3;
+  max-width: 30em;
 }
-.hero-sub strong { color: var(--ink); font-weight: 600; }
-
-.cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
-.btn-primary {
+.cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
+  min-height: 50px;
+  padding: 0 22px;
+  border-radius: 12px;
+  font: 600 16px/1.2 var(--sans);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn small { font-weight: 450; opacity: 0.78; font-size: 14px; }
+.btn-primary {
   background: var(--blue);
   color: #fff;
-  font-weight: 600;
-  font-size: 1rem;
-  padding: 13px 22px;
-  border-radius: 10px;
-  border: 1px solid var(--blue);
-  box-shadow: 0 8px 20px -8px rgba(21, 93, 251, 0.55);
-  transition: background 0.15s ease, transform 0.15s ease;
+  border: 1px solid #3d7bff;
+  box-shadow: 0 10px 30px -10px rgba(21, 93, 251, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
-.btn-primary:hover { background: var(--blue-deep); text-decoration: none; }
-.btn-primary svg { width: 17px; height: 17px; }
-.btn-primary small {
-  font-weight: 400;
-  opacity: 0.85;
-  font-size: 0.82em;
+.btn-primary:hover { background: var(--blue-press); }
+.btn-quiet {
+  color: var(--on-dark);
+  border: 1px solid rgba(169, 194, 255, 0.3);
+  background: rgba(169, 194, 255, 0.06);
 }
-.btn-ghost {
+.btn-quiet:hover { border-color: rgba(169, 194, 255, 0.6); background: rgba(169, 194, 255, 0.12); }
+.hero-meta {
+  margin: 18px 0 0;
+  font-size: 14px;
+  color: var(--on-dark-muted);
+}
+
+.hero-shot {
+  position: relative;
+  margin: 72px 0 0;
+}
+.hero-shot::before {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 12%;
+  bottom: -6%;
+  background: radial-gradient(closest-side, rgba(21, 93, 251, 0.55), transparent);
+  filter: blur(40px);
+  pointer-events: none;
+}
+.screen {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #f4f5f7;
+  box-shadow:
+    0 0 0 1px rgba(169, 194, 255, 0.28),
+    0 2px 0 rgba(255, 255, 255, 0.06) inset,
+    0 48px 100px -30px rgba(0, 4, 20, 0.85);
+}
+.screen img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+
+.hero-copy, .hero-shot { animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.hero-shot { animation-delay: 0.15s; animation-duration: 1.1s; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- light, fast, lean ---------- */
+
+.spec {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 48px 72px;
+  align-items: start;
+}
+.spec .section-head { position: sticky; top: 120px; }
+.spec-list { margin: 0; border-top: 2px solid var(--ink); }
+.spec-row {
+  display: grid;
+  grid-template-columns: 7.5em minmax(0, 1fr);
+  gap: 8px 24px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+}
+.spec-row dt { font-weight: 700; font-size: 19px; line-height: 1.5; }
+.spec-row dd { margin: 0; color: var(--slate); }
+.spec-row dd strong { color: var(--ink); font-weight: 650; }
+
+/* ---------- workspaces ---------- */
+
+.switch {
+  display: inline-flex;
+  padding: 4px;
+  margin: 40px 0 0;
+  border-radius: 12px;
+  background: #e3e8f1;
+  gap: 2px;
+}
+.switch button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--ink);
-  font-weight: 500;
-  padding: 12px 18px;
-  border-radius: 10px;
-  border: 1px solid var(--hairline);
-  background: #fff;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-.btn-ghost:hover { border-color: var(--blue); color: var(--blue); text-decoration: none; }
-.platform-note {
-  margin: 14px 0 0;
-  font-size: 0.85rem;
+  height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
   color: var(--slate);
+  font: 600 15px/1 var(--sans);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
-.platform-note .mono { font-size: 0.8rem; }
-
-/* 窗框截图 */
-.hero-shot {
+.switch button svg { width: 18px; height: 18px; }
+.switch button:hover { color: var(--ink); }
+.switch button[aria-pressed="true"] {
+  background: #fff;
+  color: var(--deep);
+  box-shadow: 0 1px 2px rgba(11, 27, 51, 0.12), 0 4px 12px -6px rgba(11, 27, 51, 0.25);
+}
+.mode {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+  gap: 40px 56px;
+  align-items: start;
+  margin-top: 36px;
+}
+.mode[hidden] { display: none; }
+.mode-text h3 { margin: 6px 0 12px; font-size: 24px; line-height: 1.35; }
+.mode-text > p { margin: 0 0 22px; color: var(--slate); }
+.ticks { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.ticks li {
   position: relative;
-  z-index: 1;
-  transform: rotate(1.15deg);
+  padding-left: 26px;
+  font-size: 16px;
+  line-height: 1.6;
 }
-.window {
-  background: #fff;
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow:
-    0 2px 6px rgba(11, 27, 51, 0.06),
-    0 30px 60px -18px rgba(11, 27, 51, 0.28);
-}
-.window-bar {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--hairline);
-  background: #f4f6fa;
-}
-.window-dot { width: 11px; height: 11px; border-radius: 50%; background: #cbd5e4; }
-.window-dot:first-child { background: #b7c4d8; }
-.window-title {
-  margin: 0 auto;
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--slate);
-  transform: translateX(-21px);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 60%;
-}
-.window img { display: block; width: 100%; height: auto; }
-.hero-shot-badge {
-  position: absolute;
-  left: -14px;
-  bottom: 26px;
-  background: var(--ink);
-  color: #fff;
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  padding: 7px 12px;
-  border-radius: 7px;
-  box-shadow: 0 8px 18px -6px rgba(11, 27, 51, 0.5);
-  transform: rotate(-2deg);
-}
-
-/* ---------- 目录 ---------- */
-.toc { border-bottom: 1px solid var(--hairline); padding: 40px 0 44px; }
-.toc-head {
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
-  color: var(--slate);
-  margin: 0 0 18px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.toc-head::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
-.toc-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 40px;
-}
-.toc-list a {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 7px 10px;
-  margin: 0 -10px;
-  border-radius: 8px;
-  color: var(--ink);
-  font-size: 0.98rem;
-}
-.toc-list a:hover { background: var(--blue-wash); text-decoration: none; color: var(--blue-deep); }
-.toc-num {
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  color: var(--blue);
-  white-space: nowrap;
-}
-
-/* ---------- 功能条目 ---------- */
-.feature {
-  display: grid;
-  grid-template-columns: 92px 1fr;
-  gap: 26px;
-  padding: 58px 0;
-  border-bottom: 1px solid var(--hairline);
-}
-.feature-num {
-  font-family: var(--mono);
-  color: var(--blue);
-  font-size: 0.95rem;
-  text-align: center;
-  padding-top: 8px;
-  white-space: nowrap;
-}
-.feature-num::after {
+.ticks li::before {
   content: "";
-  display: block;
-  width: 1px;
-  height: 46px;
-  background: var(--hairline);
-  margin: 14px auto 0;
-}
-.feature-body { min-width: 0; }
-.feature-body h2 {
-  font-size: 1.62rem;
-  letter-spacing: -0.015em;
-  line-height: 1.3;
-  margin: 0 0 12px;
-  font-weight: 700;
-}
-.feature-body h2 .zh-sub {
-  display: block;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--slate);
-  letter-spacing: 0;
-  margin-top: 2px;
-}
-.feature-body p { margin: 0 0 26px; color: var(--slate); max-width: 40em; }
-.feature-body p strong { color: var(--ink); font-weight: 600; }
-
-.feature-figure { margin: 0; }
-.feature-figure img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  box-shadow: 0 22px 44px -20px rgba(11, 27, 51, 0.25);
-}
-.feature-figure figcaption {
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  color: var(--slate);
-  margin-top: 10px;
-  text-align: center;
-}
-
-.feature.split .feature-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
-  gap: 34px;
-  align-items: center;
-}
-.feature.split .feature-body > p { margin-bottom: 0; align-self: start; padding-top: 6px; }
-.feature.split .feature-body > div { min-width: 0; }
-
-.quick-facts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 10px;
-}
-.quick-facts li {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-  background: #fff;
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-  padding: 13px 16px;
-}
-.quick-facts .fact-word { font-weight: 700; color: var(--blue); white-space: nowrap; }
-.quick-facts .fact-note { color: var(--slate); font-size: 0.93rem; }
-
-/* ---------- 开源节 ---------- */
-.open-source { padding: 64px 0 76px; }
-.os-card {
-  background: linear-gradient(135deg, var(--blue) 0%, var(--blue-deep) 100%);
-  border-radius: 18px;
-  color: #fff;
-  padding: 52px 56px;
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 44px;
-  align-items: center;
-  position: relative;
-  overflow: hidden;
-}
-.os-card::before {
-  content: "MIT";
   position: absolute;
-  right: -30px;
-  bottom: -58px;
-  font-family: var(--mono);
-  font-weight: 700;
-  font-size: 13rem;
-  letter-spacing: -0.04em;
-  color: rgba(255, 255, 255, 0.08);
-  pointer-events: none;
+  left: 2px;
+  top: 0.62em;
+  width: 10px;
+  height: 6px;
+  border-left: 2px solid var(--blue);
+  border-bottom: 2px solid var(--blue);
+  transform: translateY(-50%) rotate(-45deg);
 }
-.os-card h2 {
-  margin: 0 0 12px;
-  font-size: 1.9rem;
-  letter-spacing: -0.015em;
-  line-height: 1.25;
-}
-.os-card p { margin: 0; opacity: 0.92; max-width: 30em; }
-.os-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  position: relative;
-  z-index: 1;
-}
-.os-actions .btn-white {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  background: #fff;
-  color: var(--blue-deep);
-  font-weight: 650;
-  padding: 13px 20px;
-  border-radius: 10px;
-  transition: transform 0.15s ease;
-}
-.os-actions .btn-white:hover { transform: translateY(-1px); text-decoration: none; }
-.os-actions .btn-line {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  color: #fff;
-  font-weight: 500;
-  padding: 12px 20px;
-  border-radius: 10px;
-}
-.os-actions .btn-line:hover { border-color: #fff; text-decoration: none; }
-.os-actions svg { width: 17px; height: 17px; }
+.ticks .note { display: block; font-size: 14px; color: var(--slate); }
+.mode .screen { box-shadow: 0 0 0 1px var(--line), 0 30px 60px -28px rgba(11, 27, 51, 0.4); }
+.mode .screen img { animation: fade 0.35s ease both; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
-/* ---------- 页脚 ---------- */
-.footer {
-  border-top: 1px solid var(--hairline);
-  padding: 48px 0 96px;
-  font-size: 0.9rem;
-  color: var(--slate);
-}
-.footer-grid {
+/* ---------- blank pages, watermarks, page numbers ---------- */
+
+.trio {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
-  gap: 36px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 40px 32px;
+  margin-top: 56px;
 }
-.footer h3 {
-  font-size: 0.78rem;
-  font-family: var(--mono);
-  letter-spacing: 0.08em;
+/* Rows shared across the three columns keep headings level however long a caption runs. */
+.trio article { display: grid; grid-template-rows: subgrid; grid-row: span 4; row-gap: 0; align-content: start; }
+.trio .frame {
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line-dark), 0 26px 50px -24px rgba(0, 4, 20, 0.9);
+}
+.trio .frame img { width: 100%; }
+.trio figcaption { margin-top: 10px; font-size: 14px; color: var(--on-dark-muted); }
+.trio h3 { margin: 26px 0 10px; font-size: 22px; color: #fff; }
+.trio p { margin: 0; color: var(--on-dark-muted); font-size: 16px; }
+.trio p strong { color: var(--on-dark); font-weight: 600; }
+.options {
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line-dark);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 16px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.options dt { color: var(--on-dark-muted); }
+.options dd { margin: 0; color: var(--on-dark); }
+
+/* ---------- details ---------- */
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 48px 64px;
+  align-items: center;
+  margin-top: 64px;
+}
+.detail h3 { margin: 0 0 12px; font-size: 26px; line-height: 1.3; }
+.detail-text > p { margin: 0 0 24px; color: var(--slate); max-width: 34em; }
+.detail .screen { box-shadow: 0 0 0 1px var(--line), 0 30px 60px -30px rgba(11, 27, 51, 0.45); }
+
+.demo {
+  border-radius: 14px;
+  background: var(--mist);
+  padding: 18px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.demo-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line), 0 6px 16px -10px rgba(11, 27, 51, 0.3);
+}
+.demo-bar svg { width: 18px; height: 18px; color: var(--slate); flex: none; }
+.demo-bar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
   color: var(--ink);
-  margin: 0 0 14px;
-  font-weight: 600;
+  font: 500 16px/1 var(--sans);
 }
-.footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.footer a { color: var(--slate); }
-.footer a:hover { color: var(--blue); }
-.footer-brand p { margin: 10px 0 0; max-width: 26em; }
-.footer-bottom {
-  margin-top: 44px;
-  padding-top: 20px;
-  border-top: 1px solid var(--hairline);
+.demo-bar:focus-within { box-shadow: 0 0 0 2px var(--blue), 0 6px 16px -10px rgba(11, 27, 51, 0.3); }
+.demo-count { font-size: 14px; color: var(--slate); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.paper {
+  container-type: inline-size;
+  margin-top: 14px;
+  padding: 7% 8%;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(11, 27, 51, 0.1), 0 16px 30px -22px rgba(11, 27, 51, 0.5);
+  font-family: var(--page-serif);
+  color: #1c2433;
+}
+.paper p { margin: 0 0 1.1em; font-size: clamp(11px, 3.35cqw, 17px); line-height: 1.95; }
+.paper p:last-child { margin: 0; }
+.paper[lang="en"] p { font-size: clamp(11px, 3.1cqw, 16.5px); }
+/* Each line is one line of the PDF's own text, justified the way the page set it. */
+.paper .ln { display: block; white-space: nowrap; text-align: justify; text-align-last: justify; }
+.paper .ln:last-child { text-align-last: auto; }
+.paper mark {
+  background: var(--hit);
+  color: inherit;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(214, 160, 20, 0.25);
+}
+.paper mark.is-current { background: var(--hit-current); }
+.demo-hint { margin: 12px 2px 0; font-size: 14px; color: var(--slate); }
+
+.detail--wide { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+.detail--wide .detail-text {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 64px;
+  align-items: start;
+}
+.detail--wide .detail-text > p { margin: 0; }
+.detail--wide .screen img { aspect-ratio: 2048 / 720; }
+
+/* ---------- download ---------- */
+
+.download-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 48px;
+}
+.platform {
+  border-radius: 16px;
+  background: #fff;
+  padding: 28px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.platform h3 { margin: 0 0 4px; font-size: 22px; }
+.platform > p { margin: 0 0 20px; font-size: 15px; color: var(--slate); }
+.files { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.files a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--mist);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 15px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.files a:hover { background: #e4ebf8; color: var(--deep); }
+.files .ext { font-weight: 450; color: var(--slate); font-size: 14px; }
+.files svg { width: 17px; height: 17px; color: var(--blue); flex: none; }
+.files .is-recommended { background: var(--deep); color: #fff; }
+.files .is-recommended .ext { color: var(--sky); }
+.files .is-recommended svg { color: #fff; }
+.files .is-recommended:hover { background: #0c2a57; color: #fff; }
+.download-foot {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 24px;
+  gap: 8px 32px;
   justify-content: space-between;
-  font-size: 0.82rem;
+  margin-top: 28px;
+  font-size: 15px;
+  color: var(--slate);
+}
+.download-foot a { color: var(--deep); font-weight: 600; text-decoration-color: rgba(16, 51, 102, 0.35); text-underline-offset: 3px; }
+
+/* ---------- open source ---------- */
+
+.open {
+  background:
+    radial-gradient(900px 520px at 85% 110%, rgba(21, 93, 251, 0.32), transparent 65%),
+    linear-gradient(180deg, var(--navy), var(--night));
+}
+.open-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 48px 80px;
+  align-items: end;
+}
+.open h2 {
+  margin: 0;
+  font-size: clamp(34px, 5vw, 60px);
+  line-height: 1.12;
+  font-weight: 750;
+  color: #fff;
+}
+html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
+.open-text { margin: 24px 0 0; font-size: 19px; color: #c9d6f3; max-width: 32em; }
+.open-actions { display: grid; gap: 12px; }
+.open-actions a {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 14px;
+  align-items: center;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid rgba(169, 194, 255, 0.22);
+  background: rgba(169, 194, 255, 0.05);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.open-actions a:hover { border-color: rgba(169, 194, 255, 0.55); background: rgba(169, 194, 255, 0.1); }
+.open-actions svg { grid-row: span 2; width: 22px; height: 22px; color: var(--sky); }
+.open-actions strong { font-size: 17px; color: #fff; }
+.open-actions span { font-size: 14px; color: var(--on-dark-muted); }
+
+/* ---------- footer ---------- */
+
+.footer {
+  background: var(--night);
+  color: var(--on-dark-muted);
+  font-size: 14px;
+  border-top: 1px solid rgba(169, 194, 255, 0.1);
+}
+.footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 32px var(--gutter) 40px;
+}
+.footer .brand { color: var(--on-dark); font-size: 16px; }
+.footer .brand img { width: 24px; height: 24px; }
+.footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.footer a { text-decoration: none; }
+.footer nav a:hover { color: #fff; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1000px) {
+  .hero-head, .spec, .mode, .detail, .open-grid { grid-template-columns: minmax(0, 1fr); }
+  .spec .section-head { position: static; }
+  .trio { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+  .download-grid { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
+  .detail--wide .detail-text { grid-template-columns: minmax(0, 1fr); }
+  .nav-links { display: none; }
+  .nav-tools { margin-left: auto; }
 }
 
-/* ---------- 阅读页码指示（— n —） ---------- */
-.page-ticker {
-  position: fixed;
-  right: 22px;
-  bottom: 20px;
-  z-index: 40;
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  padding: 6px 14px;
-  box-shadow: 0 8px 20px -10px rgba(11, 27, 51, 0.3);
-  pointer-events: none;
-}
-.page-ticker span { color: var(--blue); }
-
-/* ---------- 滚动入场 ---------- */
-.reveal {
-  opacity: 0;
-  transform: translateY(18px);
-  transition: opacity 0.55s ease, transform 0.55s ease;
-}
-.reveal.is-in { opacity: 1; transform: none; }
-
-/* ---------- 响应式 ---------- */
-@media (max-width: 960px) {
-  .hero-grid { grid-template-columns: 1fr; padding: 52px 0 64px; gap: 40px; }
-  .hero-shot { max-width: 560px; }
-  .cta-row .btn-primary, .cta-row .btn-ghost { width: 100%; justify-content: center; }
-  .feature { grid-template-columns: 1fr; gap: 8px; padding: 44px 0; }
-  .feature-num { text-align: left; display: flex; align-items: center; gap: 14px; }
-  .feature-num::after { height: 1px; width: 44px; margin: 0; flex: 1; }
-  .feature.split .feature-body { grid-template-columns: 1fr; }
-  .toc-list { grid-template-columns: 1fr; }
-  .os-card { grid-template-columns: 1fr; padding: 40px 32px; }
-  .footer-grid { grid-template-columns: 1fr; gap: 26px; }
-  .nav-links a:not(.nav-star) { display: none; }
+@media (max-width: 640px) {
+  :root { --gutter: 16px; }
+  body { font-size: 16px; }
+  .sheet { padding-top: 84px; }
+  .hero { padding-top: 56px; }
+  .folio { padding: 64px 0 26px; }
+  .hero-shot { margin-top: 48px; }
+  .hero-sub, .section-head p, .open-text { font-size: 17px; }
+  .cta-row .btn { width: 100%; }
+  .spec-row { grid-template-columns: minmax(0, 1fr); }
+  .switch { display: flex; }
+  .switch button { flex: 1; justify-content: center; padding: 0 10px; }
+  .chip-button .label-long { display: none; }
+  .demo { padding: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .reveal { opacity: 1; transform: none; transition: none; }
-  .btn-primary, .btn-ghost, .os-actions .btn-white { transition: none; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 </style>
 </head>
 <body>
 
-<a class="skip-link" href="#features"><span lang="zh">跳到功能目录</span><span lang="en">Skip to contents</span></a>
+<a class="skip-link" href="#main"><span lang="zh-CN">跳到正文</span><span lang="en">Skip to content</span></a>
 
-<nav class="nav" aria-label="站点导航">
-  <div class="wrap nav-inner">
-    <a class="brand" href="#">
-      <img src="assets/icon.svg" alt="TFolio" width="26" height="26">
+<header class="masthead">
+  <div class="wrap masthead-inner">
+    <a class="brand" href="#top">
+      <img src="assets/icon.svg" alt="" width="28" height="28">
       TFolio
     </a>
-    <div class="nav-links">
-      <a href="#features"><span lang="zh">功能</span><span lang="en">Features</span></a>
-      <a href="#download"><span lang="zh">下载</span><span lang="en">Download</span></a>
-      <button class="lang-toggle" id="lang-toggle" type="button">
-        <span lang="zh">EN</span><span lang="en">中文</span>
+    <nav class="nav-links" id="site-nav" aria-label="站点导航">
+      <a href="#workspaces"><span lang="zh-CN">工作区</span><span lang="en">Workspaces</span></a>
+      <a href="#smart"><span lang="zh-CN">智能添加</span><span lang="en">Pages &amp; marks</span></a>
+      <a href="#details"><span lang="zh-CN">细节</span><span lang="en">Details</span></a>
+      <a href="#download"><span lang="zh-CN">下载</span><span lang="en">Download</span></a>
+    </nav>
+    <div class="nav-tools">
+      <button class="chip-button" id="lang-toggle" type="button">
+        <span lang="zh-CN">English</span><span lang="en">中文</span>
       </button>
-      <a class="nav-star" href="https://github.com/roy-tian/TFolio" target="_blank" rel="noopener">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .25a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .25Z"/></svg>
-        Star
+      <a class="chip-button" href="https://github.com/roy-tian/TFolio" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .25Z"/></svg>
+        <span class="label-long">GitHub</span>
       </a>
     </div>
   </div>
-</nav>
-
-<header class="hero">
-  <div class="hero-watermark" aria-hidden="true"></div>
-  <div class="wrap hero-grid">
-    <div class="hero-copy">
-      <p class="eyebrow"><span lang="zh">MIT 开源 · 全程本地处理 · Win / macOS / Linux</span><span lang="en">MIT licensed · local-first · Windows / macOS / Linux</span></p>
-      <h1><span lang="zh">你手边的 PDF <em>工作伴侣</em></span><span lang="en">Put your PDFs <em>in order</em></span></h1>
-      <p class="hero-sub">
-        <span lang="zh">TFolio 是一款<strong>轻快的开源 PDF 桌面工具</strong>：整篇水印、国标式页码、跨行全文搜索、三种遮盖方框，再把 PDF、图片与 Word 文档<strong>合订成册</strong>——一切都在你的电脑上完成，文件不出本机。</span>
-        <span lang="en">TFolio is a <strong>nimble open-source desktop PDF app</strong>: whole-document watermarks, GB/T 9704-style page numbers, line-break-proof search, and three kinds of redaction boxes — then bind PDFs, images, and Word files into <strong>one tidy volume</strong>. Everything runs on your machine; nothing is uploaded.</span>
-      </p>
-      <div class="cta-row">
-        <a class="btn-primary js-download" href="https://github.com/roy-tian/TFolio/releases">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <span class="js-download-label"></span>
-        </a>
-        <a class="btn-ghost" href="https://github.com/roy-tian/TFolio/releases" target="_blank" rel="noopener">
-          <span lang="zh">其他系统与历史版本</span><span lang="en">All platforms &amp; past releases</span>
-        </a>
-      </div>
-      <p class="platform-note">
-        <span lang="zh">已按你的系统选择安装包，当前版本 <span class="mono">v0.1.18</span>。</span>
-        <span lang="en">The button picks your system's installer · <span class="mono">v0.1.18</span>.</span>
-      </p>
-    </div>
-    <figure class="hero-shot reveal">
-      <div class="window">
-        <div class="window-bar" aria-hidden="true">
-          <span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span>
-          <span class="window-title"><span lang="zh">十五五规划纲要.pdf — TFolio</span><span lang="en">Attention Is All You Need.pdf — TFolio</span></span>
-        </div>
-        <img id="hero-shot-img"
-             data-lang-src-zh="assets/zh/hero.png" data-lang-src-en="assets/en/hero.png"
-             data-lang-alt-zh="TFolio 主界面：正在阅读《十五五规划纲要》PDF" data-lang-alt-en="TFolio main window reading the Attention Is All You Need paper"
-             width="1100" height="760" fetchpriority="high" alt="">
-        <noscript><img src="assets/zh/hero.png" alt="TFolio 主界面：正在阅读《十五五规划纲要》PDF" width="1100" height="760"></noscript>
-      </div>
-      <span class="hero-shot-badge"><span lang="zh">实机截图 · Linux 版</span><span lang="en">Live capture · Linux build</span></span>
-    </figure>
-  </div>
 </header>
 
-<section class="toc" id="features" aria-labelledby="toc-heading">
+<main id="main">
+
+<section class="sheet hero is-dark" id="top" aria-labelledby="hero-title">
+  <svg class="hero-stars" viewBox="0 0 1440 760" preserveAspectRatio="xMidYMin slice" aria-hidden="true"><circle cx="172" cy="382" r="1.1" fill-opacity="0.45"/><circle cx="1372" cy="672" r="1.1" fill-opacity="0.44"/><circle cx="606" cy="435" r="1.3" fill-opacity="0.51"/><circle cx="707" cy="588" r="0.9" fill-opacity="0.28"/><circle cx="884" cy="84" r="0.6" fill-opacity="0.37"/><circle cx="1173" cy="521" r="1.3" fill-opacity="0.31"/><circle cx="572" cy="264" r="0.8" fill-opacity="0.52"/><circle cx="1440" cy="390" r="0.6" fill-opacity="0.48"/><circle cx="129" cy="409" r="0.8" fill-opacity="0.37"/><circle cx="1262" cy="535" r="1.1" fill-opacity="0.31"/><circle cx="1221" cy="280" r="0.9" fill-opacity="0.36"/><circle cx="574" cy="445" r="0.9" fill-opacity="0.54"/><circle cx="613" cy="610" r="1.1" fill-opacity="0.55"/><circle cx="573" cy="399" r="0.9" fill-opacity="0.42"/><circle cx="1414" cy="390" r="0.6" fill-opacity="0.42"/><circle cx="1103" cy="622" r="1.3" fill-opacity="0.40"/><circle cx="965" cy="545" r="0.9" fill-opacity="0.38"/><circle cx="694" cy="174" r="0.6" fill-opacity="0.44"/><circle cx="658" cy="357" r="1.1" fill-opacity="0.29"/><circle cx="579" cy="759" r="1.1" fill-opacity="0.52"/><circle cx="723" cy="364" r="0.9" fill-opacity="0.36"/><circle cx="424" cy="204" r="0.6" fill-opacity="0.24"/><circle cx="1270" cy="730" r="1.1" fill-opacity="0.57"/><circle cx="518" cy="152" r="1.3" fill-opacity="0.38"/><circle cx="736" cy="628" r="0.9" fill-opacity="0.41"/><circle cx="1306" cy="632" r="0.8" fill-opacity="0.37"/><circle cx="1169" cy="333" r="1.3" fill-opacity="0.51"/><circle cx="742" cy="344" r="0.7" fill-opacity="0.59"/><circle cx="1213" cy="364" r="0.6" fill-opacity="0.45"/><circle cx="1301" cy="281" r="0.7" fill-opacity="0.49"/><circle cx="592" cy="342" r="0.6" fill-opacity="0.22"/><circle cx="650" cy="415" r="0.6" fill-opacity="0.44"/><circle cx="286" cy="92" r="0.6" fill-opacity="0.50"/><circle cx="1377" cy="508" r="1.3" fill-opacity="0.33"/><circle cx="7" cy="505" r="1.1" fill-opacity="0.50"/><circle cx="1368" cy="374" r="1.3" fill-opacity="0.57"/><circle cx="786" cy="359" r="0.7" fill-opacity="0.58"/><circle cx="1261" cy="384" r="0.6" fill-opacity="0.36"/><circle cx="231" cy="103" r="1.1" fill-opacity="0.31"/><circle cx="593" cy="614" r="1.1" fill-opacity="0.52"/><circle cx="541" cy="729" r="0.9" fill-opacity="0.55"/><circle cx="74" cy="264" r="0.8" fill-opacity="0.57"/><circle cx="1361" cy="19" r="0.9" fill-opacity="0.32"/><circle cx="437" cy="248" r="0.6" fill-opacity="0.39"/><circle cx="672" cy="470" r="0.7" fill-opacity="0.24"/><circle cx="748" cy="330" r="0.8" fill-opacity="0.37"/><circle cx="336" cy="540" r="1.1" fill-opacity="0.35"/><circle cx="282" cy="700" r="0.6" fill-opacity="0.45"/><circle cx="1341" cy="37" r="1.3" fill-opacity="0.26"/><circle cx="1024" cy="667" r="0.7" fill-opacity="0.45"/><circle cx="315" cy="671" r="0.7" fill-opacity="0.25"/><circle cx="1216" cy="296" r="0.9" fill-opacity="0.40"/><circle cx="1250" cy="291" r="0.7" fill-opacity="0.32"/><circle cx="379" cy="378" r="0.9" fill-opacity="0.30"/><circle cx="255" cy="395" r="0.9" fill-opacity="0.23"/><circle cx="1147" cy="606" r="0.6" fill-opacity="0.54"/><circle cx="333" cy="725" r="0.9" fill-opacity="0.45"/><circle cx="588" cy="595" r="1.3" fill-opacity="0.26"/><circle cx="39" cy="643" r="0.8" fill-opacity="0.42"/><circle cx="824" cy="409" r="0.6" fill-opacity="0.44"/><circle cx="404" cy="571" r="1.3" fill-opacity="0.27"/><circle cx="424" cy="204" r="1.1" fill-opacity="0.24"/><circle cx="1125" cy="73" r="0.9" fill-opacity="0.25"/><circle cx="986" cy="577" r="1.3" fill-opacity="0.52"/><circle cx="930" cy="81" r="0.8" fill-opacity="0.30"/><circle cx="1206" cy="221" r="0.8" fill-opacity="0.25"/><circle cx="369" cy="11" r="0.8" fill-opacity="0.35"/><circle cx="22" cy="73" r="0.6" fill-opacity="0.31"/><circle cx="135" cy="426" r="0.8" fill-opacity="0.31"/><circle cx="657" cy="476" r="1.3" fill-opacity="0.44"/><circle cx="1332" cy="240" r="0.7" fill-opacity="0.43"/><circle cx="614" cy="514" r="0.6" fill-opacity="0.47"/><circle cx="1240" cy="518" r="0.8" fill-opacity="0.34"/><circle cx="1364" cy="271" r="1.3" fill-opacity="0.48"/><circle cx="1265" cy="214" r="0.8" fill-opacity="0.30"/><circle cx="1380" cy="608" r="0.6" fill-opacity="0.30"/><circle cx="600" cy="445" r="0.6" fill-opacity="0.41"/><circle cx="493" cy="426" r="1.3" fill-opacity="0.60"/><circle cx="233" cy="93" r="0.6" fill-opacity="0.23"/><circle cx="510" cy="492" r="1.3" fill-opacity="0.31"/><circle cx="612" cy="96" r="0.9" fill-opacity="0.34"/><circle cx="345" cy="320" r="0.7" fill-opacity="0.51"/><circle cx="264" cy="22" r="1.3" fill-opacity="0.57"/><circle cx="985" cy="302" r="0.8" fill-opacity="0.51"/><circle cx="329" cy="13" r="1.1" fill-opacity="0.38"/><circle cx="380" cy="239" r="1.3" fill-opacity="0.43"/><circle cx="1209" cy="420" r="1.3" fill-opacity="0.54"/><circle cx="1186" cy="623" r="0.8" fill-opacity="0.45"/><circle cx="1087" cy="241" r="1.3" fill-opacity="0.53"/><circle cx="904" cy="185" r="0.6" fill-opacity="0.59"/></svg>
   <div class="wrap">
-    <h2 class="toc-head" id="toc-heading"><span lang="zh">目 录</span><span lang="en">CONTENTS</span></h2>
-    <ul class="toc-list">
-      <li><a href="#f-fast"><span class="toc-num">— 01 —</span><span lang="zh">快而轻</span><span lang="en">Fast and light</span></a></li>
-      <li><a href="#f-watermark"><span class="toc-num">— 02 —</span><span lang="zh">整篇水印</span><span lang="en">Watermarks</span></a></li>
-      <li><a href="#f-numbers"><span class="toc-num">— 03 —</span><span lang="zh">国标页码</span><span lang="en">Page numbers</span></a></li>
-      <li><a href="#f-search"><span class="toc-num">— 04 —</span><span lang="zh">跨行搜索</span><span lang="en">Search</span></a></li>
-      <li><a href="#f-rect"><span class="toc-num">— 05 —</span><span lang="zh">遮盖方框</span><span lang="en">Redaction boxes</span></a></li>
-      <li><a href="#f-merge"><span class="toc-num">— 06 —</span><span lang="zh">合订成册</span><span lang="en">Bound volumes</span></a></li>
-      <li><a href="#f-bookmarks"><span class="toc-num">— 07 —</span><span lang="zh">书签与整览</span><span lang="en">Bookmarks</span></a></li>
-      <li><a href="#f-open"><span class="toc-num">— 08 —</span><span lang="zh">开源共建</span><span lang="en">Open source</span></a></li>
-    </ul>
+    <div class="hero-head hero-copy">
+      <h1 id="hero-title">
+        <span lang="zh-CN"><span class="line">你手边的</span><span class="line">PDF 工作伴侣</span></span>
+        <span lang="en"><span class="line">Your PDF work</span><span class="line">companion,</span><span class="line">always at hand</span></span>
+      </h1>
+      <div class="hero-side">
+        <p class="hero-sub">
+          <span lang="zh-CN">轻巧、快速、占内存少。“查看编辑”与“页面组织”两个工作区各管一摊：读、标、改一份 PDF，或把多个文件拼成一个新 PDF。</span>
+          <span lang="en">Light, fast and easy on memory. Two workspaces, each with one job: read, mark up and edit a PDF in View and edit, or combine many files into a new PDF in Organize pages.</span>
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary js-download" href="#download">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            <span class="js-download-label"><span lang="zh-CN">下载 TFolio</span><span lang="en">Download TFolio</span></span>
+          </a>
+          <a class="btn btn-quiet" href="#download"><span lang="zh-CN">其他平台</span><span lang="en">Other platforms</span></a>
+        </div>
+        <p class="hero-meta">
+          <span lang="zh-CN">版本 0.1.25，MIT 开源，免费使用。支持 Windows、macOS 与 Linux。</span>
+          <span lang="en">Version 0.1.25. Free and open source under MIT, for Windows, macOS and Linux.</span>
+        </p>
+      </div>
+    </div>
+    <figure class="hero-shot">
+      <div class="screen">
+        <img id="hero-shot"
+             data-src-zh="assets/zh/view.webp" data-src-en="assets/en/view.webp"
+             data-alt-zh="TFolio 的“查看编辑”工作区：以书籍视图打开《天象年历》，封面上的页码自动显示为白色"
+             data-alt-en="TFolio’s View and edit workspace: Sky Almanac open in book view, with the cover’s page number turned white"
+             width="2560" height="1600" fetchpriority="high" alt="">
+        <noscript><img src="assets/zh/view.webp" alt="TFolio 的“查看编辑”工作区" width="2560" height="1600"></noscript>
+      </div>
+    </figure>
   </div>
+  <p class="folio" aria-hidden="true">— 1 —</p>
 </section>
 
-<main>
-  <div class="wrap">
+<section class="sheet sheet--light" id="light" aria-labelledby="light-title">
+  <div class="wrap spec">
+    <div class="section-head">
+      <h2 id="light-title"><span lang="zh-CN">轻巧、快速、省内存</span><span lang="en">Light, fast, lean</span></h2>
+      <p>
+        <span lang="zh-CN">TFolio 只做 PDF 这件事，所以装得下、开得快，也不和别的程序抢内存。</span>
+        <span lang="en">TFolio does one thing, PDFs, so it installs small, opens fast and leaves memory for everything else.</span>
+      </p>
+    </div>
+    <dl class="spec-list">
+      <div class="spec-row">
+        <dt><span lang="zh-CN">轻巧</span><span lang="en">Small</span></dt>
+        <dd>
+          <span lang="zh-CN">Windows 安装包<strong>约 6 MB</strong>，.dmg、.deb、.rpm 也都不到 10 MB。界面交给系统自带的 WebView，不再捆绑一整个浏览器。</span>
+          <span lang="en">The Windows installer is <strong>about 6 MB</strong>; the .dmg, .deb and .rpm packages all stay under 10 MB. The interface uses the WebView your system already has instead of bundling a browser.</span>
+        </dd>
+      </div>
+      <div class="spec-row">
+        <dt><span lang="zh-CN">快速</span><span lang="en">Fast</span></dt>
+        <dd>
+          <span lang="zh-CN">页面由 Rust 调用 PDFium 在本机渲染，<strong>打开即看</strong>，滚动、缩放都跟手。</span>
+          <span lang="en">Pages are rendered on your machine by Rust and PDFium, so documents <strong>open straight away</strong> and scrolling and zooming keep up with you.</span>
+        </dd>
+      </div>
+      <div class="spec-row">
+        <dt><span lang="zh-CN">省内存</span><span lang="en">Lean</span></dt>
+        <dd>
+          <span lang="zh-CN">只渲染屏幕上的页面，并提前备好下一页；页面组织读入的文件放在<strong>有容量上限的缓存</strong>里，文件再多也不会无限占用内存。</span>
+          <span lang="en">Only the pages on screen are rendered, with the next one ready ahead of time. Files added to Organize pages live in a <strong>cache with a size limit</strong>, so many files never mean unbounded memory.</span>
+        </dd>
+      </div>
+      <div class="spec-row">
+        <dt><span lang="zh-CN">好上手</span><span lang="en">Friendly</span></dt>
+        <dd>
+          <span lang="zh-CN">功能按工作区分开，工具栏一眼看全，每一步都能撤销。界面支持<strong>8 种语言</strong>，明亮、暗黑主题随你选。</span>
+          <span lang="en">Tools are split by workspace and fit on one toolbar, and every step can be undone. The interface speaks <strong>8 languages</strong>, in light or dark.</span>
+        </dd>
+      </div>
+      <div class="spec-row">
+        <dt><span lang="zh-CN">留在本机</span><span lang="en">Local</span></dt>
+        <dd>
+          <span lang="zh-CN">文档只在你的电脑上处理，<strong>不上传</strong>到任何服务器。</span>
+          <span lang="en">Documents are processed on your computer and <strong>never uploaded</strong> anywhere.</span>
+        </dd>
+      </div>
+    </dl>
+  </div>
+  <p class="folio" aria-hidden="true">— 2 —</p>
+</section>
 
-  <section class="feature split" id="f-fast" aria-labelledby="f-fast-h">
-    <div class="feature-num" aria-hidden="true">— 01 —</div>
-    <div class="feature-body">
-      <div>
-        <h2 id="f-fast-h">
-          <span lang="zh">快而轻<span class="zh-sub">启动、翻页、安装包，三处都不拖沓</span></span>
-          <span lang="en">Fast and light<span class="zh-sub">Quick to start, smooth to scroll, small to download</span></span>
-        </h2>
-        <ul class="quick-facts">
-          <li>
-            <span class="fact-word"><span lang="zh">启动迅速</span><span lang="en">Instant launch</span></span>
-            <span class="fact-note"><span lang="zh">点开即用，不必等进度条走完</span><span lang="en">ready before any progress bar could finish</span></span>
-          </li>
-          <li>
-            <span class="fact-word"><span lang="zh">翻页如纸</span><span lang="en">Paper-like paging</span></span>
-            <span class="fact-note"><span lang="zh">本地引擎渲染，滚动缩放都跟手</span><span lang="en">native rendering keeps scrolling and zooming fluid</span></span>
-          </li>
-          <li>
-            <span class="fact-word"><span lang="zh">体积精简</span><span lang="en">Compact</span></span>
-            <span class="fact-note"><span lang="zh">安装包只有几十 MB，不捆绑任何东西</span><span lang="en">a few dozen MB, nothing bundled</span></span>
-          </li>
+<section class="sheet sheet--mist" id="workspaces" aria-labelledby="workspaces-title">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="workspaces-title"><span lang="zh-CN">两个工作区，各司其职</span><span lang="en">Two workspaces, one job each</span></h2>
+      <p>
+        <span lang="zh-CN">左上角一键切换。处理一份文档时用“查看编辑”，要把几份材料合成一份时用“页面组织”。</span>
+        <span lang="en">Switch from the top-left corner: View and edit for working on one document, Organize pages for combining several into one.</span>
+      </p>
+    </div>
+    <div class="switch" role="group" aria-label="工作区" id="mode-switch">
+      <button type="button" data-mode="view" aria-pressed="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+        <span lang="zh-CN">查看编辑</span><span lang="en">View and edit</span>
+      </button>
+      <button type="button" data-mode="organize" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+        <span lang="zh-CN">页面组织</span><span lang="en">Organize pages</span>
+      </button>
+    </div>
+
+    <div class="mode" data-mode-panel="view">
+      <div class="mode-text">
+        <h3><span lang="zh-CN">把一份 PDF 读透、改好</span><span lang="en">Read and refine one PDF</span></h3>
+        <p><span lang="zh-CN">多个文档各占一个标签页，标签页还能拖到新窗口里并排看。</span><span lang="en">Each document gets a tab, and a tab can be dragged into a window of its own.</span></p>
+        <ul class="ticks">
+          <li><span lang="zh-CN">单页视图与书籍视图，缩略图、书签随时跳转</span><span lang="en">Single page and book views, with thumbnails and bookmarks to jump around</span></li>
+          <li><span lang="zh-CN">文字高亮、文字注释，绘制半透明、马赛克或高斯模糊方框</span><span lang="en">Highlights, text notes, and boxes that are translucent, mosaic or blurred</span></li>
+          <li><span lang="zh-CN">插入空白页，旋转、删除、剪切、复制、粘贴页面</span><span lang="en">Insert blank pages; rotate, delete, cut, copy and paste pages</span></li>
+          <li><span lang="zh-CN">添加水印与页码，每一步都可撤销、重做</span><span lang="en">Add watermarks and page numbers, with undo and redo for every step</span></li>
+          <li><span lang="zh-CN">导出图片、拆分 PDF、减小文件大小、打印</span><span lang="en">Export images, split the PDF, reduce file size, print</span></li>
         </ul>
       </div>
-      <figure class="feature-figure reveal">
-        <img src="assets/zh/book.png"
-             data-lang-src-zh="assets/zh/book.png" data-lang-src-en="assets/en/book.png"
-             data-lang-alt-zh="TFolio 书籍视图：《傲慢与偏见》第一章对开页" data-lang-alt-en="TFolio book view: the opening spread of Pride and Prejudice"
-             width="1100" height="760" loading="lazy">
-        <figcaption><span lang="zh">《傲慢与偏见》· 书籍视图</span><span lang="en">Pride and Prejudice · book spread</span></figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section class="feature split" id="f-watermark" aria-labelledby="f-watermark-h">
-    <div class="feature-num" aria-hidden="true">— 02 —</div>
-    <div class="feature-body">
-      <div>
-        <h2 id="f-watermark-h">
-          <span lang="zh">整篇水印<span class="zh-sub">盖得快，也留得住</span></span>
-          <span lang="en">Whole-document watermarks<span class="zh-sub">Stamped in one go, hard to peel off</span></span>
-        </h2>
-        <p>
-          <span lang="zh">输入一句话，整份文档每一页同时盖印，预览所见即所得。导出时选择<strong>把页面合成图片</strong>，水印便不再是能单独选中、一键删除的文字层——这份“盖了章”的版本，适合直接外发。</span>
-          <span lang="en">Type once and every page is stamped, exactly as the preview shows. Export with pages <strong>rasterized to images</strong>, and the watermark is no longer a text layer someone can select and delete — that stamped copy is safe to send on.</span>
-        </p>
-      </div>
-      <figure class="feature-figure reveal">
-        <img src="assets/zh/watermark.png"
-             data-lang-src-zh="assets/zh/watermark.png" data-lang-src-en="assets/en/watermark.png"
-             data-lang-alt-zh="《民营经济促进法》首页盖满平铺的“内部资料”水印" data-lang-alt-en="The Promotion of Private Economy Law title page under a tiled CONFIDENTIAL watermark"
-             width="1100" height="760" loading="lazy">
-        <figcaption><span lang="zh">《民营经济促进法》· 平铺水印「内部资料」</span><span lang="en">Tiled CONFIDENTIAL watermark · one setting, every page</span></figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section class="feature split" id="f-numbers" aria-labelledby="f-numbers-h">
-    <div class="feature-num" aria-hidden="true">— 03 —</div>
-    <div class="feature-body">
-      <figure class="feature-figure reveal">
-        <img src="assets/zh/page-numbers.png"
-             data-lang-src-zh="assets/zh/page-numbers.png" data-lang-src-en="assets/en/page-numbers.png"
-             data-lang-alt-zh="页码设置对话框：预览“— 1 —”样式，支持奇偶页自动镜像" data-lang-alt-en="Page-number dialog: “— 1 —” preview with automatic odd/even mirroring"
-             width="1100" height="760" loading="lazy">
-        <figcaption><span lang="zh">在 GB/T 9704 标准文本上设置页码</span><span lang="en">Numbering the GB/T 9704 standard itself</span></figcaption>
-      </figure>
-      <div>
-        <h2 id="f-numbers-h">
-          <span lang="zh">国标页码<span class="zh-sub">按 GB/T 9704 公文格式排版</span></span>
-          <span lang="en">Official-format page numbers<span class="zh-sub">the “— n —” style of GB/T 9704</span></span>
-        </h2>
-        <p>
-          <span lang="zh">页码采用公文通用的 <strong>“— 1 —”样式</strong>。打开“自动匹配”，奇数页落右下、偶数页落左下，<strong>双面装订各归其位</strong>；空白页计不计号、印不印号，也都由你决定。</span>
-          <span lang="en">Numbers take the <strong>“— 1 —” form</strong> used in Chinese official documents. Auto-match mirrors them — odd pages bottom-right, even pages bottom-left — so <strong>double-sided binding lines up</strong>; whether blank pages count, or print at all, is your call.</span>
-        </p>
+      <div class="screen">
+        <img lang="zh-CN" src="assets/zh/edit.webp" width="2560" height="1600" loading="lazy" alt="“查看编辑”工作区：侧栏显示书签，流星雨表格中的“英仙座”一行加了半透明方框">
+        <img lang="en" src="assets/en/edit.webp" width="2560" height="1600" loading="lazy" alt="The View and edit workspace: bookmarks in the sidebar and a translucent box over the Perseids row">
       </div>
     </div>
-  </section>
 
-  <section class="feature split" id="f-search" aria-labelledby="f-search-h">
-    <div class="feature-num" aria-hidden="true">— 04 —</div>
-    <div class="feature-body">
-      <div>
-        <h2 id="f-search-h">
-          <span lang="zh">跨行搜索<span class="zh-sub">换行不拆词，粘贴即可搜</span></span>
-          <span lang="en">Search that spans line breaks<span class="zh-sub">paste a paragraph, find it whole</span></span>
-        </h2>
-        <p>
-          <span lang="zh">全文检索只认 PDF 里的真实文字：正文里被排版折行的短语照样一击命中，<strong>带着换行粘进搜索框的整段话</strong>也能连起来匹配。140 页的纲要、200 多处结果，转眼就到。</span>
-          <span lang="en">Full-text search reads the PDF's real text: phrases wrapped mid-line still match in <strong>one hit</strong>, and a query pasted with its line breaks intact matches too. All 46 “attention” hits across the Transformer paper — results land in the blink of an eye.</span>
-        </p>
+    <div class="mode" data-mode-panel="organize" hidden>
+      <div class="mode-text">
+        <h3><span lang="zh-CN">把多个文件拼成一个新 PDF</span><span lang="en">Combine many files into a new PDF</span></h3>
+        <p><span lang="zh-CN">源文件只读不改；排好页面后点“生成 PDF”，结果在新标签页里打开。</span><span lang="en">Source files are only read, never changed. Arrange the pages, choose Create PDF, and the result opens in a new tab.</span></p>
+        <ul class="ticks">
+          <li>
+            <span lang="zh-CN">添加 PDF、图片和 Word 文档<span class="note">Word 文档需要本机装有 Word、WPS 或 LibreOffice</span></span>
+            <span lang="en">Add PDFs, images and Word documents<span class="note">Word files need Word, WPS or LibreOffice installed</span></span>
+          </li>
+          <li><span lang="zh-CN">页面可以跨文件拖动，也能旋转、删除、插入空白页</span><span lang="en">Drag pages between files; rotate, delete or insert blank pages</span></li>
+          <li><span lang="zh-CN">每个文件都从奇数页开始，所有页面统一为 A4</span><span lang="en">Start every file on an odd page, and make every page A4</span></li>
+          <li><span lang="zh-CN">为每个文件建书签，或保留文件原有的书签</span><span lang="en">Add a bookmark per file, or keep the files’ own bookmarks</span></li>
+        </ul>
       </div>
-      <figure class="feature-figure reveal">
-        <img src="assets/zh/search.png"
-             data-lang-src-zh="assets/zh/search.png" data-lang-src-en="assets/en/search.png"
-             data-lang-alt-zh="在《十五五规划纲要》中搜索“发展”，200+ 处命中并高亮" data-lang-alt-en="Searching “attention” across the paper, hits highlighted one by one"
-             width="1100" height="760" loading="lazy">
-        <figcaption><span lang="zh">140 页《十五五规划纲要》· 搜索「发展」· 200+ 处</span><span lang="en">“attention” across the Transformer paper · 46 hits</span></figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section class="feature split" id="f-rect" aria-labelledby="f-rect-h">
-    <div class="feature-num" aria-hidden="true">— 05 —</div>
-    <div class="feature-body">
-      <figure class="feature-figure reveal">
-        <img src="assets/zh/rect-effects.png"
-             data-lang-src-zh="assets/zh/rect-effects.png" data-lang-src-en="assets/en/rect-effects.png"
-             data-lang-alt-zh="《Attention Is All You Need》首页：半透明、高斯模糊、马赛克三种方框" data-lang-alt-en="Three box effects on the paper's first page: translucent, blur, mosaic"
-             width="1100" height="760" loading="lazy">
-        <figcaption><span lang="zh">同页三种效果 · 半透明 / 高斯模糊 / 马赛克</span><span lang="en">Translucent / Gaussian blur / mosaic, one page</span></figcaption>
-      </figure>
-      <div>
-        <h2 id="f-rect-h">
-          <span lang="zh">遮盖方框<span class="zh-sub">半透明、高斯模糊、马赛克</span></span>
-          <span lang="en">Redaction boxes<span class="zh-sub">translucent, Gaussian blur, mosaic</span></span>
-        </h2>
-        <p>
-          <span lang="zh">选中效果，在页面上<strong>拖一个框就位</strong>：半透明色块用于提醒，模糊与马赛克用于挡住敏感内容。配合图片化导出，<strong>PDF 底层的原文字层一并抹去</strong>，复制粘贴也取不回来。</span>
-          <span lang="en">Pick an effect and <strong>drag a box</strong>: translucent flags a spot, blur and mosaic hide sensitive content. Export rasterized and <strong>the underlying text layer goes with it</strong> — no copy-paste recovery.</span>
-        </p>
+      <div class="screen">
+        <img lang="zh-CN" src="assets/zh/organize.webp" width="2560" height="1600" loading="lazy" alt="“页面组织”工作区：天象年历、观测活动通知和一张海报排成一个新文档">
+        <img lang="en" src="assets/en/organize.webp" width="2560" height="1600" loading="lazy" alt="The Organize pages workspace: an almanac, a notice and a poster arranged into one document">
       </div>
     </div>
-  </section>
-
-  <section class="feature split" id="f-merge" aria-labelledby="f-merge-h">
-    <div class="feature-num" aria-hidden="true">— 06 —</div>
-    <div class="feature-body">
-      <div>
-        <h2 id="f-merge-h">
-          <span lang="zh">合订成册<span class="zh-sub">PDF、图片、Word，来者不拒</span></span>
-          <span lang="en">Bound volumes<span class="zh-sub">PDFs, images, Word — all welcome</span></span>
-        </h2>
-        <p>
-          <span lang="zh">把材料按顺序拖进合并向导：PDF、图片、Word 文档（<span class="mono">.doc / .docx</span>）一律并入。可以<strong>插入空白页让每份材料从奇数页起</strong>，统一为 A4，再自动编页码、立书签——装订厂级别的整齐。</span>
-          <span lang="en">Drop materials into the merge wizard in order: PDFs, images, and Word documents (<span class="mono">.doc / .docx</span>) all join. <strong>Insert blank pages so each source starts on an odd leaf</strong>, normalize to A4, then add page numbers and bookmarks — bindery-grade tidiness.</span>
-        </p>
-      </div>
-      <figure class="feature-figure reveal">
-        <img src="assets/zh/merge-wizard.png"
-             data-lang-src-zh="assets/zh/merge-wizard.png" data-lang-src-en="assets/en/merge-wizard.png"
-             data-lang-alt-zh="合并向导：五个文件按序列出，可勾选书签、页码、水印" data-lang-alt-en="Merge wizard: five sources listed in order with bookmark, page-number, and watermark switches"
-             width="1100" height="760" loading="lazy">
-        <figcaption><span lang="zh">合并向导 · 五份公开文献 · 一路点到底</span><span lang="en">Five public documents, one wizard</span></figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section class="feature split" id="f-bookmarks" aria-labelledby="f-bookmarks-h">
-    <div class="feature-num" aria-hidden="true">— 07 —</div>
-    <div class="feature-body">
-      <figure class="feature-figure reveal">
-        <img src="assets/zh/merged-bookmarks.png"
-             data-lang-src-zh="assets/zh/merged-bookmarks.png" data-lang-src-en="assets/en/merged-bookmarks.png"
-             data-lang-alt-zh="合订后的 623 页文档：左侧书签即目录，右侧缩略图整览" data-lang-alt-en="The 623-page compilation: bookmarks as a table of contents, thumbnails for the whole volume"
-             width="1100" height="760" loading="lazy">
-        <figcaption><span lang="zh">623 页合订本 · 每个源文件一条书签</span><span lang="en">623 pages · a bookmark per source</span></figcaption>
-      </figure>
-      <div>
-        <h2 id="f-bookmarks-h">
-          <span lang="zh">书签与整览<span class="zh-sub">厚厚一册，也井井有条</span></span>
-          <span lang="en">Bookmarks at a glance<span class="zh-sub">six hundred pages, still tidy</span></span>
-        </h2>
-        <p>
-          <span lang="zh">合订完成后每个源文件自动生成一条书签，侧栏即成目录；缩略图视图整册过目，随时拖动调序、插入空白页。成品可存为 PDF，或<strong>逐页导出 PNG</strong> 打包带走。</span>
-          <span lang="en">Every source becomes a bookmark, so the sidebar doubles as a table of contents; the thumbnail grid surveys the whole volume, and pages drag to reorder or slot in blanks. Save as PDF, or <strong>export page-by-page PNGs</strong>.</span>
-        </p>
-      </div>
-    </div>
-  </section>
-
   </div>
+  <p class="folio" aria-hidden="true">— 3 —</p>
+</section>
 
-  <section class="open-source" id="f-open" aria-labelledby="f-open-h">
-    <div class="wrap">
-      <div class="os-card">
-        <div>
-          <h2 id="f-open-h">
-            <span lang="zh">开源，欢迎光临</span>
-            <span lang="en">Open source, come say hi</span>
-          </h2>
-          <p>
-            <span lang="zh">TFolio 以 MIT 许可发布，代码托管在 GitHub。用得顺手，请赏一颗 Star；用着别扭，欢迎提个 issue——每一条反馈都会被认真读。</span>
-            <span lang="en">TFolio ships under the MIT license on GitHub. If it works for you, a Star helps others find it; if it doesn't, file an issue — every report gets read.</span>
-          </p>
+<section class="sheet sheet--dark is-dark" id="smart" aria-labelledby="smart-title">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="smart-title"><span lang="zh-CN">空白页、水印、页码，智能添加</span><span lang="en">Blank pages, watermarks, page numbers, added for you</span></h2>
+      <p>
+        <span lang="zh-CN">装订、外发、归档前最费时的三件事，几下点击就能办好，而且打开就有预览。</span>
+        <span lang="en">The three chores that come before printing, sending or filing, each done in a few clicks with a preview first.</span>
+      </p>
+    </div>
+    <div class="trio">
+      <article>
+        <figure>
+          <div class="frame">
+            <img lang="zh-CN" src="assets/zh/blank.webp" width="1128" height="752" loading="lazy" alt="页面组织中，第 10 页是自动补上的空白页，下一个文件从第 11 页开始">
+            <img lang="en" src="assets/en/blank.webp" width="1128" height="752" loading="lazy" alt="In Organize pages, page 10 is an added blank so the next file starts on page 11">
+          </div>
+          <figcaption><span lang="zh-CN">虚线框是自动补的空白页，下一个文件从第 11 页开始</span><span lang="en">The dashed page is an added blank; the next file starts on page 11</span></figcaption>
+        </figure>
+        <h3><span lang="zh-CN">空白页</span><span lang="en">Blank pages</span></h3>
+        <p>
+          <span lang="zh-CN">打开<strong>“每个文件都从奇数页开始”</strong>，TFolio 只在需要的地方补一张空白页，双面打印时每份材料都从正面起头。也可以在任意两页之间手动插入。</span>
+          <span lang="en">Turn on <strong>Start every file on an odd page</strong> and TFolio adds a blank only where one is needed, so every file begins on a front side when printed double-sided. You can also insert one between any two pages.</span>
+        </p>
+        <dl class="options">
+          <dt><span lang="zh-CN">页面组织</span><span lang="en">Organize</span></dt>
+          <dd><span lang="zh-CN">自动补页，或在前面、后面插入空白页</span><span lang="en">Automatic padding, or insert before or after</span></dd>
+          <dt><span lang="zh-CN">页码</span><span lang="en">Numbers</span></dt>
+          <dd><span lang="zh-CN">空白页可以参与计数、隐藏页码或跳过计数</span><span lang="en">Blanks can be counted, counted but unnumbered, or skipped</span></dd>
+        </dl>
+      </article>
+      <article>
+        <figure>
+          <div class="frame">
+            <img lang="zh-CN" src="assets/zh/watermark.webp" width="1440" height="960" loading="lazy" alt="文档水印对话框：斑马式重复的“校对样稿”实时预览">
+            <img lang="en" src="assets/en/watermark.webp" width="1440" height="960" loading="lazy" alt="Document watermark dialog with a live preview of a tiled PROOF COPY mark">
+          </div>
+          <figcaption><span lang="zh-CN">斑马式重复，预览即成品</span><span lang="en">Tiled, and the preview is the result</span></figcaption>
+        </figure>
+        <h3><span lang="zh-CN">水印</span><span lang="en">Watermarks</span></h3>
+        <p>
+          <span lang="zh-CN">输入一行字，<strong>每一页同时加上同一个水印</strong>。文字大小按页面宽度的比例计算，横版、竖版页面都不会走样。</span>
+          <span lang="en">Type one line and <strong>every page gets the same mark</strong>. Its size is a share of each page’s width, so portrait and landscape pages both look right.</span>
+        </p>
+        <dl class="options">
+          <dt><span lang="zh-CN">文字方向</span><span lang="en">Direction</span></dt>
+          <dd><span lang="zh-CN">左下到右上，或左上到右下</span><span lang="en">Bottom left to top right, or top left to bottom right</span></dd>
+          <dt><span lang="zh-CN">重复方式</span><span lang="en">Repeat</span></dt>
+          <dd><span lang="zh-CN">仅显示一份，或斑马式重复</span><span lang="en">Once, or tiled</span></dd>
+        </dl>
+      </article>
+      <article>
+        <figure>
+          <div class="frame">
+            <img lang="zh-CN" src="assets/zh/numbers.webp" width="1440" height="960" loading="lazy" alt="页码对话框：页码位置、页面范围、起始页码、空白页面与智能匹配页码颜色">
+            <img lang="en" src="assets/en/numbers.webp" width="1440" height="960" loading="lazy" alt="Page numbers dialog: position, page range, starting number, blank pages and smart number color">
+          </div>
+          <figcaption><span lang="zh-CN">“— n —”样式，范围与起始页码可选</span><span lang="en">The “— n —” style, with a range and a starting number</span></figcaption>
+        </figure>
+        <h3><span lang="zh-CN">页码</span><span lang="en">Page numbers</span></h3>
+        <p>
+          <span lang="zh-CN">在页面底部加上<strong>“— n —”样式</strong>的页码。选择“自动匹配”，奇数页落在右下、偶数页落在左下，按双面装订镜像对称。</span>
+          <span lang="en">Add page numbers in the <strong>“— n —” style</strong> along the bottom. Choose Automatic and they mirror for double-sided binding: odd pages bottom right, even pages bottom left.</span>
+        </p>
+        <dl class="options">
+          <dt><span lang="zh-CN">页码位置</span><span lang="en">Position</span></dt>
+          <dd><span lang="zh-CN">固定中下、固定右下或自动匹配</span><span lang="en">Fixed center, fixed right, or automatic</span></dd>
+          <dt><span lang="zh-CN">范围</span><span lang="en">Range</span></dt>
+          <dd><span lang="zh-CN">任选页面区间与起始页码</span><span lang="en">Any page range, any starting number</span></dd>
+        </dl>
+      </article>
+    </div>
+  </div>
+  <p class="folio" aria-hidden="true">— 4 —</p>
+</section>
+
+<section class="sheet sheet--light" id="details" aria-labelledby="details-title">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="details-title"><span lang="zh-CN">细节里见功夫</span><span lang="en">Care in the details</span></h2>
+      <p>
+        <span lang="zh-CN">两处小地方，用过就回不去。</span>
+        <span lang="en">Two small things you will miss in any other reader.</span>
+      </p>
+    </div>
+
+    <div class="detail">
+      <div class="detail-text">
+        <h3><span lang="zh-CN">换行处的词，也搜得到</span><span lang="en">Search finds words split across lines</span></h3>
+        <p>
+          <span lang="zh-CN">PDF 里一个词常被排版拆在两行，TFolio 照样把它算作一处结果；从别处复制来、带着换行的一句话，直接粘进搜索框也能找到。下面这段文字和右图是同一页，试着改搜别的词。</span>
+          <span lang="en">Typesetting often splits a phrase over two lines; TFolio still counts it as one result, and a sentence pasted with its line breaks is found too. The text below is the page on the right. Try another phrase.</span>
+        </p>
+        <div class="demo" lang="zh-CN" data-demo>
+          <label class="demo-bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" value="英仙座流星雨" placeholder="在 PDF 中搜索…" aria-label="在示例页面中搜索" spellcheck="false" autocomplete="off">
+            <span class="demo-count" aria-live="polite"></span>
+          </label>
+          <div class="paper">
+            <p><span class="ln">8 月 12 日恰好是新月，月亮与太阳同升同落，整夜没有月光。这</span><span class="ln">意味着今年的英仙座流星雨可以在真正的暗夜里观看，肉眼可见</span><span class="ln">的暗弱流星不会再被月光淹没。极大预计出现在 13 日凌晨，届时</span><span class="ln">英仙座已高悬东北天空，每小时可见数十颗乃至上百颗流星。</span></p>
+            <p><span class="ln">观看流星雨不需要任何器材，躺椅、保暖衣物与耐心，静候英仙</span><span class="ln">座流星雨的极大便好。让眼睛在黑暗中适应二十分钟，视野里会</span><span class="ln">多出成倍的星星。</span></p>
+          </div>
         </div>
-        <div class="os-actions">
-          <a class="btn-white" href="https://github.com/roy-tian/TFolio" target="_blank" rel="noopener">
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .25Z"/></svg>
-            <span lang="zh">给 TFolio 加 Star</span><span lang="en">Star TFolio on GitHub</span>
-          </a>
-          <a class="btn-line" href="https://github.com/roy-tian/TFolio/issues" target="_blank" rel="noopener">
-            <span lang="zh">提交 issue</span><span lang="en">File an issue</span>
-          </a>
+        <div class="demo" lang="en" data-demo>
+          <label class="demo-bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" value="Perseid meteor shower" placeholder="Search in PDF…" aria-label="Search the sample page" spellcheck="false" autocomplete="off">
+            <span class="demo-count" aria-live="polite"></span>
+          </label>
+          <div class="paper" lang="en">
+            <p><span class="ln">New moon falls on August 12, so the Moon rises and sets</span><span class="ln">with the Sun and leaves the whole night dark. That puts this</span><span class="ln">year’s Perseid meteor shower under a truly dark sky. The</span><span class="ln">peak comes before dawn on the 13th, with up to a hundred</span><span class="ln">meteors an hour.</span></p>
+            <p><span class="ln">Leave the telescope at home: all you need for the Perseid</span><span class="ln">meteor shower is a reclining chair, warm layers and</span><span class="ln">patience. Give your eyes twenty minutes in the dark and the</span><span class="ln">sky fills with stars.</span></p>
+          </div>
         </div>
       </div>
+      <div class="screen">
+        <img lang="zh-CN" src="assets/zh/search.webp" width="1280" height="1226" loading="lazy" alt="TFolio 搜索“英仙座流星雨”：当前结果跨两行高亮，共 5 处">
+        <img lang="en" src="assets/en/search.webp" width="1280" height="1226" loading="lazy" alt="TFolio searching for “Perseid meteor shower”: the current result is highlighted across two lines">
+      </div>
     </div>
-  </section>
+
+    <div class="detail detail--wide">
+      <div class="detail-text">
+        <h3><span lang="zh-CN">智能匹配页码颜色</span><span lang="en">Smart number color</span></h3>
+        <p>
+          <span lang="zh-CN">页码默认为黑色，落在深色区域时自动改用白色，深浅页面混排也不用逐页调整。这个页面每一节底部的页码，用的也是同样的配色规则。</span>
+          <span lang="en">Numbers print in black and switch to white where they land on a dark area, so mixed light and dark pages need no fixing by hand. The page numbers closing each section of this page follow the same rule.</span>
+        </p>
+      </div>
+      <div class="screen">
+        <img lang="zh-CN" src="assets/zh/numbers-color.webp" width="2048" height="720" loading="lazy" alt="书籍视图中的第 3、4 页：浅色页上的“— 3 —”为黑色，深色页上的“— 4 —”为白色">
+        <img lang="en" src="assets/en/numbers-color.webp" width="2048" height="720" loading="lazy" alt="Pages 3 and 4 in book view: “— 3 —” in black on the light page, “— 4 —” in white on the dark page">
+      </div>
+    </div>
+  </div>
+  <p class="folio" aria-hidden="true">— 5 —</p>
+</section>
+
+<section class="sheet sheet--mist" id="download" aria-labelledby="download-title">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="download-title"><span lang="zh-CN">下载 TFolio</span><span lang="en">Download TFolio</span></h2>
+      <p>
+        <span lang="zh-CN">当前版本 0.1.25。安装后，TFolio 会在启动时检查更新，有新版本会提示你。</span>
+        <span lang="en">Current version 0.1.25. Once installed, TFolio checks for updates when it starts and lets you know when a new version is out.</span>
+      </p>
+    </div>
+    <div class="download-grid">
+      <div class="platform" data-platform="windows">
+        <h3>Windows</h3>
+        <p><span lang="zh-CN">Windows 10 与 11，x64</span><span lang="en">Windows 10 and 11, x64</span></p>
+        <ul class="files">
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64-setup.exe"><span lang="zh-CN">安装程序</span><span lang="en">Installer</span> <span class="ext">.exe</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64_en-US.msi"><span lang="zh-CN">MSI 安装包</span><span lang="en">MSI package</span> <span class="ext">.msi</span></a></li>
+        </ul>
+      </div>
+      <div class="platform" data-platform="mac">
+        <h3>macOS</h3>
+        <p><span lang="zh-CN">Apple 芯片与 Intel 处理器</span><span lang="en">Apple silicon and Intel</span></p>
+        <ul class="files">
+          <li><a data-target="macArm" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_aarch64.dmg"><span lang="zh-CN">Apple 芯片</span><span lang="en">Apple silicon</span> <span class="ext">.dmg</span></a></li>
+          <li><a data-target="macIntel" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64.dmg"><span lang="zh-CN">Intel 处理器</span><span lang="en">Intel</span> <span class="ext">.dmg</span></a></li>
+        </ul>
+      </div>
+      <div class="platform" data-platform="linux">
+        <h3>Linux</h3>
+        <p><span lang="zh-CN">x64，三种安装格式</span><span lang="en">x64, in three package formats</span></p>
+        <ul class="files">
+          <li><a data-target="linux" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_amd64.deb">Debian / Ubuntu <span class="ext">.deb</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio-0.1.25-1.x86_64.rpm">Fedora / openSUSE <span class="ext">.rpm</span></a></li>
+          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_amd64.AppImage"><span lang="zh-CN">免安装</span><span lang="en">Portable</span> <span class="ext">.AppImage</span></a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="download-foot">
+      <span><span lang="zh-CN">所有安装包都来自 GitHub Releases。</span><span lang="en">Every package comes from GitHub Releases.</span></span>
+      <a href="https://github.com/roy-tian/TFolio/releases" target="_blank" rel="noopener"><span lang="zh-CN">全部版本与更新日志</span><span lang="en">All releases and changelogs</span></a>
+    </div>
+  </div>
+  <p class="folio" aria-hidden="true">— 6 —</p>
+</section>
+
+<section class="sheet open is-dark" id="open" aria-labelledby="open-title">
+  <div class="wrap open-grid">
+    <div>
+      <h2 id="open-title">
+        <span lang="zh-CN">MIT 开源，<br>欢迎随时提意见</span>
+        <span lang="en">Open source under MIT.<br>Ideas always welcome.</span>
+      </h2>
+      <p class="open-text">
+        <span lang="zh-CN">TFolio 以 MIT 许可发布，个人和商业用途都免费，源代码全部公开。哪里用着不顺手、想要什么功能，随时在 GitHub 上留言，每一条都会认真看。</span>
+        <span lang="en">TFolio is released under the MIT license: free for personal and commercial use, with all of its source code public. If something feels awkward or a feature is missing, say so on GitHub any time. Every message gets read.</span>
+      </p>
+    </div>
+    <div class="open-actions">
+      <a href="https://github.com/roy-tian/TFolio/discussions" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+        <strong><span lang="zh-CN">提建议</span><span lang="en">Suggest an idea</span></strong>
+        <span><span lang="zh-CN">在 Discussions 里聊想法和用法</span><span lang="en">Talk ideas and workflows in Discussions</span></span>
+      </a>
+      <a href="https://github.com/roy-tian/TFolio/issues" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+        <strong><span lang="zh-CN">报告问题</span><span lang="en">Report a problem</span></strong>
+        <span><span lang="zh-CN">遇到错误或异常，在 Issues 里反馈</span><span lang="en">Something broke? File it in Issues</span></span>
+      </a>
+      <a href="https://github.com/roy-tian/TFolio" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>
+        <strong><span lang="zh-CN">查看源代码</span><span lang="en">Read the source</span></strong>
+        <span><span lang="zh-CN">觉得好用，顺手点个 Star</span><span lang="en">If it helps you, a Star helps others find it</span></span>
+      </a>
+    </div>
+  </div>
+  <p class="folio" aria-hidden="true">— 7 —</p>
+</section>
+
 </main>
 
-<footer class="footer" id="download">
-  <div class="wrap">
-    <div class="footer-grid">
-      <div class="footer-brand">
-        <a class="brand" href="#">
-          <img src="assets/icon.svg" alt="TFolio" width="26" height="26">
-          TFolio
-        </a>
-        <p>
-          <span lang="zh">轻快的开源 PDF 桌面工具。阅读、批注、合订与排版都在本机完成，文档不会上传。</span>
-          <span lang="en">A nimble open-source PDF desk. Read, mark up, compile, and typeset locally — your files never leave the machine.</span>
-        </p>
-      </div>
-      <div>
-        <h3><span lang="zh">下载 v0.1.18</span><span lang="en">DOWNLOAD v0.1.18</span></h3>
-        <ul>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.18/TFolio_0.1.18_x64-setup.exe"><span lang="zh">Windows x64（.exe）</span><span lang="en">Windows x64 (.exe)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.18/TFolio_0.1.18_x64_en-US.msi"><span lang="zh">Windows x64（.msi）</span><span lang="en">Windows x64 (.msi)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.18/TFolio_0.1.18_aarch64.dmg"><span lang="zh">macOS Apple Silicon（.dmg）</span><span lang="en">macOS Apple Silicon (.dmg)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.18/TFolio_0.1.18_x64.dmg"><span lang="zh">macOS Intel（.dmg）</span><span lang="en">macOS Intel (.dmg)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.18/TFolio_0.1.18_amd64.deb"><span lang="zh">Linux x64（.deb）</span><span lang="en">Linux x64 (.deb)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.18/TFolio_0.1.18_amd64.AppImage"><span lang="zh">Linux x64（.AppImage）</span><span lang="en">Linux x64 (.AppImage)</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.18/TFolio-0.1.18-1.x86_64.rpm"><span lang="zh">Linux x64（.rpm）</span><span lang="en">Linux x64 (.rpm)</span></a></li>
-        </ul>
-      </div>
-      <div>
-        <h3><span lang="zh">链 接</span><span lang="en">LINKS</span></h3>
-        <ul>
-          <li><a href="https://github.com/roy-tian/TFolio/releases"><span lang="zh">全部版本与更新日志</span><span lang="en">All releases &amp; changelog</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/issues"><span lang="zh">问题反馈</span><span lang="en">Feedback</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/blob/master/LICENSE"><span lang="zh">MIT 许可证</span><span lang="en">MIT license</span></a></li>
-        </ul>
-      </div>
-    </div>
-    <div class="footer-bottom">
-      <span><span lang="zh">© 2026 Roy Tian · TFolio 以 MIT 许可开源</span><span lang="en">© 2026 Roy Tian · TFolio, MIT licensed</span></span>
-      <span class="mono">— END —</span>
-    </div>
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <a class="brand" href="#top">
+      <img src="assets/icon.svg" alt="" width="24" height="24">
+      TFolio
+    </a>
+    <nav aria-label="页脚链接" id="footer-nav">
+      <a href="https://github.com/roy-tian/TFolio/releases" target="_blank" rel="noopener"><span lang="zh-CN">版本发布</span><span lang="en">Releases</span></a>
+      <a href="https://github.com/roy-tian/TFolio/blob/master/LICENSE" target="_blank" rel="noopener"><span lang="zh-CN">MIT 许可证</span><span lang="en">MIT license</span></a>
+      <a href="https://github.com/roy-tian/TFolio/blob/master/README_zh.md" target="_blank" rel="noopener" lang="zh-CN">使用说明</a>
+      <a href="https://github.com/roy-tian/TFolio#readme" target="_blank" rel="noopener" lang="en">README</a>
+    </nav>
+    <span>© 2026 Roy Tian</span>
   </div>
 </footer>
-
-<div class="page-ticker" aria-hidden="true">— <span id="ticker-page">01</span> —</div>
 
 <script>
 (function () {
   "use strict"
 
-  var VERSION = "0.1.18"
+  var VERSION = "0.1.25"
   var BASE = "https://github.com/roy-tian/TFolio/releases/download/v" + VERSION + "/"
 
   var TARGETS = {
     windows: {
       url: BASE + "TFolio_" + VERSION + "_x64-setup.exe",
-      ext: ".exe",
-      label: { zh: "Windows 版", en: "Windows" }
+      label: { zh: ["下载 Windows 版", ".exe"], en: ["Download for Windows", ".exe"] }
     },
     macArm: {
       url: BASE + "TFolio_" + VERSION + "_aarch64.dmg",
-      ext: ".dmg",
-      label: { zh: "macOS · Apple Silicon", en: "macOS · Apple Silicon" }
+      label: { zh: ["下载 macOS 版", "Apple 芯片"], en: ["Download for macOS", "Apple silicon"] }
     },
     macIntel: {
       url: BASE + "TFolio_" + VERSION + "_x64.dmg",
-      ext: ".dmg",
-      label: { zh: "macOS · Intel", en: "macOS · Intel" }
+      label: { zh: ["下载 macOS 版", "Intel"], en: ["Download for macOS", "Intel"] }
     },
     linux: {
       url: BASE + "TFolio_" + VERSION + "_amd64.deb",
-      ext: ".deb",
-      label: { zh: "Linux 版", en: "Linux" }
+      label: { zh: ["下载 Linux 版", ".deb"], en: ["Download for Linux", ".deb"] }
     }
   }
 
   var COPY = {
     zh: {
       title: "TFolio — 你手边的 PDF 工作伴侣",
-      download: "下载 TFolio " + VERSION + " · ",
-      fallback: "前往下载页",
-      toggleHint: "切换到 English",
-      navLabel: "站点导航"
+      toggle: "Switch to English",
+      nav: "站点导航",
+      footerNav: "页脚链接",
+      modes: "工作区",
+      results: function (n) { return n + " 处结果" },
+      none: "无搜索结果"
     },
     en: {
-      title: "TFolio — Put your PDFs in order",
-      download: "Download TFolio " + VERSION + " · ",
-      fallback: "Go to releases",
-      toggleHint: "Switch to Chinese",
-      navLabel: "Main navigation"
+      title: "TFolio — Your PDF work companion, always at hand",
+      toggle: "切换到中文",
+      nav: "Site navigation",
+      footerNav: "Footer links",
+      modes: "Workspaces",
+      results: function (n) { return n === 1 ? "1 result" : n + " results" },
+      none: "No results"
     }
   }
 
-  var lang = document.documentElement.dataset.lang === "en" ? "en" : "zh"
-  var button = document.querySelector(".js-download")
-  var label = document.querySelector(".js-download-label")
-  var toggle = document.getElementById("lang-toggle")
-  var nav = document.querySelector(".nav")
+  var root = document.documentElement
+  var lang = root.dataset.lang === "en" ? "en" : "zh"
+  var target = null
 
-  function detect() {
+  function detectPlatform() {
     var ua = navigator.userAgent
     var data = navigator.userAgentData
     var platform = (data && data.platform) || navigator.platform || ""
-
-    if (/Win/i.test(platform) || /Windows/i.test(ua)) return "windows"
-    if (/Mac/i.test(platform) || /Macintosh/i.test(ua)) {
-      var arm = /arm|aarch/i.test(navigator.platform || "") ||
-        (function () {
-          try {
-            var canvas = document.createElement("canvas")
-            var gl = canvas.getContext("webgl")
-            var renderer = gl && gl.getParameter(gl.RENDERER) || ""
-            return /apple|m1|m2|m3/i.test(String(renderer))
-          } catch (error) {
-            return false
-          }
-        })()
-      // WebGL can't tell on Safari; Apple Silicon is the sensible default now.
-      return arm ? "macArm" : "macIntel"
-    }
-    if (/Linux|X11|CrOS/i.test(platform) || /Linux/i.test(ua)) {
-      return /Android/i.test(ua) ? null : "linux"
-    }
+    if (/Android|iPhone|iPad|iPod/i.test(ua)) return null
+    if (/Win/i.test(platform)) return "windows"
+    // Safari reports no architecture; new Macs are Apple silicon, so that is the default.
+    if (/Mac/i.test(platform)) return "macArm"
+    if (/Linux|X11/i.test(platform)) return "linux"
     return null
   }
 
-  var targetKey = detect()
-  var target = targetKey ? TARGETS[targetKey] : null
-
   function renderDownload() {
-    document.title = COPY[lang].title
-    toggle.setAttribute("aria-label", COPY[lang].toggleHint)
-    nav.setAttribute("aria-label", COPY[lang].navLabel)
-    if (target && button && label) {
-      button.href = target.url
-      label.innerHTML = ""
-      label.append(
-        COPY[lang].download + target.label[lang] + " ",
-        Object.assign(document.createElement("small"), {
-          textContent: "(" + target.ext + ")"
-        })
-      )
-    } else if (label) {
-      label.textContent = COPY[lang].fallback
-    }
+    var button = document.querySelector(".js-download")
+    var label = document.querySelector(".js-download-label")
+    document.querySelectorAll(".files a").forEach(function (link) {
+      link.classList.toggle("is-recommended", !!target && link.href === TARGETS[target].url)
+    })
+    if (!target || !button || !label) return
+    var text = TARGETS[target].label[lang]
+    button.href = TARGETS[target].url
+    label.textContent = text[0] + " "
+    var small = document.createElement("small")
+    small.textContent = text[1]
+    label.appendChild(small)
   }
 
   function applyLang(next) {
     lang = next
-    document.documentElement.dataset.lang = lang
-    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en"
-    document.querySelectorAll("img[data-lang-src-zh]").forEach(function (img) {
-      var src = img.getAttribute("data-lang-src-" + lang)
-      if (src) img.setAttribute("src", src)
-      var alt = img.getAttribute("data-lang-alt-" + lang)
-      if (alt) img.setAttribute("alt", alt)
-    })
+    root.dataset.lang = lang
+    root.lang = lang === "zh" ? "zh-CN" : "en"
+    document.title = COPY[lang].title
+    document.getElementById("lang-toggle").setAttribute("aria-label", COPY[lang].toggle)
+    document.getElementById("site-nav").setAttribute("aria-label", COPY[lang].nav)
+    document.getElementById("footer-nav").setAttribute("aria-label", COPY[lang].footerNav)
+    document.getElementById("mode-switch").setAttribute("aria-label", COPY[lang].modes)
+    var hero = document.getElementById("hero-shot")
+    hero.src = hero.getAttribute("data-src-" + lang)
+    hero.alt = hero.getAttribute("data-alt-" + lang)
     renderDownload()
+    document.querySelectorAll("[data-demo]").forEach(runDemo)
     try {
       localStorage.setItem("tfolio-lang", lang)
-    } catch (error) { /* private mode */ }
+    } catch (error) { /* storage blocked */ }
   }
 
-  toggle.addEventListener("click", function () {
+  // ---- search demo: matches may run across the page's own line breaks ----
+
+  function escapeHtml(text) {
+    return text.replace(/[&<>"]/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]
+    })
+  }
+
+  function queryPattern(query) {
+    var chars = Array.from(query.trim().replace(/\s+/g, " "))
+    if (!chars.length) return null
+    var source = chars.map(function (ch, index) {
+      if (ch === " ") return "\\s+"
+      var escaped = ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      // A line break may fall between any two characters, as on a PDF page.
+      return index < chars.length - 1 && chars[index + 1] !== " " ? escaped + "\\n?" : escaped
+    }).join("")
+    return new RegExp(source, "giu")
+  }
+
+  function runDemo(demo) {
+    var input = demo.querySelector("input")
+    var count = demo.querySelector(".demo-count")
+    var paragraphs = demo.querySelectorAll(".paper p")
+    var demoLang = demo.getAttribute("lang") === "en" ? "en" : "zh"
+    if (!demo.lines) {
+      demo.lines = Array.prototype.map.call(paragraphs, function (p) {
+        return Array.prototype.map.call(p.querySelectorAll(".ln"), function (ln) { return ln.textContent })
+      })
+    }
+    var pattern = queryPattern(input.value)
+    var total = 0
+    var currentSet = false
+    demo.lines.forEach(function (lines, index) {
+      var text = lines.join("\n")
+      var ranges = []
+      if (pattern) {
+        pattern.lastIndex = 0
+        var match
+        while ((match = pattern.exec(text)) && match[0].length) {
+          ranges.push([match.index, match.index + match[0].length, match[0].indexOf("\n") >= 0])
+        }
+      }
+      total += ranges.length
+      var current = -1
+      if (!currentSet) {
+        // The current result is the first one that wraps, to show the point of the demo.
+        current = ranges.findIndex(function (range) { return range[2] })
+        if (current >= 0) currentSet = true
+      }
+      var html = ""
+      var offset = 0
+      lines.forEach(function (line) {
+        var start = offset
+        var end = offset + line.length
+        var cursor = start
+        var parts = ""
+        ranges.forEach(function (range, r) {
+          var from = Math.max(range[0], start)
+          var to = Math.min(range[1], end)
+          if (from >= to) return
+          parts += escapeHtml(text.slice(cursor, from))
+          parts += "<mark" + (r === current ? " class=\"is-current\"" : "") + ">" + escapeHtml(text.slice(from, to)) + "</mark>"
+          cursor = to
+        })
+        parts += escapeHtml(text.slice(cursor, end))
+        html += "<span class=\"ln\">" + parts + "</span>"
+        offset = end + 1
+      })
+      paragraphs[index].innerHTML = html
+    })
+    count.textContent = pattern ? (total ? COPY[demoLang].results(total) : COPY[demoLang].none) : ""
+  }
+
+  document.querySelectorAll("[data-demo]").forEach(function (demo) {
+    demo.querySelector("input").addEventListener("input", function () { runDemo(demo) })
+  })
+
+  // ---- workspace switch ----
+
+  var switchButtons = document.querySelectorAll("#mode-switch [data-mode]")
+  switchButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      var mode = button.getAttribute("data-mode")
+      switchButtons.forEach(function (other) {
+        other.setAttribute("aria-pressed", String(other === button))
+      })
+      document.querySelectorAll("[data-mode-panel]").forEach(function (panel) {
+        panel.hidden = panel.getAttribute("data-mode-panel") !== mode
+      })
+    })
+  })
+
+  document.getElementById("lang-toggle").addEventListener("click", function () {
     applyLang(lang === "zh" ? "en" : "zh")
   })
 
+  target = detectPlatform()
   applyLang(lang)
 
-  // 滚动入场
-  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  var revealables = document.querySelectorAll(".reveal")
-  if (reduce || !("IntersectionObserver" in window)) {
-    revealables.forEach(function (node) { node.classList.add("is-in") })
-  } else {
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("is-in")
-          io.unobserve(entry.target)
-        }
-      })
-    }, { rootMargin: "0px 0px -12% 0px", threshold: 0.1 })
-    revealables.forEach(function (node) { io.observe(node) })
-  }
-
-  // — n — 阅读页码：落在哪个功能节，就翻到第几页
-  var sections = Array.prototype.slice.call(
-    document.querySelectorAll(".feature, .open-source")
-  )
-  var ticker = document.getElementById("ticker-page")
-  if (sections.length && ticker && "IntersectionObserver" in window) {
-    var spy = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (!entry.isIntersecting) return
-        var index = sections.indexOf(entry.target)
-        if (index >= 0) {
-          ticker.textContent = String(index + 1).padStart(2, "0")
-        }
-      })
-    }, { rootMargin: "-45% 0px -45% 0px" })
-    sections.forEach(function (node) { spy.observe(node) })
+  // Chromium can tell an Intel Mac apart; elsewhere the Apple silicon default stands.
+  if (target === "macArm" && navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+    navigator.userAgentData.getHighEntropyValues(["architecture"]).then(function (values) {
+      if (values.architecture === "x86") {
+        target = "macIntel"
+        renderDownload()
+      }
+    }).catch(function () {})
   }
 })()
 </script>
