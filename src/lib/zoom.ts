@@ -38,7 +38,7 @@ export const MAX_ZOOM = 8
 
 /** Rungs `+`/`-` land on, in percent. The ends match MIN_ZOOM and MAX_ZOOM. */
 export const zoomSteps = [
-  10, 15, 20, 25, 50, 75, 100, 125, 150, 200, 300, 400, 600, 800,
+  10, 15, 20, 25, 50, 75, 100, 110, 125, 150, 175, 200, 250, 300, 400, 600, 800,
 ] as const
 
 export const defaultZoomState: ZoomState = {

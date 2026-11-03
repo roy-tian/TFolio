@@ -4,6 +4,7 @@ import {
   scrollbarsEmulated,
   scrollPerThumbPixel,
   thumbGeometry,
+  trackPressScroll,
 } from "@/lib/overlayScrollbars"
 import { cn } from "@/lib/utils"
 import { normalizeWheelDelta } from "@/lib/zoom"
@@ -15,6 +16,10 @@ const THIN_TRACK_THICKNESS = 6
 const HIDE_DELAY_MS = 1000
 // A page less a little, so a line of context carries over, as native bars do.
 const PAGE_STEP = 0.875
+// Chromium's native timing: a page at the press, then a page every 50 ms
+// while held, after a pause long enough for a click to end first.
+const PAGE_HOLD_DELAY_MS = 250
+const PAGE_REPEAT_MS = 50
 
 type OverlayScrollbarsProps = {
   /** Where the bars lie; by default over the whole positioned parent, which
@@ -54,13 +59,21 @@ type Axis = {
   trackSize: number
 }
 
-type Drag = {
-  axis: Axis
-  pointerId: number
-  pointer: number
-  scroll: number
-  scrollPerPixel: number
-}
+/** A press held on the thumb, which drags it, or on the track, which pages. */
+type Hold = { axis: Axis; pointerId: number } & (
+  | { kind: "drag"; pointer: number; scroll: number; scrollPerPixel: number }
+  | {
+      kind: "page"
+      clientX: number
+      clientY: number
+      /** Fixed at the press, as native bars do: a pointer moved past the thumb
+          pauses the paging rather than turning it back. */
+      direction: number
+      timer?: ReturnType<typeof setTimeout>
+    }
+)
+
+type Paging = Extract<Hold, { kind: "page" }>
 
 function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScrollbarsProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -102,7 +115,7 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
     })
     const y = makeAxis(true, style.overflowY, yTrack, yThumb)
     const x = makeAxis(false, style.overflowX, xTrack, xThumb)
-    let drag: Drag | null = null
+    let hold: Hold | null = null
     let hovered: Axis | null = null
     let lastActivity = 0
     let hideTimer: ReturnType<typeof setTimeout> | undefined
@@ -180,7 +193,7 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
       hideTimer = undefined
 
       // Leaving the bar or letting go schedules this again.
-      if (drag || hovered) {
+      if (hold || hovered) {
         return
       }
 
@@ -219,6 +232,40 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
       }
     }
 
+    const pageToward = (paging: Paging) => {
+      const { axis, clientX, clientY } = paging
+      const box = axis.track.getBoundingClientRect()
+
+      // Off the track, a native bar pauses rather than chasing the pointer.
+      if (clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) {
+        return
+      }
+
+      // The geometry the last scroll event placed can lag behind a slow frame,
+      // and a step from it would run past the pointer.
+      place()
+
+      const step = trackPressScroll(
+        axis.vertical ? clientY - box.top : clientX - box.left,
+        axis.thumbOffset,
+        axis.thumbSize,
+        axis.clientSize * PAGE_STEP,
+        scrollPerThumbPixel(axis.scrollSize, axis.clientSize, axis.trackSize, axis.thumbSize),
+      )
+
+      if (Math.sign(step) === paging.direction) {
+        viewport.scrollBy(axis.vertical ? { top: step } : { left: step })
+      }
+    }
+
+    const releaseHold = () => {
+      if (hold?.kind === "page") {
+        clearTimeout(hold.timer)
+      }
+
+      hold = null
+    }
+
     const listeners = [y, x].map((axis) => {
       const { track, thumb, vertical } = axis
       const along = (event: PointerEvent) => (vertical ? event.clientY : event.clientX)
@@ -230,11 +277,13 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
 
         // The press is the bar's: no focus moves and no text selection starts.
         event.preventDefault()
+        releaseHold()
+        track.setPointerCapture(event.pointerId)
 
         if (event.target === thumb) {
-          track.setPointerCapture(event.pointerId)
-          drag = {
+          hold = {
             axis,
+            kind: "drag",
             pointer: along(event),
             pointerId: event.pointerId,
             scroll: vertical ? viewport.scrollTop : viewport.scrollLeft,
@@ -249,22 +298,44 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
         }
 
         const trackRect = track.getBoundingClientRect()
-        const pressed = along(event) - (vertical ? trackRect.top : trackRect.left)
-        const step = (pressed < axis.thumbOffset ? -1 : 1) * axis.clientSize * PAGE_STEP
+        const paging: Paging = {
+          axis,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          direction:
+            along(event) - (vertical ? trackRect.top : trackRect.left) < axis.thumbOffset ? -1 : 1,
+          kind: "page",
+          pointerId: event.pointerId,
+        }
+        const repeat = () => {
+          if (hold === paging) {
+            pageToward(paging)
+            paging.timer = setTimeout(repeat, PAGE_REPEAT_MS)
+          }
+        }
 
-        viewport.scrollBy(vertical ? { top: step } : { left: step })
+        hold = paging
+        pageToward(paging)
+        paging.timer = setTimeout(repeat, PAGE_HOLD_DELAY_MS)
       }
       const onPointerMove = (event: PointerEvent) => {
-        if (drag?.axis === axis && event.pointerId === drag.pointerId) {
-          scrollAlong(axis, drag.scroll + (along(event) - drag.pointer) * drag.scrollPerPixel)
-        }
-      }
-      const endDrag = (event: PointerEvent) => {
-        if (drag?.axis !== axis || event.pointerId !== drag.pointerId) {
+        if (hold?.axis !== axis || event.pointerId !== hold.pointerId) {
           return
         }
 
-        drag = null
+        if (hold.kind === "drag") {
+          scrollAlong(axis, hold.scroll + (along(event) - hold.pointer) * hold.scrollPerPixel)
+        } else {
+          hold.clientX = event.clientX
+          hold.clientY = event.clientY
+        }
+      }
+      const endHold = (event: PointerEvent) => {
+        if (hold?.axis !== axis || event.pointerId !== hold.pointerId) {
+          return
+        }
+
+        releaseHold()
 
         // Let go off the bar: the leave was held back while it was captured.
         if (hovered !== axis) {
@@ -283,7 +354,7 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
           hovered = null
         }
 
-        if (drag?.axis !== axis) {
+        if (hold?.axis !== axis) {
           delete track.dataset.expanded
         }
 
@@ -321,9 +392,9 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
       const entries = [
         ["pointerdown", onPointerDown],
         ["pointermove", onPointerMove],
-        ["pointerup", endDrag],
-        ["pointercancel", endDrag],
-        ["lostpointercapture", endDrag],
+        ["pointerup", endHold],
+        ["pointercancel", endHold],
+        ["lostpointercapture", endHold],
         ["pointerenter", onPointerEnter],
         ["pointerleave", onPointerLeave],
       ] as const
@@ -380,6 +451,7 @@ function EmulatedScrollbars({ className, thin = false, viewportRef }: OverlayScr
       mutationObserver.disconnect()
       resizeObserver.disconnect()
       clearTimeout(hideTimer)
+      releaseHold()
       // The bars outlive a re-run onto another box, as when Settings switches
       // panels; with the timer gone, nothing else would hide them.
       delete root.dataset.visible

@@ -160,9 +160,9 @@ describe("TFolio keyboard shortcuts", () => {
     await browser.keys(["Control", "0"])
     await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 100%")
 
-    // The buttons' rungs: 100% steps to 125% and back down to 75%.
+    // The buttons' rungs: 100% steps to 110% and back down to 75%.
     await browser.keys(["Control", "="])
-    await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 125%")
+    await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 110%")
     await browser.keys(["Control", "-"])
     await browser.keys(["Control", "-"])
     await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 75%")

@@ -13,12 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { isOutOfSight, prefersReducedMotion, TURN_MOTION } from "@/lib/motion"
-import {
-  slotSize,
-  type OrganizeGroup,
-  type OutputPage,
-  type SourceMap,
-} from "@/lib/organize"
+import type { OrganizeGroup, SourceMap } from "@/lib/organize"
 import { dimensionsForRotation } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
@@ -48,41 +43,24 @@ export type PageActionHandler = (key: number, action: PageAction, byKeyboard: bo
 
 type Frame = { height: number; width: number }
 
-/** One cell for the whole board, as wide as its widest paper and as tall as
-    its longest side: portrait and landscape pages line up in columns and
-    rows, and a turn never changes a row's height. A board of one orientation
-    keeps its papers a gap apart across. */
-export function boardFrame(
-  pages: OutputPage[],
-  sources: SourceMap,
-  paperWidth: number,
-): Frame {
-  let height = 0
-  let width = 0
+/** The blank smart padding closes a file with, numbered where it stands. */
+export type PaddingPage = { caption: number; height: number; width: number }
 
-  for (const page of pages) {
-    const paper = thumbnailPaper(
-      page.kind === "slot" ? slotSize(page.slot, sources) : page,
-      paperWidth,
-    )
-
-    height = Math.max(height, paper.height, paper.width)
-    width = Math.max(width, paper.width)
-  }
-
-  return { height: Math.ceil(height), width: Math.ceil(width) }
+/** Every cell is square, as wide and tall as a paper's long side: portrait
+    and landscape pages line up in rows and columns, and a turn moves no other
+    page, as a cell sized by the board's widest paper would reflow the grid. */
+function cellFrame(paperWidth: number): Frame {
+  return { height: paperWidth, width: paperWidth }
 }
 
 type GroupSectionProps = {
   cut: ReadonlySet<number>
-  frame: Frame
   group: OrganizeGroup
   /** Slots in hand: their places show where they will land. */
   holes: ReadonlySet<number>
   onAction: PageActionHandler
   outputNumber: ReadonlyMap<number, number>
-  /** The blank smart padding puts before this file, if any. */
-  padding: { height: number; width: number } | undefined
+  padding: PaddingPage | undefined
   paperWidth: number
   selection: ReadonlySet<number>
   sources: SourceMap
@@ -91,7 +69,6 @@ type GroupSectionProps = {
 /** One file's pages on the board, under its name. */
 export function GroupSection({
   cut,
-  frame,
   group,
   holes,
   onAction,
@@ -102,7 +79,6 @@ export function GroupSection({
   sources,
 }: GroupSectionProps) {
   const { t } = useTranslation()
-  const firstNumber = group.slots[0] ? outputNumber.get(group.slots[0].key) : undefined
 
   return (
     <section
@@ -121,16 +97,6 @@ export function GroupSection({
         data-organize-flow
         style={{ columnGap: COLUMN_GAP }}
       >
-        {padding && firstNumber !== undefined ? (
-          <PaddingCell
-            caption={firstNumber - 1}
-            frame={frame}
-            groupId={group.id}
-            height={padding.height}
-            paperWidth={paperWidth}
-            width={padding.width}
-          />
-        ) : null}
         {group.slots.map((slot, index) => {
           const source = slot.kind === "page" ? sources.get(slot.sourceId) : undefined
           const page = slot.kind === "page" ? source?.pages[slot.pageNumber - 1] : undefined
@@ -140,8 +106,6 @@ export function GroupSection({
               blankHeight={slot.kind === "blank" ? slot.height : 0}
               blankWidth={slot.kind === "blank" ? slot.width : 0}
               caption={outputNumber.get(slot.key) ?? 0}
-              frameHeight={frame.height}
-              frameWidth={frame.width}
               hole={holes.has(slot.key)}
               intrinsicRotation={page?.rotation ?? 0}
               isCut={cut.has(slot.key)}
@@ -167,6 +131,15 @@ export function GroupSection({
             />
           )
         })}
+        {padding ? (
+          <PaddingCell
+            caption={padding.caption}
+            groupId={group.id}
+            height={padding.height}
+            paperWidth={paperWidth}
+            width={padding.width}
+          />
+        ) : null}
         {group.slots.length === 0 ? (
           <p className="self-center text-sm text-muted-foreground">
             {t("organize.emptyFile")}
@@ -183,8 +156,6 @@ const SlotCell = memo(function SlotCell({
   blankHeight,
   blankWidth,
   caption,
-  frameHeight,
-  frameWidth,
   hole,
   intrinsicRotation,
   isCut,
@@ -203,8 +174,6 @@ const SlotCell = memo(function SlotCell({
   blankHeight: number
   blankWidth: number
   caption: number
-  frameHeight: number
-  frameWidth: number
   hole: boolean
   intrinsicRotation: number
   isCut: boolean
@@ -238,7 +207,7 @@ const SlotCell = memo(function SlotCell({
       setFocusWithin(false)
     }
   }, [focusWithin, nearView])
-  const frame = { height: frameHeight, width: frameWidth }
+  const frame = cellFrame(paperWidth)
   const paper = thumbnailPaper(
     sourceId < 0
       ? { height: blankHeight, width: blankWidth }
@@ -246,7 +215,7 @@ const SlotCell = memo(function SlotCell({
     paperWidth,
   )
   // The white between the paper and its cell's edge, on either side.
-  const margin = (frameWidth - paper.width) / 2
+  const margin = (frame.width - paper.width) / 2
   const overlay = showControls ? (
     <PageControls
       caption={caption}
@@ -316,14 +285,14 @@ const SlotCell = memo(function SlotCell({
       {hole ? (
         <DragHole
           height={paper.height}
-          top={(frameHeight - paper.height) / 2}
+          top={(frame.height - paper.height) / 2}
           width={paper.width}
         />
       ) : null}
       {showControls ? (
         <InsertZone
           action="insert-before"
-          height={frameHeight}
+          height={frame.height}
           label={t("pageEdit.insertBefore", { pageNumber: caption })}
           left={-COLUMN_GAP}
           line={COLUMN_GAP / 2}
@@ -335,9 +304,9 @@ const SlotCell = memo(function SlotCell({
       {showControls && isLast ? (
         <InsertZone
           action="insert-after"
-          height={frameHeight}
+          height={frame.height}
           label={t("pageEdit.insertAfter", { pageNumber: caption })}
-          left={frameWidth - margin}
+          left={frame.width - margin}
           line={margin + COLUMN_GAP / 2}
           onAction={onAction}
           slotKey={slotKey}
@@ -561,20 +530,19 @@ function BlankPaper({
 /** The blank smart padding adds: shown where it will stand, not chosen. */
 function PaddingCell({
   caption,
-  frame,
   groupId,
   height,
   paperWidth,
   width,
 }: {
   caption: number
-  frame: Frame
   groupId: number
   height: number
   paperWidth: number
   width: number
 }) {
   const { t } = useTranslation()
+  const frame = cellFrame(paperWidth)
   const paper = thumbnailPaper({ height, width }, paperWidth)
 
   return (
