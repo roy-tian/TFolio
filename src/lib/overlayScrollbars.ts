@@ -35,6 +35,26 @@ export function thumbGeometry(
   return { offset: (trackSize - size) * progress, size }
 }
 
+/** How far a press at `pressed` along the track scrolls: a page toward it, as
+    native bars do, but no further than brings the thumb's edge to the press.
+    A box overflowing by less than a page, as a zoomed page does sideways,
+    would otherwise reach its end from any press. */
+export function trackPressScroll(
+  pressed: number,
+  thumbOffset: number,
+  thumbSize: number,
+  page: number,
+  scrollPerPixel: number,
+) {
+  const reach =
+    pressed < thumbOffset
+      ? pressed - thumbOffset
+      : Math.max(0, pressed - thumbOffset - thumbSize)
+  const toPress = reach * scrollPerPixel
+
+  return Math.sign(toPress) * Math.min(page, Math.abs(toPress))
+}
+
 /** How far the box scrolls for each pixel the thumb is dragged. */
 export function scrollPerThumbPixel(
   scrollSize: number,

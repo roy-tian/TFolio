@@ -234,6 +234,108 @@ describe("PDF scrolling", () => {
     })
   })
 
+  // A page zoomed a little past the viewer overflows it by less than the page a
+  // track press steps, which would carry the thumb to the far end every time.
+  it("stops the thumb at a press on the sideways track", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("track-press.pdf", minimalPdf(1, "0 0 595 842"))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+
+    const session = "[data-document-session][data-active='true']"
+    await $(`${session} button[aria-label='Actual size']`).click()
+    for (let rung = 0; rung < 5; rung += 1) {
+      await $(`${session} button[aria-label='Zoom in']`).click()
+    }
+    await expect($(`${session} [data-slot='zoom-controls']`))
+      .toHaveAttribute("aria-label", "Zoom 200%")
+
+    await browser.execute((scope: string) => {
+      document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!.scrollLeft = 0
+    }, session)
+    await browser.waitUntil(async () => {
+      const bar = await overlayBar("x")
+      return bar.scroll === 0 && Math.abs(bar.thumb.left - bar.track.left) < 1
+    }, { timeoutMsg: "the sideways thumb never settled at the start" })
+    const start = await overlayBar("x")
+    expect(start.trackHidden).toBe(false)
+    expect(start.maxScroll).toBeGreaterThan(0)
+    expect(start.maxScroll).toBeLessThan(0.875 * start.clientSize)
+
+    const offset = await calibratePointer()
+    const middle = Math.round((start.track.top + start.track.bottom) / 2)
+    const click = (x: number) => {
+      pointer({ x: x + offset.x, y: middle + offset.y })
+      pointer({ down: true })
+      pointer({ down: false })
+    }
+
+    try {
+      const forward = Math.round(start.thumb.right + 40)
+      click(forward)
+      await browser.waitUntil(
+        async () => Math.abs((await overlayBar("x")).thumb.right - forward) <= 1,
+        { timeoutMsg: "a press past the thumb never brought its end to the press" },
+      )
+      expect((await overlayBar("x")).scroll).toBeLessThan(start.maxScroll - 1)
+
+      const back = Math.round((await overlayBar("x")).thumb.left - 20)
+      click(back)
+      await browser.waitUntil(
+        async () => Math.abs((await overlayBar("x")).thumb.left - back) <= 1,
+        { timeoutMsg: "a press before the thumb never brought its start to the press" },
+      )
+      expect((await overlayBar("x")).scroll).toBeGreaterThan(0)
+    } finally {
+      pointer({ x: 300 + offset.x, y: 300 + offset.y })
+    }
+  })
+
+  it("pages on toward a press held on the track", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("track-hold.pdf", bandedPdf(48))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+
+    const start = await overlayBar("y")
+    expect(start.trackHidden).toBe(false)
+
+    const page = 0.875 * start.clientSize
+    const at = {
+      x: Math.round((start.thumb.left + start.thumb.right) / 2),
+      y: Math.round(start.track.top + 0.9 * (start.track.bottom - start.track.top)),
+    }
+    const offset = await calibratePointer()
+    pointer({ x: at.x + offset.x, y: at.y + offset.y })
+
+    try {
+      pointer({ down: true })
+      await browser.waitUntil(async () => (await overlayBar("y")).scroll - start.scroll > 3 * page, {
+        interval: 50,
+        timeoutMsg: "holding a press on the track never paged past the first page",
+      })
+      pointer({ down: false })
+
+      // The release lands a step or so behind the native event.
+      await browser.pause(200)
+      const released = await overlayBar("y")
+      expect(released.thumb.bottom).toBeLessThan(at.y - 10)
+      await browser.pause(400)
+      expect((await overlayBar("y")).scroll).toBe(released.scroll)
+
+      pointer({ down: true })
+      await browser.waitUntil(
+        async () => Math.abs((await overlayBar("y")).thumb.bottom - at.y) <= 1,
+        { timeoutMsg: "a held press never brought the thumb to the pointer" },
+      )
+      await browser.pause(400)
+      expect(Math.abs((await overlayBar("y")).thumb.bottom - at.y)).toBeLessThanOrEqual(1)
+    } finally {
+      pointer({ down: false })
+      pointer({ x: 300 + offset.x, y: 300 + offset.y })
+    }
+  })
+
   it("keeps page navigation and fit-page below the tabs", async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
@@ -359,3 +461,28 @@ describe("PDF scrolling", () => {
     expect(await field()).toMatchObject({ focused: false, value: "4" })
   })
 })
+
+/** The active viewer's overlay bar along `axis`, in client coordinates. */
+function overlayBar(axis: "x" | "y") {
+  return browser.execute((axis: "x" | "y") => {
+    const session = "[data-document-session][data-active='true']"
+    const viewer = document.querySelector<HTMLElement>(`${session} [data-pdf-scroll-root]`)!
+    const track = viewer.parentElement!.querySelector<HTMLElement>(
+      `:scope > [data-slot='overlay-scrollbars'] [data-axis='${axis}']`,
+    )!
+    const box = track.getBoundingClientRect()
+    const thumb = track.firstElementChild!.getBoundingClientRect()
+    const vertical = axis === "y"
+
+    return {
+      clientSize: vertical ? viewer.clientHeight : viewer.clientWidth,
+      maxScroll: vertical
+        ? viewer.scrollHeight - viewer.clientHeight
+        : viewer.scrollWidth - viewer.clientWidth,
+      scroll: vertical ? viewer.scrollTop : viewer.scrollLeft,
+      thumb: { bottom: thumb.bottom, left: thumb.left, right: thumb.right, top: thumb.top },
+      track: { bottom: box.bottom, left: box.left, right: box.right, top: box.top },
+      trackHidden: track.hidden,
+    }
+  }, axis)
+}
