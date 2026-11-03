@@ -494,9 +494,9 @@ describe("TFolio PDF viewer", () => {
     expect((await pageBox()).width).toBe(actualSize(100))
 
     await $("button[aria-label='Zoom in']").click()
-    await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 125%")
+    await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 110%")
     await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
-    expect((await pageBox()).width).toBe(actualSize(125))
+    expect((await pageBox()).width).toBe(actualSize(110))
 
     await $("button[aria-label='Zoom out']").click()
     await $("button[aria-label='Zoom out']").click()
@@ -568,8 +568,8 @@ describe("TFolio PDF viewer", () => {
     // A zoom made on the status bar is answered by the bar's own readout.
     const fromBar = await pressAndWatch("bar")
     expect(fromBar.visible).toBe("false")
-    await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 125%")
-    await expect($("[data-slot='zoom-controls-readout']")).toHaveText("125%")
+    await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 110%")
+    await expect($("[data-slot='zoom-controls-readout']")).toHaveText("110%")
 
     // A fit takes the tighter dimension — height, for a portrait page in a
     // landscape window — and must actually fit, padding aside.

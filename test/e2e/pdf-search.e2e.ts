@@ -167,7 +167,7 @@ describe("TFolio PDF search", () => {
     while (await $("button[aria-label='Zoom out']").isEnabled()) {
       await $("button[aria-label='Zoom out']").click()
     }
-    for (let rung = 0; rung < 7; rung += 1) {
+    for (let rung = 0; rung < 8; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
     }
     await expect($("[data-slot='zoom-controls']"))

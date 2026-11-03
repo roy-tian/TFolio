@@ -97,7 +97,7 @@ describe("PDF scrolling", () => {
 
     const session = "[data-document-session][data-active='true']"
     await $(`${session} button[aria-label='Actual size']`).click()
-    for (let rung = 0; rung < 3; rung += 1) {
+    for (let rung = 0; rung < 5; rung += 1) {
       await $(`${session} button[aria-label='Zoom in']`).click()
     }
     await expect($(`${session} [data-slot='zoom-controls']`))

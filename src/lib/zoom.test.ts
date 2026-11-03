@@ -241,8 +241,10 @@ describe("resolveZoomScale", () => {
 
 describe("stepZoomPercent", () => {
   test("moves to the next rung up or down", () => {
-    expect(stepZoomPercent(100, 1)).toBe(125)
+    expect(stepZoomPercent(100, 1)).toBe(110)
     expect(stepZoomPercent(100, -1)).toBe(75)
+    expect(stepZoomPercent(150, 1)).toBe(175)
+    expect(stepZoomPercent(300, -1)).toBe(250)
     expect(stepZoomPercent(25, -1)).toBe(20)
     expect(stepZoomPercent(15, -1)).toBe(10)
   })
