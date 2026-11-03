@@ -82,6 +82,12 @@ function hasOverEveryElement(selector: string) {
   return false
 }
 
+/** Whether a combinator after `:focus-within` reaches any element at all, as
+    in `:focus-within *` (group-focus-within-*) or `:focus-within ~ *`. */
+function focusWithinOverEveryElement(selector: string) {
+  return /:focus-within(?:\s*[>~+]\s*|\s+)\*/.test(selector)
+}
+
 describe("TFolio toolbar tooltips", () => {
   before(async () => {
     await seedSettings({ ui: { language: "zh-CN", viewMode: "single" } })
@@ -144,6 +150,14 @@ describe("TFolio toolbar tooltips", () => {
     // mounted, while scrolling and for every tooltip. A `:has()` whose
     // combinator names its targets measured harmless.
     expect((await shippedSelectors()).filter(hasOverEveryElement)).toEqual([])
+  })
+
+  it("ships no :focus-within over every element, which WebKit restyles all for", async () => {
+    // Every focus change flips `:focus-within` on the focused element's
+    // ancestors up to the root, and for a rule reaching their descendants
+    // WebKit restyles the whole document: one group-focus-within-* made each
+    // focus change on a 400-page organize board take 29 ms, against 2 ms.
+    expect((await shippedSelectors()).filter(focusWithinOverEveryElement)).toEqual([])
   })
 
   it("ships no width media query a resizable window can flip", async () => {
