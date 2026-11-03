@@ -40,6 +40,9 @@ struct UiPreferences {
     sidebar: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sidebar_panel: Option<String>,
+    /// The organize thumbnails' long side in CSS pixels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organize_thumbnail_size: Option<u32>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -203,6 +206,7 @@ mod tests {
                 view_mode: None,
                 sidebar: Some("hidden".into()),
                 sidebar_panel: Some("bookmarks".into()),
+                organize_thumbnail_size: Some(200),
             }),
             annotate: Some(AnnotatePreferences {
                 highlight_color: Some("#ffd54a".into()),
@@ -223,7 +227,9 @@ mod tests {
         let rendered = settings().render().expect("the settings should render");
         let read = Settings::parse(&rendered);
 
-        assert_eq!(read.ui.and_then(|ui| ui.theme).as_deref(), Some("dark"));
+        let ui = read.ui.expect("the ui section should read back");
+        assert_eq!(ui.theme.as_deref(), Some("dark"));
+        assert_eq!(ui.organize_thumbnail_size, Some(200));
         assert_eq!(
             read.annotate
                 .and_then(|annotate| annotate.text_note)
@@ -244,6 +250,7 @@ mod tests {
         assert!(rendered.contains("[pageNumbers]"));
         assert!(rendered.contains("fontSize"));
         assert!(rendered.contains("sidebarPanel"));
+        assert!(rendered.contains("organizeThumbnailSize = 200"));
         assert!(!rendered.contains("[watermark]"));
     }
 

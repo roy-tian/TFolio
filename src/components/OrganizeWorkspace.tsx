@@ -45,11 +45,13 @@ import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { OrganizeWorkspace as Workspace } from "@/hooks/useOrganizeWorkspace"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
+import {
+  ORGANIZE_PAPER_WIDTHS,
+  readStoredOrganizeStep,
+  storeOrganizeStep,
+} from "@/lib/organizeSize"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
-
-/** The thumbnails' long side, smallest to largest; the status bar steps along. */
-const PAPER_WIDTHS = [120, 160, 200, 240] as const
 
 type OrganizeWorkspaceProps = {
   active: boolean
@@ -69,7 +71,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
 }: OrganizeWorkspaceProps) {
   const { t } = useTranslation()
   const [panel, setPanel] = useState<"files" | "bookmarks">("files")
-  const [size, setSize] = useState(1)
+  const [size, setSize] = useState(readStoredOrganizeStep)
   const scrollRef = useRef<HTMLElement>(null)
   const { options } = organize.plan
   const chosen = organize.selection
@@ -112,6 +114,11 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
 
     return () => document.removeEventListener("keydown", onKey)
   }, [active, chosen, organize])
+
+  const chooseSize = (next: number) => {
+    setSize(next)
+    storeOrganizeStep(next)
+  }
 
   const showGroup = (groupId: number) => {
     scrollRef.current
@@ -379,7 +386,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           ) : (
             <OrganizeBoard
               organize={organize}
-              paperWidth={PAPER_WIDTHS[size]!}
+              paperWidth={ORGANIZE_PAPER_WIDTHS[size]!}
               scrollRef={scrollRef}
             />
           )}
@@ -406,24 +413,28 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
         <SliderStepper
           canDecrease={size > 0}
           disabled={empty}
-          canIncrease={size < PAPER_WIDTHS.length - 1}
+          canIncrease={size < ORGANIZE_PAPER_WIDTHS.length - 1}
           decrease={{ label: t("organize.smaller") }}
           groupLabel={t("organize.size")}
           increase={{ label: t("organize.larger") }}
-          max={PAPER_WIDTHS.length - 1}
+          max={ORGANIZE_PAPER_WIDTHS.length - 1}
           min={0}
-          // Four sizes only, so each is laid out as the thumb reaches it.
-          onCommit={setSize}
-          onDecrease={() => setSize((current) => Math.max(0, current - 1))}
+          // Only the size let go at is written, not each one dragged past.
+          onCommit={chooseSize}
+          onDecrease={() => chooseSize(Math.max(0, size - 1))}
           onIncrease={() =>
-            setSize((current) => Math.min(PAPER_WIDTHS.length - 1, current + 1))
+            chooseSize(Math.min(ORGANIZE_PAPER_WIDTHS.length - 1, size + 1))
           }
+          // Four sizes only, so each is laid out as the thumb reaches it.
           onPreview={setSize}
           sliderLabel={t("organize.size")}
           slot="organize-size"
           value={size}
           valueText={(step) =>
-            t("organize.sizeStep", { current: step + 1, total: PAPER_WIDTHS.length })
+            t("organize.sizeStep", {
+              current: step + 1,
+              total: ORGANIZE_PAPER_WIDTHS.length,
+            })
           }
         />
       </StatusBar>

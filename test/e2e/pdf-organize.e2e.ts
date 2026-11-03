@@ -11,6 +11,7 @@ import {
   pressRedo,
   refreshApp,
   seedSettings,
+  settingsHold,
   writeScratchPdf,
 } from "./helpers"
 
@@ -119,6 +120,21 @@ describe("TFolio organize workspace", () => {
     await expect(slider).toHaveAttribute("aria-valuetext", "1 of 4")
     await expect($(`${bar} button[aria-label='Smaller thumbnails']`)).toBeDisabled()
     expect(await slotWidth()).toBeLessThan(before)
+  })
+
+  it("opens on the thumbnail size the reader last chose", async () => {
+    const bar = `${workspace} [data-slot='status-bar']`
+    const slider = () => $(`${bar} input[aria-label='Thumbnail size']`)
+    await organizeWith([portrait()])
+
+    await $(`${bar} button[aria-label='Larger thumbnails']`).click()
+    await expect(slider()).toHaveAttribute("aria-valuetext", "3 of 4")
+    // A reload before the write lands would read the old size back.
+    await settingsHold(["organizeThumbnailSize = 200"])
+
+    await refreshApp()
+    await $("button[aria-label='Organize pages']").click()
+    await expect(slider()).toHaveAttribute("aria-valuetext", "3 of 4")
   })
 
   it("keeps the status bar's slider in place though it mounted hidden", async () => {

@@ -347,10 +347,15 @@ export async function seedSettings(settings: Settings = {}) {
 
   // Not merely that a file is there again — that it holds what was just asked
   // for, so a write still in flight from the spec before cannot satisfy this.
-  const wanted = seededValues(settings)
+  await settingsHold(seededValues(settings))
+}
 
+/** Waits until the settings file holds every one of `wanted`. */
+export async function settingsHold(wanted: string[]) {
   await browser.waitUntil(
     () => {
+      const settingsPath = settingsFile()
+
       if (!existsSync(settingsPath)) {
         return false
       }
