@@ -341,22 +341,24 @@ describe("TFolio organize workspace", () => {
     expect(await focused()).toBe("Page 1 of landscape")
   })
 
-  it("keeps every row's height when a page turns", async () => {
-    await organizeWith([landscape()])
-    const heights = () =>
+  it("keeps every page where it stood when a page turns", async () => {
+    // Pages of one shape: the turned page is wider than any the board had.
+    await organizeWith([portrait()])
+    const cells = () =>
       browser.execute(
         (scope: string) =>
           Array.from(
-            document.querySelectorAll(`${scope} [data-slot-key]`),
-            (cell) => cell.getBoundingClientRect().height,
+            document.querySelectorAll<HTMLElement>(`${scope} [data-slot-key]`),
+            (cell) =>
+              `${cell.offsetLeft},${cell.offsetTop} ${cell.offsetWidth}x${cell.offsetHeight}`,
           ),
         workspace,
       )
-    const before = await heights()
+    const before = await cells()
 
-    await pageControl("Page 1 of landscape", "rotate-right").click()
-    await expect(slot("Page 1 of landscape")).toHaveAttribute("data-rotation", "90")
-    expect(await heights()).toEqual(before)
+    await pageControl("Page 1 of portrait", "rotate-right").click()
+    await expect(slot("Page 1 of portrait")).toHaveAttribute("data-rotation", "90")
+    expect(await cells()).toEqual(before)
   })
 
   it("inserts a blank page from the gap between two pages", async () => {
@@ -436,7 +438,10 @@ describe("TFolio organize workspace", () => {
     await expect($(`${workspace} [data-organize-padding]`)).not.toBeExisting()
 
     await $(`${workspace} [data-slot='organize-smart-padding']`).click()
-    await expect($(`${workspace} [data-organize-padding]`)).toBeDisplayed()
+    // It closes the file before, rather than opening the next one.
+    await expect(
+      $(`${workspace} section[aria-label='one'] [data-organize-flow] > [data-organize-padding]:last-child`),
+    ).toBeDisplayed()
     await expect(total()).resolves.toBe("4 pages from 2 files")
   })
 

@@ -181,29 +181,30 @@ describe("outputPages", () => {
     expect(layout(padded, sources)).toEqual(["1:1", "pad", "2:1", "2:2", "3:1"])
   })
 
-  test("sizes the padding like the page it precedes, turned as it stands", () => {
+  test("closes the file before, sized like its last page as it stands", () => {
     const { plan, sources } = setup(source(1, 1), source(2, 1))
-    const second = plan.groups[1]!
+    const first = plan.groups[0]!
     const turned = rotateSlots(
       setOptions(plan, { smartPadding: true }),
-      new Set([second.slots[0]!.key]),
+      new Set([first.slots[0]!.key]),
       90,
     )
 
     expect(outputPages(turned, sources)[1]).toMatchObject({
+      groupId: first.id,
       height: 200,
       kind: "padding",
       width: 300,
     })
   })
 
-  test("lays padding on the A4 sheet the engine fits the next page to", () => {
+  test("lays padding on the A4 sheet the engine fits the last page to", () => {
     // 500x400 fits upright A4 unshrunk, so the engine keeps that sheet upright
     // and turns it with the page — the padding must match either way.
-    const wide = { ...source(2, 1), pages: [{ height: 400, rotation: 0, width: 500 }] }
-    const { plan, sources } = setup(source(1, 1), wide)
+    const wide = { ...source(1, 1), pages: [{ height: 400, rotation: 0, width: 500 }] }
+    const { plan, sources } = setup(wide, source(2, 1))
     const fitted = setOptions(plan, { normalizeA4: true, smartPadding: true })
-    const turned = rotateSlots(fitted, new Set([fitted.groups[1]!.slots[0]!.key]), 90)
+    const turned = rotateSlots(fitted, new Set([fitted.groups[0]!.slots[0]!.key]), 90)
 
     expect(outputPages(fitted, sources)[1]).toMatchObject({ height: 841.89, width: 595.28 })
     expect(outputPages(turned, sources)[1]).toMatchObject({ height: 595.28, width: 841.89 })

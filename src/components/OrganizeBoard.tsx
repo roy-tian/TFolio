@@ -1,7 +1,6 @@
 import {
   useCallback,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -12,9 +11,9 @@ import { useTranslation } from "react-i18next"
 
 import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
 import {
-  boardFrame,
   GroupSection,
   PAGE_CONTROL,
+  type PaddingPage,
   type PageActionHandler,
 } from "@/components/OrganizeGroupSection"
 import {
@@ -131,13 +130,9 @@ function boardTargetAt(
     )
     const cell = hit ? cells[hit.index]! : undefined
 
-    if (!hit || !cell) {
+    // The padding blank closes the file: over it, the stack goes in at its end.
+    if (!hit || !cell || cell.dataset.slotKey === undefined) {
       return { beforeKey: null, groupId }
-    }
-
-    // The padding blank stands ahead of the file's first page.
-    if (cell.dataset.slotKey === undefined) {
-      return { beforeKey: stayingFrom(0), groupId }
     }
 
     const key = Number(cell.dataset.slotKey)
@@ -185,10 +180,6 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
   // The preview numbers and pads pages as the drop would.
   const shownPages: OutputPage[] =
     shownPlan === plan ? pages : outputPages(shownPlan, sources)
-  const frame = useMemo(
-    () => boardFrame(shownPages, sources, paperWidth),
-    [paperWidth, shownPages, sources],
-  )
   const [menuKeys, setMenuKeys] = useState<ReadonlySet<number>>(() => new Set())
   // The pages a right-click is over, read when Base UI asks to open: it opens
   // on any press inside the trigger, and off every page there is no menu.
@@ -473,13 +464,17 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
   }
 
   const outputNumber = new Map<number, number>()
-  const paddingOf = new Map<number, { height: number; width: number }>()
+  const paddingOf = new Map<number, PaddingPage>()
 
   shownPages.forEach((page, index) => {
     if (page.kind === "slot") {
       outputNumber.set(page.slot.key, index + 1)
     } else {
-      paddingOf.set(page.groupId, page)
+      paddingOf.set(page.groupId, {
+        caption: index + 1,
+        height: page.height,
+        width: page.width,
+      })
     }
   })
 
@@ -557,7 +552,6 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
         {shownPlan.groups.map((group) => (
           <GroupSection
             cut={cut}
-            frame={frame}
             group={group}
             holes={holes}
             key={group.id}

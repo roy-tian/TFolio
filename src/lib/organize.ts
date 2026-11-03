@@ -173,30 +173,32 @@ function sheetFor(slot: Slot, sources: SourceMap, normalizeA4: boolean) {
   return slot.turn % 180 === 0 ? sheet : { height: sheet.width, width: sheet.height }
 }
 
+/** A padding page's group is the one it closes. */
 export type OutputPage =
   | { groupId: number; kind: "slot"; slot: Slot }
   | { groupId: number; height: number; kind: "padding"; width: number }
 
 /**
  * The document the plan makes, page by page: groups in order, an empty one
- * contributing nothing, and with smart padding a blank before any group that
- * would otherwise start on an even page, sized like that group's first page.
+ * contributing nothing, and with smart padding a blank closing any group that
+ * would otherwise leave the next to start on an even page. That blank is the
+ * back of the group's last leaf, so it is sized like the group's last page.
  */
 export function outputPages(plan: OrganizePlan, sources: SourceMap): OutputPage[] {
   const pages: OutputPage[] = []
 
   for (const group of plan.groups) {
-    const first = group.slots[0]
-
-    if (!first) {
+    if (group.slots.length === 0) {
       continue
     }
 
-    if (plan.options.smartPadding && pages.length % 2 === 1) {
+    const last = pages.at(-1)
+
+    if (plan.options.smartPadding && pages.length % 2 === 1 && last?.kind === "slot") {
       pages.push({
-        groupId: group.id,
+        groupId: last.groupId,
         kind: "padding",
-        ...sheetFor(first, sources, plan.options.normalizeA4),
+        ...sheetFor(last.slot, sources, plan.options.normalizeA4),
       })
     }
 
