@@ -16,6 +16,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
 <link rel="preload" href="assets/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<noscript><style>#hero-shot { display: none; }</style></noscript>
 <script>
 (function () {
   var lang = "zh"
@@ -354,7 +355,7 @@ html[data-lang="en"] .hero h1 {
     0 2px 0 rgba(255, 255, 255, 0.06) inset,
     0 48px 100px -30px rgba(0, 4, 20, 0.85);
 }
-.screen img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+.screen img { width: 100%; }
 
 .hero-copy, .hero-shot { animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .hero-shot { animation-delay: 0.15s; animation-duration: 1.1s; }
@@ -533,9 +534,10 @@ html[data-lang="en"] .hero h1 {
   font-family: var(--page-serif);
   color: #1c2433;
 }
-.paper p { margin: 0 0 1.1em; font-size: clamp(11px, 3.35cqw, 17px); line-height: 1.95; }
+/* No pixel floor: the lines cannot wrap, so on a phone a floor pushes them past the paper. */
+.paper p { margin: 0 0 1.1em; font-size: min(3.35cqw, 17px); line-height: 1.95; }
 .paper p:last-child { margin: 0; }
-.paper[lang="en"] p { font-size: clamp(11px, 3.1cqw, 16.5px); }
+.paper[lang="en"] p { font-size: min(3.1cqw, 16.5px); }
 /* Each line is one line of the PDF's own text, justified the way the page set it. */
 .paper .ln { display: block; white-space: nowrap; text-align: justify; text-align-last: justify; }
 .paper .ln:last-child { text-align-last: auto; }
@@ -556,7 +558,6 @@ html[data-lang="en"] .hero h1 {
   align-items: start;
 }
 .detail--wide .detail-text > p { margin: 0; }
-.detail--wide .screen img { aspect-ratio: 2048 / 720; }
 
 /* ---------- download ---------- */
 
@@ -753,8 +754,8 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
           <a class="btn btn-quiet" href="#download"><span lang="zh-CN">其他平台</span><span lang="en">Other platforms</span></a>
         </div>
         <p class="hero-meta">
-          <span lang="zh-CN">版本 0.1.25，MIT 开源，免费使用。支持 Windows、macOS 与 Linux。</span>
-          <span lang="en">Version 0.1.25. Free and open source under MIT, for Windows, macOS and Linux.</span>
+          <span lang="zh-CN">版本 <span class="js-version">0.1.25</span>，MIT 开源，免费使用。支持 Windows、macOS 与 Linux。</span>
+          <span lang="en">Version <span class="js-version">0.1.25</span>. Free and open source under MIT, for Windows, macOS and Linux.</span>
         </p>
       </div>
     </div>
@@ -1026,8 +1027,8 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
     <div class="section-head">
       <h2 id="download-title"><span lang="zh-CN">下载 TFolio</span><span lang="en">Download TFolio</span></h2>
       <p>
-        <span lang="zh-CN">当前版本 0.1.25。安装后，TFolio 会在启动时检查更新，有新版本会提示你。</span>
-        <span lang="en">Current version 0.1.25. Once installed, TFolio checks for updates when it starts and lets you know when a new version is out.</span>
+        <span lang="zh-CN">当前版本 <span class="js-version">0.1.25</span>。安装后，TFolio 会在启动时检查更新，有新版本会提示你。</span>
+        <span lang="en">Current version <span class="js-version">0.1.25</span>. Once installed, TFolio checks for updates when it starts and lets you know when a new version is out.</span>
       </p>
     </div>
     <div class="download-grid">
@@ -1035,25 +1036,25 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
         <h3>Windows</h3>
         <p><span lang="zh-CN">Windows 10 与 11，x64</span><span lang="en">Windows 10 and 11, x64</span></p>
         <ul class="files">
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64-setup.exe"><span lang="zh-CN">安装程序</span><span lang="en">Installer</span> <span class="ext">.exe</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64_en-US.msi"><span lang="zh-CN">MSI 安装包</span><span lang="en">MSI package</span> <span class="ext">.msi</span></a></li>
+          <li><a data-file="TFolio_{v}_x64-setup.exe" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64-setup.exe"><span lang="zh-CN">安装程序</span><span lang="en">Installer</span> <span class="ext">.exe</span></a></li>
+          <li><a data-file="TFolio_{v}_x64_en-US.msi" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64_en-US.msi"><span lang="zh-CN">MSI 安装包</span><span lang="en">MSI package</span> <span class="ext">.msi</span></a></li>
         </ul>
       </div>
       <div class="platform" data-platform="mac">
         <h3>macOS</h3>
         <p><span lang="zh-CN">Apple 芯片与 Intel 处理器</span><span lang="en">Apple silicon and Intel</span></p>
         <ul class="files">
-          <li><a data-target="macArm" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_aarch64.dmg"><span lang="zh-CN">Apple 芯片</span><span lang="en">Apple silicon</span> <span class="ext">.dmg</span></a></li>
-          <li><a data-target="macIntel" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64.dmg"><span lang="zh-CN">Intel 处理器</span><span lang="en">Intel</span> <span class="ext">.dmg</span></a></li>
+          <li><a data-file="TFolio_{v}_aarch64.dmg" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_aarch64.dmg"><span lang="zh-CN">Apple 芯片</span><span lang="en">Apple silicon</span> <span class="ext">.dmg</span></a></li>
+          <li><a data-file="TFolio_{v}_x64.dmg" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_x64.dmg"><span lang="zh-CN">Intel 处理器</span><span lang="en">Intel</span> <span class="ext">.dmg</span></a></li>
         </ul>
       </div>
       <div class="platform" data-platform="linux">
         <h3>Linux</h3>
         <p><span lang="zh-CN">x64，三种安装格式</span><span lang="en">x64, in three package formats</span></p>
         <ul class="files">
-          <li><a data-target="linux" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_amd64.deb">Debian / Ubuntu <span class="ext">.deb</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio-0.1.25-1.x86_64.rpm">Fedora / openSUSE <span class="ext">.rpm</span></a></li>
-          <li><a href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_amd64.AppImage"><span lang="zh-CN">免安装</span><span lang="en">Portable</span> <span class="ext">.AppImage</span></a></li>
+          <li><a data-file="TFolio_{v}_amd64.deb" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_amd64.deb">Debian / Ubuntu <span class="ext">.deb</span></a></li>
+          <li><a data-file="TFolio-{v}-1.x86_64.rpm" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio-0.1.25-1.x86_64.rpm">Fedora / openSUSE <span class="ext">.rpm</span></a></li>
+          <li><a data-file="TFolio_{v}_amd64.AppImage" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.25/TFolio_0.1.25_amd64.AppImage"><span lang="zh-CN">免安装</span><span lang="en">Portable</span> <span class="ext">.AppImage</span></a></li>
         </ul>
       </div>
     </div>
@@ -1120,24 +1121,22 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
 (function () {
   "use strict"
 
-  var VERSION = "0.1.25"
-  var BASE = "https://github.com/roy-tian/TFolio/releases/download/v" + VERSION + "/"
-
+  // Keys are the download links' data-file names.
   var TARGETS = {
     windows: {
-      url: BASE + "TFolio_" + VERSION + "_x64-setup.exe",
+      file: "TFolio_{v}_x64-setup.exe",
       label: { zh: ["下载 Windows 版", ".exe"], en: ["Download for Windows", ".exe"] }
     },
     macArm: {
-      url: BASE + "TFolio_" + VERSION + "_aarch64.dmg",
+      file: "TFolio_{v}_aarch64.dmg",
       label: { zh: ["下载 macOS 版", "Apple 芯片"], en: ["Download for macOS", "Apple silicon"] }
     },
     macIntel: {
-      url: BASE + "TFolio_" + VERSION + "_x64.dmg",
+      file: "TFolio_{v}_x64.dmg",
       label: { zh: ["下载 macOS 版", "Intel"], en: ["Download for macOS", "Intel"] }
     },
     linux: {
-      url: BASE + "TFolio_" + VERSION + "_amd64.deb",
+      file: "TFolio_{v}_amd64.deb",
       label: { zh: ["下载 Linux 版", ".deb"], en: ["Download for Linux", ".deb"] }
     }
   }
@@ -1173,21 +1172,27 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
     var platform = (data && data.platform) || navigator.platform || ""
     if (/Android|iPhone|iPad|iPod/i.test(ua)) return null
     if (/Win/i.test(platform)) return "windows"
-    // Safari reports no architecture; new Macs are Apple silicon, so that is the default.
-    if (/Mac/i.test(platform)) return "macArm"
-    if (/Linux|X11/i.test(platform)) return "linux"
+    // iPadOS Safari reports a Mac platform; only the touch points give it away. Safari reports
+    // no architecture either; new Macs are Apple silicon, so that is the default.
+    if (/Mac/i.test(platform)) return navigator.maxTouchPoints > 1 ? null : "macArm"
+    // Every Linux package is x64.
+    if (/Linux|X11/i.test(platform)) return /arm|aarch/i.test(navigator.platform || "") ? null : "linux"
     return null
   }
 
   function renderDownload() {
     var button = document.querySelector(".js-download")
     var label = document.querySelector(".js-download-label")
-    document.querySelectorAll(".files a").forEach(function (link) {
-      link.classList.toggle("is-recommended", !!target && link.href === TARGETS[target].url)
+    var file = target && TARGETS[target].file
+    var recommended = null
+    document.querySelectorAll(".files a[data-file]").forEach(function (link) {
+      var match = link.getAttribute("data-file") === file
+      link.classList.toggle("is-recommended", match)
+      if (match) recommended = link
     })
-    if (!target || !button || !label) return
+    if (!recommended || !button || !label) return
     var text = TARGETS[target].label[lang]
-    button.href = TARGETS[target].url
+    button.href = recommended.href
     label.textContent = text[0] + " "
     var small = document.createElement("small")
     small.textContent = text[1]
@@ -1208,9 +1213,6 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
     hero.alt = hero.getAttribute("data-alt-" + lang)
     renderDownload()
     document.querySelectorAll("[data-demo]").forEach(runDemo)
-    try {
-      localStorage.setItem("tfolio-lang", lang)
-    } catch (error) { /* storage blocked */ }
   }
 
   // ---- search demo: matches may run across the page's own line breaks ----
@@ -1245,8 +1247,7 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
     }
     var pattern = queryPattern(input.value)
     var total = 0
-    var currentSet = false
-    demo.lines.forEach(function (lines, index) {
+    var found = demo.lines.map(function (lines) {
       var text = lines.join("\n")
       var ranges = []
       if (pattern) {
@@ -1257,12 +1258,22 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
         }
       }
       total += ranges.length
-      var current = -1
-      if (!currentSet) {
-        // The current result is the first one that wraps, to show the point of the demo.
-        current = ranges.findIndex(function (range) { return range[2] })
-        if (current >= 0) currentSet = true
-      }
+      return { text: text, ranges: ranges }
+    })
+    // The current result is the first one that wraps, to show the point of the demo; without
+    // one it is the first result, as in the app.
+    var currentAt = null
+    ;[true, false].some(function (wrapsOnly) {
+      return found.some(function (paragraph, index) {
+        var r = paragraph.ranges.findIndex(function (range) { return !wrapsOnly || range[2] })
+        if (r >= 0) currentAt = [index, r]
+        return r >= 0
+      })
+    })
+    demo.lines.forEach(function (lines, index) {
+      var text = found[index].text
+      var ranges = found[index].ranges
+      var current = currentAt && currentAt[0] === index ? currentAt[1] : -1
       var html = ""
       var offset = 0
       lines.forEach(function (line) {
@@ -1306,8 +1317,12 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
     })
   })
 
+  // Only a choice made here is saved, so an unset visitor keeps following the browser language.
   document.getElementById("lang-toggle").addEventListener("click", function () {
     applyLang(lang === "zh" ? "en" : "zh")
+    try {
+      localStorage.setItem("tfolio-lang", lang)
+    } catch (error) { /* storage blocked */ }
   })
 
   target = detectPlatform()
@@ -1320,6 +1335,36 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
         target = "macIntel"
         renderDownload()
       }
+    }).catch(function () {})
+  }
+
+  // ---- latest release ----
+
+  // The markup names the release this page was last synced with, so it works without the API
+  // (no JS, offline, or over the 60 requests an hour GitHub allows an address). Each release
+  // then needs no change here.
+  function applyRelease(release) {
+    var match = /^v(\d+\.\d+\.\d+)$/.exec(release.tag_name || "")
+    if (!match) return
+    var version = match[1]
+    var page = release.html_url || "https://github.com/roy-tian/TFolio/releases/latest"
+    var assets = {}
+    ;(release.assets || []).forEach(function (asset) { assets[asset.name] = asset.browser_download_url })
+    document.querySelectorAll(".files a[data-file]").forEach(function (link) {
+      // A renamed package gets the release page rather than a stale build.
+      link.href = assets[link.getAttribute("data-file").split("{v}").join(version)] || page
+    })
+    document.querySelectorAll(".js-version").forEach(function (node) { node.textContent = version })
+    renderDownload()
+  }
+
+  if (window.fetch) {
+    fetch("https://api.github.com/repos/roy-tian/TFolio/releases/latest", {
+      headers: { Accept: "application/vnd.github+json" }
+    }).then(function (response) {
+      return response.ok ? response.json() : null
+    }).then(function (release) {
+      if (release) applyRelease(release)
     }).catch(function () {})
   }
 })()
