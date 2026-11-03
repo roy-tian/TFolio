@@ -3,9 +3,9 @@ import {
   BetweenHorizontalStart,
   Bookmark,
   FileOutput,
-  FilePlus2,
   FolderPlus,
   Layers,
+  RotateCcw,
   RotateCw,
   Scaling,
   Trash2,
@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next"
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { AppSidebar } from "@/components/AppSidebar"
 import { BookmarkList } from "@/components/BookmarkList"
+import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
 import { OperationProgress } from "@/components/OperationProgress"
 import { OrganizeBoard } from "@/components/OrganizeBoard"
 import { OrganizeFileList } from "@/components/OrganizeFileList"
@@ -203,9 +204,21 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
               </Button>
             </ToolbarTooltip>
             <ButtonGroup>
-              <ToolbarTooltip label={t("organize.rotate")}>
+              <ToolbarTooltip label={t("organize.rotateCounterclockwise")}>
                 <Button
-                  aria-label={t("organize.rotate")}
+                  aria-label={t("organize.rotateCounterclockwise")}
+                  data-slot="organize-rotate-left"
+                  disabled={busy || chosen.size === 0}
+                  onClick={() => organize.rotate(chosen, 270)}
+                  size="icon-sm"
+                  variant="outline"
+                >
+                  <RotateCcw />
+                </Button>
+              </ToolbarTooltip>
+              <ToolbarTooltip label={t("organize.rotateClockwise")}>
+                <Button
+                  aria-label={t("organize.rotateClockwise")}
                   data-slot="organize-rotate"
                   disabled={busy || chosen.size === 0}
                   onClick={() => organize.rotate(chosen, 90)}
@@ -215,16 +228,29 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   <RotateCw />
                 </Button>
               </ToolbarTooltip>
-              <ToolbarTooltip label={t("organize.insertBlank")}>
+              {/* With nothing chosen, either one adds at the last file's end. */}
+              <ToolbarTooltip label={t("organize.insertBlankBefore")}>
                 <Button
-                  aria-label={t("organize.insertBlank")}
-                  data-slot="organize-insert-blank"
+                  aria-label={t("organize.insertBlankBefore")}
+                  data-slot="organize-insert-blank-before"
                   disabled={busy || empty}
                   onClick={() => organize.insertBlankAt(chosen, "before")}
                   size="icon-sm"
                   variant="outline"
                 >
-                  <FilePlus2 />
+                  <InsertBeforeIcon />
+                </Button>
+              </ToolbarTooltip>
+              <ToolbarTooltip label={t("organize.insertBlankAfter")}>
+                <Button
+                  aria-label={t("organize.insertBlankAfter")}
+                  data-slot="organize-insert-blank-after"
+                  disabled={busy || empty}
+                  onClick={() => organize.insertBlankAt(chosen, "after")}
+                  size="icon-sm"
+                  variant="outline"
+                >
+                  <InsertAfterIcon />
                 </Button>
               </ToolbarTooltip>
               <ToolbarTooltip label={t("organize.delete")}>
@@ -330,7 +356,10 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           className="mr-1 text-sm tabular-nums text-muted-foreground"
           data-slot="organize-total"
         >
-          {t("organize.totalPages", { count: organize.pages.length })}
+          {t("organize.pagesFromFiles", {
+            files: t("organize.fileCount", { count: organize.plan.groups.length }),
+            pages: t("organize.pageCount", { count: organize.pages.length }),
+          })}
         </span>
       </ToolbarFrame>
 

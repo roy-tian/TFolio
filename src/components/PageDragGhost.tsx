@@ -291,13 +291,22 @@ export function PageDragGhost({
 }
 
 /** Where the pages in hand will stand: the landing page's own paper, dashed. */
-export function DragHole({ height, width }: { height: number; width: number }) {
+export function DragHole({
+  height,
+  top = 0,
+  width,
+}: {
+  height: number
+  /** Down from the cell's top, where the paper stands lower in its frame. */
+  top?: number
+  width: number
+}) {
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 border-2 border-dashed border-primary/60 bg-primary/5"
+      className="pointer-events-none absolute left-1/2 -translate-x-1/2 border-2 border-dashed border-primary/60 bg-primary/5"
       data-drag-hole
-      style={{ height, width }}
+      style={{ height, top, width }}
     />
   )
 }

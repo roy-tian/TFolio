@@ -41,13 +41,13 @@ function total() {
   return $(`${workspace} [data-slot='organize-total']`).getText()
 }
 
-/** Each slot of a file's section, by the label it reads as. */
+/** Each slot of a file's section, by the label its paper reads as. */
 function slotLabels(fileTitle: string) {
   return browser.execute(
     (scope: string, title: string) =>
       Array.from(
         document.querySelectorAll(
-          `${scope} section[aria-label='${title}'] [data-slot-key] button[aria-label]`,
+          `${scope} section[aria-label='${title}'] [data-slot-key] :is([data-thumbnail-page], [data-organize-blank])`,
         ),
         (button) => button.getAttribute("aria-label"),
       ),
@@ -60,6 +60,13 @@ function slot(label: string) {
   return $(`${workspace} [data-slot-key] button[aria-label='${label}']`)
 }
 
+/** One of the controls a page carries on its own paper. */
+function pageControl(label: string, action: string) {
+  return $(
+    `${workspace} [data-slot-key]:has(button[aria-label='${label}']) [data-page-action='${action}']`,
+  )
+}
+
 describe("TFolio organize workspace", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
@@ -68,7 +75,7 @@ describe("TFolio organize workspace", () => {
 
   it("keeps its files while the reader switches to the viewer and back", async () => {
     await organizeWith([portrait(), landscape()])
-    await expect(total()).resolves.toBe("5 pages in all")
+    await expect(total()).resolves.toBe("5 pages from 2 files")
     await expect($(`${sidebar} [data-slot='organize-files']`)).toHaveText(
       expect.stringContaining("portrait"),
     )
@@ -237,21 +244,177 @@ describe("TFolio organize workspace", () => {
 
     await slot("Page 1 of portrait").click()
     await $(`${workspace} [data-slot='organize-delete']`).click()
-    await expect(total()).resolves.toBe("1 page in all")
+    await expect(total()).resolves.toBe("1 page from 1 file")
     await browser.keys(["Control", "z"])
-    await browser.waitUntil(async () => (await total()) === "2 pages in all")
+    await browser.waitUntil(async () => (await total()) === "2 pages from 1 file")
     await pressRedo()
-    await browser.waitUntil(async () => (await total()) === "1 page in all")
+    await browser.waitUntil(async () => (await total()) === "1 page from 1 file")
     await browser.keys(["Control", "z"])
-    await browser.waitUntil(async () => (await total()) === "2 pages in all")
+    await browser.waitUntil(async () => (await total()) === "2 pages from 1 file")
 
     await slot("Page 2 of portrait").click()
     await $(`${workspace} [data-slot='organize-rotate']`).click()
     await expect(slot("Page 2 of portrait")).toHaveAttribute("data-rotation", "90")
+    await $(`${workspace} [data-slot='organize-rotate-left']`).click()
+    await $(`${workspace} [data-slot='organize-rotate-left']`).click()
+    await expect(slot("Page 2 of portrait")).toHaveAttribute("data-rotation", "270")
 
-    await $(`${workspace} [data-slot='organize-insert-blank']`).click()
+    await $(`${workspace} [data-slot='organize-insert-blank-before']`).click()
     await expect($(`${workspace} [data-organize-blank]`)).toBeDisplayed()
-    await expect(total()).resolves.toBe("3 pages in all")
+    await expect(total()).resolves.toBe("3 pages from 1 file")
+    await $(`${workspace} [data-slot='organize-insert-blank-after']`).click()
+    expect(await slotLabels("portrait")).toEqual([
+      "Page 1 of portrait",
+      "Blank page",
+      "Page 2 of portrait",
+      "Blank page",
+    ])
+  })
+
+  it("lines portrait and landscape pages up in one grid", async () => {
+    await organizeWith([portrait(), landscape()])
+
+    const cells = await browser.execute(
+      (scope: string) =>
+        Array.from(document.querySelectorAll(`${scope} [data-slot-key]`), (cell) => {
+          const box = cell.getBoundingClientRect()
+          const paper = cell.querySelector("[data-thumbnail-page]")!.getBoundingClientRect()
+
+          return {
+            across: Math.round(paper.left + paper.width / 2 - box.left),
+            down: Math.round(paper.top + paper.height / 2 - box.top),
+            size: `${box.width}x${box.height}`,
+          }
+        }),
+      workspace,
+    )
+
+    // Two shapes, one cell: each paper stands in the middle of the same box.
+    expect(cells).toHaveLength(5)
+    expect(new Set(cells.map((cell) => cell.size)).size).toBe(1)
+    expect(new Set(cells.map((cell) => cell.across)).size).toBe(1)
+    expect(new Set(cells.map((cell) => cell.down)).size).toBe(1)
+  })
+
+  it("turns, ticks and deletes a page from its own controls", async () => {
+    await organizeWith([portrait()])
+
+    await pageControl("Page 1 of portrait", "rotate-left").click()
+    await expect(slot("Page 1 of portrait")).toHaveAttribute("data-rotation", "270")
+    // The page's own bar turned it without choosing it.
+    await expect(slot("Page 1 of portrait")).toHaveAttribute("aria-pressed", "false")
+    await pageControl("Page 1 of portrait", "rotate-right").click()
+    await expect(slot("Page 1 of portrait")).toHaveAttribute("data-rotation", "0")
+
+    await pageControl("Page 1 of portrait", "toggle").click()
+    await pageControl("Page 2 of portrait", "toggle").click()
+    await expect(slot("Page 1 of portrait")).toHaveAttribute("aria-pressed", "true")
+    await expect(slot("Page 2 of portrait")).toHaveAttribute("aria-pressed", "true")
+    await pageControl("Page 1 of portrait", "toggle").click()
+    await expect(slot("Page 1 of portrait")).toHaveAttribute("aria-pressed", "false")
+
+    await pageControl("Page 1 of portrait", "delete").click()
+    await expect(total()).resolves.toBe("1 page from 1 file")
+    await expect(slot("Page 2 of portrait")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("hands keyboard focus on when a page's own delete takes the page away", async () => {
+    await organizeWith([landscape()])
+    // Enter or Space on a focused button: a click that counts no presses.
+    const pressDelete = (label: string) =>
+      browser.execute((selector: string) => {
+        const button = document.querySelector<HTMLElement>(selector)!
+
+        button.focus()
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }))
+      }, `${workspace} [data-slot-key]:has(button[aria-label='${label}']) [data-page-action='delete']`)
+    const focused = () =>
+      browser.execute(() => document.activeElement?.getAttribute("aria-label"))
+
+    await pressDelete("Page 2 of landscape")
+    await browser.waitUntil(async () => (await total()) === "2 pages from 1 file")
+    expect(await focused()).toBe("Page 3 of landscape")
+
+    // The file's last page hands it back to the one before.
+    await pressDelete("Page 3 of landscape")
+    await browser.waitUntil(async () => (await total()) === "1 page from 1 file")
+    expect(await focused()).toBe("Page 1 of landscape")
+  })
+
+  it("keeps every row's height when a page turns", async () => {
+    await organizeWith([landscape()])
+    const heights = () =>
+      browser.execute(
+        (scope: string) =>
+          Array.from(
+            document.querySelectorAll(`${scope} [data-slot-key]`),
+            (cell) => cell.getBoundingClientRect().height,
+          ),
+        workspace,
+      )
+    const before = await heights()
+
+    await pageControl("Page 1 of landscape", "rotate-right").click()
+    await expect(slot("Page 1 of landscape")).toHaveAttribute("data-rotation", "90")
+    expect(await heights()).toEqual(before)
+  })
+
+  it("inserts a blank page from the gap between two pages", async () => {
+    await organizeWith([portrait()])
+
+    await $(`${workspace} button[aria-label='Insert a blank page before page 2']`).click()
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(await slotLabels("portrait")) ===
+        JSON.stringify(["Page 1 of portrait", "Blank page", "Page 2 of portrait"]),
+      { timeoutMsg: "no blank page joined the gap" },
+    )
+
+    // Only the file's last page has a gap after it.
+    await $(`${workspace} button[aria-label='Insert a blank page after page 3']`).click()
+    await browser.waitUntil(
+      async () => (await slotLabels("portrait")).at(-1) === "Blank page",
+      { timeoutMsg: "no blank page joined the file's end" },
+    )
+    await expect(
+      $(`${workspace} button[aria-label='Insert a blank page after page 2']`),
+    ).not.toBeExisting()
+  })
+
+  it("spins a page the way it turns", async () => {
+    await organizeWith([portrait()])
+    // A page spins only once its pixels are there to spin.
+    await $(`${workspace} [data-slot-key] canvas[data-rendered='true']`).waitForExist({
+      timeout: 30_000,
+    })
+    await browser.execute(() => {
+      const spins: string[] = []
+      const animate = Element.prototype.animate
+
+      ;(window as Window & { spins?: string[] }).spins = spins
+      Element.prototype.animate = function (keyframes, options) {
+        const first = Array.isArray(keyframes) ? keyframes[0] : undefined
+
+        if (typeof first?.transform === "string" && first.transform.startsWith("rotate(")) {
+          spins.push(first.transform)
+        }
+
+        return animate.call(this, keyframes, options)
+      }
+    })
+    const spins = () =>
+      browser.execute(() => (window as Window & { spins?: string[] }).spins ?? [])
+
+    await pageControl("Page 1 of portrait", "rotate-left").click()
+    await browser.waitUntil(async () => (await spins()).length === 1, {
+      timeoutMsg: "the page turned without spinning",
+    })
+    await pageControl("Page 1 of portrait", "rotate-right").click()
+    await browser.waitUntil(async () => (await spins()).length === 2, {
+      timeoutMsg: "the page turned back without spinning",
+    })
+    // Each spin starts from where the page stood: a quarter back the other way.
+    expect(await spins()).toEqual(["rotate(90deg)", "rotate(-90deg)"])
   })
 
   it("previews the bookmarks the new PDF will carry", async () => {
@@ -274,7 +437,7 @@ describe("TFolio organize workspace", () => {
 
     await $(`${workspace} [data-slot='organize-smart-padding']`).click()
     await expect($(`${workspace} [data-organize-padding]`)).toBeDisplayed()
-    await expect(total()).resolves.toBe("4 pages in all")
+    await expect(total()).resolves.toBe("4 pages from 2 files")
   })
 
   it("adds the files dropped on it rather than opening them", async () => {
