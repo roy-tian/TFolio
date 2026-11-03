@@ -36,9 +36,11 @@
 
 ## Release
 
-- Release tags must match `package.json`; use `version:bump` to align all five version files.
+- Release tags must match `package.json`; use `version:bump` to align all four version files.
   `changelog` groups the release's conventional commit subjects as public release notes and omits
   `chore(release)` commits.
+- The landing page lives only on the `gh-pages` branch. It reads the latest release at load,
+  so releases do not change it; its `assets/icon.svg` is a copy of `app-small.svg`.
 - Releases come only from the default branch; merge the working branch in with `--no-ff`.
 - Push the release commit only after `bun run preflight` passes locally, then dispatch the
   `Release` workflow on it. Never push release tags: Release builds every platform once into a

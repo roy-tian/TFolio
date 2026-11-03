@@ -10,7 +10,6 @@ on:
     paths-ignore:
       - "**.md"
       - "LICENSE"
-      - "website/**"
       - ".agents/**"
       - ".claude/**"
       - ".github/workflows/bundle-dry-run.yml"
@@ -21,7 +20,6 @@ on:
     paths-ignore:
       - "**.md"
       - "LICENSE"
-      - "website/**"
       - ".agents/**"
       - ".claude/**"
       - ".github/workflows/bundle-dry-run.yml"
