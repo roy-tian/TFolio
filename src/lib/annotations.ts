@@ -222,6 +222,55 @@ function movedPositions(order: number[]): number[] {
   return moved
 }
 
+/** An array maps each position after an edit to the page number it held before,
+    null for a page the edit brought in; `"inPlace"` moved nothing, so
+    everything held by page number stays true. */
+export type PageMovement = (number | null)[] | "inPlace"
+
+/** `pages` taken out of `pageCount`: the rest close up in order. */
+function departures(pages: number[], pageCount: number): number[] {
+  const leaving = new Set(pages)
+
+  return everyPage(pageCount).filter((page) => !leaving.has(page))
+}
+
+/** `pages` arrived where they stand among `pageCount`; the rest keep their order. */
+function arrivals(pages: number[], pageCount: number): (number | null)[] {
+  const arrived = new Set(pages)
+  let previous = 0
+
+  return everyPage(pageCount).map((page) => (arrived.has(page) ? null : (previous += 1)))
+}
+
+/** Where a structure command, or its undo, moves each page — valid at the LIFO
+    moment it runs. Undefined for a command that leaves the page list alone. */
+export function commandMovement(
+  command: AnnotationCommand,
+  undoing: boolean,
+): PageMovement | undefined {
+  switch (command.kind) {
+    case "reorderPages":
+      return undoing ? command.inverse : command.order
+    case "rotatePages":
+      return "inPlace"
+    case "deletePages":
+      // The undo puts each page back where it stood before the delete.
+      return undoing
+        ? arrivals(command.pages, command.pageCount)
+        : departures(command.pages, command.pageCount)
+    case "insertBlankPage":
+      return undoing
+        ? departures([command.index], command.pageCount)
+        : arrivals([command.index], command.pageCount)
+    case "duplicatePages":
+      return undoing
+        ? departures(insertPagesRange(command), command.pageCount)
+        : arrivals(insertPagesRange(command), command.pageCount)
+    default:
+      return undefined
+  }
+}
+
 /** The pages a command writes to, and so the pages an undo has to take back. */
 export function commandPages(command: AnnotationCommand): number[] {
   switch (command.kind) {

@@ -156,7 +156,11 @@ export function SidebarThumbnails({
   const pagesRef = useRef(pages)
   const keysRef = useRef(thumbnailKeys)
   const numPages = pages.length
-  const { prime } = useFlipLayout(columnRef, drag !== null || ghost !== null)
+  const { prime } = useFlipLayout(
+    columnRef,
+    drag !== null || ghost !== null,
+    thumbnailKeys,
+  )
   const order =
     drag?.basis === pages && drag.at !== null
       ? orderWithBlockAt(drag.moving, drag.at, numPages)
@@ -297,11 +301,15 @@ export function SidebarThumbnails({
         beside() && pagesRef.current === basis
           ? columnLanding(
               point.y - column.getBoundingClientRect().top,
-              Array.from(column.children as HTMLCollectionOf<HTMLElement>, (row) => ({
-                height: row.offsetHeight,
-                moving: movingKeys.has(row.dataset.flipKey ?? ""),
-                top: row.offsetTop,
-              })),
+              // Rows only: a page leaving fades among them, keyless.
+              Array.from(
+                column.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"),
+                (row) => ({
+                  height: row.offsetHeight,
+                  moving: movingKeys.has(row.dataset.flipKey!),
+                  top: row.offsetTop,
+                }),
+              ),
               at,
             )
           : null
@@ -468,6 +476,9 @@ export function SidebarThumbnails({
                   Number.isFinite(first)
                 ) {
                   event.preventDefault()
+                  // A focused preview leaves with its page, and a removed
+                  // element fires no blur: the column keeps the focus instead.
+                  event.currentTarget.focus({ preventScroll: true })
                   onDeletePage(first)
                 }
               }}

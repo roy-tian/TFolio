@@ -4,6 +4,7 @@ import { Channel, invoke } from "@tauri-apps/api/core"
 import {
   canRedo,
   canUndo,
+  commandMovement,
   commandPages,
   commandTextPages,
   commit,
@@ -32,6 +33,7 @@ import {
   type AnnotationEntry,
   type AnnotationHistory,
   type HighlightCommand,
+  type PageMovement,
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
@@ -60,10 +62,6 @@ function progressChannel(onProgress?: ProgressHandler) {
   channel.onmessage = onProgress ?? (() => undefined)
   return channel
 }
-
-/** An array maps new slot -> previous page number for pages that only moved;
-    `"inPlace"` moved nothing, so everything held by page number stays true. */
-type PageMovement = number[] | "inPlace"
 
 type StructureChangeHandler = (
   documentId: number,
@@ -217,7 +215,7 @@ async function applyCommand(
           documentId,
           order: command.order,
         }),
-        command.order,
+        commandMovement(command, false),
       )
       return []
     case "rotatePages":
@@ -228,7 +226,7 @@ async function applyCommand(
           documentId,
           pageNumbers: command.pages,
         }),
-        "inPlace",
+        commandMovement(command, false),
       )
       return []
     case "deletePages":
@@ -239,6 +237,7 @@ async function applyCommand(
           pageNumbers: command.pages,
           stashId: command.stashId,
         }),
+        commandMovement(command, false),
       )
       return []
     case "insertBlankPage":
@@ -248,6 +247,7 @@ async function applyCommand(
           documentId,
           index: command.index,
         }),
+        commandMovement(command, false),
       )
       return []
     case "duplicatePages":
@@ -259,6 +259,7 @@ async function applyCommand(
           documentId,
           stashId: command.stashId,
         }),
+        commandMovement(command, false),
       )
       return []
   }
@@ -352,7 +353,7 @@ async function retractCommand(
           documentId,
           order: command.inverse,
         }),
-        command.inverse,
+        commandMovement(command, true),
       )
       return []
     case "rotatePages":
@@ -363,7 +364,7 @@ async function retractCommand(
           documentId,
           pageNumbers: command.pages,
         }),
-        "inPlace",
+        commandMovement(command, true),
       )
       return []
     case "deletePages":
@@ -373,6 +374,7 @@ async function retractCommand(
           documentId,
           stashId: command.stashId,
         }),
+        commandMovement(command, true),
       )
       return []
     case "insertBlankPage":
@@ -385,6 +387,7 @@ async function retractCommand(
           pageNumbers: [command.index],
           stashId: command.stashId,
         }),
+        commandMovement(command, true),
       )
       return []
     case "duplicatePages":
@@ -395,6 +398,7 @@ async function retractCommand(
           pageNumbers: insertPagesRange(command),
           stashId: command.stashId,
         }),
+        commandMovement(command, true),
       )
       return []
     case "eraseAnnotation":
@@ -723,6 +727,7 @@ export function useAnnotations({
                   // the undo deletes is the one the backend copied.
                   pageNumbers: planned.command.sourcePages,
                 }),
+                commandMovement(planned.command, false),
               )
               landed = true
               return true

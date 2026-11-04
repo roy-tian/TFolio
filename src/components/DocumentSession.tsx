@@ -66,6 +66,7 @@ import {
   movesPages,
   type AnnotationCommand,
   type HexColor,
+  type PageMovement,
   type RenderEpochs,
   type RectStyle,
   type TextNoteStyle,
@@ -210,8 +211,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo>(openedDocument)
     const [saveRequired, setSaveRequired] = useState(initialSaveRequired)
     const saveRequiredRef = useRef(initialSaveRequired)
-    // Thumbnail canvases follow their pages through a reorder, including undo.
-    // Other structure edits keep the existing position-based invalidation.
+    // Thumbnail canvases follow their pages through every structure edit and its
+    // undo: a preview keeps its pixels, and the column shows where it went.
     const [thumbnailIdentity, setThumbnailIdentity] = useState(() => ({
       keys: openedDocument.pages.map((_, index) => index),
       nextKey: openedDocument.numPages,
@@ -539,7 +540,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         (
           documentId: number,
           update: PdfStructureUpdate,
-          movement?: number[] | "inPlace",
+          movement?: PageMovement,
         ) => {
           const current = documentRef.current
 
@@ -569,14 +570,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           // now holds other content: gone is better than landing elsewhere.
           clearNoteFontOffer()
 
-          setThumbnailIdentity(({ keys, nextKey }) =>
-            movement
-              ? { keys: movement.map((page) => keys[page - 1]!), nextKey }
-              : {
-                  keys: update.pages.map((_, index) => keys[index] ?? nextKey + index),
-                  nextKey: nextKey + update.numPages,
-                },
-          )
+          setThumbnailIdentity(({ keys, nextKey }) => {
+            let next = nextKey
+            // A page the edit brought in is new to the column. Without a
+            // movement, a position keeps its preview.
+            const ids = update.pages.map((_, index) => {
+              const from = movement === undefined ? index + 1 : movement[index]
+
+              return (from == null ? undefined : keys[from - 1]) ?? next++
+            })
+
+            return { keys: ids, nextKey: next }
+          })
           currentPage.set(
             Math.min(Math.max(currentPage.get(), 1), Math.max(1, update.numPages)),
           )
