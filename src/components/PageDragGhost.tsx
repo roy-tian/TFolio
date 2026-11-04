@@ -257,10 +257,15 @@ export function PageDragGhost({
         ref={liftRef}
         style={{ transform: LIFTED, transformOrigin: `${-grip.x}px ${-grip.y}px` }}
       >
+        {/* The faint `drop-shadow-xs` on each tilted card smooths its edges:
+            WebKitGTK, and Chromium rastering on the GPU, paint a tilted box
+            stair-stepped, but draw a filtered one upright and then resample
+            it. An identity filter is skipped, and a filter blur costs frames,
+            so box-shadows still cast the visible shadow. */}
         {count > 1
           ? STACK_STEPS.map((step, index) => (
               <div
-                className="absolute inset-0 bg-white opacity-70 shadow-md ring-1 ring-black/10"
+                className="absolute inset-0 bg-white opacity-70 shadow-md ring-1 ring-black/10 drop-shadow-xs"
                 key={step}
                 ref={(card) => {
                   stackRefs.current[index] = card
@@ -269,7 +274,10 @@ export function PageDragGhost({
               />
             ))
           : null}
-        <div className="absolute inset-0 grid place-items-center overflow-hidden bg-white text-xs text-zinc-400 shadow-2xl ring-1 ring-black/10">
+        {/* Apart from the lead card: inside its filter, this wide shadow's
+            whole reach would be filtered again on every move. */}
+        <div className="absolute inset-0 shadow-2xl" />
+        <div className="absolute inset-0 grid place-items-center overflow-hidden bg-white text-xs text-zinc-400 ring-1 ring-black/10 drop-shadow-xs">
           {paper.canvas ? (
             <canvas className="absolute inset-0 block size-full" ref={canvasRef} />
           ) : (
