@@ -242,30 +242,45 @@ function arrivals(pages: number[], pageCount: number): (number | null)[] {
   return everyPage(pageCount).map((page) => (arrived.has(page) ? null : (previous += 1)))
 }
 
-/** Where a structure command, or its undo, moves each page — valid at the LIFO
-    moment it runs. Undefined for a command that leaves the page list alone. */
-export function commandMovement(
+/** How a structure edit moved the pages. One that takes pages out puts them
+    in its stash, and one that brings pages in may bring that stash's back. */
+export type PageChange = { movement: PageMovement; stashId?: number }
+
+/** What a structure command, or its undo, does to the pages — valid at the
+    LIFO moment it runs. Undefined for a command that leaves the page list alone. */
+export function commandPageChange(
   command: AnnotationCommand,
   undoing: boolean,
-): PageMovement | undefined {
+): PageChange | undefined {
   switch (command.kind) {
     case "reorderPages":
-      return undoing ? command.inverse : command.order
+      return { movement: undoing ? command.inverse : command.order }
     case "rotatePages":
-      return "inPlace"
+      return { movement: "inPlace" }
     case "deletePages":
-      // The undo puts each page back where it stood before the delete.
-      return undoing
-        ? arrivals(command.pages, command.pageCount)
-        : departures(command.pages, command.pageCount)
+      return {
+        // The undo puts each page back where it stood before the delete.
+        movement: undoing
+          ? arrivals(command.pages, command.pageCount)
+          : departures(command.pages, command.pageCount),
+        stashId: command.stashId,
+      }
     case "insertBlankPage":
-      return undoing
-        ? departures([command.index], command.pageCount)
-        : arrivals([command.index], command.pageCount)
+      return {
+        // A redo's blank is the one its undo took out: LIFO has taken back
+        // anything drawn on it, and the gap's neighbours size it alike.
+        movement: undoing
+          ? departures([command.index], command.pageCount)
+          : arrivals([command.index], command.pageCount),
+        stashId: command.stashId,
+      }
     case "duplicatePages":
-      return undoing
-        ? departures(insertPagesRange(command), command.pageCount)
-        : arrivals(insertPagesRange(command), command.pageCount)
+      return {
+        movement: undoing
+          ? departures(insertPagesRange(command), command.pageCount)
+          : arrivals(insertPagesRange(command), command.pageCount),
+        stashId: command.stashId,
+      }
     default:
       return undefined
   }

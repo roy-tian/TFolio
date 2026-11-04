@@ -39,6 +39,7 @@ import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import type { RenderEpochs } from "@/lib/annotations"
 import { columnLanding, exceedsDragThreshold, orderWithBlockAt } from "@/lib/pageDrag"
+import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -94,6 +95,8 @@ type SidebarThumbnailsProps = {
   onRotatePages: () => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   pages: PdfPageInfo[]
+  /** Where a preview waits while an edit has its page out of the document. */
+  parkedPreviews: ParkedPreviews
   renderEpochs: RenderEpochs
   rotations: number[]
   selectedPages: ReadonlySet<number>
@@ -121,6 +124,7 @@ export function SidebarThumbnails({
   onRotatePages,
   onSelectPage,
   pages,
+  parkedPreviews,
   renderEpochs,
   rotations,
   selectedPages,
@@ -515,6 +519,7 @@ export function SidebarThumbnails({
                   pageHeight={page.height}
                   pageNumber={pageNumber}
                   pageWidth={page.width}
+                  parked={parkedPreviews}
                   renderEpoch={renderEpochs[pageNumber] ?? 0}
                   rotation={rotations[pageNumber - 1] ?? 0}
                 />
@@ -616,6 +621,7 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
   pageHeight,
   pageNumber,
   pageWidth,
+  parked,
   renderEpoch,
   rotation,
 }: {
@@ -633,6 +639,7 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  parked: ParkedPreviews
   renderEpoch: number
   rotation: number
 }) {
@@ -657,6 +664,8 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
           pageHeight={pageHeight}
           pageNumber={pageNumber}
           pageWidth={pageWidth}
+          parkKey={flipKey}
+          parked={parked}
           renderEpoch={renderEpoch}
           retainBitmap={nearView}
           rotation={rotation}
