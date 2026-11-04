@@ -11,6 +11,7 @@ import {
   assembleSlots,
   deleteSlots,
   emptyPlan,
+  fileBookmarks,
   insertBlank,
   ORGANIZE_MAX_FILES,
   moveGroup,
@@ -18,6 +19,7 @@ import {
   organizeOutline,
   outputPages,
   removeGroups,
+  renameGroup,
   rotateSlots,
   setOptions,
   sourceFromInfo,
@@ -251,8 +253,8 @@ export function useOrganizeWorkspace({
   }, [])
 
   const pages = useMemo(() => outputPages(plan, sources), [plan, sources])
-  const outline = useMemo(
-    () => organizeOutline(plan, sources, pages),
+  const bookmarks = useMemo(
+    () => fileBookmarks(plan, sources, pages),
     [pages, plan, sources],
   )
 
@@ -379,6 +381,13 @@ export function useOrganizeWorkspace({
     (groupIds: ReadonlySet<number>) => edit((current) => removeGroups(current, groupIds)),
     [edit],
   )
+  // Taken while busy too, where `edit` refuses: a field may be open as an add
+  // starts, and no add or assembly under way reads a title it did not start with.
+  const renameFile = useCallback(
+    (groupId: number, title: string) =>
+      commit(renameGroup(planRef.current, groupId, title)),
+    [commit],
+  )
   const reorderFiles = useCallback(
     (from: number, to: number) => edit((current) => moveGroup(current, from, to)),
     [edit],
@@ -480,6 +489,7 @@ export function useOrganizeWorkspace({
       addPaths,
       assemble,
       assembling,
+      bookmarks,
       canRedo: history.future.length > 0,
       canUndo: history.past.length > 0,
       changeOptions,
@@ -490,7 +500,6 @@ export function useOrganizeWorkspace({
       hasUnsavedWorkNow,
       insertBlankAt,
       move,
-      outline,
       pages,
       paste,
       plan,
@@ -498,6 +507,7 @@ export function useOrganizeWorkspace({
       redo,
       remove,
       removeFiles,
+      renameFile,
       reorderFiles,
       rotate,
       selectAll,
@@ -514,6 +524,7 @@ export function useOrganizeWorkspace({
       addPaths,
       assemble,
       assembling,
+      bookmarks,
       changeOptions,
       chooseFiles,
       cut,
@@ -523,7 +534,6 @@ export function useOrganizeWorkspace({
       history,
       insertBlankAt,
       move,
-      outline,
       pages,
       paste,
       plan,
@@ -531,6 +541,7 @@ export function useOrganizeWorkspace({
       redo,
       remove,
       removeFiles,
+      renameFile,
       reorderFiles,
       rotate,
       selectAll,

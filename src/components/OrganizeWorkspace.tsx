@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import {
   BetweenHorizontalStart,
   Bookmark,
@@ -16,11 +16,13 @@ import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { AppSidebar } from "@/components/AppSidebar"
-import { BookmarkList } from "@/components/BookmarkList"
 import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
 import { OperationProgress } from "@/components/OperationProgress"
 import { OrganizeBoard } from "@/components/OrganizeBoard"
-import { OrganizeFileList } from "@/components/OrganizeFileList"
+import {
+  OrganizeFileList,
+  OrganizeFileListHeader,
+} from "@/components/OrganizeFileList"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { ToolbarFrame } from "@/components/SessionHeader"
 import { SliderStepper } from "@/components/SliderStepper"
@@ -36,14 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { OrganizeWorkspace as Workspace } from "@/hooks/useOrganizeWorkspace"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import {
@@ -52,7 +47,6 @@ import {
   storeOrganizeStep,
 } from "@/lib/organizeSize"
 import { shortcuts } from "@/lib/shortcuts"
-import { cn } from "@/lib/utils"
 
 type OrganizeWorkspaceProps = {
   active: boolean
@@ -72,7 +66,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   organize,
 }: OrganizeWorkspaceProps) {
   const { t } = useTranslation()
-  const [panel, setPanel] = useState<"files" | "bookmarks">("files")
+  const [closedFiles, setClosedFiles] = useState<ReadonlySet<number>>(() => new Set())
   const [size, setSize] = useState(readStoredOrganizeStep)
   const scrollRef = useRef<HTMLElement>(null)
   const { options } = organize.plan
@@ -124,23 +118,28 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     storeOrganizeStep(next)
   }
 
-  const showGroup = (groupId: number) => {
+  // Stable, so a drag in the sidebar re-renders no file's entry.
+  const showGroup = useCallback((groupId: number) => {
     scrollRef.current
       ?.querySelector(`[data-group-id="${groupId}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }
+  }, [])
 
-  const showPage = (pageNumber: number) => {
-    const page = organize.pages[pageNumber - 1]
+  const { pages } = organize
+  const showPage = useCallback(
+    (pageNumber: number) => {
+      const page = pages[pageNumber - 1]
 
-    if (page?.kind === "slot") {
-      scrollRef.current
-        ?.querySelector(`[data-slot-key="${page.slot.key}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-    }
-  }
+      if (page?.kind === "slot") {
+        scrollRef.current
+          ?.querySelector(`[data-slot-key="${page.slot.key}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+      }
+    },
+    [pages],
+  )
 
-  const bookmarksLabel = t("organize.bookmarks")
+  const folds = { closed: closedFiles, setClosed: setClosedFiles }
 
   return (
     <div
@@ -151,39 +150,14 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     >
       <AppSidebar
         macOS={macOS}
-        switcher={
-          <ToggleGroup
-            aria-label={t("sidebar.panels")}
-            onValueChange={([next]) => {
-              if (next === "files" || next === "bookmarks") {
-                setPanel(next)
-              }
-            }}
-            size="sm"
-            spacing={0}
-            value={[panel]}
-            variant="outline"
-          >
-            <ToggleGroupItem aria-label={t("organize.files")} className="gap-1.5" value="files">
-              <Layers />
-              {t("organize.files")}
-            </ToggleGroupItem>
-            <ToggleGroupItem aria-label={bookmarksLabel} className="gap-1.5" value="bookmarks">
-              <Bookmark />
-              {bookmarksLabel}
-            </ToggleGroupItem>
-          </ToggleGroup>
-        }
+        switcher={<OrganizeFileListHeader folds={folds} organize={organize} />}
       >
-        {panel === "files" ? (
-          <OrganizeFileList onShow={showGroup} organize={organize} />
-        ) : organize.outline.length > 0 ? (
-          <BookmarkList items={organize.outline} onNavigate={showPage} />
-        ) : (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            {t("organize.noBookmarks")}
-          </p>
-        )}
+        <OrganizeFileList
+          folds={folds}
+          onShowFile={showGroup}
+          onShowPage={showPage}
+          organize={organize}
+        />
       </AppSidebar>
 
       <ToolbarFrame
@@ -308,77 +282,55 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   <Scaling />
                 </Toggle>
               </ToolbarTooltip>
-              <DropdownMenu>
-                <ToolbarTooltip label={bookmarksLabel}>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        aria-label={bookmarksLabel}
-                        data-slot="organize-bookmarks"
-                        disabled={busy}
-                        size="icon-sm"
-                        variant="outline"
-                      />
-                    }
-                  >
-                    <Bookmark
-                      className={cn(
-                        (options.fileBookmarks || options.keepBookmarks) && "fill-current",
-                      )}
-                    />
-                  </DropdownMenuTrigger>
-                </ToolbarTooltip>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuCheckboxItem
-                    checked={options.fileBookmarks}
-                    data-action="organize-file-bookmarks"
-                    onCheckedChange={(checked) =>
-                      organize.changeOptions({ fileBookmarks: checked })
-                    }
-                  >
-                    {t("organize.fileBookmarks")}
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuCheckboxItem
-                    checked={options.keepBookmarks}
-                    data-action="organize-keep-bookmarks"
-                    onCheckedChange={(checked) =>
-                      organize.changeOptions({ keepBookmarks: checked })
-                    }
-                  >
-                    {t("organize.keepBookmarks")}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </ButtonGroup>
-            <ButtonGroup>
-              <ToolbarTooltip label={t("organize.preview")}>
-                <Button
-                  aria-label={t("organize.preview")}
-                  data-slot="organize-preview"
-                  disabled={busy || organize.pages.length === 0}
-                  onClick={() => void organize.assemble("preview")}
-                  size="icon-sm"
+              <ToolbarTooltip
+                label={t(options.bookmarks ? "organize.saveBookmarks" : "organize.skipBookmarks")}
+              >
+                <Toggle
+                  aria-label={t("organize.saveBookmarks")}
+                  className="size-7 min-w-7 p-0"
+                  data-slot="organize-bookmarks"
+                  disabled={busy}
+                  onPressedChange={(pressed) => organize.changeOptions({ bookmarks: pressed })}
+                  pressed={options.bookmarks}
                   variant="outline"
                 >
-                  <Eye />
-                </Button>
-              </ToolbarTooltip>
-              <ToolbarTooltip label={t("organize.saveAs")}>
-                <Button
-                  aria-label={t("organize.saveAs")}
-                  data-slot="organize-save"
-                  disabled={busy || organize.pages.length === 0}
-                  onClick={() => void organize.assemble("save")}
-                  size="icon-sm"
-                  variant="outline"
-                >
-                  <FileOutput />
-                </Button>
+                  <Bookmark />
+                </Toggle>
               </ToolbarTooltip>
             </ButtonGroup>
           </>
         }
         macOS={macOS}
+        start={
+          <ButtonGroup>
+            <ToolbarTooltip label={t("organize.preview")}>
+              <Button
+                aria-label={t("organize.preview")}
+                data-slot="organize-preview"
+                disabled={busy || organize.pages.length === 0}
+                onClick={() => void organize.assemble("preview")}
+                size="sm"
+                variant="outline"
+              >
+                <Eye data-icon="inline-start" />
+                {t("organize.previewButton")}
+              </Button>
+            </ToolbarTooltip>
+            <ToolbarTooltip label={t("organize.saveAs")}>
+              <Button
+                aria-label={t("organize.saveAs")}
+                data-slot="organize-save"
+                disabled={busy || organize.pages.length === 0}
+                onClick={() => void organize.assemble("save")}
+                size="sm"
+                variant="outline"
+              >
+                <FileOutput data-icon="inline-start" />
+                {t("organize.saveButton")}
+              </Button>
+            </ToolbarTooltip>
+          </ButtonGroup>
+        }
       />
 
       <div className="relative ml-(--sidebar-inset) h-[calc(100%-var(--status-bar-height))]">

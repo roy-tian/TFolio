@@ -5,12 +5,14 @@ import {
   assembleSlots,
   deleteSlots,
   emptyPlan,
+  fileBookmarks,
   insertBlank,
   moveGroup,
   moveSlots,
   organizeOutline,
   outputPages,
   removeGroups,
+  renameGroup,
   rotateSlots,
   setOptions,
   sourceFromInfo,
@@ -242,8 +244,7 @@ describe("organizeOutline", () => {
 
   test("nests a file's own bookmarks, following pages moved to another file", () => {
     const { plan, sources } = setup(source(1, 3, chapters), source(2, 1))
-    const both = setOptions(plan, { keepBookmarks: true })
-    const moved = moveSlots(both, keysOf(both, "1:3"), both.groups[1]!.id, null)
+    const moved = moveSlots(plan, keysOf(plan, "1:3"), plan.groups[1]!.id, null)
 
     expect(organizeOutline(moved, sources)).toEqual([
       {
@@ -263,32 +264,82 @@ describe("organizeOutline", () => {
 
   test("drops a bookmark whose page is gone, keeping its children", () => {
     const { plan, sources } = setup(source(1, 3, chapters))
-    const kept = setOptions(plan, { fileBookmarks: false, keepBookmarks: true })
 
-    expect(organizeOutline(deleteSlots(kept, keysOf(kept, "1:2")), sources)).toEqual([
-      { items: [], pageNumber: 2, title: "Section" },
-    ])
-  })
-
-  test("raises a removed file's bookmarks to the top where its pages now stand", () => {
-    const { plan, sources } = setup(source(1, 3, chapters), source(2, 1))
-    const both = setOptions(plan, { keepBookmarks: true })
-    const moved = moveSlots(both, keysOf(both, "1:2", "1:3"), both.groups[1]!.id, null)
-    const removed = removeGroups(moved, new Set([moved.groups[0]!.id]))
-
-    expect(organizeOutline(removed, sources)).toEqual([
-      { items: [], pageNumber: 1, title: "file-2" },
+    expect(organizeOutline(deleteSlots(plan, keysOf(plan, "1:2")), sources)).toEqual([
       {
-        items: [{ items: [], pageNumber: 3, title: "Section" }],
-        pageNumber: 2,
-        title: "Chapter",
+        items: [{ items: [], pageNumber: 2, title: "Section" }],
+        pageNumber: 1,
+        title: "file-1",
       },
     ])
   })
 
-  test("writes none when neither kind is asked for", () => {
+  test("hangs a removed file's bookmarks under the file now holding their pages", () => {
+    const { plan, sources } = setup(source(1, 3, chapters), source(2, 1))
+    const moved = moveSlots(plan, keysOf(plan, "1:2", "1:3"), plan.groups[1]!.id, null)
+    const removed = removeGroups(moved, new Set([moved.groups[0]!.id]))
+
+    expect(organizeOutline(removed, sources)).toEqual([
+      {
+        items: [
+          {
+            items: [{ items: [], pageNumber: 3, title: "Section" }],
+            pageNumber: 2,
+            title: "Chapter",
+          },
+        ],
+        pageNumber: 1,
+        title: "file-2",
+      },
+    ])
+  })
+
+  test("places a removed file's bookmarks by page among the new file's own", () => {
+    const { plan, sources } = setup(
+      source(1, 1, [{ items: [], pageNumber: 1, title: "Moved" }]),
+      source(2, 2, [{ items: [], pageNumber: 2, title: "Own" }]),
+    )
+    const [first, second] = plan.groups
+    const before = [...keysOf(plan, "2:2")][0]!
+    const moved = moveSlots(plan, keysOf(plan, "1:1"), second!.id, before)
+    const removed = removeGroups(moved, new Set([first!.id]))
+
+    expect(organizeOutline(removed, sources)[0]?.items).toEqual([
+      { items: [], pageNumber: 2, title: "Moved" },
+      { items: [], pageNumber: 3, title: "Own" },
+    ])
+  })
+
+  test("lists a file left without pages, which the new PDF gets no bookmark for", () => {
+    const { plan, sources } = setup(source(1, 3, chapters), source(2, 1))
+    const [first, second] = plan.groups
+    const moved = moveSlots(plan, keysOf(plan, "1:1", "1:2", "1:3"), second!.id, null)
+    const bookmarks = fileBookmarks(moved, sources)
+
+    expect(bookmarks.get(first!.id)).toEqual({ items: [], pageNumber: undefined, title: "file-1" })
+    expect(bookmarks.get(second!.id)?.items.map((item) => item.title)).toEqual(["Chapter"])
+    expect(organizeOutline(moved, sources).map((item) => item.title)).toEqual(["file-2"])
+  })
+
+  test("writes none once cleared, whatever the files carry", () => {
     const { plan, sources } = setup(source(1, 3, chapters))
 
-    expect(organizeOutline(setOptions(plan, { fileBookmarks: false }), sources)).toEqual([])
+    expect(organizeOutline(setOptions(plan, { bookmarks: false }), sources)).toEqual([])
+  })
+})
+
+describe("renameGroup", () => {
+  test("retitles the file's bookmark and keeps the history step to a real change", () => {
+    const { plan, sources } = setup(source(1, 1), source(2, 1))
+    const groupId = plan.groups[0]!.id
+    const renamed = renameGroup(plan, groupId, "  Introduction ")
+
+    expect(organizeOutline(renamed, sources).map((item) => item.title)).toEqual([
+      "Introduction",
+      "file-2",
+    ])
+    expect(renameGroup(renamed, groupId, "Introduction")).toBe(renamed)
+    expect(renameGroup(renamed, groupId, "   ")).toBe(renamed)
+    expect(renameGroup(renamed, -1, "Elsewhere")).toBe(renamed)
   })
 })
