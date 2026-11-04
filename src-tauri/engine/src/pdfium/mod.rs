@@ -51,6 +51,14 @@ impl PdfDocumentInfo {
     pub fn id(&self) -> u64 {
         self.id
     }
+
+    /// The same document once a write has bound it to `path`.
+    pub fn bound_to(self, path: String) -> Self {
+        Self {
+            path: Some(path),
+            ..self
+        }
+    }
 }
 
 /// The frontend holds no mirror of the page list to patch, so it replaces its

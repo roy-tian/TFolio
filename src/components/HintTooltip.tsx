@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from "react"
+import type { ComponentProps, ReactElement, ReactNode } from "react"
 
 import {
   Tooltip,
@@ -19,6 +19,7 @@ type HintTooltipProps = {
       the app moves focus itself and the hint would then stand open. */
   openOnFocus?: boolean
   side?: "top" | "bottom" | "left" | "right"
+  sideOffset?: ComponentProps<typeof TooltipContent>["sideOffset"]
 }
 
 export function HintTooltipGroup({ children }: { children: ReactNode }) {
@@ -33,6 +34,7 @@ export function HintTooltip({
   label,
   openOnFocus = true,
   side = "top",
+  sideOffset,
 }: HintTooltipProps) {
   if (!label) {
     return children
@@ -51,7 +53,9 @@ export function HintTooltip({
       }}
     >
       <TooltipTrigger render={children} />
-      <TooltipContent side={side}>{label}</TooltipContent>
+      <TooltipContent side={side} sideOffset={sideOffset}>
+        {label}
+      </TooltipContent>
     </Tooltip>
   )
 

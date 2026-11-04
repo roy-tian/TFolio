@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test"
 import {
   canRedo,
   canUndo,
+  commandPageChange,
   commandPages,
   commandTextPages,
   commit,
@@ -478,6 +479,47 @@ describe("structure commands", () => {
     expect(commandPages({ ...reorder, order: reorder.inverse })).toEqual([
       1, 2, 3,
     ])
+  })
+})
+
+describe("commandPageChange", () => {
+  it("closes the pages up behind a delete, and opens the gaps for its undo", () => {
+    const deletion = planDeletePages(emptyHistory, [4, 2], 5)!.command
+
+    expect(commandPageChange(deletion, false)).toEqual({
+      movement: [1, 3, 5],
+      stashId: emptyHistory.nextId,
+    })
+    // The undo puts each page back where it stood, out of the same stash.
+    expect(commandPageChange(deletion, true)).toEqual({
+      movement: [1, null, 2, null, 3],
+      stashId: emptyHistory.nextId,
+    })
+  })
+
+  it("makes room for an inserted blank, and closes it again on undo", () => {
+    const insertion = planInsertBlankPage(emptyHistory, 2, 3)!.command
+
+    expect(commandPageChange(insertion, false)?.movement).toEqual([1, null, 2, 3])
+    expect(commandPageChange(insertion, true)?.movement).toEqual([1, 3, 4])
+  })
+
+  it("brings a pasted block in as new pages, past the end too", () => {
+    const paste = planDuplicatePages(emptyHistory, [1, 2], 4, 3)!.command
+
+    expect(commandPageChange(paste, false)?.movement).toEqual([1, 2, 3, null, null])
+    expect(commandPageChange(paste, true)?.movement).toEqual([1, 2, 3])
+  })
+
+  it("follows a reorder either way, and leaves a turn in place", () => {
+    const reorder = planReorderPages(emptyHistory, [3, 1, 2])!.command
+
+    expect(commandPageChange(reorder, false)).toEqual({ movement: [3, 1, 2] })
+    expect(commandPageChange(reorder, true)).toEqual({ movement: [2, 3, 1] })
+    expect(
+      commandPageChange(planRotatePages(emptyHistory, [1], 90)!.command, true),
+    ).toEqual({ movement: "inPlace" })
+    expect(commandPageChange(highlight(1), false)).toBeUndefined()
   })
 })
 

@@ -5,7 +5,6 @@ import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
-import type { PdfExportOutcome } from "../../src/lib/pdf"
 import {
   appMenuItem,
   appMenuItemEnabled,
@@ -16,6 +15,7 @@ import {
   openPdfFromBytes,
   openPdfFromDisk,
   pageInk,
+  pointSaveAsAt,
   refreshApp,
   renderedPage,
   seedSettings,
@@ -54,28 +54,6 @@ async function highlightTheText() {
   await browser.execute(() => {
     document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
   })
-}
-
-/** Answers Save As's dialog with `destination` and runs the real write behind
-    it, through the command the e2e build keeps for this. */
-async function pointSaveAsAt(destination: string) {
-  await browser.execute((target: string) => {
-    const seam = window as unknown as Window & {
-      __tfolioE2E?: E2eOverrides
-      __TAURI_INTERNALS__: {
-        invoke: (command: string, args?: unknown) => Promise<unknown>
-      }
-    }
-
-    seam.__tfolioE2E = {
-      ...seam.__tfolioE2E,
-      exportPdf: ({ documentId }) =>
-        seam.__TAURI_INTERNALS__.invoke("export_pdf_to", {
-          documentId,
-          path: target,
-        }) as Promise<PdfExportOutcome>,
-    }
-  }, destination)
 }
 
 /** Stands in for Save As's dialog, cancelling it after noting the name it

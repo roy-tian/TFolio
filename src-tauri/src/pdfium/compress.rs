@@ -72,7 +72,7 @@ pub async fn export_compressed_pdf(
         let Some(picked) = export_dialog(
             &app,
             &engine,
-            document_id,
+            Some(document_id),
             filter_label,
             &["pdf"],
             &suggested_name,

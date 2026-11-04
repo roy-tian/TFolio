@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { decodeImage } from "@/lib/imageDecode"
 import { distanceFromView, pageWork } from "@/lib/pageWork"
+import { releaseCanvas, type ParkedPreviews } from "@/lib/parkedPreviews"
 import { MIN_RENDER_WIDTH, resolveOutputScale } from "@/lib/pdf"
 
 type PageBitmapOptions = {
@@ -23,6 +24,10 @@ type PageBitmapOptions = {
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  /** Where the canvas parks as it unmounts, under `parkKey`, and what it takes
+      up again when the same page comes back. */
+  parked?: ParkedPreviews
+  parkKey?: number
   /** Pixels added to the distance the work queue ranks this render by. */
   priorityBias?: number
   /**
@@ -37,6 +42,10 @@ type PageBitmapOptions = {
   targetWidth: number
 }
 
+// Pixels a page brought back took up rather than rendered: held as a render, so
+// they are given back like one, but matching no request, so it still renders.
+const ADOPTED = { documentId: Number.NaN, renderEpoch: Number.NaN, renderWidth: Number.NaN }
+
 export function usePageBitmap({
   canvasRef,
   command,
@@ -50,6 +59,8 @@ export function usePageBitmap({
   pageHeight,
   pageNumber,
   pageWidth,
+  parked,
+  parkKey,
   priorityBias = 0,
   renderEpoch,
   retainBitmap = true,
@@ -64,10 +75,40 @@ export function usePageBitmap({
   const [hasRendered, setHasRendered] = useState(false)
   const [renderFailed, setRenderFailed] = useState(false)
   const [bitmapRevision, setBitmapRevision] = useState(0)
+  // `retainBitmap` starts false, before its observer has said anything:
+  // nothing counts as far until it has once been near.
+  const retainedRef = useRef(false)
   const onPaintRef = useRef(onPaint)
   useLayoutEffect(() => {
     onPaintRef.current = onPaint
   }, [onPaint])
+
+  // Before the first paint, so a page brought back never shows blank. Only in
+  // view: there its own render follows at once, and out of it nobody sees them.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+
+    if (!parked || parkKey === undefined || !canvas) {
+      return
+    }
+
+    const bitmap = parked.take(parkKey)
+    const context =
+      bitmap && distanceFromView(canvas) === 0 && canvas.getContext("bitmaprenderer")
+
+    if (bitmap && context) {
+      canvas.width = bitmap.width
+      canvas.height = bitmap.height
+      context.transferFromImageBitmap(bitmap)
+      lastRenderRef.current = ADOPTED
+      setHasRendered(true)
+      setBitmapRevision((revision) => revision + 1)
+    } else {
+      bitmap?.close()
+    }
+
+    return () => parked.park(parkKey, canvas)
+  }, [canvasRef, parked, parkKey])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -188,10 +229,15 @@ export function usePageBitmap({
   useEffect(() => {
     const canvas = canvasRef.current
 
+    if (retainBitmap) {
+      retainedRef.current = true
+      return
+    }
+
     // A hidden tab reports every cell out of view; it is away, not far, and
     // clearing would re-render every preview on the way back.
     if (
-      retainBitmap ||
+      !retainedRef.current ||
       !canvas ||
       lastRenderRef.current === null ||
       canvas.getClientRects().length === 0
@@ -199,12 +245,8 @@ export function usePageBitmap({
       return
     }
 
-    // Resizing alone keeps a transferred bitmap, so release it through the
-    // context first; zero-sized then reads as released. Coming back renders
-    // it again.
-    canvas.getContext("bitmaprenderer")?.transferFromImageBitmap(null)
-    canvas.width = 0
-    canvas.height = 0
+    // Coming back renders it again.
+    releaseCanvas(canvas)
     lastRenderRef.current = null
     setHasRendered(false)
   }, [canvasRef, retainBitmap])

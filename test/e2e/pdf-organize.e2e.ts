@@ -1,18 +1,25 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import path from "node:path"
+
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
+import type { PdfDocumentInfo } from "../../src/lib/pdf"
 import {
   clickAppMenuItem,
   emitDrag,
   minimalPdf,
   outlinedPdf,
   pointMultiPickerAt,
+  pointSaveAsAt,
   pressRedo,
   refreshApp,
   seedSettings,
+  settingsHold,
   writeScratchPdf,
 } from "./helpers"
+import { calibratePointer, doubleClickAt } from "./nativePointer"
 
 const workspace = "[data-organize-workspace]"
 const sidebar = `${workspace} [data-slot='app-sidebar']`
@@ -31,6 +38,32 @@ async function organizeWith(paths: string[]) {
     async () => (await groupCount()) === paths.length,
     { timeout: 30_000, timeoutMsg: "the picked files never reached the board" },
   )
+}
+
+/** Answers the save dialog "Save as PDF" opens first with `destination`, and
+    runs the real assembly and write behind it through the command the e2e
+    build keeps for this; null cancels the dialog. */
+async function pointSaveAt(destination: string | null) {
+  await browser.execute((target: string | null) => {
+    const seam = window as unknown as Window & {
+      __tfolioE2E?: E2eOverrides
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args?: unknown) => Promise<unknown>
+      }
+    }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      saveAssembledPdf: ({ onProgress, plan }) =>
+        target === null
+          ? Promise.resolve(null)
+          : (seam.__TAURI_INTERNALS__.invoke("save_assembled_pdf_to", {
+              onProgress,
+              path: target,
+              plan,
+            }) as Promise<PdfDocumentInfo | null>),
+    }
+  }, destination)
 }
 
 async function groupCount() {
@@ -121,6 +154,21 @@ describe("TFolio organize workspace", () => {
     expect(await slotWidth()).toBeLessThan(before)
   })
 
+  it("opens on the thumbnail size the reader last chose", async () => {
+    const bar = `${workspace} [data-slot='status-bar']`
+    const slider = () => $(`${bar} input[aria-label='Thumbnail size']`)
+    await organizeWith([portrait()])
+
+    await $(`${bar} button[aria-label='Larger thumbnails']`).click()
+    await expect(slider()).toHaveAttribute("aria-valuetext", "3 of 4")
+    // A reload before the write lands would read the old size back.
+    await settingsHold(["organizeThumbnailSize = 200"])
+
+    await refreshApp()
+    await $("button[aria-label='Organize pages']").click()
+    await expect(slider()).toHaveAttribute("aria-valuetext", "3 of 4")
+  })
+
   it("keeps the status bar's slider in place though it mounted hidden", async () => {
     // The size bar mounts while the workspace is still hidden behind the
     // viewer, before anything could measure its thumb.
@@ -144,7 +192,9 @@ describe("TFolio organize workspace", () => {
   })
 
   it("moves a page across files and assembles the plan's order", async () => {
-    await organizeWith([portrait(), landscape()])
+    const sources = [portrait(), landscape()]
+    const destination = path.join(path.dirname(sources[0]!), "combined.pdf")
+    await organizeWith(sources)
 
     // Cut a landscape page, choose the second portrait page, paste before it.
     await slot("Page 1 of landscape").click()
@@ -163,15 +213,19 @@ describe("TFolio organize workspace", () => {
       "Page 3 of landscape",
     ])
 
-    await $(`${workspace} [data-slot='organize-assemble']`).click()
+    await pointSaveAt(destination)
+    await $(`${workspace} [data-slot='organize-save']`).click()
     await browser.waitUntil(
       async () =>
         (await $("[role='tab'][aria-selected='true']").getText()).includes(
-          "Organized.pdf",
+          "combined.pdf",
         ),
       { timeout: 30_000, timeoutMsg: "the assembled PDF never opened as a tab" },
     )
     await expect($(workspace)).not.toBeDisplayed()
+    // Saved before it was shown: the tab is the file's, not an unsaved copy.
+    expect(existsSync(destination)).toBe(true)
+    expect(readFileSync(destination).subarray(0, 5).toString()).toBe("%PDF-")
     await expect($("[data-slot='page-status']")).toHaveAttribute(
       "aria-label",
       "Page 1 of 5",
@@ -186,6 +240,49 @@ describe("TFolio organize workspace", () => {
       ),
     )
     expect(shapes).toEqual(["tall", "wide", "tall", "wide", "wide"])
+  })
+
+  it("builds nothing when its save dialog is cancelled", async () => {
+    await organizeWith([portrait()])
+    await pointSaveAt(null)
+
+    const save = $(`${workspace} [data-slot='organize-save']`)
+    await save.click()
+    await expect(save).toBeEnabled()
+    await expect($(workspace)).toBeDisplayed()
+    await expect($("[data-testid='organize-progress']")).not.toBeDisplayed()
+    expect((await $$("[data-document-tab]").getElements()).length).toBe(0)
+  })
+
+  it("previews the PDF unsaved, for a Save As once the reader likes it", async () => {
+    const source = portrait()
+    const directory = path.dirname(source)
+    const destination = path.join(directory, "kept.pdf")
+    await organizeWith([source])
+
+    await $(`${workspace} [data-slot='organize-preview']`).click()
+    await browser.waitUntil(
+      async () =>
+        (await $("[role='tab'][aria-selected='true']").getText()).includes(
+          "Organized.pdf",
+        ),
+      { timeout: 30_000, timeoutMsg: "the preview never opened as a tab" },
+    )
+    await expect($(workspace)).not.toBeDisplayed()
+    await expect($("[data-slot='page-status']")).toHaveAttribute(
+      "aria-label",
+      "Page 1 of 2",
+    )
+    expect(readdirSync(directory)).toEqual(["portrait.pdf"])
+
+    await pointSaveAsAt(destination)
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      async () =>
+        (await $("[role='tab'][aria-selected='true']").getText()).includes("kept.pdf"),
+      { timeout: 15_000, timeoutMsg: "Save As never bound the preview to its file" },
+    )
+    expect(existsSync(destination)).toBe(true)
   })
 
   it("drags a page into another file, in before the page it is let go on", async () => {
@@ -419,18 +516,196 @@ describe("TFolio organize workspace", () => {
     expect(await spins()).toEqual(["rotate(90deg)", "rotate(-90deg)"])
   })
 
-  it("previews the bookmarks the new PDF will carry", async () => {
+  it("lists each file with the bookmarks the new PDF will carry, folded or cleared", async () => {
     await organizeWith([writeScratchPdf("outlined.pdf", outlinedPdf()), portrait()])
+    const files = $(`${sidebar} [data-slot='organize-files']`)
+    await expect(files).toHaveText(expect.stringContaining("Second half"))
 
-    await $(`${sidebar} button[aria-label='Bookmarks']`).click()
-    const outline = $(`${sidebar} nav[aria-label='Bookmarks']`)
-    await expect(outline).toHaveText(expect.stringContaining("outlined"))
-    await expect(outline).toHaveText(expect.stringContaining("portrait"))
+    await $(`${sidebar} [data-slot='organize-collapse-all']`).click()
+    await expect(files).not.toHaveText(expect.stringContaining("Second half"))
+    await expect($(`${sidebar} [data-slot='organize-collapse-all']`)).toBeDisabled()
+    await $(`${sidebar} button[aria-label='Show the bookmarks of outlined']`).click()
+    await expect(files).toHaveText(expect.stringContaining("Second half"))
 
-    await $(`${workspace} [data-slot='organize-bookmarks']`).click()
-    await $("[data-action='organize-keep-bookmarks']").click()
+    const toggle = $(`${workspace} [data-slot='organize-bookmarks']`)
+    await expect(toggle).toHaveAttribute("aria-pressed", "true")
+    await toggle.click()
+    await expect(toggle).toHaveAttribute("aria-pressed", "false")
+    await expect(files).not.toHaveText(expect.stringContaining("Second half"))
+    await expect($(`${sidebar} [data-slot='organize-no-bookmarks']`)).toBeDisplayed()
+    await expect($(`${sidebar} [data-slot='organize-expand-all']`)).toBeDisabled()
+  })
+
+  it("edits a file's bookmark text, its heading on the board too", async () => {
+    await organizeWith([portrait(), landscape()])
+    // Looked up afresh: each edit mounts a field of its own.
+    const field = () => $(`${sidebar} [data-slot='organize-file-title']`)
+    // Typed in place: a WebDriver clear blurs the field, which settles it.
+    const typeTitle = (text: string) =>
+      browser.execute(
+        (selector: string, value: string) => {
+          document.querySelector<HTMLInputElement>(selector)!.value = value
+        },
+        `${sidebar} [data-slot='organize-file-title']`,
+        text,
+      )
+
+    await $(`${sidebar} button[aria-label='Edit the bookmark portrait']`).click()
+    await expect(field()).toBeFocused()
+    await typeTitle("Introduction")
+    await browser.keys("Enter")
+    await expect(field()).not.toBeExisting()
+    await expect($(`${workspace} section[aria-label='Introduction']`)).toBeExisting()
+
+    const offset = await calibratePointer()
+    const name = await $(
+      `${sidebar} [data-slot='organize-files'] > li:nth-child(2) [data-slot='organize-file-name']`,
+    ).getLocation()
+    doubleClickAt({ x: name.x + 8 + offset.x, y: name.y + 8 + offset.y })
+    await expect(field()).toBeFocused()
+    await typeTitle("Elsewhere")
     await browser.keys("Escape")
-    await expect(outline).toHaveText(expect.stringContaining("Second half"))
+    await expect(field()).not.toBeExisting()
+    await expect($(`${workspace} section[aria-label='landscape']`)).toBeExisting()
+
+    await $(`${workspace} button[aria-label='Undo']`).click()
+    await expect($(`${workspace} section[aria-label='portrait']`)).toBeExisting()
+  })
+
+  it("reorders files by dragging, every file folded to one row while it moves", async () => {
+    await organizeWith([writeScratchPdf("outlined.pdf", outlinedPdf()), portrait()])
+    const files = `${sidebar} [data-slot='organize-files']`
+    await expect($(files)).toHaveText(expect.stringContaining("Second half"))
+
+    // The list's drag listens on the document, which dispatched events reach.
+    await browser.execute((list: string) => {
+      const [tall, short] = Array.from(document.querySelectorAll<HTMLElement>(`${list} > li`))
+      const name = tall!.querySelector("[data-slot='organize-file-name']")!
+      const box = name.getBoundingClientRect()
+      const start = { x: box.left + 4, y: box.top + box.height / 2 }
+
+      name.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: start.x,
+          clientY: start.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", { bubbles: true, clientX: start.x, clientY: start.y + 12 }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: start.x,
+          clientY: short!.getBoundingClientRect().bottom - 2,
+        }),
+      )
+    }, files)
+
+    // Folded, the other file makes way by the dragged one's row alone.
+    await browser.waitUntil(
+      () =>
+        browser.execute((list: string) => {
+          const [tall, short] = Array.from(document.querySelectorAll<HTMLElement>(`${list} > li`))
+          const shift = Number(/-?[\d.]+/.exec(short!.style.transform)?.[0] ?? 0)
+
+          return (
+            !document.querySelector(`${list} [data-organize-outline]`) &&
+            Math.abs(shift - (tall!.offsetTop - short!.offsetTop)) < 0.5 &&
+            tall!.offsetHeight < 40
+          )
+        }, files),
+      { timeoutMsg: "the files never folded and made way for the dragged one" },
+    )
+    // Below the other file as it stands folded, whatever it has slid to.
+    await browser.execute((list: string) => {
+      const [tall, short] = Array.from(document.querySelectorAll<HTMLElement>(`${list} > li`))
+      const box = tall!.getBoundingClientRect()
+      const y = box.top + short!.offsetTop - tall!.offsetTop + short!.offsetHeight - 2
+
+      document.dispatchEvent(
+        new PointerEvent("pointerup", { bubbles: true, clientX: box.left + 8, clientY: y }),
+      )
+    }, files)
+
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(
+          await browser.execute((scope: string) =>
+            Array.from(document.querySelectorAll(`${scope} section[data-group-id]`), (section) =>
+              section.getAttribute("aria-label"),
+            ),
+            workspace,
+          ),
+        ) === JSON.stringify(["portrait", "outlined"]),
+      { timeout: 10_000, timeoutMsg: "the dragged file never moved after the other" },
+    )
+    await expect($(files)).toHaveText(expect.stringContaining("Second half"))
+  })
+
+  it("keeps a file it barely moved in place, though the files above it fold", async () => {
+    await organizeWith([
+      writeScratchPdf("first.pdf", outlinedPdf()),
+      writeScratchPdf("second.pdf", outlinedPdf()),
+      portrait(),
+      landscape(),
+    ])
+    const files = `${sidebar} [data-slot='organize-files']`
+    await expect($(files)).toHaveText(expect.stringContaining("Second half"))
+
+    // Past the drag threshold and no further, on the third of four files.
+    const pressedAt = await browser.execute((list: string) => {
+      const name = document.querySelector(`${list} > li:nth-child(3) [data-slot='organize-file-name']`)!
+      const box = name.getBoundingClientRect()
+      const x = box.left + 4
+      const y = box.top + box.height / 2
+
+      name.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: x, clientY: y, isPrimary: true }),
+      )
+      document.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: x, clientY: y + 6 }))
+
+      return { top: box.top, x, y: y + 6 }
+    }, files)
+
+    // The bookmarks above fold away, and the pressed file stays under the pointer.
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          (list: string, top: number) =>
+            !document.querySelector(`${list} [data-organize-outline]`) &&
+            Math.abs(
+              document
+                .querySelector(`${list} > li:nth-child(3) [data-slot='organize-file-name']`)!
+                .getBoundingClientRect().top - top,
+            ) < 1,
+          files,
+          pressedAt.top,
+        ),
+      { timeoutMsg: "the pressed file did not stay where it was pressed" },
+    )
+    await browser.execute((point: { x: number; y: number }) => {
+      document.dispatchEvent(
+        new PointerEvent("pointerup", { bubbles: true, clientX: point.x, clientY: point.y }),
+      )
+    }, pressedAt)
+
+    await expect($(files)).toHaveText(expect.stringContaining("Second half"))
+    expect(
+      await browser.execute((scope: string) =>
+        Array.from(document.querySelectorAll(`${scope} section[data-group-id]`), (section) =>
+          section.getAttribute("aria-label"),
+        ),
+        workspace,
+      ),
+    ).toEqual(["first", "second", "portrait", "landscape"])
+    // The list gives back the room it took to hold the file there.
+    expect(
+      await browser.execute((list: string) => document.querySelector<HTMLElement>(list)!.style.cssText, files),
+    ).toBe("")
   })
 
   it("starts a file on an odd page with a blank only where it needs one", async () => {

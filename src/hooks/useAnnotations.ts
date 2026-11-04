@@ -4,6 +4,7 @@ import { Channel, invoke } from "@tauri-apps/api/core"
 import {
   canRedo,
   canUndo,
+  commandPageChange,
   commandPages,
   commandTextPages,
   commit,
@@ -32,6 +33,7 @@ import {
   type AnnotationEntry,
   type AnnotationHistory,
   type HighlightCommand,
+  type PageChange,
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
@@ -61,14 +63,10 @@ function progressChannel(onProgress?: ProgressHandler) {
   return channel
 }
 
-/** An array maps new slot -> previous page number for pages that only moved;
-    `"inPlace"` moved nothing, so everything held by page number stays true. */
-type PageMovement = number[] | "inPlace"
-
 type StructureChangeHandler = (
   documentId: number,
   update: PdfStructureUpdate,
-  movement?: PageMovement,
+  change?: PageChange,
 ) => void
 
 type UseAnnotationsOptions = {
@@ -89,6 +87,8 @@ type UseAnnotationsOptions = {
       `null` once it is over, however it ended. */
   onLayerProgress?: (layer: PdfOwnedLayer, progress: PdfProgress | null) => void
   onSaveError: () => void
+  /** Stashes the history can no longer restore, already being discarded. */
+  onStashesDropped?: (stashIds: number[]) => void
   onStructureChange: StructureChangeHandler
   onSuccess: () => void
 }
@@ -217,7 +217,7 @@ async function applyCommand(
           documentId,
           order: command.order,
         }),
-        command.order,
+        commandPageChange(command, false),
       )
       return []
     case "rotatePages":
@@ -228,7 +228,7 @@ async function applyCommand(
           documentId,
           pageNumbers: command.pages,
         }),
-        "inPlace",
+        commandPageChange(command, false),
       )
       return []
     case "deletePages":
@@ -239,6 +239,7 @@ async function applyCommand(
           pageNumbers: command.pages,
           stashId: command.stashId,
         }),
+        commandPageChange(command, false),
       )
       return []
     case "insertBlankPage":
@@ -248,6 +249,7 @@ async function applyCommand(
           documentId,
           index: command.index,
         }),
+        commandPageChange(command, false),
       )
       return []
     case "duplicatePages":
@@ -259,6 +261,7 @@ async function applyCommand(
           documentId,
           stashId: command.stashId,
         }),
+        commandPageChange(command, false),
       )
       return []
   }
@@ -352,7 +355,7 @@ async function retractCommand(
           documentId,
           order: command.inverse,
         }),
-        command.inverse,
+        commandPageChange(command, true),
       )
       return []
     case "rotatePages":
@@ -363,7 +366,7 @@ async function retractCommand(
           documentId,
           pageNumbers: command.pages,
         }),
-        "inPlace",
+        commandPageChange(command, true),
       )
       return []
     case "deletePages":
@@ -373,6 +376,7 @@ async function retractCommand(
           documentId,
           stashId: command.stashId,
         }),
+        commandPageChange(command, true),
       )
       return []
     case "insertBlankPage":
@@ -385,6 +389,7 @@ async function retractCommand(
           pageNumbers: [command.index],
           stashId: command.stashId,
         }),
+        commandPageChange(command, true),
       )
       return []
     case "duplicatePages":
@@ -395,6 +400,7 @@ async function retractCommand(
           pageNumbers: insertPagesRange(command),
           stashId: command.stashId,
         }),
+        commandPageChange(command, true),
       )
       return []
     case "eraseAnnotation":
@@ -425,6 +431,7 @@ export function useAnnotations({
   onExported,
   onLayerProgress,
   onSaveError,
+  onStashesDropped,
   onStructureChange,
   onSuccess,
 }: UseAnnotationsOptions) {
@@ -537,6 +544,7 @@ export function useAnnotations({
                 documentId,
                 stashIds: stranded,
               }).catch(() => undefined)
+              onStashesDropped?.(stranded)
             }
           }
           onSuccess()
@@ -566,7 +574,7 @@ export function useAnnotations({
         setPending((count) => count - 1)
       })
     },
-    [applyEpochs, documentId, onSuccess],
+    [applyEpochs, documentId, onStashesDropped, onSuccess],
   )
 
   const commitCommand = useCallback(
@@ -723,6 +731,7 @@ export function useAnnotations({
                   // the undo deletes is the one the backend copied.
                   pageNumbers: planned.command.sourcePages,
                 }),
+                commandPageChange(planned.command, false),
               )
               landed = true
               return true

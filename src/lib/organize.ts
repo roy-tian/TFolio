@@ -40,8 +40,9 @@ export type OrganizeGroup = {
 }
 
 export type OrganizeOptions = {
-  fileBookmarks: boolean
-  keepBookmarks: boolean
+  /** A bookmark for each file with its own bookmarks under it; off, the new
+      PDF carries none at all. */
+  bookmarks: boolean
   normalizeA4: boolean
   smartPadding: boolean
 }
@@ -54,8 +55,7 @@ export type OrganizePlan = {
 }
 
 export const defaultOrganizeOptions: OrganizeOptions = {
-  fileBookmarks: true,
-  keepBookmarks: false,
+  bookmarks: true,
   normalizeA4: false,
   smartPadding: false,
 }
@@ -263,18 +263,26 @@ function remappedOutline(
   })
 }
 
-/** The bookmarks the assembled document gets, as the sidebar previews them. */
-export function organizeOutline(
+/** A file's bookmark as the sidebar shows it and the new PDF gets it. */
+export type FileBookmark = {
+  items: AssembleOutlineItem[]
+  /** Where the file starts; none while it has no pages, when the new PDF
+      gets no bookmark for it. */
+  pageNumber: number | undefined
+  title: string
+}
+
+/**
+ * Each file's bookmark by group id, in list order, with its source's own
+ * bookmarks under it. A source whose own file has no pages left hangs its
+ * bookmarks under the file now holding the first page they point at, so every
+ * bookmark sits under some file.
+ */
+export function fileBookmarks(
   plan: OrganizePlan,
   sources: SourceMap,
   pages = outputPages(plan, sources),
-): AssembleOutlineItem[] {
-  const { fileBookmarks, keepBookmarks } = plan.options
-
-  if (!fileBookmarks && !keepBookmarks) {
-    return []
-  }
-
+): Map<number, FileBookmark> {
   const outputNumber = new Map<string, number>()
   const firstOfSource = new Map<number, number>()
   const firstOfGroup = new Map<number, number>()
@@ -298,55 +306,70 @@ export function organizeOutline(
   })
 
   const kept = (sourceId: number) =>
-    keepBookmarks
-      ? remappedOutline(
-          sources.get(sourceId)?.outline ?? [],
-          sourceId,
-          outputNumber,
-          firstOfSource.get(sourceId),
-        )
-      : []
-
-  // Placed by the page each part starts on: a group by its first page, the
-  // bookmarks of a source whose own group is gone by the first they point at.
-  const parts: Array<{ items: AssembleOutlineItem[]; start: number }> = []
+    remappedOutline(
+      sources.get(sourceId)?.outline ?? [],
+      sourceId,
+      outputNumber,
+      firstOfSource.get(sourceId),
+    )
+  const bookmarks = new Map<number, FileBookmark>()
   const placedSources = new Set<number>()
 
   for (const group of plan.groups) {
-    const start = firstOfGroup.get(group.id)
+    const pageNumber = firstOfGroup.get(group.id)
 
-    if (start === undefined) {
-      continue
+    if (pageNumber !== undefined) {
+      placedSources.add(group.originSourceId)
     }
 
-    placedSources.add(group.originSourceId)
-
-    const own = kept(group.originSourceId)
-
-    parts.push({
-      items: fileBookmarks
-        ? [{ items: own, pageNumber: start, title: group.title }]
-        : own,
-      start,
+    bookmarks.set(group.id, {
+      items: pageNumber === undefined ? [] : kept(group.originSourceId),
+      pageNumber,
+      title: group.title,
     })
   }
 
-  for (const sourceId of firstOfSource.keys()) {
-    if (placedSources.has(sourceId)) {
-      continue
-    }
+  const strays = [...firstOfSource.keys()]
+    .filter((sourceId) => !placedSources.has(sourceId))
+    .map(kept)
+    .flatMap((items) => (items[0] ? [{ items, start: items[0].pageNumber }] : []))
+    .sort((left, right) => left.start - right.start)
 
-    const items = kept(sourceId)
-    const first = items[0]
+  const strayItems = new Set<AssembleOutlineItem>()
 
-    if (first) {
-      parts.push({ items, start: first.pageNumber })
+  for (const { items, start } of strays) {
+    const page = pages[start - 1]
+    const file = page && bookmarks.get(page.groupId)
+
+    if (file) {
+      // By page among the file's own, whose order an author may have set
+      // against the pages, so those are never re-sorted.
+      const at = file.items.findIndex(
+        (item) => !strayItems.has(item) && item.pageNumber > start,
+      )
+
+      file.items.splice(at === -1 ? file.items.length : at, 0, ...items)
+      items.forEach((item) => strayItems.add(item))
     }
   }
 
-  return parts
-    .sort((left, right) => left.start - right.start)
-    .flatMap((part) => part.items)
+  return bookmarks
+}
+
+/** The bookmarks the assembled document gets: the sidebar's, written out. */
+export function organizeOutline(
+  plan: OrganizePlan,
+  sources: SourceMap,
+  pages = outputPages(plan, sources),
+): AssembleOutlineItem[] {
+  if (!plan.options.bookmarks) {
+    return []
+  }
+
+  return [...fileBookmarks(plan, sources, pages).values()].flatMap(
+    ({ items, pageNumber, title }) =>
+      pageNumber === undefined ? [] : [{ items, pageNumber, title }],
+  )
 }
 
 /** Each source as a group of its own, in the given order, at `index`. */
@@ -382,6 +405,26 @@ export function removeGroups(plan: OrganizePlan, groupIds: ReadonlySet<number>):
     plan,
     plan.groups.filter((group) => !groupIds.has(group.id)),
   )
+}
+
+/** The file's bookmark, also its heading on the board. Blank text keeps the
+    title it had: a bookmark needs some. */
+export function renameGroup(
+  plan: OrganizePlan,
+  groupId: number,
+  title: string,
+): OrganizePlan {
+  const text = title.trim()
+  const target = plan.groups.find((group) => group.id === groupId)
+
+  if (!target || text === "" || text === target.title) {
+    return plan
+  }
+
+  return {
+    ...plan,
+    groups: plan.groups.map((group) => (group === target ? { ...group, title: text } : group)),
+  }
 }
 
 export function moveGroup(plan: OrganizePlan, from: number, to: number): OrganizePlan {

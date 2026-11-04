@@ -188,6 +188,8 @@ type ToolbarFrameProps = {
   appMenu: ReactNode
   end?: ReactNode
   macOS: boolean
+  /** The bar's own leading controls, after the sidebar's when it is not docked. */
+  start?: ReactNode
 }
 
 /** The title bar right of the sidebar, ending in the app menu and the window
@@ -198,6 +200,7 @@ export function ToolbarFrame({
   appMenu,
   end,
   macOS,
+  start,
 }: ToolbarFrameProps) {
   const docked = useSidebar().mode === "docked"
 
@@ -221,6 +224,7 @@ export function ToolbarFrame({
             <WorkspaceSwitch />
           </>
         )}
+        {start}
       </div>
       <div className="flex items-center gap-1">
         {end}

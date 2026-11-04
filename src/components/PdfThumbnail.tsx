@@ -6,6 +6,7 @@ import { HintTooltip } from "@/components/HintTooltip"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { isOutOfSight, prefersReducedMotion, TURN_MOTION } from "@/lib/motion"
+import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -68,6 +69,10 @@ type PdfThumbnailProps = {
       page edit does. Otherwise it is the view's, turning every page at once,
       and snaps. */
   animateRotation?: boolean
+  /** Where the preview's pixels wait, under `parkKey`, while an edit has its
+      page out of the document. */
+  parked?: ParkedPreviews
+  parkKey?: number
 }
 
 /** A preview that selects rather than reads — no text layer, so a long column
@@ -94,6 +99,8 @@ export function PdfThumbnail({
   frame,
   overlay,
   animateRotation = false,
+  parked,
+  parkKey,
 }: PdfThumbnailProps) {
   const { t } = useTranslation()
   const wrapperRef = useRef<HTMLButtonElement>(null)
@@ -127,6 +134,8 @@ export function PdfThumbnail({
     pageHeight,
     pageNumber,
     pageWidth,
+    parked,
+    parkKey,
     priorityBias: surface === "sidebar" ? SIDEBAR_PRIORITY_BIAS : 0,
     renderEpoch,
     retainBitmap,

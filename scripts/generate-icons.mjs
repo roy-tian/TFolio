@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -81,9 +81,3 @@ writeIco("app", "icon.ico")
 writeIcns("app", "icon.icns")
 writeIco("file", "pdf.ico")
 writeIcns("file", "pdf.icns")
-
-const websiteAssets = path.join(root, "website/assets")
-// The website is optional in checkouts; it uses the vector master directly.
-if (existsSync(websiteAssets)) {
-  copyFileSync(path.join(masters, "app-small.svg"), path.join(websiteAssets, "icon.svg"))
-}

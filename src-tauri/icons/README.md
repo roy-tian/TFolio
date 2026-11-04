@@ -2,10 +2,10 @@
 
 The five SVG masters live in `src/assets/brand/`. Regenerate these desktop
 assets with `bun run icons:generate`; Bun and the pinned Tauri CLI are sufficient.
-The command also refreshes the website icons when `website/assets/` exists.
+The landing page on `gh-pages` keeps its own copy of `app-small.svg`; update it by hand.
 
 The masters use paths and flat fills, with no embedded bitmaps or font dependency.
-The frontend and website load SVG directly. Native bundles still require PNG
+The frontend and landing page load SVG directly. Native bundles still require PNG
 (Linux), ICO (Windows), and ICNS (macOS), generated from these SVG sources.
 
 | Display size | Application | PDF document |

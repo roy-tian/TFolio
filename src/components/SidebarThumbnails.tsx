@@ -39,6 +39,7 @@ import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import type { RenderEpochs } from "@/lib/annotations"
 import { columnLanding, exceedsDragThreshold, orderWithBlockAt } from "@/lib/pageDrag"
+import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -94,6 +95,8 @@ type SidebarThumbnailsProps = {
   onRotatePages: () => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   pages: PdfPageInfo[]
+  /** Where a preview waits while an edit has its page out of the document. */
+  parkedPreviews: ParkedPreviews
   renderEpochs: RenderEpochs
   rotations: number[]
   selectedPages: ReadonlySet<number>
@@ -121,6 +124,7 @@ export function SidebarThumbnails({
   onRotatePages,
   onSelectPage,
   pages,
+  parkedPreviews,
   renderEpochs,
   rotations,
   selectedPages,
@@ -156,7 +160,11 @@ export function SidebarThumbnails({
   const pagesRef = useRef(pages)
   const keysRef = useRef(thumbnailKeys)
   const numPages = pages.length
-  const { prime } = useFlipLayout(columnRef, drag !== null || ghost !== null)
+  const { prime } = useFlipLayout(
+    columnRef,
+    drag !== null || ghost !== null,
+    thumbnailKeys,
+  )
   const order =
     drag?.basis === pages && drag.at !== null
       ? orderWithBlockAt(drag.moving, drag.at, numPages)
@@ -297,11 +305,15 @@ export function SidebarThumbnails({
         beside() && pagesRef.current === basis
           ? columnLanding(
               point.y - column.getBoundingClientRect().top,
-              Array.from(column.children as HTMLCollectionOf<HTMLElement>, (row) => ({
-                height: row.offsetHeight,
-                moving: movingKeys.has(row.dataset.flipKey ?? ""),
-                top: row.offsetTop,
-              })),
+              // Rows only: a page leaving fades among them, keyless.
+              Array.from(
+                column.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"),
+                (row) => ({
+                  height: row.offsetHeight,
+                  moving: movingKeys.has(row.dataset.flipKey!),
+                  top: row.offsetTop,
+                }),
+              ),
               at,
             )
           : null
@@ -468,6 +480,9 @@ export function SidebarThumbnails({
                   Number.isFinite(first)
                 ) {
                   event.preventDefault()
+                  // A focused preview leaves with its page, and a removed
+                  // element fires no blur: the column keeps the focus instead.
+                  event.currentTarget.focus({ preventScroll: true })
                   onDeletePage(first)
                 }
               }}
@@ -504,6 +519,7 @@ export function SidebarThumbnails({
                   pageHeight={page.height}
                   pageNumber={pageNumber}
                   pageWidth={page.width}
+                  parked={parkedPreviews}
                   renderEpoch={renderEpochs[pageNumber] ?? 0}
                   rotation={rotations[pageNumber - 1] ?? 0}
                 />
@@ -605,6 +621,7 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
   pageHeight,
   pageNumber,
   pageWidth,
+  parked,
   renderEpoch,
   rotation,
 }: {
@@ -622,6 +639,7 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
   pageHeight: number
   pageNumber: number
   pageWidth: number
+  parked: ParkedPreviews
   renderEpoch: number
   rotation: number
 }) {
@@ -646,6 +664,8 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
           pageHeight={pageHeight}
           pageNumber={pageNumber}
           pageWidth={pageWidth}
+          parkKey={flipKey}
+          parked={parked}
           renderEpoch={renderEpoch}
           retainBitmap={nearView}
           rotation={rotation}

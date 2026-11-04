@@ -3,8 +3,17 @@ import { browser } from "@wdio/globals"
 
 type PointerWindow = Window & { __nativePointerOffset?: { x: number; y: number } }
 
-export function pointer(event: { x: number; y: number } | { down: boolean }) {
+type NativeEvent = { x: number; y: number } | { down: boolean }
+
+export function pointer(event: NativeEvent | NativeEvent[]) {
   execFileSync("python3", ["test/e2e/native-pointer.py", JSON.stringify(event)])
+}
+
+/** A real double click: the embedded driver's clicks never make a `dblclick`. */
+export function doubleClickAt(point: { x: number; y: number }) {
+  const press = [{ down: true }, { down: false }]
+
+  pointer([point, ...press, ...press])
 }
 
 /** Include the native window frame rather than assuming WebView coordinates

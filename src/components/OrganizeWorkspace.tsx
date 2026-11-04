@@ -1,7 +1,8 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import {
   BetweenHorizontalStart,
   Bookmark,
+  Eye,
   FileOutput,
   FolderPlus,
   Layers,
@@ -15,11 +16,13 @@ import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { AppSidebar } from "@/components/AppSidebar"
-import { BookmarkList } from "@/components/BookmarkList"
 import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
 import { OperationProgress } from "@/components/OperationProgress"
 import { OrganizeBoard } from "@/components/OrganizeBoard"
-import { OrganizeFileList } from "@/components/OrganizeFileList"
+import {
+  OrganizeFileList,
+  OrganizeFileListHeader,
+} from "@/components/OrganizeFileList"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { ToolbarFrame } from "@/components/SessionHeader"
 import { SliderStepper } from "@/components/SliderStepper"
@@ -35,21 +38,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Toggle } from "@/components/ui/toggle"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { OrganizeWorkspace as Workspace } from "@/hooks/useOrganizeWorkspace"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
+import {
+  ORGANIZE_PAPER_WIDTHS,
+  readStoredOrganizeStep,
+  storeOrganizeStep,
+} from "@/lib/organizeSize"
 import { shortcuts } from "@/lib/shortcuts"
-import { cn } from "@/lib/utils"
-
-/** The thumbnails' long side, smallest to largest; the status bar steps along. */
-const PAPER_WIDTHS = [120, 160, 200, 240] as const
 
 type OrganizeWorkspaceProps = {
   active: boolean
@@ -59,8 +56,9 @@ type OrganizeWorkspaceProps = {
 }
 
 /** The window's second workspace: pages from several files put together into
-    one new PDF, which then opens as a tab of the first. Memoised: it stays
-    mounted behind the viewer, where the App's own re-renders are no news. */
+    one new PDF, previewed unsaved or saved where the reader chooses, and
+    opened as a tab of the first. Memoised: it stays mounted behind the
+    viewer, where the App's own re-renders are no news. */
 export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   active,
   macOS,
@@ -68,13 +66,15 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   organize,
 }: OrganizeWorkspaceProps) {
   const { t } = useTranslation()
-  const [panel, setPanel] = useState<"files" | "bookmarks">("files")
-  const [size, setSize] = useState(1)
+  const [closedFiles, setClosedFiles] = useState<ReadonlySet<number>>(() => new Set())
+  const [size, setSize] = useState(readStoredOrganizeStep)
   const scrollRef = useRef<HTMLElement>(null)
   const { options } = organize.plan
   const chosen = organize.selection
   const busy = organize.adding || organize.assembling
   const empty = organize.plan.groups.length === 0
+  const assemblyDone =
+    organize.progress !== null && organize.progress.completed >= organize.progress.total
 
   // The workspace's own keys; undo, redo and select-all come through the
   // window's shortcut table with the viewer's.
@@ -113,23 +113,33 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     return () => document.removeEventListener("keydown", onKey)
   }, [active, chosen, organize])
 
-  const showGroup = (groupId: number) => {
+  const chooseSize = (next: number) => {
+    setSize(next)
+    storeOrganizeStep(next)
+  }
+
+  // Stable, so a drag in the sidebar re-renders no file's entry.
+  const showGroup = useCallback((groupId: number) => {
     scrollRef.current
       ?.querySelector(`[data-group-id="${groupId}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }
+  }, [])
 
-  const showPage = (pageNumber: number) => {
-    const page = organize.pages[pageNumber - 1]
+  const { pages } = organize
+  const showPage = useCallback(
+    (pageNumber: number) => {
+      const page = pages[pageNumber - 1]
 
-    if (page?.kind === "slot") {
-      scrollRef.current
-        ?.querySelector(`[data-slot-key="${page.slot.key}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-    }
-  }
+      if (page?.kind === "slot") {
+        scrollRef.current
+          ?.querySelector(`[data-slot-key="${page.slot.key}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+      }
+    },
+    [pages],
+  )
 
-  const bookmarksLabel = t("organize.bookmarks")
+  const folds = { closed: closedFiles, setClosed: setClosedFiles }
 
   return (
     <div
@@ -140,39 +150,14 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     >
       <AppSidebar
         macOS={macOS}
-        switcher={
-          <ToggleGroup
-            aria-label={t("sidebar.panels")}
-            onValueChange={([next]) => {
-              if (next === "files" || next === "bookmarks") {
-                setPanel(next)
-              }
-            }}
-            size="sm"
-            spacing={0}
-            value={[panel]}
-            variant="outline"
-          >
-            <ToggleGroupItem aria-label={t("organize.files")} className="gap-1.5" value="files">
-              <Layers />
-              {t("organize.files")}
-            </ToggleGroupItem>
-            <ToggleGroupItem aria-label={bookmarksLabel} className="gap-1.5" value="bookmarks">
-              <Bookmark />
-              {bookmarksLabel}
-            </ToggleGroupItem>
-          </ToggleGroup>
-        }
+        switcher={<OrganizeFileListHeader folds={folds} organize={organize} />}
       >
-        {panel === "files" ? (
-          <OrganizeFileList onShow={showGroup} organize={organize} />
-        ) : organize.outline.length > 0 ? (
-          <BookmarkList items={organize.outline} onNavigate={showPage} />
-        ) : (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            {t("organize.noBookmarks")}
-          </p>
-        )}
+        <OrganizeFileList
+          folds={folds}
+          onShowFile={showGroup}
+          onShowPage={showPage}
+          organize={organize}
+        />
       </AppSidebar>
 
       <ToolbarFrame
@@ -297,60 +282,55 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   <Scaling />
                 </Toggle>
               </ToolbarTooltip>
-              <DropdownMenu>
-                <ToolbarTooltip label={bookmarksLabel}>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        aria-label={bookmarksLabel}
-                        data-slot="organize-bookmarks"
-                        disabled={busy}
-                        size="icon-sm"
-                        variant="outline"
-                      />
-                    }
-                  >
-                    <Bookmark
-                      className={cn(
-                        (options.fileBookmarks || options.keepBookmarks) && "fill-current",
-                      )}
-                    />
-                  </DropdownMenuTrigger>
-                </ToolbarTooltip>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuCheckboxItem
-                    checked={options.fileBookmarks}
-                    data-action="organize-file-bookmarks"
-                    onCheckedChange={(checked) =>
-                      organize.changeOptions({ fileBookmarks: checked })
-                    }
-                  >
-                    {t("organize.fileBookmarks")}
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuCheckboxItem
-                    checked={options.keepBookmarks}
-                    data-action="organize-keep-bookmarks"
-                    onCheckedChange={(checked) =>
-                      organize.changeOptions({ keepBookmarks: checked })
-                    }
-                  >
-                    {t("organize.keepBookmarks")}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ToolbarTooltip
+                label={t(options.bookmarks ? "organize.saveBookmarks" : "organize.skipBookmarks")}
+              >
+                <Toggle
+                  aria-label={t("organize.saveBookmarks")}
+                  className="size-7 min-w-7 p-0"
+                  data-slot="organize-bookmarks"
+                  disabled={busy}
+                  onPressedChange={(pressed) => organize.changeOptions({ bookmarks: pressed })}
+                  pressed={options.bookmarks}
+                  variant="outline"
+                >
+                  <Bookmark />
+                </Toggle>
+              </ToolbarTooltip>
             </ButtonGroup>
-            <Button
-              data-slot="organize-assemble"
-              disabled={busy || organize.pages.length === 0}
-              onClick={() => void organize.assemble()}
-              size="sm"
-            >
-              <FileOutput />
-              {t("organize.assemble")}
-            </Button>
           </>
         }
         macOS={macOS}
+        start={
+          <ButtonGroup>
+            <ToolbarTooltip label={t("organize.preview")}>
+              <Button
+                aria-label={t("organize.preview")}
+                data-slot="organize-preview"
+                disabled={busy || organize.pages.length === 0}
+                onClick={() => void organize.assemble("preview")}
+                size="sm"
+                variant="outline"
+              >
+                <Eye data-icon="inline-start" />
+                {t("organize.previewButton")}
+              </Button>
+            </ToolbarTooltip>
+            <ToolbarTooltip label={t("organize.saveAs")}>
+              <Button
+                aria-label={t("organize.saveAs")}
+                data-slot="organize-save"
+                disabled={busy || organize.pages.length === 0}
+                onClick={() => void organize.assemble("save")}
+                size="sm"
+                variant="outline"
+              >
+                <FileOutput data-icon="inline-start" />
+                {t("organize.saveButton")}
+              </Button>
+            </ToolbarTooltip>
+          </ButtonGroup>
+        }
       />
 
       <div className="relative ml-(--sidebar-inset) h-[calc(100%-var(--status-bar-height))]">
@@ -379,7 +359,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           ) : (
             <OrganizeBoard
               organize={organize}
-              paperWidth={PAPER_WIDTHS[size]!}
+              paperWidth={ORGANIZE_PAPER_WIDTHS[size]!}
               scrollRef={scrollRef}
             />
           )}
@@ -406,29 +386,34 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
         <SliderStepper
           canDecrease={size > 0}
           disabled={empty}
-          canIncrease={size < PAPER_WIDTHS.length - 1}
+          canIncrease={size < ORGANIZE_PAPER_WIDTHS.length - 1}
           decrease={{ label: t("organize.smaller") }}
           groupLabel={t("organize.size")}
           increase={{ label: t("organize.larger") }}
-          max={PAPER_WIDTHS.length - 1}
+          max={ORGANIZE_PAPER_WIDTHS.length - 1}
           min={0}
-          // Four sizes only, so each is laid out as the thumb reaches it.
-          onCommit={setSize}
-          onDecrease={() => setSize((current) => Math.max(0, current - 1))}
+          // Only the size let go at is written, not each one dragged past.
+          onCommit={chooseSize}
+          onDecrease={() => chooseSize(Math.max(0, size - 1))}
           onIncrease={() =>
-            setSize((current) => Math.min(PAPER_WIDTHS.length - 1, current + 1))
+            chooseSize(Math.min(ORGANIZE_PAPER_WIDTHS.length - 1, size + 1))
           }
+          // Four sizes only, so each is laid out as the thumb reaches it.
           onPreview={setSize}
           sliderLabel={t("organize.size")}
           slot="organize-size"
           value={size}
           valueText={(step) =>
-            t("organize.sizeStep", { current: step + 1, total: PAPER_WIDTHS.length })
+            t("organize.sizeStep", {
+              current: step + 1,
+              total: ORGANIZE_PAPER_WIDTHS.length,
+            })
           }
         />
       </StatusBar>
 
-      <Dialog open={active && organize.assembling}>
+      {/* Not before the first report: until then a save's dialog may be up. */}
+      <Dialog open={active && organize.assembling && organize.progress !== null}>
         <DialogContent data-testid="organize-progress" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>{t("organize.assembling")}</DialogTitle>
@@ -442,7 +427,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           />
           <DialogFooter>
             <Button
-              disabled={organize.stopping}
+              // Past the last step nothing checks for a Stop: a save's write runs on.
+              disabled={organize.stopping || assemblyDone}
               onClick={organize.stopAssembling}
               variant="outline"
             >

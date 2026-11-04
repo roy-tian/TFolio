@@ -15,7 +15,8 @@ type BookmarkItemsProps = BookmarkListProps & {
   parentKey?: string
 }
 
-function BookmarkItems({
+/** The `li`s of one level, for a `ul` the caller owns. */
+export function BookmarkItems({
   items,
   onNavigate,
   parentKey = "root",

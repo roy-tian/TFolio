@@ -66,6 +66,7 @@ import {
   movesPages,
   type AnnotationCommand,
   type HexColor,
+  type PageChange,
   type RenderEpochs,
   type RectStyle,
   type TextNoteStyle,
@@ -92,6 +93,7 @@ import {
   rotationsForPageCount,
   rotationsAfterRotate,
 } from "@/lib/pageRotation"
+import { ParkedPreviews } from "@/lib/parkedPreviews"
 import { isMacOS } from "@/lib/platform"
 import type {
   MovedSessionSnapshot,
@@ -101,6 +103,11 @@ import type { PdfOwnedLayer, PdfProgress } from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
 import type { ZoomShortcut } from "@/lib/shortcuts"
 import { shownSidebarPanel } from "@/lib/sidebar"
+import {
+  followPages,
+  forgetStashes,
+  initialThumbnailIdentity,
+} from "@/lib/thumbnailIdentity"
 import {
   defaultViewMode,
   effectiveViewMode,
@@ -210,12 +217,19 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo>(openedDocument)
     const [saveRequired, setSaveRequired] = useState(initialSaveRequired)
     const saveRequiredRef = useRef(initialSaveRequired)
-    // Thumbnail canvases follow their pages through a reorder, including undo.
-    // Other structure edits keep the existing position-based invalidation.
-    const [thumbnailIdentity, setThumbnailIdentity] = useState(() => ({
-      keys: openedDocument.pages.map((_, index) => index),
-      nextKey: openedDocument.numPages,
-    }))
+    // Thumbnail canvases follow their pages through every structure edit and its
+    // undo: a preview keeps its pixels, and the column shows where it went.
+    // Written outside any updater, which StrictMode runs twice, as the previews
+    // a page taken out leaves behind are told before the render.
+    const [initialIdentity] = useState(() =>
+      initialThumbnailIdentity(openedDocument.numPages),
+    )
+    const thumbnailIdentityRef = useRef(initialIdentity)
+    const [thumbnailKeys, setThumbnailKeys] = useState(initialIdentity.keys)
+    const [parkedPreviews] = useState(() => new ParkedPreviews())
+    // Only the latest structure edit's pages keep their previews: an undo right
+    // after it is what brings pages back, and an older one renders them afresh.
+    const previewStashRef = useRef<number | undefined>(undefined)
     // A copy of a page carrying a watermark or page numbers leaves the document
     // export-only, like those layers. The backend answers with every structure
     // update, so no replay.
@@ -533,13 +547,31 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         () => notice.raise("saveFailed"),
         [notice],
       ),
+      onStashesDropped: useCallback(
+        (stashIds: number[]) => {
+          thumbnailIdentityRef.current = forgetStashes(
+            thumbnailIdentityRef.current,
+            stashIds,
+          )
+
+          if (
+            previewStashRef.current !== undefined &&
+            stashIds.includes(previewStashRef.current)
+          ) {
+            previewStashRef.current = undefined
+            parkedPreviews.want([])
+            parkedPreviews.prune()
+          }
+        },
+        [parkedPreviews],
+      ),
       // A structure command replaces the page list wholesale; where it moved the
       // pages, bring each position-derived state back into range.
       onStructureChange: useCallback(
         (
           documentId: number,
           update: PdfStructureUpdate,
-          movement?: number[] | "inPlace",
+          change?: PageChange,
         ) => {
           const current = documentRef.current
 
@@ -561,7 +593,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
           // Turned where it stands, so every position still holds its page — a
           // second press of the rotation must still find the selection it turns.
-          if (movement === "inPlace") {
+          if (change?.movement === "inPlace") {
             return
           }
 
@@ -569,13 +601,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           // now holds other content: gone is better than landing elsewhere.
           clearNoteFontOffer()
 
-          setThumbnailIdentity(({ keys, nextKey }) =>
-            movement
-              ? { keys: movement.map((page) => keys[page - 1]!), nextKey }
-              : {
-                  keys: update.pages.map((_, index) => keys[index] ?? nextKey + index),
-                  nextKey: nextKey + update.numPages,
-                },
+          const identity = followPages(
+            thumbnailIdentityRef.current,
+            update.numPages,
+            change,
+          )
+
+          thumbnailIdentityRef.current = identity
+          setThumbnailKeys(identity.keys)
+          // Before the render that unmounts them: a preview parks only if wanted.
+          previewStashRef.current = change?.stashId
+          parkedPreviews.want(
+            change?.stashId === undefined ? [] : (identity.parked.get(change.stashId) ?? []),
           )
           currentPage.set(
             Math.min(Math.max(currentPage.get(), 1), Math.max(1, update.numPages)),
@@ -588,7 +625,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             rotationsForPageCount(rotations, update.numPages),
           )
         },
-        [clearNoteFontOffer, clearThumbnailSelection, currentPage, pageClipboardStructureChanged],
+        [
+          clearNoteFontOffer,
+          clearThumbnailSelection,
+          currentPage,
+          pageClipboardStructureChanged,
+          parkedPreviews,
+        ],
       ),
       onEditRefused: useCallback(
         () => notice.raise("markWhileEditing"),
@@ -617,6 +660,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useLayoutEffect(() => {
       textEpochsRef.current = annotations.textEpochs
     }, [annotations.textEpochs])
+
+    // After the commit new keys land in: a page brought back has taken its
+    // preview by then, if its column is up, and what is left is let go.
+    useEffect(() => parkedPreviews.prune(), [parkedPreviews, thumbnailKeys])
+    useEffect(() => () => parkedPreviews.clear(), [parkedPreviews])
 
     // Re-read when an edit changes the text under a standing select-all, so a
     // copy never hands out the text as it was before the edit.
@@ -1532,10 +1580,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               // memoised previews skip the session's every re-render.
               onSelectPage={thumbnailSelection.select}
               pages={pdfDocument.pages}
+              parkedPreviews={parkedPreviews}
               renderEpochs={annotations.renderEpochs}
               rotations={pageRotations}
               selectedPages={thumbnailSelection.selectedPages}
-              thumbnailKeys={thumbnailIdentity.keys}
+              thumbnailKeys={thumbnailKeys}
             />
           )}
         </AppSidebar>

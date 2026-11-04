@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
 
 import {
   dropGapForRow,
@@ -26,6 +26,8 @@ type UseListDragOptions = {
       actions beside the list read as strip rather than as out. */
   dropAreaRef?: RefObject<HTMLElement | null>
 }
+
+type ClientPoint = { clientX: number; clientY: number }
 
 const pressedButton = (target: Element) => target.closest("button") !== null
 
@@ -56,7 +58,7 @@ function measureCells(list: HTMLElement, axis: "x" | "y") {
     the window the press happened in, and the capture below keeps the page
     seeing them. */
 function outsideElement(
-  event: PointerEvent,
+  event: ClientPoint,
   element: HTMLElement,
 ): boolean {
   const rect = element.getBoundingClientRect()
@@ -89,14 +91,22 @@ function makeWayOffsets(
 ) {
   const offsets = Array.from({ length: cells.length }, () => 0)
   const destination = indexAfterMove(index, gap)
+  const dragged = cells[index]!
 
+  // Every cell passed over moves by the dragged cell's own extent, not its
+  // neighbour's: the organize list's files differ in height by their bookmarks.
   if (destination < index) {
+    const before = cells[index - 1]!
+    const shift = dragged.top + dragged.height - (before.top + before.height)
+
     for (let cell = destination; cell < index; cell += 1) {
-      offsets[cell] = cells[cell + 1]!.top - cells[cell]!.top
+      offsets[cell] = shift
     }
   } else if (destination > index) {
+    const shift = dragged.top - cells[index + 1]!.top
+
     for (let cell = index + 1; cell <= destination; cell += 1) {
-      offsets[cell] = cells[cell - 1]!.top - cells[cell]!.top
+      offsets[cell] = shift
     }
   }
 
@@ -118,6 +128,7 @@ export function useListDrag({
   dropAreaRef,
 }: UseListDragOptions): { drag: ListDragState | null } {
   const [drag, setDrag] = useState<ListDragState | null>(null)
+  const remeasureRef = useRef<(() => void) | null>(null)
   // Read through refs so an owner re-render mid-gesture cannot resubscribe the
   // listeners and drop the gesture in flight.
   const onReorderRef = useRef(onReorder)
@@ -132,7 +143,9 @@ export function useListDrag({
       return
     }
 
-    let gesture: {
+    type Gesture = {
+      /** The pressed cell's offset into the list as pressed, which it keeps. */
+      anchor: number
       cell: HTMLElement | null
       pointerId: number
       index: number
@@ -141,10 +154,20 @@ export function useListDrag({
       height: number
       cells: { height: number; top: number }[]
       dragging: boolean
+      /** Where the pointer last was, for a re-measure to answer about. */
+      last: ClientPoint
+      /** The cells predate the owner's drag layout — the organize list folds
+          its bookmarks away — so none may make way until they are measured
+          again after the commit that started the drag. */
+      stale: boolean
+      /** Takes back the padding `hold` gave the list, if it gave any. */
+      unpad: (() => void) | null
       width: number
-    } | null = null
+    }
 
-    const contentCoordinate = (event: PointerEvent) => {
+    let gesture: Gesture | null = null
+
+    const contentCoordinate = (event: ClientPoint) => {
       const list = listRef.current
 
       if (!list) {
@@ -159,6 +182,7 @@ export function useListDrag({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
+      gesture?.unpad?.()
       gesture = null
       setDrag(null)
 
@@ -195,9 +219,12 @@ export function useListDrag({
       // a reorderable row; WebKit must not start a native text drag here.
       event.preventDefault()
 
+      const cells = measureCells(list, axis)
+
       gesture = {
+        anchor: cells[index]!.top - (axis === "x" ? list.scrollLeft : list.scrollTop),
         cell: cell instanceof HTMLElement ? cell : null,
-        cells: measureCells(list, axis),
+        cells,
         dragging: false,
         from: { x: event.clientX, y: event.clientY },
         grip: {
@@ -206,8 +233,90 @@ export function useListDrag({
         },
         height: cellRect.height,
         index,
+        last: event,
         pointerId: event.pointerId,
+        stale: false,
+        unpad: null,
         width: cellRect.width,
+      }
+    }
+
+    /**
+     * The owner's drag layout may move the pressed cell — the organize list
+     * folds away the bookmarks above it — so the list scrolls to keep it under
+     * the pointer, and pads itself where scrolling cannot reach: a drag that
+     * hardly moved still drops where it began.
+     */
+    const hold = (list: HTMLElement, current: Gesture) => {
+      const scroll = axis === "x" ? "scrollLeft" : "scrollTop"
+      const drift = () =>
+        measureCells(list, axis)[current.index]!.top - list[scroll] - current.anchor
+
+      list[scroll] += drift()
+
+      const left = drift()
+
+      if (Math.abs(left) < 1) {
+        return
+      }
+
+      const side =
+        left < 0
+          ? axis === "x" ? "paddingLeft" : "paddingTop"
+          : axis === "x" ? "paddingRight" : "paddingBottom"
+      const inline = list.style[side]
+      const padding = Number.parseFloat(getComputedStyle(list)[side]) || 0
+
+      list.style[side] = `${padding + Math.abs(left)}px`
+      current.unpad = () => {
+        list.style[side] = inline
+      }
+
+      if (left > 0) {
+        list[scroll] += left
+      }
+    }
+
+    const show = (current: Gesture) => {
+      const coordinate = contentCoordinate(current.last)
+
+      if (coordinate === null) {
+        return
+      }
+
+      const dropArea = dropAreaRef?.current ?? listRef.current
+      const outside =
+        onDropOutsideRef.current !== undefined &&
+        dropArea !== null &&
+        outsideElement(current.last, dropArea)
+      // Outside the drop area there is no gap to point at: the neighbours come
+      // home, and the release answers to `onDropOutside` instead.
+      const still = outside || current.stale
+      const gap = still ? current.index : dropGapForRow(coordinate, current.cells)
+
+      setDrag({
+        cellOffsets: still
+          ? Array.from({ length: current.cells.length }, () => 0)
+          : makeWayOffsets(current.index, gap, current.cells),
+        gap,
+        grip: current.grip,
+        height: current.height,
+        index: current.index,
+        outside,
+        pointer: { x: current.last.clientX, y: current.last.clientY },
+        width: current.width,
+      })
+    }
+
+    // Untransformed: a stale gesture has let nothing make way.
+    remeasureRef.current = () => {
+      const list = listRef.current
+
+      if (gesture?.stale && list) {
+        gesture.stale = false
+        hold(list, gesture)
+        gesture.cells = measureCells(list, axis)
+        show(gesture)
       }
     }
 
@@ -227,6 +336,7 @@ export function useListDrag({
         }
 
         gesture.dragging = true
+        gesture.stale = true
 
         // Held pointers stay this window's until release on every platform, but
         // only a capture hands the page the events beyond its own viewport —
@@ -245,35 +355,8 @@ export function useListDrag({
       }
 
       event.preventDefault()
-
-      const coordinate = contentCoordinate(event)
-
-      if (coordinate === null) {
-        return
-      }
-
-      const dropArea = dropAreaRef?.current ?? listRef.current
-      const outside =
-        onDropOutsideRef.current !== undefined &&
-        dropArea !== null &&
-        outsideElement(event, dropArea)
-
-      // Outside the drop area there is no gap to point at: the neighbours come
-      // home, and the release answers to `onDropOutside` instead.
-      const gap = outside ? gesture.index : dropGapForRow(coordinate, gesture.cells)
-
-      setDrag({
-        cellOffsets: outside
-          ? Array.from({ length: gesture.cells.length }, () => 0)
-          : makeWayOffsets(gesture.index, gap, gesture.cells),
-        gap,
-        grip: gesture.grip,
-        height: gesture.height,
-        index: gesture.index,
-        outside,
-        pointer: { x: event.clientX, y: event.clientY },
-        width: gesture.width,
-      })
+      gesture.last = event
+      show(gesture)
     }
 
     const handlePointerUp = (event: PointerEvent) => {
@@ -286,37 +369,49 @@ export function useListDrag({
       gesture = null
       setDrag(null)
 
-      if (!current.dragging) {
-        return
-      }
+      // Only once the drop is read: its gap was measured with the padding in.
+      try {
+        if (!current.dragging) {
+          return
+        }
 
-      event.preventDefault()
+        event.preventDefault()
 
-      const dropArea = dropAreaRef?.current ?? listRef.current
-      const onDropOutside = onDropOutsideRef.current
+        const dropArea = dropAreaRef?.current ?? listRef.current
+        const onDropOutside = onDropOutsideRef.current
 
-      if (
-        onDropOutside &&
-        dropArea !== null &&
-        outsideElement(event, dropArea)
-      ) {
-        onDropOutside({ x: event.clientX, y: event.clientY }, current.index)
-        return
-      }
+        if (
+          onDropOutside &&
+          dropArea !== null &&
+          outsideElement(event, dropArea)
+        ) {
+          onDropOutside({ x: event.clientX, y: event.clientY }, current.index)
+          return
+        }
 
-      const coordinate = contentCoordinate(event)
+        const coordinate = contentCoordinate(event)
+        const list = listRef.current
 
-      if (coordinate === null) {
-        return
-      }
+        if (coordinate === null || !list) {
+          return
+        }
 
-      const to = indexAfterMove(
-        current.index,
-        dropGapForRow(coordinate, current.cells),
-      )
+        // Let go before the owner's drag layout was measured: the list as it
+        // stands now is the one the pointer was over.
+        if (current.stale) {
+          current.cells = measureCells(list, axis)
+        }
 
-      if (to !== current.index) {
-        onReorderRef.current(current.index, to)
+        const to = indexAfterMove(
+          current.index,
+          dropGapForRow(coordinate, current.cells),
+        )
+
+        if (to !== current.index) {
+          onReorderRef.current(current.index, to)
+        }
+      } finally {
+        current.unpad?.()
       }
     }
 
@@ -325,6 +420,7 @@ export function useListDrag({
         return
       }
 
+      gesture.unpad?.()
       gesture = null
       setDrag(null)
     }
@@ -335,12 +431,24 @@ export function useListDrag({
     document.addEventListener("pointercancel", handlePointerCancel)
 
     return () => {
+      gesture?.unpad?.()
+      remeasureRef.current = null
       document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("pointermove", handlePointerMove)
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, dropAreaRef, listRef])
+  }, [active, axis, dropAreaRef, listRef])
+
+  const dragging = drag !== null
+
+  // After the commit that started the drag, which is the one the owner's drag
+  // layout landed in, and before it paints.
+  useLayoutEffect(() => {
+    if (dragging) {
+      remeasureRef.current?.()
+    }
+  }, [dragging])
 
   return { drag }
 }

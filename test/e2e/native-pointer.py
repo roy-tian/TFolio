@@ -22,11 +22,13 @@ if not display:
     raise RuntimeError("Native selection tests need the app's X11 display")
 
 try:
-    event = json.loads(sys.argv[1])
-    if "x" in event:
-        xtest.XTestFakeMotionEvent(display, -1, round(event["x"]), round(event["y"]), 0)
-    else:
-        xtest.XTestFakeButtonEvent(display, 1, int(event["down"]), 0)
-    x11.XSync(display, 0)
+    # A list goes out from one process: a double click must fit GTK's interval.
+    events = json.loads(sys.argv[1])
+    for event in events if isinstance(events, list) else [events]:
+        if "x" in event:
+            xtest.XTestFakeMotionEvent(display, -1, round(event["x"]), round(event["y"]), 0)
+        else:
+            xtest.XTestFakeButtonEvent(display, 1, int(event["down"]), 0)
+        x11.XSync(display, 0)
 finally:
     x11.XCloseDisplay(display)

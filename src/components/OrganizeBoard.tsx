@@ -172,7 +172,7 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
   const ghostRef = useRef<PageDragGhostHandle>(null)
   // From a release until the ghost has landed, a press is no drag.
   const settlingRef = useRef(false)
-  const { prime } = useFlipLayout(boardRef, drag !== null || ghost !== null)
+  const { prime } = useFlipLayout(boardRef, drag !== null || ghost !== null, plan)
   const shownPlan =
     drag?.basis === plan && drag.target
       ? moveSlots(plan, drag.moving, drag.target.groupId, drag.target.beforeKey)

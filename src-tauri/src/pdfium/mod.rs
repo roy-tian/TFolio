@@ -34,7 +34,11 @@ pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
     export_compressed_pdf, release_pdf_compression,
 };
-pub use organize::{add_organize_sources, assemble_pdf, render_organize_thumbnail};
+#[cfg(feature = "e2e")]
+pub use organize::save_assembled_pdf_to;
+pub use organize::{
+    add_organize_sources, assemble_pdf, render_organize_thumbnail, save_assembled_pdf,
+};
 
 /// Counts work units rather than bytes: pages for owned content, and
 /// source/finishing stages for a merge.

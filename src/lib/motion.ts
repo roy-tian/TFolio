@@ -20,5 +20,14 @@ export const DRAG_MOTION = {
   easing: "cubic-bezier(0.2, 0, 0, 1)",
 } as const
 
+/** A page joining a list, as the pages around it slide aside. */
+export const ENTER_MOTION = DRAG_MOTION
+
+/** A page leaving a list: gone before the pages closing up behind it settle. */
+export const EXIT_MOTION = {
+  duration: 150,
+  easing: "cubic-bezier(0.3, 0, 1, 1)",
+} as const
+
 /** A page turning a quarter, its footprint swapping sides as it spins. */
 export const TURN_MOTION = { duration: 250, easing: "ease-out" } as const

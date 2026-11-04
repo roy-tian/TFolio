@@ -627,8 +627,10 @@ export default function App() {
     )
   }, [notices])
 
-  // The app's own, like a new one, and export-only: it holds other files'
-  // pages, so a chosen destination is the only thing it can be written to.
+  // A saved one is the file the reader chose, so it opens as that file's tab
+  // would, the backend having listed it as recent. A preview is the app's own,
+  // like a new one, and export-only: it holds other files' pages, so a chosen
+  // destination is the only thing it can be written to.
   const openAssembled = useCallback(
     (document: PdfDocumentInfo) => {
       if (!mountedRef.current) {
@@ -638,23 +640,37 @@ export default function App() {
         return
       }
 
-      const tab: OpenTab = {
-        dirty: true,
-        document,
-        id: document.id,
-        initialSaveRequired: true,
-        name: t("organize.untitled"),
-        path: "",
-        saveAsDefaultName: t("organize.untitled"),
-        savable: false,
-      }
+      const tab: OpenTab = document.path
+        ? {
+            dirty: false,
+            document,
+            id: document.id,
+            name: fileNameFromPath(document.path),
+            path: document.path,
+            recentPath: document.path,
+            savable: false,
+          }
+        : {
+            dirty: true,
+            document,
+            id: document.id,
+            initialSaveRequired: true,
+            name: t("organize.untitled"),
+            path: "",
+            saveAsDefaultName: t("organize.untitled"),
+            savable: false,
+          }
 
       replaceTabs((current) => [...current, tab])
       setWorkspaceMode("view")
       activateTab(tab.id)
       notices.retract(workspaceOwner, openRefusals)
+
+      if (document.path) {
+        refreshRecentFiles()
+      }
     },
-    [activateTab, notices, replaceTabs, setWorkspaceMode, t],
+    [activateTab, notices, refreshRecentFiles, replaceTabs, setWorkspaceMode, t],
   )
   const organize = useOrganizeWorkspace({ notices, onAssembled: openAssembled })
   // Read by listeners bound once, which must reach the workspace as it is now.
