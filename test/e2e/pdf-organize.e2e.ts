@@ -1,13 +1,18 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import path from "node:path"
+
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
+import type { PdfDocumentInfo } from "../../src/lib/pdf"
 import {
   clickAppMenuItem,
   emitDrag,
   minimalPdf,
   outlinedPdf,
   pointMultiPickerAt,
+  pointSaveAsAt,
   pressRedo,
   refreshApp,
   seedSettings,
@@ -32,6 +37,32 @@ async function organizeWith(paths: string[]) {
     async () => (await groupCount()) === paths.length,
     { timeout: 30_000, timeoutMsg: "the picked files never reached the board" },
   )
+}
+
+/** Answers the save dialog "Save as PDF" opens first with `destination`, and
+    runs the real assembly and write behind it through the command the e2e
+    build keeps for this; null cancels the dialog. */
+async function pointSaveAt(destination: string | null) {
+  await browser.execute((target: string | null) => {
+    const seam = window as unknown as Window & {
+      __tfolioE2E?: E2eOverrides
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args?: unknown) => Promise<unknown>
+      }
+    }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      saveAssembledPdf: ({ onProgress, plan }) =>
+        target === null
+          ? Promise.resolve(null)
+          : (seam.__TAURI_INTERNALS__.invoke("save_assembled_pdf_to", {
+              onProgress,
+              path: target,
+              plan,
+            }) as Promise<PdfDocumentInfo | null>),
+    }
+  }, destination)
 }
 
 async function groupCount() {
@@ -160,7 +191,9 @@ describe("TFolio organize workspace", () => {
   })
 
   it("moves a page across files and assembles the plan's order", async () => {
-    await organizeWith([portrait(), landscape()])
+    const sources = [portrait(), landscape()]
+    const destination = path.join(path.dirname(sources[0]!), "combined.pdf")
+    await organizeWith(sources)
 
     // Cut a landscape page, choose the second portrait page, paste before it.
     await slot("Page 1 of landscape").click()
@@ -179,15 +212,19 @@ describe("TFolio organize workspace", () => {
       "Page 3 of landscape",
     ])
 
-    await $(`${workspace} [data-slot='organize-assemble']`).click()
+    await pointSaveAt(destination)
+    await $(`${workspace} [data-slot='organize-save']`).click()
     await browser.waitUntil(
       async () =>
         (await $("[role='tab'][aria-selected='true']").getText()).includes(
-          "Organized.pdf",
+          "combined.pdf",
         ),
       { timeout: 30_000, timeoutMsg: "the assembled PDF never opened as a tab" },
     )
     await expect($(workspace)).not.toBeDisplayed()
+    // Saved before it was shown: the tab is the file's, not an unsaved copy.
+    expect(existsSync(destination)).toBe(true)
+    expect(readFileSync(destination).subarray(0, 5).toString()).toBe("%PDF-")
     await expect($("[data-slot='page-status']")).toHaveAttribute(
       "aria-label",
       "Page 1 of 5",
@@ -202,6 +239,49 @@ describe("TFolio organize workspace", () => {
       ),
     )
     expect(shapes).toEqual(["tall", "wide", "tall", "wide", "wide"])
+  })
+
+  it("builds nothing when its save dialog is cancelled", async () => {
+    await organizeWith([portrait()])
+    await pointSaveAt(null)
+
+    const save = $(`${workspace} [data-slot='organize-save']`)
+    await save.click()
+    await expect(save).toBeEnabled()
+    await expect($(workspace)).toBeDisplayed()
+    await expect($("[data-testid='organize-progress']")).not.toBeDisplayed()
+    expect((await $$("[data-document-tab]").getElements()).length).toBe(0)
+  })
+
+  it("previews the PDF unsaved, for a Save As once the reader likes it", async () => {
+    const source = portrait()
+    const directory = path.dirname(source)
+    const destination = path.join(directory, "kept.pdf")
+    await organizeWith([source])
+
+    await $(`${workspace} [data-slot='organize-preview']`).click()
+    await browser.waitUntil(
+      async () =>
+        (await $("[role='tab'][aria-selected='true']").getText()).includes(
+          "Organized.pdf",
+        ),
+      { timeout: 30_000, timeoutMsg: "the preview never opened as a tab" },
+    )
+    await expect($(workspace)).not.toBeDisplayed()
+    await expect($("[data-slot='page-status']")).toHaveAttribute(
+      "aria-label",
+      "Page 1 of 2",
+    )
+    expect(readdirSync(directory)).toEqual(["portrait.pdf"])
+
+    await pointSaveAsAt(destination)
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      async () =>
+        (await $("[role='tab'][aria-selected='true']").getText()).includes("kept.pdf"),
+      { timeout: 15_000, timeoutMsg: "Save As never bound the preview to its file" },
+    )
+    expect(existsSync(destination)).toBe(true)
   })
 
   it("drags a page into another file, in before the page it is let go on", async () => {

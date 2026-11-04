@@ -33,7 +33,7 @@ pub async fn export_pdf_archive(
         let Some(picked) = export_dialog(
             &app,
             &engine,
-            document_id,
+            Some(document_id),
             filter_label,
             &["zip"],
             &suggested_name,

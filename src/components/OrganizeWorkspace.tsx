@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react"
 import {
   BetweenHorizontalStart,
   Bookmark,
+  Eye,
   FileOutput,
   FolderPlus,
   Layers,
@@ -61,8 +62,9 @@ type OrganizeWorkspaceProps = {
 }
 
 /** The window's second workspace: pages from several files put together into
-    one new PDF, which then opens as a tab of the first. Memoised: it stays
-    mounted behind the viewer, where the App's own re-renders are no news. */
+    one new PDF, previewed unsaved or saved where the reader chooses, and
+    opened as a tab of the first. Memoised: it stays mounted behind the
+    viewer, where the App's own re-renders are no news. */
 export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   active,
   macOS,
@@ -77,6 +79,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   const chosen = organize.selection
   const busy = organize.adding || organize.assembling
   const empty = organize.plan.groups.length === 0
+  const assemblyDone =
+    organize.progress !== null && organize.progress.completed >= organize.progress.total
 
   // The workspace's own keys; undo, redo and select-all come through the
   // window's shortcut table with the viewer's.
@@ -346,15 +350,32 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                 </DropdownMenuContent>
               </DropdownMenu>
             </ButtonGroup>
-            <Button
-              data-slot="organize-assemble"
-              disabled={busy || organize.pages.length === 0}
-              onClick={() => void organize.assemble()}
-              size="sm"
-            >
-              <FileOutput />
-              {t("organize.assemble")}
-            </Button>
+            <ButtonGroup>
+              <ToolbarTooltip label={t("organize.preview")}>
+                <Button
+                  aria-label={t("organize.preview")}
+                  data-slot="organize-preview"
+                  disabled={busy || organize.pages.length === 0}
+                  onClick={() => void organize.assemble("preview")}
+                  size="icon-sm"
+                  variant="outline"
+                >
+                  <Eye />
+                </Button>
+              </ToolbarTooltip>
+              <ToolbarTooltip label={t("organize.saveAs")}>
+                <Button
+                  aria-label={t("organize.saveAs")}
+                  data-slot="organize-save"
+                  disabled={busy || organize.pages.length === 0}
+                  onClick={() => void organize.assemble("save")}
+                  size="icon-sm"
+                  variant="outline"
+                >
+                  <FileOutput />
+                </Button>
+              </ToolbarTooltip>
+            </ButtonGroup>
           </>
         }
         macOS={macOS}
@@ -439,7 +460,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
         />
       </StatusBar>
 
-      <Dialog open={active && organize.assembling}>
+      {/* Not before the first report: until then a save's dialog may be up. */}
+      <Dialog open={active && organize.assembling && organize.progress !== null}>
         <DialogContent data-testid="organize-progress" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>{t("organize.assembling")}</DialogTitle>
@@ -453,7 +475,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           />
           <DialogFooter>
             <Button
-              disabled={organize.stopping}
+              // Past the last step nothing checks for a Stop: a save's write runs on.
+              disabled={organize.stopping || assemblyDone}
               onClick={organize.stopAssembling}
               variant="outline"
             >

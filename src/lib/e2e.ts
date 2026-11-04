@@ -2,12 +2,21 @@
  * Tauri seals `__TAURI_INTERNALS__.invoke`, so the e2e seam must be the app's
  * own; the mode check is a compile-time constant, dead in every other build.
  */
-import type { PdfExportOutcome } from "@/lib/pdf"
+import type { Channel } from "@tauri-apps/api/core"
+
+import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
+  /** Stands in for `save_assembled_pdf`, whose save dialog no driver can answer. */
+  saveAssembledPdf?: (args: {
+    filterLabel: string
+    onProgress: Channel<PdfProgress>
+    plan: unknown
+    suggestedName: string
+  }) => Promise<PdfDocumentInfo | null>
   checkUpdates?: () => Promise<void>
   downloadUpdate?: () => Promise<void>
   installUpdate?: () => Promise<void>

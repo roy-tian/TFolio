@@ -743,11 +743,11 @@ pub(super) fn suggested_file_name(suggested: &str) -> String {
 
 /// Every export's save dialog, named and placed by Rust, never by the WebView:
 /// in the document's own folder for a file it came from, the last opened PDF's
-/// for one that has never been saved.
+/// for one that has never been saved or does not exist yet.
 pub(super) fn export_dialog(
     app: &AppHandle,
     engine: &PdfiumEngine,
-    document_id: u64,
+    document_id: Option<u64>,
     filter_label: String,
     extensions: &[&str],
     suggested_name: &str,
@@ -758,8 +758,8 @@ pub(super) fn export_dialog(
         .add_filter(filter_label, extensions)
         .set_file_name(suggested_file_name(suggested_name));
 
-    match engine
-        .document_source_dir(document_id)
+    match document_id
+        .and_then(|id| engine.document_source_dir(id))
         .or_else(|| app.state::<RecentFiles>().last_opened_dir())
     {
         Some(directory) => dialog.set_directory(directory),
@@ -785,7 +785,7 @@ pub async fn export_pdf(
         let Some(picked) = export_dialog(
             &app,
             &engine,
-            document_id,
+            Some(document_id),
             filter_label,
             &["pdf"],
             &suggested_name,
@@ -808,7 +808,7 @@ pub async fn export_pdf(
 /// path `focus_pdf_path` looks it up by — the OS's own, as the outcome's string
 /// is lossy. Moved straight after the write, so the gap an open could slip
 /// through is as short as it can be outside the documents lock.
-fn export_and_bind(
+pub(super) fn export_and_bind(
     app: &AppHandle,
     engine: &PdfiumEngine,
     document_id: u64,

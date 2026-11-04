@@ -14,6 +14,7 @@ import path from "node:path"
 import { $, $$, browser } from "@wdio/globals"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
+import type { PdfExportOutcome } from "../../src/lib/pdf"
 import type { Settings } from "../../src/lib/settings"
 
 /** Where the backend keeps this build's settings: the lane's app data
@@ -629,6 +630,28 @@ export async function pointMultiPickerAt(filePaths: string[]) {
       pickPdfPaths: () => Promise.resolve(mockPaths),
     }
   }, filePaths)
+}
+
+/** Answers Save As's dialog with `destination` and runs the real write behind
+    it, through the command the e2e build keeps for this. */
+export async function pointSaveAsAt(destination: string) {
+  await browser.execute((target: string) => {
+    const seam = window as unknown as Window & {
+      __tfolioE2E?: E2eOverrides
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, args?: unknown) => Promise<unknown>
+      }
+    }
+
+    seam.__tfolioE2E = {
+      ...seam.__tfolioE2E,
+      exportPdf: ({ documentId }) =>
+        seam.__TAURI_INTERNALS__.invoke("export_pdf_to", {
+          documentId,
+          path: target,
+        }) as Promise<PdfExportOutcome>,
+    }
+  }, destination)
 }
 
 /** Writes the picker stand-in without disturbing any other override. */

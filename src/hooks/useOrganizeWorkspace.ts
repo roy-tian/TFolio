@@ -26,7 +26,11 @@ import {
   type OrganizeSource,
   type OrganizeSourceInfo,
 } from "@/lib/organize"
-import { fileNameFromPath, type PdfDocumentInfo } from "@/lib/pdf"
+import {
+  exportFailureNotice,
+  fileNameFromPath,
+  type PdfDocumentInfo,
+} from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 
@@ -38,7 +42,8 @@ const emptyHistory: History = { future: [], past: [] }
 
 type UseOrganizeWorkspaceOptions = {
   notices: NoticeChannel
-  /** Opens the assembled document as a tab of its own, unsaved. */
+  /** Opens the assembled document as a tab of its own: the file its `path`
+      names once saved, unsaved for a preview, which has none. */
   onAssembled: (document: PdfDocumentInfo) => void
 }
 
@@ -261,7 +266,9 @@ export function useOrganizeWorkspace({
       .catch(() => undefined)
   }, [])
 
-  const assemble = useCallback(async () => {
+  /** A preview opens unsaved, exported once the reader likes it; a save asks
+      where the PDF goes first, and opens it as the file written there. */
+  const assemble = useCallback(async (how: "preview" | "save") => {
     const assembling = planRef.current
     const assembledPages = outputPages(assembling, sourcesRef.current)
 
@@ -286,14 +293,31 @@ export function useOrganizeWorkspace({
     }
 
     try {
-      const document = await invoke<PdfDocumentInfo | null>("assemble_pdf", {
-        onProgress: channel,
-        plan: {
-          normalizeA4: assembling.options.normalizeA4,
-          outline: organizeOutline(assembling, sourcesRef.current, assembledPages),
-          slots: assembleSlots(assembledPages, assembling.options.normalizeA4),
-        },
-      })
+      const plan = {
+        normalizeA4: assembling.options.normalizeA4,
+        outline: organizeOutline(assembling, sourcesRef.current, assembledPages),
+        slots: assembleSlots(assembledPages, assembling.options.normalizeA4),
+      }
+      let document: PdfDocumentInfo | null
+
+      if (how === "preview") {
+        document = await invoke<PdfDocumentInfo | null>("assemble_pdf", {
+          onProgress: channel,
+          plan,
+        })
+      } else {
+        const args = {
+          filterLabel: t("annotate.exportFilter"),
+          onProgress: channel,
+          plan,
+          suggestedName: t("organize.untitled"),
+        }
+        const override = e2eOverride("saveAssembledPdf")
+
+        document = override
+          ? await override(args)
+          : await invoke<PdfDocumentInfo | null>("save_assembled_pdf", args)
+      }
 
       if (document) {
         assembledRef.current = assembling
@@ -301,13 +325,16 @@ export function useOrganizeWorkspace({
       }
     } catch (error) {
       const message = String(error)
+      const refusal = exportFailureNotice(error)
 
       raise(
-        message.includes("changed since it was added")
-          ? "organizeSourceChanged"
-          : message.includes("MiB limit")
-            ? "fileTooLarge"
-            : "organizeFailed",
+        refusal !== "exportFailed"
+          ? refusal
+          : message.includes("changed since it was added")
+            ? "organizeSourceChanged"
+            : message.includes("MiB limit")
+              ? "fileTooLarge"
+              : "organizeFailed",
       )
     } finally {
       busyRef.current = false
@@ -316,7 +343,7 @@ export function useOrganizeWorkspace({
       setProgress(null)
       setStopping(false)
     }
-  }, [askStop, onAssembled, raise])
+  }, [askStop, onAssembled, raise, t])
 
   const stopAssembling = useCallback(() => {
     setStopping(true)
