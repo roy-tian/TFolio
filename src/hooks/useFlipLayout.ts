@@ -78,10 +78,69 @@ function takeSnapshot(
   return { cells, places, shown }
 }
 
-/** A cell React has let go of, kept on show while it fades where it stood: a
-    picture of itself, which no selector, pointer, focus or screen reader finds. */
-function ghostOf(cell: HTMLElement, place: Place, at: Offset) {
-  for (const element of [cell, ...cell.querySelectorAll("*")]) {
+// What a selector on an attribute may change about how an element looks:
+// colours, rings and shadows, visibility, and a transform's parts.
+const LOOK = [
+  "background-color",
+  "background-image",
+  "border-top-color",
+  "border-right-color",
+  "border-bottom-color",
+  "border-left-color",
+  "box-shadow",
+  "color",
+  "display",
+  "fill",
+  "opacity",
+  "outline-color",
+  "outline-style",
+  "outline-width",
+  "rotate",
+  "scale",
+  "stroke",
+  "transform",
+  "translate",
+  "visibility",
+] as const
+
+type Look = { element: HTMLElement | SVGElement; values: string[] }[]
+
+const styledIn = (cell: HTMLElement) =>
+  [cell, ...cell.querySelectorAll("*")].filter(
+    (element) => element instanceof HTMLElement || element instanceof SVGElement,
+  )
+
+/** A cell React has let go of, back where it stood to fade: attributes and all
+    for now, so it is styled as it was. Nothing reaches it by pointer or focus. */
+function placeGhost(container: HTMLElement, cell: HTMLElement, place: Place, at: Offset) {
+  cell.inert = true
+  Object.assign(cell.style, {
+    height: `${place.height}px`,
+    left: `${at.x}px`,
+    margin: "0",
+    pointerEvents: "none",
+    position: "absolute",
+    top: `${at.y}px`,
+    width: `${place.width}px`,
+  })
+  // First, so the cells closing up over its place pass in front of it.
+  container.prepend(cell)
+}
+
+function lookOf(cell: HTMLElement): Look {
+  return styledIn(cell).map((element) => {
+    const style = getComputedStyle(element)
+
+    return { element, values: LOOK.map((property) => style.getPropertyValue(property)) }
+  })
+}
+
+/** Keeps the look it was placed with as its own style, then takes away what a
+    selector, or a screen reader, could find it by. */
+function hideGhost(cell: HTMLElement, look: Look) {
+  for (const { element, values } of look) {
+    LOOK.forEach((property, index) => element.style.setProperty(property, values[index]!))
+
     for (const name of element.getAttributeNames()) {
       if (
         name.startsWith("data-") ||
@@ -94,19 +153,7 @@ function ghostOf(cell: HTMLElement, place: Place, at: Offset) {
     }
   }
 
-  cell.inert = true
   cell.setAttribute("aria-hidden", "true")
-  Object.assign(cell.style, {
-    height: `${place.height}px`,
-    left: `${at.x}px`,
-    margin: "0",
-    pointerEvents: "none",
-    position: "absolute",
-    top: `${at.y}px`,
-    width: `${place.width}px`,
-  })
-
-  return cell
 }
 
 /**
@@ -270,6 +317,8 @@ export function useFlipLayout(
         }
       }
 
+      const ghosts: { ghost: HTMLElement; key: string }[] = []
+
       for (const [key, cell] of snapshot.cells) {
         const was = snapshot.places.get(key)!
         const at = snapshot.shown.get(key) ?? was
@@ -281,14 +330,25 @@ export function useFlipLayout(
         slides.get(key)?.cancel()
         slides.delete(key)
 
-        if (was.width === 0 || !inSight(origin.top + at.y, was.height)) {
-          continue
+        if (was.width !== 0 && inSight(origin.top + at.y, was.height)) {
+          placeGhost(container, cell, was, at)
+          ghosts.push({ ghost: cell, key })
         }
+      }
 
-        const ghost = ghostOf(cell, was, at)
+      // Every ghost placed before any is read, so they take one style pass:
+      // `getAnimations` flushes style too. A spin or a transition under way
+      // would be read mid-frame, and kept so.
+      const motions = ghosts.flatMap(({ ghost }) => ghost.getAnimations({ subtree: true }))
 
-        // First, so the cells closing up over its place pass in front of it.
-        container.prepend(ghost)
+      for (const motion of motions) {
+        motion.cancel()
+      }
+
+      const looks = ghosts.map(({ ghost }) => lookOf(ghost))
+
+      ghosts.forEach(({ ghost, key }, index) => {
+        hideGhost(ghost, looks[index]!)
         leaving.set(key, ghost)
 
         const fade = ghost.animate(
@@ -307,7 +367,7 @@ export function useFlipLayout(
             leaving.delete(key)
           }
         }
-      }
+      })
 
       for (const cell of entering) {
         cell.animate(
