@@ -7,7 +7,7 @@ use tauri::{
     ipc::{Channel, Response},
     AppHandle, Manager, State, WebviewWindow,
 };
-use tfolio_engine::{AssemblePlan, OrganizeSourceInfo, PdfDocumentInfo};
+use tfolio_engine::{AssemblePlan, OrganizeSourceInfo, PdfDocumentInfo, WatermarkConfig};
 
 #[cfg(not(feature = "e2e"))]
 use super::commands::ensure_approved;
@@ -63,6 +63,20 @@ pub async fn render_organize_thumbnail(
     .map_err(|error| format!("PDFium thumbnail task failed: {error}"))??;
 
     Ok(Response::new(bytes))
+}
+
+/// Whether a watermark the workspace is given can be drawn, checked when it
+/// is set rather than when a save has already asked where the PDF goes.
+#[tauri::command]
+pub async fn check_organize_watermark(
+    config: WatermarkConfig,
+    state: State<'_, PdfiumState>,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || engine.check_watermark(config))
+        .await
+        .map_err(|error| format!("PDFium watermark check failed: {error}"))?
 }
 
 /// Asks where the new PDF goes before building it: a cancelled dialog costs

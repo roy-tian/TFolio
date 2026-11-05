@@ -825,6 +825,8 @@ export default function App() {
         appUpdate.requestInstall()
       } else if (kind === "noteFont" && notice.owner.scope === "document") {
         sessionRefs.current.get(notice.owner.documentId)?.fetchNoteFont()
+      } else if (kind === "noteFont") {
+        void organizeRef.current.fetchFont()
       } else if (
         kind === "layerStop" &&
         !notice.action?.busy &&
@@ -845,7 +847,7 @@ export default function App() {
   )
 
   // Two notices own their dismissal: the update, waved away while it says the
-  // same thing, and the font offer, which takes its held edit with it.
+  // same thing, and the font offer, which in a viewer tab drops its held edit.
   const dismissNotice = useCallback(
     (notice: Notice) => {
       const slot = noticeEntry(notice.kind).slot
@@ -854,6 +856,8 @@ export default function App() {
         appUpdate.dismiss()
       } else if (slot === "noteFont" && notice.owner.scope === "document") {
         sessionRefs.current.get(notice.owner.documentId)?.dismissNoteFont()
+      } else if (slot === "noteFont") {
+        organizeRef.current.dismissFontOffer()
       }
 
       notices.dismiss(notice.id)

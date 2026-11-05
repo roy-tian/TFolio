@@ -11,7 +11,6 @@ import type { OrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
 import { usePageNumbers } from "@/hooks/usePageNumbers"
 import { useWatermark } from "@/hooks/useWatermark"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
-import type { PdfLayerOutcome } from "@/lib/progress"
 import type { WatermarkConfig } from "@/lib/watermark"
 
 // The drafts belong to the workspace, which has no document to change to.
@@ -28,32 +27,17 @@ type OrganizeLayersProps = {
     viewer's own dialogs: here an apply sets the plan's option, undoably. */
 export function OrganizeLayers({ active, busy, organize }: OrganizeLayersProps) {
   const { t } = useTranslation()
-  const { changeOptions, isBusyNow, pages, plan } = organize
+  const { pages, plan, setLayers } = organize
   const pageCount = pages.length
   const disabled = busy || pageCount === 0
 
-  // Refused while an add or a save runs, which the plan's own edits refuse too.
   const setWatermark = useCallback(
-    async (config: WatermarkConfig | null): Promise<PdfLayerOutcome> => {
-      if (isBusyNow()) {
-        return "failed"
-      }
-
-      changeOptions({ watermark: config })
-      return "applied"
-    },
-    [changeOptions, isBusyNow],
+    (config: WatermarkConfig | null) => setLayers({ watermark: config }),
+    [setLayers],
   )
   const setPageNumbers = useCallback(
-    async (config: PageNumbersConfig | null): Promise<PdfLayerOutcome> => {
-      if (isBusyNow()) {
-        return "failed"
-      }
-
-      changeOptions({ pageNumbers: config })
-      return "applied"
-    },
-    [changeOptions, isBusyNow],
+    (config: PageNumbersConfig | null) => setLayers({ pageNumbers: config }),
+    [setLayers],
   )
 
   const watermark = useWatermark({

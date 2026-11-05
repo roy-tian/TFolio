@@ -264,28 +264,27 @@ describe("plan edits", () => {
     expect(groupGap(emptied, new Set(), "after")).toBeNull()
   })
 
-  test("starts over with new files, keeping the options and numbering on", () => {
+  test("starts over with new files on the options given, numbering on", () => {
     const { plan } = setup(source(1, 2))
-    const fitted = setOptions(plan, {
-      normalizeA4: true,
+    const marked = setOptions(plan, {
       watermark: { direction: "ascending", layout: "single", text: "DRAFT", widthRatio: 0.8 },
     })
-    const restarted = restartPlan(fitted, [source(2, 1), source(3, 1)])
+    const fresh = { ...emptyPlan.options, normalizeA4: true }
+    const restarted = restartPlan(marked, [source(2, 1), source(3, 1)], fresh)
     const sources = new Map([source(2, 1), source(3, 1)].map((item) => [item.id, item]))
     const oldKeys = new Set(
-      fitted.groups.flatMap((group) => [group.id, ...group.slots.map((slot) => slot.key)]),
+      marked.groups.flatMap((group) => [group.id, ...group.slots.map((slot) => slot.key)]),
     )
 
-    expect(layout(restarted, sources)).toEqual(["2:1", "3:1"])
-    expect(restarted.options.normalizeA4).toBe(true)
+    expect(layout(restarted, sources)).toEqual(["2:1", "pad", "3:1"])
     // The mark was the old PDF's, not a choice the next one starts from.
-    expect(restarted.options.watermark).toBeNull()
+    expect(restarted.options).toBe(fresh)
     expect(
       restarted.groups
         .flatMap((group) => [group.id, ...group.slots.map((slot) => slot.key)])
         .some((key) => oldKeys.has(key)),
     ).toBe(false)
-    expect(restartPlan(fitted, []).groups).toEqual([])
+    expect(restartPlan(marked, [], fresh).groups).toEqual([])
   })
 })
 

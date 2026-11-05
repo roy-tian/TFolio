@@ -36,7 +36,9 @@ pub use compress::{
 };
 #[cfg(feature = "e2e")]
 pub use organize::save_assembled_pdf_to;
-pub use organize::{add_organize_sources, render_organize_thumbnail, save_assembled_pdf};
+pub use organize::{
+    add_organize_sources, check_organize_watermark, render_organize_thumbnail, save_assembled_pdf,
+};
 
 /// Counts work units rather than bytes: pages for owned content, and
 /// source/finishing stages for a merge.

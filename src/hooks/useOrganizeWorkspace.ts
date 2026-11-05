@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Channel, invoke } from "@tauri-apps/api/core"
 import { useTranslation } from "react-i18next"
 
 import type { NoticeChannel } from "@/hooks/useNotices"
+import { isNoteFontMissing } from "@/lib/annotationStyles"
 import { e2eOverride } from "@/lib/e2e"
+import { usesEmbeddedFont } from "@/lib/embeddedFont"
 import { workspaceOwner, type NoticeKind } from "@/lib/notices"
 import { isWordPath } from "@/lib/openSources"
 import {
@@ -34,14 +36,19 @@ import {
   type OrganizeSource,
   type OrganizeSourceInfo,
 } from "@/lib/organize"
-import { storedOrganizePreferences, storeOrganizePreferences } from "@/lib/organizePreferences"
+import {
+  storedOrganizePreferences,
+  storeOrganizePreferences,
+  type OrganizePreferences,
+} from "@/lib/organizePreferences"
 import { pageNumbersFit } from "@/lib/pageNumbers"
 import {
   exportFailureNotice,
   fileNameFromPath,
   type PdfDocumentInfo,
 } from "@/lib/pdf"
-import type { PdfProgress } from "@/lib/progress"
+import type { PdfLayerOutcome, PdfProgress } from "@/lib/progress"
+import { subscribeSettings } from "@/lib/settings"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 
 const HISTORY_LIMIT = 100
@@ -49,6 +56,17 @@ const HISTORY_LIMIT = 100
 type History = { future: OrganizePlan[]; past: OrganizePlan[] }
 
 const emptyHistory: History = { future: [], past: [] }
+
+/** Where a new arrangement starts: the reader's last choices, read afresh
+    since another window may have made them, and no layers. */
+function startingOptions(): OrganizeOptions {
+  return { ...emptyPlan.options, ...storedOrganizePreferences() }
+}
+
+type FontOffer = "noteFontFailed" | "noteFontMissing"
+
+/** The layer options a dialog sets: one PDF's, never kept as preferences. */
+export type OrganizeLayerOptions = Partial<Pick<OrganizeOptions, "pageNumbers" | "watermark">>
 
 /** Slot keys, which outlive every edit: a page copied or cut is still the one
     taken however the pages move before the paste. */
@@ -77,7 +95,7 @@ export function useOrganizeWorkspace({
   )
   const [plan, setPlan] = useState<OrganizePlan>(() => ({
     ...emptyPlan,
-    options: { ...emptyPlan.options, ...storedOrganizePreferences() },
+    options: startingOptions(),
   }))
   const [history, setHistory] = useState<History>(emptyHistory)
   // Pages or files, never both: choosing one lets go of the other, so the
@@ -93,6 +111,14 @@ export function useOrganizeWorkspace({
   const [assembling, setAssembling] = useState(false)
   const [progress, setProgress] = useState<PdfProgress | null>(null)
   const [stopping, setStopping] = useState(false)
+  const [fontOffer, setFontOffer] = useState<FontOffer | null>(null)
+  const [fetchingFont, setFetchingFont] = useState(false)
+  const fetchingFontRef = useRef(false)
+  // Which offer a fetch in flight answers: one dismissed meanwhile stays gone.
+  const fontOfferRef = useRef(0)
+  // Bumped by each new arrangement, so a mark checked for the old one is not
+  // put on the files that replaced it.
+  const restartsRef = useRef(0)
   // What the handlers read: an add or an edit lands before the render that
   // would refresh a captured value. Written outside any updater, since
   // StrictMode runs an updater twice and a step taken inside would be twice.
@@ -125,6 +151,11 @@ export function useOrganizeWorkspace({
     if (next.size > 0) {
       setPageSelection(NO_KEYS)
     }
+  }, [])
+
+  const offerFont = useCallback((next: FontOffer | null) => {
+    fontOfferRef.current += 1
+    setFontOffer(next)
   }, [])
 
   const clearChoices = useCallback(() => {
@@ -312,6 +343,7 @@ export function useOrganizeWorkspace({
       const { future, past } = historyRef.current
       const kept = past.length > 0 || future.length > 0
 
+      restartsRef.current += 1
       baselineRef.current = next
       baselineKeyRef.current = key
       clearChoices()
@@ -329,14 +361,16 @@ export function useOrganizeWorkspace({
   /** Shows `path` alone as untouched, `key` naming what was read. */
   const fill = useCallback(
     (path: string, key: string | null) =>
-      load([path], (added) => showUntouched(restartPlan(planRef.current, added), key)),
+      load([path], (added) =>
+        showUntouched(restartPlan(planRef.current, added, startingOptions()), key),
+      ),
     [load, showUntouched],
   )
 
   /** Empties an untouched workspace: what it holds is not the file now shown. */
   const clearUntouched = useCallback(() => {
     if (!busyRef.current && planRef.current.groups.length > 0 && isUntouchedNow()) {
-      showUntouched(restartPlan(planRef.current, []), null)
+      showUntouched(restartPlan(planRef.current, [], startingOptions()), null)
     }
   }, [isUntouchedNow, showUntouched])
 
@@ -350,9 +384,10 @@ export function useOrganizeWorkspace({
       }
 
       await load(paths.slice(0, ORGANIZE_MAX_FILES), (added) => {
+        restartsRef.current += 1
         clearChoices()
         setClipboard(null)
-        commit(restartPlan(planRef.current, added))
+        commit(restartPlan(planRef.current, added, startingOptions()))
       })
     },
     [clearChoices, commit, load, raise],
@@ -462,6 +497,13 @@ export function useOrganizeWorkspace({
         onAssembled(document)
       }
     } catch (error) {
+      // The face could have gone since the mark was checked; the save is
+      // the reader's to try again once one is fetched.
+      if (isNoteFontMissing(error)) {
+        offerFont("noteFontMissing")
+        return
+      }
+
       const message = String(error)
       const refusal = exportFailureNotice(error)
 
@@ -481,7 +523,7 @@ export function useOrganizeWorkspace({
       setProgress(null)
       setStopping(false)
     }
-  }, [askStop, onAssembled, raise, t])
+  }, [askStop, offerFont, onAssembled, raise, t])
 
   const stopAssembling = useCallback(() => {
     setStopping(true)
@@ -566,6 +608,116 @@ export function useOrganizeWorkspace({
     },
     [edit],
   )
+
+  /** A layer dialog's apply. Taken while busy too, as a rename is: a dialog
+      may be open as an add starts, and no add or save under way reads options
+      it did not start with. A mark no installed face can draw is refused with
+      the viewer's offer to fetch one, and the dialog stays for a retry. */
+  const setLayers = useCallback(
+    async (layers: OrganizeLayerOptions): Promise<PdfLayerOutcome> => {
+      const { watermark } = layers
+      const restarts = restartsRef.current
+
+      if (watermark && usesEmbeddedFont(watermark.text)) {
+        try {
+          await invoke("check_organize_watermark", { config: watermark })
+        } catch (error) {
+          // Any other refusal is the save's to report, where it would recur.
+          if (isNoteFontMissing(error)) {
+            offerFont("noteFontMissing")
+            return "failed"
+          }
+        }
+      }
+
+      // The arrangement it was set for is gone: nothing to apply it to.
+      if (restarts !== restartsRef.current) {
+        return "cancelled"
+      }
+
+      offerFont(null)
+      commit(setOptions(planRef.current, layers))
+      return "applied"
+    },
+    [commit, offerFont],
+  )
+
+  /** Fetches the face the offer names; the reader applies or saves again. */
+  const fetchFont = useCallback(async () => {
+    if (fetchingFontRef.current) {
+      return
+    }
+
+    const offer = fontOfferRef.current
+
+    fetchingFontRef.current = true
+    setFetchingFont(true)
+
+    try {
+      await invoke("download_pdf_note_font")
+
+      if (offer === fontOfferRef.current) {
+        setFontOffer(null)
+      }
+    } catch {
+      if (offer === fontOfferRef.current) {
+        setFontOffer("noteFontFailed")
+      }
+    } finally {
+      fetchingFontRef.current = false
+      setFetchingFont(false)
+    }
+  }, [])
+
+  const dismissFontOffer = useCallback(() => offerFont(null), [offerFont])
+
+  // A condition, not an event, as in the viewer: raised again whenever its
+  // button changes, which only updates the standing notice.
+  useEffect(() => {
+    if (fontOffer) {
+      notices.raise({
+        action: { busy: fetchingFont, kind: "noteFont" },
+        kind: fontOffer,
+        owner: workspaceOwner,
+      })
+    } else {
+      notices.retract(workspaceOwner, ["noteFontFailed", "noteFontMissing"])
+    }
+  }, [fetchingFont, fontOffer, notices])
+
+  // An empty workspace shows what the next arrangement starts from, so it
+  // follows a choice another window makes; not an edit, so no undo step. Only
+  // the choices that changed: any other write must not override an undo.
+  useEffect(() => {
+    let read = storedOrganizePreferences()
+
+    return subscribeSettings(() => {
+      const previous = read
+      const current = planRef.current
+
+      read = storedOrganizePreferences()
+
+      if (current.groups.length > 0) {
+        return
+      }
+
+      const changed = Object.fromEntries(
+        Object.entries(read).filter(
+          ([name, value]) => previous[name as keyof OrganizePreferences] !== value,
+        ),
+      )
+      const next = setOptions(current, changed)
+
+      if (next !== current) {
+        if (baselineRef.current === current) {
+          baselineRef.current = next
+        }
+
+        planRef.current = next
+        setPlan(next)
+      }
+    })
+  }, [])
 
   /** Before the first chosen page, or after the last; with nothing chosen,
       at the end of the last file. */
@@ -732,6 +884,8 @@ export function useOrganizeWorkspace({
       copySelection,
       cut,
       cutSelection,
+      dismissFontOffer,
+      fetchFont,
       fileSelection,
       fill,
       filledKeyNow,
@@ -758,6 +912,7 @@ export function useOrganizeWorkspace({
       selectAll,
       selection,
       setFileSelection,
+      setLayers,
       setSelection,
       sources,
       startOver,
@@ -781,6 +936,8 @@ export function useOrganizeWorkspace({
       copySelection,
       cut,
       cutSelection,
+      dismissFontOffer,
+      fetchFont,
       fileSelection,
       fill,
       filledKeyNow,
@@ -808,6 +965,7 @@ export function useOrganizeWorkspace({
       selectAll,
       selection,
       setFileSelection,
+      setLayers,
       setSelection,
       sources,
       startOver,

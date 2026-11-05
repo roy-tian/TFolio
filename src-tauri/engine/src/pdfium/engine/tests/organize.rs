@@ -429,6 +429,23 @@ fn an_assembly_stamps_its_layers_as_content_its_file_keeps() {
 
 #[test]
 #[ignore = "requires `bun run fonts:download`"]
+fn a_watermark_is_checked_before_any_document_needs_it() {
+    let engine = test_engine();
+
+    engine
+        .check_watermark(watermark_config("DRAFT"))
+        .expect("a Latin mark needs no embedded face");
+    engine
+        .check_watermark(watermark_config("草稿"))
+        .expect("an installed or fetched face draws CJK");
+    assert!(
+        engine.check_watermark(watermark_config("  ")).is_err(),
+        "a blank mark is refused before any assembly"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
 fn an_assembly_stopped_while_stamping_hands_back_nothing() {
     let _organize = organize_test_guard();
     let engine = test_engine();

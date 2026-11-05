@@ -329,6 +329,13 @@ impl PdfiumEngine {
         Ok(true)
     }
 
+    /// Whether `config` can be drawn here, ahead of the document it is for: the
+    /// organize workspace keeps a mark for a PDF it has yet to make. Refuses as
+    /// an apply would, a face missing with the wire value the offer matches.
+    pub fn check_watermark(&self, config: WatermarkConfig) -> Result<(), String> {
+        self.watermark_resources(&config.validated()?).map(|_| ())
+    }
+
     /// Stamps layers on a document nobody holds yet, an assembly's, as content
     /// of its own rather than this session's: the file written from it reads
     /// as an open of that file would, saved over without refusal. Resources

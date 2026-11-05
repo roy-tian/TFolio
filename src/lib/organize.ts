@@ -416,12 +416,14 @@ export function addSources(
   }
 }
 
-/** `added` as the whole list. Keys go on from `plan`'s, never reused: the
-    plan replaced may still be an undo away, and a key names one page. The
-    layers belonged to the PDF that plan made, so they stay with it. */
-export function restartPlan(plan: OrganizePlan, added: OrganizeSource[]): OrganizePlan {
-  const options = { ...plan.options, pageNumbers: null, watermark: null }
-
+/** `added` as the whole list, on the options a new arrangement starts from:
+    the old one's were its own PDF's. Keys go on from `plan`'s, never reused:
+    the plan replaced may still be an undo away, and a key names one page. */
+export function restartPlan(
+  plan: OrganizePlan,
+  added: OrganizeSource[],
+  options: OrganizeOptions,
+): OrganizePlan {
   return addSources({ groups: [], nextKey: plan.nextKey, options }, added)
 }
 

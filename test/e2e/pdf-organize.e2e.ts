@@ -1083,6 +1083,29 @@ describe("TFolio organize workspace", () => {
     await expect(toggle("bookmarks")).toHaveAttribute("aria-pressed", "false")
   })
 
+  it("follows another window's choices while empty, as no undo step", async () => {
+    await $("button[aria-label='Organize pages']").click()
+    await $(`${workspace} [data-slot='organize-empty-add']`).waitForDisplayed()
+    const a4 = $(`${workspace} [data-slot='organize-normalize-a4']`)
+    await expect(a4).toHaveAttribute("aria-pressed", "false")
+
+    // What another window's write announces: the whole settings document.
+    await browser.execute(() => {
+      const tauri = (
+        window as Window & {
+          __TAURI__?: { event: { emit: (name: string, payload?: unknown) => Promise<void> } }
+        }
+      ).__TAURI__
+
+      void tauri?.event.emit("settings://changed", {
+        organize: { normalizeA4: true },
+        ui: { language: "en", viewMode: "single" },
+      })
+    })
+    await expect(a4).toHaveAttribute("aria-pressed", "true")
+    await expect($(`${workspace} button[aria-label='Undo']`)).toBeDisabled()
+  })
+
   it("adds the files dropped on it rather than opening them", async () => {
     await organizeWith([portrait()])
     await emitDrag("drag-drop", { x: 600, y: 400 }, [landscape()])
