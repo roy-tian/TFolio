@@ -404,6 +404,12 @@ export function addSources(
   }
 }
 
+/** `added` as the whole list. Keys go on from `plan`'s, never reused: the
+    plan replaced may still be an undo away, and a key names one page. */
+export function restartPlan(plan: OrganizePlan, added: OrganizeSource[]): OrganizePlan {
+  return addSources({ groups: [], nextKey: plan.nextKey, options: plan.options }, added)
+}
+
 export function removeGroups(plan: OrganizePlan, groupIds: ReadonlySet<number>): OrganizePlan {
   return withGroups(
     plan,

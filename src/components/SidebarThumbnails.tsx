@@ -7,6 +7,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react"
+import { Layers } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
@@ -24,6 +25,7 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { useNearViewport } from "@/hooks/useNearViewport"
+import { usePagesDrop } from "@/hooks/usePagesDrop"
 import type { RenderEpochs } from "@/lib/annotations"
 import { columnLanding, exceedsDragThreshold, orderWithBlockAt } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
@@ -431,7 +433,7 @@ export function SidebarThumbnails({
   }
 
   return (
-    <div className="relative h-full">
+    <div className="relative h-full" data-sidebar-pages>
       <ContextMenu
         onOpenChange={(open) => {
           if (!open) {
@@ -554,6 +556,37 @@ export function SidebarThumbnails({
         ) : null}
       </ContextMenu>
       <OverlayScrollbars viewportRef={listRef} />
+      <PagesDropTarget />
+    </div>
+  )
+}
+
+/** Shown over the column while a file drag offers it; a drop there combines
+    the files with this one in the organize workspace. */
+function PagesDropTarget() {
+  const { t } = useTranslation()
+  const drop = usePagesDrop()
+
+  if (!drop) {
+    return null
+  }
+
+  return (
+    <div
+      className={cn(
+        "pointer-events-none absolute inset-2 z-10 grid place-items-center rounded-xl border-2 border-dashed p-3 text-center backdrop-blur-sm",
+        drop === "over"
+          ? "border-primary/70 bg-background/90"
+          : "border-muted-foreground/40 bg-background/75 text-muted-foreground",
+      )}
+      data-over={drop === "over" ? "" : undefined}
+      data-testid="sidebar-pages-drop"
+    >
+      <div className="flex flex-col items-center">
+        <Layers className="mb-3 size-8" />
+        <p className="text-sm font-semibold">{t("organize.mergeDropNow")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t("organize.mergeDropHint")}</p>
+      </div>
     </div>
   )
 }

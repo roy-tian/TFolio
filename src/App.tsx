@@ -15,6 +15,7 @@ import {
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { NoticeCenter } from "@/components/NoticeCenter"
+import { OrganizeFillPrompt } from "@/components/OrganizeFillPrompt"
 import { OrganizeWorkspace } from "@/components/OrganizeWorkspace"
 import {
   SettingsDialog,
@@ -34,7 +35,9 @@ import {
 } from "@/components/ui/alert-dialog"
 import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
+import { useOrganizeFill, type FillTab } from "@/hooks/useOrganizeFill"
 import { useOrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
+import { PagesDropContext, type PagesDrop } from "@/hooks/usePagesDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import {
   WorkspaceModeContext,
@@ -42,6 +45,7 @@ import {
 } from "@/hooks/useWorkspaceMode"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
+import { dropPointInCss, overSidebarPages, sidebarPagesShown } from "@/lib/fileDrop"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
@@ -65,7 +69,8 @@ import {
   fileNameFromPath,
   type PdfDocumentInfo,
 } from "@/lib/pdf"
-import { isMacOS } from "@/lib/platform"
+import { isMacOS, isWindows } from "@/lib/platform"
+import { cn } from "@/lib/utils"
 import {
   classifyOpenSource,
   isSourcePath,
@@ -101,6 +106,9 @@ import { unsavedWorkElsewhere } from "@/lib/unsavedWork"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 
 type OpenTab = {
+  /** The image or Word document a converted tab was made from: what the
+      organize workspace reads for it while it has no file of its own. */
+  convertedFrom?: string
   dirty: boolean
   document: PdfDocumentInfo
   id: number
@@ -206,6 +214,7 @@ export default function App() {
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [pagesDrop, setPagesDrop] = useState<PagesDrop>(null)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
   // What the prompt keeps showing while it fades out after an answer.
   const [shownClose, setShownClose] = useState<PendingClose | null>(null)
@@ -215,6 +224,9 @@ export default function App() {
   const { channel: notices, notices: raisedNotices } = useNotices()
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
+  // Per tab, moved on by each save that may have rewritten its file: the
+  // organize workspace reads a file again once its revision has moved.
+  const fileRevisionsRef = useRef(new Map<number, number>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
   const openBatchesRef = useRef(0)
   const choosingFileRef = useRef(false)
@@ -470,6 +482,7 @@ export default function App() {
               }
 
               const tab: OpenTab = {
+                convertedFrom: path,
                 dirty: false,
                 document,
                 id: document.id,
@@ -679,6 +692,32 @@ export default function App() {
   useEffect(() => {
     organizeRef.current = organize
   }, [organize])
+
+  const findFillTab = useCallback(
+    (id: number): FillTab | null => tabsRef.current.find((tab) => tab.id === id) ?? null,
+    [],
+  )
+  const activeFillTab = useCallback(() => {
+    const id = activeIdRef.current
+
+    return id === HOME_TAB_ID ? null : findFillTab(id)
+  }, [findFillTab])
+  const fileRevision = useCallback(
+    (id: number) => fileRevisionsRef.current.get(id) ?? 0,
+    [],
+  )
+  const sessionHandle = useCallback((id: number) => sessionRefs.current.get(id), [])
+  const organizeFill = useOrganizeFill({
+    activeTab: activeFillTab,
+    findTab: findFillTab,
+    modeRef: workspaceModeRef,
+    notices,
+    organize: organizeRef,
+    revision: fileRevision,
+    session: sessionHandle,
+    setMode: setWorkspaceMode,
+  })
+  const { canMergeDrop, enterOrganize, mergeDrop } = organizeFill
   const hasUnsavedWorkNow = useCallback(
     () =>
       organizeRef.current.hasUnsavedWorkNow() ||
@@ -1281,6 +1320,14 @@ export default function App() {
 
   const updateDirty = useCallback(
     (documentId: number, dirty: boolean) => {
+      // An undo back to the saved state also clears the flag; reading the
+      // unchanged file again costs only time.
+      if (!dirty && tabsRef.current.some((tab) => tab.id === documentId && tab.dirty)) {
+        const revisions = fileRevisionsRef.current
+
+        revisions.set(documentId, (revisions.get(documentId) ?? 0) + 1)
+      }
+
       replaceTabs((current) => {
         const tab = current.find((item) => item.id === documentId)
 
@@ -1628,6 +1675,18 @@ export default function App() {
     // The OS reports drags of anything at all, and one naming no file has
     // nothing to open: left alone rather than met with a drop target and an error.
     let namesNoFile = false
+    const windows = isWindows()
+    // The viewer's sidebar pages are a target of their own while the shown tab
+    // has a file to combine the dropped ones with.
+    const pagesDropAt = (position: { x: number; y: number }): PagesDrop => {
+      if (workspaceModeRef.current !== "view" || !canMergeDrop() || !sidebarPagesShown()) {
+        return null
+      }
+
+      return overSidebarPages(dropPointInCss(position, windows, window.devicePixelRatio))
+        ? "over"
+        : "offered"
+    }
 
     void getCurrentWebview()
       .onDragDropEvent((event) => {
@@ -1639,17 +1698,21 @@ export default function App() {
         ) {
           namesNoFile = false
           setIsDragging(false)
+          setPagesDrop(null)
           return
         }
 
         if (event.payload.type === "drop") {
           namesNoFile = false
           setIsDragging(false)
+          setPagesDrop(null)
 
           // The organize workspace takes every drop while it shows; anything
-          // else opens as tabs.
+          // else opens as tabs, unless it lands on the sidebar's pages.
           if (workspaceModeRef.current === "organize") {
             organizeDrop(event.payload.paths)
+          } else if (pagesDropAt(event.payload.position) === "over") {
+            void mergeDrop(event.payload.paths)
           } else {
             void openPaths(event.payload.paths, "first")
           }
@@ -1664,6 +1727,7 @@ export default function App() {
 
         if (!namesNoFile) {
           setIsDragging(true)
+          setPagesDrop(pagesDropAt(event.payload.position))
         }
       })
       .then((stop) => {
@@ -1678,7 +1742,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [openPaths, organizeDrop])
+  }, [canMergeDrop, mergeDrop, openPaths, organizeDrop])
 
   // A double-clicked file reaches the app before this workspace exists, so
   // Rust holds it: the event carries no paths, only that a take will find some.
@@ -2032,9 +2096,14 @@ export default function App() {
   }, [homeActive, refreshRecentFiles])
 
   const viewing = workspaceMode === "view"
+  // The reader's own switch to organize may bring the shown tab's file along.
   const workspaceModeState = useMemo(
-    () => ({ mode: workspaceMode, setMode: setWorkspaceMode }),
-    [setWorkspaceMode, workspaceMode],
+    () => ({
+      mode: workspaceMode,
+      setMode: (mode: WorkspaceMode) =>
+        mode === "organize" ? void enterOrganize() : setWorkspaceMode(mode),
+    }),
+    [enterOrganize, setWorkspaceMode, workspaceMode],
   )
 
   const workspace = (
@@ -2144,7 +2213,17 @@ export default function App() {
 
       {isDragging ? (
         <div
-          className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] right-3 bottom-3 left-[calc(var(--sidebar-inset)+0.75rem)] z-60 grid place-items-center rounded-2xl border-2 border-dashed border-primary/60 bg-background/90 backdrop-blur-sm"
+          className={cn(
+            "pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] right-3 bottom-3 z-60 grid place-items-center rounded-2xl border-2 border-dashed backdrop-blur-sm",
+            // Clear of the sidebar, docked or not, while its pages are a
+            // target of their own.
+            pagesDrop
+              ? "left-[calc(var(--sidebar-width)+0.75rem)]"
+              : "left-[calc(var(--sidebar-inset)+0.75rem)]",
+            pagesDrop === "over"
+              ? "border-muted-foreground/30 bg-background/75 text-muted-foreground"
+              : "border-primary/60 bg-background/90",
+          )}
           data-testid="workspace-file-drop"
         >
           <div className="flex flex-col items-center text-center">
@@ -2158,6 +2237,12 @@ export default function App() {
           </div>
         </div>
       ) : null}
+
+      <OrganizeFillPrompt
+        onAnswer={organizeFill.answer}
+        open={organizeFill.promptOpen}
+        prompt={organizeFill.prompt}
+      />
 
       <NoticeCenter
         activeDocumentId={activeId === HOME_TAB_ID || !viewing ? null : activeId}
@@ -2241,7 +2326,9 @@ export default function App() {
     <AppUpdateContext.Provider value={appUpdate}>
       <SidebarContext.Provider value={sidebar}>
         <WorkspaceModeContext.Provider value={workspaceModeState}>
-          {workspace}
+          <PagesDropContext.Provider value={pagesDrop}>
+            {workspace}
+          </PagesDropContext.Provider>
         </WorkspaceModeContext.Provider>
       </SidebarContext.Provider>
     </AppUpdateContext.Provider>

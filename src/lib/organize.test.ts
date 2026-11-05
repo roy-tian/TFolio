@@ -14,6 +14,7 @@ import {
   outputPages,
   removeGroups,
   renameGroup,
+  restartPlan,
   rotateSlots,
   setOptions,
   slotGap,
@@ -201,6 +202,25 @@ describe("plan edits", () => {
     expect(
       layout(removeGroups(plan, new Set([plan.groups[1]!.id])), sources),
     ).toEqual(["1:1", "3:1"])
+  })
+
+  test("starts over with new files, keeping the options and numbering on", () => {
+    const { plan } = setup(source(1, 2))
+    const fitted = setOptions(plan, { normalizeA4: true })
+    const restarted = restartPlan(fitted, [source(2, 1), source(3, 1)])
+    const sources = new Map([source(2, 1), source(3, 1)].map((item) => [item.id, item]))
+    const oldKeys = new Set(
+      fitted.groups.flatMap((group) => [group.id, ...group.slots.map((slot) => slot.key)]),
+    )
+
+    expect(layout(restarted, sources)).toEqual(["2:1", "3:1"])
+    expect(restarted.options.normalizeA4).toBe(true)
+    expect(
+      restarted.groups
+        .flatMap((group) => [group.id, ...group.slots.map((slot) => slot.key)])
+        .some((key) => oldKeys.has(key)),
+    ).toBe(false)
+    expect(restartPlan(fitted, []).groups).toEqual([])
   })
 })
 

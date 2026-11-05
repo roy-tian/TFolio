@@ -108,6 +108,8 @@
   in a byte-budgeted LRU, and are released on window destruction and page reload up to the id
   cutoff taken at release, so a reloaded page keeps the sources it has added since.
 - A source whose fingerprint (mtime and size) changed blocks assembly until removed or re-added.
+- A viewer tab enters organize as its file on disk, never its document: ask about unsaved changes
+  first. A fill the reader has not touched is not unsaved work and may be replaced without asking.
 - Every assembled PDF is recorded through `record_document`. Preview leaves it a sourceless
   in-memory document whose first export adopts the destination. Save as PDF asks for the
   destination through Rust's own dialog before assembling, then writes and binds it like Save As

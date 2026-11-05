@@ -21,6 +21,7 @@ import {
   outputPages,
   removeGroups,
   renameGroup,
+  restartPlan,
   rotateSlots,
   setOptions,
   slotGap,
@@ -91,6 +92,10 @@ export function useOrganizeWorkspace({
   const choosingRef = useRef(false)
   // The plan as last assembled: work is unsaved only while the plan differs.
   const assembledRef = useRef<OrganizePlan | null>(null)
+  // The plan a fill from the viewer's tab left, and what it read: the reader
+  // has changed nothing while the plan is still this one.
+  const baselineRef = useRef<OrganizePlan>(emptyPlan)
+  const baselineKeyRef = useRef<string | null>(null)
   // A Stop pressed before the backend has listed the assembly finds nothing
   // to stop, so each progress report asks again until one listens.
   const stopOwedRef = useRef(false)
@@ -146,24 +151,9 @@ export function useOrganizeWorkspace({
     [notices],
   )
 
-  /** `index` is where the new files go on the list, its end by default. A
-      file already on the list is not added again: a second drop of the same
-      file is far likelier a slip than a wish for its pages twice. */
-  const addPaths = useCallback(
-    async (offered: string[], index?: number) => {
-      const listed = new Set(
-        planRef.current.groups.map(
-          (group) => sourcesRef.current.get(group.originSourceId)?.path,
-        ),
-      )
-      const fresh = [...new Set(offered)].filter((path) => !listed.has(path))
-      const room = Math.max(0, ORGANIZE_MAX_FILES - planRef.current.groups.length)
-      const paths = fresh.slice(0, room)
-
-      if (fresh.length > room) {
-        raise("organizeTooManyFiles")
-      }
-
+  /** Reads `paths` as sources and hands `place` those it could read. */
+  const load = useCallback(
+    async (paths: string[], place: (added: OrganizeSource[]) => void) => {
       if (paths.length === 0 || busyRef.current) {
         return
       }
@@ -198,7 +188,7 @@ export function useOrganizeWorkspace({
 
           sourcesRef.current = next
           setSources(next)
-          commit(addSources(planRef.current, added, index))
+          place(added)
         }
 
         if (refused.length > 0) {
@@ -226,7 +216,106 @@ export function useOrganizeWorkspace({
         }
       }
     },
-    [commit, notices, raise],
+    [notices, raise],
+  )
+
+  /** `index` is where the new files go on the list, its end by default. A
+      file already on the list is not added again: a second drop of the same
+      file is far likelier a slip than a wish for its pages twice. */
+  const addPaths = useCallback(
+    async (offered: string[], index?: number) => {
+      const listed = new Set(
+        planRef.current.groups.map(
+          (group) => sourcesRef.current.get(group.originSourceId)?.path,
+        ),
+      )
+      const fresh = [...new Set(offered)].filter((path) => !listed.has(path))
+      const room = Math.max(0, ORGANIZE_MAX_FILES - planRef.current.groups.length)
+
+      if (fresh.length > room) {
+        raise("organizeTooManyFiles")
+      }
+
+      await load(fresh.slice(0, room), (added) =>
+        commit(addSources(planRef.current, added, index)),
+      )
+    },
+    [commit, load, raise],
+  )
+
+  /** Untouched is empty, or just as a fill left it: nothing the reader did is
+      there to lose, so another file may take its place. A redo stack is the
+      reader's own work an undo stepped back from, which a fill would drop. */
+  const isUntouchedNow = useCallback(
+    () =>
+      historyRef.current.future.length === 0 &&
+      (planRef.current.groups.length === 0 || planRef.current === baselineRef.current),
+    [],
+  )
+
+  /** An add or assembly under way, which refuses any other change. */
+  const isBusyNow = useCallback(() => busyRef.current, [])
+
+  /** What the shown fill was read from, while the reader has left it alone. */
+  const filledKeyNow = useCallback(
+    () =>
+      planRef.current.groups.length > 0 && planRef.current === baselineRef.current
+        ? baselineKeyRef.current
+        : null,
+    [],
+  )
+
+  /** A fill is the workspace's starting point, not an edit: it takes no undo
+      step unless an undo history stands, which it must not wipe. */
+  const showUntouched = useCallback(
+    (next: OrganizePlan, key: string | null) => {
+      const { future, past } = historyRef.current
+      const kept = past.length > 0 || future.length > 0
+
+      baselineRef.current = next
+      baselineKeyRef.current = key
+      setSelection(new Set())
+      setClipboard(null)
+      show(
+        next,
+        kept
+          ? { future: [], past: [...past, planRef.current].slice(-HISTORY_LIMIT) }
+          : emptyHistory,
+      )
+    },
+    [show],
+  )
+
+  /** Shows `path` alone as untouched, `key` naming what was read. */
+  const fill = useCallback(
+    (path: string, key: string | null) =>
+      load([path], (added) => showUntouched(restartPlan(planRef.current, added), key)),
+    [load, showUntouched],
+  )
+
+  /** Empties an untouched workspace: what it holds is not the file now shown. */
+  const clearUntouched = useCallback(() => {
+    if (!busyRef.current && planRef.current.groups.length > 0 && isUntouchedNow()) {
+      showUntouched(restartPlan(planRef.current, []), null)
+    }
+  }, [isUntouchedNow, showUntouched])
+
+  /** `paths` as the whole list, one undo away from what it held. */
+  const startOver = useCallback(
+    async (offered: string[]) => {
+      const paths = [...new Set(offered)]
+
+      if (paths.length > ORGANIZE_MAX_FILES) {
+        raise("organizeTooManyFiles")
+      }
+
+      await load(paths.slice(0, ORGANIZE_MAX_FILES), (added) => {
+        setSelection(new Set())
+        setClipboard(null)
+        commit(restartPlan(planRef.current, added))
+      })
+    },
+    [commit, load, raise],
   )
 
   // The backend's own dialog, which is also what approves the chosen paths
@@ -368,7 +457,8 @@ export function useOrganizeWorkspace({
   const hasUnsavedArrangementNow = useCallback(
     () =>
       planRef.current.groups.length > 0 &&
-      assembledRef.current !== planRef.current,
+      assembledRef.current !== planRef.current &&
+      baselineRef.current !== planRef.current,
     [],
   )
 
@@ -545,12 +635,17 @@ export function useOrganizeWorkspace({
         clipboard !== null &&
         plan.groups.some((group) => group.slots.some((slot) => clipboard.keys.has(slot.key))),
       chooseFiles,
+      clearUntouched,
       copySelection,
       cut,
       cutSelection,
+      fill,
+      filledKeyNow,
       hasUnsavedArrangementNow,
       hasUnsavedWorkNow,
       insertBlankAt,
+      isBusyNow,
+      isUntouchedNow,
       move,
       pages,
       paste,
@@ -567,6 +662,7 @@ export function useOrganizeWorkspace({
       selection,
       setSelection,
       sources,
+      startOver,
       stopAdding,
       stopAssembling,
       stopping,
@@ -581,14 +677,19 @@ export function useOrganizeWorkspace({
       cancelCut,
       changeOptions,
       chooseFiles,
+      clearUntouched,
       clipboard,
       copySelection,
       cut,
       cutSelection,
+      fill,
+      filledKeyNow,
       hasUnsavedArrangementNow,
       hasUnsavedWorkNow,
       history,
       insertBlankAt,
+      isBusyNow,
+      isUntouchedNow,
       move,
       pages,
       paste,
@@ -605,6 +706,7 @@ export function useOrganizeWorkspace({
       selection,
       setSelection,
       sources,
+      startOver,
       stopAdding,
       stopAssembling,
       stopping,

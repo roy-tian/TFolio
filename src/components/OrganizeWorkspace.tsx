@@ -6,6 +6,7 @@ import {
   FileOutput,
   FolderPlus,
   Layers,
+  LoaderCircle,
   RotateCcw,
   RotateCw,
   Scaling,
@@ -347,7 +348,17 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           data-thumbnail-scroll-root
           ref={scrollRef}
         >
-          {empty ? (
+          {empty && organize.adding ? (
+            // The first files are on their way, often one the viewer showed:
+            // the invitation to add some would read as if nothing came along.
+            <div
+              className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+              data-slot="organize-reading"
+            >
+              <LoaderCircle className="size-8 animate-spin" />
+              <p className="text-sm">{t("organize.adding")}</p>
+            </div>
+          ) : empty ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
               <Layers className="size-12 text-muted-foreground" />
               <h1 className="text-lg font-semibold">{t("organize.emptyTitle")}</h1>
