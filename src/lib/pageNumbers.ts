@@ -53,7 +53,8 @@ export const pageNumbersPositions: readonly PageNumbersPosition[] = [
 ]
 
 export const defaultPageNumbersPreferences: PageNumbersPreferences = {
-  mode: "single",
+  // `auto`; the position is where a switch to a fixed place lands.
+  mode: "duplex",
   position: "bottomCenter",
   // On by default, so numbers stay legible on dark pages without the reader
   // discovering the toggle.

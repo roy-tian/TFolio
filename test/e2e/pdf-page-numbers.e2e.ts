@@ -91,17 +91,25 @@ describe("TFolio page numbers", () => {
 
     // One control covers fixed and mirrored places, so the preview says which is
     // chosen: a single sheet for a fixed place, an odd and an even for mirrored.
+    // With no stored style it opens on the mirrored choice.
     const preview = $("[data-testid='page-numbers-preview']")
-    await $("//button[normalize-space()='Automatic']").click()
+    const automatic = $("//button[normalize-space()='Automatic']")
+    await expect(automatic).toHaveAttribute("aria-pressed", "true")
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Even pages"),
-      { timeout: 15_000, timeoutMsg: "the mirrored choice never showed a pair" },
+      { timeout: 15_000, timeoutMsg: "the default never showed a mirrored pair" },
     )
 
     await $("//button[normalize-space()='Fixed center']").click()
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Every page"),
       { timeout: 15_000, timeoutMsg: "the fixed place never went back to one sheet" },
+    )
+
+    await automatic.click()
+    await browser.waitUntil(
+      async () => (await preview.getText()).includes("Even pages"),
+      { timeout: 15_000, timeoutMsg: "the mirrored choice never showed a pair" },
     )
 
     // A backwards range holds the apply button until it is valid. The fixture
@@ -213,28 +221,29 @@ describe("TFolio page numbers", () => {
   it("replaces and explicitly removes as single history steps", async () => {
     const clean = await pagePixelFingerprint()
 
+    // The default, automatic, puts the fixture's one (odd) page at the right.
     await applyPageNumbers()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) !== clean, {
       timeout: 30_000,
     })
-    const centred = await pagePixelFingerprint()
+    const automatic = await pagePixelFingerprint()
 
     // Replace the position; the page changes but stays one owned object.
     await openPageNumbersDialog()
-    await $("//button[normalize-space()='Fixed right']").click()
+    await $("//button[normalize-space()='Fixed center']").click()
     await $("[data-testid='page-numbers-apply']").click()
     await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
       reverse: true,
       timeout: 30_000,
     })
     await browser.waitUntil(
-      async () => (await pagePixelFingerprint()) !== centred,
+      async () => (await pagePixelFingerprint()) !== automatic,
       { timeout: 30_000, timeoutMsg: "the replacement never moved the number" },
     )
 
-    // One undo returns to the centred numbers rather than removing them.
+    // One undo returns to the automatic numbers rather than removing them.
     await $("button[aria-label^='Undo']").click()
-    await browser.waitUntil(async () => (await pagePixelFingerprint()) === centred, {
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) === automatic, {
       timeout: 30_000,
       timeoutMsg: "undo did not restore the replaced position",
     })
