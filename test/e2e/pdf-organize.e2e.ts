@@ -981,6 +981,43 @@ describe("TFolio organize workspace", () => {
     )
   })
 
+  it("cuts and copies every page of the chosen files", async () => {
+    await organizeWith([portrait(), landscape()])
+    const moved = ["Page 1 of landscape", "Page 2 of landscape", "Page 3 of landscape"]
+
+    await clickFile("landscape")
+    await browser.keys(["Control", "c"])
+    await clickFile("portrait")
+    await browser.keys(["Control", "v"])
+    await waitForTotal("8 pages from 2 files")
+    expect(await slotLabels("portrait")).toEqual([
+      "Page 1 of portrait",
+      "Page 2 of portrait",
+      ...moved,
+    ])
+
+    // Cut and pasted straight back over the same file, the pages stay put.
+    await clickFile("landscape")
+    await browser.keys(["Control", "x"])
+    await browser.waitUntil(async () => (await cutLabels()).length === 3)
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await cutLabels()).length === 0)
+    expect(await slotLabels("landscape")).toEqual(moved)
+
+    await browser.keys(["Control", "x"])
+    await clickFile("portrait")
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await slotLabels("landscape")).length === 0, {
+      timeoutMsg: "the cut file's pages never left it",
+    })
+    expect(await slotLabels("portrait")).toEqual([
+      "Page 1 of portrait",
+      "Page 2 of portrait",
+      ...moved,
+      ...moved,
+    ])
+  })
+
   it("starts a file on an odd page with a blank only where it needs one", async () => {
     await organizeWith([writeScratchPdf("one.pdf", minimalPdf(1)), portrait()])
     await expect($(`${workspace} [data-organize-padding]`)).not.toBeExisting()

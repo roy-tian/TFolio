@@ -77,8 +77,7 @@ export function useOrganizeWorkspace({
   const [plan, setPlan] = useState<OrganizePlan>(emptyPlan)
   const [history, setHistory] = useState<History>(emptyHistory)
   // Pages or files, never both: choosing one lets go of the other, so the
-  // toolbar, Delete and paste act on whichever was chosen last. Cut and copy
-  // take pages alone.
+  // toolbar and the keys act on whichever was chosen last.
   const [selection, setPageSelection] = useState<ReadonlySet<number>>(() => new Set())
   // Group ids. One an edit took off the list stays here unshown, so the undo
   // bringing its file back brings it back chosen.
@@ -614,13 +613,19 @@ export function useOrganizeWorkspace({
     )
   }, [setSelection])
 
+  /** The chosen pages, or every page of the chosen files. */
   const take = useCallback(
     (mode: OrganizeClipboard["mode"]) => {
-      if (selection.size > 0) {
-        setClipboard({ keys: new Set(selection), mode })
+      const keys =
+        fileSelection.size > 0
+          ? groupSlotKeys(planRef.current, fileSelection)
+          : new Set(selection)
+
+      if (keys.size > 0) {
+        setClipboard({ keys, mode })
       }
     },
-    [selection],
+    [fileSelection, selection],
   )
   const cutSelection = useCallback(() => take("cut"), [take])
   const copySelection = useCallback(() => take("copy"), [take])
@@ -657,8 +662,8 @@ export function useOrganizeWorkspace({
 
   /** The keyboard's paste: before the first chosen page not itself cut, or at
       the end of the last chosen file — of the last file with nothing chosen.
-      Pages cut and still the only ones chosen stay where they are: a cut
-      followed straight by a paste moves nothing. */
+      Pages cut and still all that is chosen, or all the chosen files hold,
+      stay where they are: a cut followed straight by a paste moves nothing. */
   const paste = useCallback(() => {
     const current = planRef.current
     const chosen = current.groups.flatMap((group) =>
@@ -668,11 +673,13 @@ export function useOrganizeWorkspace({
     )
     const anchor = chosen.find(({ key }) => !cut.has(key))
     const end = groupGap(current, fileSelection, "after")
+    const held = groupSlotKeys(current, fileSelection)
+    const heldAllCut = held.size > 0 && [...held].every((key) => cut.has(key))
     const last = current.groups.at(-1)
 
     if (anchor) {
       pasteInto(anchor.group, anchor.index)
-    } else if (chosen.length > 0) {
+    } else if (chosen.length > 0 || heldAllCut) {
       setClipboard(null)
     } else if (end) {
       pasteInto(end.group, end.index)

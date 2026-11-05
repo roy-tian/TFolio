@@ -107,10 +107,10 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
         }
 
         organize.cancelCut()
-      } else if (primary && event.key.toLowerCase() === "x" && chosen.size > 0) {
+      } else if (primary && event.key.toLowerCase() === "x" && !nothingChosen) {
         event.preventDefault()
         organize.cutSelection()
-      } else if (primary && event.key.toLowerCase() === "c" && chosen.size > 0) {
+      } else if (primary && event.key.toLowerCase() === "c" && !nothingChosen) {
         event.preventDefault()
         organize.copySelection()
       } else if (primary && event.key.toLowerCase() === "v") {
@@ -122,7 +122,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     document.addEventListener("keydown", onKey)
 
     return () => document.removeEventListener("keydown", onKey)
-  }, [active, chosen, nothingChosen, organize])
+  }, [active, nothingChosen, organize])
 
   const chooseSize = (next: number) => {
     setSize(next)
