@@ -395,6 +395,7 @@ const fr = {
     themeDark: "Sombre",
     language: "Langue",
     languageHint: "Choisissez la langue de l’interface.",
+    languageSystem: "Automatique (comme le système)",
     close: "Fermer",
   },
   viewer: {

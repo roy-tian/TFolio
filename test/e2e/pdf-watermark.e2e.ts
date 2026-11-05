@@ -86,7 +86,7 @@ describe("TFolio document watermark", () => {
       )
     const ascending = await previewTransform()
 
-    await $("//button[normalize-space()='TL ↘ BR']").click()
+    await $("//button[normalize-space()='Top left ↘ bottom right']").click()
     expect(await previewTransform()).not.toBe(ascending)
     await $("//button[normalize-space()='Tiled']").click()
     await expect($("[data-testid='watermark-size']")).toHaveText(

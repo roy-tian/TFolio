@@ -377,6 +377,7 @@ const zhCN = {
     themeDark: "暗黑",
     language: "语言",
     languageHint: "选择界面显示语言。",
+    languageSystem: "自动（与系统一致）",
     close: "关闭",
   },
   viewer: {

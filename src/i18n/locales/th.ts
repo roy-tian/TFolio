@@ -394,6 +394,7 @@ const th = {
     themeDark: "มืด",
     language: "ภาษา",
     languageHint: "เลือกภาษาของอินเทอร์เฟซ",
+    languageSystem: "อัตโนมัติ (ตามระบบ)",
     close: "ปิด",
   },
   viewer: {

@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test"
 
 import {
   defaultLanguage,
+  resolveLanguagePreference,
   resolveSupportedLanguage,
-  selectPreferredLanguage,
+  selectSystemLanguage,
+  systemLanguage,
 } from "./config"
 
 describe("resolveSupportedLanguage", () => {
@@ -37,22 +39,26 @@ describe("resolveSupportedLanguage", () => {
   )
 })
 
-describe("selectPreferredLanguage", () => {
-  test("prefers a saved selection over system languages", () => {
-    expect(selectPreferredLanguage("en", ["zh-CN"])).toBe("en")
+describe("resolveLanguagePreference", () => {
+  test("keeps a chosen language", () => {
+    expect(resolveLanguagePreference("en")).toBe("en")
+    expect(resolveLanguagePreference("zh")).toBe("zh-CN")
   })
 
+  test.each([undefined, null, 3, "", "invalid", systemLanguage])(
+    "follows the system for %s",
+    (stored) => {
+      expect(resolveLanguagePreference(stored)).toBe(systemLanguage)
+    },
+  )
+})
+
+describe("selectSystemLanguage", () => {
   test("uses the first supported system language", () => {
-    expect(selectPreferredLanguage(null, ["pt-BR", "de-CH", "zh-CN"])).toBe(
-      "de",
-    )
-  })
-
-  test("ignores an invalid saved value", () => {
-    expect(selectPreferredLanguage("invalid", ["zh-TW"])).toBe("zh-TW")
+    expect(selectSystemLanguage(["pt-BR", "de-CH", "zh-CN"])).toBe("de")
   })
 
   test("falls back when no candidate is supported", () => {
-    expect(selectPreferredLanguage(null, ["pt-BR"])).toBe(defaultLanguage)
+    expect(selectSystemLanguage(["pt-BR"])).toBe(defaultLanguage)
   })
 })

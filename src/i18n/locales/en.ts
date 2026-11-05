@@ -309,8 +309,8 @@ const en = {
     size: "Text size",
     sizeHint: "A share of the page width, measured corner to corner.",
     direction: "Direction",
-    directionAscending: "BL ↗ TR",
-    directionDescending: "TL ↘ BR",
+    directionAscending: "Bottom left ↗ top right",
+    directionDescending: "Top left ↘ bottom right",
     layout: "Repeat",
     layoutSingle: "Once",
     layoutZebra: "Tiled",
@@ -393,6 +393,7 @@ const en = {
     themeDark: "Dark",
     language: "Language",
     languageHint: "Choose the interface language.",
+    languageSystem: "Automatic (same as system)",
     close: "Close",
   },
   viewer: {

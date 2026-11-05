@@ -396,6 +396,7 @@ const de = {
     themeDark: "Dunkel",
     language: "Sprache",
     languageHint: "Wählen Sie die Sprache der Benutzeroberfläche.",
+    languageSystem: "Automatisch (wie das System)",
     close: "Schließen",
   },
   viewer: {

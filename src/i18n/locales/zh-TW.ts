@@ -392,6 +392,7 @@ const zhTW = {
     themeDark: "深色",
     language: "語言",
     languageHint: "選擇介面語言。",
+    languageSystem: "自動（與系統一致）",
     close: "關閉",
   },
   viewer: {
