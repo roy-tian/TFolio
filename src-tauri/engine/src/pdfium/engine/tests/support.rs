@@ -47,24 +47,20 @@ pub(super) fn rotated_text_pdf() -> Vec<u8> {
 }
 
 // `Pdfium::new` runs once per process and refuses any later bind, so share a
-// single leaked pair across the (otherwise independent) test engines.
-pub(super) fn test_pdfium() -> (&'static Pdfium, &'static dyn PdfiumLibraryBindings) {
-    static PDFIUM: std::sync::OnceLock<(&'static Pdfium, &'static dyn PdfiumLibraryBindings)> =
-        std::sync::OnceLock::new();
+// single leaked instance across the (otherwise independent) test engines.
+pub(super) fn test_pdfium() -> &'static Pdfium {
+    static PDFIUM: std::sync::OnceLock<&'static Pdfium> = std::sync::OnceLock::new();
 
-    *PDFIUM.get_or_init(|| {
+    PDFIUM.get_or_init(|| {
         let library_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("resources")
             .join("pdfium")
             .join(PDFIUM_LIBRARY_NAME);
-        let (bindings, raw_bindings) = bind_library_twice(&library_path)
+        let bindings = Pdfium::bind_to_library(&library_path)
             .unwrap_or_else(|error| panic!("could not load {}: {error}", library_path.display()));
 
-        (
-            Box::leak(Box::new(Pdfium::new(bindings))),
-            Box::leak(raw_bindings),
-        )
+        Box::leak(Box::new(Pdfium::new(bindings)))
     })
 }
 
@@ -75,8 +71,7 @@ pub(super) fn test_engine() -> &'static PdfiumEngine {
 
     ENGINE.get_or_init(|| PdfiumEngine {
         word: crate::convert::WordConverter::nowhere(),
-        pdfium: test_pdfium().0,
-        raw_bindings: test_pdfium().1,
+        pdfium: test_pdfium(),
         documents: Mutex::new(HashMap::new()),
         commits: Mutex::new(()),
         next_document_id: AtomicU64::new(1),
@@ -344,8 +339,7 @@ pub(super) fn font_engine(
 ) -> PdfiumEngine {
     PdfiumEngine {
         word: crate::convert::WordConverter::at_directory(std::env::temp_dir()),
-        pdfium: test_pdfium().0,
-        raw_bindings: test_pdfium().1,
+        pdfium: test_pdfium(),
         documents: Mutex::new(HashMap::new()),
         commits: Mutex::new(()),
         next_document_id: AtomicU64::new(1),

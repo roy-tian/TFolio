@@ -301,8 +301,6 @@ impl Drop for OperationGuard<'_> {
 
 pub struct PdfiumEngine {
     pdfium: &'static Pdfium,
-    /// The same library bound again, for the calls pdfium-render does not wrap.
-    raw_bindings: &'static dyn PdfiumLibraryBindings,
     /// The open documents, and the lock serializing PDFium itself: it is not
     /// thread-safe, so hold this across *all* PDFium work, opening included.
     documents: Mutex<HashMap<u64, OpenDocument>>,
@@ -348,12 +346,11 @@ pub struct EnginePaths {
 
 impl PdfiumEngine {
     pub fn new(paths: EnginePaths, word_suites: WordSuites) -> Result<Self, String> {
-        let (bindings, raw_bindings) = bind_pdfium(&paths.library_candidates)?;
+        let bindings = bind_pdfium(&paths.library_candidates)?;
         let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
 
         Ok(Self {
             pdfium,
-            raw_bindings: Box::leak(raw_bindings),
             documents: Mutex::new(HashMap::new()),
             commits: Mutex::new(()),
             next_document_id: AtomicU64::new(1),
@@ -867,7 +864,7 @@ impl PdfiumEngine {
             .get(page_number - 1)
             .map_err(|error| format!("PDFium could not load page {page_number}: {error}"))?;
         let unrotated_height = unrotated_page_height(&page);
-        let runs = text_runs::page_runs(self.raw_bindings, &page).map_err(|error| {
+        let runs = text_runs::page_runs(self.pdfium.bindings(), &page).map_err(|error| {
             format!("PDFium could not read text on page {page_number}: {error}")
         })?;
         let mut spans = Vec::new();

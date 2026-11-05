@@ -238,9 +238,7 @@ impl PdfiumEngine {
             .save_to_bytes()
             .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
 
-        if let Err(error) =
-            super::page_reorder::move_pages(self.raw_bindings, &mut entry.document, &indices)
-        {
+        if let Err(error) = super::page_reorder::move_pages(&mut entry.document, &indices) {
             return Err(self.restore_document_snapshot(entry, snapshot, error));
         }
 

@@ -1,3 +1,5 @@
+use pdfium_render::prelude::PdfiumLibraryBindingsAccessor;
+
 use super::support::*;
 
 // Two pages for document search: the first occurrence crosses a visual line
@@ -57,8 +59,9 @@ fn reads_each_text_run_as_pdfium_reads_its_rect() {
         .open(fragmented_text_pdf())
         .expect("PDFium should open the fragmented fixture");
 
+    let bindings = engine.pdfium.bindings();
     let (runs, segments) = with_page(engine, document.id, 1, |page| {
-        let runs: Vec<_> = crate::pdfium::engine::text_runs::page_runs(engine.raw_bindings, page)
+        let runs: Vec<_> = crate::pdfium::engine::text_runs::page_runs(bindings, page)
             .expect("the page's text should load")
             .into_iter()
             .map(|run| {
