@@ -40,6 +40,10 @@ const es = {
     unsaved: "Cambios sin guardar",
     dropNow: "Suelta para abrir los archivos",
     dropHint: "Los PDF, imágenes y documentos de Word se abren en pestañas separadas",
+    newFromPages_one: "PDF nuevo con {{count}} página",
+    newFromPages_other: "PDF nuevo con {{count}} páginas",
+    pagesFrom: "Páginas de {{name}}",
+    extractFailed: "No se pudo crear un PDF nuevo con esas páginas.",
     unsavedTabDescription:
       "Este documento tiene cambios sin guardar. Si cierras su pestaña, se descartarán.",
     unsavedWindowDescription:
@@ -245,6 +249,8 @@ const es = {
     actionInsertBlankPage: "insertar una página en blanco",
     actionDuplicatePages_one: "pegar una página",
     actionDuplicatePages_other: "pegar {{count}} páginas",
+    actionInsertPages_one: "insertar una página",
+    actionInsertPages_other: "insertar {{count}} páginas",
     highlight: "Resaltar texto",
     highlightOptions: "Opciones de resaltado",
     highlightColor: "Color de resaltado",

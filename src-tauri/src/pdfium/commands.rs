@@ -546,6 +546,61 @@ pub async fn duplicate_pdf_pages(
     .map_err(|error| format!("PDFium page duplication task failed: {error}"))?
 }
 
+/// Nothing is read from disk, so there is no path to approve; what is checked
+/// instead is that this window holds both documents.
+#[tauri::command]
+pub async fn insert_pdf_pages_from_document(
+    document_id: u64,
+    source_document_id: u64,
+    page_numbers: Vec<i32>,
+    index: i32,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfStructureUpdate, String> {
+    // The drag crosses two tabs of one window, and documents are owned per
+    // window: neither end may be a document this window does not hold.
+    if !owners.owns(document_id, window.label()) || !owners.owns(source_document_id, window.label())
+    {
+        return Err("both documents must be open in this window".into());
+    }
+
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.insert_pages_from_document(document_id, source_document_id, &page_numbers, index)
+    })
+    .await
+    .map_err(|error| format!("PDFium insert task failed: {error}"))?
+}
+
+/// The pages a drag took to the tab strip, as a new document of this window's.
+#[tauri::command]
+pub async fn extract_pdf_pages(
+    source_document_id: u64,
+    page_numbers: Vec<i32>,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfDocumentInfo, String> {
+    if !owners.owns(source_document_id, window.label()) {
+        return Err("this window does not hold that document".into());
+    }
+
+    let engine = Arc::clone(&state.engine);
+    let page = page_generation(&window);
+
+    let document = tauri::async_runtime::spawn_blocking(move || {
+        engine.extract_pages(source_document_id, &page_numbers)
+    })
+    .await
+    .map_err(|error| format!("PDFium extract task failed: {error}"))??;
+
+    record_document(&owners, &window, page, document.id(), None);
+
+    Ok(document)
+}
+
 #[tauri::command]
 pub async fn insert_pdf_blank_page(
     document_id: u64,

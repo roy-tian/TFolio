@@ -21,6 +21,7 @@ import {
   pageNumbersConfig,
   planDeletePages,
   planDuplicatePages,
+  planInsertPages,
   planEraseAnnotation,
   planInsertBlankPage,
   planPageNumbersChange,
@@ -589,6 +590,48 @@ describe("pasting the document's own pages", () => {
     expect(commandPages(command)).toEqual([2, 3, 4, 5])
     expect(commandTextPages(command)).toEqual([2, 3, 4, 5])
     expect(movesPages(command)).toBe(true)
+  })
+})
+
+describe("taking in another document's pages", () => {
+  it("plans a copy of the source's pages, named as the source stands", () => {
+    const history = historyOf(highlight(1))
+    const planned = planInsertPages(history, 7, [5, 2, 5], 1, 3)!
+
+    expect(planned.command).toEqual({
+      index: 1,
+      kind: "insertPages",
+      pageCount: 5,
+      sourceDocumentId: 7,
+      sourcePages: [2, 5],
+      stashId: history.nextId,
+    })
+    expect(planned.history.past.at(-1)!.id).toBe(planned.command.stashId)
+  })
+
+  it("refuses a position this document does not have, and an empty block", () => {
+    expect(planInsertPages(emptyHistory, 7, [1], 0, 3)).toBeNull()
+    expect(planInsertPages(emptyHistory, 7, [1], 5, 3)).toBeNull()
+    expect(planInsertPages(emptyHistory, 7, [], 2, 3)).toBeNull()
+    expect(planInsertPages(emptyHistory, 7, [9], 4, 3)).not.toBeNull()
+  })
+
+  it("moves the pages from the gap on, and undoes by deleting its own run", () => {
+    const command = planInsertPages(emptyHistory, 7, [4, 8], 3, 3)!.command
+
+    expect(commandPages(command)).toEqual([3, 4, 5])
+    expect(commandTextPages(command)).toEqual([3, 4, 5])
+    expect(movesPages(command)).toBe(true)
+    expect(insertPagesRange(command)).toEqual([3, 4])
+  })
+
+  it("leaves its stash behind when a new branch drops it", () => {
+    const history = planInsertPages(historyOf(highlight(1)), 7, [1], 2, 2)!.history
+    const undone = undo(history)!.history
+
+    expect(droppedStashIds(undone, commit(undone, highlight(2)))).toEqual([
+      history.past[1]!.id,
+    ])
   })
 })
 

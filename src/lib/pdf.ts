@@ -129,6 +129,13 @@ export function fileNameFromPath(path: string) {
   return path.split(/[/\\]/).pop() || path
 }
 
+/** A leading dot is part of the name, as in ".profile". */
+export function fileStem(name: string) {
+  const dot = name.lastIndexOf(".")
+
+  return dot > 0 ? name.slice(0, dot) : name
+}
+
 export function dimensionsForRotation(
   rotation: number,
   width: number,

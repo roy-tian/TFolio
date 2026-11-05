@@ -2,6 +2,7 @@ import type { DocumentNotices } from "@/hooks/useNotices"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import type { usePageClipboard } from "@/hooks/usePageClipboard"
 import type { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
+import type { CarriedPages } from "@/lib/pageCarry"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { pagesToRotate } from "@/lib/pageRotation"
 import { pastePlan } from "@/lib/pageClipboard"
@@ -128,9 +129,23 @@ export function useThumbnailPageOps({
   const reorderPages = (order: number[]) =>
     editingBusy() ? Promise.resolve(false) : annotations.reorderPages(order)
 
+  /** Another tab's pages dragged in: copies, one undo step like a paste. Only
+      into an idle queue: a copy waiting behind other work would read the
+      source's pages by numbers the reader may have changed meanwhile. */
+  const insertCarriedPages = (carried: CarriedPages, index: number) =>
+    !pdfDocument || editingBusy() || annotations.hasPendingWorkNow()
+      ? null
+      : annotations.insertPages(
+          carried.sourceDocumentId,
+          carried.pages,
+          index,
+          pdfDocument.numPages,
+        )
+
   return {
     deleteThumbnailPage,
     insertBlankPage,
+    insertCarriedPages,
     menuThumbnailPage,
     pastePages,
     reorderPages,

@@ -37,6 +37,7 @@ import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
 import { useOrganizeFill, type FillTab } from "@/hooks/useOrganizeFill"
 import { useOrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
+import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
 import { PagesDropContext, type PagesDrop } from "@/hooks/usePagesDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import {
@@ -65,8 +66,10 @@ import {
   type Notice,
   type NoticeKind,
 } from "@/lib/notices"
+import type { CarriedPages } from "@/lib/pageCarry"
 import {
   fileNameFromPath,
+  fileStem,
   type PdfDocumentInfo,
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
@@ -633,6 +636,84 @@ export default function App() {
       }),
     [activateTab, notices, replaceTabs, runOpenBatch, t],
   )
+
+  // The pages a drag let go of on the strip's open space: the app's own new
+  // document, like a blank one, but holding work a close would lose.
+  const openPagesAsDocument = useCallback(
+    (carried: CarriedPages) => {
+      // At the release, not when the open queue reaches it: the page numbers
+      // name the source as it stands now, and could be stale by then.
+      const extracted = invoke<PdfDocumentInfo>("extract_pdf_pages", {
+        pageNumbers: carried.pages,
+        sourceDocumentId: carried.sourceDocumentId,
+      })
+      const sourceName = tabsRef.current.find(
+        (tab) => tab.id === carried.sourceDocumentId,
+      )?.name
+
+      // Awaited in the batch; until then a refusal is not an unhandled one.
+      void extracted.catch(() => undefined)
+
+      return runOpenBatch(async () => {
+        setWorkspaceMode("view")
+
+        try {
+          const document = await extracted
+
+          if (!mountedRef.current) {
+            void invoke("close_pdf", { documentId: document.id }).catch(
+              () => undefined,
+            )
+            return
+          }
+
+          const stem = sourceName ? fileStem(sourceName) : ""
+          const name = stem
+            ? `${t("tabs.pagesFrom", { name: stem })}.pdf`
+            : t("menu.untitled")
+          const tab: OpenTab = {
+            dirty: true,
+            document,
+            id: document.id,
+            initialSaveRequired: true,
+            name,
+            path: "",
+            saveAsDefaultName: name,
+            savable: false,
+          }
+
+          replaceTabs((current) => [...current, tab])
+          activateTab(tab.id)
+          notices.retract(workspaceOwner, openRefusals)
+        } catch {
+          notices.raise({ kind: "extractFailed", owner: workspaceOwner })
+        }
+      })
+    },
+    [activateTab, notices, replaceTabs, runOpenBatch, setWorkspaceMode, t],
+  )
+
+  // The pages are about to land in this tab's column, so its sidebar shows
+  // pages, whichever panel the window last chose. The choice is stored, so it
+  // is changed only where the tab would show bookmarks instead.
+  const carryIntoTab = useCallback(
+    (tabId: number) => {
+      const outline = tabsRef.current.find((tab) => tab.id === tabId)?.document.outline
+
+      if (sidebar.panel !== "thumbnails" && (outline?.length ?? 0) > 0) {
+        sidebar.setPanel("thumbnails")
+      }
+
+      activateTab(tabId)
+    },
+    [activateTab, sidebar],
+  )
+
+  const pageCarry = usePageCarry({
+    activeIdRef,
+    onActivate: carryIntoTab,
+    onNewDocument: openPagesAsDocument,
+  })
 
   const openNewWindow = useCallback(() => {
     void invoke("open_new_window").catch(() =>
@@ -2182,6 +2263,8 @@ export default function App() {
       <div hidden={!viewing}>
         <DocumentTabs
           activeId={activeId}
+          armedTabId={pageCarry.armedTabId}
+          newDocumentOffer={pageCarry.newDocumentOffer}
           onActivate={activateTab}
           onClose={requestCloseTab}
           onCloseAll={requestCloseAll}
@@ -2331,7 +2414,9 @@ export default function App() {
       <SidebarContext.Provider value={sidebar}>
         <WorkspaceModeContext.Provider value={workspaceModeState}>
           <PagesDropContext.Provider value={pagesDrop}>
-            {workspace}
+            <PageCarryContext.Provider value={pageCarry.carry}>
+              {workspace}
+            </PageCarryContext.Provider>
           </PagesDropContext.Provider>
         </WorkspaceModeContext.Provider>
       </SidebarContext.Provider>

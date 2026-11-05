@@ -1,5 +1,10 @@
 import { samePageNumbersConfig, type PageNumbersConfig } from "@/lib/pageNumbers"
-import { fileNameFromPath, type PdfOutlineItem, type PdfPageInfo } from "@/lib/pdf"
+import {
+  fileNameFromPath,
+  fileStem,
+  type PdfOutlineItem,
+  type PdfPageInfo,
+} from "@/lib/pdf"
 import { sameWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
 /** A4 in points, portrait. */
@@ -122,16 +127,13 @@ export function sourceFromInfo(info: OrganizeSourceInfo): OrganizeSource | null 
     return null
   }
 
-  const name = fileNameFromPath(info.path)
-  const dot = name.lastIndexOf(".")
-
   return {
     id: info.id,
     kind: info.kind,
     outline: info.outline,
     pages: info.pages,
     path: info.path,
-    title: dot > 0 ? name.slice(0, dot) : name,
+    title: fileStem(fileNameFromPath(info.path)),
   }
 }
 

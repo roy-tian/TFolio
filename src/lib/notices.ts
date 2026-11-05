@@ -62,6 +62,7 @@ export const noticeCatalogue = {
     tone: "danger",
   },
   createFailed: { life: "transient", textKey: "menu.newFailed", tone: "danger" },
+  extractFailed: { life: "transient", textKey: "tabs.extractFailed", tone: "danger" },
   exportCopyOnly: {
     life: "transient",
     textKey: "annotate.exportCopyOnly",

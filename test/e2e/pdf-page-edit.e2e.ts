@@ -12,6 +12,7 @@ import {
   refreshApp,
   seedSettings,
   sidebarPageAction,
+  textPdf,
 } from "./helpers"
 
 /** Only the active document's sidebar is laid out, and only it is what a
@@ -224,6 +225,75 @@ function dragThumbAway(from: number, over: number) {
     preview(over),
   )
 }
+
+type Point = { x: number; y: number }
+
+/** Presses a preview and carries it past the drag threshold, leaving the
+    pages in hand for the moves that follow. */
+function liftThumb(pageNumber: number) {
+  return browser.execute((selector: string) => {
+    const source = document.querySelector(selector)!
+    const box = source.getBoundingClientRect()
+    const start = { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+
+    source.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: start.x,
+        clientY: start.y,
+        isPrimary: true,
+      }),
+    )
+    document.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, clientX: start.x, clientY: start.y + 12 }),
+    )
+  }, preview(pageNumber))
+}
+
+function pointerAt(type: "pointermove" | "pointerup", point: Point) {
+  return browser.execute(
+    (kind: string, at: Point) => {
+      document.dispatchEvent(
+        new PointerEvent(kind, { bubbles: true, clientX: at.x, clientY: at.y }),
+      )
+    },
+    type,
+    point,
+  )
+}
+
+/** Just inside the top of a preview in the shown sidebar: the gap before it. */
+function abovePreview(pageNumber: number) {
+  return browser.execute((selector: string) => {
+    const box = document.querySelector(selector)!.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + 6 }
+  }, preview(pageNumber))
+}
+
+function tabPoint(name: string) {
+  return browser.execute((tabName: string) => {
+    const tab = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-document-tab]"),
+    ).find((element) => element.textContent?.includes(tabName))!
+    const box = tab.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  }, name)
+}
+
+/** The middle of the strip's open space, past the last tab and its buttons. */
+function stripSpace() {
+  return browser.execute(() => {
+    const box = document.querySelector("[data-strip-space]")!.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  })
+}
+
+const tabButton = (name: string) =>
+  $(`//button[@role='tab'][normalize-space()='${name}']`)
 
 const pageInput = () => $("input[aria-label='Page number']")
 
@@ -472,5 +542,90 @@ describe("TFolio page editing in the sidebar", () => {
     })
     await waitForThumb(1, fourth!)
     await waitForThumb(2, second!)
+  })
+})
+
+describe("TFolio pages carried to other documents", () => {
+  beforeEach(async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+  })
+
+  it("copies pages into another tab's column where they are let go", async () => {
+    await openPdfFromDisk("carry-target.pdf", textPdf(2))
+    const [targetFirst, targetSecond] = await paintedFingerprints(2)
+    await openPdfFromDisk("carry-source.pdf", bandedPdf(4))
+    const [, sourceSecond, sourceThird] = await paintedFingerprints(4)
+
+    await clickThumb(2)
+    await clickThumb(3, { ctrl: true })
+    await liftThumb(3)
+    await pointerAt("pointermove", await tabPoint("carry-target.pdf"))
+    // Resting on the tab opens it under the pages.
+    await expect(tabButton("carry-target.pdf")).toHaveAttribute("aria-selected", "true")
+
+    const gap = await abovePreview(2)
+
+    await pointerAt("pointermove", gap)
+    await $(`${activeSidebar} [data-drag-hole]`).waitForExist({
+      timeoutMsg: "the column never made room for the pages",
+    })
+    await pointerAt("pointerup", gap)
+
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the copies never landed",
+    })
+    await waitForThumb(1, targetFirst!)
+    await waitForThumb(2, sourceSecond!)
+    await waitForThumb(3, sourceThird!)
+    await waitForThumb(4, targetSecond!)
+
+    // One step in the history of the document that took them.
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the undo never took the copies back",
+    })
+
+    // The source gave copies and kept its own.
+    await tabButton("carry-source.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the source lost pages",
+    })
+  })
+
+  it("makes a new PDF of pages let go on the tab strip's open space", async () => {
+    await openPdfFromDisk("extract-source.pdf", bandedPdf(4))
+    const [first, , third] = await paintedFingerprints(4)
+
+    await clickThumb(1)
+    await clickThumb(3, { ctrl: true })
+    await liftThumb(3)
+
+    const space = await stripSpace()
+
+    await pointerAt("pointermove", space)
+    await $("[data-new-document-offer]").waitForDisplayed({
+      timeoutMsg: "the strip never offered a new PDF",
+    })
+    await pointerAt("pointerup", space)
+
+    await expect(tabButton("Pages from extract-source.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the new PDF never showed its pages",
+    })
+    await waitForThumb(1, first!)
+    await waitForThumb(2, third!)
+    // Work that exists nowhere else yet: a close asks first.
+    await expect(
+      $("button[role='tab'][aria-selected='true'] [aria-label='Unsaved changes']"),
+    ).toBeExisting()
+
+    await tabButton("extract-source.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the source lost pages",
+    })
   })
 })

@@ -771,22 +771,8 @@ impl PdfiumEngine {
             return Err(self.restore_document_snapshot(entry, snapshot, error));
         }
 
-        // Read while `page_ids` still stands as the sources were named: a copy
-        // of a page this document may not be saved over is one too.
-        let merged: Vec<bool> = sources
-            .iter()
-            .map(|source| {
-                let page_id = entry.page_ids[*source];
-
-                entry.merged_page_ids.contains(&page_id)
-                    || entry.owned_content.as_ref().is_some_and(|state| {
-                        state
-                            .per_page
-                            .get(&page_id)
-                            .is_some_and(|tail| !tail.segments.is_empty())
-                    })
-            })
-            .collect();
+        // Read while `page_ids` still stands as the sources were named.
+        let merged = copy_only_pages(entry, &sources);
 
         if let Err(error) = Self::record_inserted_pages(entry, slot, &merged) {
             return Err(self.restore_document_snapshot(entry, snapshot, error));
@@ -798,4 +784,124 @@ impl PdfiumEngine {
 
         Ok(structure_update(entry))
     }
+
+    /// The sidebar's drag onto another tab: pages copied from another open
+    /// document as the reader has it, marks and all. The source is only read,
+    /// and a redo restores the undo's stash, so it may be closed by then.
+    pub fn insert_pages_from_document(
+        &self,
+        document_id: u64,
+        source_document_id: u64,
+        page_numbers: &[i32],
+        index: i32,
+    ) -> Result<PdfStructureUpdate, String> {
+        // Within one document a drag reorders and a paste duplicates; this is
+        // also what keeps the two entries below disjoint.
+        if document_id == source_document_id {
+            return Err("a document cannot take pages from itself".into());
+        }
+
+        let mut documents = self.lock_documents()?;
+        let source_count = open_entry(&documents, source_document_id)?.page_ids.len();
+        let sources = validate_distinct_pages(page_numbers, source_count, "an insert")?;
+        let page_count = open_entry(&documents, document_id)?.page_ids.len();
+        // One past the end is a position too, exactly as a blank page's is.
+        let Some(slot) = page_index(index, page_count + 1) else {
+            return Err(format!("a page cannot go to position {index}"));
+        };
+        let [Some(entry), Some(source)] =
+            documents.get_disjoint_mut([&document_id, &source_document_id])
+        else {
+            return Err("PDF document is no longer open".into());
+        };
+        let merged = copy_only_pages(source, &sources);
+
+        // The import may fail partway; snapshot first so a failure rolls the
+        // document back whole, as every multi-page structure change does.
+        let snapshot = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+
+        if let Err(error) = entry.document.pages_mut().copy_pages_from_document(
+            &source.document,
+            &page_range_argument(&sources),
+            slot as i32,
+        ) {
+            return Err(self.restore_document_snapshot(
+                entry,
+                snapshot,
+                format!("PDFium could not insert the pages: {error}"),
+            ));
+        }
+
+        if let Err(error) = Self::record_inserted_pages(entry, slot, &merged) {
+            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        }
+
+        entry.invalidate_all_page_revisions();
+
+        Ok(structure_update(entry))
+    }
+
+    /// A new document of the chosen pages, as the reader has them, built in
+    /// memory with no file, like a blank one. Whatever a layer stamped on them
+    /// is the new document's own content, as it is in an assembled PDF.
+    pub fn extract_pages(
+        &self,
+        source_document_id: u64,
+        page_numbers: &[i32],
+    ) -> Result<PdfDocumentInfo, String> {
+        let bytes = {
+            // PDFium work like any other, so under the store's lock — given
+            // back before `open_with_source` takes it again.
+            let documents = self.lock_documents()?;
+            let source = open_entry(&documents, source_document_id)?;
+            let sources =
+                validate_distinct_pages(page_numbers, source.page_ids.len(), "a new document")?;
+            let mut document = self
+                .pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+
+            document
+                .pages_mut()
+                .copy_pages_from_document(&source.document, &page_range_argument(&sources), 0)
+                .map_err(|error| format!("PDFium could not copy the pages: {error}"))?;
+
+            let copied = document.pages().len() as usize;
+
+            if copied != sources.len() {
+                return Err(format!(
+                    "PDFium copied {copied} pages where {} were asked for",
+                    sources.len()
+                ));
+            }
+
+            document
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not build the new document: {error}"))?
+        };
+
+        self.open_with_source(bytes, None)
+    }
+}
+
+/// Which of `sources` (0-based) a copy may not be saved over a file with: a
+/// copy of a page carrying a layer this session owns, or of such a copy.
+fn copy_only_pages(entry: &OpenDocument, sources: &[usize]) -> Vec<bool> {
+    sources
+        .iter()
+        .map(|source| {
+            let page_id = entry.page_ids[*source];
+
+            entry.merged_page_ids.contains(&page_id)
+                || entry.owned_content.as_ref().is_some_and(|state| {
+                    state
+                        .per_page
+                        .get(&page_id)
+                        .is_some_and(|tail| !tail.segments.is_empty())
+                })
+        })
+        .collect()
 }

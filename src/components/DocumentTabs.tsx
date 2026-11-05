@@ -5,6 +5,7 @@ import {
   ChevronDown,
   CopyX,
   ExternalLink,
+  FilePlus2,
   FolderOpen,
   House,
   LoaderCircle,
@@ -40,6 +41,7 @@ import {
   type OtherTabs,
   type TabId,
 } from "@/lib/documentTabs"
+import { TAB_SPRING_MS } from "@/lib/pageCarry"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
@@ -55,6 +57,11 @@ const GHOST_EDGE_MARGIN = 4
 
 type DocumentTabsProps = {
   activeId: TabId
+  /** The tab carried pages are resting on, which is about to open under them
+      — see `usePageCarry`. The bar beneath counts the rest out. */
+  armedTabId: number | null
+  /** The page count a release on the strip's open space makes a new PDF of. */
+  newDocumentOffer: number | null
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
   onCloseAll: () => void
@@ -117,6 +124,8 @@ function TabDragGhost({ drag, tab }: {
 
 export function DocumentTabs({
   activeId,
+  armedTabId,
+  newDocumentOffer,
   onActivate,
   onClose,
   onCloseAll,
@@ -241,8 +250,8 @@ export function DocumentTabs({
   const homeSelected = activeId === HOME_TAB_ID
 
   return (
-    // The whole strip is the workspace's, which `data-tab-strip` is what a page
-    // drag hit-tests for: a release on it lands nothing rather than reordering.
+    // A sidebar page drag hit-tests `data-tab-strip` to carry pages off its
+    // column: resting on a tab opens it, and `data-strip-space` makes a new PDF.
     <div
       className="fixed top-(--toolbar-height) right-0 left-(--sidebar-inset) z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted px-2"
       data-tab-strip
@@ -289,6 +298,7 @@ export function DocumentTabs({
             <HintTooltipGroup>
               {tabs.map((tab, index) => {
                 const selected = tab.id === activeId
+                const armed = tab.id === armedTabId
                 // A selected tab is parted from its neighbours by its own border;
                 // between two unselected ones nothing marks where one ends.
                 const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
@@ -310,6 +320,9 @@ export function DocumentTabs({
                               : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
                             divided &&
                               "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
+                            // Held pages are over this tab: it reads as the one they are
+                            // about to be taken to, ahead of it actually opening.
+                            armed && "border-primary bg-background text-foreground",
                             drag &&
                               drag.index !== index &&
                               "transition-transform duration-200 ease-out",
@@ -362,6 +375,16 @@ export function DocumentTabs({
                         <span className="truncate">{tab.name}</span>
                       </button>
                     </HintTooltip>
+                    {/* Runs the length of the wait the tab is about to end: the
+                        dwell itself, so the bar cannot promise a different one. */}
+                    {armed ? (
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-x-1 bottom-1 h-1 origin-left animate-tab-spring rounded-full bg-primary"
+                        data-tab-spring
+                        style={{ animationDuration: `${TAB_SPRING_MS}ms` }}
+                      />
+                    ) : null}
                     <HintTooltip label={t("tabs.close", { name: tab.name })}>
                       <button
                         aria-label={t("tabs.close", { name: tab.name })}
@@ -491,9 +514,24 @@ export function DocumentTabs({
       ) : null}
 
       <div
-        className="h-full min-w-8 flex-1 self-stretch"
+        className="relative h-full min-w-8 flex-1 self-stretch"
+        data-strip-space
         data-tauri-drag-region="deep"
-      />
+      >
+        {/* Over the space it describes, never beside it: a target that pushed
+            the strip's buttons over would slide out from under the pointer. */}
+        {newDocumentOffer !== null ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-1 bottom-0.5 flex items-center justify-center gap-1.5 overflow-hidden rounded-md border-2 border-dashed border-primary/60 bg-primary/5 px-2 text-sm font-medium text-foreground"
+            data-new-document-offer
+          >
+            <FilePlus2 className="size-4 shrink-0" />
+            <span className="truncate">
+              {t("tabs.newFromPages", { count: newDocumentOffer })}
+            </span>
+          </div>
+        ) : null}
+      </div>
 
       {drag && draggedTab ? <TabDragGhost drag={drag} tab={draggedTab} /> : null}
     </div>

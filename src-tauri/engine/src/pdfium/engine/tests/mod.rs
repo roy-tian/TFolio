@@ -18,6 +18,7 @@ mod support;
 mod annotations;
 mod archive_export;
 mod compress;
+mod cross_document_pages;
 mod documents;
 mod duplicate_pages;
 mod image_dpi;

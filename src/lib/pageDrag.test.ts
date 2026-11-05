@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
 import {
+  besideColumn,
+  columnEdgeStep,
   columnLanding,
   dropGapForRow,
   exceedsDragThreshold,
@@ -11,6 +13,22 @@ import {
   orderWithBlockAt,
   wayOffsets,
 } from "@/lib/pageDrag"
+
+describe("the sidebar column's reach", () => {
+  const column = { bottom: 600, left: 0, right: 240, top: 100 }
+
+  it("keeps a pointer a little beside the column, and lets one further off go", () => {
+    expect(besideColumn(260, column)).toBe(true)
+    expect(besideColumn(300, column)).toBe(false)
+  })
+
+  it("scrolls near either edge, and only for a pointer beside the column", () => {
+    expect(columnEdgeStep({ x: 120, y: 110 }, column)).toBeLessThan(0)
+    expect(columnEdgeStep({ x: 120, y: 590 }, column)).toBeGreaterThan(0)
+    expect(columnEdgeStep({ x: 120, y: 350 }, column)).toBe(0)
+    expect(columnEdgeStep({ x: 600, y: 110 }, column)).toBe(0)
+  })
+})
 
 describe("exceedsDragThreshold", () => {
   it("keeps a wobbling click a click", () => {

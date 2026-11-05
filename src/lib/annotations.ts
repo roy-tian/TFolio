@@ -147,6 +147,22 @@ export type DuplicatePagesCommand = {
   stashId: number
 }
 
+/** The sidebar's drag onto another tab. A redo restores the undo's stash, so
+    the source may be gone by then. */
+export type InsertPagesCommand = {
+  kind: "insertPages"
+  /** 1-based position the first copy takes, from 1 to page count + 1. */
+  index: number
+  /** Pages in the document after the copies landed. */
+  pageCount: number
+  sourceDocumentId: number
+  /** Ascending 1-based page numbers, as the source document stood. */
+  sourcePages: number[]
+  /** The history entry's own id: the undo deletes the copied range under it,
+      and the redo restores exactly that stash. */
+  stashId: number
+}
+
 /** The mark-making entry is carried whole, not pointed at: an undo re-applies
     exactly that command, and every entry's undo knows its own marks by id. */
 export type EraseAnnotationCommand = {
@@ -171,6 +187,7 @@ export type AnnotationCommand =
   | DeletePagesCommand
   | InsertBlankPageCommand
   | DuplicatePagesCommand
+  | InsertPagesCommand
   | EraseAnnotationCommand
 
 /** Redoing re-runs the command and gets a fresh annotation out of PDFium, but
@@ -275,6 +292,7 @@ export function commandPageChange(
         stashId: command.stashId,
       }
     case "duplicatePages":
+    case "insertPages":
       return {
         movement: undoing
           ? departures(insertPagesRange(command), command.pageCount)
@@ -310,6 +328,7 @@ export function commandPages(command: AnnotationCommand): number[] {
       // the larger of the two shapes.
       return pagesFrom(command.index, command.pageCount)
     case "duplicatePages":
+    case "insertPages":
       // Only from the gap on — an append at the very end invalidates nothing.
       // `pageCount` spans before and after, covering the apply and the undo alike.
       return pagesFrom(command.index, command.pageCount)
@@ -330,6 +349,7 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "deletePages":
     case "insertBlankPage":
     case "duplicatePages":
+    case "insertPages":
       return true
     case "highlight":
     case "rect":
@@ -357,6 +377,7 @@ export function commandTextPages(command: AnnotationCommand): number[] {
     case "deletePages":
     case "insertBlankPage":
     case "duplicatePages":
+    case "insertPages":
       return commandPages(command)
     // A rotation moves no text: the spans keep their places in the page's own
     // space, and it is the layer drawn over them that turns.
@@ -541,7 +562,9 @@ export function planInsertBlankPage(
 
 /** The pages a copied block's undo deletes and its redo restores, valid at the
     LIFO moment the insert sits at the top of history. */
-export function insertPagesRange(command: DuplicatePagesCommand): number[] {
+export function insertPagesRange(
+  command: DuplicatePagesCommand | InsertPagesCommand,
+): number[] {
   return pageRange(command.index, command.sourcePages.length)
 }
 
@@ -563,6 +586,32 @@ export function planDuplicatePages(
     index,
     kind: "duplicatePages",
     pageCount: pageCount + pages.length,
+    sourcePages: pages,
+    stashId: history.nextId,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+/** As `planDuplicatePages`, the pages named as the source document stands. */
+export function planInsertPages(
+  history: AnnotationHistory,
+  sourceDocumentId: number,
+  sourcePages: number[],
+  index: number,
+  pageCount: number,
+) {
+  const pages = [...new Set(sourcePages)].sort((left, right) => left - right)
+
+  if (pages.length === 0 || index < 1 || index > pageCount + 1) {
+    return null
+  }
+
+  const command: InsertPagesCommand = {
+    index,
+    kind: "insertPages",
+    pageCount: pageCount + pages.length,
+    sourceDocumentId,
     sourcePages: pages,
     stashId: history.nextId,
   }
@@ -758,6 +807,7 @@ export function droppedStashIds(
     switch (entry.command.kind) {
       case "insertBlankPage":
       case "duplicatePages":
+      case "insertPages":
         return [entry.command.stashId]
       default:
         return []

@@ -40,6 +40,10 @@ const it = {
     unsaved: "Modifiche non salvate",
     dropNow: "Rilascia per aprire i file",
     dropHint: "PDF, immagini e documenti Word si aprono in schede separate",
+    newFromPages_one: "Nuovo PDF con {{count}} pagina",
+    newFromPages_other: "Nuovo PDF con {{count}} pagine",
+    pagesFrom: "Pagine da {{name}}",
+    extractFailed: "Impossibile creare un nuovo PDF con queste pagine.",
     unsavedTabDescription:
       "Questo documento contiene modifiche non salvate. Chiudendo la scheda, verranno scartate.",
     unsavedWindowDescription:
@@ -244,6 +248,8 @@ const it = {
     actionInsertBlankPage: "inserimento pagina vuota",
     actionDuplicatePages_one: "incollamento pagina",
     actionDuplicatePages_other: "incollamento di {{count}} pagine",
+    actionInsertPages_one: "inserimento pagina",
+    actionInsertPages_other: "inserimento di {{count}} pagine",
     highlight: "Evidenzia testo",
     highlightOptions: "Opzioni evidenziazione",
     highlightColor: "Colore evidenziazione",

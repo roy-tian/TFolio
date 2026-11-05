@@ -40,6 +40,10 @@ const de = {
     unsaved: "Nicht gespeicherte Änderungen",
     dropNow: "Ablegen, um Dateien zu öffnen",
     dropHint: "PDFs, Bilder und Word-Dokumente werden in eigenen Tabs geöffnet",
+    newFromPages_one: "Neues PDF aus {{count}} Seite",
+    newFromPages_other: "Neues PDF aus {{count}} Seiten",
+    pagesFrom: "Seiten aus {{name}}",
+    extractFailed: "Aus diesen Seiten konnte kein neues PDF erstellt werden.",
     unsavedTabDescription:
       "Dieses Dokument enthält nicht gespeicherte Änderungen. Wenn Sie den Tab schließen, werden sie verworfen.",
     unsavedWindowDescription:
@@ -246,6 +250,8 @@ const de = {
     // "Insert" and "paste" are both "einfügen"; the cross-tab drag names its source.
     actionDuplicatePages_one: "Seite einfügen",
     actionDuplicatePages_other: "{{count}} Seiten einfügen",
+    actionInsertPages_one: "Seite aus anderem Tab einfügen",
+    actionInsertPages_other: "{{count}} Seiten aus anderem Tab einfügen",
     highlight: "Text hervorheben",
     highlightOptions: "Hervorhebungsoptionen",
     highlightColor: "Hervorhebungsfarbe",

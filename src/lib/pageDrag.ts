@@ -11,6 +11,32 @@ export function exceedsDragThreshold(
   return Math.hypot(to.x - from.x, to.y - from.y) > DRAG_THRESHOLD
 }
 
+type Bounds = { bottom: number; left: number; right: number; top: number }
+
+// A pointer this far beside the sidebar's column has left it: nothing moves
+// there, and letting go puts the pages back.
+const COLUMN_AWAY_MARGIN = 32
+// Near this close to the column's edge, a drag scrolls it.
+const COLUMN_EDGE_BAND = 40
+const COLUMN_EDGE_STEP = 12
+
+export function besideColumn(x: number, column: Bounds): boolean {
+  return x >= column.left - COLUMN_AWAY_MARGIN && x <= column.right + COLUMN_AWAY_MARGIN
+}
+
+/** The scroll a drag beside the column asks of it this frame. */
+export function columnEdgeStep(point: { x: number; y: number }, column: Bounds): number {
+  if (!besideColumn(point.x, column)) {
+    return 0
+  }
+
+  return point.y < column.top + COLUMN_EDGE_BAND
+    ? -COLUMN_EDGE_STEP
+    : point.y > column.bottom - COLUMN_EDGE_BAND
+      ? COLUMN_EDGE_STEP
+      : 0
+}
+
 /** The gap a point falls in among stacked rows: before the first row whose
     midpoint is below it. `y` and the rows are content-space. */
 export function dropGapForRow(

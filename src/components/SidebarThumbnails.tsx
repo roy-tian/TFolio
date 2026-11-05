@@ -25,26 +25,29 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { useNearViewport } from "@/hooks/useNearViewport"
+import { CARRY_KEY, useIncomingPages } from "@/hooks/useIncomingPages"
+import { usePageCarryContext, type CarryLanding } from "@/hooks/usePageCarry"
 import { usePagesDrop } from "@/hooks/usePagesDrop"
 import type { RenderEpochs } from "@/lib/annotations"
-import { columnLanding, exceedsDragThreshold, orderWithBlockAt } from "@/lib/pageDrag"
+import { stripSpotAt, type CarriedPages } from "@/lib/pageCarry"
+import {
+  besideColumn,
+  columnEdgeStep,
+  columnLanding,
+  exceedsDragThreshold,
+  orderWithBlockAt,
+} from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
-import { thumbnailPaper } from "@/lib/viewMode"
+import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
 
 // A column shows a handful of pages; keeping pixels further out than a few
 // screens would hold a long document's every preview for one scroll through.
 const RETAIN_MARGIN = "1500px 0px"
-// Near this close to the column's edge, a drag scrolls it.
-const EDGE_SCROLL_BAND = 40
-const EDGE_SCROLL_STEP = 12
 // The click a drag ends on belongs to the drag; one later than this is a choice.
 const DRAG_CLICK_GRACE_MS = 300
-// A pointer this far beside the column has left it: nothing moves, and letting
-// go puts the pages back.
-const AWAY_MARGIN = 32
 const NO_HOLES: ReadonlySet<number> = new Set()
 
 type ColumnDrag = {
@@ -73,6 +76,11 @@ type SidebarThumbnailsProps = {
   onFocusChange: (focused: boolean) => void
   /** The page a blank goes in front of, 1-based; one past the last appends. */
   onInsertBlankPage: (index: number) => void
+  /** Copies another document's pages in before this 1-based page. Null where
+      the document cannot take them now; else settles on whether they landed. */
+  onInsertCarriedPages: (carried: CarriedPages, index: number) => Promise<boolean> | null
+  /** A page edit in flight is about to renumber the pages a drag names. */
+  isEditingNow: () => boolean
   /** A right-click, before its menu opens: a page outside the selection
       becomes the selection, so the menu means what is on screen. */
   onMenuPage: (pageNumber: number) => void
@@ -104,8 +112,10 @@ export function SidebarThumbnails({
   onCopyPages,
   onCutPages,
   onDeletePage,
+  isEditingNow,
   onFocusChange,
   onInsertBlankPage,
+  onInsertCarriedPages,
   onMenuPage,
   onNavigate,
   onPastePages,
@@ -137,10 +147,26 @@ export function SidebarThumbnails({
   const [holes, setHoles] = useState(NO_HOLES)
   const [ghost, setGhost] = useState<PageDragGhostState | null>(null)
   const [landing, setLanding] = useState<{
+    /** Where the ghost lands instead, outside this column; null fades it. */
+    box?: { left: number; top: number } | null
     /** The pressed page's thumbnail key: the ghost lands on its hole. */
     leadKey: number
+    onLanded?: () => void
     settled: Promise<unknown>
   } | null>(null)
+  const carry = usePageCarryContext()
+  // The flip layout is told about the holes, and opens them: its `prime`
+  // is reached through a ref the layout fills in below.
+  const primeRef = useRef(() => {})
+  const primeIncoming = useCallback(() => primeRef.current(), [])
+  const incoming = useIncomingPages({
+    columnRef,
+    documentId,
+    onInsert: onInsertCarriedPages,
+    pages,
+    prime: primeIncoming,
+    viewRef: listRef,
+  })
   const ghostRef = useRef<PageDragGhostHandle>(null)
   // From a release until the column is its own again, a press is no drag.
   const settlingRef = useRef(false)
@@ -148,24 +174,40 @@ export function SidebarThumbnails({
   const selectionRef = useRef(selectedPages)
   const pagesRef = useRef(pages)
   const keysRef = useRef(thumbnailKeys)
+  const isEditingRef = useRef(isEditingNow)
+  // A column gone before its ghost is down still lets the taker's holes close.
+  const pendingLandedRef = useRef<(() => void) | undefined>(undefined)
   const numPages = pages.length
   const { prime } = useFlipLayout(
     columnRef,
-    drag !== null || ghost !== null,
+    drag !== null || ghost !== null || incoming !== null,
     thumbnailKeys,
   )
+  primeRef.current = prime
   const order =
     drag?.basis === pages && drag.at !== null
       ? orderWithBlockAt(drag.moving, drag.at, numPages)
       : pages.map((_, index) => index + 1)
+  const incomingAt =
+    incoming?.basis === pages && incoming.at !== null ? incoming.at : null
+  // The copies have arrived ahead of the ghost: they wait as its holes.
+  const arrived =
+    incoming?.landing && !incoming.ghostDown && incoming.basis !== pages && incoming.at !== null
+      ? new Set(
+          thumbnailKeys.slice(incoming.at, incoming.at + incoming.carried.pages.length),
+        )
+      : NO_HOLES
 
   selectionRef.current = selectedPages
   pagesRef.current = pages
   keysRef.current = thumbnailKeys
+  isEditingRef.current = isEditingNow
 
   // A column unmounted with focus in it (an overlay dismissed, the sidebar
   // hidden) fires no blur, which would leave the clipboard keys on the pages.
   useEffect(() => () => onFocusChange(false), [onFocusChange])
+
+  useEffect(() => () => pendingLandedRef.current?.(), [])
 
   // Only when the reader's page changes, never on every render: a reader
   // scrolling the column to look further ahead must not be pulled back.
@@ -215,18 +257,24 @@ export function SidebarThumbnails({
       return
     }
 
-    const box = landingBox(
-      column,
-      column.querySelector(`[data-flip-key="${landing.leadKey}"]`),
-      "[data-thumbnail-page]",
-      listRef.current,
-    )
+    const box =
+      landing.box !== undefined
+        ? landing.box
+        : landingBox(
+            column,
+            column.querySelector(`[data-flip-key="${landing.leadKey}"]`),
+            "[data-thumbnail-page]",
+            listRef.current,
+          )
+    pendingLandedRef.current = landing.onLanded
     // A landing that fails still lets the pages back out of their holes.
     void Promise.resolve(ghostRef.current?.land(box))
       .catch(() => {})
       .then(() => {
         setHoles(NO_HOLES)
         setGhost(null)
+        pendingLandedRef.current = undefined
+        landing.onLanded?.()
 
         return landing.settled
       })
@@ -274,15 +322,17 @@ export function SidebarThumbnails({
     const start = { x: event.clientX, y: event.clientY }
     let moving: number[] | null = null
     let movingKeys: ReadonlySet<string> = new Set()
+    let carried: CarriedPages | null = null
+    // Out over the tab strip or another tab's column, where the window answers.
+    let carrying = false
     let at: number | null = null
     let point = start
     let frame = 0
 
-    const beside = () => {
-      const bounds = list.getBoundingClientRect()
-
-      return point.x >= bounds.left - AWAY_MARGIN && point.x <= bounds.right + AWAY_MARGIN
-    }
+    // Hidden once the drag has opened another tab: its box is then all zeros.
+    const beside = () =>
+      list.getClientRects().length > 0 &&
+      besideColumn(point.x, list.getBoundingClientRect())
     // Read from the column as laid out now — the block where it last landed —
     // and by key, so a preview not yet rendered still reads right.
     const retarget = () => {
@@ -290,8 +340,19 @@ export function SidebarThumbnails({
         return
       }
 
+      // The strip runs past the column's edge, and is the way to other tabs.
+      const home = beside() && !stripSpotAt(point)
+
+      if (!home && carry && carried) {
+        carrying = true
+        carry.move(carried, point)
+      } else if (carrying) {
+        carrying = false
+        carry?.cancel()
+      }
+
       const next =
-        beside() && pagesRef.current === basis
+        home && pagesRef.current === basis
           ? columnLanding(
               point.y - column.getBoundingClientRect().top,
               // Rows only: a page leaving fades among them, keyless.
@@ -313,14 +374,10 @@ export function SidebarThumbnails({
       }
     }
     const edgeScroll = () => {
-      const bounds = list.getBoundingClientRect()
-      const step = !beside()
-        ? 0
-        : point.y < bounds.top + EDGE_SCROLL_BAND
-          ? -EDGE_SCROLL_STEP
-          : point.y > bounds.bottom - EDGE_SCROLL_BAND
-            ? EDGE_SCROLL_STEP
-            : 0
+      const step =
+        carrying || list.getClientRects().length === 0
+          ? 0
+          : columnEdgeStep(point, list.getBoundingClientRect())
 
       if (step !== 0) {
         list.scrollBy({ top: step })
@@ -343,6 +400,16 @@ export function SidebarThumbnails({
           ? [...selectionRef.current].sort((left, right) => left - right)
           : [pressed]
         movingKeys = new Set(moving.map((pageNumber) => String(keyOf(pageNumber))))
+        carried = {
+          lead: moving.indexOf(pressed),
+          pages: moving,
+          sizes: moving.map((pageNumber) => {
+            const { height, width } = basis[pageNumber - 1]!
+
+            return { height, width }
+          }),
+          sourceDocumentId: documentId,
+        }
         // The block gathers where the pressed page stands.
         at = pressed - 1 - moving.filter((pageNumber) => pageNumber < pressed).length
 
@@ -375,6 +442,32 @@ export function SidebarThumbnails({
 
       if (commit) {
         retarget()
+      }
+
+      if (carrying) {
+        // The pages are copied, never taken: this column puts its own back.
+        const taken: CarryLanding | null =
+          commit &&
+          carried &&
+          pagesRef.current === basis &&
+          !isEditingRef.current()
+            ? (carry?.drop(carried, point) ?? null)
+            : null
+
+        if (!taken) {
+          carry?.cancel()
+        }
+
+        at = null
+        settlingRef.current = true
+        setDrag({ at, basis, moving })
+        setLanding({
+          box: taken ? taken.box : undefined,
+          leadKey,
+          onLanded: taken?.landed,
+          settled: taken?.settled ?? Promise.resolve(),
+        })
+        return
       }
 
       const reorder =
@@ -498,18 +591,35 @@ export function SidebarThumbnails({
         >
           {/* Positioned: the slides read each row's place off it. */}
           <ol className="relative flex flex-col items-center gap-3" ref={columnRef}>
-            {order.map((pageNumber, index) => {
+            {/* Flat, so each preview keeps its key among the column's rows. */}
+            {[...order, null].flatMap((pageNumber, index) => {
+              const holesHere =
+                index === incomingAt ? (
+                  <CarriedHoles
+                    key={CARRY_KEY}
+                    rotations={rotations.slice(incomingAt)}
+                    sizes={incoming!.carried.sizes}
+                  />
+                ) : null
+
+              if (pageNumber === null) {
+                return [holesHere]
+              }
+
               const page = pages[pageNumber - 1]!
               const key = thumbnailKeys[pageNumber - 1] ?? pageNumber - 1
+              const carriedAhead =
+                incomingAt !== null && index >= incomingAt ? incoming!.carried.pages.length : 0
 
-              return (
+              return [
+                holesHere,
                 <SidebarThumbnail
                   // Where the page stands in a drag's preview, as it will once
                   // the pages land.
-                  caption={index + 1}
+                  caption={index + 1 + carriedAhead}
                   documentId={documentId}
                   flipKey={key}
-                  hole={holes.has(key)}
+                  hole={holes.has(key) || arrived.has(key)}
                   intrinsicRotation={page.rotation}
                   isCurrent={current === pageNumber}
                   isCut={cutPages.has(pageNumber)}
@@ -523,8 +633,8 @@ export function SidebarThumbnails({
                   parked={parkedPreviews}
                   renderEpoch={renderEpochs[pageNumber] ?? 0}
                   rotation={rotations[pageNumber - 1] ?? 0}
-                />
-              )
+                />,
+              ]
             })}
           </ol>
         </ContextMenuTrigger>
@@ -589,6 +699,35 @@ function PagesDropTarget() {
       </div>
     </div>
   )
+}
+
+/** Where another document's pages will stand, one hole each, keyed apart from
+    every page; a fragment, so each is a row of the column's own. Turned by the
+    view rotations the copies take up at those places, not the source's. */
+function CarriedHoles({
+  rotations,
+  sizes,
+}: {
+  rotations: number[]
+  sizes: CarriedPages["sizes"]
+}) {
+  return sizes.map((size, index) => {
+    const paper = thumbnailPaper(
+      dimensionsForRotation(rotations[index] ?? 0, size.width, size.height),
+    )
+
+    return (
+      <li className="relative" data-flip-key={`${CARRY_KEY}${index}`} key={index}>
+        <div
+          style={{
+            height: `calc(${paper.height}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
+            width: paper.width,
+          }}
+        />
+        <DragHole height={paper.height} width={paper.width} />
+      </li>
+    )
+  })
 }
 
 /** Memoised on primitives alone, so the reader's page moving re-renders the

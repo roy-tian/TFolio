@@ -40,6 +40,10 @@ const zhTW = {
     unsaved: "有未儲存的變更",
     dropNow: "放開以開啟檔案",
     dropHint: "PDF、圖片和 Word 文件會分別在各自的分頁中開啟",
+    newFromPages_one: "以 {{count}} 頁建立新的 PDF",
+    newFromPages_other: "以 {{count}} 頁建立新的 PDF",
+    pagesFrom: "{{name}} 的頁面",
+    extractFailed: "無法以這些頁面建立新的 PDF。",
     unsavedTabDescription:
       "此文件有尚未儲存的變更，關閉分頁將會捨棄這些變更。",
     unsavedWindowDescription:
@@ -242,6 +246,8 @@ const zhTW = {
     actionInsertBlankPage: "插入空白頁",
     actionDuplicatePages_one: "貼上 {{count}} 頁",
     actionDuplicatePages_other: "貼上 {{count}} 頁",
+    actionInsertPages_one: "插入 {{count}} 頁",
+    actionInsertPages_other: "插入 {{count}} 頁",
     highlight: "醒目提示文字",
     highlightOptions: "醒目提示選項",
     highlightColor: "醒目提示色彩",

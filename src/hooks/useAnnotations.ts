@@ -19,6 +19,7 @@ import {
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
   planDuplicatePages,
+  planInsertPages,
   planEraseAnnotation,
   planInsertBlankPage,
   planPageNumbersChange,
@@ -253,6 +254,7 @@ async function applyCommand(
       )
       return []
     case "duplicatePages":
+    case "insertPages":
       // Only ever a redo here — the first apply copies the pages below. A redo
       // restores the stash rather than copying again.
       onStructureChange(
@@ -393,6 +395,7 @@ async function retractCommand(
       )
       return []
     case "duplicatePages":
+    case "insertPages":
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("delete_pdf_pages", {
@@ -731,6 +734,65 @@ export function useAnnotations({
                   // the undo deletes is the one the backend copied.
                   pageNumbers: planned.command.sourcePages,
                 }),
+                commandPageChange(planned.command, false),
+              )
+              landed = true
+              return true
+            },
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+      }
+
+      return landed
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  /** `duplicatePages`' path, with the pages read from another open document. */
+  const insertPages = useCallback(
+    async (
+      sourceDocumentId: number,
+      sourcePages: number[],
+      index: number,
+      pageCount: number,
+    ) => {
+      let landed = false
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planInsertPages(
+            current,
+            sourceDocumentId,
+            sourcePages,
+            index,
+            pageCount,
+          )
+
+          if (!planned) {
+            onAnnotateError()
+            return null
+          }
+
+          return {
+            next: planned.history,
+            pages: commandPages(planned.command),
+            textPages: commandTextPages(planned.command),
+            work: async () => {
+              onStructureChange(
+                documentId,
+                await invoke<PdfStructureUpdate>(
+                  "insert_pdf_pages_from_document",
+                  {
+                    documentId,
+                    index,
+                    pageNumbers: planned.command.sourcePages,
+                    sourceDocumentId,
+                  },
+                ),
                 commandPageChange(planned.command, false),
               )
               landed = true
@@ -1244,6 +1306,7 @@ export function useAnnotations({
       hasPendingWorkNow,
       historyNow,
       insertBlankPage,
+      insertPages,
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,
@@ -1277,6 +1340,7 @@ export function useAnnotations({
       history,
       historyNow,
       insertBlankPage,
+      insertPages,
       isBusy,
       isDirtyNow,
       isStructureBusyNow,

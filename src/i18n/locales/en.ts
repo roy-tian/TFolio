@@ -38,6 +38,10 @@ const en = {
     unsaved: "Unsaved changes",
     dropNow: "Drop to open files",
     dropHint: "PDFs, images, and Word documents open in separate tabs",
+    newFromPages_one: "New PDF from {{count}} page",
+    newFromPages_other: "New PDF from {{count}} pages",
+    pagesFrom: "Pages from {{name}}",
+    extractFailed: "A new PDF could not be made from those pages.",
     unsavedTabDescription:
       "This document has changes that are not saved. Closing its tab will discard them.",
     unsavedWindowDescription:
@@ -243,6 +247,8 @@ const en = {
     actionInsertBlankPage: "inserting a blank page",
     actionDuplicatePages_one: "pasting a page",
     actionDuplicatePages_other: "pasting {{count}} pages",
+    actionInsertPages_one: "inserting a page",
+    actionInsertPages_other: "inserting {{count}} pages",
     highlight: "Highlight text",
     highlightOptions: "Highlight options",
     highlightColor: "Highlight color",

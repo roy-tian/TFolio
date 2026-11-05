@@ -40,6 +40,10 @@ const fr = {
     unsaved: "Modifications non enregistrées",
     dropNow: "Déposez pour ouvrir les fichiers",
     dropHint: "Les PDF, images et documents Word s’ouvrent dans des onglets distincts",
+    newFromPages_one: "Nouveau PDF avec {{count}} page",
+    newFromPages_other: "Nouveau PDF avec {{count}} pages",
+    pagesFrom: "Pages de {{name}}",
+    extractFailed: "Impossible de créer un nouveau PDF avec ces pages.",
     unsavedTabDescription:
       "Ce document contient des modifications non enregistrées. Si vous fermez son onglet, elles seront perdues.",
     unsavedWindowDescription:
@@ -245,6 +249,8 @@ const fr = {
     actionInsertBlankPage: "l’insertion d’une page vierge",
     actionDuplicatePages_one: "le collage d’une page",
     actionDuplicatePages_other: "le collage de {{count}} pages",
+    actionInsertPages_one: "l’insertion d’une page",
+    actionInsertPages_other: "l’insertion de {{count}} pages",
     highlight: "Surligner le texte",
     highlightOptions: "Options de surlignage",
     highlightColor: "Couleur de surlignage",

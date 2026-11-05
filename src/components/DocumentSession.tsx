@@ -707,6 +707,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const {
       deleteThumbnailPage,
       insertBlankPage,
+      insertCarriedPages,
       menuThumbnailPage,
       pastePages,
       reorderPages,
@@ -1579,8 +1580,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onCopyPages={pageClipboard.copy}
               onCutPages={pageClipboard.cut}
               onDeletePage={deleteThumbnailPage}
+              isEditingNow={annotations.isStructureBusyNow}
               onFocusChange={setThumbnailsFocused}
               onInsertBlankPage={insertBlankPage}
+              onInsertCarriedPages={insertCarriedPages}
               onMenuPage={menuThumbnailPage}
               onNavigate={navigateFromSidebar}
               onPastePages={pastePages}

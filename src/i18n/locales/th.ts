@@ -40,6 +40,10 @@ const th = {
     unsaved: "มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก",
     dropNow: "ปล่อยเพื่อเปิดไฟล์",
     dropHint: "PDF รูปภาพ และเอกสาร Word จะเปิดในแท็บแยกกัน",
+    newFromPages_one: "PDF ใหม่จาก {{count}} หน้า",
+    newFromPages_other: "PDF ใหม่จาก {{count}} หน้า",
+    pagesFrom: "หน้าจาก {{name}}",
+    extractFailed: "ไม่สามารถสร้าง PDF ใหม่จากหน้าเหล่านั้นได้",
     unsavedTabDescription:
       "เอกสารนี้มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก การปิดแท็บจะละทิ้งการเปลี่ยนแปลงเหล่านั้น",
     unsavedWindowDescription:
@@ -244,6 +248,8 @@ const th = {
     actionInsertBlankPage: "การแทรกหน้าว่าง",
     actionDuplicatePages_one: "การวาง {{count}} หน้า",
     actionDuplicatePages_other: "การวาง {{count}} หน้า",
+    actionInsertPages_one: "การแทรก {{count}} หน้า",
+    actionInsertPages_other: "การแทรก {{count}} หน้า",
     highlight: "ไฮไลต์ข้อความ",
     highlightOptions: "ตัวเลือกไฮไลต์",
     highlightColor: "สีไฮไลต์",
