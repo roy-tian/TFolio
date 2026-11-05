@@ -8,8 +8,10 @@ import type { E2eOverrides } from "../../src/lib/e2e"
 import type { PdfDocumentInfo } from "../../src/lib/pdf"
 import {
   clickAppMenuItem,
+  deletePageFromSidebar,
   emitDrag,
   minimalPdf,
+  openPdfFromDisk,
   outlinedPdf,
   pointMultiPickerAt,
   pointSaveAsAt,
@@ -91,6 +93,63 @@ function slotLabels(fileTitle: string) {
 
 function slot(label: string) {
   return $(`${workspace} [data-slot-key] button[aria-label='${label}']`)
+}
+
+/** Picks `action` from the menu a right-click on the page opens. */
+async function slotAction(label: string, action: string) {
+  const selector = `${workspace} [data-slot-key] button[aria-label='${label}']`
+
+  await $(selector).waitForExist()
+  await browser.execute((target: string) => {
+    const paper = document.querySelector(target)!
+    const box = paper.getBoundingClientRect()
+
+    paper.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        clientX: box.left + box.width / 2,
+        clientY: box.top + box.height / 2,
+      }),
+    )
+  }, selector)
+
+  const item = $(`[data-action='${action}']`)
+
+  await item.waitForDisplayed({ timeout: 5_000 })
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 5_000 })
+}
+
+/** The middle of the shown tab's sidebar pages, where a file drop combines. */
+function sidebarPagesPoint() {
+  return browser.execute(() => {
+    const box = document
+      .querySelector("[data-document-session][data-active='true'] [data-sidebar-pages]")!
+      .getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  })
+}
+
+async function waitForTotal(expected: string) {
+  await browser.waitUntil(async () => (await total()) === expected, {
+    timeout: 30_000,
+    timeoutMsg: `the board never totalled "${expected}"`,
+  })
+}
+
+function cutLabels() {
+  return browser.execute(
+    (scope: string) =>
+      Array.from(
+        document.querySelectorAll(
+          `${scope} [data-cut] :is([data-thumbnail-page], [data-organize-blank])`,
+        ),
+        (paper) => paper.getAttribute("aria-label"),
+      ),
+    workspace,
+  )
 }
 
 /** One of the controls a page carries on its own paper. */
@@ -240,6 +299,67 @@ describe("TFolio organize workspace", () => {
       ),
     )
     expect(shapes).toEqual(["tall", "wide", "tall", "wide", "wide"])
+  })
+
+  it("copies pages from a page's menu and pastes them beside another, undoably", async () => {
+    await organizeWith([portrait(), landscape()])
+
+    await slotAction("Page 1 of portrait", "copy-pages")
+    await slotAction("Page 1 of landscape", "paste-pages-after")
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(await slotLabels("landscape")) ===
+        JSON.stringify([
+          "Page 1 of landscape",
+          "Page 1 of portrait",
+          "Page 2 of landscape",
+          "Page 3 of landscape",
+        ]),
+      { timeout: 10_000, timeoutMsg: "the copy never landed after the page" },
+    )
+
+    // A copy stays on the clipboard, and shows nothing for Esc to take back.
+    expect(await cutLabels()).toEqual([])
+    await browser.keys("Escape")
+    await slotAction("Page 2 of portrait", "paste-pages-before")
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(await slotLabels("portrait")) ===
+        JSON.stringify(["Page 1 of portrait", "Page 1 of portrait", "Page 2 of portrait"]),
+      { timeout: 10_000, timeoutMsg: "the second copy never landed" },
+    )
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(
+      async () => (await slotLabels("portrait")).length === 2,
+      { timeoutMsg: "undo never took the copy back" },
+    )
+  })
+
+  it("takes a cut back with Esc", async () => {
+    await organizeWith([portrait()])
+
+    await slotAction("Page 2 of portrait", "cut-pages")
+    await browser.waitUntil(
+      async () => (await cutLabels()).join() === "Page 2 of portrait",
+      { timeoutMsg: "the cut page never faded" },
+    )
+    // While the menu's popup is still leaving, the keys are its own.
+    await browser.waitUntil(() =>
+      browser.execute(() => !document.querySelector("[role='menu']")),
+    )
+    await browser.keys("Escape")
+    await browser.waitUntil(async () => (await cutLabels()).length === 0, {
+      timeoutMsg: "Esc never took the cut back",
+    })
+
+    // Nothing is left to paste.
+    await slot("Page 1 of portrait").click()
+    await browser.keys(["Control", "v"])
+    expect(await slotLabels("portrait")).toEqual([
+      "Page 1 of portrait",
+      "Page 2 of portrait",
+    ])
   })
 
   it("builds nothing when its save dialog is cancelled", async () => {
@@ -756,5 +876,135 @@ describe("TFolio organize workspace", () => {
       await browser.execute(() => document.documentElement.dataset.quitRequested),
     ).toBeFalsy()
     expect(await groupCount()).toBe(1)
+  })
+
+  it("follows the shown tab while untouched, and keeps the reader's arrangement", async () => {
+    await openPdfFromDisk("portrait.pdf", minimalPdf(2, "0 0 200 300"))
+    await $("button[aria-label='Organize pages']").click()
+    await waitForTotal("2 pages from 1 file")
+
+    await $("button[aria-label='View and edit']").click()
+    await openPdfFromDisk("landscape.pdf", minimalPdf(3, "0 0 300 200"))
+    await $("//button[@role='tab'][contains(., 'landscape.pdf')]").waitForDisplayed()
+    await $("button[aria-label='Organize pages']").click()
+    await waitForTotal("3 pages from 1 file")
+    await expect($(`${workspace} section[aria-label='landscape']`)).toBeDisplayed()
+
+    await slotAction("Page 1 of landscape", "delete-pages")
+    await waitForTotal("2 pages from 1 file")
+    await $("button[aria-label='View and edit']").click()
+    await $("//button[@role='tab'][contains(., 'portrait.pdf')]").click()
+    await $("button[aria-label='Organize pages']").click()
+
+    await expect($(workspace)).toBeDisplayed()
+    await expect(total()).resolves.toBe("2 pages from 1 file")
+    await expect($(`${workspace} section[aria-label='landscape']`)).toBeDisplayed()
+  })
+
+  it("counts a fill the reader left alone as nothing a quit would lose", async () => {
+    await openPdfFromDisk("portrait.pdf", minimalPdf(2, "0 0 200 300"))
+    await $("button[aria-label='Organize pages']").click()
+    await waitForTotal("2 pages from 1 file")
+    await browser.execute(() => {
+      const app = window as Window & { __tfolioE2E?: E2eOverrides }
+
+      app.__tfolioE2E = {
+        ...app.__tfolioE2E,
+        quitApp: async () => {
+          document.documentElement.dataset.quitRequested = "true"
+        },
+      }
+    })
+
+    await clickAppMenuItem("exit")
+    await browser.waitUntil(
+      () =>
+        browser.execute(() => document.documentElement.dataset.quitRequested === "true"),
+      { timeout: 10_000, timeoutMsg: "the quit asked about an untouched fill" },
+    )
+  })
+
+  it("asks first about the tab's unsaved changes, which organize cannot read", async () => {
+    await openPdfFromDisk("portrait.pdf", minimalPdf(2, "0 0 200 300"))
+    await deletePageFromSidebar(1)
+    const prompt = $("[role='alertdialog']")
+
+    await $("button[aria-label='Organize pages']").click()
+    await expect(prompt).toHaveText(
+      expect.stringContaining("portrait.pdf has unsaved changes"),
+    )
+    await prompt.$("button=Don't add").click()
+    await expect(prompt).not.toBeDisplayed()
+    await expect($(`${workspace} [data-slot='organize-empty-add']`)).toBeDisplayed()
+
+    await $("button[aria-label='View and edit']").click()
+    await $("button[aria-label='Organize pages']").click()
+    await prompt.$("button=Add the saved version").click()
+    await waitForTotal("2 pages from 1 file")
+
+    // The saved version is what the reader chose for this file: not asked again.
+    await $("button[aria-label='View and edit']").click()
+    await $("button[aria-label='Organize pages']").click()
+    await expect($(workspace)).toBeDisplayed()
+    await expect(prompt).not.toBeDisplayed()
+  })
+
+  it("asks again once the file it holds gains unsaved changes in the viewer", async () => {
+    await openPdfFromDisk("portrait.pdf", minimalPdf(2, "0 0 200 300"))
+    await $("button[aria-label='Organize pages']").click()
+    await waitForTotal("2 pages from 1 file")
+
+    await $("button[aria-label='View and edit']").click()
+    await deletePageFromSidebar(1)
+    await $("button[aria-label='Organize pages']").click()
+    const prompt = $("[role='alertdialog']")
+
+    await expect(prompt).toHaveText(
+      expect.stringContaining("portrait.pdf has unsaved changes"),
+    )
+    await prompt.$("button=Save and add").click()
+    await waitForTotal("1 page from 1 file")
+  })
+
+  it("saves the tab's changes before reading its file, when asked to", async () => {
+    await openPdfFromDisk("portrait.pdf", minimalPdf(2, "0 0 200 300"))
+    await deletePageFromSidebar(1)
+
+    await $("button[aria-label='Organize pages']").click()
+    await $("[role='alertdialog']").$("button=Save and add").click()
+    await waitForTotal("1 page from 1 file")
+  })
+
+  it("combines files dropped on the sidebar's pages, starting over only when told", async () => {
+    await openPdfFromDisk("portrait.pdf", minimalPdf(2, "0 0 200 300"))
+    await $(
+      "[data-document-session][data-active='true'] button[data-thumbnail-page='2']",
+    ).waitForExist({ timeout: 30_000 })
+    const point = await sidebarPagesPoint()
+    const dropped = landscape()
+
+    await emitDrag("drag-over", point, [dropped])
+    await expect($("[data-testid='sidebar-pages-drop']")).toHaveAttribute("data-over", "")
+    await emitDrag("drag-drop", point, [dropped])
+    await expect($(workspace)).toBeDisplayed()
+    await waitForTotal("5 pages from 2 files")
+    expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
+
+    await $("button[aria-label='View and edit']").click()
+    const prompt = $("[role='alertdialog']")
+    const one = writeScratchPdf("one.pdf", minimalPdf(1))
+
+    await emitDrag("drag-drop", point, [one])
+    await expect(prompt).toHaveText(expect.stringContaining("start over"))
+    await prompt.$("button=Cancel").click()
+    await expect(prompt).not.toBeDisplayed()
+    await expect($(workspace)).not.toBeDisplayed()
+
+    await emitDrag("drag-drop", point, [one])
+    await prompt.$("button=Start over").click()
+    await waitForTotal("3 pages from 2 files")
+
+    await browser.keys(["Control", "z"])
+    await waitForTotal("5 pages from 2 files")
   })
 })

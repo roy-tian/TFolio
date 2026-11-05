@@ -620,7 +620,7 @@ impl PdfiumEngine {
             let document = draft.document();
 
             if !in_order {
-                move_pages(self.raw_bindings, document, &draft_index)?;
+                move_pages(document, &draft_index)?;
             }
 
             let bytes = document
@@ -674,20 +674,21 @@ impl PdfiumEngine {
 
             self.with_organize_source(scope, *source_id, |source, path| {
                 let document = draft.document();
+                let bindings = document.bindings();
                 let start = document.pages().len();
                 // SAFETY: both handles live for these borrows, the engine
                 // serializes PDFium calls, and the pages land at the end, past
                 // every index pdfium-render's page cache may already hold.
                 let imported = unsafe {
-                    self.raw_bindings.FPDF_ImportPagesByIndex_vec(
-                        self.raw_bindings.get_handle_from_document(document),
-                        self.raw_bindings.get_handle_from_document(source),
+                    bindings.FPDF_ImportPagesByIndex_vec(
+                        bindings.get_handle_from_document(document),
+                        bindings.get_handle_from_document(source),
                         indices,
                         start,
                     )
                 };
 
-                if !self.raw_bindings.is_true(imported) {
+                if !bindings.is_true(imported) {
                     return Err(format!("PDFium could not copy pages of {}", path.display()));
                 }
 

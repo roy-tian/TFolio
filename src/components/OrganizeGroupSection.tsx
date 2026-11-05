@@ -493,7 +493,10 @@ function BlankPaper({
   }, [paper.height, paper.width])
 
   return (
-    <div className={cn("flex flex-col items-center", isCut && "opacity-45")}>
+    <div
+      className={cn("flex flex-col items-center", isCut && "opacity-45")}
+      data-cut={isCut ? "" : undefined}
+    >
       <div
         className="grid place-items-center"
         style={{ height: frame.height, width: frame.width }}

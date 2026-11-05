@@ -7,7 +7,7 @@
 //! lock. Here the characters are read once and indexed by position, and each
 //! run's text is put together as `CPDF_TextPage::GetTextByRect` does it.
 //!
-//! The replay follows PDFium chromium/7881. On a PDFium bump, port any change
+//! The replay follows PDFium chromium/8125. On a PDFium bump, port any change
 //! to the functions named below: the parity test
 //! `reads_each_text_run_as_pdfium_reads_its_rect` checks one fixture only.
 

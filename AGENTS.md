@@ -2,58 +2,64 @@
 
 ## Workflow
 
-- Put tool output under `artifacts/<tool>/`, temporary manual samples in `.temp/`,
-  and persistent test fixtures beside their tests.
+- Put tool output under `artifacts/<tool>/`, temporary manual samples in `.temp/`, and persistent
+  test fixtures beside their tests.
 - Keep skills in `.agents/skills/`; `.claude/skills/` contains symlinks only.
 - TypeScript has no formatter: use two-space indent, double quotes, and no semicolons.
 - Add UI primitives through shadcn's pinned `base-nova` registry.
 - Add user-facing string keys in every locale; `en` defines the typed schema.
-- Explain non-obvious WHY in comments; keep them concise and omit self-evident descriptions.
-- Keep files cohesive; extract unrelated responsibilities. Around 1,000 lines, review whether
-  splitting improves clarity; cohesive files may exceed it.
-- `src-tauri/engine` (`tfolio-engine`) must not depend on Tauri: the app resolves paths into
-  `EnginePaths` and owns commands, dialogs, windows, path approval, IPC image encoding, and the
-  async runtime. The engine has no `e2e` feature; e2e choices are passed in by the app.
+- Comments explain only the non-obvious WHY, concisely.
+- Keep files cohesive, extracting unrelated responsibilities; past about 1,000 lines, review
+  whether a split improves clarity.
+- Commits are conventional (husky runs commitlint) with `- ` bullet bodies.
+- `src-tauri/engine` (`tfolio-engine`: PDFium, fonts, Word conversion) must not depend on Tauri.
+  The app resolves paths into `EnginePaths` and owns commands, dialogs, windows, path approval,
+  IPC image encoding, the async runtime, and e2e choices; the engine has no `e2e` feature.
 - Page reordering calls the raw `FPDF_MovePages` binding in `page_reorder.rs`, bypassing
   `pdfium-render`'s page index cache: never keep a `PdfPage` alive past one engine call.
 - CI takes Bun's version from `packageManager`, not the local toolchain.
 
 ## Validation
 
-- Before a PR, run `bun run version:check`, `bun run test`, `bun run build`, and Cargo
-  `fmt --all -- --check` (without `--all` it skips the engine crate), `clippy --locked -- -D warnings`
-  (which subsumes `check`), and `test --locked` against `src-tauri/Cargo.toml`. Backend or GUI
-  changes also require `bun run test:all`.
-- Run overlapping checks once; `test:all` satisfies the `bun run test` and Cargo `test --locked` requirements.
-- PDFium test fonts are not bundled. PDFium-dependent ignored Rust tests require `fonts:download`;
-  missing fonts fail those tests instead of skipping them.
-- e2e cannot drive native dialogs; use `window.__tfolioE2E` in e2e mode and `seedSettings`
-  for settings that must survive refresh.
-- GUI tests drive only `main`; manually check multi-window changes with a separate file in each window.
-- Verify launch handling manually: build, then launch the binary with a PDF path twice;
-  the GUI harness cannot cover process startup.
-- Security changes also require `bun run tauri:build` and a manual WebView console check for new CSP violations.
+- Before a PR, run `bun run version:check`, `bun run build`, and Cargo `fmt --all -- --check`
+  (without `--all` it skips the engine crate) and `clippy --locked -- -D warnings` (which subsumes
+  `check`) against `src-tauri/Cargo.toml`. Then run `bun run test:all` for backend or GUI changes,
+  else `bun run test` and Cargo `test --locked`.
+- PDFium-dependent Rust tests are `#[ignore]`d and need `pdfium:download` and `fonts:download`
+  (`test:all` runs both); missing fonts fail them rather than skip.
+- `test:e2e:headless` reruns the GUI suite on the last `test:e2e:build`. Never run Cargo during
+  it: debug builds overwrite the `target/debug/tfolio` each spec relaunches.
+- e2e cannot drive native dialogs; use `window.__tfolioE2E` in e2e mode and `seedSettings` for
+  settings that must survive refresh.
+- WebDriver input is not real input: scripted keys ignore `preventDefault`, typing appends over a
+  selection, clicks make no `dblclick` or hover. `test/e2e/nativePointer.ts` drives real pointers.
+- GUI tests drive only `main`; check multi-window changes manually, a different file per window.
+- Verify launch handling manually: build, then launch the binary with a PDF path twice; the GUI
+  harness cannot cover process startup.
+- Security changes also require `bun run tauri:build` and a check for new CSP violations; the e2e
+  build runs the production CSP, so a `securitypolicyviolation` listener in a spec can do it.
 
 ## Release
 
-- Release tags must match `package.json`; use `version:bump` to align all four version files.
-  `changelog` groups the release's conventional commit subjects as public release notes and omits
-  `chore(release)` commits.
-- The landing page lives only on the `gh-pages` branch. It reads the latest release at load,
-  so releases do not change it; its `assets/icon.svg` is a copy of `app-small.svg`.
-- Releases come only from the default branch; merge the working branch in with `--no-ff`.
-- Push the release commit only after `bun run preflight` passes locally, then dispatch the
-  `Release` workflow on it. Never push release tags: Release builds every platform once into a
-  draft and publishes, creating the tag, only after every build and that commit's CI pass.
-- `preflight` uses `tauri:build` (`--no-bundle`) so private signing keys stay out of local
-  environments. Release and the optional, non-gating `Bundle dry-run` alone sign installers with
-  both `TAURI_SIGNING_*` repository secrets. Regenerating the key strands installed copies on
-  their current version.
+- Release from the default branch: merge the working branch with `--no-ff` as
+  `chore(release): merge develop for <version>`, then `bun run release <version>` aligns the four
+  version files and commits `chore(release): <version>`. It runs no checks: push only after
+  `bun run preflight` passes, then dispatch the `Release` workflow.
+- Never push release tags: Release builds every platform once into a draft and publishes,
+  creating the tag, only after every build and that commit's CI pass.
+- `changelog` turns the release's conventional commit subjects into public release notes,
+  omitting `chore(release)` commits.
+- `preflight` uses `tauri:build` (`--no-bundle`) to keep signing keys out of local environments.
+  Only Release and the optional, non-gating `Bundle dry-run` sign installers, with both
+  `TAURI_SIGNING_*` repository secrets. Regenerating the key strands installed copies on their
+  current version.
+- The landing page lives only on the `gh-pages` branch and reads the latest release at load, so
+  releases do not change it; its `assets/icon.svg` is a copy of `app-small.svg`.
 
 ## Persistence and windows
 
-- Persist TOML through `store.rs` in app data, never `localStorage`; feature-specific guards
-  must validate loaded, user-editable settings.
+- Persist TOML through `store.rs` in app data, never `localStorage`; feature-specific guards must
+  validate loaded, user-editable settings.
 - PDFium, settings, recent files, and approved paths are process-wide; documents belong to windows.
 - Every command returning a new document, including an in-memory one, must use `record_document`
   so an open finishing after window destruction releases the document.
@@ -62,8 +68,9 @@
   tabs locally because their ownership entries may be awaiting close.
 - Never reuse window labels; delayed events must not target replacement windows. New windows
   inherit `tauri.conf.json`; production capabilities must cover `window-*`.
-- File-manager launches steal OS focus. Route them to the last focused app window, and queue
-  and announce them per window so another workspace cannot consume them.
+- File-manager launches steal OS focus; route them to the last focused app window. Launch files
+  and tabs moved in from another window wait in Rust, per window, until that page takes them:
+  events reach only pages already listening.
 - Linux's desktop entry needs `%F` (missing from Tauri's template). Single-instance arguments
   must be absolute; relative paths resolve against the running process's directory.
 - Settings writes replace the whole document. Sync other windows through `settings://changed`;
@@ -81,17 +88,27 @@
 - `export_pdf` reduces suggested names with `Path::file_name()`; `save_pdf` uses only the
   recorded source.
 
+## WebView UI
+
+- Ship no `group-has-*`, `peer-has-*`, or `group-focus-within-*`, even from registry snippets or
+  class names in comments: each makes WebView2 or WebKit restyle the whole document per DOM
+  change or focus. `toolbar-tooltips.e2e.ts` guards.
+- Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
+  beside it.
+- Fetch what a copy writes when the selection is made: WebKit refuses a clipboard write that
+  awaits IPC long after the keypress.
+- Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
+  worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
+  pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
+  resizing keeps them.
+
 ## PDF editing and cancellation
 
-- Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what
-  PDFium cannot do: writing outlines, relinking bookmarks and split links, recompressing images.
-- Render in Rust; transfer bytes/images as raw IPC binary and decode with `createImageBitmap`
-  in the decode worker (`imageDecode.ts`), never `blob:`. Page canvases take bitmaps through
-  `bitmaprenderer`: they have no 2d context, so read pixels through a 2d copy; resizing keeps
-  the bitmap, so release it with `transferFromImageBitmap(null)`.
+- Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what PDFium
+  cannot do: writing outlines, relinking bookmarks and split links, recompressing images.
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
-- Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool
-  may wait on the PDFium lock held by the operation being cancelled.
+- Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
+  wait on the PDFium lock held by the operation being cancelled.
 - Long loops under the shared PDFium lock need cancellation checks between pages/files and an
   explicit completion result. Roll back rebuild snapshots on cancellation; publish assembled
   documents only on completion.
@@ -103,35 +120,44 @@
 
 ## Organize workspace
 
-- Organize sources are read-only and are not documents: no `record_document`, recent files,
-  save binding, or `focus_pdf_path`. They live in a per-window registry whose parsed files sit
-  in a byte-budgeted LRU, and are released on window destruction and page reload up to the id
-  cutoff taken at release, so a reloaded page keeps the sources it has added since.
+- Organize sources are read-only and are not documents: no `record_document`, recent files, save
+  binding, or `focus_pdf_path`. Each window's registry releases them on window destruction and on
+  page reload up to the id cutoff taken at release, so a reloaded page keeps those added since.
 - A source whose fingerprint (mtime and size) changed blocks assembly until removed or re-added.
-- Every assembled PDF is recorded through `record_document`. Preview leaves it a sourceless
-  in-memory document whose first export adopts the destination. Save as PDF asks for the
-  destination through Rust's own dialog before assembling, then writes and binds it like Save As
-  before it opens as that file's tab; a failed write closes it. Writes refuse only open documents'
-  files, so a destination chosen over a source then blocks assembly.
+- A viewer tab enters organize as its file on disk, never its document: ask about unsaved changes
+  first. A fill the reader has not touched is not unsaved work and may be replaced without asking.
+- Every assembled PDF goes through `record_document`. Preview leaves it a sourceless in-memory
+  document whose first export adopts the destination. Save as PDF picks the destination in Rust's
+  own dialog before assembling, writes and binds it like Save As, then opens it as that file's
+  tab; a failed write closes it. Writes refuse only open documents' files, so a destination
+  chosen over a source then blocks assembly.
+
+## Word and image import
+
+- Images and Word files open as converted, sourceless in-memory PDFs. `openSources.ts` mirrors
+  the engine's `MERGE_IMAGE_EXTENSIONS`.
+- Convert only through installed suites (Word, WPS, LibreOffice; Windows stops at WPS), detected
+  without starting one; e2e passes `WordSuites::Absent`.
+- Suites read a staged copy, never the reader's file. Kill only processes this run spawned, never
+  by name; a non-PDF output refuses that file.
 
 ## Fonts
 
-- Font downloads accept no caller-controlled URL or destination. Pin host, commit, size, and SHA-256;
-  verify bytes before writing and write the compiled-in OFL license before the font.
+- Font downloads accept no caller-controlled URL or destination. Pin host, commit, size, and
+  SHA-256; verify bytes before writing and write the compiled-in OFL license before the font.
 - Embedded fonts need TrueType outlines, subset permission, and glyph coverage. Resolve variable
   fonts to Regular before subsetting because PDFium ignores axis positions; skip unsuitable faces.
 
 ## Updates
 
-- Check updates at startup and whenever About opens, in Rust and never in e2e; no command
-  takes a URL. Keep the endpoint and verifying key in `tauri.conf.json`; exclude updater
-  commands from WebView capabilities.
-- Installing an update restarts the process and discards unsaved work in every window. Confirm
-  if any window has unsaved work or cannot answer. Refuse in debug builds: without a bundle type
-  under `target/`, the plugin falls back to replacing the running binary itself.
-- Keep downloaded installers in the cache directory, away from `settings.toml`, with the release
-  signature beside them so it outlives the run.
-  Verify against the compiled-in key before offering the installer and again before installing;
-  `.deb` and `.rpm` installers run as root.
+- Check updates at startup and whenever About opens, in Rust and never in e2e; no command takes a
+  URL. Keep the endpoint and verifying key in `tauri.conf.json`; exclude updater commands from
+  WebView capabilities.
+- Installing an update restarts the process and discards unsaved work in every window. Confirm if
+  any window has unsaved work or cannot answer. Refuse in debug builds: without a bundle type under
+  `target/`, the plugin falls back to replacing the running binary itself.
+- Keep downloaded installers in the cache directory, away from `settings.toml`, with their release
+  signatures beside them so they outlive the run. Verify against the compiled-in key before
+  offering an installer and again before installing; `.deb` and `.rpm` installers run as root.
 - Match a cached installer by its signature against this run's fetched feed, never by an on-disk
   version; an older release may also have a valid signature.

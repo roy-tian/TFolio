@@ -149,57 +149,55 @@ export function WatermarkSettings({
             </p>
           </Field>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field className="min-w-0">
-              <FieldLabel id={directionId}>{t("watermark.direction")}</FieldLabel>
-              <ToggleGroup
-                className="w-full"
-                aria-labelledby={directionId}
-                onValueChange={([value]) => {
-                  if (isWatermarkDirection(value)) {
-                    onDraftChange({ ...draft, direction: value })
-                  }
-                }}
-                spacing={0}
-                value={[draft.direction]}
-                variant="outline"
-              >
-                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="ascending">
-                  {t("watermark.directionAscending")}
-                </ToggleGroupItem>
-                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="descending">
-                  {t("watermark.directionDescending")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </Field>
+          <Field>
+            <FieldLabel id={directionId}>{t("watermark.direction")}</FieldLabel>
+            <ToggleGroup
+              className="w-full"
+              aria-labelledby={directionId}
+              onValueChange={([value]) => {
+                if (isWatermarkDirection(value)) {
+                  onDraftChange({ ...draft, direction: value })
+                }
+              }}
+              spacing={0}
+              value={[draft.direction]}
+              variant="outline"
+            >
+              <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="ascending">
+                {t("watermark.directionAscending")}
+              </ToggleGroupItem>
+              <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="descending">
+                {t("watermark.directionDescending")}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </Field>
 
-            <Field className="min-w-0">
-              <FieldLabel id={layoutId}>{t("watermark.layout")}</FieldLabel>
-              <ToggleGroup
-                className="w-full"
-                aria-labelledby={layoutId}
-                onValueChange={([value]) => {
-                  if (isWatermarkLayout(value)) {
-                    onDraftChange({
-                      ...draft,
-                      layout: value,
-                      widthRatio: defaultWatermarkWidthRatio(value),
-                    })
-                  }
-                }}
-                spacing={0}
-                value={[draft.layout]}
-                variant="outline"
-              >
-                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="single">
-                  {t("watermark.layoutSingle")}
-                </ToggleGroupItem>
-                <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="zebra">
-                  {t("watermark.layoutZebra")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </Field>
-          </div>
+          <Field>
+            <FieldLabel id={layoutId}>{t("watermark.layout")}</FieldLabel>
+            <ToggleGroup
+              className="w-full"
+              aria-labelledby={layoutId}
+              onValueChange={([value]) => {
+                if (isWatermarkLayout(value)) {
+                  onDraftChange({
+                    ...draft,
+                    layout: value,
+                    widthRatio: defaultWatermarkWidthRatio(value),
+                  })
+                }
+              }}
+              spacing={0}
+              value={[draft.layout]}
+              variant="outline"
+            >
+              <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="single">
+                {t("watermark.layoutSingle")}
+              </ToggleGroupItem>
+              <ToggleGroupItem className="h-auto min-h-7 min-w-0 flex-1 whitespace-normal py-1 text-center" value="zebra">
+                {t("watermark.layoutZebra")}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </Field>
 
           {validationError === "style" ? (
             <FieldError>{t("watermark.errorStyle")}</FieldError>

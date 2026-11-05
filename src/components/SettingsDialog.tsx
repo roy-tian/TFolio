@@ -21,17 +21,18 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { changeLanguage } from "@/i18n"
+import { changeLanguagePreference, useLanguagePreference } from "@/i18n"
 import {
-  fallbackLanguage,
+  detectSystemLanguage,
   languageNames,
-  resolveSupportedLanguage,
   supportedLanguages,
-  type SupportedLanguage,
+  systemLanguage,
 } from "@/i18n/config"
+import { translations } from "@/i18n/resources"
 import { cn } from "@/lib/utils"
 import {
   setThemePreference,
@@ -61,8 +62,6 @@ const themeOptions: Array<{
   { value: "dark", labelKey: "settings.themeDark", icon: Moon },
 ]
 
-// Base UI resolves the trigger's label from `items`; without it the trigger
-// would fall back to printing the raw value ("zh-CN").
 const languageItems = supportedLanguages.map((value) => ({
   label: languageNames[value],
   value,
@@ -157,14 +156,23 @@ export function SettingsDialog({
   open,
   section,
 }: SettingsDialogProps) {
-  const { i18n, t } = useTranslation()
+  const { t } = useTranslation()
   const preference = useThemePreference()
+  const languagePreference = useLanguagePreference()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const appearanceRef = useRef<HTMLDivElement>(null)
   const aboutRef = useRef<HTMLDivElement>(null)
 
-  const activeLanguage: SupportedLanguage =
-    resolveSupportedLanguage(i18n.resolvedLanguage) ?? fallbackLanguage
+  // In the language it switches to, like the names beside it, so a reader
+  // stranded in an interface they cannot read still recognises it.
+  const systemLabelLanguage = detectSystemLanguage()
+  const systemLabel = translations[systemLabelLanguage].settings.languageSystem
+  // Base UI resolves the trigger's label from `items`; without it the trigger
+  // would fall back to printing the raw value ("zh-CN").
+  const languageOptions = [
+    { label: systemLabel, value: systemLanguage },
+    ...languageItems,
+  ]
 
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -310,20 +318,26 @@ export function SettingsDialog({
                   </p>
                 </div>
                 <Select
-                  items={languageItems}
+                  items={languageOptions}
                   onValueChange={(value) => {
                     // Base UI types the value as nullable to allow a placeholder
-                    // item; this list has none, so it only ever reports a language.
+                    // item; this list has none, so it only ever reports a choice.
                     if (value !== null) {
-                      void changeLanguage(value)
+                      void changeLanguagePreference(value)
                     }
                   }}
-                  value={activeLanguage}
+                  value={languagePreference}
                 >
                   <SelectTrigger className="w-full max-w-60" id="settings-language">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectGroup>
+                      <SelectItem lang={systemLabelLanguage} value={systemLanguage}>
+                        {systemLabel}
+                      </SelectItem>
+                    </SelectGroup>
+                    <SelectSeparator />
                     <SelectGroup>
                       {languageItems.map((item) => (
                         <SelectItem

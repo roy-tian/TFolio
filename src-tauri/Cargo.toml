@@ -26,7 +26,7 @@ tauri-build = { version = "2", features = [] }
 # The one transform between a signed release and the two strings that check
 # it: both the key and the signature reach this app base64-wrapped. Already
 # in the tree under the updater plugin, so this names it rather than adds it.
-base64 = "0.22"
+base64 = "0.23"
 # Encodes the pages the engine renders as pixels into what the WebView
 # decodes. Already in the tree under the engine, so this names it rather than
 # adds it.
@@ -35,7 +35,7 @@ image = { version = "0.25", default-features = false, features = ["png", "webp"]
 # updater plugin checks the signature over bytes it never writes down and
 # keeps that check private, so a saved package is checked again here — with
 # the same crate the plugin itself verifies with.
-minisign-verify = "0.2"
+minisign-verify = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["macos-private-api"] }

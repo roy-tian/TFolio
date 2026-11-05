@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use pdfium_render::prelude::*;
 
@@ -9,19 +9,9 @@ pub const PDFIUM_LIBRARY_NAME: &str = "libpdfium.dylib";
 #[cfg(all(unix, not(target_os = "macos")))]
 pub const PDFIUM_LIBRARY_NAME: &str = "libpdfium.so";
 
-pub(super) type Bindings = Box<dyn PdfiumLibraryBindings>;
-
-/// pdfium-render keeps the bindings `Pdfium::new` takes to itself, so the raw
-/// calls it has no wrapper for go through a second binding of the same loaded
-/// library. Both bind first: once `Pdfium::new` runs, every bind is refused.
-pub(super) fn bind_library_twice(path: &Path) -> Result<(Bindings, Bindings), PdfiumError> {
-    Ok((
-        Pdfium::bind_to_library(path)?,
-        Pdfium::bind_to_library(path)?,
-    ))
-}
-
-pub(super) fn bind_pdfium(candidates: &[PathBuf]) -> Result<(Bindings, Bindings), String> {
+pub(super) fn bind_pdfium(
+    candidates: &[PathBuf],
+) -> Result<Box<dyn PdfiumLibraryBindings>, String> {
     let mut failures = Vec::new();
 
     for path in candidates {
@@ -29,7 +19,7 @@ pub(super) fn bind_pdfium(candidates: &[PathBuf]) -> Result<(Bindings, Bindings)
             continue;
         }
 
-        match bind_library_twice(path) {
+        match Pdfium::bind_to_library(path) {
             Ok(bindings) => return Ok(bindings),
             Err(error) => failures.push(format!("{}: {error}", path.display())),
         }

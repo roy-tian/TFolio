@@ -13,6 +13,12 @@ export const supportedLanguages = [
 
 export type SupportedLanguage = (typeof supportedLanguages)[number]
 
+/** Follows the system's languages, read at each boot; also what an unset or
+    unreadable setting means, so a fresh install starts on it. */
+export const systemLanguage = "system"
+
+export type LanguagePreference = SupportedLanguage | typeof systemLanguage
+
 /** Each language named in itself, never translated: a reader stranded in an
     interface they cannot read must still recognise their own. */
 export const languageNames: Record<SupportedLanguage, string> = {
@@ -62,22 +68,22 @@ export function resolveSupportedLanguage(
   return supportedLanguages.find((supported) => supported === base) ?? null
 }
 
-function readStoredLanguage(): string | null {
-  const stored = storedSettings().ui?.language
-
-  return typeof stored === "string" ? stored : null
+/** A hand-edited "zh" still counts as Chinese; anything unrecognised follows the system. */
+export function resolveLanguagePreference(
+  stored: unknown,
+): LanguagePreference {
+  return typeof stored === "string"
+    ? (resolveSupportedLanguage(stored) ?? systemLanguage)
+    : systemLanguage
 }
 
-export function selectPreferredLanguage(
-  storedLanguage: string | null | undefined,
+export function storedLanguagePreference(): LanguagePreference {
+  return resolveLanguagePreference(storedSettings().ui?.language)
+}
+
+export function selectSystemLanguage(
   preferredLanguages: readonly string[],
 ): SupportedLanguage {
-  const supportedStoredLanguage = resolveSupportedLanguage(storedLanguage)
-
-  if (supportedStoredLanguage) {
-    return supportedStoredLanguage
-  }
-
   for (const language of preferredLanguages) {
     const supportedLanguage = resolveSupportedLanguage(language)
 
@@ -89,14 +95,18 @@ export function selectPreferredLanguage(
   return defaultLanguage
 }
 
-export function detectPreferredLanguage(): SupportedLanguage {
-  const preferredLanguages = navigator.languages.length
-    ? navigator.languages
-    : [navigator.language]
-
-  return selectPreferredLanguage(readStoredLanguage(), preferredLanguages)
+export function detectSystemLanguage(): SupportedLanguage {
+  return selectSystemLanguage(
+    navigator.languages.length ? navigator.languages : [navigator.language],
+  )
 }
 
-export function storeLanguage(language: SupportedLanguage) {
-  rememberSettings({ ui: { language } })
+export function languageForPreference(
+  preference: LanguagePreference,
+): SupportedLanguage {
+  return preference === systemLanguage ? detectSystemLanguage() : preference
+}
+
+export function storeLanguagePreference(preference: LanguagePreference) {
+  rememberSettings({ ui: { language: preference } })
 }

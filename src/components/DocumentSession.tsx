@@ -131,6 +131,8 @@ export type DocumentSessionHandle = {
       also counts work still running, which no save can. */
   hasUnsavedChangesNow: () => boolean
   hasUnsavedWorkNow: () => boolean
+  /** Whether a save could only write a copy, never the document's own file. */
+  isCopyOnlyNow: () => boolean
   openPageNumbers: () => void
   openSearch: () => void
   openWatermark: () => void
@@ -399,6 +401,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const pastePagesRef = useRef<(index: number) => void>(() => {})
     const pageClipboard = usePageClipboard({
       active: active && thumbnailsShown && thumbnailsFocused,
+      onCutCancelled: useCallback(() => notice.retract(["pagesCut"]), [notice]),
       onPaste: useCallback((index: number) => pastePagesRef.current(index), []),
       onTaken: useCallback(
         (taken: PageClipboard) =>
@@ -411,6 +414,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         [notice],
       ),
       selectedPages: thumbnailSelection.selectedPages,
+      shown: active && thumbnailsShown,
     })
     const pageClipboardStructureChanged = pageClipboard.structureChanged
     const { clipboard } = pageClipboard
@@ -884,18 +888,22 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     // The destination dialog is the backend's own, so this only says *that* an
     // export happens; `onExportError` reports a failed write.
-    const exportPdf = useCallback(() => {
-      // A copy-only document may not go over the file it came from, so its
-      // own name is the one suggestion bound to be refused.
-      const copyOnly =
+    // A copy-only document may not go over the file it came from.
+    const isCopyOnlyNow = useCallback(
+      () =>
         Boolean(documentRef.current?.path) &&
-        (annotations.hasOwnedContentNow() || hasMergedPagesRef.current)
-      const name = copyOnly
+        (annotations.hasOwnedContentNow() || hasMergedPagesRef.current),
+      [annotations],
+    )
+
+    const exportPdf = useCallback(() => {
+      // Its own name is the one suggestion bound to be refused.
+      const name = isCopyOnlyNow()
         ? `${exportBaseName.replace(/\.pdf$/i, "")}-${t("annotate.copySuffix")}.pdf`
         : exportBaseName
 
       return annotations.exportCopy(name, t("annotate.exportFilter"))
-    }, [annotations, exportBaseName, t])
+    }, [annotations, exportBaseName, isCopyOnlyNow, t])
 
     useEffect(() => {
       mountedRef.current = true
@@ -1398,6 +1406,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         fetchNoteFont: () => void fetchNoteFont(),
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
+        isCopyOnlyNow,
         openPageNumbers: openPageNumbersDialog,
         openSearch: search.openSearch,
         openWatermark: openWatermarkDialog,
@@ -1442,6 +1451,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         fetchNoteFont,
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
+        isCopyOnlyNow,
         openPageNumbersDialog,
         openWatermarkDialog,
         redoStep,

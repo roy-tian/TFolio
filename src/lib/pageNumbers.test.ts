@@ -196,11 +196,11 @@ describe("placement", () => {
   it("reads the mode and position back as one choice", () => {
     const fresh = draftFromPreferences(defaultPageNumbersPreferences, 10)
 
-    expect(draftPlacement(fresh)).toBe("bottomCenter")
-    expect(draftPlacement({ ...fresh, position: "bottomRight" })).toBe(
-      "bottomRight",
-    )
-    expect(draftPlacement({ ...fresh, mode: "duplex" })).toBe("auto")
+    expect(draftPlacement(fresh)).toBe("auto")
+    expect(draftPlacement({ ...fresh, mode: "single" })).toBe("bottomCenter")
+    expect(
+      draftPlacement({ ...fresh, mode: "single", position: "bottomRight" }),
+    ).toBe("bottomRight")
   })
 
   it("remembers the fixed place a reader leaves for the mirrored one", () => {

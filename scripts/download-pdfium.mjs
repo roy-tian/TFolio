@@ -17,7 +17,7 @@ import { pipeline } from "node:stream/promises"
 
 // src-tauri/engine/src/pdfium/engine/text_runs.rs replays this build's text
 // extraction; read its header before bumping.
-const PDFIUM_BUILD = "7881"
+const PDFIUM_BUILD = "8125"
 const repositoryRoot = resolve(import.meta.dirname, "..")
 const outputDirectory = join(
   repositoryRoot,
@@ -82,41 +82,41 @@ const packages = {
     arm64: {
       asset: "pdfium-mac-arm64.tgz",
       library: "libpdfium.dylib",
-      sha256: "52e94ca5aa8847934330daf3f8150c190682c5ca93831468794f8b90d4392e40",
+      sha256: "4939bd935ac83ddc09a3a4f038bc43a19cea1660316a3667f26cb07a070e139d",
     },
     x64: {
       asset: "pdfium-mac-x64.tgz",
       library: "libpdfium.dylib",
-      sha256: "6dedf83990e0e3d6b7c93c9e7589c5a126b0ae14b7464d76120cff7a26afb18b",
+      sha256: "8a5193535b80c7215d8932f6647ae5097465b6dba2811602c21e120c2af112b0",
     },
   },
   linux: {
     arm64: {
       asset: "pdfium-linux-arm64.tgz",
       library: "libpdfium.so",
-      sha256: "ee7f7b7d5468958336a818c1cd580bdd20972846b7377b13f9a923d92d1d4674",
+      sha256: "8b8818f2ec57d1b213d952ca6d7f0ffeca9d0110487d0e20ad83ba918bc92efa",
     },
     x64: {
       asset: "pdfium-linux-x64.tgz",
       library: "libpdfium.so",
-      sha256: "1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d",
+      sha256: "e1c3ce6e270cb5e0c20816b379ad9f2c1309972697c505f508de92bf5e7d6659",
     },
   },
   win32: {
     arm64: {
       asset: "pdfium-win-arm64.tgz",
       library: "pdfium.dll",
-      sha256: "d3035d4d2cacac6ecd1a2ece197a3d702a1b2a58466276b9f870b8cb278a9d84",
+      sha256: "d394ba61991fb53f4d87f70988035f337d9e73f2bd2c3c1b966df8c43fcabb05",
     },
     ia32: {
       asset: "pdfium-win-x86.tgz",
       library: "pdfium.dll",
-      sha256: "cf02980c66a93eef007cfff861fe79d291f3c3dcd43258abf6e3099b682e7ec6",
+      sha256: "5aa1eb3e7de0589534245a181cb51def90d1dc76e987aea4be524a8cb3db1069",
     },
     x64: {
       asset: "pdfium-win-x64.tgz",
       library: "pdfium.dll",
-      sha256: "73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08",
+      sha256: "9a964261760cff52570aabf038ab346d3a5034dd8b30d0d5fe8861235d356b8b",
     },
   },
 }

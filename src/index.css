@@ -389,9 +389,11 @@ body {
 }
 
 /* Each hotspot sits on the point its tool acts from, not the glyph's corner.
-   The rectangle keeps the system crosshair, sharper where a drag starts. */
+   The rectangle keeps the system crosshair, sharper where a drag starts.
+   The SVGs' viewBox draws the 24-unit glyphs at 16px, the toolbar icons' size,
+   in an 18px image whose margin holds the white halo. */
 [data-tool-cursor="highlight"] {
-  cursor: url("./assets/cursors/highlight.svg") 5 20, text;
+  cursor: url("./assets/cursors/highlight.svg") 4 14, text;
 }
 
 [data-tool-cursor="rect"] {
@@ -399,11 +401,11 @@ body {
 }
 
 [data-tool-cursor="textNote"] {
-  cursor: url("./assets/cursors/text-note.svg") 4 4, text;
+  cursor: url("./assets/cursors/text-note.svg") 3 3, text;
 }
 
 [data-tool-cursor="eraser"] {
-  cursor: url("./assets/cursors/eraser.svg") 5 19, crosshair;
+  cursor: url("./assets/cursors/eraser.svg") 4 13, crosshair;
 }
 
 /* The text layer covers the whole page and asks for an I-beam of its own, which

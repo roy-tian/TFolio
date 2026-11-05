@@ -6,10 +6,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react"
-import { RotateCcw, RotateCw, Scissors, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
 import {
   GroupSection,
   PAGE_CONTROL,
@@ -23,13 +21,8 @@ import {
   type PageDragGhostHandle,
   type PageDragGhostState,
 } from "@/components/PageDragGhost"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu"
+import { PageMenuContent } from "@/components/PageContextMenu"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import type { OrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
 import {
@@ -564,53 +557,16 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
           />
         ))}
       </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem
-          data-action="organize-rotate"
-          onClick={() => organize.rotate(menuKeys, 90)}
-        >
-          <RotateCw />
-          {t("pageEdit.rotate", { count: menuKeys.size })}
-        </ContextMenuItem>
-        <ContextMenuItem
-          data-action="organize-rotate-left"
-          onClick={() => organize.rotate(menuKeys, 270)}
-        >
-          <RotateCcw />
-          {t("organize.rotateLeft", { count: menuKeys.size })}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          data-action="organize-cut"
-          onClick={() => organize.cutSelection()}
-        >
-          <Scissors />
-          {t("pageEdit.cut", { count: menuKeys.size })}
-        </ContextMenuItem>
-        <ContextMenuItem
-          data-action="organize-blank-before"
-          onClick={() => organize.insertBlankAt(menuKeys, "before")}
-        >
-          <InsertBeforeIcon />
-          {t("organize.insertBlankBefore")}
-        </ContextMenuItem>
-        <ContextMenuItem
-          data-action="organize-blank-after"
-          onClick={() => organize.insertBlankAt(menuKeys, "after")}
-        >
-          <InsertAfterIcon />
-          {t("organize.insertBlankAfter")}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          data-action="organize-delete"
-          onClick={() => organize.remove(menuKeys)}
-          variant="destructive"
-        >
-          <Trash2 />
-          {t("pageEdit.delete", { count: menuKeys.size })}
-        </ContextMenuItem>
-      </ContextMenuContent>
+      <PageMenuContent
+        canPaste={organize.canPaste}
+        count={menuKeys.size}
+        onCopy={organize.copySelection}
+        onCut={organize.cutSelection}
+        onDelete={() => organize.remove(menuKeys)}
+        onInsertBlank={(side) => organize.insertBlankAt(menuKeys, side)}
+        onPaste={(side) => organize.pasteBeside(menuKeys, side)}
+        onRotate={(degrees) => organize.rotate(menuKeys, degrees)}
+      />
       {ghost ? (
         <PageDragGhost
           count={ghost.count}

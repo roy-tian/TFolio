@@ -6,6 +6,7 @@ import {
   FileOutput,
   FolderPlus,
   Layers,
+  LoaderCircle,
   RotateCcw,
   RotateCw,
   Scaling,
@@ -97,11 +98,19 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
       if ((event.key === "Delete" || event.key === "Backspace") && chosen.size > 0) {
         event.preventDefault()
         organize.remove(chosen)
-      } else if (event.key === "Escape" && chosen.size > 0) {
-        organize.setSelection(new Set())
+      } else if (event.key === "Escape") {
+        // As in a file manager: Esc lets the pages go and takes back a cut.
+        if (chosen.size > 0) {
+          organize.setSelection(new Set())
+        }
+
+        organize.cancelCut()
       } else if (primary && event.key.toLowerCase() === "x" && chosen.size > 0) {
         event.preventDefault()
         organize.cutSelection()
+      } else if (primary && event.key.toLowerCase() === "c" && chosen.size > 0) {
+        event.preventDefault()
+        organize.copySelection()
       } else if (primary && event.key.toLowerCase() === "v") {
         event.preventDefault()
         organize.paste()
@@ -214,9 +223,9 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                 </Button>
               </ToolbarTooltip>
               {/* With nothing chosen, either one adds at the last file's end. */}
-              <ToolbarTooltip label={t("organize.insertBlankBefore")}>
+              <ToolbarTooltip label={t("pageEdit.insertBlankBefore")}>
                 <Button
-                  aria-label={t("organize.insertBlankBefore")}
+                  aria-label={t("pageEdit.insertBlankBefore")}
                   data-slot="organize-insert-blank-before"
                   disabled={busy || empty}
                   onClick={() => organize.insertBlankAt(chosen, "before")}
@@ -226,9 +235,9 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   <InsertBeforeIcon />
                 </Button>
               </ToolbarTooltip>
-              <ToolbarTooltip label={t("organize.insertBlankAfter")}>
+              <ToolbarTooltip label={t("pageEdit.insertBlankAfter")}>
                 <Button
-                  aria-label={t("organize.insertBlankAfter")}
+                  aria-label={t("pageEdit.insertBlankAfter")}
                   data-slot="organize-insert-blank-after"
                   disabled={busy || empty}
                   onClick={() => organize.insertBlankAt(chosen, "after")}
@@ -339,7 +348,17 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
           data-thumbnail-scroll-root
           ref={scrollRef}
         >
-          {empty ? (
+          {empty && organize.adding ? (
+            // The first files are on their way, often one the viewer showed:
+            // the invitation to add some would read as if nothing came along.
+            <div
+              className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+              data-slot="organize-reading"
+            >
+              <LoaderCircle className="size-8 animate-spin" />
+              <p className="text-sm">{t("organize.adding")}</p>
+            </div>
+          ) : empty ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
               <Layers className="size-12 text-muted-foreground" />
               <h1 className="text-lg font-semibold">{t("organize.emptyTitle")}</h1>

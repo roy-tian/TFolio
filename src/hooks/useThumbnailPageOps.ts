@@ -3,10 +3,7 @@ import type { useAnnotations } from "@/hooks/useAnnotations"
 import type { usePageClipboard } from "@/hooks/usePageClipboard"
 import type { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import type { PdfDocumentInfo } from "@/lib/pdf"
-import {
-  pagesToRotate,
-  QUARTER_TURN,
-} from "@/lib/pageRotation"
+import { pagesToRotate } from "@/lib/pageRotation"
 import { pastePlan } from "@/lib/pageClipboard"
 
 type UseThumbnailPageOpsOptions = {
@@ -67,14 +64,14 @@ export function useThumbnailPageOps({
    * Rotate in a preview's menu, where turning a page edits the document —
    * undone and saved like any other — taking the selection, or all of it.
    */
-  const rotateThumbnailPages = () => {
+  const rotateThumbnailPages = (degrees: 90 | 270) => {
     if (!pdfDocument || editingBusy()) {
       return
     }
 
     void annotations.rotatePages(
       pagesToRotate(pdfDocument.numPages, thumbnailSelection.selectedPages),
-      QUARTER_TURN,
+      degrees,
     )
   }
 
