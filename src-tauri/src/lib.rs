@@ -15,7 +15,7 @@ use launch::{take_launch_files, LaunchQueue};
 use pdfium::{
     add_organize_sources, add_pdf_highlight_annotation, add_pdf_rect_annotation,
     add_pdf_rect_effect_annotation, add_pdf_text_note_annotation, apply_pdf_page_numbers,
-    apply_pdf_watermark, assemble_pdf, cancel_pdf_archive, cancel_pdf_compression,
+    apply_pdf_watermark, cancel_pdf_archive, cancel_pdf_compression,
     cancel_pdf_compression_estimate, cancel_pdf_merge, cancel_pdf_operation, cancel_pdf_search,
     cancel_word_conversion, cancel_word_open, close_pdf, create_pdf, delete_pdf_annotations,
     delete_pdf_pages, discard_pdf_stashes, download_pdf_note_font, duplicate_pdf_pages,
@@ -155,7 +155,6 @@ pub fn run() {
             pick_pdf_paths,
             add_organize_sources,
             render_organize_thumbnail,
-            assemble_pdf,
             save_assembled_pdf,
             #[cfg(feature = "e2e")]
             save_assembled_pdf_to,

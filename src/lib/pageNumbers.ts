@@ -272,6 +272,12 @@ export function parsePageNumbersDraft(
   }
 }
 
+/** Whether `config` still holds for a document of `pageCount` pages: one
+    chosen for a longer arrangement may name pages it no longer has. */
+export function pageNumbersFit(config: PageNumbersConfig, pageCount: number): boolean {
+  return parsePageNumbersDraft(draftFromConfig(config, pageCount), pageCount).error === null
+}
+
 function sameRange(
   left: [number, number] | null,
   right: [number, number] | null,

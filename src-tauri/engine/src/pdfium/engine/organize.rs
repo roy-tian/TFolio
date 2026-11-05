@@ -166,6 +166,8 @@ pub struct AssemblePlan {
     pub slots: Vec<AssembleSlot>,
     pub normalize_a4: bool,
     pub outline: Vec<AssembleOutlineItem>,
+    pub watermark: Option<WatermarkConfig>,
+    pub page_numbers: Option<PageNumbersConfig>,
 }
 
 /// The outline as `write_outline` takes it, refusing what no workspace sends.
@@ -475,8 +477,9 @@ impl PdfiumEngine {
         }
     }
 
-    /// A new document of the plan's pages, in its order, with its outline. Like
-    /// a merge it has no source path, so it can only ever be exported.
+    /// A new document of the plan's pages, in its order, with its outline and
+    /// any watermark or page numbers stamped on. Like a merge it has no source
+    /// path, so it can only ever be exported.
     pub fn assemble_pdf(
         &self,
         scope: &str,
@@ -487,6 +490,8 @@ impl PdfiumEngine {
             slots,
             normalize_a4,
             outline,
+            watermark,
+            page_numbers,
         } = plan;
 
         if slots.is_empty() {
@@ -501,6 +506,11 @@ impl PdfiumEngine {
 
         let mut budget = MAX_OUTLINE_ITEMS;
         let nodes = outline_nodes(outline, slots.len(), 0, &mut budget)?;
+        let watermark = watermark.map(WatermarkConfig::validated).transpose()?;
+        let page_numbers = page_numbers
+            .map(|config| config.validated(slots.len() as i32))
+            .transpose()?;
+        let stamped = watermark.is_some() || page_numbers.is_some();
 
         // Every slot checked before anything is built: a refusal halfway would
         // have spent the reader's wait on a document that is then thrown away.
@@ -533,15 +543,26 @@ impl PdfiumEngine {
             }
         }
 
+        // Cut before the build, as the slots are checked: a mark no installed
+        // face can draw refuses now, not after the reader has waited for it.
+        let watermark = watermark
+            .map(|config| self.watermark_resources(&config))
+            .transpose()?;
+        let page_numbers = page_numbers
+            .map(|config| self.page_numbers_resources(&config))
+            .transpose()?;
+
         let groups = slots_by_source(&slots);
         // One unit per source imported, or per page fitted, then one each for
-        // the blanks, serialization, outline, and opening.
+        // the blanks, serialization, outline, and opening, then the two passes
+        // a layer rebuild reports per page.
         let units = if normalize_a4 {
             groups.iter().map(|(_, pages)| pages.len()).sum()
         } else {
             groups.len()
         };
-        let total = units + 4;
+        let layer_units = if stamped { slots.len() * 2 } else { 0 };
+        let total = units + 4 + layer_units;
 
         on_progress(0, total);
 
@@ -647,7 +668,29 @@ impl PdfiumEngine {
         let document = self.open_with_source(bytes, None)?;
         step();
 
-        Ok(Some(document))
+        if !stamped {
+            return Ok(Some(document));
+        }
+
+        let opened = completed;
+        let outcome = self.stamp_layers(
+            document.id,
+            watermark,
+            page_numbers,
+            &mut |done, _| on_progress(opened + done, total),
+            &operation,
+        );
+
+        // Handed back only whole: a stopped or failed stamp leaves nothing in
+        // the store for the reader to close.
+        match outcome {
+            Ok(true) => Ok(Some(document)),
+            Ok(false) => self.close(document.id).map(|()| None),
+            Err(error) => {
+                self.close(document.id).ok();
+                Err(error)
+            }
+        }
     }
 
     /// One import per source, all its pages at once: PDFium shares a font or

@@ -1,8 +1,7 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   BetweenHorizontalStart,
   Bookmark,
-  Eye,
   FileOutput,
   FolderPlus,
   Layers,
@@ -24,6 +23,7 @@ import {
   OrganizeFileList,
   OrganizeFileListHeader,
 } from "@/components/OrganizeFileList"
+import { OrganizeLayers } from "@/components/OrganizeLayers"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { ToolbarFrame } from "@/components/SessionHeader"
 import { SliderStepper } from "@/components/SliderStepper"
@@ -42,6 +42,7 @@ import {
 import { Toggle } from "@/components/ui/toggle"
 import type { OrganizeWorkspace as Workspace } from "@/hooks/useOrganizeWorkspace"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
+import { blankPageCount } from "@/lib/organize"
 import {
   ORGANIZE_PAPER_WIDTHS,
   readStoredOrganizeStep,
@@ -57,9 +58,9 @@ type OrganizeWorkspaceProps = {
 }
 
 /** The window's second workspace: pages from several files put together into
-    one new PDF, previewed unsaved or saved where the reader chooses, and
-    opened as a tab of the first. Memoised: it stays mounted behind the
-    viewer, where the App's own re-renders are no news. */
+    one new PDF, saved where the reader chooses and opened as a tab of the
+    first. Memoised: it stays mounted behind the viewer, where the App's own
+    re-renders are no news. */
 export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   active,
   macOS,
@@ -78,6 +79,11 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   const empty = organize.plan.groups.length === 0
   const assemblyDone =
     organize.progress !== null && organize.progress.completed >= organize.progress.total
+  const blanks = useMemo(() => blankPageCount(organize.pages), [organize.pages])
+  const totalValues = {
+    files: t("organize.fileCount", { count: organize.plan.groups.length }),
+    pages: t("organize.pageCount", { count: organize.pages.length }),
+  }
 
   // The workspace's own keys; undo, redo and select-all come through the
   // window's shortcut table with the viewer's.
@@ -313,38 +319,24 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                 </Toggle>
               </ToolbarTooltip>
             </ButtonGroup>
+            <OrganizeLayers active={active} busy={busy} organize={organize} />
           </>
         }
         macOS={macOS}
         start={
-          <ButtonGroup>
-            <ToolbarTooltip label={t("organize.preview")}>
-              <Button
-                aria-label={t("organize.preview")}
-                data-slot="organize-preview"
-                disabled={busy || organize.pages.length === 0}
-                onClick={() => void organize.assemble("preview")}
-                size="sm"
-                variant="outline"
-              >
-                <Eye data-icon="inline-start" />
-                {t("organize.previewButton")}
-              </Button>
-            </ToolbarTooltip>
-            <ToolbarTooltip label={t("organize.saveAs")}>
-              <Button
-                aria-label={t("organize.saveAs")}
-                data-slot="organize-save"
-                disabled={busy || organize.pages.length === 0}
-                onClick={() => void organize.assemble("save")}
-                size="sm"
-                variant="outline"
-              >
-                <FileOutput data-icon="inline-start" />
-                {t("organize.saveButton")}
-              </Button>
-            </ToolbarTooltip>
-          </ButtonGroup>
+          <ToolbarTooltip label={t("organize.saveAs")}>
+            <Button
+              aria-label={t("organize.saveAs")}
+              data-slot="organize-save"
+              disabled={busy || organize.pages.length === 0}
+              onClick={() => void organize.assemble()}
+              size="sm"
+              variant="outline"
+            >
+              <FileOutput data-icon="inline-start" />
+              {t("organize.saveButton")}
+            </Button>
+          </ToolbarTooltip>
         }
       />
 
@@ -401,10 +393,9 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
             className="truncate text-sm tabular-nums text-muted-foreground"
             data-slot="organize-total"
           >
-            {t("organize.pagesFromFiles", {
-              files: t("organize.fileCount", { count: organize.plan.groups.length }),
-              pages: t("organize.pageCount", { count: organize.pages.length }),
-            })}
+            {blanks > 0
+              ? t("organize.pagesFromFilesWithBlanks", { ...totalValues, count: blanks })
+              : t("organize.pagesFromFiles", totalValues)}
           </span>
         }
       >

@@ -329,6 +329,35 @@ impl PdfiumEngine {
         Ok(true)
     }
 
+    /// Stamps layers on a document nobody holds yet, an assembly's, as content
+    /// of its own rather than this session's: the file written from it reads
+    /// as an open of that file would, saved over without refusal. Resources
+    /// come from validated configs; `false` is a stopped run.
+    pub(super) fn stamp_layers(
+        &self,
+        document_id: u64,
+        watermark: Option<WatermarkResources>,
+        page_numbers: Option<PageNumbersResources>,
+        on_progress: &mut dyn FnMut(usize, usize),
+        operation: &OperationGuard<'_>,
+    ) -> Result<bool, String> {
+        let mut documents = self.lock_documents()?;
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if !self.rebuild_owned_content(entry, watermark, page_numbers, on_progress, operation)? {
+            return Ok(false);
+        }
+
+        entry.owned_content = None;
+
+        Ok(true)
+    }
+
     /// A layer change's two walks as one run of progress — the tails checked
     /// once, then rebuilt in two passes — and one stop for either: nothing is
     /// touched until the check has passed, and the rebuild rolls itself back.

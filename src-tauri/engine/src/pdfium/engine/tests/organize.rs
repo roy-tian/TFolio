@@ -41,6 +41,8 @@ fn plan(slots: Vec<AssembleSlot>, outline: Vec<AssembleOutlineItem>) -> Assemble
         slots,
         normalize_a4: false,
         outline,
+        watermark: None,
+        page_numbers: None,
     }
 }
 
@@ -348,6 +350,119 @@ fn a_stopped_assembly_hands_back_nothing() {
     fs::remove_dir_all(directory).ok();
 }
 
+fn stamped_plan(slots: Vec<AssembleSlot>) -> AssemblePlan {
+    AssemblePlan {
+        watermark: Some(watermark_config("DRAFT")),
+        page_numbers: Some(PageNumbersConfig {
+            mode: PageNumbersMode::Single,
+            position: PageNumbersPosition::BottomCenter,
+            range: None,
+            start: None,
+            smart_color: false,
+            blank_numbered: true,
+            blank_counted: true,
+        }),
+        ..plan(slots, Vec::new())
+    }
+}
+
+fn page_text(engine: &PdfiumEngine, document_id: u64, page_number: i32) -> String {
+    engine
+        .extract_text(document_id, page_number)
+        .expect("PDFium should extract page content")
+        .into_iter()
+        .map(|span| span.text)
+        .collect()
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn an_assembly_stamps_its_layers_as_content_its_file_keeps() {
+    let _organize = organize_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("organize-stamped");
+    let ids = added(
+        engine,
+        "main",
+        vec![write_source(
+            &directory,
+            "source.pdf",
+            banded_pdf(&[20, 60]),
+        )],
+    );
+    let mut progress = Vec::new();
+
+    let assembled = engine
+        .assemble_pdf(
+            "main",
+            stamped_plan(vec![page(ids[0], 2, 0), page(ids[0], 1, 0)]),
+            |completed, total| progress.push((completed, total)),
+        )
+        .expect("PDFium should assemble and stamp the pages")
+        .expect("an assembly nobody stopped hands back its document");
+
+    for page_number in 1..=2 {
+        let text = page_text(engine, assembled.id, page_number);
+
+        assert!(
+            text.contains("DRAFT") && text.contains(&format!("— {page_number} —")),
+            "page {page_number} should carry both layers, got {text:?}"
+        );
+    }
+    assert_eq!(progress.last(), Some(&(9, 9)));
+    assert!(
+        progress.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+        "progress never runs backwards: {progress:?}"
+    );
+
+    // Not this session's layers: the file written is one a save may write over.
+    let destination = directory.join("organized.pdf");
+    engine
+        .export_to(assembled.id, &destination)
+        .expect("the stamped assembly should write to its file");
+    engine
+        .save(assembled.id)
+        .expect("a stamped assembly saves over the file it was written to");
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn an_assembly_stopped_while_stamping_hands_back_nothing() {
+    let _organize = organize_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("organize-stamp-stopped");
+    let ids = added(
+        engine,
+        "stamp-stopped",
+        vec![write_source(
+            &directory,
+            "source.pdf",
+            banded_pdf(&[20, 60]),
+        )],
+    );
+    // One source imported and four finishing steps come before the stamp.
+    let assembled = engine
+        .assemble_pdf(
+            "stamp-stopped",
+            stamped_plan(vec![page(ids[0], 1, 0), page(ids[0], 2, 0)]),
+            |completed, _| {
+                if completed > 5 {
+                    engine.cancel_operation(OperationTarget::Merge("stamp-stopped".into()));
+                }
+            },
+        )
+        .expect("a stopped assembly is not a failure");
+
+    assert!(
+        assembled.is_none(),
+        "an assembly stopped while stamping produces no document"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_fitted_assembly_lays_every_page_and_blank_on_a4() {
@@ -378,6 +493,8 @@ fn a_fitted_assembly_lays_every_page_and_blank_on_a4() {
                 ],
                 normalize_a4: true,
                 outline: Vec::new(),
+                watermark: None,
+                page_numbers: None,
             },
             |_, _| {},
         )
@@ -427,6 +544,8 @@ fn a_fitted_assembly_keeps_the_plan_s_order_across_files() {
                 slots: vec![page(ids[1], 1, 0), page(ids[0], 1, 90), page(ids[1], 2, 0)],
                 normalize_a4: true,
                 outline: Vec::new(),
+                watermark: None,
+                page_numbers: None,
             },
             |_, _| {},
         )
@@ -737,6 +856,8 @@ fn a_fitted_assembly_carries_a_rotated_page_the_way_it_reads() {
                 slots: vec![page(ids[0], 1, 0)],
                 normalize_a4: true,
                 outline: Vec::new(),
+                watermark: None,
+                page_numbers: None,
             },
             |_, _| {},
         )

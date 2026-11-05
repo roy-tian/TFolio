@@ -1,4 +1,6 @@
+import { samePageNumbersConfig, type PageNumbersConfig } from "@/lib/pageNumbers"
 import { fileNameFromPath, type PdfOutlineItem, type PdfPageInfo } from "@/lib/pdf"
+import { sameWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
 /** A4 in points, portrait. */
 const A4 = { height: 841.89, width: 595.28 }
@@ -44,7 +46,10 @@ export type OrganizeOptions = {
       PDF carries none at all. */
   bookmarks: boolean
   normalizeA4: boolean
+  /** Stamped on as the new PDF's own content, not a layer its tab can lift. */
+  pageNumbers: PageNumbersConfig | null
   smartPadding: boolean
+  watermark: WatermarkConfig | null
 }
 
 export type OrganizePlan = {
@@ -57,7 +62,9 @@ export type OrganizePlan = {
 export const defaultOrganizeOptions: OrganizeOptions = {
   bookmarks: true,
   normalizeA4: false,
-  smartPadding: false,
+  pageNumbers: null,
+  smartPadding: true,
+  watermark: null,
 }
 
 export const emptyPlan: OrganizePlan = {
@@ -208,6 +215,11 @@ export function outputPages(plan: OrganizePlan, sources: SourceMap): OutputPage[
   }
 
   return pages
+}
+
+/** Padding and inserted blanks alike: the pages no file brought. */
+export function blankPageCount(pages: OutputPage[]) {
+  return pages.filter((page) => page.kind === "padding" || page.slot.kind === "blank").length
 }
 
 export type AssembleSlot =
@@ -405,9 +417,12 @@ export function addSources(
 }
 
 /** `added` as the whole list. Keys go on from `plan`'s, never reused: the
-    plan replaced may still be an undo away, and a key names one page. */
+    plan replaced may still be an undo away, and a key names one page. The
+    layers belonged to the PDF that plan made, so they stay with it. */
 export function restartPlan(plan: OrganizePlan, added: OrganizeSource[]): OrganizePlan {
-  return addSources({ groups: [], nextKey: plan.nextKey, options: plan.options }, added)
+  const options = { ...plan.options, pageNumbers: null, watermark: null }
+
+  return addSources({ groups: [], nextKey: plan.nextKey, options }, added)
 }
 
 export function removeGroups(plan: OrganizePlan, groupIds: ReadonlySet<number>): OrganizePlan {
@@ -628,10 +643,19 @@ export function insertBlank(
   return { ...plan, groups, nextKey }
 }
 
-export function setOptions(plan: OrganizePlan, options: Partial<OrganizeOptions>): OrganizePlan {
-  const changed = (Object.keys(options) as Array<keyof OrganizeOptions>).some(
-    (name) => options[name] !== undefined && options[name] !== plan.options[name],
+/** By value: the same layer settings applied again are no edit. */
+function sameOptions(left: OrganizeOptions, right: OrganizeOptions) {
+  return (
+    left.bookmarks === right.bookmarks &&
+    left.normalizeA4 === right.normalizeA4 &&
+    left.smartPadding === right.smartPadding &&
+    samePageNumbersConfig(left.pageNumbers, right.pageNumbers) &&
+    sameWatermarkConfig(left.watermark, right.watermark)
   )
+}
 
-  return changed ? { ...plan, options: { ...plan.options, ...options } } : plan
+export function setOptions(plan: OrganizePlan, options: Partial<OrganizeOptions>): OrganizePlan {
+  const next = { ...plan.options, ...options }
+
+  return sameOptions(plan.options, next) ? plan : { ...plan, options: next }
 }

@@ -65,20 +65,6 @@ pub async fn render_organize_thumbnail(
     Ok(Response::new(bytes))
 }
 
-/// Preview: the plan's pages as a new document that exists only in memory,
-/// so it has nowhere to save to until its first export adopts a destination.
-#[tauri::command]
-pub async fn assemble_pdf(
-    plan: AssemblePlan,
-    on_progress: Channel<PdfProgress>,
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<Option<PdfDocumentInfo>, String> {
-    let page = page_generation(&window);
-
-    assemble_recorded(plan, on_progress, &app, &window, page).await
-}
-
 /// Asks where the new PDF goes before building it: a cancelled dialog costs
 /// no assembly. The dialog is this command's own, as `export_pdf`'s is, since
 /// a path argument would be an arbitrary-file write for any page code.
@@ -138,37 +124,10 @@ pub async fn save_assembled_pdf_to(
     assemble_into(plan, PathBuf::from(path), on_progress, app, window, page).await
 }
 
-/// Builds the plan's document and records it as the window's. `None` for a
-/// stopped assembly, and for one whose page reloaded or closed meanwhile:
-/// that has already closed the document, and nothing is left to show it.
-async fn assemble_recorded(
-    plan: AssemblePlan,
-    on_progress: Channel<PdfProgress>,
-    app: &AppHandle,
-    window: &WebviewWindow,
-    page: PageGeneration,
-) -> Result<Option<PdfDocumentInfo>, String> {
-    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
-    let label = window.label().to_string();
-    let assembled = tauri::async_runtime::spawn_blocking(move || {
-        engine.assemble_pdf(&label, plan, channel_progress(on_progress))
-    })
-    .await
-    .map_err(|error| format!("PDFium assembly task failed: {error}"))??;
-    let Some(document) = assembled else {
-        return Ok(None);
-    };
-    let owners = app.state::<DocumentOwners>();
-
-    record_document(&owners, window, page, document.id(), None);
-
-    Ok(owners
-        .owns(document.id(), window.label())
-        .then_some(document))
-}
-
-/// Builds the plan's document and writes it to `path`, which it is then bound
-/// to: it opens as that file's tab, as an open of it would.
+/// Builds the plan's document, records it as the window's, and writes it to
+/// `path`, which it is then bound to: it opens as that file's tab, as an open
+/// of it would. `None` for a stopped assembly, and for one whose page reloaded
+/// or closed meanwhile: that has already closed the document.
 async fn assemble_into(
     plan: AssemblePlan,
     path: PathBuf,
@@ -177,11 +136,26 @@ async fn assemble_into(
     window: WebviewWindow,
     page: PageGeneration,
 ) -> Result<Option<PdfDocumentInfo>, String> {
-    let Some(document) = assemble_recorded(plan, on_progress, &app, &window, page).await? else {
+    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
+    let label = window.label().to_string();
+    let assembly_engine = Arc::clone(&engine);
+    let assembled = tauri::async_runtime::spawn_blocking(move || {
+        assembly_engine.assemble_pdf(&label, plan, channel_progress(on_progress))
+    })
+    .await
+    .map_err(|error| format!("PDFium assembly task failed: {error}"))??;
+    let Some(document) = assembled else {
         return Ok(None);
     };
+    let owners = app.state::<DocumentOwners>();
+
+    record_document(&owners, &window, page, document.id(), None);
+
+    if !owners.owns(document.id(), window.label()) {
+        return Ok(None);
+    }
+
     let id = document.id();
-    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
     let shown = path.to_string_lossy().into_owned();
     let task_app = app.clone();
     let written =
@@ -192,9 +166,9 @@ async fn assemble_into(
     match written {
         Ok(Ok(_)) => Ok(Some(document.bound_to(shown))),
         // An unwritten document has no file to open as; the arrangement is
-        // still there to try another destination, or a preview.
+        // still there to try another destination.
         Ok(Err(error)) | Err(error) => {
-            app.state::<DocumentOwners>().release(id);
+            owners.release(id);
             app.state::<PdfiumState>().close_document_detached(id);
 
             Err(error)

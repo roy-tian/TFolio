@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
 import { $, $$, browser, expect } from "@wdio/globals"
@@ -14,7 +14,6 @@ import {
   openPdfFromDisk,
   outlinedPdf,
   pointMultiPickerAt,
-  pointSaveAsAt,
   pressRedo,
   refreshApp,
   seedSettings,
@@ -74,6 +73,16 @@ async function groupCount() {
 
 function total() {
   return $(`${workspace} [data-slot='organize-total']`).getText()
+}
+
+/** The shown tab's text, its watermark and page numbers included. */
+function pageText() {
+  return browser.execute(() =>
+    Array.from(
+      document.querySelectorAll("[data-document-session][data-active='true'] .pdf-text-layer span"),
+      (span) => span.textContent ?? "",
+    ).join(" "),
+  )
 }
 
 /** Each slot of a file's section, by the label its paper reads as. */
@@ -327,9 +336,10 @@ describe("TFolio organize workspace", () => {
     // Saved before it was shown: the tab is the file's, not an unsaved copy.
     expect(existsSync(destination)).toBe(true)
     expect(readFileSync(destination).subarray(0, 5).toString()).toBe("%PDF-")
+    // Padded by default: a blank closes the three-page file.
     await expect($("[data-slot='page-status']")).toHaveAttribute(
       "aria-label",
-      "Page 1 of 5",
+      "Page 1 of 6",
     )
 
     const shapes = await browser.execute(() =>
@@ -340,7 +350,7 @@ describe("TFolio organize workspace", () => {
         (page) => (page.offsetWidth > page.offsetHeight ? "wide" : "tall"),
       ),
     )
-    expect(shapes).toEqual(["tall", "wide", "tall", "wide", "wide"])
+    expect(shapes).toEqual(["tall", "wide", "tall", "tall", "wide", "wide"])
   })
 
   it("copies pages from a page's menu and pastes them beside another, undoably", async () => {
@@ -416,35 +426,54 @@ describe("TFolio organize workspace", () => {
     expect((await $$("[data-document-tab]").getElements()).length).toBe(0)
   })
 
-  it("previews the PDF unsaved, for a Save As once the reader likes it", async () => {
+  it("stamps a watermark and page numbers the saved file keeps as its own", async () => {
     const source = portrait()
-    const directory = path.dirname(source)
-    const destination = path.join(directory, "kept.pdf")
+    const destination = path.join(path.dirname(source), "stamped.pdf")
     await organizeWith([source])
+    const watermark = $(`${workspace} [data-slot='organize-watermark']`)
+    const pageNumbers = $(`${workspace} [data-slot='organize-page-numbers']`)
 
-    await $(`${workspace} [data-slot='organize-preview']`).click()
+    await watermark.click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({ timeout: 15_000 })
+    await $("[data-testid='watermark-text']").setValue("DRAFT")
+    await $("[data-testid='watermark-apply']").click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({ reverse: true })
+    await expect(watermark).toHaveAttribute("aria-pressed", "true")
+
+    await pageNumbers.click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({ timeout: 15_000 })
+    await $("[data-testid='page-numbers-apply']").click()
+    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({ reverse: true })
+    await expect(pageNumbers).toHaveAttribute("aria-pressed", "true")
+    // Options of the plan, like the rest: one undo away.
+    await browser.keys(["Control", "z"])
+    await expect(pageNumbers).toHaveAttribute("aria-pressed", "false")
+    await pressRedo()
+    await expect(pageNumbers).toHaveAttribute("aria-pressed", "true")
+
+    await pointSaveAt(destination)
+    await $(`${workspace} [data-slot='organize-save']`).click()
     await browser.waitUntil(
       async () =>
-        (await $("[role='tab'][aria-selected='true']").getText()).includes(
-          "Organized.pdf",
-        ),
-      { timeout: 30_000, timeoutMsg: "the preview never opened as a tab" },
+        (await $("[role='tab'][aria-selected='true']").getText()).includes("stamped.pdf"),
+      { timeout: 30_000, timeoutMsg: "the stamped PDF never opened as a tab" },
     )
-    await expect($(workspace)).not.toBeDisplayed()
-    await expect($("[data-slot='page-status']")).toHaveAttribute(
-      "aria-label",
-      "Page 1 of 2",
-    )
-    expect(readdirSync(directory)).toEqual(["portrait.pdf"])
-
-    await pointSaveAsAt(destination)
-    await clickAppMenuItem("save-as")
     await browser.waitUntil(
-      async () =>
-        (await $("[role='tab'][aria-selected='true']").getText()).includes("kept.pdf"),
-      { timeout: 15_000, timeoutMsg: "Save As never bound the preview to its file" },
+      async () => {
+        const text = await pageText()
+        return text.includes("DRAFT") && text.includes("—")
+      },
+      { timeout: 20_000, timeoutMsg: "the saved pages never carried both layers" },
     )
-    expect(existsSync(destination)).toBe(true)
+
+    // Not the session's layers, which would make the tab export-only.
+    const written = readFileSync(destination)
+    await deletePageFromSidebar(2)
+    await clickAppMenuItem("save")
+    await browser.waitUntil(async () => !readFileSync(destination).equals(written), {
+      timeout: 15_000,
+      timeoutMsg: "the tab never saved over the file it was written to",
+    })
   })
 
   it("drags a page into another file, in before the page it is let go on", async () => {
@@ -520,7 +549,7 @@ describe("TFolio organize workspace", () => {
 
     await $(`${workspace} [data-slot='organize-insert-blank-before']`).click()
     await expect($(`${workspace} [data-organize-blank]`)).toBeDisplayed()
-    await expect(total()).resolves.toBe("3 pages from 1 file")
+    await expect(total()).resolves.toBe("3 pages from 1 file (including 1 blank page)")
     await $(`${workspace} [data-slot='organize-insert-blank-after']`).click()
     expect(await slotLabels("portrait")).toEqual([
       "Page 1 of portrait",
@@ -949,7 +978,8 @@ describe("TFolio organize workspace", () => {
     await waitForTotal("5 pages from 2 files")
     // The undo brings the files back still chosen, for a second try.
     await browser.keys(["Control", "z"])
-    await waitForTotal("10 pages from 4 files")
+    // A blank pads the one-page file.
+    await waitForTotal("11 pages from 4 files (including 1 blank page)")
     expect(await chosenFiles()).toEqual(["one", "four"])
 
     const remove = $(`${sidebar} [data-slot='organize-remove-files']`)
@@ -989,7 +1019,8 @@ describe("TFolio organize workspace", () => {
     await browser.keys(["Control", "c"])
     await clickFile("portrait")
     await browser.keys(["Control", "v"])
-    await waitForTotal("8 pages from 2 files")
+    // A blank pads the five-page file.
+    await waitForTotal("9 pages from 2 files (including 1 blank page)")
     expect(await slotLabels("portrait")).toEqual([
       "Page 1 of portrait",
       "Page 2 of portrait",
@@ -1018,16 +1049,38 @@ describe("TFolio organize workspace", () => {
     ])
   })
 
-  it("starts a file on an odd page with a blank only where it needs one", async () => {
+  it("starts each file on an odd page by default, with a blank only where it needs one", async () => {
     await organizeWith([writeScratchPdf("one.pdf", minimalPdf(1)), portrait()])
-    await expect($(`${workspace} [data-organize-padding]`)).not.toBeExisting()
+    const toggle = $(`${workspace} [data-slot='organize-smart-padding']`)
 
-    await $(`${workspace} [data-slot='organize-smart-padding']`).click()
+    await expect(toggle).toHaveAttribute("aria-pressed", "true")
     // It closes the file before, rather than opening the next one.
     await expect(
       $(`${workspace} section[aria-label='one'] [data-organize-flow] > [data-organize-padding]:last-child`),
     ).toBeDisplayed()
-    await expect(total()).resolves.toBe("4 pages from 2 files")
+    await expect(total()).resolves.toBe("4 pages from 2 files (including 1 blank page)")
+
+    await toggle.click()
+    await expect($(`${workspace} [data-organize-padding]`)).not.toBeExisting()
+    await expect(total()).resolves.toBe("3 pages from 2 files")
+  })
+
+  it("starts the next arrangement from the padding, A4 and bookmark choices last made", async () => {
+    const toggle = (name: string) => $(`${workspace} [data-slot='organize-${name}']`)
+    await organizeWith([portrait()])
+    await expect(toggle("normalize-a4")).toHaveAttribute("aria-pressed", "false")
+
+    await toggle("smart-padding").click()
+    await toggle("normalize-a4").click()
+    await toggle("bookmarks").click()
+    // A reload before the write lands would read the old choices back.
+    await settingsHold(["smartPadding = false", "normalizeA4 = true", "bookmarks = false"])
+
+    await refreshApp()
+    await $("button[aria-label='Organize pages']").click()
+    await expect(toggle("smart-padding")).toHaveAttribute("aria-pressed", "false")
+    await expect(toggle("normalize-a4")).toHaveAttribute("aria-pressed", "true")
+    await expect(toggle("bookmarks")).toHaveAttribute("aria-pressed", "false")
   })
 
   it("adds the files dropped on it rather than opening them", async () => {

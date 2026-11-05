@@ -126,11 +126,12 @@
 - A source whose fingerprint (mtime and size) changed blocks assembly until removed or re-added.
 - A viewer tab enters organize as its file on disk, never its document: ask about unsaved changes
   first. A fill the reader has not touched is not unsaved work and may be replaced without asking.
-- Every assembled PDF goes through `record_document`. Preview leaves it a sourceless in-memory
-  document whose first export adopts the destination. Save as PDF picks the destination in Rust's
-  own dialog before assembling, writes and binds it like Save As, then opens it as that file's
-  tab; a failed write closes it. Writes refuse only open documents' files, so a destination
-  chosen over a source then blocks assembly.
+- Every assembled PDF goes through `record_document`; there is no unsaved preview. Save as PDF
+  picks the destination in Rust's own dialog before assembling, writes and binds it like Save As,
+  then opens it as that file's tab; a failed write closes it. Writes refuse only open documents'
+  files, so a destination chosen over a source then blocks assembly.
+- The plan's watermark and page numbers are stamped before the write and dropped from session
+  ownership: the tab reads them as input content, as a reopen would, and may save over its file.
 
 ## Word and image import
 

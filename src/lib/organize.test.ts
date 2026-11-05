@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   addSources,
   assembleSlots,
+  blankPageCount,
   copySlots,
   deleteSlots,
   emptyPlan,
@@ -38,10 +39,17 @@ function source(id: number, pageCount: number, outline: OrganizeSource["outline"
   }
 }
 
+/** Neither padding nor A4 unless a test turns one on, so a layout reads as
+    the pages themselves. */
+const plainPlan: OrganizePlan = {
+  ...emptyPlan,
+  options: { ...emptyPlan.options, normalizeA4: false, smartPadding: false },
+}
+
 function setup(...added: OrganizeSource[]) {
   const sources = new Map(added.map((item) => [item.id, item]))
 
-  return { plan: addSources(emptyPlan, added), sources }
+  return { plan: addSources(plainPlan, added), sources }
 }
 
 /** Each output page as `sourceId:pageNumber`, `blank`, or `pad`. */
@@ -195,6 +203,32 @@ describe("plan edits", () => {
     expect(moveSlots(plan, new Set([first!.key]), plan.groups[0]!.id, second!.key)).toBe(plan)
     expect(removeGroups(plan, gone)).toBe(plan)
     expect(setOptions(plan, { smartPadding: false })).toBe(plan)
+    expect(setOptions(plan, { watermark: null })).toBe(plan)
+  })
+
+  test("pads and keeps bookmarks, but fits nothing to A4, unless told otherwise", () => {
+    expect(emptyPlan.options).toEqual({
+      bookmarks: true,
+      normalizeA4: false,
+      pageNumbers: null,
+      smartPadding: true,
+      watermark: null,
+    })
+  })
+
+  test("takes the same layer settings applied again as no edit", () => {
+    const { plan } = setup(source(1, 1))
+    const watermark = {
+      direction: "ascending",
+      layout: "single",
+      text: "DRAFT",
+      widthRatio: 0.8,
+    } as const
+    const marked = setOptions(plan, { watermark })
+
+    expect(marked).not.toBe(plan)
+    expect(setOptions(marked, { watermark: { ...watermark } })).toBe(marked)
+    expect(setOptions(marked, { watermark: { ...watermark, text: "FINAL" } })).not.toBe(marked)
   })
 
   test("reorders and removes whole files", () => {
@@ -232,7 +266,10 @@ describe("plan edits", () => {
 
   test("starts over with new files, keeping the options and numbering on", () => {
     const { plan } = setup(source(1, 2))
-    const fitted = setOptions(plan, { normalizeA4: true })
+    const fitted = setOptions(plan, {
+      normalizeA4: true,
+      watermark: { direction: "ascending", layout: "single", text: "DRAFT", widthRatio: 0.8 },
+    })
     const restarted = restartPlan(fitted, [source(2, 1), source(3, 1)])
     const sources = new Map([source(2, 1), source(3, 1)].map((item) => [item.id, item]))
     const oldKeys = new Set(
@@ -241,6 +278,8 @@ describe("plan edits", () => {
 
     expect(layout(restarted, sources)).toEqual(["2:1", "3:1"])
     expect(restarted.options.normalizeA4).toBe(true)
+    // The mark was the old PDF's, not a choice the next one starts from.
+    expect(restarted.options.watermark).toBeNull()
     expect(
       restarted.groups
         .flatMap((group) => [group.id, ...group.slots.map((slot) => slot.key)])
@@ -285,6 +324,16 @@ describe("outputPages", () => {
 
     expect(outputPages(fitted, sources)[1]).toMatchObject({ height: 841.89, width: 595.28 })
     expect(outputPages(turned, sources)[1]).toMatchObject({ height: 595.28, width: 841.89 })
+  })
+
+  test("counts padding and inserted blanks as the pages no file brought", () => {
+    const { plan, sources } = setup(source(1, 1), source(2, 1))
+    const padded = setOptions(plan, { smartPadding: true })
+    const withBlank = insertBlank(padded, sources, padded.groups[1]!.id, 0)
+
+    expect(blankPageCount(outputPages(plan, sources))).toBe(0)
+    expect(blankPageCount(outputPages(padded, sources))).toBe(1)
+    expect(blankPageCount(outputPages(withBlank, sources))).toBe(2)
   })
 
   test("hands the engine every slot and padding page", () => {

@@ -25,6 +25,8 @@ pub struct Settings {
     watermark: Option<WatermarkConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     page_numbers: Option<PageNumbersPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organize: Option<OrganizePreferences>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -43,6 +45,18 @@ struct UiPreferences {
     /// The organize thumbnails' long side in CSS pixels.
     #[serde(skip_serializing_if = "Option::is_none")]
     organize_thumbnail_size: Option<u32>,
+}
+
+/// The choices a new organize plan starts from: the last ones the reader made.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct OrganizePreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    smart_padding: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    normalize_a4: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bookmarks: Option<bool>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -90,6 +104,7 @@ impl Stored for Settings {
             annotate: section(&table, "annotate"),
             watermark: section(&table, "watermark"),
             page_numbers: section(&table, "pageNumbers"),
+            organize: section(&table, "organize"),
         }
     }
 
@@ -107,6 +122,7 @@ impl Settings {
             annotate: sent_section(document, "annotate"),
             watermark: sent_section(document, "watermark"),
             page_numbers: sent_section(document, "pageNumbers"),
+            organize: sent_section(document, "organize"),
         }
     }
 }
@@ -219,6 +235,11 @@ mod tests {
             }),
             watermark: None,
             page_numbers: Some(page_numbers()),
+            organize: Some(OrganizePreferences {
+                smart_padding: Some(false),
+                normalize_a4: Some(true),
+                bookmarks: None,
+            }),
         }
     }
 
@@ -237,6 +258,13 @@ mod tests {
             Some(12.0)
         );
         assert_eq!(read.page_numbers, Some(page_numbers()));
+
+        let organize = read
+            .organize
+            .expect("the organize section should read back");
+        assert_eq!(organize.smart_padding, Some(false));
+        assert_eq!(organize.normalize_a4, Some(true));
+        assert_eq!(organize.bookmarks, None);
     }
 
     /// Names the keys rather than trusting the derive, because they are also
@@ -251,6 +279,9 @@ mod tests {
         assert!(rendered.contains("fontSize"));
         assert!(rendered.contains("sidebarPanel"));
         assert!(rendered.contains("organizeThumbnailSize = 200"));
+        assert!(rendered.contains("[organize]"));
+        assert!(rendered.contains("smartPadding = false"));
+        assert!(rendered.contains("normalizeA4 = true"));
         assert!(!rendered.contains("[watermark]"));
     }
 

@@ -34,6 +34,8 @@ import {
   type OrganizeSource,
   type OrganizeSourceInfo,
 } from "@/lib/organize"
+import { storedOrganizePreferences, storeOrganizePreferences } from "@/lib/organizePreferences"
+import { pageNumbersFit } from "@/lib/pageNumbers"
 import {
   exportFailureNotice,
   fileNameFromPath,
@@ -56,8 +58,7 @@ const NO_KEYS: ReadonlySet<number> = new Set()
 
 type UseOrganizeWorkspaceOptions = {
   notices: NoticeChannel
-  /** Opens the assembled document as a tab of its own: the file its `path`
-      names once saved, unsaved for a preview, which has none. */
+  /** Opens the assembled document as the tab of the file it was saved to. */
   onAssembled: (document: PdfDocumentInfo) => void
 }
 
@@ -74,7 +75,10 @@ export function useOrganizeWorkspace({
   const [sources, setSources] = useState<ReadonlyMap<number, OrganizeSource>>(
     () => new Map(),
   )
-  const [plan, setPlan] = useState<OrganizePlan>(emptyPlan)
+  const [plan, setPlan] = useState<OrganizePlan>(() => ({
+    ...emptyPlan,
+    options: { ...emptyPlan.options, ...storedOrganizePreferences() },
+  }))
   const [history, setHistory] = useState<History>(emptyHistory)
   // Pages or files, never both: choosing one lets go of the other, so the
   // toolbar and the keys act on whichever was chosen last.
@@ -101,7 +105,7 @@ export function useOrganizeWorkspace({
   const assembledRef = useRef<OrganizePlan | null>(null)
   // The plan a fill from the viewer's tab left, and what it read: the reader
   // has changed nothing while the plan is still this one.
-  const baselineRef = useRef<OrganizePlan>(emptyPlan)
+  const baselineRef = useRef(plan)
   const baselineKeyRef = useRef<string | null>(null)
   // A Stop pressed before the backend has listed the assembly finds nothing
   // to stop, so each progress report asks again until one listens.
@@ -403,13 +407,19 @@ export function useOrganizeWorkspace({
       .catch(() => undefined)
   }, [])
 
-  /** A preview opens unsaved, exported once the reader likes it; a save asks
-      where the PDF goes first, and opens it as the file written there. */
-  const assemble = useCallback(async (how: "preview" | "save") => {
+  /** Asks where the PDF goes first, and opens it as the file written there. */
+  const assemble = useCallback(async () => {
     const assembling = planRef.current
     const assembledPages = outputPages(assembling, sourcesRef.current)
+    const { normalizeA4, pageNumbers, watermark } = assembling.options
 
     if (busyRef.current || assembledPages.length === 0) {
+      return
+    }
+
+    // A range set before pages were removed would only fail the build.
+    if (pageNumbers && !pageNumbersFit(pageNumbers, assembledPages.length)) {
+      raise("organizePageNumbersStale")
       return
     }
 
@@ -430,31 +440,22 @@ export function useOrganizeWorkspace({
     }
 
     try {
-      const plan = {
-        normalizeA4: assembling.options.normalizeA4,
-        outline: organizeOutline(assembling, sourcesRef.current, assembledPages),
-        slots: assembleSlots(assembledPages, assembling.options.normalizeA4),
+      const args = {
+        filterLabel: t("annotate.exportFilter"),
+        onProgress: channel,
+        plan: {
+          normalizeA4,
+          outline: organizeOutline(assembling, sourcesRef.current, assembledPages),
+          pageNumbers,
+          slots: assembleSlots(assembledPages, normalizeA4),
+          watermark,
+        },
+        suggestedName: t("organize.untitled"),
       }
-      let document: PdfDocumentInfo | null
-
-      if (how === "preview") {
-        document = await invoke<PdfDocumentInfo | null>("assemble_pdf", {
-          onProgress: channel,
-          plan,
-        })
-      } else {
-        const args = {
-          filterLabel: t("annotate.exportFilter"),
-          onProgress: channel,
-          plan,
-          suggestedName: t("organize.untitled"),
-        }
-        const override = e2eOverride("saveAssembledPdf")
-
-        document = override
-          ? await override(args)
-          : await invoke<PdfDocumentInfo | null>("save_assembled_pdf", args)
-      }
+      const override = e2eOverride("saveAssembledPdf")
+      const document = override
+        ? await override(args)
+        : await invoke<PdfDocumentInfo | null>("save_assembled_pdf", args)
 
       if (document) {
         assembledRef.current = assembling
@@ -552,9 +553,17 @@ export function useOrganizeWorkspace({
       edit((current) => rotateSlots(current, keys, degrees)),
     [edit],
   )
+  /** A choice the reader makes is also where the next plan starts; an undo
+      steps this plan back, not that. */
   const changeOptions = useCallback(
-    (options: Partial<OrganizeOptions>) =>
-      edit((current) => setOptions(current, options)),
+    (options: Partial<OrganizeOptions>) => {
+      if (busyRef.current) {
+        return
+      }
+
+      edit((current) => setOptions(current, options))
+      storeOrganizePreferences(options)
+    },
     [edit],
   )
 

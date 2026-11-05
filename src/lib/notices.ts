@@ -257,6 +257,11 @@ export const noticeCatalogue = {
     textKey: "organize.failed",
     tone: "danger",
   },
+  organizePageNumbersStale: {
+    life: "transient",
+    textKey: "organize.pageNumbersStale",
+    tone: "warning",
+  },
   organizeSourceChanged: {
     life: "transient",
     textKey: "organize.sourceChanged",
