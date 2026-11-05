@@ -1,7 +1,9 @@
 /** The bar under the pressed item of a switch-like toolbar group — view mode,
-    and the drawing tools — so a chosen button reads apart from a hovered one. */
+    and the drawing tools — so a chosen button reads apart from a hovered one.
+    It sits low: a 28px button leaves 6px under its 16px icon, and an outline
+    button's border takes one of them. */
 const selectionBarShape =
-  "relative after:pointer-events-none after:absolute after:inset-x-2 after:bottom-1 after:h-0.5 after:rounded-full after:opacity-0 after:transition-opacity aria-pressed:after:opacity-100"
+  "relative after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0.5 after:h-0.5 after:rounded-full after:opacity-0 after:transition-opacity aria-pressed:after:opacity-100"
 
 /** The brand navy is the menu button's, the toolbar's one accent. */
 export const toolbarSelectionBarClassName = `${selectionBarShape} after:bg-brand`
