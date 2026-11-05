@@ -2,31 +2,28 @@
 
 [English](README.md) · [简体中文](README_zh.md)
 
-TFolio 是一款轻快的开源 PDF 桌面应用。阅读、批注、合订和排版都在本机完成，文档不会上传。
+你手边的 PDF 工作伴侣：轻巧、快速、占内存少。“查看编辑”与“页面组织”两个工作区各管一摊：读、标、改一份 PDF，或把多个文件拼成一个新 PDF。文档只在本机处理，不会上传。
+
+[官网](https://roy-tian.github.io/TFolio/) · [下载](https://github.com/roy-tian/TFolio/releases/latest)
+
+![TFolio 的查看编辑工作区](https://roy-tian.github.io/TFolio/assets/zh/view.webp)
 
 ## 亮点
 
-- **快而轻**：启动迅速、浏览丝滑、安装包精简。
-- **水印**：轻松添加整篇文字水印；导出时可将页面转为图片，让水印无法作为独立文字直接删除。
-- **页码**：支持双面装订的奇偶页镜像、空白页计数，以及参考 [GB/T 9704—2012](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=F3CC9BEF482524C895FDA7A08BB4A70E) 的“— 1 —”样式。
-- **全文搜索**：可跨视觉换行匹配短语，查询词里的回车也不会打断匹配。
-- **方框效果**：拖出半透明、模糊或马赛克方框；模糊、马赛克配合图片化导出，可去掉 PDF 中的原文字层。
-- **合订本**：按顺序合并 PDF、图片和 Word 文档（`.doc` / `.docx`），插入空白页，并保留或按文件生成书签；Windows 上可借助 WPS Office 转换 Word 文档。
-- **MIT 开源**：基于 [MIT 许可证](LICENSE) 发布，欢迎在 [Issues](https://github.com/roy-tian/TFolio/issues) 提意见。
+- **轻巧省内存**：Windows 安装包约 6 MB；Rust + PDFium 本机渲染，只渲染屏幕上的页面，打开即看、滚动跟手。
+- **查看编辑**：高亮、文字注释，半透明、马赛克或模糊方框；插入空白页，旋转、排序、删除页面；拆分、减小文件大小、导出图片、打印。
+- **页面组织**：把 PDF、图片和 Word 文档拼成新 PDF，源文件只读不改；每个文件从奇数页开始、统一为 A4，并按文件建书签。
+- **智能添加空白页、水印、页码**：只在双面打印需要处补空白页；水印按页宽等比缩放；“— n —”页码按双面装订奇右偶左，落在深色区域自动变白。
+- **跨行搜索**：被排版拆到两行的词、带着换行粘贴的句子，都能搜到。
+- **好上手，MIT 开源**：每一步都能撤销，8 种界面语言，明暗主题可选。想法请到 [Discussions](https://github.com/roy-tian/TFolio/discussions)，问题请到 [Issues](https://github.com/roy-tian/TFolio/issues)。
 
-## 更多功能
+## 下载
 
-- 单页、书本对开和缩略图视图；可拖动页面排序，或将页面拖到另一个已打开的文档。
-- 高亮文字、添加文字注释；合订时还可让每个文件从奇数页开始、统一为 A4，并导出 PDF 或逐页 PNG 压缩包。
-- 界面支持简体中文、繁体中文、英语、法语、西班牙语、意大利语、德语和泰语。
-
-## 安装
-
-从 [Releases](https://github.com/roy-tian/TFolio/releases) 下载 macOS（Apple Silicon / Intel）、Windows x64 或 Linux x64 安装包。
+从 [Releases](https://github.com/roy-tian/TFolio/releases/latest) 下载：Windows 10 与 11 x64（`.exe` / `.msi`）、macOS Apple 芯片与 Intel（`.dmg`）、Linux x64（`.deb` / `.rpm` / `.AppImage`）。TFolio 启动时会检查更新。
 
 ## 须知
 
-- Word 导入依赖本机安装的 Microsoft Word、WPS Office（Windows）或 LibreOffice（macOS / Linux）；目前不支持直接导入 `.wps` 文件。
-- 添加水印、页码或其他文件的页面后，只能导出副本，原文件不会被改动。可打开不超过 512 MiB 的 PDF。
+- 导入 Word 文档需本机装有 Microsoft Word、WPS Office（Windows）或 LibreOffice（macOS / Linux）；暂不支持直接导入 `.wps` 文件。
+- 带水印或页码的文档只能导出副本，原文件不会被改动。可打开不超过 512 MiB 的 PDF。
 
 版权所有 © 2026 Roy Tian

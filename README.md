@@ -2,31 +2,28 @@
 
 [English](README.md) · [简体中文](README_zh.md)
 
-TFolio is a lightweight, open-source desktop PDF app. Read, mark up, compile, and arrange documents locally; your files are never uploaded.
+Your PDF work companion, always at hand: light, fast and easy on memory. Two workspaces, each with one job: read, mark up and edit a PDF in View and edit, or combine many files into a new PDF in Organize pages. Documents are processed on your computer and never uploaded.
+
+[Website](https://roy-tian.github.io/TFolio/) · [Download](https://github.com/roy-tian/TFolio/releases/latest)
+
+![TFolio's View and edit workspace](https://roy-tian.github.io/TFolio/assets/en/view.webp)
 
 ## Highlights
 
-- **Fast and light**: quick startup, smooth browsing, and a compact installer.
-- **Watermarks**: easily stamp an entire document; export pages as images so the watermark cannot be deleted as separate text.
-- **Page numbers**: mirror their position on odd and even pages for double-sided binding, control how blank pages count, and use a “— 1 —” style inspired by [GB/T 9704—2012](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=F3CC9BEF482524C895FDA7A08BB4A70E).
-- **Full-text search**: find phrases across visual line breaks, even when your query contains a return.
-- **Rectangle effects**: quickly mark areas with translucent, blur, or mosaic boxes; blur and mosaic combined with image export remove the PDF's original text layer.
-- **Organized compilations**: combine PDFs, images, and Word documents (`.doc` / `.docx`) in order, insert blank pages, and retain or generate bookmarks for each source. On Windows, WPS Office can convert Word documents for import.
-- **MIT-licensed**: open source under the [MIT License](LICENSE); feedback is welcome in [Issues](https://github.com/roy-tian/TFolio/issues).
+- **Light, fast, lean**: the Windows installer is about 6 MB; Rust and PDFium render only the pages on screen, so documents open straight away and scrolling keeps up.
+- **View and edit**: highlights, text notes, and translucent, mosaic or blurred boxes; insert blank pages, rotate, reorder and delete pages; split, reduce file size, export images, print.
+- **Organize pages**: combine PDFs, images and Word documents into a new PDF without changing the sources; start every file on an odd page, make every page A4, and add a bookmark per file.
+- **Blank pages, watermarks, page numbers, added for you**: blanks only where double-sided printing needs them; watermarks sized to each page's width; “— n —” numbers that mirror for binding and turn white on dark areas.
+- **Search across line breaks**: a phrase split over two lines, or pasted with its line breaks, is still found.
+- **Friendly and MIT-licensed**: every step can be undone; 8 interface languages, light or dark. Bring ideas to [Discussions](https://github.com/roy-tian/TFolio/discussions) and problems to [Issues](https://github.com/roy-tian/TFolio/issues).
 
-## More features
+## Download
 
-- Single-page, book spread, and thumbnail views; drag to reorder pages or move them into another open document.
-- Highlight text and add text notes; start each source on an odd page, fit a compilation to A4, and export a PDF or a ZIP of page PNGs.
-- Interface in Simplified and Traditional Chinese, English, French, Spanish, Italian, German, and Thai.
-
-## Install
-
-Download an installer for macOS (Apple Silicon / Intel), Windows x64, or Linux x64 from [Releases](https://github.com/roy-tian/TFolio/releases).
+Get the latest from [Releases](https://github.com/roy-tian/TFolio/releases/latest): Windows 10 and 11 x64 (`.exe` / `.msi`), macOS on Apple silicon or Intel (`.dmg`), and Linux x64 (`.deb` / `.rpm` / `.AppImage`). TFolio checks for updates when it starts.
 
 ## Good to know
 
-- Word import requires an installed Microsoft Word, WPS Office (Windows), or LibreOffice (macOS / Linux); `.wps` files cannot currently be imported directly.
-- Adding a watermark, page numbers, or pages from another file requires exporting a copy; the source file stays untouched. PDFs up to 512 MiB can be opened.
+- Word import needs Microsoft Word, WPS Office (Windows), or LibreOffice (macOS / Linux) installed; `.wps` files cannot be imported directly.
+- A document carrying a watermark or page numbers can only be exported as a copy; the original file stays untouched. PDFs up to 512 MiB can be opened.
 
 Copyright © 2026 Roy Tian.
