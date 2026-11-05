@@ -27,10 +27,12 @@ import {
 } from "@/components/ui/select"
 import { changeLanguagePreference, useLanguagePreference } from "@/i18n"
 import {
+  detectSystemLanguage,
   languageNames,
   supportedLanguages,
   systemLanguage,
 } from "@/i18n/config"
+import { translations } from "@/i18n/resources"
 import { cn } from "@/lib/utils"
 import {
   setThemePreference,
@@ -161,9 +163,12 @@ export function SettingsDialog({
   const appearanceRef = useRef<HTMLDivElement>(null)
   const aboutRef = useRef<HTMLDivElement>(null)
 
+  // In the language it switches to, like the names beside it, so a reader
+  // stranded in an interface they cannot read still recognises it.
+  const systemLabelLanguage = detectSystemLanguage()
+  const systemLabel = translations[systemLabelLanguage].settings.languageSystem
   // Base UI resolves the trigger's label from `items`; without it the trigger
   // would fall back to printing the raw value ("zh-CN").
-  const systemLabel = t("settings.languageSystem")
   const languageOptions = [
     { label: systemLabel, value: systemLanguage },
     ...languageItems,
@@ -328,7 +333,9 @@ export function SettingsDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value={systemLanguage}>{systemLabel}</SelectItem>
+                      <SelectItem lang={systemLabelLanguage} value={systemLanguage}>
+                        {systemLabel}
+                      </SelectItem>
                     </SelectGroup>
                     <SelectSeparator />
                     <SelectGroup>
