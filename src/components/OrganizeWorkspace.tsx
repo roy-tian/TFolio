@@ -72,6 +72,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   const scrollRef = useRef<HTMLElement>(null)
   const { options } = organize.plan
   const chosen = organize.selection
+  const chosenFiles = organize.fileSelection
+  const nothingChosen = chosen.size === 0 && chosenFiles.size === 0
   const busy = organize.adding || organize.assembling
   const empty = organize.plan.groups.length === 0
   const assemblyDone =
@@ -95,13 +97,13 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
 
       const primary = event.ctrlKey || event.metaKey
 
-      if ((event.key === "Delete" || event.key === "Backspace") && chosen.size > 0) {
+      if ((event.key === "Delete" || event.key === "Backspace") && !nothingChosen) {
         event.preventDefault()
-        organize.remove(chosen)
+        organize.removeChosen()
       } else if (event.key === "Escape") {
-        // As in a file manager: Esc lets the pages go and takes back a cut.
-        if (chosen.size > 0) {
-          organize.setSelection(new Set())
+        // As in a file manager: Esc lets the pages or files go and takes back a cut.
+        if (!nothingChosen) {
+          organize.clearChoices()
         }
 
         organize.cancelCut()
@@ -120,7 +122,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
     document.addEventListener("keydown", onKey)
 
     return () => document.removeEventListener("keydown", onKey)
-  }, [active, chosen, organize])
+  }, [active, chosen, nothingChosen, organize])
 
   const chooseSize = (next: number) => {
     setSize(next)
@@ -149,6 +151,10 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
   )
 
   const folds = { closed: closedFiles, setClosed: setClosedFiles }
+  const deleteLabel =
+    chosenFiles.size > 0
+      ? t("organize.removeChosen", { count: chosenFiles.size })
+      : t("organize.delete")
 
   return (
     <div
@@ -202,8 +208,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                 <Button
                   aria-label={t("organize.rotateCounterclockwise")}
                   data-slot="organize-rotate-left"
-                  disabled={busy || chosen.size === 0}
-                  onClick={() => organize.rotate(chosen, 270)}
+                  disabled={busy || nothingChosen}
+                  onClick={() => organize.rotateChosen(270)}
                   size="icon-sm"
                   variant="outline"
                 >
@@ -214,8 +220,8 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                 <Button
                   aria-label={t("organize.rotateClockwise")}
                   data-slot="organize-rotate"
-                  disabled={busy || chosen.size === 0}
-                  onClick={() => organize.rotate(chosen, 90)}
+                  disabled={busy || nothingChosen}
+                  onClick={() => organize.rotateChosen(90)}
                   size="icon-sm"
                   variant="outline"
                 >
@@ -228,7 +234,7 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   aria-label={t("pageEdit.insertBlankBefore")}
                   data-slot="organize-insert-blank-before"
                   disabled={busy || empty}
-                  onClick={() => organize.insertBlankAt(chosen, "before")}
+                  onClick={() => organize.insertBlankBeside("before")}
                   size="icon-sm"
                   variant="outline"
                 >
@@ -240,19 +246,19 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   aria-label={t("pageEdit.insertBlankAfter")}
                   data-slot="organize-insert-blank-after"
                   disabled={busy || empty}
-                  onClick={() => organize.insertBlankAt(chosen, "after")}
+                  onClick={() => organize.insertBlankBeside("after")}
                   size="icon-sm"
                   variant="outline"
                 >
                   <InsertAfterIcon />
                 </Button>
               </ToolbarTooltip>
-              <ToolbarTooltip label={t("organize.delete")}>
+              <ToolbarTooltip label={deleteLabel}>
                 <Button
-                  aria-label={t("organize.delete")}
+                  aria-label={deleteLabel}
                   data-slot="organize-delete"
-                  disabled={busy || chosen.size === 0}
-                  onClick={() => organize.remove(chosen)}
+                  disabled={busy || nothingChosen}
+                  onClick={organize.removeChosen}
                   size="icon-sm"
                   variant="outline"
                 >

@@ -519,6 +519,8 @@ const es = {
     sourceChanged: "Un archivo cambió después de añadirlo. Quítalo y vuelve a añadirlo.",
     failed: "No se pudo crear el PDF.",
     removeAll: "Quitar todos los archivos",
+    removeChosen_one: "Quitar {{count}} archivo",
+    removeChosen_other: "Quitar {{count}} archivos",
     unsavedArrangement: "Las páginas ordenadas en Organizar páginas aún no se han convertido en un PDF; al cerrar se descartan.",
     unsavedArrangementToo: "También se descartarán las páginas ordenadas en Organizar páginas.",
     mergeDropNow: "Suelta para combinar con este archivo",

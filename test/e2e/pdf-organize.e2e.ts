@@ -152,6 +152,48 @@ function cutLabels() {
   )
 }
 
+const fileList = `${sidebar} [data-slot='organize-files']`
+
+/** A dispatched click on a file's row: WebDriver's own carries no modifiers. */
+function clickFile(title: string, keys: { ctrlKey?: boolean; shiftKey?: boolean } = {}) {
+  return browser.execute(
+    (list: string, name: string, modifiers: { ctrlKey?: boolean; shiftKey?: boolean }) => {
+      const row = Array.from(document.querySelectorAll(`${list} [data-slot='organize-file']`)).find(
+        (candidate) =>
+          candidate.querySelector("[data-slot='organize-file-name']")?.textContent === name,
+      )!
+
+      row.dispatchEvent(new MouseEvent("click", { bubbles: true, ...modifiers }))
+    },
+    fileList,
+    title,
+    keys,
+  )
+}
+
+function chosenFiles() {
+  return browser.execute(
+    (list: string) =>
+      Array.from(
+        document.querySelectorAll(
+          `${list} [data-slot='organize-file'][data-selected] [data-slot='organize-file-name']`,
+        ),
+        (name) => name.textContent,
+      ),
+    fileList,
+  )
+}
+
+function sectionTitles() {
+  return browser.execute(
+    (scope: string) =>
+      Array.from(document.querySelectorAll(`${scope} section[data-group-id]`), (section) =>
+        section.getAttribute("aria-label"),
+      ),
+    workspace,
+  )
+}
+
 /** One of the controls a page carries on its own paper. */
 function pageControl(label: string, action: string) {
   return $(
@@ -826,6 +868,117 @@ describe("TFolio organize workspace", () => {
     expect(
       await browser.execute((list: string) => document.querySelector<HTMLElement>(list)!.style.cssText, files),
     ).toBe("")
+  })
+
+  it("chooses several files to turn, move and remove together", async () => {
+    await organizeWith([
+      portrait(),
+      landscape(),
+      writeScratchPdf("one.pdf", minimalPdf(1)),
+      writeScratchPdf("four.pdf", minimalPdf(4)),
+    ])
+
+    await clickFile("portrait")
+    await clickFile("one", { ctrlKey: true })
+    expect(await chosenFiles()).toEqual(["portrait", "one"])
+    // A range runs from the last file clicked, not the first.
+    await clickFile("four", { shiftKey: true })
+    expect(await chosenFiles()).toEqual(["one", "four"])
+
+    // Pages or files, never both: what the toolbar acts on is never in doubt.
+    await slot("Page 1 of landscape").click()
+    expect(await chosenFiles()).toEqual([])
+    await clickFile("one")
+    await clickFile("four", { ctrlKey: true })
+    await expect(slot("Page 1 of landscape")).toHaveAttribute("aria-pressed", "false")
+
+    await $(`${workspace} [data-slot='organize-rotate']`).click()
+    await expect(slot("Page 4 of four")).toHaveAttribute("data-rotation", "90")
+    await expect(slot("Page 1 of one")).toHaveAttribute("data-rotation", "90")
+    await expect(slot("Page 1 of portrait")).not.toHaveAttribute("data-rotation", "90")
+
+    // Pressed on a chosen file, the drag carries the other chosen one along.
+    await browser.execute((list: string) => {
+      const rows = Array.from(document.querySelectorAll<HTMLElement>(`${list} > li`))
+      const name = rows[3]!.querySelector("[data-slot='organize-file-name']")!
+      const box = name.getBoundingClientRect()
+      const start = { x: box.left + 4, y: box.top + box.height / 2 }
+
+      name.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: start.x,
+          clientY: start.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", { bubbles: true, clientX: start.x, clientY: start.y - 12 }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: start.x,
+          clientY: rows[0]!.getBoundingClientRect().top + 2,
+        }),
+      )
+    }, fileList)
+    await expect($("[data-slot='organize-file-ghost']")).toHaveText(expect.stringContaining("2"))
+    // At the list's top: the first file has slid down out of the way.
+    await browser.execute((list: string) => {
+      const box = document.querySelector(list)!.getBoundingClientRect()
+
+      document.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          clientX: box.left + 16,
+          clientY: box.top + 4,
+        }),
+      )
+    }, fileList)
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(await sectionTitles()) ===
+        JSON.stringify(["one", "four", "portrait", "landscape"]),
+      { timeout: 10_000, timeoutMsg: "the chosen files never moved to the top together" },
+    )
+    expect(await chosenFiles()).toEqual(["one", "four"])
+
+    await browser.keys("Delete")
+    await waitForTotal("5 pages from 2 files")
+    // The undo brings the files back still chosen, for a second try.
+    await browser.keys(["Control", "z"])
+    await waitForTotal("10 pages from 4 files")
+    expect(await chosenFiles()).toEqual(["one", "four"])
+
+    const remove = $(`${sidebar} [data-slot='organize-remove-files']`)
+    await expect(remove).toHaveText("Remove 2 files")
+    await remove.click()
+    await waitForTotal("5 pages from 2 files")
+    await expect(remove).toHaveText("Remove all files")
+  })
+
+  it("selects every file from the list, and pastes at a chosen file's end", async () => {
+    await organizeWith([portrait(), landscape()])
+
+    await clickFile("portrait")
+    await browser.keys(["Control", "a"])
+    expect(await chosenFiles()).toEqual(["portrait", "landscape"])
+    expect(
+      (await $$(`${workspace} [data-slot-key] [aria-pressed='true']`).getElements()).length,
+    ).toBe(0)
+    await browser.keys("Escape")
+    expect(await chosenFiles()).toEqual([])
+
+    await slot("Page 1 of landscape").click()
+    await browser.keys(["Control", "x"])
+    await clickFile("portrait")
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(
+      async () => (await slotLabels("portrait")).at(-1) === "Page 1 of landscape",
+      { timeout: 10_000, timeoutMsg: "the cut page never landed at the chosen file's end" },
+    )
   })
 
   it("starts a file on an odd page with a blank only where it needs one", async () => {

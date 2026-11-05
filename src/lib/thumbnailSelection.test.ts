@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 
 import {
+  choiceAfterClick,
   emptySelection,
   selectionAfterClick,
   selectionOfAllPages,
@@ -76,5 +77,30 @@ describe("selectionOfAllPages", () => {
     const narrowed = selectionAfterClick(selectionOfAllPages(6), 3, range)
 
     expect(pagesOf(narrowed)).toEqual([1, 2, 3])
+  })
+})
+
+describe("choiceAfterClick", () => {
+  const order = [7, 3, 9, 5]
+
+  it("spans from the anchor in list order, keeping the anchor", () => {
+    expect(choiceAfterClick(order, new Set([3]), 3, 5, range)).toEqual({
+      anchor: 3,
+      chosen: new Set([3, 9, 5]),
+    })
+  })
+
+  it("takes a range from an anchor no longer listed as a plain click", () => {
+    expect(choiceAfterClick(order, new Set([1]), 1, 9, range)).toEqual({
+      anchor: 9,
+      chosen: new Set([9]),
+    })
+  })
+
+  it("toggles one item and moves the anchor to it", () => {
+    expect(choiceAfterClick(order, new Set([7, 9]), 7, 9, toggle)).toEqual({
+      anchor: 9,
+      chosen: new Set([7]),
+    })
   })
 })

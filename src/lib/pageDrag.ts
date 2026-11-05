@@ -1,5 +1,9 @@
 export const DRAG_THRESHOLD = 4
 
+// A release's click lands within this of the drag's end; a later one is the
+// reader's own, even when the drag ended elsewhere and sent no click.
+export const DRAG_CLICK_WINDOW = 300
+
 export function exceedsDragThreshold(
   from: { x: number; y: number },
   to: { x: number; y: number },
@@ -24,10 +28,60 @@ export function dropGapForRow(
   return rows.length
 }
 
-/** The gap counts positions between the items as they stand, so every gap
-    past the dragged item's own place shifts down by the hole it leaves. */
-export function indexAfterMove(from: number, gap: number): number {
-  return gap > from ? gap - 1 : gap
+/** Where the first of the moving items, by ascending index, stands once they
+    land together at `gap`. The gap counts positions between the items as they
+    stand, so each moving item before it shifts it down by the hole it leaves. */
+export function indexAfterMove(moving: readonly number[], gap: number): number {
+  return gap - moving.filter((index) => index < gap).length
+}
+
+/** Only a run with no gaps in it, landing on its own first place, leaves
+    every item where it stands. */
+export function movesNothing(moving: readonly number[], to: number): boolean {
+  return moving.every((index, offset) => index === to + offset)
+}
+
+/**
+ * How far each item slides to make way for the moving items, by ascending
+ * index, landing together at `to`. An item passed over moves by each passing
+ * item's own extent, not its neighbour's: the organize list's files differ in
+ * height by their bookmarks. The moving items stay put, hidden under the ghost.
+ */
+export function wayOffsets(
+  moving: readonly number[],
+  to: number,
+  cells: readonly { height: number; top: number }[],
+): number[] {
+  const lifted = new Set(moving)
+  const staying = cells.flatMap((_, index) => (lifted.has(index) ? [] : [index]))
+  const order = [...staying.slice(0, to), ...moving, ...staying.slice(to)]
+  const place: number[] = []
+
+  order.forEach((index, at) => {
+    place[index] = at
+  })
+
+  return cells.map((_, index) => {
+    let offset = 0
+
+    if (lifted.has(index)) {
+      return offset
+    }
+
+    for (const item of moving) {
+      const cell = cells[item]!
+
+      if (item > index && place[item]! < place[index]!) {
+        const before = cells[item - 1]!
+
+        offset += cell.top + cell.height - (before.top + before.height)
+      } else if (item < index && place[item]! > place[index]!) {
+        offset += cell.top - cells[item + 1]!.top
+      }
+    }
+
+    return offset
+  })
 }
 
 /** A drop that reproduces the current order comes back as the identity,

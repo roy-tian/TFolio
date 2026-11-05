@@ -520,6 +520,8 @@ const fr = {
     sourceChanged: "Un fichier a changé après son ajout. Retirez-le puis ajoutez-le de nouveau.",
     failed: "Le PDF n'a pas pu être créé.",
     removeAll: "Retirer tous les fichiers",
+    removeChosen_one: "Retirer {{count}} fichier",
+    removeChosen_other: "Retirer {{count}} fichiers",
     unsavedArrangement: "Les pages disposées dans Organiser les pages ne forment pas encore un PDF ; la fermeture les abandonne.",
     unsavedArrangementToo: "Les pages disposées dans Organiser les pages seront aussi abandonnées.",
     mergeDropNow: "Déposez pour combiner avec ce fichier",

@@ -4,6 +4,8 @@ import {
   dropGapForRow,
   exceedsDragThreshold,
   indexAfterMove,
+  movesNothing,
+  wayOffsets,
 } from "@/lib/pageDrag"
 
 type UseListDragOptions = {
@@ -11,8 +13,13 @@ type UseListDragOptions = {
       bar by x. Decided once at measurement so the rest is axis-free. */
   axis?: "x" | "y"
   active: boolean
+  /** The cells a press on `index` lifts, itself among them, by ascending
+      index: that one alone by default. Asked once, as the press turns into a
+      drag. */
+  carry?: (index: number) => readonly number[]
   listRef: RefObject<HTMLElement | null>
-  onReorder: (from: number, to: number) => void
+  /** `moved` lands together, the first of them at `to` and the rest after it. */
+  onReorder: (moved: readonly number[], to: number) => void
   /** Targets that are pressed, not dragged. A row's own buttons by default;
       the tab strip overrides it to the close button alone, its title button
       being the handle. */
@@ -72,45 +79,19 @@ function outsideElement(
 }
 
 export type ListDragState = {
+  /** The pressed cell, whose ghost the pointer carries. */
   index: number
   gap: number
   grip: { x: number; y: number }
   height: number
+  /** The cells lifted, the pressed one among them, by ascending index. */
+  moving: readonly number[]
   /** The pointer has left the drop area, so this drag is no longer a reorder:
       no insertion gap is shown and the release goes to `onDropOutside`. */
   outside: boolean
   pointer: { x: number; y: number }
   cellOffsets: number[]
   width: number
-}
-
-function makeWayOffsets(
-  index: number,
-  gap: number,
-  cells: { height: number; top: number }[],
-) {
-  const offsets = Array.from({ length: cells.length }, () => 0)
-  const destination = indexAfterMove(index, gap)
-  const dragged = cells[index]!
-
-  // Every cell passed over moves by the dragged cell's own extent, not its
-  // neighbour's: the organize list's files differ in height by their bookmarks.
-  if (destination < index) {
-    const before = cells[index - 1]!
-    const shift = dragged.top + dragged.height - (before.top + before.height)
-
-    for (let cell = destination; cell < index; cell += 1) {
-      offsets[cell] = shift
-    }
-  } else if (destination > index) {
-    const shift = dragged.top - cells[index + 1]!.top
-
-    for (let cell = index + 1; cell <= destination; cell += 1) {
-      offsets[cell] = shift
-    }
-  }
-
-  return offsets
 }
 
 /**
@@ -121,6 +102,7 @@ function makeWayOffsets(
 export function useListDrag({
   active,
   axis = "y",
+  carry,
   listRef,
   onReorder,
   pressOnly = pressedButton,
@@ -131,9 +113,11 @@ export function useListDrag({
   const remeasureRef = useRef<(() => void) | null>(null)
   // Read through refs so an owner re-render mid-gesture cannot resubscribe the
   // listeners and drop the gesture in flight.
+  const carryRef = useRef(carry)
   const onReorderRef = useRef(onReorder)
   const onDropOutsideRef = useRef(onDropOutside)
 
+  carryRef.current = carry
   onReorderRef.current = onReorder
   onDropOutsideRef.current = onDropOutside
 
@@ -156,6 +140,7 @@ export function useListDrag({
       dragging: boolean
       /** Where the pointer last was, for a re-measure to answer about. */
       last: ClientPoint
+      moving: readonly number[]
       /** The cells predate the owner's drag layout — the organize list folds
           its bookmarks away — so none may make way until they are measured
           again after the commit that started the drag. */
@@ -234,6 +219,7 @@ export function useListDrag({
         height: cellRect.height,
         index,
         last: event,
+        moving: [index],
         pointerId: event.pointerId,
         stale: false,
         unpad: null,
@@ -297,11 +283,12 @@ export function useListDrag({
       setDrag({
         cellOffsets: still
           ? Array.from({ length: current.cells.length }, () => 0)
-          : makeWayOffsets(current.index, gap, current.cells),
+          : wayOffsets(current.moving, indexAfterMove(current.moving, gap), current.cells),
         gap,
         grip: current.grip,
         height: current.height,
         index: current.index,
+        moving: current.moving,
         outside,
         pointer: { x: current.last.clientX, y: current.last.clientY },
         width: current.width,
@@ -335,8 +322,14 @@ export function useListDrag({
           return
         }
 
+        const carried = carryRef.current?.(gesture.index)
+
         gesture.dragging = true
         gesture.stale = true
+
+        if (carried?.includes(gesture.index)) {
+          gesture.moving = carried
+        }
 
         // Held pointers stay this window's until release on every platform, but
         // only a capture hands the page the events beyond its own viewport —
@@ -403,12 +396,12 @@ export function useListDrag({
         }
 
         const to = indexAfterMove(
-          current.index,
+          current.moving,
           dropGapForRow(coordinate, current.cells),
         )
 
-        if (to !== current.index) {
-          onReorderRef.current(current.index, to)
+        if (!movesNothing(current.moving, to)) {
+          onReorderRef.current(current.moving, to)
         }
       } finally {
         current.unpad?.()

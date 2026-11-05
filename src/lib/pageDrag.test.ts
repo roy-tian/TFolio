@@ -6,8 +6,10 @@ import {
   exceedsDragThreshold,
   flowCellAt,
   indexAfterMove,
+  movesNothing,
   orderAfterMove,
   orderWithBlockAt,
+  wayOffsets,
 } from "@/lib/pageDrag"
 
 describe("exceedsDragThreshold", () => {
@@ -61,13 +63,56 @@ describe("dropGapForRow", () => {
 
 describe("indexAfterMove", () => {
   it("leaves an item dropped back where it already is", () => {
-    expect(indexAfterMove(2, 2)).toBe(2)
-    expect(indexAfterMove(2, 3)).toBe(2)
+    expect(indexAfterMove([2], 2)).toBe(2)
+    expect(indexAfterMove([2], 3)).toBe(2)
   })
 
   it("closes up over the hole a downward move leaves", () => {
-    expect(indexAfterMove(0, 3)).toBe(2)
-    expect(indexAfterMove(3, 1)).toBe(1)
+    expect(indexAfterMove([0], 3)).toBe(2)
+    expect(indexAfterMove([3], 1)).toBe(1)
+  })
+
+  it("closes up over every hole a block leaves before the gap", () => {
+    expect(indexAfterMove([0, 2], 4)).toBe(2)
+    expect(indexAfterMove([0, 2], 2)).toBe(1)
+    expect(indexAfterMove([1, 3], 0)).toBe(0)
+  })
+})
+
+describe("movesNothing", () => {
+  it("holds for a run landing on its own first place", () => {
+    expect(movesNothing([2], 2)).toBe(true)
+    expect(movesNothing([1, 2, 3], 1)).toBe(true)
+  })
+
+  it("fails for a run landing elsewhere, or a block gathering up", () => {
+    expect(movesNothing([1, 2], 0)).toBe(false)
+    expect(movesNothing([0, 2], 0)).toBe(false)
+  })
+})
+
+describe("wayOffsets", () => {
+  // Rows of 10, 30, 10 and 20 with 2 between them.
+  const cells = [
+    { height: 10, top: 0 },
+    { height: 30, top: 12 },
+    { height: 10, top: 44 },
+    { height: 20, top: 56 },
+  ]
+
+  it("slides the items passed over by the moving item's own extent", () => {
+    expect(wayOffsets([1], 3, cells)).toEqual([0, 0, -32, -32])
+    expect(wayOffsets([3], 1, cells)).toEqual([0, 22, 22, 0])
+  })
+
+  it("slides each item by every moving item that passes it", () => {
+    // 0 and 2 land after 3: 0 alone passes 1, and both pass 3.
+    expect(wayOffsets([0, 2], 2, cells)).toEqual([0, -12, 0, -24])
+    expect(wayOffsets([1, 3], 0, cells)).toEqual([54, 0, 22, 0])
+  })
+
+  it("moves nothing for a block landing where it stands", () => {
+    expect(wayOffsets([1, 2], 1, cells)).toEqual([0, 0, 0, 0])
   })
 })
 

@@ -140,7 +140,8 @@ export function DocumentTabs({
     active: reorderable,
     axis: "x",
     listRef: scrollerRef,
-    onReorder,
+    // A tab is never carried with others, so only the pressed one moves.
+    onReorder: (moved, to) => onReorder(moved[0]!, to),
     onDropOutside: onTabDropOutside
       ? (point, index) => {
           const tab = tabs[index]

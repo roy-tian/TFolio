@@ -499,6 +499,8 @@ const zhCN = {
     sourceChanged: "有文件在添加后被修改了。请移除它再重新添加。",
     failed: "无法生成 PDF。",
     removeAll: "移除全部文件",
+    removeChosen_one: "移除 {{count}} 个文件",
+    removeChosen_other: "移除 {{count}} 个文件",
     unsavedArrangement: "“页面组织”里排好的页面还没有生成 PDF，关闭后这些安排会丢失。",
     unsavedArrangementToo: "“页面组织”里排好的页面也会丢失。",
     mergeDropNow: "松开以与当前文件合并",

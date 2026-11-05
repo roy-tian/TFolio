@@ -7,8 +7,10 @@ import {
   deleteSlots,
   emptyPlan,
   fileBookmarks,
+  groupGap,
+  groupSlotKeys,
   insertBlank,
-  moveGroup,
+  moveGroups,
   moveSlots,
   organizeOutline,
   outputPages,
@@ -197,11 +199,35 @@ describe("plan edits", () => {
 
   test("reorders and removes whole files", () => {
     const { plan, sources } = setup(source(1, 1), source(2, 1), source(3, 1))
+    const [first, second, third] = plan.groups.map((group) => group.id)
 
-    expect(layout(moveGroup(plan, 2, 0), sources)).toEqual(["3:1", "1:1", "2:1"])
+    expect(layout(moveGroups(plan, new Set([third!]), 0), sources)).toEqual([
+      "3:1",
+      "1:1",
+      "2:1",
+    ])
     expect(
       layout(removeGroups(plan, new Set([plan.groups[1]!.id])), sources),
     ).toEqual(["1:1", "3:1"])
+    expect(layout(moveGroups(plan, new Set([first!, third!]), 1), sources)).toEqual([
+      "2:1",
+      "1:1",
+      "3:1",
+    ])
+    expect(moveGroups(plan, new Set([first!, second!]), 0)).toBe(plan)
+    expect(moveGroups(plan, new Set([999]), 0)).toBe(plan)
+  })
+
+  test("finds the pages and the edges of the chosen files", () => {
+    const { plan } = setup(source(1, 2), source(2, 1), source(3, 1))
+    const emptied = deleteSlots(plan, new Set(plan.groups[2]!.slots.map((slot) => slot.key)))
+    const [first, , third] = emptied.groups
+    const chosen = new Set([first!.id, third!.id])
+
+    expect([...groupSlotKeys(emptied, chosen)]).toEqual(first!.slots.map((slot) => slot.key))
+    expect(groupGap(emptied, chosen, "before")).toEqual({ group: first!, index: 0 })
+    expect(groupGap(emptied, chosen, "after")).toEqual({ group: third!, index: 0 })
+    expect(groupGap(emptied, new Set(), "after")).toBeNull()
   })
 
   test("starts over with new files, keeping the options and numbering on", () => {

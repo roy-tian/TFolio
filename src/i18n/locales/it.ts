@@ -518,6 +518,8 @@ const it = {
     sourceChanged: "Un file è cambiato dopo essere stato aggiunto. Rimuovilo e aggiungilo di nuovo.",
     failed: "Impossibile creare il PDF.",
     removeAll: "Rimuovi tutti i file",
+    removeChosen_one: "Rimuovi {{count}} file",
+    removeChosen_other: "Rimuovi {{count}} file",
     unsavedArrangement: "Le pagine disposte in Organizza pagine non sono ancora diventate un PDF; la chiusura le scarta.",
     unsavedArrangementToo: "Anche le pagine disposte in Organizza pagine verranno scartate.",
     mergeDropNow: "Rilascia per combinare con questo file",

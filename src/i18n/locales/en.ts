@@ -517,6 +517,8 @@ const en = {
     sourceChanged: "A file changed after it was added. Remove it and add it again.",
     failed: "The PDF could not be created.",
     removeAll: "Remove all files",
+    removeChosen_one: "Remove {{count}} file",
+    removeChosen_other: "Remove {{count}} files",
     unsavedArrangement: "The pages arranged in Organize pages have not been made into a PDF yet; closing discards them.",
     unsavedArrangementToo: "The pages arranged in Organize pages will be discarded too.",
     mergeDropNow: "Drop to combine with this file",

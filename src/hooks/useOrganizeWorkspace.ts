@@ -13,9 +13,11 @@ import {
   deleteSlots,
   emptyPlan,
   fileBookmarks,
+  groupGap,
+  groupSlotKeys,
   insertBlank,
   ORGANIZE_MAX_FILES,
-  moveGroup,
+  moveGroups,
   moveSlots,
   organizeOutline,
   outputPages,
@@ -74,7 +76,13 @@ export function useOrganizeWorkspace({
   )
   const [plan, setPlan] = useState<OrganizePlan>(emptyPlan)
   const [history, setHistory] = useState<History>(emptyHistory)
-  const [selection, setSelection] = useState<ReadonlySet<number>>(() => new Set())
+  // Pages or files, never both: choosing one lets go of the other, so the
+  // toolbar, Delete and paste act on whichever was chosen last. Cut and copy
+  // take pages alone.
+  const [selection, setPageSelection] = useState<ReadonlySet<number>>(() => new Set())
+  // Group ids. One an edit took off the list stays here unshown, so the undo
+  // bringing its file back brings it back chosen.
+  const [storedFiles, setStoredFiles] = useState<ReadonlySet<number>>(NO_KEYS)
   const [clipboard, setClipboard] = useState<OrganizeClipboard | null>(null)
   // Pages a cut has marked to move: they stay where they are until a paste.
   const cut = clipboard?.mode === "cut" ? clipboard.keys : NO_KEYS
@@ -99,6 +107,35 @@ export function useOrganizeWorkspace({
   // A Stop pressed before the backend has listed the assembly finds nothing
   // to stop, so each progress report asks again until one listens.
   const stopOwedRef = useRef(false)
+
+  const setSelection = useCallback((next: ReadonlySet<number>) => {
+    setPageSelection(next)
+
+    if (next.size > 0) {
+      setStoredFiles(NO_KEYS)
+    }
+  }, [])
+
+  const setFileSelection = useCallback((next: ReadonlySet<number>) => {
+    setStoredFiles(next)
+
+    if (next.size > 0) {
+      setPageSelection(NO_KEYS)
+    }
+  }, [])
+
+  const clearChoices = useCallback(() => {
+    setPageSelection(NO_KEYS)
+    setStoredFiles(NO_KEYS)
+  }, [])
+
+  const fileSelection = useMemo(() => {
+    const listed = plan.groups.flatMap((group) =>
+      storedFiles.has(group.id) ? [group.id] : [],
+    )
+
+    return listed.length === storedFiles.size ? storedFiles : new Set(listed)
+  }, [plan.groups, storedFiles])
 
   const show = useCallback((next: OrganizePlan, nextHistory: History) => {
     planRef.current = next
@@ -274,7 +311,7 @@ export function useOrganizeWorkspace({
 
       baselineRef.current = next
       baselineKeyRef.current = key
-      setSelection(new Set())
+      clearChoices()
       setClipboard(null)
       show(
         next,
@@ -283,7 +320,7 @@ export function useOrganizeWorkspace({
           : emptyHistory,
       )
     },
-    [show],
+    [clearChoices, show],
   )
 
   /** Shows `path` alone as untouched, `key` naming what was read. */
@@ -310,12 +347,12 @@ export function useOrganizeWorkspace({
       }
 
       await load(paths.slice(0, ORGANIZE_MAX_FILES), (added) => {
-        setSelection(new Set())
+        clearChoices()
         setClipboard(null)
         commit(restartPlan(planRef.current, added))
       })
     },
-    [commit, load, raise],
+    [clearChoices, commit, load, raise],
   )
 
   // The backend's own dialog, which is also what approves the chosen paths
@@ -488,8 +525,9 @@ export function useOrganizeWorkspace({
       commit(renameGroup(planRef.current, groupId, title)),
     [commit],
   )
-  const reorderFiles = useCallback(
-    (from: number, to: number) => edit((current) => moveGroup(current, from, to)),
+  const moveFiles = useCallback(
+    (groupIds: ReadonlySet<number>, to: number) =>
+      edit((current) => moveGroups(current, groupIds, to)),
     [edit],
   )
   const move = useCallback(
@@ -506,7 +544,7 @@ export function useOrganizeWorkspace({
 
       edit((current) => deleteSlots(current, keys))
       // A page's own delete button may leave the rest of the selection standing.
-      setSelection((current) => new Set([...current].filter((key) => !keys.has(key))))
+      setPageSelection((current) => new Set([...current].filter((key) => !keys.has(key))))
     },
     [edit],
   )
@@ -535,11 +573,46 @@ export function useOrganizeWorkspace({
     [edit],
   )
 
+  /** Before the first chosen page or file, or after the last. */
+  const insertBlankBeside = useCallback(
+    (where: "before" | "after") =>
+      edit((current) => {
+        const gap =
+          fileSelection.size > 0
+            ? groupGap(current, fileSelection, where)
+            : slotGap(current, selection, where)
+
+        return gap
+          ? insertBlank(current, sourcesRef.current, gap.group.id, gap.index)
+          : current
+      }),
+    [edit, fileSelection, selection],
+  )
+
+  /** The chosen pages, or every page of the chosen files. */
+  const rotateChosen = useCallback(
+    (degrees: 90 | 270) =>
+      rotate(
+        fileSelection.size > 0 ? groupSlotKeys(planRef.current, fileSelection) : selection,
+        degrees,
+      ),
+    [fileSelection, rotate, selection],
+  )
+
+  /** The chosen files come off the list whole, chosen pages out of theirs. */
+  const removeChosen = useCallback(() => {
+    if (fileSelection.size > 0) {
+      removeFiles(fileSelection)
+    } else if (selection.size > 0) {
+      remove(selection)
+    }
+  }, [fileSelection, remove, removeFiles, selection])
+
   const selectAll = useCallback(() => {
     setSelection(
       new Set(planRef.current.groups.flatMap((group) => group.slots.map((slot) => slot.key))),
     )
-  }, [])
+  }, [setSelection])
 
   const take = useCallback(
     (mode: OrganizeClipboard["mode"]) => {
@@ -582,10 +655,10 @@ export function useOrganizeWorkspace({
     [clipboard, edit],
   )
 
-  /** The keyboard's paste: before the first chosen page not itself cut — at
-      the last file's end with nothing chosen. Pages cut and still the only
-      ones chosen stay where they are: a cut followed straight by a paste
-      moves nothing. */
+  /** The keyboard's paste: before the first chosen page not itself cut, or at
+      the end of the last chosen file — of the last file with nothing chosen.
+      Pages cut and still the only ones chosen stay where they are: a cut
+      followed straight by a paste moves nothing. */
   const paste = useCallback(() => {
     const current = planRef.current
     const chosen = current.groups.flatMap((group) =>
@@ -594,16 +667,19 @@ export function useOrganizeWorkspace({
       ),
     )
     const anchor = chosen.find(({ key }) => !cut.has(key))
+    const end = groupGap(current, fileSelection, "after")
     const last = current.groups.at(-1)
 
     if (anchor) {
       pasteInto(anchor.group, anchor.index)
     } else if (chosen.length > 0) {
       setClipboard(null)
+    } else if (end) {
+      pasteInto(end.group, end.index)
     } else if (last) {
       pasteInto(last, last.slots.length)
     }
-  }, [cut, pasteInto, selection])
+  }, [cut, fileSelection, pasteInto, selection])
 
   /** The menu's paste, beside the pages it was opened on. */
   const pasteBeside = useCallback(
@@ -630,6 +706,7 @@ export function useOrganizeWorkspace({
       canUndo: history.past.length > 0,
       changeOptions,
       cancelCut,
+      clearChoices,
       // Not once every page it took has been deleted: its paste would do nothing.
       canPaste:
         clipboard !== null &&
@@ -639,14 +716,17 @@ export function useOrganizeWorkspace({
       copySelection,
       cut,
       cutSelection,
+      fileSelection,
       fill,
       filledKeyNow,
       hasUnsavedArrangementNow,
       hasUnsavedWorkNow,
       insertBlankAt,
+      insertBlankBeside,
       isBusyNow,
       isUntouchedNow,
       move,
+      moveFiles,
       pages,
       paste,
       pasteBeside,
@@ -654,12 +734,14 @@ export function useOrganizeWorkspace({
       progress,
       redo,
       remove,
+      removeChosen,
       removeFiles,
       renameFile,
-      reorderFiles,
       rotate,
+      rotateChosen,
       selectAll,
       selection,
+      setFileSelection,
       setSelection,
       sources,
       startOver,
@@ -677,20 +759,24 @@ export function useOrganizeWorkspace({
       cancelCut,
       changeOptions,
       chooseFiles,
+      clearChoices,
       clearUntouched,
       clipboard,
       copySelection,
       cut,
       cutSelection,
+      fileSelection,
       fill,
       filledKeyNow,
       hasUnsavedArrangementNow,
       hasUnsavedWorkNow,
       history,
       insertBlankAt,
+      insertBlankBeside,
       isBusyNow,
       isUntouchedNow,
       move,
+      moveFiles,
       pages,
       paste,
       pasteBeside,
@@ -698,12 +784,14 @@ export function useOrganizeWorkspace({
       progress,
       redo,
       remove,
+      removeChosen,
       removeFiles,
       renameFile,
-      reorderFiles,
       rotate,
+      rotateChosen,
       selectAll,
       selection,
+      setFileSelection,
       setSelection,
       sources,
       startOver,

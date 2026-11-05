@@ -31,8 +31,8 @@ import {
   type OrganizePlan,
   type OutputPage,
 } from "@/lib/organize"
-import { exceedsDragThreshold, flowCellAt } from "@/lib/pageDrag"
-import type { SelectionModifiers } from "@/lib/thumbnailSelection"
+import { DRAG_CLICK_WINDOW, exceedsDragThreshold, flowCellAt } from "@/lib/pageDrag"
+import { choiceAfterClick, type SelectionModifiers } from "@/lib/thumbnailSelection"
 
 /** Where a dragged stack would land: before `beforeKey`, or at the end. */
 type DropTarget = { beforeKey: number | null; groupId: number }
@@ -50,9 +50,6 @@ type BoardDrag = {
 const EDGE_SCROLL_BAND = 48
 const EDGE_SCROLL_STEP = 14
 
-// A release's click lands within this of the drag's end; a later one is the
-// reader's own, even when the drag ended outside the board and sent no click.
-const DRAG_CLICK_WINDOW = 300
 const PAPER = "[data-thumbnail-page], [data-organize-blank]"
 const NO_HOLES: ReadonlySet<number> = new Set()
 
@@ -188,33 +185,14 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
   selectionRef.current = selection
 
   const select = useCallback(
-    (key: number, { range, toggle }: SelectionModifiers) => {
+    (key: number, modifiers: SelectionModifiers) => {
       const order = planRef.current.groups.flatMap((group) =>
         group.slots.map((slot) => slot.key),
       )
-      const anchor = anchorRef.current
+      const next = choiceAfterClick(order, selectionRef.current, anchorRef.current, key, modifiers)
 
-      if (range && anchor !== null && order.includes(anchor)) {
-        const from = order.indexOf(anchor)
-        const to = order.indexOf(key)
-
-        setSelection(new Set(order.slice(Math.min(from, to), Math.max(from, to) + 1)))
-        return
-      }
-
-      anchorRef.current = key
-
-      if (toggle) {
-        const next = new Set(selectionRef.current)
-
-        if (!next.delete(key)) {
-          next.add(key)
-        }
-
-        setSelection(next)
-      } else {
-        setSelection(new Set([key]))
-      }
+      anchorRef.current = next.anchor
+      setSelection(next.chosen)
     },
     [setSelection],
   )
@@ -510,7 +488,7 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
                   toggle: event.ctrlKey || event.metaKey,
                 })
               } else if (!(event.target as Element).closest("button")) {
-                setSelection(new Set())
+                organize.clearChoices()
               }
             }}
             onContextMenu={(event) => {

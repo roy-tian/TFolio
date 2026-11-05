@@ -60,6 +60,39 @@ export function selectionAfterClick(
   return { anchor: pageNumber, pages: new Set([pageNumber]) }
 }
 
+/** A click over items listed in `order`, as `selectionAfterClick` takes one;
+    an anchor no longer listed makes a range click a plain one. */
+export function choiceAfterClick<T>(
+  order: readonly T[],
+  chosen: ReadonlySet<T>,
+  anchor: T | null,
+  item: T,
+  { range, toggle }: SelectionModifiers,
+): { anchor: T; chosen: Set<T> } {
+  const from = anchor === null ? -1 : order.indexOf(anchor)
+
+  if (range && from !== -1) {
+    const to = order.indexOf(item)
+
+    return {
+      anchor: anchor!,
+      chosen: new Set(order.slice(Math.min(from, to), Math.max(from, to) + 1)),
+    }
+  }
+
+  if (toggle) {
+    const next = new Set(chosen)
+
+    if (!next.delete(item)) {
+      next.add(item)
+    }
+
+    return { anchor: item, chosen: next }
+  }
+
+  return { anchor: item, chosen: new Set([item]) }
+}
+
 /** The anchor goes to the first page, so a shift-click after select-all
     narrows from there, not from the last single click. */
 export function selectionOfAllPages(numPages: number): ThumbnailSelection {

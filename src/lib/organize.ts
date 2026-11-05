@@ -437,17 +437,42 @@ export function renameGroup(
   }
 }
 
-export function moveGroup(plan: OrganizePlan, from: number, to: number): OrganizePlan {
-  const moved = plan.groups[from]
+/** The chosen files, in list order, put together at `to` among the files
+    that stay: where the first of them then stands. */
+export function moveGroups(
+  plan: OrganizePlan,
+  groupIds: ReadonlySet<number>,
+  to: number,
+): OrganizePlan {
+  const moving = plan.groups.filter((group) => groupIds.has(group.id))
+  const staying = plan.groups.filter((group) => !groupIds.has(group.id))
 
-  if (!moved || from === to) {
-    return plan
-  }
+  return withGroups(plan, spliced(staying, to, 0, ...moving))
+}
 
-  return {
-    ...plan,
-    groups: spliced(spliced(plan.groups, from, 1), to, 0, moved),
-  }
+/** Every page of the chosen files. */
+export function groupSlotKeys(
+  plan: OrganizePlan,
+  groupIds: ReadonlySet<number>,
+): Set<number> {
+  return new Set(
+    plan.groups.flatMap((group) =>
+      groupIds.has(group.id) ? group.slots.map((slot) => slot.key) : [],
+    ),
+  )
+}
+
+/** The start of the first chosen file, or the end of the last: a file with
+    no pages left still takes what goes beside it. */
+export function groupGap(
+  plan: OrganizePlan,
+  groupIds: ReadonlySet<number>,
+  where: "before" | "after",
+): { group: OrganizeGroup; index: number } | null {
+  const chosen = plan.groups.filter((group) => groupIds.has(group.id))
+  const group = where === "before" ? chosen[0] : chosen.at(-1)
+
+  return group ? { group, index: where === "before" ? 0 : group.slots.length } : null
 }
 
 /**

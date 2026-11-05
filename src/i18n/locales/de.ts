@@ -520,6 +520,8 @@ const de = {
     sourceChanged: "Eine Datei wurde nach dem Hinzufügen geändert. Entfernen Sie sie und fügen Sie sie erneut hinzu.",
     failed: "Die PDF konnte nicht erstellt werden.",
     removeAll: "Alle Dateien entfernen",
+    removeChosen_one: "{{count}} Datei entfernen",
+    removeChosen_other: "{{count}} Dateien entfernen",
     unsavedArrangement: "Die unter „Seiten organisieren“ angeordneten Seiten sind noch keine PDF; beim Schließen gehen sie verloren.",
     unsavedArrangementToo: "Die unter „Seiten organisieren“ angeordneten Seiten gehen ebenfalls verloren.",
     mergeDropNow: "Ablegen, um mit dieser Datei zu kombinieren",

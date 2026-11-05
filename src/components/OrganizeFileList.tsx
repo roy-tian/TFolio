@@ -1,6 +1,8 @@
 import {
   memo,
   useCallback,
+  useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -29,7 +31,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
 import type { OrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
+import { isTypingTarget } from "@/lib/contextMenu"
 import type { FileBookmark, OrganizeGroup, OrganizeSourceKind } from "@/lib/organize"
+import { DRAG_CLICK_WINDOW } from "@/lib/pageDrag"
+import { matchesShortcut, shortcuts } from "@/lib/shortcuts"
+import { choiceAfterClick, type SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 
 function KindIcon({ kind }: { kind: OrganizeSourceKind }) {
@@ -99,13 +105,16 @@ function TitleEditor({
 /** Over the page count and the title's end: a hovered row trades its count
     for these. A keyboard reaching them shows them too — tracked here, since a
     `:focus-within` rule would have WebKit restyle the whole app per focus. */
-function RowActions({ children }: { children: ReactNode }) {
+function RowActions({ children, selected }: { children: ReactNode; selected: boolean }) {
   const [focused, setFocused] = useState(false)
 
   return (
     <span
       className={cn(
-        "absolute inset-y-0 right-1 flex items-center gap-0.5 bg-sidebar-accent pl-1 opacity-0 group-hover/file:opacity-100 before:absolute before:inset-y-0 before:-left-4 before:w-4 before:bg-linear-to-r before:from-transparent before:to-sidebar-accent",
+        "absolute inset-y-0 right-1 flex items-center gap-0.5 pl-1 opacity-0 group-hover/file:opacity-100 before:absolute before:inset-y-0 before:-left-4 before:w-4 before:bg-linear-to-r before:from-transparent",
+        selected
+          ? "bg-background before:to-background"
+          : "bg-sidebar-accent before:to-sidebar-accent",
         focused && "opacity-100",
       )}
       onBlur={(event) => {
@@ -129,13 +138,14 @@ type FileEntryProps = {
   folding: boolean
   group: OrganizeGroup
   kind: OrganizeSourceKind
+  onChoose: (groupId: number, modifiers: SelectionModifiers) => void
   onEdit: (groupId: number | null) => void
   onRemove: (groupId: number) => void
   onRename: (groupId: number, title: string) => void
-  onShowFile: (groupId: number) => void
   onShowPage: (pageNumber: number) => void
   onToggle: (groupId: number) => void
   open: boolean
+  selected: boolean
 }
 
 /** A file and the bookmarks under it. Memoised apart from its cell, which a
@@ -148,13 +158,14 @@ const FileEntry = memo(function FileEntry({
   folding,
   group,
   kind,
+  onChoose,
   onEdit,
   onRemove,
   onRename,
-  onShowFile,
   onShowPage,
   onToggle,
   open,
+  selected,
 }: FileEntryProps) {
   const { t } = useTranslation()
   const rowRef = useRef<HTMLDivElement>(null)
@@ -167,11 +178,18 @@ const FileEntry = memo(function FileEntry({
     <>
       <div
         className={cn(
-          "group/file relative flex h-9 items-center gap-1 rounded-md px-1 hover:bg-sidebar-accent",
+          "group/file relative flex h-9 items-center gap-1 rounded-md px-1",
+          selected ? "bg-background shadow-sm" : "hover:bg-sidebar-accent",
           draggable ? "cursor-grab" : "cursor-pointer",
         )}
+        data-selected={selected ? "" : undefined}
         data-slot="organize-file"
-        onClick={() => onShowFile(group.id)}
+        onClick={(event) =>
+          onChoose(group.id, {
+            range: event.shiftKey,
+            toggle: event.ctrlKey || event.metaKey,
+          })
+        }
         ref={rowRef}
         onDoubleClick={
           folding && !busy
@@ -244,7 +262,7 @@ const FileEntry = memo(function FileEntry({
             </span>
             {/* Remounted as work starts or ends: a focused button that turns
                 disabled loses focus with no blur to hide the actions by. */}
-            <RowActions key={busy ? "busy" : "idle"}>
+            <RowActions key={busy ? "busy" : "idle"} selected={selected}>
               {folding ? (
                 <HintTooltip label={renameLabel}>
                   <Button
@@ -289,7 +307,8 @@ const FileEntry = memo(function FileEntry({
   )
 })
 
-/** One row tall: `drag.height` is the cell as pressed, bookmarks and all. */
+/** One row tall: `drag.height` is the cell as pressed, bookmarks and all.
+    Files carried with it stack behind, counted as the page ghost counts. */
 function FileDragGhost({
   drag,
   group,
@@ -299,21 +318,34 @@ function FileDragGhost({
   group: OrganizeGroup
   kind: OrganizeSourceKind
 }) {
+  const count = drag.moving.length
+
   return createPortal(
     <div
       aria-hidden
-      className="pointer-events-none fixed z-60 flex h-9 items-center gap-1 rounded-md border bg-popover px-2 select-none shadow-xl ring-1 ring-primary/20"
+      className="pointer-events-none fixed z-60 h-9 select-none"
+      data-slot="organize-file-ghost"
       style={{
         left: drag.pointer.x + drag.grip.x,
         top: drag.pointer.y + drag.grip.y,
         width: drag.width,
       }}
     >
-      <KindIcon kind={kind} />
-      <span className="min-w-0 flex-1 truncate text-sm">{group.title}</span>
-      <span className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums">
-        {group.slots.length}
-      </span>
+      {count > 1 ? (
+        <div className="absolute inset-0 translate-x-1 translate-y-1 rounded-md border bg-popover shadow-md" />
+      ) : null}
+      <div className="relative flex h-full items-center gap-1 rounded-md border bg-popover px-2 shadow-xl ring-1 ring-primary/20">
+        <KindIcon kind={kind} />
+        <span className="min-w-0 flex-1 truncate text-sm">{group.title}</span>
+        <span className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums">
+          {group.slots.length}
+        </span>
+      </div>
+      {count > 1 ? (
+        <span className="absolute -top-2 -right-2 grid min-w-5 place-items-center rounded-full bg-primary px-1 py-0.5 font-mono text-xs font-semibold text-primary-foreground tabular-nums shadow-md">
+          {count}
+        </span>
+      ) : null}
     </div>,
     document.body,
   )
@@ -387,8 +419,9 @@ type OrganizeFileListProps = {
 }
 
 /** The files the new PDF is put together from, in order, each with the
-    bookmarks it will carry: drag a file to reorder, click one to bring its
-    pages into view, a bookmark to bring its page. */
+    bookmarks it will carry: click a file to choose it and bring its pages
+    into view — with Ctrl or Shift to choose more, there and then — drag the
+    chosen files to move them together, click a bookmark to bring its page. */
 export function OrganizeFileList({
   folds,
   onShowFile,
@@ -398,24 +431,97 @@ export function OrganizeFileList({
   const { t } = useTranslation()
   const listRef = useRef<HTMLOListElement>(null)
   const [editing, setEditing] = useState<number | null>(null)
-  const { bookmarks, plan, sources } = organize
+  const { bookmarks, fileSelection, plan, setFileSelection, sources } = organize
   const busy = organize.adding || organize.assembling
   const folding = plan.options.bookmarks
+  // Read by the handlers, which stay stable for the memoised entries.
+  const groupsRef = useRef(plan.groups)
+  const chosenRef = useRef(fileSelection)
+  const anchorRef = useRef<number | null>(null)
+  const dragEndedAtRef = useRef(Number.NEGATIVE_INFINITY)
+
+  groupsRef.current = plan.groups
+  chosenRef.current = fileSelection
+
   // A file an undo took away mid-edit leaves no field to settle the edit.
   const editingId =
     folding && plan.groups.some((group) => group.id === editing) ? editing : null
   const draggable = !busy && plan.groups.length > 1 && editingId === null
+  // A chosen file brings the others chosen along; any other goes alone.
+  const carry = useCallback((index: number) => {
+    const groups = groupsRef.current
+    const chosen = chosenRef.current
+    const pressed = groups[index]
+
+    return pressed && chosen.has(pressed.id)
+      ? groups.flatMap((group, at) => (chosen.has(group.id) ? [at] : []))
+      : [index]
+  }, [])
   const { drag } = useListDrag({
     active: draggable,
+    carry,
     listRef,
-    onReorder: organize.reorderFiles,
+    onReorder: (moved, to) =>
+      organize.moveFiles(
+        new Set(moved.flatMap((index) => plan.groups[index]?.id ?? [])),
+        to,
+      ),
     pressOnly,
   })
   const kindOf = (group: OrganizeGroup) =>
     sources.get(group.originSourceId)?.kind ?? "pdf"
   const dragged = drag ? plan.groups[drag.index] : undefined
+  const lifted = new Set(drag?.moving)
   const { closed, setClosed } = folds
   const { removeFiles } = organize
+  const liftedId = dragged?.id
+  const dragging = drag !== null
+
+  // As on the board, the file a drag lifts is the one chosen.
+  useEffect(() => {
+    if (liftedId !== undefined && !chosenRef.current.has(liftedId)) {
+      anchorRef.current = liftedId
+      setFileSelection(new Set([liftedId]))
+    }
+  }, [liftedId, setFileSelection])
+
+  // In the release's own commit, so it stands before any click that follows.
+  useLayoutEffect(() => {
+    if (dragging) {
+      return () => {
+        dragEndedAtRef.current = performance.now()
+      }
+    }
+  }, [dragging])
+
+  const choose = useCallback(
+    (groupId: number, modifiers: SelectionModifiers) => {
+      if (performance.now() - dragEndedAtRef.current < DRAG_CLICK_WINDOW) {
+        dragEndedAtRef.current = Number.NEGATIVE_INFINITY
+        return
+      }
+
+      const order = groupsRef.current.map((group) => group.id)
+      const next = choiceAfterClick(
+        order,
+        chosenRef.current,
+        anchorRef.current,
+        groupId,
+        modifiers,
+      )
+
+      anchorRef.current = next.anchor
+      setFileSelection(next.chosen)
+
+      // Only a plain click goes to the file: one that adds to the choice
+      // leaves the board where the reader is.
+      if (!modifiers.range && !modifiers.toggle) {
+        onShowFile(groupId)
+      }
+    },
+    [onShowFile, setFileSelection],
+  )
+  // A file's own remove takes that file alone, chosen or not.
   const removeFile = useCallback(
     (groupId: number) => removeFiles(new Set([groupId])),
     [removeFiles],
@@ -456,19 +562,48 @@ export function OrganizeFileList({
       <div className="relative min-h-0 flex-1">
         <ol
           aria-label={t("organize.outline")}
-          className="overlay-scroll-viewport flex h-full select-none flex-col gap-0.5 overflow-y-auto overscroll-contain p-2"
+          className="overlay-scroll-viewport flex h-full select-none flex-col gap-0.5 overflow-y-auto overscroll-contain p-2 outline-none"
           data-slot="organize-files"
+          onClick={(event) => {
+            const list = event.currentTarget
+
+            // A draggable row's press has its default stopped, which may
+            // leave the list unfocused, and select-all then misses it.
+            if (!list.contains(document.activeElement)) {
+              list.focus({ preventScroll: true })
+            }
+
+            // A drag let go past the last file ends in a click here too.
+            if (
+              !(event.target as Element).closest("li") &&
+              performance.now() - dragEndedAtRef.current >= DRAG_CLICK_WINDOW
+            ) {
+              setFileSelection(new Set())
+            }
+          }}
+          // Ahead of the window's select-all, which takes the pages: with
+          // focus in the list it is the files the reader means.
+          onKeyDown={(event) => {
+            if (
+              matchesShortcut(event, shortcuts.selectAll) &&
+              !isTypingTarget(event.target)
+            ) {
+              event.preventDefault()
+              setFileSelection(new Set(plan.groups.map((group) => group.id)))
+            }
+          }}
           ref={listRef}
+          tabIndex={-1}
         >
           {plan.groups.map((group, index) => {
             const offset = drag?.cellOffsets[index] ?? 0
+            const moving = lifted.has(index)
 
             return (
               <li
                 className={cn(
                   "relative shrink-0",
-                  drag && drag.index !== index && "transition-transform duration-200 ease-out",
-                  drag?.index === index && "opacity-0",
+                  drag && !moving && "transition-transform duration-200 ease-out",
                 )}
                 data-list-index={index}
                 key={group.id}
@@ -487,24 +622,28 @@ export function OrganizeFileList({
                     }}
                   />
                 ) : null}
-                <FileEntry
-                  bookmark={bookmarks.get(group.id)}
-                  busy={busy}
-                  draggable={draggable}
-                  editing={editingId === group.id}
-                  folding={folding}
-                  group={group}
-                  kind={kindOf(group)}
-                  onEdit={setEditing}
-                  onRemove={removeFile}
-                  onRename={organize.renameFile}
-                  onShowFile={onShowFile}
-                  onShowPage={onShowPage}
-                  onToggle={toggle}
-                  // Every file folds while one moves: a file is then one row
-                  // tall, however many bookmarks it carries.
-                  open={!drag && !closed.has(group.id)}
-                />
+                {/* A lifted file fades inside its cell, which may carry the line. */}
+                <div className={moving ? "opacity-0" : undefined}>
+                  <FileEntry
+                    bookmark={bookmarks.get(group.id)}
+                    busy={busy}
+                    draggable={draggable}
+                    editing={editingId === group.id}
+                    folding={folding}
+                    group={group}
+                    kind={kindOf(group)}
+                    onChoose={choose}
+                    onEdit={setEditing}
+                    onRemove={removeFile}
+                    onRename={organize.renameFile}
+                    onShowPage={onShowPage}
+                    onToggle={toggle}
+                    // Every file folds while one moves: a file is then one row
+                    // tall, however many bookmarks it carries.
+                    open={!drag && !closed.has(group.id)}
+                    selected={fileSelection.has(group.id)}
+                  />
+                </div>
               </li>
             )
           })}
@@ -516,16 +655,22 @@ export function OrganizeFileList({
       <div className="flex h-(--status-bar-height) shrink-0 items-center border-t px-2 pb-px">
         <Button
           className="w-full justify-start text-muted-foreground"
-          data-slot="organize-remove-all"
+          data-slot="organize-remove-files"
           disabled={busy}
           onClick={() =>
-            organize.removeFiles(new Set(plan.groups.map((group) => group.id)))
+            organize.removeFiles(
+              fileSelection.size > 0
+                ? fileSelection
+                : new Set(plan.groups.map((group) => group.id)),
+            )
           }
           size="sm"
           variant="ghost"
         >
           <Trash2 />
-          {t("organize.removeAll")}
+          {fileSelection.size > 0
+            ? t("organize.removeChosen", { count: fileSelection.size })
+            : t("organize.removeAll")}
         </Button>
       </div>
       {drag && dragged ? (

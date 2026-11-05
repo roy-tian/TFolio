@@ -516,6 +516,8 @@ const zhTW = {
     sourceChanged: "有檔案在加入後被修改了。請移除後重新加入。",
     failed: "無法產生 PDF。",
     removeAll: "移除所有檔案",
+    removeChosen_one: "移除 {{count}} 個檔案",
+    removeChosen_other: "移除 {{count}} 個檔案",
     unsavedArrangement: "「頁面組織」裡排好的頁面還沒有產生 PDF，關閉後這些安排會遺失。",
     unsavedArrangementToo: "「頁面組織」裡排好的頁面也會遺失。",
     mergeDropNow: "放開以與目前檔案合併",

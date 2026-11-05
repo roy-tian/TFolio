@@ -518,6 +518,8 @@ const th = {
     sourceChanged: "มีไฟล์ที่เปลี่ยนไปหลังจากเพิ่มแล้ว โปรดนำออกแล้วเพิ่มใหม่",
     failed: "สร้าง PDF ไม่ได้",
     removeAll: "นำไฟล์ทั้งหมดออก",
+    removeChosen_one: "นำ {{count}} ไฟล์ออก",
+    removeChosen_other: "นำ {{count}} ไฟล์ออก",
     unsavedArrangement: "หน้าที่จัดไว้ใน “จัดระเบียบหน้า” ยังไม่ได้สร้างเป็น PDF การปิดจะทิ้งการจัดนี้",
     unsavedArrangementToo: "หน้าที่จัดไว้ใน “จัดระเบียบหน้า” จะถูกทิ้งด้วย",
     mergeDropNow: "ปล่อยเพื่อรวมกับไฟล์นี้",
