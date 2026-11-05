@@ -1,7 +1,10 @@
 //! The reader's own settings — how the app behaves, never one document's state —
 //! in one TOML file per user and machine, theirs to edit, so revalidated on the way in.
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{
+    de::{DeserializeOwned, IgnoredAny},
+    Deserialize, Deserializer, Serialize,
+};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tfolio_engine::{PageNumbersPreferences, WatermarkConfig};
 
@@ -51,12 +54,28 @@ struct UiPreferences {
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 struct OrganizePreferences {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "flag", skip_serializing_if = "Option::is_none")]
     smart_padding: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "flag", skip_serializing_if = "Option::is_none")]
     normalize_a4: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "flag", skip_serializing_if = "Option::is_none")]
     bookmarks: Option<bool>,
+}
+
+/// A choice this version cannot read costs that choice alone, not the
+/// section: the three are independent, and the frontend falls back on each.
+fn flag<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Flag {
+        Set(bool),
+        Unreadable(IgnoredAny),
+    }
+
+    Ok(match Flag::deserialize(deserializer)? {
+        Flag::Set(value) => Some(value),
+        Flag::Unreadable(_) => None,
+    })
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -324,6 +343,31 @@ mod tests {
             Some("en")
         );
         assert!(settings.page_numbers.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_organize_choice_costs_only_itself() {
+        let read = Settings::parse(
+            r#"
+            [organize]
+            normalizeA4 = "yes"
+            smartPadding = false
+            "#,
+        )
+        .organize
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(read.normalize_a4, None);
+        assert_eq!(read.smart_padding, Some(false));
+
+        let sent = Settings::sent(&serde_json::json!({
+            "organize": { "bookmarks": false, "smartPadding": 1 },
+        }))
+        .organize
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(sent.bookmarks, Some(false));
+        assert_eq!(sent.smart_padding, None);
     }
 
     #[test]
