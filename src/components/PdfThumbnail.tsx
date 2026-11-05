@@ -315,6 +315,7 @@ export function PdfThumbnail({
         // and a paste is what moves it.
         isCut && "opacity-45",
       )}
+      data-cut={isCut ? "" : undefined}
     >
       {frame ? (
         <div

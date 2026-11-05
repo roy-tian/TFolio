@@ -399,6 +399,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const pastePagesRef = useRef<(index: number) => void>(() => {})
     const pageClipboard = usePageClipboard({
       active: active && thumbnailsShown && thumbnailsFocused,
+      onCutCancelled: useCallback(() => notice.retract(["pagesCut"]), [notice]),
       onPaste: useCallback((index: number) => pastePagesRef.current(index), []),
       onTaken: useCallback(
         (taken: PageClipboard) =>
@@ -411,6 +412,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         [notice],
       ),
       selectedPages: thumbnailSelection.selectedPages,
+      shown: active && thumbnailsShown,
     })
     const pageClipboardStructureChanged = pageClipboard.structureChanged
     const { clipboard } = pageClipboard

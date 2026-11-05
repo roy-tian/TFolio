@@ -269,6 +269,11 @@ describe("TFolio page editing in the sidebar", () => {
     await browser.waitUntil(async () => (await thumbShape(2)) === "portrait")
     await pressRedo()
     await browser.waitUntil(async () => (await thumbShape(2)) === "landscape")
+
+    await sidebarPageAction(2, "rotate-pages-left")
+    await browser.waitUntil(async () => (await thumbShape(2)) === "portrait", {
+      timeoutMsg: "the page never turned back",
+    })
   })
 
   it("deletes the chosen page with the Delete key, and undo and redo answer", async () => {
@@ -340,10 +345,43 @@ describe("TFolio page editing in the sidebar", () => {
     await waitForThumb(2, first!)
     await waitForThumb(3, second!)
 
-    // The last page's menu is the one way past the end.
-    await sidebarPageAction(3, "paste-pages-end")
+    // Pasting after the last page is the one way past the end.
+    await sidebarPageAction(3, "paste-pages-after")
     await browser.waitUntil(async () => (await thumbCount()) === 4)
     await waitForThumb(4, first!)
+  })
+
+  it("takes a cut back with Esc, wherever the focus is", async () => {
+    await openPdfFromDisk("cut-escape.pdf", bandedPdf(3))
+    await paintedFingerprints(3)
+    const cutPages = () =>
+      browser.execute(
+        (scope: string) =>
+          Array.from(
+            document.querySelectorAll(`${scope} [data-cut] [data-thumbnail-page]`),
+            (button) => Number(button.getAttribute("data-thumbnail-page")),
+          ),
+        activeSidebar,
+      )
+
+    await sidebarPageAction(3, "cut-pages")
+    await browser.waitUntil(async () => (await cutPages()).join() === "3", {
+      timeoutMsg: "the cut page never faded",
+    })
+    await browser.execute(() => {
+      document.querySelector<HTMLElement>(
+        "[data-document-session][data-active='true'] [data-pdf-scroll-root]",
+      )!.focus()
+    })
+    // While the menu's popup is still leaving, the keys are its own.
+    await browser.waitUntil(() =>
+      browser.execute(() => !document.querySelector("[role='menu']")),
+    )
+    await browser.keys("Escape")
+    await browser.waitUntil(async () => (await cutPages()).length === 0, {
+      timeoutMsg: "Esc never took the cut back",
+    })
+    await $("[data-notice='pagesCut']").waitForExist({ reverse: true, timeout: 5_000 })
   })
 
   it("leaves the clipboard keys to the text while the column is not focused", async () => {

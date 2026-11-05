@@ -9,6 +9,7 @@ import { isWordPath } from "@/lib/openSources"
 import {
   addSources,
   assembleSlots,
+  copySlots,
   deleteSlots,
   emptyPlan,
   fileBookmarks,
@@ -22,7 +23,9 @@ import {
   renameGroup,
   rotateSlots,
   setOptions,
+  slotGap,
   sourceFromInfo,
+  type OrganizeGroup,
   type OrganizeOptions,
   type OrganizePlan,
   type OrganizeSource,
@@ -41,6 +44,12 @@ const HISTORY_LIMIT = 100
 type History = { future: OrganizePlan[]; past: OrganizePlan[] }
 
 const emptyHistory: History = { future: [], past: [] }
+
+/** Slot keys, which outlive every edit: a page copied or cut is still the one
+    taken however the pages move before the paste. */
+type OrganizeClipboard = { keys: ReadonlySet<number>; mode: "cut" | "copy" }
+
+const NO_KEYS: ReadonlySet<number> = new Set()
 
 type UseOrganizeWorkspaceOptions = {
   notices: NoticeChannel
@@ -65,8 +74,9 @@ export function useOrganizeWorkspace({
   const [plan, setPlan] = useState<OrganizePlan>(emptyPlan)
   const [history, setHistory] = useState<History>(emptyHistory)
   const [selection, setSelection] = useState<ReadonlySet<number>>(() => new Set())
+  const [clipboard, setClipboard] = useState<OrganizeClipboard | null>(null)
   // Pages a cut has marked to move: they stay where they are until a paste.
-  const [cut, setCut] = useState<ReadonlySet<number>>(() => new Set())
+  const cut = clipboard?.mode === "cut" ? clipboard.keys : NO_KEYS
   const [adding, setAdding] = useState(false)
   const [assembling, setAssembling] = useState(false)
   const [progress, setProgress] = useState<PdfProgress | null>(null)
@@ -426,21 +436,11 @@ export function useOrganizeWorkspace({
   const insertBlankAt = useCallback(
     (keys: ReadonlySet<number>, where: "before" | "after") =>
       edit((current) => {
-        const located = current.groups.flatMap((group) =>
-          group.slots.flatMap((slot, index) =>
-            keys.has(slot.key) ? [{ group, index }] : [],
-          ),
-        )
-        const at = where === "before" ? located[0] : located.at(-1)
-        const group = at?.group ?? current.groups.at(-1)
+        const gap = slotGap(current, keys, where)
 
-        if (!group) {
-          return current
-        }
-
-        const index = at ? at.index + (where === "after" ? 1 : 0) : group.slots.length
-
-        return insertBlank(current, sourcesRef.current, group.id, index)
+        return gap
+          ? insertBlank(current, sourcesRef.current, gap.group.id, gap.index)
+          : current
       }),
     [edit],
   )
@@ -451,35 +451,81 @@ export function useOrganizeWorkspace({
     )
   }, [])
 
-  const cutSelection = useCallback(() => {
-    setCut(new Set(selection))
-  }, [selection])
+  const take = useCallback(
+    (mode: OrganizeClipboard["mode"]) => {
+      if (selection.size > 0) {
+        setClipboard({ keys: new Set(selection), mode })
+      }
+    },
+    [selection],
+  )
+  const cutSelection = useCallback(() => take("cut"), [take])
+  const copySelection = useCallback(() => take("copy"), [take])
+  /** A copy stays on the clipboard for the next paste; Esc only lets go of a
+      cut, the one that shows. */
+  const cancelCut = useCallback(() => {
+    setClipboard((current) => (current?.mode === "cut" ? null : current))
+  }, [])
 
-  /** The cut pages go before the first chosen page — at the last file's end
-      with nothing chosen. Pages cut and still the only ones chosen stay where
-      they are: a cut followed straight by a paste moves nothing. */
+  /** Into `group` at `index`: a cut lands in front of the first page there
+      that is not itself moving, which a page in hand cannot anchor. */
+  const pasteInto = useCallback(
+    (group: OrganizeGroup, index: number) => {
+      // Busy, `edit` refuses the paste: a cut must outlive it.
+      if (!clipboard || busyRef.current) {
+        return
+      }
+
+      const { keys, mode } = clipboard
+
+      if (mode === "copy") {
+        edit((plan) => copySlots(plan, keys, group.id, index))
+        return
+      }
+
+      const beforeKey =
+        group.slots.slice(index).find((slot) => !keys.has(slot.key))?.key ?? null
+
+      edit((plan) => moveSlots(plan, keys, group.id, beforeKey))
+      setClipboard(null)
+    },
+    [clipboard, edit],
+  )
+
+  /** The keyboard's paste: before the first chosen page not itself cut — at
+      the last file's end with nothing chosen. Pages cut and still the only
+      ones chosen stay where they are: a cut followed straight by a paste
+      moves nothing. */
   const paste = useCallback(() => {
-    if (cut.size === 0) {
-      return
-    }
-
     const current = planRef.current
-    const placed = current.groups.flatMap((group) =>
-      group.slots.map((slot) => ({ group, slot })),
+    const chosen = current.groups.flatMap((group) =>
+      group.slots.flatMap((slot, index) =>
+        selection.has(slot.key) ? [{ group, index, key: slot.key }] : [],
+      ),
     )
-    const anchor = placed.find(
-      ({ slot }) => selection.has(slot.key) && !cut.has(slot.key),
-    )
-    const choseOnlyCut =
-      !anchor && placed.some(({ slot }) => selection.has(slot.key))
-    const group = anchor?.group ?? current.groups.at(-1)
+    const anchor = chosen.find(({ key }) => !cut.has(key))
+    const last = current.groups.at(-1)
 
-    if (group && !choseOnlyCut) {
-      edit((plan) => moveSlots(plan, cut, group.id, anchor?.slot.key ?? null))
+    if (anchor) {
+      pasteInto(anchor.group, anchor.index)
+    } else if (chosen.length > 0) {
+      setClipboard(null)
+    } else if (last) {
+      pasteInto(last, last.slots.length)
     }
+  }, [cut, pasteInto, selection])
 
-    setCut(new Set())
-  }, [cut, edit, selection])
+  /** The menu's paste, beside the pages it was opened on. */
+  const pasteBeside = useCallback(
+    (keys: ReadonlySet<number>, where: "before" | "after") => {
+      const gap = slotGap(planRef.current, keys, where)
+
+      if (gap) {
+        pasteInto(gap.group, gap.index)
+      }
+    },
+    [pasteInto],
+  )
 
   // One object per change rather than per render: the App re-renders often,
   // and a fresh one would re-render the whole board behind the viewer too.
@@ -493,7 +539,13 @@ export function useOrganizeWorkspace({
       canRedo: history.future.length > 0,
       canUndo: history.past.length > 0,
       changeOptions,
+      cancelCut,
+      // Not once every page it took has been deleted: its paste would do nothing.
+      canPaste:
+        clipboard !== null &&
+        plan.groups.some((group) => group.slots.some((slot) => clipboard.keys.has(slot.key))),
       chooseFiles,
+      copySelection,
       cut,
       cutSelection,
       hasUnsavedArrangementNow,
@@ -502,6 +554,7 @@ export function useOrganizeWorkspace({
       move,
       pages,
       paste,
+      pasteBeside,
       plan,
       progress,
       redo,
@@ -525,8 +578,11 @@ export function useOrganizeWorkspace({
       assemble,
       assembling,
       bookmarks,
+      cancelCut,
       changeOptions,
       chooseFiles,
+      clipboard,
+      copySelection,
       cut,
       cutSelection,
       hasUnsavedArrangementNow,
@@ -536,6 +592,7 @@ export function useOrganizeWorkspace({
       move,
       pages,
       paste,
+      pasteBeside,
       plan,
       progress,
       redo,

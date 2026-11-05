@@ -296,8 +296,12 @@ export function fileBookmarks(
 
     if (page.kind === "slot" && page.slot.kind === "page") {
       const { sourceId } = page.slot
+      const sourcePage = `${sourceId}:${page.slot.pageNumber}`
 
-      outputNumber.set(`${sourceId}:${page.slot.pageNumber}`, pageNumber)
+      // A pasted copy repeats its page: the bookmark keeps the first.
+      if (!outputNumber.has(sourcePage)) {
+        outputNumber.set(sourcePage, pageNumber)
+      }
 
       if (!firstOfSource.has(sourceId)) {
         firstOfSource.set(sourceId, pageNumber)
@@ -471,6 +475,55 @@ export function moveSlots(
   })
 
   return withGroups(plan, groups)
+}
+
+/** Copies of the chosen slots, in plan order and under keys of their own, put
+    into the target group at `index`. */
+export function copySlots(
+  plan: OrganizePlan,
+  keys: ReadonlySet<number>,
+  groupId: number,
+  index: number,
+): OrganizePlan {
+  let nextKey = plan.nextKey
+  const copies = plan.groups.flatMap((group) =>
+    group.slots.flatMap((slot) => (keys.has(slot.key) ? [{ ...slot, key: nextKey++ }] : [])),
+  )
+
+  if (copies.length === 0 || !plan.groups.some((group) => group.id === groupId)) {
+    return plan
+  }
+
+  return {
+    ...plan,
+    groups: plan.groups.map((group) =>
+      group.id === groupId
+        ? { ...group, slots: spliced(group.slots, index, 0, ...copies) }
+        : group,
+    ),
+    nextKey,
+  }
+}
+
+/** The gap before the first chosen slot, or after the last; with none of them
+    on the board, the end of the last group. */
+export function slotGap(
+  plan: OrganizePlan,
+  keys: ReadonlySet<number>,
+  where: "before" | "after",
+): { group: OrganizeGroup; index: number } | null {
+  const located = plan.groups.flatMap((group) =>
+    group.slots.flatMap((slot, index) => (keys.has(slot.key) ? [{ group, index }] : [])),
+  )
+  const at = where === "before" ? located[0] : located.at(-1)
+
+  if (at) {
+    return { group: at.group, index: at.index + (where === "after" ? 1 : 0) }
+  }
+
+  const last = plan.groups.at(-1)
+
+  return last ? { group: last, index: last.slots.length } : null
 }
 
 export function deleteSlots(plan: OrganizePlan, keys: ReadonlySet<number>): OrganizePlan {

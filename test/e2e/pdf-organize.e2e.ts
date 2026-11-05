@@ -93,6 +93,45 @@ function slot(label: string) {
   return $(`${workspace} [data-slot-key] button[aria-label='${label}']`)
 }
 
+/** Picks `action` from the menu a right-click on the page opens. */
+async function slotAction(label: string, action: string) {
+  const selector = `${workspace} [data-slot-key] button[aria-label='${label}']`
+
+  await $(selector).waitForExist()
+  await browser.execute((target: string) => {
+    const paper = document.querySelector(target)!
+    const box = paper.getBoundingClientRect()
+
+    paper.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        button: 2,
+        clientX: box.left + box.width / 2,
+        clientY: box.top + box.height / 2,
+      }),
+    )
+  }, selector)
+
+  const item = $(`[data-action='${action}']`)
+
+  await item.waitForDisplayed({ timeout: 5_000 })
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 5_000 })
+}
+
+function cutLabels() {
+  return browser.execute(
+    (scope: string) =>
+      Array.from(
+        document.querySelectorAll(
+          `${scope} [data-cut] :is([data-thumbnail-page], [data-organize-blank])`,
+        ),
+        (paper) => paper.getAttribute("aria-label"),
+      ),
+    workspace,
+  )
+}
+
 /** One of the controls a page carries on its own paper. */
 function pageControl(label: string, action: string) {
   return $(
@@ -240,6 +279,67 @@ describe("TFolio organize workspace", () => {
       ),
     )
     expect(shapes).toEqual(["tall", "wide", "tall", "wide", "wide"])
+  })
+
+  it("copies pages from a page's menu and pastes them beside another, undoably", async () => {
+    await organizeWith([portrait(), landscape()])
+
+    await slotAction("Page 1 of portrait", "copy-pages")
+    await slotAction("Page 1 of landscape", "paste-pages-after")
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(await slotLabels("landscape")) ===
+        JSON.stringify([
+          "Page 1 of landscape",
+          "Page 1 of portrait",
+          "Page 2 of landscape",
+          "Page 3 of landscape",
+        ]),
+      { timeout: 10_000, timeoutMsg: "the copy never landed after the page" },
+    )
+
+    // A copy stays on the clipboard, and shows nothing for Esc to take back.
+    expect(await cutLabels()).toEqual([])
+    await browser.keys("Escape")
+    await slotAction("Page 2 of portrait", "paste-pages-before")
+    await browser.waitUntil(
+      async () =>
+        JSON.stringify(await slotLabels("portrait")) ===
+        JSON.stringify(["Page 1 of portrait", "Page 1 of portrait", "Page 2 of portrait"]),
+      { timeout: 10_000, timeoutMsg: "the second copy never landed" },
+    )
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(
+      async () => (await slotLabels("portrait")).length === 2,
+      { timeoutMsg: "undo never took the copy back" },
+    )
+  })
+
+  it("takes a cut back with Esc", async () => {
+    await organizeWith([portrait()])
+
+    await slotAction("Page 2 of portrait", "cut-pages")
+    await browser.waitUntil(
+      async () => (await cutLabels()).join() === "Page 2 of portrait",
+      { timeoutMsg: "the cut page never faded" },
+    )
+    // While the menu's popup is still leaving, the keys are its own.
+    await browser.waitUntil(() =>
+      browser.execute(() => !document.querySelector("[role='menu']")),
+    )
+    await browser.keys("Escape")
+    await browser.waitUntil(async () => (await cutLabels()).length === 0, {
+      timeoutMsg: "Esc never took the cut back",
+    })
+
+    // Nothing is left to paste.
+    await slot("Page 1 of portrait").click()
+    await browser.keys(["Control", "v"])
+    expect(await slotLabels("portrait")).toEqual([
+      "Page 1 of portrait",
+      "Page 2 of portrait",
+    ])
   })
 
   it("builds nothing when its save dialog is cancelled", async () => {

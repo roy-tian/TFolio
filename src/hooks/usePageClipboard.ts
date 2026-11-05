@@ -11,11 +11,16 @@ type UsePageClipboardOptions = {
   /** True only while the sidebar's previews have focus; the clipboard itself
       outlives that, so a paste can still happen once the reader comes back. */
   active: boolean
+  /** Esc took a cut back: what the cut said is no longer so. */
+  onCutCancelled: () => void
   /** Runs a paste into the gap before this 1-based page — the owner's, since
       only it can say what the paste costs the document. */
   onPaste: (index: number) => void
   onTaken: (clipboard: PageClipboard) => void
   selectedPages: ReadonlySet<number>
+  /** While the previews show, Esc takes back a cut: its faded pages are on
+      screen whether or not the column has focus. */
+  shown: boolean
 }
 
 /**
@@ -24,11 +29,16 @@ type UsePageClipboardOptions = {
  */
 export function usePageClipboard({
   active,
+  onCutCancelled,
   onPaste,
   onTaken,
   selectedPages,
+  shown,
 }: UsePageClipboardOptions) {
   const [clipboard, setClipboard] = useState<PageClipboard | null>(null)
+  const clipboardRef = useRef(clipboard)
+
+  clipboardRef.current = clipboard
   // The insert a paste is about to make: only that change may move the pages on
   // the clipboard, so it is consumed by the next one, and only if it fits.
   const pendingPasteRef = useRef<{
@@ -96,14 +106,6 @@ export function usePageClipboard({
         return
       }
 
-      // As it clears the selection: a cut standing over the pages it marked is
-      // the other thing Esc is for here.
-      if (event.key === "Escape") {
-        setClipboard(null)
-
-        return
-      }
-
       const key = event.key.toLowerCase()
 
       if (
@@ -150,6 +152,30 @@ export function usePageClipboard({
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [active, onPaste, take])
+
+  useEffect(() => {
+    if (!shown) {
+      return
+    }
+
+    // As it clears the selection. A copy stays: it shows nothing to take back.
+    const cancelCut = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !isTypingTarget(event.target) &&
+        !hasLayerOverWorkspace() &&
+        clipboardRef.current?.mode === "cut"
+      ) {
+        setClipboard(null)
+        onCutCancelled()
+      }
+    }
+
+    document.addEventListener("keydown", cancelCut)
+
+    return () => document.removeEventListener("keydown", cancelCut)
+  }, [onCutCancelled, shown])
 
   return { armPaste, clipboard, copy, cut, disarmPaste, structureChanged }
 }

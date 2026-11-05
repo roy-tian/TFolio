@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   addSources,
   assembleSlots,
+  copySlots,
   deleteSlots,
   emptyPlan,
   fileBookmarks,
@@ -15,6 +16,7 @@ import {
   renameGroup,
   rotateSlots,
   setOptions,
+  slotGap,
   sourceFromInfo,
   type OrganizePlan,
   type OrganizeSource,
@@ -115,6 +117,33 @@ describe("plan edits", () => {
       "1:1",
     ])
     expect(moveSlots(plan, keys, plan.groups[0]!.id, [...keys][0]!)).toBe(plan)
+  })
+
+  test("copies pages in plan order under new keys, leaving the originals", () => {
+    const { plan, sources } = setup(source(1, 3), source(2, 1))
+    const copied = copySlots(plan, keysOf(plan, "1:3", "1:1"), plan.groups[1]!.id, 0)
+    const keys = copied.groups.flatMap((group) => group.slots.map((slot) => slot.key))
+
+    expect(layout(copied, sources)).toEqual(["1:1", "1:2", "1:3", "1:1", "1:3", "2:1"])
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(copied.nextKey).toBe(plan.nextKey + 2)
+    expect(copySlots(plan, new Set([999]), plan.groups[0]!.id, 0)).toBe(plan)
+  })
+
+  test("finds the gap beside the chosen pages, or the last file's end", () => {
+    const { plan } = setup(source(1, 3), source(2, 2))
+    const [first, second] = plan.groups
+
+    expect(slotGap(plan, keysOf(plan, "2:1", "1:2"), "before")).toEqual({
+      group: first!,
+      index: 1,
+    })
+    expect(slotGap(plan, keysOf(plan, "2:1", "1:2"), "after")).toEqual({
+      group: second!,
+      index: 1,
+    })
+    expect(slotGap(plan, new Set(), "before")).toEqual({ group: second!, index: 2 })
+    expect(slotGap(emptyPlan, new Set(), "after")).toBeNull()
   })
 
   test("keeps an emptied group, which contributes no pages", () => {
@@ -319,6 +348,13 @@ describe("organizeOutline", () => {
     expect(bookmarks.get(first!.id)).toEqual({ items: [], pageNumber: undefined, title: "file-1" })
     expect(bookmarks.get(second!.id)?.items.map((item) => item.title)).toEqual(["Chapter"])
     expect(organizeOutline(moved, sources).map((item) => item.title)).toEqual(["file-2"])
+  })
+
+  test("keeps a copied page's bookmarks on the first of its copies", () => {
+    const { plan, sources } = setup(source(1, 3, chapters), source(2, 1))
+    const copied = copySlots(plan, keysOf(plan, "1:2"), plan.groups[1]!.id, 1)
+
+    expect(fileBookmarks(copied, sources).get(plan.groups[0]!.id)?.items[0]?.pageNumber).toBe(2)
   })
 
   test("writes none once cleared, whatever the files carry", () => {

@@ -7,14 +7,6 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react"
-import {
-  ClipboardPaste,
-  Copy,
-  FilePlus2,
-  RotateCw,
-  Scissors,
-  Trash2,
-} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
@@ -26,14 +18,9 @@ import {
   type PageDragGhostHandle,
   type PageDragGhostState,
 } from "@/components/PageDragGhost"
+import { PageMenuContent } from "@/components/PageContextMenu"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { useNearViewport } from "@/hooks/useNearViewport"
@@ -92,7 +79,7 @@ type SidebarThumbnailsProps = {
   /** Settles once the reorder has landed or been refused: the column holds
       the dropped order until then, rather than flash the old one. */
   onReorderPages: (order: number[]) => Promise<unknown>
-  onRotatePages: () => void
+  onRotatePages: (degrees: 90 | 270) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   pages: PdfPageInfo[]
   /** Where a preview waits while an edit has its page out of the document. */
@@ -428,8 +415,20 @@ export function SidebarThumbnails({
     document.addEventListener("keydown", escape, true)
   }
 
-  const menuCount =
-    menuPage !== null && selectedPages.has(menuPage) ? selectedPages.size : 1
+  // The page pressed alone only until its click's selection lands. Blanks and
+  // pastes go before the first or after the last, as on the organize board.
+  // Folded, not spread: a select-all can pass the engine's argument limit.
+  const menuPages: Iterable<number> =
+    menuPage === null ? [] : selectedPages.has(menuPage) ? selectedPages : [menuPage]
+  let menuCount = 0
+  let menuFirst = Number.POSITIVE_INFINITY
+  let menuLast = Number.NEGATIVE_INFINITY
+
+  for (const pageNumber of menuPages) {
+    menuCount += 1
+    menuFirst = Math.min(menuFirst, pageNumber)
+    menuLast = Math.max(menuLast, pageNumber)
+  }
 
   return (
     <div className="relative h-full">
@@ -528,66 +527,20 @@ export function SidebarThumbnails({
           </ol>
         </ContextMenuTrigger>
         {menuPage !== null ? (
-          <ContextMenuContent>
-            <ContextMenuItem data-action="cut-pages" onClick={onCutPages}>
-              <Scissors />
-              {t("pageEdit.cut", { count: menuCount })}
-            </ContextMenuItem>
-            <ContextMenuItem data-action="copy-pages" onClick={onCopyPages}>
-              <Copy />
-              {t("pageEdit.copy", { count: menuCount })}
-            </ContextMenuItem>
-            {canPaste ? (
-              <ContextMenuItem
-                data-action="paste-pages"
-                onClick={() => onPastePages(menuPage)}
-              >
-                <ClipboardPaste />
-                {t("pageEdit.pasteBefore", { pageNumber: menuPage })}
-              </ContextMenuItem>
-            ) : null}
-            {canPaste && menuPage === numPages ? (
-              <ContextMenuItem
-                data-action="paste-pages-end"
-                onClick={() => onPastePages(numPages + 1)}
-              >
-                <ClipboardPaste />
-                {t("pageEdit.pasteAtEnd")}
-              </ContextMenuItem>
-            ) : null}
-            <ContextMenuSeparator />
-            <ContextMenuItem data-action="rotate-pages" onClick={onRotatePages}>
-              <RotateCw />
-              {t("pageEdit.rotate", { count: menuCount })}
-            </ContextMenuItem>
-            <ContextMenuItem
-              data-action="insert-blank-before"
-              onClick={() => onInsertBlankPage(menuPage)}
-            >
-              <FilePlus2 />
-              {t("pageEdit.insertBefore", { pageNumber: menuPage })}
-            </ContextMenuItem>
-            <ContextMenuItem
-              data-action="insert-blank-after"
-              onClick={() => onInsertBlankPage(menuPage + 1)}
-            >
-              <FilePlus2 />
-              {menuPage === numPages
-                ? t("pageEdit.insertAtEnd")
-                : t("pageEdit.insertBefore", { pageNumber: menuPage + 1 })}
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              data-action="delete-pages"
-              // A document keeps one page; the backend refuses a delete of them all.
-              disabled={menuCount >= numPages}
-              onClick={() => onDeletePage(menuPage)}
-              variant="destructive"
-            >
-              <Trash2 />
-              {t("pageEdit.delete", { count: menuCount })}
-            </ContextMenuItem>
-          </ContextMenuContent>
+          <PageMenuContent
+            canPaste={canPaste}
+            count={menuCount}
+            // A document keeps one page; the backend refuses a delete of them all.
+            deleteDisabled={menuCount >= numPages}
+            onCopy={onCopyPages}
+            onCut={onCutPages}
+            onDelete={() => onDeletePage(menuPage)}
+            onInsertBlank={(side) =>
+              onInsertBlankPage(side === "before" ? menuFirst : menuLast + 1)
+            }
+            onPaste={(side) => onPastePages(side === "before" ? menuFirst : menuLast + 1)}
+            onRotate={onRotatePages}
+          />
         ) : null}
         {ghost ? (
           <PageDragGhost

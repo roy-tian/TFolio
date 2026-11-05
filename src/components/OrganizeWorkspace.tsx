@@ -97,11 +97,19 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
       if ((event.key === "Delete" || event.key === "Backspace") && chosen.size > 0) {
         event.preventDefault()
         organize.remove(chosen)
-      } else if (event.key === "Escape" && chosen.size > 0) {
-        organize.setSelection(new Set())
+      } else if (event.key === "Escape") {
+        // As in a file manager: Esc lets the pages go and takes back a cut.
+        if (chosen.size > 0) {
+          organize.setSelection(new Set())
+        }
+
+        organize.cancelCut()
       } else if (primary && event.key.toLowerCase() === "x" && chosen.size > 0) {
         event.preventDefault()
         organize.cutSelection()
+      } else if (primary && event.key.toLowerCase() === "c" && chosen.size > 0) {
+        event.preventDefault()
+        organize.copySelection()
       } else if (primary && event.key.toLowerCase() === "v") {
         event.preventDefault()
         organize.paste()
@@ -214,9 +222,9 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                 </Button>
               </ToolbarTooltip>
               {/* With nothing chosen, either one adds at the last file's end. */}
-              <ToolbarTooltip label={t("organize.insertBlankBefore")}>
+              <ToolbarTooltip label={t("pageEdit.insertBlankBefore")}>
                 <Button
-                  aria-label={t("organize.insertBlankBefore")}
+                  aria-label={t("pageEdit.insertBlankBefore")}
                   data-slot="organize-insert-blank-before"
                   disabled={busy || empty}
                   onClick={() => organize.insertBlankAt(chosen, "before")}
@@ -226,9 +234,9 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   <InsertBeforeIcon />
                 </Button>
               </ToolbarTooltip>
-              <ToolbarTooltip label={t("organize.insertBlankAfter")}>
+              <ToolbarTooltip label={t("pageEdit.insertBlankAfter")}>
                 <Button
-                  aria-label={t("organize.insertBlankAfter")}
+                  aria-label={t("pageEdit.insertBlankAfter")}
                   data-slot="organize-insert-blank-after"
                   disabled={busy || empty}
                   onClick={() => organize.insertBlankAt(chosen, "after")}
