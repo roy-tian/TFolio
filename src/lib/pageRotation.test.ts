@@ -43,8 +43,10 @@ describe("page rotation lookup", () => {
     expect(rotationForPage([90], 2)).toBe(0)
   })
 
-  it("trims removed positions and initializes added positions upright", () => {
-    expect(rotationsForPageCount([90, 180, 270], 2)).toEqual([90, 180])
-    expect(rotationsForPageCount([90], 3)).toEqual([90, 0, 0])
+  it("gives every page after a structure change the turn the view shows", () => {
+    expect(rotationsForPageCount([90, 90, 90], 2)).toEqual([90, 90])
+    // The added pages are turned with the rest, not left upright at the end.
+    expect(rotationsForPageCount([270], 3)).toEqual([270, 270, 270])
+    expect(rotationsForPageCount([0, 0], 4)).toEqual([0, 0, 0, 0])
   })
 })

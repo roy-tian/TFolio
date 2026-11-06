@@ -37,6 +37,7 @@ import {
   exceedsDragThreshold,
   orderWithBlockAt,
 } from "@/lib/pageDrag"
+import { viewRotation } from "@/lib/pageRotation"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -597,7 +598,7 @@ export function SidebarThumbnails({
                 index === incomingAt ? (
                   <CarriedHoles
                     key={CARRY_KEY}
-                    rotations={rotations.slice(incomingAt)}
+                    rotation={viewRotation(rotations)}
                     sizes={incoming!.carried.sizes}
                   />
                 ) : null
@@ -702,19 +703,17 @@ function PagesDropTarget() {
 }
 
 /** Where another document's pages will stand, one hole each, keyed apart from
-    every page; a fragment, so each is a row of the column's own. Turned by the
-    view rotations the copies take up at those places, not the source's. */
+    every page; a fragment, so each is a row of the column's own. Turned as
+    this view turns its pages, which the copies take on, not as the source's. */
 function CarriedHoles({
-  rotations,
+  rotation,
   sizes,
 }: {
-  rotations: number[]
+  rotation: number
   sizes: CarriedPages["sizes"]
 }) {
   return sizes.map((size, index) => {
-    const paper = thumbnailPaper(
-      dimensionsForRotation(rotations[index] ?? 0, size.width, size.height),
-    )
+    const paper = thumbnailPaper(dimensionsForRotation(rotation, size.width, size.height))
 
     return (
       <li className="relative" data-flip-key={`${CARRY_KEY}${index}`} key={index}>

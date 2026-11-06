@@ -32,12 +32,18 @@ export function pagesToRotate(
     : pages.filter((pageNumber) => selectedPages.has(pageNumber))
 }
 
+/** The view turns the whole document at once: one turn every page shows. */
+export function viewRotation(rotations: PageRotations) {
+  return rotations[0] ?? 0
+}
+
+/** A page a structure change brings in, wherever it lands, takes the turn
+    every other page shows. */
 export function rotationsForPageCount(
   rotations: PageRotations,
   pageCount: number,
 ): number[] {
-  return Array.from(
-    { length: pageCount },
-    (_, index) => rotations[index] ?? 0,
-  )
+  const turn = viewRotation(rotations)
+
+  return Array.from({ length: pageCount }, () => turn)
 }
