@@ -9,10 +9,10 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 use tfolio_engine::{
-    download_fallback_font, size_limit_error, ExportOutcome, ExtractedPages, OperationTarget,
-    PageNumbersConfig, PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, TextNoteStyle,
-    WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+    download_fallback_font, size_limit_error, ExportOutcome, OperationTarget, PageNumbersConfig,
+    PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
+    PdfiumEngine, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
+    MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
@@ -582,7 +582,7 @@ pub async fn extract_pdf_pages(
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
-) -> Result<ExtractedPages, String> {
+) -> Result<PdfDocumentInfo, String> {
     if !owners.owns(source_document_id, window.label()) {
         return Err("this window does not hold that document".into());
     }

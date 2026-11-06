@@ -851,7 +851,7 @@ impl PdfiumEngine {
         &self,
         source_document_id: u64,
         page_numbers: &[i32],
-    ) -> Result<ExtractedPages, String> {
+    ) -> Result<PdfDocumentInfo, String> {
         let (bytes, merged) = {
             // PDFium work like any other, so under the store's lock — given
             // back before `open_marked` takes it again.
@@ -884,12 +884,8 @@ impl PdfiumEngine {
 
             (bytes, copy_only_pages(source, &sources))
         };
-        let has_merged_pages = merged.contains(&true);
 
-        Ok(ExtractedPages {
-            document: self.open_marked(bytes, None, &merged)?,
-            has_merged_pages,
-        })
+        self.open_marked(bytes, None, &merged)
     }
 }
 

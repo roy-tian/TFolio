@@ -45,6 +45,9 @@ pub struct PdfDocumentInfo {
     /// The file this document was opened from. `None` — opened from bytes —
     /// disables saving; only exporting can give it a file.
     path: Option<String>,
+    /// As in [`PdfStructureUpdate`]: a new document of another one's pages can
+    /// open already export-only.
+    has_merged_pages: bool,
 }
 
 impl PdfDocumentInfo {
@@ -58,21 +61,6 @@ impl PdfDocumentInfo {
             path: Some(path),
             ..self
         }
-    }
-}
-
-/// A new document of another one's pages. Its copies of pages carrying a
-/// session layer leave it export-only from the start, which no open says.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtractedPages {
-    document: PdfDocumentInfo,
-    has_merged_pages: bool,
-}
-
-impl ExtractedPages {
-    pub fn id(&self) -> u64 {
-        self.document.id
     }
 }
 

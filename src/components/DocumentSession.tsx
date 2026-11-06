@@ -166,8 +166,6 @@ type DocumentSessionProps = {
   /** Whether this app-created document has yet to be written to its first
       file. It remains unsaved even before the reader makes another edit. */
   initialSaveRequired?: boolean
-  /** Opened already holding copies of pages it may only be exported with. */
-  initialHasMergedPages?: boolean
   /** A path-backed document's last reading view. */
   initialRecentView?: RecentPdfView
   /** Overrides the stored preference: a tab moved from another window keeps
@@ -202,7 +200,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       active,
       document: openedDocument,
       fileName,
-      initialHasMergedPages = false,
       initialRecentView,
       initialSaveRequired = false,
       initialViewMode,
@@ -236,13 +233,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // after it is what brings pages back, and an older one renders them afresh.
     const previewStashRef = useRef<number | undefined>(undefined)
     // A copy of a page carrying a watermark or page numbers leaves the document
-    // export-only, like those layers. The backend answers with every structure
-    // update, so no replay.
-    const [hasMergedPages, setHasMergedPages] = useState(
-      () => movedSeed?.hasMergedPages ?? initialHasMergedPages,
-    )
-    // Read by a close's save, which runs after the queue and before a render.
-    const hasMergedPagesRef = useRef(hasMergedPages)
+    // export-only, like those layers. The backend says so at the open and with
+    // every structure update, so no replay.
+    const hasMergedPages = pdfDocument.hasMergedPages
     const [currentPage] = useState(() =>
       createCurrentPage(
         Math.min(
@@ -588,6 +581,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
           const next = {
             ...current,
+            hasMergedPages: update.hasMergedPages,
             numPages: update.numPages,
             outline: update.outline,
             pages: update.pages,
@@ -595,8 +589,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
           documentRef.current = next
           setPdfDocument(next)
-          hasMergedPagesRef.current = update.hasMergedPages
-          setHasMergedPages(update.hasMergedPages)
 
           // Turned where it stands, so every position still holds its page — a
           // second press of the rotation must still find the selection it turns.
@@ -896,7 +888,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const isCopyOnlyNow = useCallback(
       () =>
         Boolean(documentRef.current?.path) &&
-        (annotations.hasOwnedContentNow() || hasMergedPagesRef.current),
+        (annotations.hasOwnedContentNow() ||
+          documentRef.current?.hasMergedPages === true),
       [annotations],
     )
 
@@ -1222,7 +1215,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         recentView: sampleCurrentView(),
         saveRequired: saveRequiredRef.current,
         seed: {
-          hasMergedPages,
           history: annotationsSeed.history,
           marks: annotationsSeed.marks,
           pageRotations,
@@ -1231,7 +1223,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [
       annotations,
-      hasMergedPages,
       pageRotations,
       preferredViewMode,
       sampleCurrentView,
@@ -1386,7 +1377,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         Boolean(documentRef.current?.path) &&
         !saveRequiredRef.current &&
         !annotations.hasOwnedContentNow() &&
-        !hasMergedPagesRef.current
+        !documentRef.current?.hasMergedPages
 
       return writesBack
         ? annotations.save()

@@ -10,6 +10,7 @@ import {
 } from "./tabMove"
 
 const document = {
+  hasMergedPages: true,
   id: 7,
   numPages: 3,
   outline: [],
@@ -36,7 +37,6 @@ const payload: MovedTabPayload = {
   savable: false,
   saveRequired: false,
   seed: {
-    hasMergedPages: true,
     history: {
       ...emptyHistory,
       past: [
@@ -182,6 +182,12 @@ describe("parseMovedTabPayload", () => {
     expect(parseMovedTabPayload(null)).toBeNull()
     expect(parseMovedTabPayload("moved.pdf")).toBeNull()
     expect(parseMovedTabPayload({ ...valid, document: { id: 7 } })).toBeNull()
+    expect(
+      parseMovedTabPayload({
+        ...valid,
+        document: { ...valid.document, hasMergedPages: "yes" },
+      }),
+    ).toBeNull()
     expect(
       parseMovedTabPayload({
         ...valid,

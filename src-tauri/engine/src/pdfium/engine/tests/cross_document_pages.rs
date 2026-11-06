@@ -163,11 +163,8 @@ fn extracts_the_chosen_pages_into_a_new_document() {
         .expect("PDFium should build the new document");
 
     assert_ne!(extracted.id(), source.id);
-    assert_eq!(extracted.document.num_pages, 2);
-    assert_eq!(
-        extracted.document.path, None,
-        "a new document has no file yet"
-    );
+    assert_eq!(extracted.num_pages, 2);
+    assert_eq!(extracted.path, None, "a new document has no file yet");
     assert!(!extracted.has_merged_pages, "plain pages leave it saveable");
     assert_eq!(
         page_fingerprints(engine, extracted.id(), 2),

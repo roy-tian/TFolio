@@ -110,7 +110,6 @@ export async function fetchWindowRects(): Promise<WindowRect[]> {
     it owns are what keep the document's dirty state, its export-only refusals,
     and annotation deletion answering as they did where it came from. */
 export type MovedTabSeed = {
-  hasMergedPages: boolean
   history: AnnotationHistory
   marks: [entryId: number, markIds: number[]][]
   pageRotations: number[]
@@ -185,7 +184,8 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     !isNumber(document.numPages) ||
     !Array.isArray(document.pages) ||
     !Array.isArray(document.outline) ||
-    (typeof document.path !== "string" && document.path !== null)
+    (typeof document.path !== "string" && document.path !== null) ||
+    typeof document.hasMergedPages !== "boolean"
   ) {
     return null
   }
@@ -197,7 +197,6 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     !Array.isArray(seed.history.future) ||
     !isNumber(seed.history.nextId) ||
     !isNumber(seed.history.savedId) ||
-    typeof seed.hasMergedPages !== "boolean" ||
     !isMarks(seed.marks) ||
     !Array.isArray(seed.pageRotations) ||
     !seed.pageRotations.every(isNumber) ||
@@ -218,7 +217,6 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     saveRequired: value.saveRequired === true,
     savable: value.savable === true,
     seed: {
-      hasMergedPages: seed.hasMergedPages,
       history: seed.history as unknown as AnnotationHistory,
       marks: seed.marks,
       pageRotations: seed.pageRotations,

@@ -40,10 +40,9 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, ExtractedPages, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect,
-    PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
-    MAX_PDF_BYTES,
+    ExportOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect, PdfDocumentInfo,
+    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
+    RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -580,15 +579,17 @@ impl PdfiumEngine {
         let path = source_path
             .as_deref()
             .map(|path| path.to_string_lossy().into_owned());
+        let merged_page_ids: HashSet<u64> = (0..num_pages as u64)
+            .filter(|&page_id| copy_only.get(page_id as usize) == Some(&true))
+            .collect();
+        let has_merged_pages = !merged_page_ids.is_empty();
 
         documents.insert(
             id,
             OpenDocument {
                 document,
                 marks: HashMap::new(),
-                merged_page_ids: (0..num_pages as u64)
-                    .filter(|&page_id| copy_only.get(page_id as usize) == Some(&true))
-                    .collect(),
+                merged_page_ids,
                 needs_compaction: false,
                 next_mark_id: 1,
                 next_page_id: num_pages as u64,
@@ -610,6 +611,7 @@ impl PdfiumEngine {
             pages,
             outline,
             path,
+            has_merged_pages,
         })
     }
 

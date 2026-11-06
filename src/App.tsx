@@ -71,7 +71,6 @@ import {
   fileNameFromPath,
   fileStem,
   type PdfDocumentInfo,
-  type PdfExtractedPages,
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
 import { cn } from "@/lib/utils"
@@ -117,8 +116,6 @@ type OpenTab = {
   document: PdfDocumentInfo
   id: number
   initialSaveRequired?: boolean
-  /** See the session's prop of the same name; read once, at its first mount. */
-  initialHasMergedPages?: boolean
   /** A tab that arrived from another window: what its session replays, which
       no fresh open could derive. Read once, at the session's first mount. */
   movedSeed?: MovedTabSeed
@@ -646,7 +643,7 @@ export default function App() {
     (carried: CarriedPages) => {
       // At the release, not when the open queue reaches it: the page numbers
       // name the source as it stands now, and could be stale by then.
-      const extracted = invoke<PdfExtractedPages>("extract_pdf_pages", {
+      const extracted = invoke<PdfDocumentInfo>("extract_pdf_pages", {
         pageNumbers: carried.pages,
         sourceDocumentId: carried.sourceDocumentId,
       })
@@ -661,7 +658,7 @@ export default function App() {
         setWorkspaceMode("view")
 
         try {
-          const { document, hasMergedPages } = await extracted
+          const document = await extracted
 
           if (!mountedRef.current) {
             void invoke("close_pdf", { documentId: document.id }).catch(
@@ -678,7 +675,6 @@ export default function App() {
             dirty: true,
             document,
             id: document.id,
-            initialHasMergedPages: hasMergedPages || undefined,
             initialSaveRequired: true,
             name,
             path: "",
@@ -2230,7 +2226,6 @@ export default function App() {
           active={tab.id === activeId && viewing}
           document={tab.document}
           fileName={tab.name}
-          initialHasMergedPages={tab.initialHasMergedPages}
           initialSaveRequired={tab.initialSaveRequired}
           initialRecentView={tab.recentView}
           // A moved tab keeps the view it was being read in even where no
