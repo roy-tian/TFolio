@@ -93,6 +93,13 @@ export function exportFailureNotice(
   return isRefusal(error, EXPORT_DENIED) ? "exportDenied" : "exportFailed"
 }
 
+/** A new document of another one's pages: copies of pages carrying that
+    one's watermark or page numbers leave it export-only from the start. */
+export type PdfExtractedPages = {
+  document: PdfDocumentInfo
+  hasMergedPages: boolean
+}
+
 /** Nothing here is patched into place: the page list and outline are
     replaced wholesale, the backend's document being the only truth. */
 export type PdfStructureUpdate = {

@@ -163,8 +163,12 @@ fn extracts_the_chosen_pages_into_a_new_document() {
         .expect("PDFium should build the new document");
 
     assert_ne!(extracted.id(), source.id);
-    assert_eq!(extracted.num_pages, 2);
-    assert_eq!(extracted.path, None, "a new document has no file yet");
+    assert_eq!(extracted.document.num_pages, 2);
+    assert_eq!(
+        extracted.document.path, None,
+        "a new document has no file yet"
+    );
+    assert!(!extracted.has_merged_pages, "plain pages leave it saveable");
     assert_eq!(
         page_fingerprints(engine, extracted.id(), 2),
         vec![from[0].clone(), from[2].clone()],
@@ -179,8 +183,9 @@ fn extracts_the_chosen_pages_into_a_new_document() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn an_extracted_watermarked_page_is_the_new_documents_own_content() {
+fn an_extracted_copy_of_a_watermarked_page_keeps_the_new_document_export_only() {
     let engine = test_engine();
+    let directory = scratch_directory("extract-copy-only");
     let source = engine
         .open(banded_pdf(&[20, 60]))
         .expect("PDFium should open the source");
@@ -188,23 +193,41 @@ fn an_extracted_watermarked_page_is_the_new_documents_own_content() {
     engine
         .apply_watermark(source.id, watermark_config("ARCHIVE"))
         .expect("PDFium should apply the watermark");
+    // Inserted after the apply, so the layer never covered it.
+    engine
+        .insert_blank_page(source.id, 3)
+        .expect("PDFium should add a bare page");
 
     let watermarked = page_fingerprints(engine, source.id, 1);
     let extracted = engine
-        .extract_pages(source.id, &[1])
+        .extract_pages(source.id, &[1, 3])
         .expect("PDFium should build the new document");
-    let documents = engine
-        .documents
-        .lock()
-        .expect("the document store should be usable");
-    let entry = &documents[&extracted.id()];
 
     assert!(
-        entry.merged_page_ids.is_empty() && entry.owned_content.is_none(),
-        "as an assembled PDF's, the stamp is input content the new file may keep",
+        extracted.has_merged_pages,
+        "as in a document it is pasted into, the copy holds the source's layer",
     );
-    drop(documents);
+    assert_eq!(
+        engine
+            .documents
+            .lock()
+            .expect("the document store should be usable")[&extracted.id()]
+            .merged_page_ids,
+        HashSet::from([0]),
+        "only the copy of the stamped page is marked",
+    );
     assert_eq!(page_fingerprints(engine, extracted.id(), 1), watermarked);
+
+    // Its first Save As gives it a file, which a save may then not go over.
+    engine
+        .export_to(extracted.id(), &directory.join("pages.pdf"))
+        .expect("the export should write the new document");
+    let refused = engine
+        .save(extracted.id())
+        .expect_err("the copy may only be exported");
+    assert!(refused.contains("only be exported"), "why: {refused}");
+
+    fs::remove_dir_all(&directory).ok();
 }
 
 #[test]

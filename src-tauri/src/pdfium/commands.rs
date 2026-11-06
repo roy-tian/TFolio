@@ -9,10 +9,10 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 use tfolio_engine::{
-    download_fallback_font, size_limit_error, ExportOutcome, OperationTarget, PageNumbersConfig,
-    PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
-    PdfiumEngine, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
-    MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+    download_fallback_font, size_limit_error, ExportOutcome, ExtractedPages, OperationTarget,
+    PageNumbersConfig, PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome,
+    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, TextNoteStyle,
+    WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
@@ -582,7 +582,7 @@ pub async fn extract_pdf_pages(
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
-) -> Result<PdfDocumentInfo, String> {
+) -> Result<ExtractedPages, String> {
     if !owners.owns(source_document_id, window.label()) {
         return Err("this window does not hold that document".into());
     }
@@ -590,15 +590,15 @@ pub async fn extract_pdf_pages(
     let engine = Arc::clone(&state.engine);
     let page = page_generation(&window);
 
-    let document = tauri::async_runtime::spawn_blocking(move || {
+    let extracted = tauri::async_runtime::spawn_blocking(move || {
         engine.extract_pages(source_document_id, &page_numbers)
     })
     .await
     .map_err(|error| format!("PDFium extract task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id(), None);
+    record_document(&owners, &window, page, extracted.id(), None);
 
-    Ok(document)
+    Ok(extracted)
 }
 
 #[tauri::command]

@@ -3,9 +3,11 @@ import "@wdio/tauri-service"
 
 import {
   activeSidebar,
+  appMenuItem,
   appMenuItemEnabled,
   bandedPdf,
   clickAppMenuItem,
+  closeAppMenu,
   openPathViaDialog,
   openPdfFromDisk,
   pressRedo,
@@ -13,6 +15,7 @@ import {
   seedSettings,
   sidebarPageAction,
   textPdf,
+  tooltipOn,
 } from "./helpers"
 
 /** Only the active document's sidebar is laid out, and only it is what a
@@ -543,6 +546,28 @@ describe("TFolio page editing in the sidebar", () => {
     await waitForThumb(1, fourth!)
     await waitForThumb(2, second!)
   })
+
+  it("turns the pages a paste brings in with the rest of a turned view", async () => {
+    await openPdfFromDisk("turned.pdf", bandedPdf(2))
+    await paintedFingerprints(2)
+    await $("button[aria-label='Rotate the view clockwise']").click()
+    await browser.waitUntil(async () => (await thumbShape(2)) === "landscape", {
+      timeoutMsg: "the view never turned",
+    })
+
+    await clickThumb(2)
+    await browser.keys(["Control", "c"])
+    await clickThumb(1)
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the paste never landed",
+    })
+
+    // The last place is the one an untracked turn would have left upright.
+    for (const pageNumber of [1, 2, 3]) {
+      expect(await thumbShape(pageNumber)).toBe("landscape")
+    }
+  })
 })
 
 describe("TFolio pages carried to other documents", () => {
@@ -627,5 +652,36 @@ describe("TFolio pages carried to other documents", () => {
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the source lost pages",
     })
+  })
+
+  it("keeps a new PDF of watermarked pages export-only", async () => {
+    await openPdfFromDisk("stamped-source.pdf", bandedPdf(2))
+    await paintedFingerprints(2)
+    await $("button[aria-label='Watermark']").click()
+    await $("[data-testid='watermark-text']").setValue("ARCHIVE")
+    await $("[data-testid='watermark-apply']").click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 30_000,
+    })
+
+    await clickThumb(1)
+    await liftThumb(1)
+
+    const space = await stripSpace()
+
+    await pointerAt("pointermove", space)
+    await $("[data-new-document-offer]").waitForDisplayed()
+    await pointerAt("pointerup", space)
+    await expect(tabButton("Pages from stamped-source.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    // The tab knows from its first render, before any edit has said so.
+    const save = await appMenuItem("save")
+    expect(await save.getAttribute("data-disabled")).not.toBe(null)
+    expect(await tooltipOn("[data-action='save']")).toContain("holding copies of pages")
+    await closeAppMenu(save)
   })
 })

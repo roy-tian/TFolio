@@ -166,6 +166,8 @@ type DocumentSessionProps = {
   /** Whether this app-created document has yet to be written to its first
       file. It remains unsaved even before the reader makes another edit. */
   initialSaveRequired?: boolean
+  /** Opened already holding copies of pages it may only be exported with. */
+  initialHasMergedPages?: boolean
   /** A path-backed document's last reading view. */
   initialRecentView?: RecentPdfView
   /** Overrides the stored preference: a tab moved from another window keeps
@@ -200,6 +202,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       active,
       document: openedDocument,
       fileName,
+      initialHasMergedPages = false,
       initialRecentView,
       initialSaveRequired = false,
       initialViewMode,
@@ -236,7 +239,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // export-only, like those layers. The backend answers with every structure
     // update, so no replay.
     const [hasMergedPages, setHasMergedPages] = useState(
-      () => movedSeed?.hasMergedPages ?? false,
+      () => movedSeed?.hasMergedPages ?? initialHasMergedPages,
     )
     // Read by a close's save, which runs after the queue and before a render.
     const hasMergedPagesRef = useRef(hasMergedPages)

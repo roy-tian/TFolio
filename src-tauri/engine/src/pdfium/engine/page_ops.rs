@@ -845,16 +845,16 @@ impl PdfiumEngine {
     }
 
     /// A new document of the chosen pages, as the reader has them, built in
-    /// memory with no file, like a blank one. Whatever a layer stamped on them
-    /// is the new document's own content, as it is in an assembled PDF.
+    /// memory with no file, like a blank one. Copies of pages a layer stamped
+    /// leave it export-only, as they would any document they were pasted into.
     pub fn extract_pages(
         &self,
         source_document_id: u64,
         page_numbers: &[i32],
-    ) -> Result<PdfDocumentInfo, String> {
-        let bytes = {
+    ) -> Result<ExtractedPages, String> {
+        let (bytes, merged) = {
             // PDFium work like any other, so under the store's lock — given
-            // back before `open_with_source` takes it again.
+            // back before `open_marked` takes it again.
             let documents = self.lock_documents()?;
             let source = open_entry(&documents, source_document_id)?;
             let sources =
@@ -878,12 +878,18 @@ impl PdfiumEngine {
                 ));
             }
 
-            document
+            let bytes = document
                 .save_to_bytes()
-                .map_err(|error| format!("PDFium could not build the new document: {error}"))?
-        };
+                .map_err(|error| format!("PDFium could not build the new document: {error}"))?;
 
-        self.open_with_source(bytes, None)
+            (bytes, copy_only_pages(source, &sources))
+        };
+        let has_merged_pages = merged.contains(&true);
+
+        Ok(ExtractedPages {
+            document: self.open_marked(bytes, None, &merged)?,
+            has_merged_pages,
+        })
     }
 }
 

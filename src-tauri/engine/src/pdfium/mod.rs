@@ -61,6 +61,21 @@ impl PdfDocumentInfo {
     }
 }
 
+/// A new document of another one's pages. Its copies of pages carrying a
+/// session layer leave it export-only from the start, which no open says.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractedPages {
+    document: PdfDocumentInfo,
+    has_merged_pages: bool,
+}
+
+impl ExtractedPages {
+    pub fn id(&self) -> u64 {
+        self.document.id
+    }
+}
+
 /// The frontend holds no mirror of the page list to patch, so it replaces its
 /// copy wholesale after every structure change.
 #[derive(Debug, Serialize)]

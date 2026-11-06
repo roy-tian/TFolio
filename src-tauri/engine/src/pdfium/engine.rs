@@ -40,9 +40,10 @@ use super::{
         watermark_zebra_spacing, WatermarkConfig, WatermarkPlacement, WATERMARK_COLOR,
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
-    ExportOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect, PdfDocumentInfo,
-    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
-    RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    ExportOutcome, ExtractedPages, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect,
+    PdfDocumentInfo, PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome,
+    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
+    MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -543,6 +544,17 @@ impl PdfiumEngine {
         bytes: Vec<u8>,
         source_path: Option<PathBuf>,
     ) -> Result<PdfDocumentInfo, String> {
+        self.open_marked(bytes, source_path, &[])
+    }
+
+    /// `copy_only[i]` marks page `i + 1` a copy the document may not be saved
+    /// over a file with, recorded with the open rather than after it.
+    fn open_marked(
+        &self,
+        bytes: Vec<u8>,
+        source_path: Option<PathBuf>,
+        copy_only: &[bool],
+    ) -> Result<PdfDocumentInfo, String> {
         if bytes.is_empty() {
             return Err("PDF file is empty".into());
         }
@@ -574,7 +586,9 @@ impl PdfiumEngine {
             OpenDocument {
                 document,
                 marks: HashMap::new(),
-                merged_page_ids: HashSet::new(),
+                merged_page_ids: (0..num_pages as u64)
+                    .filter(|&page_id| copy_only.get(page_id as usize) == Some(&true))
+                    .collect(),
                 needs_compaction: false,
                 next_mark_id: 1,
                 next_page_id: num_pages as u64,
