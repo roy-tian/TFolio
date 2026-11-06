@@ -284,12 +284,18 @@ const zhCN = {
     exportCopyOnly: "此文档只能导出为副本，不能覆盖它已保存到的文件，请换一个文件名。",
     exportDenied:
       "无法写入该位置——文件或文件夹可能是只读的，或文件正被其他程序占用，请另选位置。",
+    exportSigned:
+      "该文件含有效的数字签名，保存覆盖会使签名失效。请换一个文件名。",
+    exportSignedChanged:
+      "已签名的文件在打开后被修改过，这份副本已不是原件。请重新打开该文件再复制。",
     markWhileEditing: "页面编辑仍在进行，刚才的标注未保留，请稍后再试。",
     watermarkRebuilding: "正在更新水印…",
     pageNumbersRebuilding: "正在更新页码…",
     layerStop: "停止",
     layerStopping: "正在停止…",
     saveMerged: "含有带水印或页码页面副本的文档只能导出副本，不能保存回原文件",
+    saveSigned:
+      "含有效数字签名的文档只能导出副本，不能保存回已签名的原文件",
   },
   watermark: {
     open: "水印",
@@ -540,6 +546,10 @@ const zhCN = {
     noBookmarks: "此文档没有书签",
     noDocument: "打开 PDF 后，这里会显示它的页面和书签。",
     thumbnailLabel: "转到第 {{pageNumber}} 页",
+  },
+  signatures: {
+    count_one: "含 {{count}} 个数字签名",
+    count_other: "含 {{count}} 个数字签名",
   },
   about: {
     title: "TFolio",

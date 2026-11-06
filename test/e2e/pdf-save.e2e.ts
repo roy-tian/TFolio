@@ -14,6 +14,7 @@ import {
   openPathViaDialog,
   openPdfFromBytes,
   openPdfFromDisk,
+  highlightTheText,
   pageInk,
   pointSaveAsAt,
   refreshApp,
@@ -22,39 +23,6 @@ import {
   textPdf,
   writeScratchPdf,
 } from "./helpers"
-
-/** Selects the page's one text run and lets go, the way the reader highlights:
-    the press has to land on the text for the release to commit. */
-async function highlightTheText() {
-  // The tool stays on after a highlight, and a second press would turn it off.
-  const tool = $("button[aria-label='Highlight text']")
-  if ((await tool.getAttribute("aria-pressed")) !== "true") {
-    await tool.click()
-  }
-
-  const selected = await browser.execute(() => {
-    const span = document.querySelector(".pdf-text-layer span")
-
-    if (!span) {
-      return null
-    }
-
-    span.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
-
-    const range = document.createRange()
-    range.selectNodeContents(span)
-    const selection = window.getSelection()!
-    selection.removeAllRanges()
-    selection.addRange(range)
-
-    return span.textContent
-  })
-  expect(selected).toContain("Highlight")
-
-  await browser.execute(() => {
-    document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
-  })
-}
 
 /** Stands in for Save As's dialog, cancelling it after noting the name it
     was asked to suggest. */

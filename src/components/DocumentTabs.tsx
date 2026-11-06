@@ -6,6 +6,7 @@ import {
   CopyX,
   ExternalLink,
   FilePlus2,
+  FileSignature,
   FolderOpen,
   House,
   LoaderCircle,
@@ -17,6 +18,7 @@ import { useTranslation } from "react-i18next"
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import { SignatureBadge } from "@/components/SignatureBadge"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import {
   ContextMenu,
@@ -42,11 +44,14 @@ import {
   type TabId,
 } from "@/lib/documentTabs"
 import { TAB_SPRING_MS } from "@/lib/pageCarry"
+import type { PdfSignatures } from "@/lib/pdf"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
 export type DocumentTabItem = {
   dirty: boolean
+  /** Intact signatures mark a tab still bound to the signed file it opened. */
+  document: { signatures: PdfSignatures }
   id: number
   name: string
 }
@@ -117,6 +122,9 @@ function TabDragGhost({ drag, tab }: {
         <span className="size-2 shrink-0 rounded-full bg-primary" />
       ) : null}
       <span className="truncate">{tab.name}</span>
+      {tab.document.signatures.intact ? (
+        <FileSignature className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+      ) : null}
     </div>,
     document.body,
   )
@@ -375,6 +383,23 @@ export function DocumentTabs({
                         <span className="truncate">{tab.name}</span>
                       </button>
                     </HintTooltip>
+                    {/* Beside the tab's button, not in it: its own hint, and
+                        no text added to the name the button reads as. */}
+                    {tab.document.signatures.intact ? (
+                      <SignatureBadge
+                        className="size-6"
+                        count={tab.document.signatures.count}
+                        inDelayGroup
+                        onClick={() => {
+                          if (draggedClickRef.current === tab.id) {
+                            draggedClickRef.current = null
+                            return
+                          }
+
+                          onActivate(tab.id)
+                        }}
+                      />
+                    ) : null}
                     {/* Runs the length of the wait the tab is about to end: the
                         dwell itself, so the bar cannot promise a different one. */}
                     {armed ? (
@@ -501,6 +526,15 @@ export function DocumentTabs({
               >
                 <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
                 <span className="min-w-0 flex-1 truncate">{tab.name}</span>
+                {tab.document.signatures.intact ? (
+                  <FileSignature
+                    aria-label={t("signatures.count", {
+                      count: tab.document.signatures.count,
+                    })}
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                    role="img"
+                  />
+                ) : null}
                 {tab.dirty ? (
                   <span
                     aria-label={t("tabs.unsaved")}

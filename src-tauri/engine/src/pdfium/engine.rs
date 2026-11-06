@@ -41,8 +41,9 @@ use super::{
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
     ExportOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect, PdfDocumentInfo,
-    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
-    RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfSignatures,
+    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
+    MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -160,6 +161,9 @@ struct OpenDocument {
     /// until a save-and-reload collects them, so the next write takes that route.
     needs_compaction: bool,
     owned_content: Option<OwnedContentState>,
+    /// The file this document opened from, while every signature in it was
+    /// intact: kept past a rebinding, so no write ever lands on it.
+    signed_original: Option<OpenedFile>,
 }
 
 impl OpenDocument {
@@ -213,6 +217,16 @@ impl OpenDocument {
             *self.revisions.entry(page_id).or_insert(0) += 1;
         }
         self.content_changed();
+    }
+
+    /// Bound to the signed file it opened from: saving would rewrite it,
+    /// breaking every signature.
+    fn bound_to_signed_original(&self) -> bool {
+        self.signed_original.as_ref().is_some_and(|original| {
+            self.source_path
+                .as_deref()
+                .is_some_and(|source| io::same_file(source, &original.path))
+        })
     }
 
     fn content_changed(&mut self) {
@@ -481,9 +495,9 @@ impl PdfiumEngine {
     }
 
     pub fn open_from_path(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
-        let bytes = read_pdf_bytes(&path)?;
+        let (bytes, fingerprint) = read_pdf_file(&path)?;
 
-        self.open_with_source(bytes, Some(path))
+        self.open_with_source(bytes, Some(OpenedFile { path, fingerprint }))
     }
 
     /// An image or a Word document opened as its converted PDF. Built in
@@ -541,9 +555,9 @@ impl PdfiumEngine {
     fn open_with_source(
         &self,
         bytes: Vec<u8>,
-        source_path: Option<PathBuf>,
+        source: Option<OpenedFile>,
     ) -> Result<PdfDocumentInfo, String> {
-        self.open_marked(bytes, source_path, &[])
+        self.open_marked(bytes, source, &[])
     }
 
     /// `copy_only[i]` marks page `i + 1` a copy the document may not be saved
@@ -551,7 +565,7 @@ impl PdfiumEngine {
     fn open_marked(
         &self,
         bytes: Vec<u8>,
-        source_path: Option<PathBuf>,
+        source: Option<OpenedFile>,
         copy_only: &[bool],
     ) -> Result<PdfDocumentInfo, String> {
         if bytes.is_empty() {
@@ -575,6 +589,8 @@ impl PdfiumEngine {
             pages,
             outline,
         } = document_layout(&document);
+        let source_path = source.as_ref().map(|source| source.path.clone());
+        let scan = signatures::SignatureScan::of(&document);
         let id = self.next_document_id.fetch_add(1, Ordering::Relaxed);
         let path = source_path
             .as_deref()
@@ -600,10 +616,28 @@ impl PdfiumEngine {
                 content_version: 0,
                 compress_cache: None,
                 revisions: HashMap::new(),
+                signed_original: None,
                 source_path,
                 stashes: HashMap::new(),
             },
         );
+        drop(documents);
+
+        // Off the lock: the file may sit on slow storage. Until its id is
+        // answered no command names the document, so protection lands in time.
+        let mut intact = false;
+
+        if let Some(file) = source.filter(|file| scan.intact_in(file)) {
+            if let Some(entry) = self
+                .lock_documents()
+                .ok()
+                .as_deref_mut()
+                .and_then(|documents| documents.get_mut(&id))
+            {
+                entry.signed_original = Some(file);
+                intact = true;
+            }
+        }
 
         Ok(PdfDocumentInfo {
             id,
@@ -612,6 +646,7 @@ impl PdfiumEngine {
             outline,
             path,
             has_merged_pages,
+            signatures: scan.summary(intact),
         })
     }
 
@@ -1116,17 +1151,19 @@ mod owned_content;
 mod page_ops;
 mod page_reorder;
 mod raster;
+mod signatures;
 mod text_runs;
 mod watermark_preview;
 
 pub use io::is_merge_image;
-use io::{image_page_document, read_image, read_pdf_bytes};
+use io::{image_page_document, read_image, read_pdf_bytes, read_pdf_file};
 pub use organize::{
     AssembleOutlineItem, AssemblePlan, AssembleSlot, OrganizeSourceInfo, ORGANIZE_SOURCE_CHANGED,
 };
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;
+use signatures::OpenedFile;
 
 #[cfg(test)]
 mod tests;

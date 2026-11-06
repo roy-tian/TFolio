@@ -1389,13 +1389,20 @@ export default function App() {
   // Save As binds the document to its destination; the tab follows with the
   // reader's name, the duplicate-open check's path, and the next suggestion.
   const updateSource = useCallback(
-    (documentId: number, path: string) => {
+    (documentId: number, path: string, signatures: PdfDocumentInfo["signatures"]) => {
       const name = fileNameFromPath(path)
 
       replaceTabs((current) =>
         current.map((tab) =>
           tab.id === documentId
-            ? { ...tab, name, path, recentPath: path, saveAsDefaultName: name }
+            ? {
+                ...tab,
+                document: { ...tab.document, signatures },
+                name,
+                path,
+                recentPath: path,
+                saveAsDefaultName: name,
+              }
             : tab,
         ),
       )

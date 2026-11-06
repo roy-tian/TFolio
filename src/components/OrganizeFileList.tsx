@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next"
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { BookmarkItems } from "@/components/BookmarkList"
 import { HintTooltip } from "@/components/HintTooltip"
+import { SignatureBadge } from "@/components/SignatureBadge"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
@@ -146,6 +147,8 @@ type FileEntryProps = {
   onToggle: (groupId: number) => void
   open: boolean
   selected: boolean
+  /** Intact signatures in the file the group was added as; 0 for none. */
+  signatures: number
 }
 
 /** A file and the bookmarks under it. Memoised apart from its cell, which a
@@ -166,6 +169,7 @@ const FileEntry = memo(function FileEntry({
   onToggle,
   open,
   selected,
+  signatures,
 }: FileEntryProps) {
   const { t } = useTranslation()
   const rowRef = useRef<HTMLDivElement>(null)
@@ -257,6 +261,9 @@ const FileEntry = memo(function FileEntry({
                 {name}
               </span>
             </HintTooltip>
+            {signatures > 0 ? (
+              <SignatureBadge className="size-5" count={signatures} />
+            ) : null}
             <span className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums">
               {group.slots.length}
             </span>
@@ -470,6 +477,11 @@ export function OrganizeFileList({
   })
   const kindOf = (group: OrganizeGroup) =>
     sources.get(group.originSourceId)?.kind ?? "pdf"
+  const signaturesOf = (group: OrganizeGroup) => {
+    const signatures = sources.get(group.originSourceId)?.signatures
+
+    return signatures?.intact ? signatures.count : 0
+  }
   const dragged = drag ? plan.groups[drag.index] : undefined
   const lifted = new Set(drag?.moving)
   const { closed, setClosed } = folds
@@ -642,6 +654,7 @@ export function OrganizeFileList({
                     // tall, however many bookmarks it carries.
                     open={!drag && !closed.has(group.id)}
                     selected={fileSelection.has(group.id)}
+                    signatures={signaturesOf(group)}
                   />
                 </div>
               </li>

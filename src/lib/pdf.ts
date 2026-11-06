@@ -44,6 +44,14 @@ export type PdfSearchOutcome = {
   matches: PdfSearchMatch[]
 }
 
+/** The digital signatures a file opened with. `intact` checks their structure
+    in the file on disk, never who signed: while it holds, that file is never
+    written over. */
+export type PdfSignatures = {
+  count: number
+  intact: boolean
+}
+
 export type PdfDocumentInfo = {
   /** As in a structure update, which the session copies here: a new document
       of another one's pages can open already export-only. */
@@ -55,6 +63,24 @@ export type PdfDocumentInfo = {
   /** The file this document was opened from; null when opened from bytes,
       which leaves nothing to save over. */
   path: string | null
+  /** As opened; the session clears `intact` once a Save As moves the
+      document off the signed file, which it may then save over no longer. */
+  signatures: PdfSignatures
+}
+
+export function isPdfSignatures(value: unknown): value is PdfSignatures {
+  if (typeof value !== "object" || value === null) {
+    return false
+  }
+
+  const { count, intact } = value as Record<string, unknown>
+
+  return (
+    typeof count === "number" &&
+    Number.isInteger(count) &&
+    count >= 0 &&
+    typeof intact === "boolean"
+  )
 }
 
 /** Whether the document is now bound to the file the export wrote: that, not
@@ -62,6 +88,9 @@ export type PdfDocumentInfo = {
 export type PdfExportOutcome = {
   path: string
   savedToSource: boolean
+  /** Still bound to the signed file it opened from: an unchanged copy keeps
+      it there, an edited one moves it off. */
+  signedOriginal: boolean
 }
 
 /** The backend's refusal to write over a file another tab holds, kept in step
@@ -76,6 +105,14 @@ export const EXPORT_COPY_ONLY = "tfolio:export-copy-only"
     `EXPORT_DENIED_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
 export const EXPORT_DENIED = "tfolio:export-denied"
 
+/** A write over a file whose intact signatures it would break, kept in step
+    with `EXPORT_SIGNED_ERROR` in `src-tauri/engine/src/pdfium/engine/signatures.rs`. */
+export const EXPORT_SIGNED = "tfolio:export-signed"
+
+/** An unchanged signed document's copy, refused because its file changed on
+    disk since the open; kept in step with `SIGNED_ORIGINAL_CHANGED_ERROR`. */
+export const SIGNED_ORIGINAL_CHANGED = "tfolio:signed-original-changed"
+
 function isRefusal(error: unknown, code: string): boolean {
   return error === code || (error instanceof Error && error.message === code)
 }
@@ -84,13 +121,27 @@ function isRefusal(error: unknown, code: string): boolean {
     are named, and anything else is the generic failure. */
 export function exportFailureNotice(
   error: unknown,
-): "exportCopyOnly" | "exportDenied" | "exportFailed" | "exportTargetOpen" {
+):
+  | "exportCopyOnly"
+  | "exportDenied"
+  | "exportFailed"
+  | "exportSigned"
+  | "exportSignedChanged"
+  | "exportTargetOpen" {
   if (isRefusal(error, EXPORT_TARGET_OPEN)) {
     return "exportTargetOpen"
   }
 
   if (isRefusal(error, EXPORT_COPY_ONLY)) {
     return "exportCopyOnly"
+  }
+
+  if (isRefusal(error, EXPORT_SIGNED)) {
+    return "exportSigned"
+  }
+
+  if (isRefusal(error, SIGNED_ORIGINAL_CHANGED)) {
+    return "exportSignedChanged"
   }
 
   return isRefusal(error, EXPORT_DENIED) ? "exportDenied" : "exportFailed"

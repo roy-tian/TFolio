@@ -298,6 +298,10 @@ const fr = {
       "Ce document ne peut être exporté que sous forme de copie : il ne peut pas remplacer le fichier dans lequel il a été enregistré. Choisissez un autre nom.",
     exportDenied:
       "Impossible d’écrire à cet emplacement — le fichier ou le dossier est peut-être en lecture seule, ou le fichier est ouvert dans un autre programme. Choisissez un autre emplacement.",
+    exportSigned:
+      "Ce fichier porte des signatures numériques intactes, qu’un enregistrement par-dessus romprait. Choisissez un autre nom.",
+    exportSignedChanged:
+      "Le fichier signé a changé sur le disque depuis son ouverture : cette copie ne serait plus lui. Rouvrez le fichier pour le copier.",
     markWhileEditing:
       "Une modification de pages est en cours — cette annotation n’a pas été conservée. Réessayez dans un instant.",
     watermarkRebuilding: "Mise à jour du filigrane…",
@@ -306,6 +310,8 @@ const fr = {
     layerStopping: "Arrêt…",
     saveMerged:
       "Un document contenant des copies de pages avec filigrane ou numéros de page ne peut être exporté que sous forme de copie, jamais enregistré à la place du fichier d’origine",
+    saveSigned:
+      "Un document ouvert avec des signatures numériques intactes ne peut être exporté que sous forme de copie, jamais enregistré à la place du fichier signé",
   },
   watermark: {
     open: "Filigrane",
@@ -561,6 +567,10 @@ const fr = {
     noBookmarks: "Ce document ne contient aucun signet",
     noDocument: "Ouvrez un PDF pour voir ici ses pages et ses signets.",
     thumbnailLabel: "Aller à la page {{pageNumber}}",
+  },
+  signatures: {
+    count_one: "Contient {{count}} signature numérique",
+    count_other: "Contient {{count}} signatures numériques",
   },
   about: {
     title: "TFolio",

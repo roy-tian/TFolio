@@ -4,6 +4,7 @@ import {
   fileStem,
   type PdfOutlineItem,
   type PdfPageInfo,
+  type PdfSignatures,
 } from "@/lib/pdf"
 import { sameWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
@@ -20,6 +21,7 @@ export type OrganizeSource = {
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
   path: string
+  signatures: PdfSignatures
   /** The file name without its extension: a bookmark's title. */
   title: string
 }
@@ -120,6 +122,7 @@ export type OrganizeSourceInfo = {
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
   path: string
+  signatures: PdfSignatures
 }
 
 export function sourceFromInfo(info: OrganizeSourceInfo): OrganizeSource | null {
@@ -133,6 +136,7 @@ export function sourceFromInfo(info: OrganizeSourceInfo): OrganizeSource | null 
     outline: info.outline,
     pages: info.pages,
     path: info.path,
+    signatures: info.signatures,
     title: fileStem(fileNameFromPath(info.path)),
   }
 }

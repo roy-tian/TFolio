@@ -299,6 +299,10 @@ const de = {
       "Dieses Dokument kann nur als Kopie exportiert werden und darf daher nicht die Datei überschreiben, in der es gespeichert wurde. Wählen Sie einen anderen Namen.",
     exportDenied:
       "In diesen Speicherort kann nicht geschrieben werden – die Datei oder der Ordner ist möglicherweise schreibgeschützt, oder die Datei ist in einem anderen Programm geöffnet. Wählen Sie einen anderen Ort.",
+    exportSigned:
+      "Diese Datei enthält intakte digitale Signaturen, die ein Speichern darüber zerstören würde. Wählen Sie einen anderen Namen.",
+    exportSignedChanged:
+      "Die signierte Datei wurde seit dem Öffnen auf dem Datenträger geändert, daher wäre diese Kopie nicht mehr sie. Öffnen Sie die Datei erneut, um sie zu kopieren.",
     markWhileEditing:
       "Eine Seitenbearbeitung läuft noch – die Markierung wurde nicht übernommen. Versuchen Sie es gleich noch einmal.",
     watermarkRebuilding: "Wasserzeichen wird aktualisiert…",
@@ -307,6 +311,8 @@ const de = {
     layerStopping: "Wird gestoppt…",
     saveMerged:
       "Ein Dokument mit Kopien von Seiten mit Wasserzeichen oder Seitenzahlen kann nur als Kopie exportiert und nie über die Datei gespeichert werden, aus der es geöffnet wurde",
+    saveSigned:
+      "Ein Dokument mit intakten digitalen Signaturen kann nur als Kopie exportiert und nie über die signierte Datei gespeichert werden",
   },
   watermark: {
     open: "Wasserzeichen",
@@ -561,6 +567,10 @@ const de = {
     noBookmarks: "Dieses Dokument hat keine Lesezeichen",
     noDocument: "Öffnen Sie eine PDF, um hier ihre Seiten und Lesezeichen zu sehen.",
     thumbnailLabel: "Zu Seite {{pageNumber}}",
+  },
+  signatures: {
+    count_one: "Enthält {{count}} digitale Signatur",
+    count_other: "Enthält {{count}} digitale Signaturen",
   },
   about: {
     title: "TFolio",

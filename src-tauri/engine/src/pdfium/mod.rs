@@ -48,6 +48,7 @@ pub struct PdfDocumentInfo {
     /// As in [`PdfStructureUpdate`]: a new document of another one's pages can
     /// open already export-only.
     has_merged_pages: bool,
+    signatures: PdfSignatures,
 }
 
 impl PdfDocumentInfo {
@@ -62,6 +63,16 @@ impl PdfDocumentInfo {
             ..self
         }
     }
+}
+
+/// The digital signatures a file opened with. `intact` is a check of their
+/// structure in the file on disk, never of who signed: while it holds, that
+/// file is never written over, so it keeps every signature valid.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfSignatures {
+    count: usize,
+    intact: bool,
 }
 
 /// The frontend holds no mirror of the page list to patch, so it replaces its
@@ -103,6 +114,9 @@ pub struct ExportOutcome {
     /// Whether the document is now bound to `path` — false only for a copy-only
     /// document's copy. This, not the operation's name, marks the history saved.
     saved_to_source: bool,
+    /// Whether it is still bound to the signed file it opened from, which an
+    /// edited copy moves it off: the frontend's badge and save key follow this.
+    signed_original: bool,
 }
 
 impl ExportOutcome {

@@ -4,12 +4,14 @@ import {
   dimensionsForRotation,
   EXPORT_COPY_ONLY,
   EXPORT_DENIED,
+  EXPORT_SIGNED,
   EXPORT_TARGET_OPEN,
   exportFailureNotice,
   fileNameFromPath,
   isPdfPath,
   pickCurrentPage,
   resolveOutputScale,
+  SIGNED_ORIGINAL_CHANGED,
 } from "./pdf"
 
 describe("isPdfPath", () => {
@@ -32,6 +34,10 @@ describe("exportFailureNotice", () => {
     )
     expect(exportFailureNotice(EXPORT_COPY_ONLY)).toBe("exportCopyOnly")
     expect(exportFailureNotice(new Error(EXPORT_DENIED))).toBe("exportDenied")
+    expect(exportFailureNotice(EXPORT_SIGNED)).toBe("exportSigned")
+    expect(exportFailureNotice(new Error(SIGNED_ORIGINAL_CHANGED))).toBe(
+      "exportSignedChanged",
+    )
   })
 
   test("leaves any other failure to the generic notice", () => {

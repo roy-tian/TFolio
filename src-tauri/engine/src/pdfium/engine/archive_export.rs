@@ -151,6 +151,9 @@ impl PdfiumEngine {
             if io::is_open_document_file(&documents, path, None) {
                 return Err("an archive cannot replace an open PDF".into());
             }
+            if self.is_signed_file(&documents, path) {
+                return Err(signatures::EXPORT_SIGNED_ERROR.into());
+            }
             (
                 entry.content_version,
                 entry.document.pages().len() as usize,
@@ -337,6 +340,9 @@ impl PdfiumEngine {
         let documents = self.lock_documents()?;
         if io::is_open_document_file(&documents, path, None) {
             return Err("an archive cannot replace an open PDF".into());
+        }
+        if self.is_signed_file(&documents, path) {
+            return Err(signatures::EXPORT_SIGNED_ERROR.into());
         }
         if operation.is_cancelled() {
             return Ok(false);

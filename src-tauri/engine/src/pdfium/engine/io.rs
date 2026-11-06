@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use super::*;
 
 // A guided merge holds every source in memory at once under the same MiB
@@ -218,9 +220,37 @@ fn write_error(error: &std::io::Error, message: String) -> String {
     }
 }
 
+/// A file as it stood when read: what tells a later look that it changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Fingerprint {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Fingerprint {
+    pub(super) fn of(metadata: &fs::Metadata) -> Self {
+        Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        }
+    }
+}
+
+pub(super) fn fingerprint(path: &Path) -> Option<Fingerprint> {
+    fs::metadata(path)
+        .ok()
+        .map(|metadata| Fingerprint::of(&metadata))
+}
+
 /// A PDF read into memory under the app's ceiling, sized from metadata first so
 /// an oversized file is refused before it is read — and checked again after.
 pub(super) fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    read_pdf_file(path).map(|(bytes, _)| bytes)
+}
+
+/// `read_pdf_bytes` with the fingerprint of the metadata it sized the read by:
+/// taken before the read, so a file changed during it never matches it again.
+pub(super) fn read_pdf_file(path: &Path) -> Result<(Vec<u8>, Fingerprint), String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
 
@@ -243,7 +273,7 @@ pub(super) fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
         return Err(size_limit_error());
     }
 
-    Ok(bytes)
+    Ok((bytes, Fingerprint::of(&metadata)))
 }
 
 pub fn is_merge_image(path: &Path) -> bool {
@@ -573,6 +603,13 @@ impl PdfiumEngine {
             );
         }
 
+        if entry.bound_to_signed_original() {
+            return Err(
+                "a document opened with intact digital signatures may only be exported as a copy, not saved over its own file"
+                    .into(),
+            );
+        }
+
         let path = entry.source_path.clone().ok_or_else(|| {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
@@ -618,6 +655,11 @@ impl PdfiumEngine {
             return Err(EXPORT_TARGET_OPEN_ERROR.into());
         }
 
+        // Its own signed file included, wherever the document is bound now.
+        if self.is_signed_file(&documents, path) {
+            return Err(signatures::EXPORT_SIGNED_ERROR.into());
+        }
+
         let entry = open_entry_mut(&mut documents, document_id)?;
         let copy_only = entry
             .owned_content
@@ -636,6 +678,21 @@ impl PdfiumEngine {
             return Err(EXPORT_COPY_ONLY_ERROR.into());
         }
 
+        // Unchanged, the copy is the file itself: PDFium's rewrite would break
+        // every signature. Not rebound, since that copy is a signed original too.
+        if entry.content_version == 0 && entry.bound_to_signed_original() {
+            if let Some(original) = entry.signed_original.clone() {
+                drop(documents);
+                signatures::copy_original(&original, path)?;
+
+                return Ok(ExportOutcome {
+                    path: path.to_string_lossy().into_owned(),
+                    saved_to_source: false,
+                    signed_original: true,
+                });
+            }
+        }
+
         let (version, loaded_len) = (entry.content_version, entry.loaded_len);
         let staged = self.stage_document(entry, path)?;
 
@@ -647,6 +704,7 @@ impl PdfiumEngine {
         if saved_to_source {
             entry.source_path = Some(path.to_path_buf());
         }
+        let signed_original = entry.bound_to_signed_original();
 
         drop(documents);
 
@@ -666,6 +724,7 @@ impl PdfiumEngine {
         Ok(ExportOutcome {
             path: path.to_string_lossy().into_owned(),
             saved_to_source,
+            signed_original,
         })
     }
 

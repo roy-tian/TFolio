@@ -27,6 +27,7 @@ import {
 } from "./organize"
 
 const portrait = { height: 300, rotation: 0, width: 200 }
+const unsigned = { count: 0, intact: false }
 
 function source(id: number, pageCount: number, outline: OrganizeSource["outline"] = []): OrganizeSource {
   return {
@@ -35,6 +36,7 @@ function source(id: number, pageCount: number, outline: OrganizeSource["outline"
     outline,
     pages: Array.from({ length: pageCount }, () => portrait),
     path: `/files/file-${id}.pdf`,
+    signatures: unsigned,
     title: `file-${id}`,
   }
 }
@@ -89,6 +91,7 @@ describe("sourceFromInfo", () => {
       outline: [],
       pages: [portrait],
       path: "C:\\Users\\me\\Q3 report.docx",
+      signatures: unsigned,
     })
 
     expect(made?.title).toBe("Q3 report")
@@ -96,7 +99,13 @@ describe("sourceFromInfo", () => {
 
   test("refuses a file the backend could not read", () => {
     expect(
-      sourceFromInfo({ kind: "pdf", outline: [], pages: [], path: "/broken.pdf" }),
+      sourceFromInfo({
+        kind: "pdf",
+        outline: [],
+        pages: [],
+        path: "/broken.pdf",
+        signatures: unsigned,
+      }),
     ).toBeNull()
   })
 })

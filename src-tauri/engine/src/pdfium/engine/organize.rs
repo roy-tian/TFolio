@@ -1,13 +1,12 @@
 //! The organize workspace's sources: files read for their pages, never
 //! edited, and only ever copied into a new document by `assemble_pdf`.
 
-use std::time::SystemTime;
-
 use serde::{Deserialize, Serialize};
 
 use super::io::{
-    append_page_fitted_to_a4, is_merge_image, load_merge_source, merge_file_limit_error,
-    read_merge_source, MergeDraft, SourceFile, MAX_MERGE_FILES,
+    append_page_fitted_to_a4, fingerprint, is_merge_image, load_merge_source,
+    merge_file_limit_error, read_merge_source, Fingerprint, MergeDraft, SourceFile,
+    MAX_MERGE_FILES,
 };
 use super::page_ops::{page_index, quarter_turn, quarter_turn_rotation};
 use super::page_reorder::move_pages;
@@ -26,21 +25,6 @@ const MIN_PAGE_SIDE: f32 = 3.0;
 /// What the frontend matches to tell the reader to add the file again.
 pub const ORGANIZE_SOURCE_CHANGED: &str = "the file changed since it was added";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Fingerprint {
-    len: u64,
-    modified: Option<SystemTime>,
-}
-
-fn fingerprint(path: &Path) -> Option<Fingerprint> {
-    let metadata = fs::metadata(path).ok()?;
-
-    Some(Fingerprint {
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-    })
-}
-
 struct OrganizeSource {
     scope: String,
     /// The reader's own file: what the fingerprint guards and errors name.
@@ -49,6 +33,8 @@ struct OrganizeSource {
     read_from: PathBuf,
     fingerprint: Fingerprint,
     page_count: usize,
+    /// Its signatures intact on disk: no write may replace it while added.
+    signed: bool,
 }
 
 struct OpenSource {
@@ -67,6 +53,12 @@ pub(super) struct OrganizeSources {
 }
 
 impl OrganizeSources {
+    pub(super) fn is_signed_source(&self, path: &Path) -> bool {
+        self.entries
+            .values()
+            .any(|source| source.signed && io::same_file(&source.path, path))
+    }
+
     fn entry(&self, scope: &str, id: u64) -> Result<&OrganizeSource, String> {
         self.entries
             .get(&id)
@@ -127,6 +119,7 @@ pub struct OrganizeSourceInfo {
     pub(super) id: Option<u64>,
     pub(super) pages: Vec<PdfPageInfo>,
     pub(super) outline: Vec<PdfOutlineItem>,
+    pub(super) signatures: PdfSignatures,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) error: Option<MergeSourceError>,
 }
@@ -237,7 +230,7 @@ fn valid_side(side: f32) -> bool {
 }
 
 impl PdfiumEngine {
-    fn lock_organize(&self) -> MutexGuard<'_, OrganizeSources> {
+    pub(super) fn lock_organize(&self) -> MutexGuard<'_, OrganizeSources> {
         // Bookkeeping like the operations list: a poisoned lock must not leave
         // every later source unreadable.
         self.organize
@@ -291,6 +284,7 @@ impl PdfiumEngine {
                 id: None,
                 pages: Vec::new(),
                 outline: Vec::new(),
+                signatures: PdfSignatures::default(),
                 error,
             })
         };
@@ -315,7 +309,7 @@ impl PdfiumEngine {
             return refused(unreadable);
         };
         let cost = source_cost(&file);
-        let Ok(_documents) = self.lock_documents() else {
+        let Ok(documents) = self.lock_documents() else {
             return refused(unreadable);
         };
 
@@ -334,6 +328,10 @@ impl PdfiumEngine {
             return refused(unreadable);
         }
 
+        // A conversion is this app's own output, never a signed file.
+        let scan =
+            matches!(kind, MergeSourceKind::Pdf).then(|| signatures::SignatureScan::of(&document));
+
         let mut organize = self.lock_organize();
         let id = self.next_organize_id.fetch_add(1, Ordering::Relaxed);
 
@@ -345,9 +343,25 @@ impl PdfiumEngine {
                 read_from,
                 fingerprint,
                 page_count: layout.num_pages as usize,
+                signed: false,
             },
         );
         organize.keep_open(id, document, cost);
+        drop(organize);
+        drop(documents);
+
+        let signed = scan.as_ref().is_some_and(|scan| {
+            scan.intact_in(&signatures::OpenedFile {
+                path: path.clone(),
+                fingerprint,
+            })
+        });
+
+        if signed {
+            if let Some(source) = self.lock_organize().entries.get_mut(&id) {
+                source.signed = true;
+            }
+        }
 
         Some(OrganizeSourceInfo {
             path: path.to_string_lossy().into_owned(),
@@ -355,6 +369,7 @@ impl PdfiumEngine {
             id: Some(id),
             pages: layout.pages,
             outline: layout.outline,
+            signatures: scan.map_or_else(PdfSignatures::default, |scan| scan.summary(signed)),
             error: None,
         })
     }

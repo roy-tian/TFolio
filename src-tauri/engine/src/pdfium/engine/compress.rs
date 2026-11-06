@@ -444,21 +444,26 @@ fn compressed_output(
     Ok((!operation.is_cancelled()).then_some((compressed, measured)))
 }
 
-/// Like an archive, a compressed copy is a different file by construction: it
-/// cannot replace any open PDF, its own source included, whose edit history
-/// it would silently stop describing.
-fn refuse_open_destination(
-    documents: &HashMap<u64, OpenDocument>,
-    path: &Path,
-) -> Result<(), String> {
-    if io::is_open_document_file(documents, path, None) {
-        return Err("a compressed copy cannot replace an open PDF".into());
+impl PdfiumEngine {
+    /// Like an archive, a compressed copy is a different file by construction:
+    /// it cannot replace any open PDF, its own source included, whose edit
+    /// history it would silently stop describing, nor any signed file.
+    fn refuse_open_destination(
+        &self,
+        documents: &HashMap<u64, OpenDocument>,
+        path: &Path,
+    ) -> Result<(), String> {
+        if io::is_open_document_file(documents, path, None) {
+            return Err("a compressed copy cannot replace an open PDF".into());
+        }
+
+        if self.is_signed_file(documents, path) {
+            return Err(signatures::EXPORT_SIGNED_ERROR.into());
+        }
+
+        Ok(())
     }
 
-    Ok(())
-}
-
-impl PdfiumEngine {
     fn compress_basis(&self, document_id: u64) -> Result<Basis, String> {
         let mut documents = self.lock_documents()?;
 
@@ -547,7 +552,7 @@ impl PdfiumEngine {
         let basis = {
             let mut documents = self.lock_documents()?;
 
-            refuse_open_destination(&documents, path)?;
+            self.refuse_open_destination(&documents, path)?;
             basis(open_entry_mut(&mut documents, document_id)?)?
         };
 
@@ -568,7 +573,7 @@ impl PdfiumEngine {
         // Checked again under the lock the write happens under: another
         // window may have opened this very path while the images were done.
         let documents = self.lock_documents()?;
-        refuse_open_destination(&documents, path)?;
+        self.refuse_open_destination(&documents, path)?;
 
         io::write_file_atomically(path, |file| {
             file.write_all(&compressed)

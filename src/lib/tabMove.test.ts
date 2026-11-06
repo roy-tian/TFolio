@@ -20,6 +20,7 @@ const document = {
     { height: 400, rotation: 0, width: 300 },
   ],
   path: "/tmp/moved.pdf",
+  signatures: { count: 1, intact: true },
 }
 
 const payload: MovedTabPayload = {
@@ -186,6 +187,12 @@ describe("parseMovedTabPayload", () => {
       parseMovedTabPayload({
         ...valid,
         document: { ...valid.document, hasMergedPages: "yes" },
+      }),
+    ).toBeNull()
+    expect(
+      parseMovedTabPayload({
+        ...valid,
+        document: { ...valid.document, signatures: { count: 1 } },
       }),
     ).toBeNull()
     expect(

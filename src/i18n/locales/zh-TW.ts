@@ -295,6 +295,10 @@ const zhTW = {
       "此文件只能匯出為複本，因此不能覆寫它已儲存的檔案。請選擇其他名稱。",
     exportDenied:
       "無法寫入該位置——檔案或資料夾可能為唯讀，或檔案正由其他程式開啟中。請選擇其他位置。",
+    exportSigned:
+      "該檔案含有效的數位簽章，儲存覆蓋會使簽章失效。請換一個檔名。",
+    exportSignedChanged:
+      "已簽署的檔案在開啟後被修改過，這份複本已不是原件。請重新開啟該檔案再複製。",
     markWhileEditing:
       "頁面編輯仍在進行中——剛才的標記未保留。請稍後再試。",
     watermarkRebuilding: "正在更新浮水印…",
@@ -303,6 +307,8 @@ const zhTW = {
     layerStopping: "正在停止…",
     saveMerged:
       "含有帶浮水印或頁碼頁面複本的文件只能匯出為複本，無法存回原本開啟的檔案",
+    saveSigned:
+      "含有效數位簽章的文件只能匯出為複本，無法存回已簽署的原始檔案",
   },
   watermark: {
     open: "浮水印",
@@ -557,6 +563,10 @@ const zhTW = {
     noBookmarks: "此文件沒有書籤",
     noDocument: "開啟 PDF 後，這裡會顯示它的頁面和書籤。",
     thumbnailLabel: "前往第 {{pageNumber}} 頁",
+  },
+  signatures: {
+    count_one: "含 {{count}} 個數位簽章",
+    count_other: "含 {{count}} 個數位簽章",
   },
   about: {
     title: "TFolio",

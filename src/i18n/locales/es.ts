@@ -298,6 +298,10 @@ const es = {
       "Este documento solo puede exportarse como copia, así que no puede sobrescribir el archivo en el que se guardó. Elige otro nombre.",
     exportDenied:
       "No se puede escribir en esa ubicación: el archivo o la carpeta pueden ser de solo lectura, o el archivo puede estar abierto en otro programa. Elige otra.",
+    exportSigned:
+      "Ese archivo tiene firmas digitales intactas, que guardar encima rompería. Elija otro nombre.",
+    exportSignedChanged:
+      "El archivo firmado cambió en el disco desde que se abrió, así que esta copia ya no sería él. Vuelva a abrir el archivo para copiarlo.",
     markWhileEditing:
       "Aún hay una edición de páginas en curso; esa marca no se conservó. Vuelve a intentarlo en un momento.",
     watermarkRebuilding: "Actualizando la marca de agua…",
@@ -306,6 +310,8 @@ const es = {
     layerStopping: "Deteniendo…",
     saveMerged:
       "Un documento con copias de páginas con marca de agua o números de página solo puede exportarse como copia, nunca guardarse sobre el archivo desde el que se abrió",
+    saveSigned:
+      "Un documento abierto con firmas digitales intactas solo puede exportarse como copia, nunca guardarse sobre el archivo firmado",
   },
   watermark: {
     open: "Marca de agua",
@@ -560,6 +566,10 @@ const es = {
     noBookmarks: "Este documento no tiene marcadores",
     noDocument: "Abre un PDF para ver aquí sus páginas y marcadores.",
     thumbnailLabel: "Ir a la página {{pageNumber}}",
+  },
+  signatures: {
+    count_one: "Contiene {{count}} firma digital",
+    count_other: "Contiene {{count}} firmas digitales",
   },
   about: {
     title: "TFolio",

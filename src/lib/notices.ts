@@ -78,6 +78,16 @@ export const noticeCatalogue = {
     textKey: "annotate.exportFailed",
     tone: "danger",
   },
+  exportSigned: {
+    life: "transient",
+    textKey: "annotate.exportSigned",
+    tone: "warning",
+  },
+  exportSignedChanged: {
+    life: "transient",
+    textKey: "annotate.exportSignedChanged",
+    tone: "warning",
+  },
   exportTargetOpen: {
     life: "transient",
     textKey: "annotate.exportTargetOpen",
@@ -183,6 +193,12 @@ export const noticeCatalogue = {
     life: "transient",
     slot: "saveCopyOnly",
     textKey: "annotate.saveOwnedContent",
+    tone: "warning",
+  },
+  saveSignedOnly: {
+    life: "transient",
+    slot: "saveCopyOnly",
+    textKey: "annotate.saveSigned",
     tone: "warning",
   },
   tabMoveBusy: {
@@ -326,6 +342,8 @@ export const documentRefusals = [
   "exportCopyOnly",
   "exportDenied",
   "exportFailed",
+  "exportSigned",
+  "exportSignedChanged",
   "exportTargetOpen",
   "noteFontFailed",
   "noteFontMissing",

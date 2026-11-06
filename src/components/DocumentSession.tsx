@@ -178,7 +178,11 @@ type DocumentSessionProps = {
   onSavableChange: (documentId: number, canSave: boolean) => void
   /** An export that gave a document its first file: the tab now stands for
       that file, not for the bytes it opened from. */
-  onSourceChange: (documentId: number, path: string) => void
+  onSourceChange: (
+    documentId: number,
+    path: string,
+    signatures: PdfDocumentInfo["signatures"],
+  ) => void
   recentPath?: string
   saveAsDefaultName?: string
   /** A tab that arrived from another window, replayed here: the state the
@@ -232,6 +236,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // export-only, like those layers. The backend says so at the open and with
     // every structure update, so no replay.
     const hasMergedPages = pdfDocument.hasMergedPages
+    // Bound to a file whose signatures are intact: any save would break them.
+    const signedOriginal = pdfDocument.signatures.intact
     const [currentPage] = useState(() =>
       createCurrentPage(
         Math.min(
@@ -530,12 +536,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          const next = { ...current, path: outcome.path }
+          const next = {
+            ...current,
+            path: outcome.path,
+            signatures: { ...current.signatures, intact: outcome.signedOriginal },
+          }
           saveRequiredRef.current = false
           setSaveRequired(false)
           documentRef.current = next
           setPdfDocument(next)
-          onSourceChange(documentId, outcome.path)
+          onSourceChange(documentId, outcome.path, next.signatures)
         },
         [onSourceChange],
       ),
@@ -882,7 +892,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       () =>
         Boolean(documentRef.current?.path) &&
         (annotations.hasOwnedContentNow() ||
-          documentRef.current?.hasMergedPages === true),
+          documentRef.current?.hasMergedPages === true ||
+          documentRef.current?.signatures.intact === true),
       [annotations],
     )
 
@@ -1302,16 +1313,22 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       annotations.watermarkConfig !== null || annotations.pageNumbersConfig !== null
     const hasSourceFile = Boolean(pdfDocument.path)
     const canSave =
-      hasSourceFile && annotations.isDirty && !hasOwnedContent && !hasMergedPages
+      hasSourceFile &&
+      annotations.isDirty &&
+      !hasOwnedContent &&
+      !hasMergedPages &&
+      !signedOriginal
     // Only where the reason is not already in front of the reader. Owned page
     // content is named first — it is the stricter, less recoverable reason.
     const saveHint = hasOwnedContent
       ? t("annotate.saveOwnedContent")
-      : hasMergedPages
-        ? t("annotate.saveMerged")
-        : hasSourceFile
-          ? undefined
-          : t("annotate.saveNoSource")
+      : signedOriginal
+        ? t("annotate.saveSigned")
+        : hasMergedPages
+          ? t("annotate.saveMerged")
+          : hasSourceFile
+            ? undefined
+            : t("annotate.saveNoSource")
     // The toolbar's button has only its tooltip to carry the reason, so a
     // disabled save names it there rather than repeating the action's name.
     const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
@@ -1335,6 +1352,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         void exportPdf()
       } else if (hasOwnedContent) {
         notice.raise("saveOwnedContentOnly")
+      } else if (signedOriginal) {
+        notice.raise("saveSignedOnly")
       } else if (hasMergedPages) {
         notice.raise("saveMergedOnly")
       }
@@ -1346,6 +1365,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       hasOwnedContent,
       hasSourceFile,
       notice,
+      signedOriginal,
     ])
 
     // A close prompt's Save: back over the file where the document may be
@@ -1370,7 +1390,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         Boolean(documentRef.current?.path) &&
         !saveRequiredRef.current &&
         !annotations.hasOwnedContentNow() &&
-        !documentRef.current?.hasMergedPages
+        !documentRef.current?.hasMergedPages &&
+        !documentRef.current?.signatures.intact
 
       return writesBack
         ? annotations.save()

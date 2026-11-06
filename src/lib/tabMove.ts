@@ -3,7 +3,7 @@ import { getAllWindows } from "@tauri-apps/api/window"
 
 import type { AnnotationHistory } from "@/lib/annotations"
 import { parseRecentPdfView, type RecentPdfView } from "@/lib/recentFiles"
-import type { PdfDocumentInfo } from "@/lib/pdf"
+import { isPdfSignatures, type PdfDocumentInfo } from "@/lib/pdf"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 /** A window the drag can land on, in physical pixels — the space every
@@ -190,7 +190,8 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     !Array.isArray(document.pages) ||
     !Array.isArray(document.outline) ||
     (typeof document.path !== "string" && document.path !== null) ||
-    typeof document.hasMergedPages !== "boolean"
+    typeof document.hasMergedPages !== "boolean" ||
+    !isPdfSignatures(document.signatures)
   ) {
     return null
   }

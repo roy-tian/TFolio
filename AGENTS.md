@@ -117,6 +117,10 @@
 - Watermarks and page numbers are session-owned appended content, not redaction; after reopening
   they are input content. Save documents carrying them, or copies of pages that did, only to
   copies, checking symlink-resolved source paths on every write.
+- Every PDFium write breaks every digital signature. A file a document or organize source opened
+  with intact signatures (byte ranges checked on disk, off the lock, never the CMS) is never
+  written over by any writer, even after Save As rebinds the document; an unchanged document's
+  Save As copies the file's bytes instead.
 
 ## Organize workspace
 
@@ -129,7 +133,7 @@
 - Every assembled PDF goes through `record_document`; there is no unsaved preview. Save as PDF
   picks the destination in Rust's own dialog before assembling, writes and binds it like Save As,
   then opens it as that file's tab; a failed write closes it. Writes refuse only open documents'
-  files, so a destination chosen over a source then blocks assembly.
+  files and signed files, so a destination chosen over an unsigned source then blocks assembly.
 - The plan's watermark and page numbers are stamped before the write and dropped from session
   ownership: the tab reads them as input content, as a reopen would, and may save over its file.
 

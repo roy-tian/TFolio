@@ -297,6 +297,10 @@ const it = {
       "Questo documento può essere esportato solo come copia, quindi non può sovrascrivere il file in cui è stato salvato. Scegli un altro nome.",
     exportDenied:
       "Impossibile scrivere in quella posizione — il file o la cartella potrebbero essere di sola lettura, o il file aperto in un altro programma. Scegline un’altra.",
+    exportSigned:
+      "Quel file contiene firme digitali integre, che salvarci sopra romperebbe. Scegli un altro nome.",
+    exportSignedChanged:
+      "Il file firmato è cambiato sul disco da quando è stato aperto, quindi questa copia non sarebbe più lui. Riapri il file per copiarlo.",
     markWhileEditing:
       "Una modifica alle pagine è ancora in corso — l’annotazione non è stata mantenuta. Riprova tra poco.",
     watermarkRebuilding: "Aggiornamento della filigrana…",
@@ -305,6 +309,8 @@ const it = {
     layerStopping: "Interruzione…",
     saveMerged:
       "Un documento che contiene copie di pagine con filigrana o numeri di pagina può essere esportato solo come copia, mai salvato sopra il file da cui è stato aperto",
+    saveSigned:
+      "Un documento aperto con firme digitali integre può essere esportato solo come copia, mai salvato sopra il file firmato",
   },
   watermark: {
     open: "Filigrana",
@@ -559,6 +565,10 @@ const it = {
     noBookmarks: "Questo documento non ha segnalibri",
     noDocument: "Apri un PDF per vederne qui le pagine e i segnalibri.",
     thumbnailLabel: "Vai alla pagina {{pageNumber}}",
+  },
+  signatures: {
+    count_one: "Contiene {{count}} firma digitale",
+    count_other: "Contiene {{count}} firme digitali",
   },
   about: {
     title: "TFolio",

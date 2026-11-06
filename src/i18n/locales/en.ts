@@ -296,6 +296,10 @@ const en = {
       "This document can only be exported as a copy, so it cannot go over the file it was saved to. Choose another name.",
     exportDenied:
       "That location cannot be written — the file or folder may be read-only, or the file open in another program. Choose another.",
+    exportSigned:
+      "That file carries intact digital signatures, which saving over it would break. Choose another name.",
+    exportSignedChanged:
+      "The signed file changed on disk since it was opened, so this copy would not be it. Open the file again to copy it.",
     markWhileEditing:
       "A page edit is still running — that mark was not kept. Try again in a moment.",
     watermarkRebuilding: "Updating the watermark…",
@@ -304,6 +308,8 @@ const en = {
     layerStopping: "Stopping…",
     saveMerged:
       "A document holding copies of pages with a watermark or page numbers can only be exported as a copy, never saved back over the file it was opened from",
+    saveSigned:
+      "A document opened with intact digital signatures can only be exported as a copy, never saved back over the signed file",
   },
   watermark: {
     open: "Watermark",
@@ -558,6 +564,10 @@ const en = {
     noBookmarks: "This document has no bookmarks",
     noDocument: "Open a PDF to see its pages and bookmarks here.",
     thumbnailLabel: "Go to page {{pageNumber}}",
+  },
+  signatures: {
+    count_one: "Contains {{count}} digital signature",
+    count_other: "Contains {{count}} digital signatures",
   },
   about: {
     title: "TFolio",
