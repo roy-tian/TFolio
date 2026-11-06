@@ -409,6 +409,13 @@ const fr = {
     languageHint: "Choisissez la langue de l’interface.",
     languageSystem: "Automatique (comme le système)",
     close: "Fermer",
+    signatures: "Fichiers signés",
+    signatureHandling: "Modifier des fichiers signés",
+    signatureHandlingHint:
+      "Ce qui se passe avant qu’une modification ou un nouveau fichier n’invalide les signatures numériques d’un fichier. Le fichier signé lui-même n’est jamais écrasé.",
+    signatureAsk: "Demander à chaque fois",
+    signatureFlatten: "Aplatir (garder l’aspect)",
+    signatureKeep: "Garder les champs de signature (affichés non valides)",
   },
   viewer: {
     dropTitle: "PDF/Word/Images",
@@ -594,6 +601,11 @@ const fr = {
     cancel: "Annuler",
     flattenFailed:
       "Les signatures n’ont pas pu être aplaties, et rien n’a changé. Réessayez, ou gardez les champs de signature.",
+    remember: "Mémoriser mon choix (modifiable dans les Réglages)",
+    appliedFlatten:
+      "Comme le veulent les Réglages, les signatures numériques sont aplaties pour cette modification. Le fichier signé reste tel quel.",
+    appliedKeep:
+      "Comme le veulent les Réglages, les champs de signature sont gardés pour cette modification et apparaîtront non valides. Le fichier signé reste tel quel.",
   },
   about: {
     title: "TFolio",

@@ -78,6 +78,7 @@ import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
 import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals } from "@/lib/notices"
+import { storedSignatureHandling } from "@/lib/signatureHandling"
 import {
   formatPageRanges,
   type PageClipboard,
@@ -521,6 +522,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const flattenRef = useRef<(pageCount: number) => Promise<boolean>>(() =>
       Promise.resolve(false),
     )
+    // A remembered flatten is announced once it worked; after a failed one the
+    // reader is asked, as its notice offers keeping the fields instead.
+    const announceFlattenRef = useRef(false)
+    const askAfterFailedFlattenRef = useRef(false)
 
     useLayoutEffect(() => {
       askSignaturesRef.current = askSignatures
@@ -534,11 +539,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           return null
         }
 
-        const answer = await askSignaturesRef.current({
-          context: change,
-          count: current.signatures.count,
-          name: fileName,
-        })
+        const remembered = askAfterFailedFlattenRef.current
+          ? "ask"
+          : storedSignatureHandling()
+        askAfterFailedFlattenRef.current = false
+        const answer =
+          remembered === "ask"
+            ? await askSignaturesRef.current({
+                context: change,
+                count: current.signatures.count,
+                name: fileName,
+              })
+            : remembered
 
         if (!answer) {
           return null
@@ -556,6 +568,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
             documentRef.current = next
             setPdfDocument(next)
+          }
+
+          // Said of what the backend holds, which is what the change will do.
+          if (remembered !== "ask" && signatures.decision === "keep") {
+            notice.raise("signaturesKeptAsSet")
+          } else if (remembered !== "ask" && signatures.decision === "flatten") {
+            // A new file flattens its own copy, out of this document's sight.
+            if (change === "export") {
+              notice.raise("signaturesFlattenedAsSet")
+            } else {
+              announceFlattenRef.current = true
+            }
           }
 
           return signatures.decision
@@ -579,9 +603,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           .current(documentRef.current?.numPages ?? 0)
           .then((flattened) => {
             const current = documentRef.current
+            const announce = announceFlattenRef.current
+
+            announceFlattenRef.current = false
+
+            if (flattened && announce) {
+              notice.raise("signaturesFlattenedAsSet")
+            }
 
             // Asked again next time, where keeping the fields still works.
             if (!flattened && current) {
+              askAfterFailedFlattenRef.current = true
               const next = {
                 ...current,
                 signatures: { ...current.signatures, decision: null },

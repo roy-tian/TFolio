@@ -1,5 +1,14 @@
 import { useRef, type KeyboardEvent } from "react"
-import { Info, Monitor, Moon, Palette, Sun, X, type LucideIcon } from "lucide-react"
+import {
+  FileSignature,
+  Info,
+  Monitor,
+  Moon,
+  Palette,
+  Sun,
+  X,
+  type LucideIcon,
+} from "lucide-react"
 import { Radio } from "@base-ui/react/radio"
 import { RadioGroup } from "@base-ui/react/radio-group"
 import { useTranslation } from "react-i18next"
@@ -33,6 +42,12 @@ import {
   systemLanguage,
 } from "@/i18n/config"
 import { translations } from "@/i18n/resources"
+import {
+  isSignatureHandling,
+  storeSignatureHandling,
+  useSignatureHandling,
+  type SignatureHandling,
+} from "@/lib/signatureHandling"
 import { cn } from "@/lib/utils"
 import {
   setThemePreference,
@@ -41,15 +56,25 @@ import {
   type ThemePreference,
 } from "@/lib/theme"
 
-export type SettingsSection = "appearance" | "about"
+export type SettingsSection = "appearance" | "signatures" | "about"
 
 const sections: Array<{
   value: SettingsSection
-  labelKey: "settings.appearance" | "settings.about"
+  labelKey: "settings.appearance" | "settings.signatures" | "settings.about"
   icon: LucideIcon
 }> = [
   { value: "appearance", labelKey: "settings.appearance", icon: Palette },
+  { value: "signatures", labelKey: "settings.signatures", icon: FileSignature },
   { value: "about", labelKey: "settings.about", icon: Info },
+]
+
+const signatureOptions: Array<{
+  value: SignatureHandling
+  labelKey: "settings.signatureAsk" | "settings.signatureFlatten" | "settings.signatureKeep"
+}> = [
+  { value: "ask", labelKey: "settings.signatureAsk" },
+  { value: "flatten", labelKey: "settings.signatureFlatten" },
+  { value: "keep", labelKey: "settings.signatureKeep" },
 ]
 
 const themeOptions: Array<{
@@ -161,7 +186,9 @@ export function SettingsDialog({
   const languagePreference = useLanguagePreference()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const appearanceRef = useRef<HTMLDivElement>(null)
+  const signaturesRef = useRef<HTMLDivElement>(null)
   const aboutRef = useRef<HTMLDivElement>(null)
+  const signatureHandling = useSignatureHandling()
 
   // In the language it switches to, like the names beside it, so a reader
   // stranded in an interface they cannot read still recognises it.
@@ -356,6 +383,50 @@ export function SettingsDialog({
           </div>
 
           <div
+            aria-labelledby="settings-tab-signatures"
+            className="overlay-scroll-viewport flex-1 overflow-y-auto p-6"
+            hidden={section !== "signatures"}
+            id="settings-panel-signatures"
+            ref={signaturesRef}
+            role="tabpanel"
+          >
+            <section className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium" id="settings-signatures-label">
+                  {t("settings.signatureHandling")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.signatureHandlingHint")}
+                </p>
+              </div>
+              <RadioGroup
+                aria-labelledby="settings-signatures-label"
+                className="flex flex-col gap-2"
+                onValueChange={(value) => {
+                  if (isSignatureHandling(value)) {
+                    storeSignatureHandling(value)
+                  }
+                }}
+                value={signatureHandling}
+              >
+                {signatureOptions.map((option) => (
+                  <Radio.Root
+                    className="group/signature flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm outline-none transition-all hover:border-foreground/25 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 data-checked:border-primary"
+                    data-signature-handling={option.value}
+                    key={option.value}
+                    value={option.value}
+                  >
+                    <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full border border-input transition-colors group-data-checked/signature:border-primary group-data-checked/signature:bg-primary">
+                      <Radio.Indicator className="block size-1.5 rounded-full bg-primary-foreground" />
+                    </span>
+                    {t(option.labelKey)}
+                  </Radio.Root>
+                ))}
+              </RadioGroup>
+            </section>
+          </div>
+
+          <div
             aria-labelledby="settings-tab-about"
             className="overlay-scroll-viewport flex-1 overflow-y-auto p-6"
             hidden={section !== "about"}
@@ -379,7 +450,15 @@ export function SettingsDialog({
             </div>
           </div>
           {/* The shown panel fills this box; the hidden one has none. */}
-          <OverlayScrollbars viewportRef={section === "about" ? aboutRef : appearanceRef} />
+          <OverlayScrollbars
+            viewportRef={
+              section === "about"
+                ? aboutRef
+                : section === "signatures"
+                  ? signaturesRef
+                  : appearanceRef
+            }
+          />
         </div>
       </DialogContent>
     </Dialog>

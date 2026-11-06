@@ -16,6 +16,7 @@ export type Settings = {
   watermark?: unknown
   pageNumbers?: unknown
   organize?: { bookmarks?: unknown; normalizeA4?: unknown; smartPadding?: unknown }
+  signatures?: { handling?: unknown }
 }
 
 let current: Settings = {}
@@ -127,6 +128,7 @@ function merged(base: Settings, patch: Settings): Settings {
     ui: mergedSection(base.ui, patch.ui),
     annotate: mergedSection(base.annotate, patch.annotate),
     organize: mergedSection(base.organize, patch.organize),
+    signatures: mergedSection(base.signatures, patch.signatures),
   }
 }
 

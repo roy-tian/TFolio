@@ -409,6 +409,13 @@ const es = {
     languageHint: "Elige el idioma de la interfaz.",
     languageSystem: "Automático (igual que el sistema)",
     close: "Cerrar",
+    signatures: "Archivos firmados",
+    signatureHandling: "Modificar archivos firmados",
+    signatureHandlingHint:
+      "Qué ocurre antes de que un cambio o un archivo nuevo invalide las firmas digitales de un archivo. El archivo firmado nunca se sobrescribe.",
+    signatureAsk: "Preguntar cada vez",
+    signatureFlatten: "Aplanar (conservar el aspecto)",
+    signatureKeep: "Conservar campos de firma (aparecen como no válidos)",
   },
   viewer: {
     dropTitle: "PDF/Word/Imágenes",
@@ -593,6 +600,11 @@ const es = {
     cancel: "Cancelar",
     flattenFailed:
       "No se pudieron aplanar las firmas y no se cambió nada. Inténtelo de nuevo o conserve los campos de firma.",
+    remember: "Recordar mi elección (se cambia en Ajustes)",
+    appliedFlatten:
+      "Según los ajustes, las firmas digitales se aplanan en este cambio. El archivo firmado queda como está.",
+    appliedKeep:
+      "Según los ajustes, los campos de firma se conservan en este cambio y aparecerán como no válidos. El archivo firmado queda como está.",
   },
   about: {
     title: "TFolio",

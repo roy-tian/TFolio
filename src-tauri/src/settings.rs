@@ -30,6 +30,17 @@ pub struct Settings {
     page_numbers: Option<PageNumbersPreferences>,
     #[serde(skip_serializing_if = "Option::is_none")]
     organize: Option<OrganizePreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signatures: Option<SignaturePreferences>,
+}
+
+/// What a change that would break intact signatures does without asking:
+/// `ask`, `flatten` or `keep`, validated where the frontend reads it.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct SignaturePreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handling: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -124,6 +135,7 @@ impl Stored for Settings {
             watermark: section(&table, "watermark"),
             page_numbers: section(&table, "pageNumbers"),
             organize: section(&table, "organize"),
+            signatures: section(&table, "signatures"),
         }
     }
 
@@ -142,6 +154,7 @@ impl Settings {
             watermark: sent_section(document, "watermark"),
             page_numbers: sent_section(document, "pageNumbers"),
             organize: sent_section(document, "organize"),
+            signatures: sent_section(document, "signatures"),
         }
     }
 }
@@ -259,6 +272,9 @@ mod tests {
                 normalize_a4: Some(true),
                 bookmarks: None,
             }),
+            signatures: Some(SignaturePreferences {
+                handling: Some("flatten".into()),
+            }),
         }
     }
 
@@ -284,6 +300,12 @@ mod tests {
         assert_eq!(organize.smart_padding, Some(false));
         assert_eq!(organize.normalize_a4, Some(true));
         assert_eq!(organize.bookmarks, None);
+        assert_eq!(
+            read.signatures
+                .and_then(|signatures| signatures.handling)
+                .as_deref(),
+            Some("flatten")
+        );
     }
 
     /// Names the keys rather than trusting the derive, because they are also
@@ -301,6 +323,8 @@ mod tests {
         assert!(rendered.contains("[organize]"));
         assert!(rendered.contains("smartPadding = false"));
         assert!(rendered.contains("normalizeA4 = true"));
+        assert!(rendered.contains("[signatures]"));
+        assert!(rendered.contains("handling = \"flatten\""));
         assert!(!rendered.contains("[watermark]"));
     }
 

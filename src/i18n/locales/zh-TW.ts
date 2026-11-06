@@ -406,6 +406,12 @@ const zhTW = {
     languageHint: "選擇介面語言。",
     languageSystem: "自動（與系統一致）",
     close: "關閉",
+    signatures: "簽署檔案",
+    signatureHandling: "修改含簽章的檔案",
+    signatureHandlingHint: "當修改或產生新檔案會使檔案的數位簽章失效時如何處理。已簽署的原始檔案不會被覆寫。",
+    signatureAsk: "每次詢問",
+    signatureFlatten: "平面化（保留外觀）",
+    signatureKeep: "保留簽章欄位（將顯示為無效）",
   },
   viewer: {
     dropTitle: "PDF/Word/圖片",
@@ -582,6 +588,9 @@ const zhTW = {
     cancel: "取消",
     flattenFailed:
       "簽章無法平面化，檔案未做任何修改。請重試，或改為保留簽章欄位。",
+    remember: "記住我的選擇（可在設定中變更）",
+    appliedFlatten: "已依設定將數位簽章平面化。已簽署的原始檔案保持不變。",
+    appliedKeep: "已依設定保留簽章欄位，它們將顯示為無效。已簽署的原始檔案保持不變。",
   },
   about: {
     title: "TFolio",

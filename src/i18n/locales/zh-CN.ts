@@ -391,6 +391,12 @@ const zhCN = {
     languageHint: "选择界面显示语言。",
     languageSystem: "自动（与系统一致）",
     close: "关闭",
+    signatures: "签名文件",
+    signatureHandling: "修改含签名的文件",
+    signatureHandlingHint: "当修改或生成新文件会使文件的数字签名失效时如何处理。已签名的原文件不会被覆盖。",
+    signatureAsk: "每次询问",
+    signatureFlatten: "扁平化（保留外观）",
+    signatureKeep: "保留签名域（将显示为无效）",
   },
   viewer: {
     dropTitle: "PDF/Word/图片",
@@ -565,6 +571,9 @@ const zhCN = {
     cancel: "取消",
     flattenFailed:
       "签名无法扁平化，文件未做任何修改。请重试，或改为保留签名域。",
+    remember: "记住我的选择（可在设置中更改）",
+    appliedFlatten: "已按设置将数字签名扁平化。已签名的原文件保持不变。",
+    appliedKeep: "已按设置保留签名域，它们将显示为无效。已签名的原文件保持不变。",
   },
   about: {
     title: "TFolio",

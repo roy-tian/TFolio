@@ -410,6 +410,13 @@ const de = {
     languageHint: "Wählen Sie die Sprache der Benutzeroberfläche.",
     languageSystem: "Automatisch (wie das System)",
     close: "Schließen",
+    signatures: "Signierte Dateien",
+    signatureHandling: "Signierte Dateien ändern",
+    signatureHandlingHint:
+      "Was geschieht, bevor eine Änderung oder neue Datei die digitalen Signaturen einer Datei ungültig machen würde. Die signierte Datei selbst wird nie überschrieben.",
+    signatureAsk: "Jedes Mal fragen",
+    signatureFlatten: "Reduzieren (Aussehen behalten)",
+    signatureKeep: "Signaturfelder behalten (erscheinen ungültig)",
   },
   viewer: {
     dropTitle: "PDF/Word/Bilder",
@@ -594,6 +601,11 @@ const de = {
     cancel: "Abbrechen",
     flattenFailed:
       "Die Signaturen konnten nicht reduziert werden, es wurde nichts geändert. Versuchen Sie es erneut oder behalten Sie die Signaturfelder.",
+    remember: "Auswahl merken (in den Einstellungen änderbar)",
+    appliedFlatten:
+      "Wie in den Einstellungen festgelegt, werden die digitalen Signaturen für diese Änderung reduziert. Die signierte Datei bleibt unverändert.",
+    appliedKeep:
+      "Wie in den Einstellungen festgelegt, bleiben die Signaturfelder für diese Änderung erhalten und erscheinen ungültig. Die signierte Datei bleibt unverändert.",
   },
   about: {
     title: "TFolio",

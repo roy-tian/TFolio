@@ -201,9 +201,21 @@ export const noticeCatalogue = {
     textKey: "annotate.saveSigned",
     tone: "warning",
   },
+  // A remembered answer given in the reader's place: said every time, since
+  // nothing else shows the signatures were just let go.
+  signaturesFlattenedAsSet: {
+    life: "transient",
+    textKey: "signatures.appliedFlatten",
+    tone: "warning",
+  },
   signaturesFlattenFailed: {
     life: "transient",
     textKey: "signatures.flattenFailed",
+    tone: "warning",
+  },
+  signaturesKeptAsSet: {
+    life: "transient",
+    textKey: "signatures.appliedKeep",
     tone: "warning",
   },
   tabMoveBusy: {

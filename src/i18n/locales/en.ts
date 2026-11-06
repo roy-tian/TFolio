@@ -407,6 +407,13 @@ const en = {
     languageHint: "Choose the interface language.",
     languageSystem: "Automatic (same as system)",
     close: "Close",
+    signatures: "Signed files",
+    signatureHandling: "Changing signed files",
+    signatureHandlingHint:
+      "What happens before a change, or a new file, would break a file's digital signatures. The signed file itself is never overwritten.",
+    signatureAsk: "Ask each time",
+    signatureFlatten: "Flatten (keep the look)",
+    signatureKeep: "Keep signature fields (they show as invalid)",
   },
   viewer: {
     dropTitle: "PDF/Word/Images",
@@ -591,6 +598,11 @@ const en = {
     cancel: "Cancel",
     flattenFailed:
       "The signatures could not be flattened, and nothing was changed. Try again, or keep the signature fields.",
+    remember: "Remember my choice (change it in Settings)",
+    appliedFlatten:
+      "As set in Settings, the digital signatures are flattened for this change. The signed file stays as it is.",
+    appliedKeep:
+      "As set in Settings, the signature fields are kept for this change and will show as invalid. The signed file stays as it is.",
   },
   about: {
     title: "TFolio",

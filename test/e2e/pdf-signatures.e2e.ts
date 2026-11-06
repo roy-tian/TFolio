@@ -20,6 +20,7 @@ import {
   refreshApp,
   renderedPage,
   seedSettings,
+  settingsHold,
   signedPdf,
   textPdf,
   tooltipOn,
@@ -287,5 +288,54 @@ describe("TFolio signed documents", () => {
       timeout: 15_000,
       timeoutMsg: "the new PDF lost the seal",
     })
+  })
+
+  it("remembers an answer from the prompt and gives it, saying so, next time", async () => {
+    await openPdfFromDisk("first.pdf", signedPdf())
+    await renderedPage()
+
+    const tool = $("button[aria-label='Highlight text']")
+    await tool.click()
+    await $(prompt).waitForDisplayed()
+    await $(`${prompt} [data-slot='signature-prompt-remember']`).click()
+    await answerPrompt("signatures-flatten")
+    await expect(tool).toHaveAttribute("aria-pressed", "true")
+    await settingsHold(["[signatures]", 'handling = "flatten"'])
+
+    await openPdfFromDisk("second.pdf", signedPdf())
+    // Not `renderedPage()`: with two tabs its selector can find the hidden one.
+    await expect(tabNamed("second.pdf")).toHaveAttribute("aria-selected", "true")
+    await $("[data-active='true'] button[aria-label='Highlight text']").click()
+    await $("[data-notice='signaturesFlattenedAsSet']").waitForDisplayed()
+    expect(await $(prompt).isDisplayed()).toBe(false)
+    await browser.waitUntil(async () => (await sealPixels()) > 0, {
+      timeout: 15_000,
+      timeoutMsg: "the flattened page lost its seal",
+    })
+  })
+
+  it("takes the choice from Settings, where asking each time brings the prompt back", async () => {
+    await seedSettings({
+      signatures: { handling: "keep" },
+      ui: { language: "en", viewMode: "single" },
+    })
+    await refreshApp()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+
+    await clickAppMenuItem("settings")
+    await $("[role='tab'][aria-controls='settings-panel-signatures']").click()
+    await expect($("[data-signature-handling='keep']")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    await $("[data-signature-handling='ask']").click()
+    await settingsHold(['handling = "ask"'])
+    await browser.keys(["Escape"])
+    await expect($("[role='dialog']")).not.toBeDisplayed()
+
+    await openPdfFromDisk("signed.pdf", signedPdf())
+    await renderedPage()
+    await $("button[aria-label='Highlight text']").click()
+    await answerPrompt(null)
   })
 })

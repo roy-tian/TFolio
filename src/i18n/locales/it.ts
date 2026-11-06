@@ -408,6 +408,13 @@ const it = {
     languageHint: "Scegli la lingua dell’interfaccia.",
     languageSystem: "Automatica (come il sistema)",
     close: "Chiudi",
+    signatures: "File firmati",
+    signatureHandling: "Modificare file firmati",
+    signatureHandlingHint:
+      "Cosa succede prima che una modifica o un nuovo file invalidi le firme digitali di un file. Il file firmato non viene mai sovrascritto.",
+    signatureAsk: "Chiedi ogni volta",
+    signatureFlatten: "Appiattisci (mantieni l’aspetto)",
+    signatureKeep: "Mantieni campi firma (risultano non validi)",
   },
   viewer: {
     dropTitle: "PDF/Word/Immagini",
@@ -592,6 +599,11 @@ const it = {
     cancel: "Annulla",
     flattenFailed:
       "Non è stato possibile appiattire le firme e non è cambiato nulla. Riprova o mantieni i campi firma.",
+    remember: "Ricorda la mia scelta (modificabile nelle Impostazioni)",
+    appliedFlatten:
+      "Come da Impostazioni, le firme digitali vengono appiattite per questa modifica. Il file firmato resta com’è.",
+    appliedKeep:
+      "Come da Impostazioni, i campi firma vengono mantenuti per questa modifica e risulteranno non validi. Il file firmato resta com’è.",
   },
   about: {
     title: "TFolio",

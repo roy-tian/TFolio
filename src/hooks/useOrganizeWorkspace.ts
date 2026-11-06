@@ -6,6 +6,7 @@ import type { NoticeChannel } from "@/hooks/useNotices"
 import type { AskSignatures } from "@/hooks/useSignaturePrompt"
 import { isNoteFontMissing } from "@/lib/annotationStyles"
 import { e2eOverride } from "@/lib/e2e"
+import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { usesEmbeddedFont } from "@/lib/embeddedFont"
 import { workspaceOwner, type NoticeKind } from "@/lib/notices"
 import { isWordPath } from "@/lib/openSources"
@@ -475,16 +476,27 @@ export function useOrganizeWorkspace({
       ),
     )
     let signatures: SignatureDecision | null = null
+    // Announced only once the PDF exists: a cancelled dialog changed nothing.
+    let settledAs: SignatureDecision | null = null
 
     if (signedSources.size > 0) {
-      signatures = await askSignatures({
-        context: "organize",
-        count: signedSources.size,
-        name: "",
-      })
+      const remembered = storedSignatureHandling()
+
+      signatures =
+        remembered === "ask"
+          ? await askSignatures({
+              context: "organize",
+              count: signedSources.size,
+              name: "",
+            })
+          : remembered
 
       if (!signatures) {
         return
+      }
+
+      if (remembered !== "ask") {
+        settledAs = remembered
       }
     }
 
@@ -526,6 +538,10 @@ export function useOrganizeWorkspace({
       if (document) {
         assembledRef.current = assembling
         onAssembled(document)
+
+        if (settledAs) {
+          raise(settledAs === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet")
+        }
       }
     } catch (error) {
       // The face could have gone since the mark was checked; the save is

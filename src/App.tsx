@@ -2375,7 +2375,9 @@ export default function App() {
       />
       <SignaturePrompt
         onAnswer={signaturePrompt.answer}
+        onRememberChange={signaturePrompt.changeRemember}
         open={signaturePrompt.open}
+        remember={signaturePrompt.remember}
         request={signaturePrompt.request}
       />
 
