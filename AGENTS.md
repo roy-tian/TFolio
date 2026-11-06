@@ -105,7 +105,8 @@
 ## PDF editing and cancellation
 
 - Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what PDFium
-  cannot do: writing outlines, relinking bookmarks and split links, recompressing images.
+  cannot do: writing outlines, relinking bookmarks and split links, recompressing images, drawing
+  signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation).
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
   wait on the PDFium lock held by the operation being cancelled.
@@ -120,7 +121,10 @@
 - Every PDFium write breaks every digital signature. A file a document or organize source opened
   with intact signatures (byte ranges checked on disk, off the lock, never the CMS) is never
   written over by any writer, even after Save As rebinds the document; an unchanged document's
-  Save As copies the file's bytes instead.
+  Save As copies the file's bytes instead. Changes and new files that break intact signatures wait
+  for the reader's flatten-or-keep answer, which the engine records per document (per plan for an
+  assembly) and enforces; a document flattens in place only before its first change, and a new file
+  flattens its own copy.
 
 ## Organize workspace
 

@@ -42,8 +42,8 @@ use super::{
     },
     ExportOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect, PdfDocumentInfo,
     PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfSignatures,
-    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, TextNoteStyle,
-    MAX_PDF_BYTES,
+    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, SignatureDecision,
+    TextNoteStyle, MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -164,6 +164,10 @@ struct OpenDocument {
     /// The file this document opened from, while every signature in it was
     /// intact: kept past a rebinding, so no write ever lands on it.
     signed_original: Option<OpenedFile>,
+    /// As PDFium counted them at the open.
+    signature_count: usize,
+    signature_decision: Option<SignatureDecision>,
+    signatures_flattened: bool,
 }
 
 impl OpenDocument {
@@ -616,6 +620,9 @@ impl PdfiumEngine {
                 content_version: 0,
                 compress_cache: None,
                 revisions: HashMap::new(),
+                signature_count: scan.count(),
+                signature_decision: None,
+                signatures_flattened: false,
                 signed_original: None,
                 source_path,
                 stashes: HashMap::new(),
@@ -1117,6 +1124,7 @@ fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
         num_pages: pages.len() as i32,
         outline: collect_bookmark_siblings(entry.document.bookmarks().root()),
         pages,
+        signatures: entry.signatures(),
     }
 }
 
@@ -1151,6 +1159,7 @@ mod owned_content;
 mod page_ops;
 mod page_reorder;
 mod raster;
+mod signature_flatten;
 mod signatures;
 mod text_runs;
 mod watermark_preview;

@@ -66,13 +66,28 @@ impl PdfDocumentInfo {
 }
 
 /// The digital signatures a file opened with. `intact` is a check of their
-/// structure in the file on disk, never of who signed: while it holds, that
-/// file is never written over, so it keeps every signature valid.
+/// structure in the file on disk, never of who signed, and holds while the
+/// document is bound to that file, which is then never written over.
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PdfSignatures {
     count: usize,
     intact: bool,
+    /// What the reader chose for them before the first change that breaks
+    /// them; until then every such change is refused.
+    decision: Option<SignatureDecision>,
+    /// Drawn into the pages in place, as `Flatten` does before the first edit.
+    flattened: bool,
+}
+
+/// What becomes of intact signatures once something would break them.
+/// `Flatten` keeps their look as page content; `Keep` leaves the fields,
+/// which then read as invalid, and an A4 fit drops them.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SignatureDecision {
+    Flatten,
+    Keep,
 }
 
 /// The frontend holds no mirror of the page list to patch, so it replaces its
@@ -86,6 +101,7 @@ pub struct PdfStructureUpdate {
     /// Like a watermark, a copy of a page carrying one or page numbers leaves the
     /// document export-only; the frontend's save key reads this, not its history.
     has_merged_pages: bool,
+    signatures: PdfSignatures,
 }
 
 /// An image is laid on a sheet of its own; a Word document arrives as the PDF
@@ -114,9 +130,9 @@ pub struct ExportOutcome {
     /// Whether the document is now bound to `path` — false only for a copy-only
     /// document's copy. This, not the operation's name, marks the history saved.
     saved_to_source: bool,
-    /// Whether it is still bound to the signed file it opened from, which an
-    /// edited copy moves it off: the frontend's badge and save key follow this.
-    signed_original: bool,
+    /// As they stand after the write: an edited copy moves the document off
+    /// the signed file, which the frontend's badge and save key follow.
+    signatures: PdfSignatures,
 }
 
 impl ExportOutcome {

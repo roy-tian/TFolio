@@ -322,6 +322,9 @@ type DrawnDpis = Arc<HashMap<lopdf::ObjectId, f32>>;
 /// the export usually asks for the output the last estimate already made.
 pub(super) struct CompressCache {
     version: u64,
+    /// Whether `rewritten` has the signatures drawn in: the reader's answer
+    /// changes it without a content change, so it is part of the key.
+    flattens: bool,
     rewritten: Arc<Vec<u8>>,
     drawn_dpis: Option<DrawnDpis>,
     latest: Option<(Option<u32>, Arc<Vec<u8>>)>,
@@ -330,6 +333,7 @@ pub(super) struct CompressCache {
 /// What one run takes from the cache before letting go of the PDFium lock.
 struct Basis {
     version: u64,
+    flattens: bool,
     /// The size the dialog measures savings against.
     baseline: u64,
     rewritten: Arc<Vec<u8>>,
@@ -350,22 +354,35 @@ impl Basis {
 /// that needs the PDFium lock, so it happens here, under the caller's guard,
 /// once per content version.
 fn basis(entry: &mut OpenDocument) -> Result<Basis, String> {
+    // An estimate made before the reader's answer measures the signatures as
+    // they stand.
+    let flattens = entry.output_flattens().unwrap_or(false);
     let cache = match entry.compress_cache.take() {
-        Some(cache) if cache.version == entry.content_version => cache,
-        _ => CompressCache {
-            version: entry.content_version,
-            rewritten: Arc::new(
-                entry
-                    .document
-                    .save_to_bytes()
-                    .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?,
-            ),
-            drawn_dpis: None,
-            latest: None,
-        },
+        Some(cache) if cache.version == entry.content_version && cache.flattens == flattens => {
+            cache
+        }
+        _ => {
+            let mut rewritten = entry
+                .document
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?;
+
+            if flattens {
+                rewritten = signatures::flattened_bytes(rewritten)?;
+            }
+
+            CompressCache {
+                version: entry.content_version,
+                flattens,
+                rewritten: Arc::new(rewritten),
+                drawn_dpis: None,
+                latest: None,
+            }
+        }
     };
     let basis = Basis {
         version: cache.version,
+        flattens: cache.flattens,
         baseline: entry.loaded_len.unwrap_or(cache.rewritten.len() as u64),
         rewritten: Arc::clone(&cache.rewritten),
         drawn_dpis: cache.drawn_dpis.clone(),
@@ -471,11 +488,12 @@ impl PdfiumEngine {
     }
 
     /// Files a finished run's work for the next one — unless the document
-    /// changed meanwhile, or the dialog released the cache.
+    /// changed meanwhile, the reader's signature answer changed what it
+    /// measures, or the dialog released the cache.
     fn remember_compression(
         &self,
         document_id: u64,
-        version: u64,
+        basis: &Basis,
         measured: Option<DrawnDpis>,
         latest: (Option<u32>, Arc<Vec<u8>>),
     ) -> Result<(), String> {
@@ -483,7 +501,7 @@ impl PdfiumEngine {
         let Some(cache) = documents
             .get_mut(&document_id)
             .and_then(|entry| entry.compress_cache.as_mut())
-            .filter(|cache| cache.version == version)
+            .filter(|cache| cache.version == basis.version && cache.flattens == basis.flattens)
         else {
             return Ok(());
         };
@@ -530,7 +548,7 @@ impl PdfiumEngine {
 
         self.remember_compression(
             document_id,
-            basis.version,
+            &basis,
             measured,
             (options.image_dpi, Arc::new(compressed)),
         )?;
@@ -553,7 +571,9 @@ impl PdfiumEngine {
             let mut documents = self.lock_documents()?;
 
             self.refuse_open_destination(&documents, path)?;
-            basis(open_entry_mut(&mut documents, document_id)?)?
+            let entry = open_entry_mut(&mut documents, document_id)?;
+            entry.output_flattens()?;
+            basis(entry)?
         };
 
         // The estimate for these levels usually already made these very bytes.

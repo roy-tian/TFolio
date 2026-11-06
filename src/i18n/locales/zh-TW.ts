@@ -567,6 +567,21 @@ const zhTW = {
   signatures: {
     count_one: "含 {{count}} 個數位簽章",
     count_other: "含 {{count}} 個數位簽章",
+    promptTitle: "要修改含數位簽章的檔案嗎？",
+    promptEdit_one: "「{{name}}」含一個數位簽章。修改後簽章將失效，可能有合規風險。",
+    promptEdit_other: "「{{name}}」含 {{count}} 個數位簽章。修改後簽章將失效，可能有合規風險。",
+    promptExport_one: "以「{{name}}」的頁面產生的新檔案無法保留其數位簽章，可能有合規風險。",
+    promptExport_other: "以「{{name}}」的頁面產生的新檔案無法保留其 {{count}} 個數位簽章，可能有合規風險。",
+    promptOrganize_one: "新的 PDF 取用了一個已簽署檔案的頁面，無法保留其數位簽章，可能有合規風險。",
+    promptOrganize_other: "新的 PDF 取用了 {{count}} 個已簽署檔案的頁面，無法保留這些數位簽章，可能有合規風險。",
+    promptOriginal: "已簽署的原始檔案不會被覆寫。",
+    flattenHint: "平面化：保留外觀，簽章的圖樣併入頁面內容，簽章本身被移除。",
+    keepHint: "保留簽章欄位：欄位留在檔案中，但會顯示為無效；A4 調整會遺失它們。",
+    flatten: "平面化",
+    keep: "保留簽章欄位",
+    cancel: "取消",
+    flattenFailed:
+      "簽章無法平面化，檔案未做任何修改。請重試，或改為保留簽章欄位。",
   },
   about: {
     title: "TFolio",

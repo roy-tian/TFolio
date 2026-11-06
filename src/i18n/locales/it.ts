@@ -569,6 +569,29 @@ const it = {
   signatures: {
     count_one: "Contiene {{count}} firma digitale",
     count_other: "Contiene {{count}} firme digitali",
+    promptTitle: "Modificare un file con firma digitale?",
+    promptEdit_one:
+      "«{{name}}» contiene una firma digitale. Modificarlo la invalida, con un possibile rischio di conformità.",
+    promptEdit_other:
+      "«{{name}}» contiene {{count}} firme digitali. Modificarlo le invalida, con un possibile rischio di conformità.",
+    promptExport_one:
+      "Un nuovo file con pagine di «{{name}}» non può conservarne la firma digitale, con un possibile rischio di conformità.",
+    promptExport_other:
+      "Un nuovo file con pagine di «{{name}}» non può conservarne le {{count}} firme digitali, con un possibile rischio di conformità.",
+    promptOrganize_one:
+      "Il nuovo PDF prende pagine da un file firmato e non può conservarne le firme digitali, con un possibile rischio di conformità.",
+    promptOrganize_other:
+      "Il nuovo PDF prende pagine da {{count}} file firmati e non può conservarne le firme digitali, con un possibile rischio di conformità.",
+    promptOriginal: "Il file firmato non viene mai sovrascritto.",
+    flattenHint:
+      "Appiattisci mantiene l’aspetto: l’aspetto di ogni firma diventa contenuto della pagina e la firma viene rimossa.",
+    keepHint:
+      "Mantieni campi firma li lascia nel file, dove risultano non validi; un adattamento ad A4 li elimina.",
+    flatten: "Appiattisci",
+    keep: "Mantieni campi firma",
+    cancel: "Annulla",
+    flattenFailed:
+      "Non è stato possibile appiattire le firme e non è cambiato nulla. Riprova o mantieni i campi firma.",
   },
   about: {
     title: "TFolio",

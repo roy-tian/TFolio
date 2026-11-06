@@ -550,6 +550,21 @@ const zhCN = {
   signatures: {
     count_one: "含 {{count}} 个数字签名",
     count_other: "含 {{count}} 个数字签名",
+    promptTitle: "要修改含数字签名的文件吗？",
+    promptEdit_one: "“{{name}}”含一个数字签名。修改后签名将失效，可能存在合规风险。",
+    promptEdit_other: "“{{name}}”含 {{count}} 个数字签名。修改后签名将失效，可能存在合规风险。",
+    promptExport_one: "用“{{name}}”的页面生成的新文件无法保留其数字签名，可能存在合规风险。",
+    promptExport_other: "用“{{name}}”的页面生成的新文件无法保留其 {{count}} 个数字签名，可能存在合规风险。",
+    promptOrganize_one: "新 PDF 取用了一个已签名文件的页面，无法保留其数字签名，可能存在合规风险。",
+    promptOrganize_other: "新 PDF 取用了 {{count}} 个已签名文件的页面，无法保留这些数字签名，可能存在合规风险。",
+    promptOriginal: "已签名的原文件不会被覆盖。",
+    flattenHint: "扁平化：保留外观，签名的图样并入页面内容，签名本身被移除。",
+    keepHint: "保留签名域：签名域留在文件中，但会显示为无效；A4 适配会丢失它们。",
+    flatten: "扁平化",
+    keep: "保留签名域",
+    cancel: "取消",
+    flattenFailed:
+      "签名无法扁平化，文件未做任何修改。请重试，或改为保留签名域。",
   },
   about: {
     title: "TFolio",

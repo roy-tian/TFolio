@@ -201,6 +201,11 @@ export const noticeCatalogue = {
     textKey: "annotate.saveSigned",
     tone: "warning",
   },
+  signaturesFlattenFailed: {
+    life: "transient",
+    textKey: "signatures.flattenFailed",
+    tone: "warning",
+  },
   tabMoveBusy: {
     life: "transient",
     textKey: "tabs.moveBusy",

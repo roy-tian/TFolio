@@ -27,12 +27,13 @@ import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import type { AnnotationTool } from "@/components/AnnotationToolbar"
-import { useAnnotations } from "@/hooks/useAnnotations"
+import { useAnnotations, type SignedChange } from "@/hooks/useAnnotations"
 import { createCurrentPage } from "@/hooks/useCurrentPage"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useDocumentNotices, type NoticeChannel } from "@/hooks/useNotices"
 import { usePageClipboard } from "@/hooks/usePageClipboard"
 import { usePrint } from "@/hooks/usePrint"
+import type { AskSignatures } from "@/hooks/useSignaturePrompt"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import { useDocumentSearch } from "@/hooks/useDocumentSearch"
 import { useEraserTool } from "@/hooks/useEraserTool"
@@ -86,7 +87,9 @@ import {
   fileNameFromPath,
   type PdfDocumentInfo,
   type PdfExportOutcome,
+  type PdfSignatures,
   type PdfStructureUpdate,
+  type SignatureDecision,
 } from "@/lib/pdf"
 import { turnView } from "@/lib/pageRotation"
 import { ParkedPreviews } from "@/lib/parkedPreviews"
@@ -122,6 +125,9 @@ import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 export type DocumentSessionHandle = {
   /** Lets go of the edit it held: the note's text lives nowhere else by then. */
   dismissNoteFont: () => void
+  /** The reader's word on intact signatures before a change, or a new file of
+      these pages, breaks them; `true` where none is owed. */
+  ensureSignatures: (change: SignedChange) => true | Promise<boolean>
   fetchNoteFont: () => void
   /** Edits and a typed note, which a save would keep; `hasUnsavedWorkNow`
       also counts work still running, which no save can. */
@@ -157,7 +163,11 @@ export type DocumentSessionHandle = {
 
 type DocumentSessionProps = {
   active: boolean
+  /** The window's one signature prompt. */
+  askSignatures: AskSignatures
   document: PdfDocumentInfo
+  /** Another tab's word on its intact signatures before its pages come in. */
+  ensureSourceSignatures: (documentId: number) => true | Promise<boolean>
   fileName: string
   /** Whether this app-created document has yet to be written to its first
       file. It remains unsaved even before the reader makes another edit. */
@@ -198,7 +208,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
   function DocumentSession(
     {
       active,
+      askSignatures,
       document: openedDocument,
+      ensureSourceSignatures,
       fileName,
       initialRecentView,
       initialSaveRequired = false,
@@ -501,7 +513,122 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         selectAllText()
       }
     }, [selectAllPages, selectAllText, thumbnailsFocused, thumbnailsShown])
+    // One prompt per document: a second asker waits for the first's answer,
+    // which the backend records and reports back as the document's own.
+    const askSignaturesRef = useRef(askSignatures)
+    const decisionGateRef = useRef<Promise<SignatureDecision | null> | null>(null)
+    const flattenGateRef = useRef<Promise<boolean> | null>(null)
+    const flattenRef = useRef<(pageCount: number) => Promise<boolean>>(() =>
+      Promise.resolve(false),
+    )
+
+    useLayoutEffect(() => {
+      askSignaturesRef.current = askSignatures
+    }, [askSignatures])
+
+    const decideSignatures = useCallback(
+      async (change: SignedChange) => {
+        const current = documentRef.current
+
+        if (!current) {
+          return null
+        }
+
+        const answer = await askSignaturesRef.current({
+          context: change,
+          count: current.signatures.count,
+          name: fileName,
+        })
+
+        if (!answer) {
+          return null
+        }
+
+        try {
+          const signatures = await invoke<PdfSignatures>("decide_pdf_signatures", {
+            decision: answer,
+            documentId: current.id,
+          })
+          const latest = documentRef.current
+
+          if (latest?.id === current.id) {
+            const next = { ...latest, signatures }
+
+            documentRef.current = next
+            setPdfDocument(next)
+          }
+
+          return signatures.decision
+        } catch {
+          notice.raise(change === "export" ? "exportFailed" : "annotateFailed")
+          return null
+        }
+      },
+      [fileName, notice],
+    )
+
+    // A flatten answer draws the signatures in before the first edit; a new
+    // file of the pages flattens its own copy, leaving this document as it is.
+    const settleSignatures = useCallback(
+      (change: SignedChange, decision: SignatureDecision): true | Promise<boolean> => {
+        if (change === "export" || decision === "keep") {
+          return true
+        }
+
+        flattenGateRef.current ??= flattenRef
+          .current(documentRef.current?.numPages ?? 0)
+          .then((flattened) => {
+            const current = documentRef.current
+
+            // Asked again next time, where keeping the fields still works.
+            if (!flattened && current) {
+              const next = {
+                ...current,
+                signatures: { ...current.signatures, decision: null },
+              }
+
+              documentRef.current = next
+              setPdfDocument(next)
+              notice.raise("signaturesFlattenFailed")
+            }
+
+            return flattened
+          })
+          .finally(() => {
+            flattenGateRef.current = null
+          })
+
+        return flattenGateRef.current
+      },
+      [notice],
+    )
+
+    const ensureSignatures = useCallback(
+      (change: SignedChange): true | Promise<boolean> => {
+        const signatures = documentRef.current?.signatures
+
+        if (!signatures?.intact || signatures.flattened) {
+          return true
+        }
+
+        if (signatures.decision !== null) {
+          return settleSignatures(change, signatures.decision)
+        }
+
+        decisionGateRef.current ??= decideSignatures(change).finally(() => {
+          decisionGateRef.current = null
+        })
+
+        return decisionGateRef.current.then((decision) =>
+          decision === null ? false : settleSignatures(change, decision),
+        )
+      },
+      [decideSignatures, settleSignatures],
+    )
+
     const annotations = useAnnotations({
+      beforeCopyFrom: ensureSourceSignatures,
+      beforeSignedChange: ensureSignatures,
       documentId: pdfDocument.id,
       initial: movedSeed && { history: movedSeed.history, marks: movedSeed.marks },
       onAnnotateError: useCallback(
@@ -536,11 +663,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          const next = {
-            ...current,
-            path: outcome.path,
-            signatures: { ...current.signatures, intact: outcome.signedOriginal },
-          }
+          const next = { ...current, path: outcome.path, signatures: outcome.signatures }
           saveRequiredRef.current = false
           setSaveRequired(false)
           documentRef.current = next
@@ -591,6 +714,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             numPages: update.numPages,
             outline: update.outline,
             pages: update.pages,
+            signatures: update.signatures,
           }
 
           documentRef.current = next
@@ -662,6 +786,34 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useLayoutEffect(() => {
       textEpochsRef.current = annotations.textEpochs
     }, [annotations.textEpochs])
+
+    useLayoutEffect(() => {
+      flattenRef.current = annotations.flattenSignatures
+    }, [annotations.flattenSignatures])
+
+    // Asked as a drawing tool is picked, not at the end of its first stroke
+    // or typed note, which a cancelled prompt would then throw away.
+    const chooseTool = useCallback(
+      (tool: AnnotationTool) => {
+        if (tool === null || tool === "eraser") {
+          setActiveTool(tool)
+          return
+        }
+
+        const ready = ensureSignatures("edit")
+
+        if (ready === true) {
+          setActiveTool(tool)
+        } else {
+          void ready.then((allowed) => {
+            if (allowed) {
+              setActiveTool(tool)
+            }
+          })
+        }
+      },
+      [ensureSignatures],
+    )
 
     // After the commit new keys land in: a page brought back has taken its
     // preview by then, if its column is up, and what is left is let go.
@@ -1412,6 +1564,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       ref,
       () => ({
         dismissNoteFont: clearNoteFontOffer,
+        ensureSignatures,
         fetchNoteFont: () => void fetchNoteFont(),
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
@@ -1456,6 +1609,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         annotations.canRedo,
         annotations.canUndo,
         clearNoteFontOffer,
+        ensureSignatures,
         exportPdf,
         fetchNoteFont,
         hasUnsavedChangesNow,
@@ -1551,7 +1705,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onSearchClose={search.closeSearch}
           onSearchOpen={search.openSearch}
           onSplit={() => setSplitOpen(true)}
-          onToolChange={setActiveTool}
+          onToolChange={chooseTool}
           onUndo={undoStep}
           saveLabel={saveLabel}
           searchOpen={search.searchOpen}

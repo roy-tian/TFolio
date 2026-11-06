@@ -570,6 +570,29 @@ const es = {
   signatures: {
     count_one: "Contiene {{count}} firma digital",
     count_other: "Contiene {{count}} firmas digitales",
+    promptTitle: "¿Modificar un archivo con firma digital?",
+    promptEdit_one:
+      "«{{name}}» tiene una firma digital. Modificarlo la invalida, lo que puede suponer un riesgo de cumplimiento.",
+    promptEdit_other:
+      "«{{name}}» tiene {{count}} firmas digitales. Modificarlo las invalida, lo que puede suponer un riesgo de cumplimiento.",
+    promptExport_one:
+      "Un archivo nuevo con páginas de «{{name}}» no puede conservar su firma digital, lo que puede suponer un riesgo de cumplimiento.",
+    promptExport_other:
+      "Un archivo nuevo con páginas de «{{name}}» no puede conservar sus {{count}} firmas digitales, lo que puede suponer un riesgo de cumplimiento.",
+    promptOrganize_one:
+      "El PDF nuevo toma páginas de un archivo firmado y no puede conservar sus firmas digitales, lo que puede suponer un riesgo de cumplimiento.",
+    promptOrganize_other:
+      "El PDF nuevo toma páginas de {{count}} archivos firmados y no puede conservar sus firmas digitales, lo que puede suponer un riesgo de cumplimiento.",
+    promptOriginal: "El archivo firmado nunca se sobrescribe.",
+    flattenHint:
+      "Aplanar conserva el aspecto: la apariencia de cada firma pasa a ser contenido de la página y la firma se elimina.",
+    keepHint:
+      "Conservar campos de firma los deja en el archivo, donde aparecen como no válidos; un ajuste a A4 los descarta.",
+    flatten: "Aplanar",
+    keep: "Conservar campos de firma",
+    cancel: "Cancelar",
+    flattenFailed:
+      "No se pudieron aplanar las firmas y no se cambió nada. Inténtelo de nuevo o conserve los campos de firma.",
   },
   about: {
     title: "TFolio",

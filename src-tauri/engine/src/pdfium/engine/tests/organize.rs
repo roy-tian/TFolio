@@ -43,6 +43,7 @@ fn plan(slots: Vec<AssembleSlot>, outline: Vec<AssembleOutlineItem>) -> Assemble
         outline,
         watermark: None,
         page_numbers: None,
+        signatures: None,
     }
 }
 
@@ -512,6 +513,7 @@ fn a_fitted_assembly_lays_every_page_and_blank_on_a4() {
                 outline: Vec::new(),
                 watermark: None,
                 page_numbers: None,
+                signatures: None,
             },
             |_, _| {},
         )
@@ -563,6 +565,7 @@ fn a_fitted_assembly_keeps_the_plan_s_order_across_files() {
                 outline: Vec::new(),
                 watermark: None,
                 page_numbers: None,
+                signatures: None,
             },
             |_, _| {},
         )
@@ -875,6 +878,7 @@ fn a_fitted_assembly_carries_a_rotated_page_the_way_it_reads() {
                 outline: Vec::new(),
                 watermark: None,
                 page_numbers: None,
+                signatures: None,
             },
             |_, _| {},
         )

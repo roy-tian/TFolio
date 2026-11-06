@@ -161,6 +161,10 @@ pub struct AssemblePlan {
     pub outline: Vec<AssembleOutlineItem>,
     pub watermark: Option<WatermarkConfig>,
     pub page_numbers: Option<PageNumbersConfig>,
+    /// What becomes of signed sources' signatures, which a new document
+    /// cannot keep; required while any slot takes a page from one.
+    #[serde(default)]
+    pub signatures: Option<SignatureDecision>,
 }
 
 /// The outline as `write_outline` takes it, refusing what no workspace sends.
@@ -507,6 +511,7 @@ impl PdfiumEngine {
             outline,
             watermark,
             page_numbers,
+            signatures,
         } = plan;
 
         if slots.is_empty() {
@@ -529,6 +534,7 @@ impl PdfiumEngine {
 
         // Every slot checked before anything is built: a refusal halfway would
         // have spent the reader's wait on a document that is then thrown away.
+        let mut signed_sources = HashSet::new();
         {
             let organize = self.lock_organize();
 
@@ -540,6 +546,10 @@ impl PdfiumEngine {
                         turn,
                     } => {
                         let entry = organize.entry(scope, *source_id)?;
+
+                        if entry.signed {
+                            signed_sources.insert(*source_id);
+                        }
 
                         if page_index(*page_number, entry.page_count).is_none() {
                             return Err(format!("page {page_number} does not exist"));
@@ -556,6 +566,16 @@ impl PdfiumEngine {
                     }
                 }
             }
+        }
+
+        if !signed_sources.is_empty() && signatures.is_none() {
+            return Err(signatures::SIGNATURES_UNDECIDED_ERROR.into());
+        }
+
+        let flatten = signatures == Some(SignatureDecision::Flatten);
+
+        if !flatten {
+            signed_sources.clear();
         }
 
         // Cut before the build, as the slots are checked: a mark no installed
@@ -590,6 +610,12 @@ impl PdfiumEngine {
         let mut draft = MergeDraft::new(self)?;
         let mut draft_index = vec![0; slots.len()];
         let built = if normalize_a4 {
+            // Each source with whether its pages' signatures go in first.
+            let groups: Vec<_> = groups
+                .iter()
+                .map(|group| (group.clone(), signed_sources.contains(&group.0)))
+                .collect();
+
             self.fit_sources(
                 scope,
                 &groups,
@@ -672,7 +698,14 @@ impl PdfiumEngine {
             return Ok(None);
         }
 
-        // Byte work, not PDFium work, so the lock is given back for it.
+        // Byte work, not PDFium work, so the lock is given back for it. Every
+        // signature widget an imported page brought along is drawn in; a
+        // fitted page had its own drawn in at its source, and brought none.
+        let bytes = if flatten && !normalize_a4 {
+            signatures::flattened_bytes(bytes)?
+        } else {
+            bytes
+        };
         let bytes = outline::write_outline(bytes, &nodes)?;
         step();
 
@@ -770,13 +803,13 @@ impl PdfiumEngine {
     fn fit_sources(
         &self,
         scope: &str,
-        groups: &[SourcePages],
+        groups: &[(SourcePages, bool)],
         draft: &mut MergeDraft<'_>,
         operation: &OperationGuard<'_>,
         draft_index: &mut [PdfPageIndex],
         progress: &mut impl FnMut(),
     ) -> Result<bool, String> {
-        for (source_id, pages) in groups {
+        for ((source_id, pages), flatten) in groups {
             for &(position, page_number) in pages {
                 if operation.is_cancelled() {
                     return Ok(false);
@@ -786,6 +819,19 @@ impl PdfiumEngine {
                     let document = draft.document();
 
                     draft_index[position] = document.pages().len();
+
+                    // A form XObject leaves annotations behind, so the page's
+                    // signatures go into its content first, on a copy of it.
+                    if *flatten && signatures::has_widgets(source, page_number - 1)? {
+                        let page = signatures::flattened_pages(
+                            self.pdfium,
+                            source,
+                            &[(page_number - 1) as usize],
+                        )?;
+
+                        return append_page_fitted_to_a4(document, &page, 0, path);
+                    }
+
                     append_page_fitted_to_a4(document, source, page_number - 1, path)
                 })?;
                 progress();

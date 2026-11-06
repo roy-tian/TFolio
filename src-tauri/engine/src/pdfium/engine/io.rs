@@ -682,13 +682,15 @@ impl PdfiumEngine {
         // every signature. Not rebound, since that copy is a signed original too.
         if entry.content_version == 0 && entry.bound_to_signed_original() {
             if let Some(original) = entry.signed_original.clone() {
+                let signatures = entry.signatures();
+
                 drop(documents);
                 signatures::copy_original(&original, path)?;
 
                 return Ok(ExportOutcome {
                     path: path.to_string_lossy().into_owned(),
                     saved_to_source: false,
-                    signed_original: true,
+                    signatures,
                 });
             }
         }
@@ -704,7 +706,7 @@ impl PdfiumEngine {
         if saved_to_source {
             entry.source_path = Some(path.to_path_buf());
         }
-        let signed_original = entry.bound_to_signed_original();
+        let signatures = entry.signatures();
 
         drop(documents);
 
@@ -724,7 +726,7 @@ impl PdfiumEngine {
         Ok(ExportOutcome {
             path: path.to_string_lossy().into_owned(),
             saved_to_source,
-            signed_original,
+            signatures,
         })
     }
 

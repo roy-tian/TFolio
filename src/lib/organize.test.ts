@@ -27,7 +27,7 @@ import {
 } from "./organize"
 
 const portrait = { height: 300, rotation: 0, width: 200 }
-const unsigned = { count: 0, intact: false }
+const unsigned = { count: 0, decision: null, flattened: false, intact: false }
 
 function source(id: number, pageCount: number, outline: OrganizeSource["outline"] = []): OrganizeSource {
   return {

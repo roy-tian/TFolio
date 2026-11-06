@@ -80,6 +80,7 @@ impl PdfiumEngine {
 
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let page_id = entry.page_id(page_number)?;
 
         let mut page = entry
@@ -289,6 +290,7 @@ impl PdfiumEngine {
         let placeholder = DynamicImage::new_rgba8(1, 1);
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
 
         // Found by id: a page inserted at the captured number must never
         // receive another page's pixels; a structure change fails the revision.
@@ -402,6 +404,7 @@ impl PdfiumEngine {
         let fill = annotation_color(&style.color, style.opacity)?;
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let page_id = entry.page_id(page_number)?;
 
         // Loaded only for its unrotated height, then dropped: the path below
@@ -539,6 +542,7 @@ impl PdfiumEngine {
 
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let page_id = entry.page_id(page_number)?;
 
         let unrotated_height = {

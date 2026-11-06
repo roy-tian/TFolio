@@ -153,9 +153,10 @@ pub(super) fn minimal_pdf() -> Vec<u8> {
     build_pdf(&objects)
 }
 
-/// One page carrying a signature field whose widget shows a red seal, signed
-/// over the whole file. The `/Contents` is no real CMS: only the structure is
-/// ever checked, which this frames exactly as a signer's would.
+/// One page carrying a signature field whose widget shows a red seal, and a
+/// link to the page beside it, under one bookmark, signed over the whole file.
+/// The `/Contents` is no real CMS: only the structure is ever checked, which
+/// this frames exactly as a signer's.
 pub(super) fn signed_pdf() -> Vec<u8> {
     const PLACEHOLDER: &str = "[0 0000000000 0000000000 0000000000]";
     let seal = "1 0 0 rg 10 10 80 80 re f";
@@ -164,9 +165,9 @@ pub(super) fn signed_pdf() -> Vec<u8> {
         .chain(std::iter::repeat_n("00".to_string(), 192))
         .collect();
     let objects = [
-            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /SigFlags 3 >> >>\nendobj\n".to_string(),
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 9 0 R /AcroForm << /Fields [5 0 R] /SigFlags 3 >> >>\nendobj\n".to_string(),
             "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
-            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Annots [5 0 R] >>\nendobj\n".to_string(),
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Annots [5 0 R 8 0 R] >>\nendobj\n".to_string(),
             "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
             "5 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Sig /T (Seal) /Rect [50 50 150 150] /F 4 /P 3 0 R /V 7 0 R /AP << /N 6 0 R >> >>\nendobj\n".to_string(),
             format!(
@@ -176,6 +177,9 @@ pub(super) fn signed_pdf() -> Vec<u8> {
             format!(
                 "7 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange {PLACEHOLDER} /Contents <{contents}> >>\nendobj\n"
             ),
+            "8 0 obj\n<< /Type /Annot /Subtype /Link /Rect [10 250 90 270] /Border [0 0 0] /Dest [3 0 R /Fit] >>\nendobj\n".to_string(),
+            "9 0 obj\n<< /Type /Outlines /First 10 0 R /Last 10 0 R /Count 1 >>\nendobj\n".to_string(),
+            "10 0 obj\n<< /Title (Seal) /Parent 9 0 R /Dest [3 0 R /Fit] >>\nendobj\n".to_string(),
         ];
     let mut pdf = build_pdf(&objects);
     let start = find(&pdf, b"/Contents <").expect("the fixture has a signature") + 10;

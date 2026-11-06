@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Channel, invoke } from "@tauri-apps/api/core"
 
 import {
@@ -70,7 +70,15 @@ type StructureChangeHandler = (
   change?: PageChange,
 ) => void
 
+/** A change to the document itself, or a new file made of its pages. */
+export type SignedChange = "edit" | "export"
+
 type UseAnnotationsOptions = {
+  /** The reader's word on intact signatures, before a change that breaks
+      them; `true` where none is owed, without a turn of the event loop. */
+  beforeSignedChange?: (change: SignedChange) => true | Promise<boolean>
+  /** The same word from another open document whose pages are copied in. */
+  beforeCopyFrom?: (sourceDocumentId: number) => true | Promise<boolean>
   documentId: number
   /** A moved tab's history and marks, replayed as this session's own: undo,
       the dirty flag, and the export-only refusals keep answering as they did
@@ -426,6 +434,8 @@ async function retractCommand(
 /** PDFium's document is the truth about what is on a page, so nothing here
     mirrors the annotations, only what it cannot answer about the reader's steps. */
 export function useAnnotations({
+  beforeCopyFrom,
+  beforeSignedChange,
   documentId,
   initial,
   onAnnotateError,
@@ -464,6 +474,20 @@ export function useAnnotations({
   // The one thing kept about the annotations themselves: which marks each
   // applied entry holds, so an undo and the eraser can name them, not count them.
   const marksRef = useRef<MarkStore>(new Map(initial?.marks ?? []))
+  const beforeSignedChangeRef = useRef(beforeSignedChange)
+  const beforeCopyFromRef = useRef(beforeCopyFrom)
+
+  useLayoutEffect(() => {
+    beforeSignedChangeRef.current = beforeSignedChange
+    beforeCopyFromRef.current = beforeCopyFrom
+  }, [beforeCopyFrom, beforeSignedChange])
+
+  // Awaited by callers only where an answer is owed: elsewhere an edit still
+  // enqueues in the same turn, as the drops that need an idle queue rely on.
+  const signedChangeReady = useCallback(
+    (change: SignedChange) => beforeSignedChangeRef.current?.(change) ?? true,
+    [],
+  )
 
   const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
     const next = { ...renderEpochsRef.current }
@@ -594,6 +618,21 @@ export function useAnnotations({
         return false
       }
 
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true) {
+        if (!(await ready)) {
+          return false
+        }
+
+        // A flatten answered earlier runs here with no modal prompt, so a
+        // page-moving edit may have started meanwhile.
+        if (structurePendingRef.current > 0) {
+          onEditRefused?.()
+          return false
+        }
+      }
+
       let applied = false
       await enqueue(
         (current) => ({
@@ -624,7 +663,14 @@ export function useAnnotations({
       )
       return applied
     },
-    [documentId, enqueue, onAnnotateError, onEditRefused, onStructureChange],
+    [
+      documentId,
+      enqueue,
+      onAnnotateError,
+      onEditRefused,
+      onStructureChange,
+      signedChangeReady,
+    ],
   )
 
   /** Every structure edit's one path: planned inside the queue, which hands the
@@ -635,6 +681,12 @@ export function useAnnotations({
         history: AnnotationHistory,
       ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
     ): Promise<boolean> => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return false
+      }
+
       let landed = false
 
       structurePendingRef.current += 1
@@ -670,7 +722,7 @@ export function useAnnotations({
 
       return landed
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
   const reorderPages = useCallback(
@@ -700,6 +752,12 @@ export function useAnnotations({
       redo is what restores the undo's stash. */
   const duplicatePages = useCallback(
     async (sourcePages: number[], index: number, pageCount: number) => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return false
+      }
+
       let landed = false
 
       structurePendingRef.current += 1
@@ -747,7 +805,7 @@ export function useAnnotations({
 
       return landed
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
   /** `duplicatePages`' path, with the pages read from another open document. */
@@ -758,6 +816,20 @@ export function useAnnotations({
       index: number,
       pageCount: number,
     ) => {
+      // The source first: its answer changes nothing in place, while this
+      // document's flatten does, and must not happen for a copy then refused.
+      const source = beforeCopyFromRef.current?.(sourceDocumentId) ?? true
+
+      if (source !== true && !(await source)) {
+        return false
+      }
+
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return false
+      }
+
       let landed = false
 
       structurePendingRef.current += 1
@@ -806,7 +878,39 @@ export function useAnnotations({
 
       return landed
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
+  )
+
+  /** Draws the document's signatures into its pages in place, ahead of the
+      edit that asked for it: no history entry, since the file it came from is
+      never written over and nothing of this session's own is there to undo. */
+  const flattenSignatures = useCallback(
+    async (pageCount: number) => {
+      const pages = Array.from({ length: pageCount }, (_, index) => index + 1)
+      let flattened = false
+
+      await enqueue(
+        (current) => ({
+          next: current,
+          pages,
+          textPages: pages,
+          work: async () => {
+            onStructureChange(
+              documentId,
+              await invoke<PdfStructureUpdate>("flatten_pdf_signatures", { documentId }),
+              { movement: "inPlace" },
+            )
+            flattened = true
+            return true
+          },
+        }),
+        // The session says why: the answer is the reader's to give again.
+        () => undefined,
+      )
+
+      return flattened
+    },
+    [documentId, enqueue, onStructureChange],
   )
 
   /** Rubs out whichever of this session's marks the backend's hit test finds —
@@ -887,6 +991,12 @@ export function useAnnotations({
       pageCount: number,
       onProgress?: ProgressHandler,
     ): Promise<PdfLayerOutcome> => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
@@ -929,7 +1039,7 @@ export function useAnnotations({
 
       return outcome
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
   const setPageNumbers = useCallback(
@@ -938,6 +1048,12 @@ export function useAnnotations({
       pageCount: number,
       onProgress?: ProgressHandler,
     ): Promise<PdfLayerOutcome> => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
@@ -978,7 +1094,7 @@ export function useAnnotations({
 
       return outcome
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
   /** The one gesture that reaches a rebuild in flight. `false` is a miss, not a
@@ -1155,6 +1271,14 @@ export function useAnnotations({
 
   const exportArchive = useCallback(
     async (request: ArchiveExportRequest, onProgress: ProgressHandler) => {
+      // Images are pixels; a split PDF carries its pages' signature widgets.
+      const ready =
+        request.options.format === "images" ? true : signedChangeReady("export")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: "saved" | "cancelled" | "failed" = "cancelled"
       await enqueue((current) => ({
         next: current,
@@ -1175,13 +1299,19 @@ export function useAnnotations({
       }), () => { outcome = "failed" })
       return outcome as "saved" | "cancelled" | "failed"
     },
-    [documentId, enqueue],
+    [documentId, enqueue, signedChangeReady],
   )
 
   /** A compressed copy never touches this tab's history: like the archive
       export, it leaves for a destination the backend's own dialog picked. */
   const exportCompressed = useCallback(
     async (request: CompressedExportRequest, onProgress: ProgressHandler) => {
+      const ready = signedChangeReady("export")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: "saved" | "cancelled" | "failed" = "cancelled"
       await enqueue((current) => ({
         next: current,
@@ -1202,7 +1332,7 @@ export function useAnnotations({
       }), () => { outcome = "failed" })
       return outcome as "saved" | "cancelled" | "failed"
     },
-    [documentId, enqueue],
+    [documentId, enqueue, signedChangeReady],
   )
 
   /** Writes the document back over its own file. A clean history is a no-op —
@@ -1302,6 +1432,7 @@ export function useAnnotations({
       exportCopy,
       exportArchive,
       exportCompressed,
+      flattenSignatures,
       hasOwnedContentNow,
       hasPendingWorkNow,
       historyNow,
@@ -1335,6 +1466,7 @@ export function useAnnotations({
       exportCopy,
       exportArchive,
       exportCompressed,
+      flattenSignatures,
       hasOwnedContentNow,
       hasPendingWorkNow,
       history,

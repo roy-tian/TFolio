@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core"
 import { useTranslation } from "react-i18next"
 
 import type { NoticeChannel } from "@/hooks/useNotices"
+import type { AskSignatures } from "@/hooks/useSignaturePrompt"
 import { isNoteFontMissing } from "@/lib/annotationStyles"
 import { e2eOverride } from "@/lib/e2e"
 import { usesEmbeddedFont } from "@/lib/embeddedFont"
@@ -46,6 +47,7 @@ import {
   exportFailureNotice,
   fileNameFromPath,
   type PdfDocumentInfo,
+  type SignatureDecision,
 } from "@/lib/pdf"
 import type { PdfLayerOutcome, PdfProgress } from "@/lib/progress"
 import { subscribeSettings } from "@/lib/settings"
@@ -75,6 +77,8 @@ type OrganizeClipboard = { keys: ReadonlySet<number>; mode: "cut" | "copy" }
 const NO_KEYS: ReadonlySet<number> = new Set()
 
 type UseOrganizeWorkspaceOptions = {
+  /** The window's one signature prompt, for pages taken from signed files. */
+  askSignatures: AskSignatures
   notices: NoticeChannel
   /** Opens the assembled document as the tab of the file it was saved to. */
   onAssembled: (document: PdfDocumentInfo) => void
@@ -86,6 +90,7 @@ type UseOrganizeWorkspaceOptions = {
  * though not a reload, and touches no open document.
  */
 export function useOrganizeWorkspace({
+  askSignatures,
   notices,
   onAssembled,
 }: UseOrganizeWorkspaceOptions) {
@@ -458,6 +463,31 @@ export function useOrganizeWorkspace({
       return
     }
 
+    // A new PDF keeps no signature of the files it takes pages from; the
+    // reader says first what becomes of them, and the backend holds it to that.
+    const signedSources = new Set(
+      assembledPages.flatMap((page) =>
+        page.kind === "slot" &&
+        page.slot.kind === "page" &&
+        sourcesRef.current.get(page.slot.sourceId)?.signatures.intact
+          ? [page.slot.sourceId]
+          : [],
+      ),
+    )
+    let signatures: SignatureDecision | null = null
+
+    if (signedSources.size > 0) {
+      signatures = await askSignatures({
+        context: "organize",
+        count: signedSources.size,
+        name: "",
+      })
+
+      if (!signatures) {
+        return
+      }
+    }
+
     busyRef.current = true
     stopOwedRef.current = false
     setAssembling(true)
@@ -482,6 +512,7 @@ export function useOrganizeWorkspace({
           normalizeA4,
           outline: organizeOutline(assembling, sourcesRef.current, assembledPages),
           pageNumbers,
+          signatures,
           slots: assembleSlots(assembledPages, normalizeA4),
           watermark,
         },
@@ -523,7 +554,7 @@ export function useOrganizeWorkspace({
       setProgress(null)
       setStopping(false)
     }
-  }, [askStop, offerFont, onAssembled, raise, t])
+  }, [askSignatures, askStop, offerFont, onAssembled, raise, t])
 
   const stopAssembling = useCallback(() => {
     setStopping(true)

@@ -571,6 +571,29 @@ const fr = {
   signatures: {
     count_one: "Contient {{count}} signature numérique",
     count_other: "Contient {{count}} signatures numériques",
+    promptTitle: "Modifier un fichier signé numériquement ?",
+    promptEdit_one:
+      "« {{name}} » porte une signature numérique. Le modifier l’invalide, ce qui peut présenter un risque de conformité.",
+    promptEdit_other:
+      "« {{name}} » porte {{count}} signatures numériques. Le modifier les invalide, ce qui peut présenter un risque de conformité.",
+    promptExport_one:
+      "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder sa signature numérique, ce qui peut présenter un risque de conformité.",
+    promptExport_other:
+      "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder ses {{count}} signatures numériques, ce qui peut présenter un risque de conformité.",
+    promptOrganize_one:
+      "Le nouveau PDF reprend des pages d’un fichier signé et ne peut pas garder ses signatures numériques, ce qui peut présenter un risque de conformité.",
+    promptOrganize_other:
+      "Le nouveau PDF reprend des pages de {{count}} fichiers signés et ne peut pas garder leurs signatures numériques, ce qui peut présenter un risque de conformité.",
+    promptOriginal: "Le fichier signé lui-même n’est jamais écrasé.",
+    flattenHint:
+      "Aplatir garde l’aspect : l’apparence de chaque signature devient du contenu de page, et la signature est retirée.",
+    keepHint:
+      "Garder les champs de signature les laisse dans le fichier, où ils apparaissent non valides ; un ajustement A4 les supprime.",
+    flatten: "Aplatir",
+    keep: "Garder les champs de signature",
+    cancel: "Annuler",
+    flattenFailed:
+      "Les signatures n’ont pas pu être aplaties, et rien n’a changé. Réessayez, ou gardez les champs de signature.",
   },
   about: {
     title: "TFolio",

@@ -65,6 +65,50 @@ async function organizeWith(paths: string[]) {
   )
 }
 
+const prompt = "[data-slot='signature-prompt']"
+
+/** The seal's red on the shown tab's first page. */
+function sealPixels() {
+  return browser.execute(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      "[data-active='true'] [data-page-number='1'] canvas",
+    )
+
+    if (!canvas || canvas.width === 0) {
+      return 0
+    }
+
+    // A `bitmaprenderer` canvas has no 2d context to read: copy it into one.
+    const copy = document.createElement("canvas")
+    copy.width = canvas.width
+    copy.height = canvas.height
+    const context = copy.getContext("2d")!
+    context.drawImage(canvas, 0, 0)
+    const { data } = context.getImageData(0, 0, copy.width, copy.height)
+    let red = 0
+
+    for (let index = 0; index < data.length; index += 4) {
+      if (data[index]! > 200 && data[index + 1]! < 80 && data[index + 2]! < 80) {
+        red += 1
+      }
+    }
+
+    return red
+  })
+}
+
+async function answerPrompt(action: "signatures-flatten" | "signatures-keep" | null) {
+  await $(prompt).waitForDisplayed()
+
+  if (action) {
+    await $(`${prompt} [data-action='${action}']`).click()
+  } else {
+    await $(`//*[@data-slot='signature-prompt']//button[normalize-space()='Cancel']`).click()
+  }
+
+  await $(prompt).waitForDisplayed({ reverse: true })
+}
+
 function tabNamed(name: string) {
   return $(`//button[@role='tab'][normalize-space()='${name}']`)
 }
@@ -95,6 +139,8 @@ describe("TFolio signed documents", () => {
     expect(readFileSync(copyPath).equals(original)).toBe(true)
     await expect(tabNamed("signed.pdf")).toHaveAttribute("aria-selected", "true")
 
+    await $("button[aria-label='Highlight text']").click()
+    await answerPrompt("signatures-keep")
     const clean = await pageInk()
     await highlightTheText()
     await browser.waitUntil(async () => (await pageInk()) > clean, {
@@ -151,7 +197,95 @@ describe("TFolio signed documents", () => {
     // every signature, so the write is refused before it lands.
     await pointOrganizeSaveAt(signed)
     await $(`${workspace} [data-slot='organize-save']`).click()
+    await answerPrompt("signatures-flatten")
     await $("[data-notice='exportSigned']").waitForDisplayed({ timeout: 30_000 })
     expect(readFileSync(signed).equals(original)).toBe(true)
+  })
+
+  it("asks before the first edit, and a flatten keeps the seal as page content", async () => {
+    const sourcePath = await openPdfFromDisk("signed.pdf", signedPdf())
+    const original = readFileSync(sourcePath)
+    await renderedPage()
+    await browser.waitUntil(async () => (await sealPixels()) > 0, {
+      timeout: 15_000,
+      timeoutMsg: "the seal never showed",
+    })
+
+    // Asked as the tool is picked; a cancel leaves it off and the file alone.
+    const tool = $("button[aria-label='Highlight text']")
+    await tool.click()
+    await answerPrompt(null)
+    expect(await tool.getAttribute("aria-pressed")).not.toBe("true")
+
+    await tool.click()
+    await answerPrompt("signatures-flatten")
+    await expect(tool).toHaveAttribute("aria-pressed", "true")
+    await browser.waitUntil(async () => (await sealPixels()) > 0, {
+      timeout: 15_000,
+      timeoutMsg: "the flattened page lost its seal",
+    })
+
+    // Answered once: the edit itself goes through without another prompt.
+    const clean = await pageInk()
+    await highlightTheText()
+    await browser.waitUntil(async () => (await pageInk()) > clean, {
+      timeout: 15_000,
+      timeoutMsg: "the highlight never reached the page",
+    })
+    expect(await $(prompt).isDisplayed()).toBe(false)
+
+    const editedPath = path.join(path.dirname(sourcePath), "edited.pdf")
+    await pointSaveAsAt(editedPath)
+    await clickAppMenuItem("save-as")
+    await expect(tabNamed("edited.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(readFileSync(editedPath).includes("/ByteRange")).toBe(false)
+    expect(readFileSync(sourcePath).equals(original)).toBe(true)
+  })
+
+  it("keeps the signature fields when asked, and asks only once", async () => {
+    const sourcePath = await openPdfFromDisk("signed.pdf", signedPdf())
+    await renderedPage()
+
+    const tool = $("button[aria-label='Highlight text']")
+    await tool.click()
+    await answerPrompt("signatures-keep")
+    await expect(tool).toHaveAttribute("aria-pressed", "true")
+
+    await tool.click()
+    await expect(tool).not.toHaveAttribute("aria-pressed", "true")
+    await tool.click()
+    await expect(tool).toHaveAttribute("aria-pressed", "true")
+    expect(await $(prompt).isDisplayed()).toBe(false)
+
+    const clean = await pageInk()
+    await highlightTheText()
+    await browser.waitUntil(async () => (await pageInk()) > clean, {
+      timeout: 15_000,
+      timeoutMsg: "the highlight never reached the page",
+    })
+
+    // The kept field travels into the copy, where its signature no longer holds.
+    const editedPath = path.join(path.dirname(sourcePath), "edited.pdf")
+    await pointSaveAsAt(editedPath)
+    await clickAppMenuItem("save-as")
+    await expect(tabNamed("edited.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(readFileSync(editedPath).includes("/ByteRange")).toBe(true)
+  })
+
+  it("asks before an organize save takes pages from a signed file", async () => {
+    const signed = writeScratchPdf("signed.pdf", signedPdf())
+    const assembledPath = path.join(path.dirname(signed), "assembled.pdf")
+
+    await organizeWith([signed])
+    await pointOrganizeSaveAt(assembledPath)
+    await $(`${workspace} [data-slot='organize-save']`).click()
+    await answerPrompt("signatures-flatten")
+
+    await expect(tabNamed("assembled.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(readFileSync(assembledPath).includes("/ByteRange")).toBe(false)
+    await browser.waitUntil(async () => (await sealPixels()) > 0, {
+      timeout: 15_000,
+      timeoutMsg: "the new PDF lost the seal",
+    })
   })
 })

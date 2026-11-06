@@ -44,11 +44,20 @@ export type PdfSearchOutcome = {
   matches: PdfSearchMatch[]
 }
 
+/** What becomes of intact signatures once something would break them:
+    flattened into the pages, keeping their look, or kept as fields that then
+    read as invalid. */
+export type SignatureDecision = "flatten" | "keep"
+
 /** The digital signatures a file opened with. `intact` checks their structure
-    in the file on disk, never who signed: while it holds, that file is never
-    written over. */
+    in the file on disk, never who signed, and holds while the document is
+    bound to that file, which is then never written over. */
 export type PdfSignatures = {
   count: number
+  /** The reader's answer, asked before the first change that breaks them. */
+  decision: SignatureDecision | null
+  /** Drawn into the pages in place, as a flatten does before the first edit. */
+  flattened: boolean
   intact: boolean
 }
 
@@ -63,8 +72,8 @@ export type PdfDocumentInfo = {
   /** The file this document was opened from; null when opened from bytes,
       which leaves nothing to save over. */
   path: string | null
-  /** As opened; the session clears `intact` once a Save As moves the
-      document off the signed file, which it may then save over no longer. */
+  /** As the backend last reported them: an open, a structure update, or a
+      Save As, which moves an edited document off the signed file. */
   signatures: PdfSignatures
 }
 
@@ -73,12 +82,14 @@ export function isPdfSignatures(value: unknown): value is PdfSignatures {
     return false
   }
 
-  const { count, intact } = value as Record<string, unknown>
+  const { count, decision, flattened, intact } = value as Record<string, unknown>
 
   return (
     typeof count === "number" &&
     Number.isInteger(count) &&
     count >= 0 &&
+    (decision === null || decision === "flatten" || decision === "keep") &&
+    typeof flattened === "boolean" &&
     typeof intact === "boolean"
   )
 }
@@ -88,9 +99,9 @@ export function isPdfSignatures(value: unknown): value is PdfSignatures {
 export type PdfExportOutcome = {
   path: string
   savedToSource: boolean
-  /** Still bound to the signed file it opened from: an unchanged copy keeps
-      it there, an edited one moves it off. */
-  signedOriginal: boolean
+  /** After the write: an unchanged copy leaves the document on the signed
+      file, an edited one moves it off. */
+  signatures: PdfSignatures
 }
 
 /** The backend's refusal to write over a file another tab holds, kept in step
@@ -156,6 +167,7 @@ export type PdfStructureUpdate = {
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  signatures: PdfSignatures
 }
 
 /** Widest a single page may render on screen, in CSS pixels. */

@@ -571,6 +571,29 @@ const de = {
   signatures: {
     count_one: "Enthält {{count}} digitale Signatur",
     count_other: "Enthält {{count}} digitale Signaturen",
+    promptTitle: "Digital signierte Datei ändern?",
+    promptEdit_one:
+      "„{{name}}“ enthält eine digitale Signatur. Eine Änderung macht sie ungültig, was ein Compliance-Risiko sein kann.",
+    promptEdit_other:
+      "„{{name}}“ enthält {{count}} digitale Signaturen. Eine Änderung macht sie ungültig, was ein Compliance-Risiko sein kann.",
+    promptExport_one:
+      "Eine neue Datei aus Seiten von „{{name}}“ kann deren digitale Signatur nicht behalten, was ein Compliance-Risiko sein kann.",
+    promptExport_other:
+      "Eine neue Datei aus Seiten von „{{name}}“ kann deren {{count}} digitale Signaturen nicht behalten, was ein Compliance-Risiko sein kann.",
+    promptOrganize_one:
+      "Das neue PDF übernimmt Seiten aus einer signierten Datei und kann deren digitale Signaturen nicht behalten, was ein Compliance-Risiko sein kann.",
+    promptOrganize_other:
+      "Das neue PDF übernimmt Seiten aus {{count}} signierten Dateien und kann deren digitale Signaturen nicht behalten, was ein Compliance-Risiko sein kann.",
+    promptOriginal: "Die signierte Datei selbst wird nie überschrieben.",
+    flattenHint:
+      "Reduzieren behält das Aussehen: Das Erscheinungsbild jeder Signatur wird Seiteninhalt, die Signatur selbst wird entfernt.",
+    keepHint:
+      "Signaturfelder behalten lässt sie in der Datei, wo sie als ungültig erscheinen; eine A4-Anpassung verwirft sie.",
+    flatten: "Reduzieren",
+    keep: "Signaturfelder behalten",
+    cancel: "Abbrechen",
+    flattenFailed:
+      "Die Signaturen konnten nicht reduziert werden, es wurde nichts geändert. Versuchen Sie es erneut oder behalten Sie die Signaturfelder.",
   },
   about: {
     title: "TFolio",

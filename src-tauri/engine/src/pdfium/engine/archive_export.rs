@@ -144,7 +144,7 @@ impl PdfiumEngine {
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<bool, String> {
         let operation = self.begin_operation(OperationTarget::Archive(document_id));
-        let (version, total, outline) = {
+        let (version, total, outline, flatten) = {
             let documents = self.lock_documents()?;
             let entry = open_entry(&documents, document_id)?;
             // A ZIP can never replace an open PDF, including one reached through an alias.
@@ -154,10 +154,17 @@ impl PdfiumEngine {
             if self.is_signed_file(&documents, path) {
                 return Err(signatures::EXPORT_SIGNED_ERROR.into());
             }
+            // Images are pixels, which no signature is part of; a split PDF
+            // carries its pages' signature widgets as any page copy does.
+            let flatten = match options {
+                ArchiveOptions::Images { .. } => false,
+                _ => entry.output_flattens()?,
+            };
             (
                 entry.content_version,
                 entry.document.pages().len() as usize,
                 collect_bookmark_siblings(entry.document.bookmarks().root()),
+                flatten,
             )
         };
         let dpi = if let ArchiveOptions::Images { dpi, .. } = options {
@@ -221,7 +228,7 @@ impl PdfiumEngine {
                     let Some((bytes, links)) = copied else {
                         return Ok(false);
                     };
-                    let Some(bytes) = write_navigation(
+                    let Some(mut bytes) = write_navigation(
                         bytes,
                         &section_outline(&outline, section.start, section.end),
                         &links,
@@ -231,6 +238,11 @@ impl PdfiumEngine {
                     else {
                         return Ok(false);
                     };
+                    // After the links: they are found again by their index in
+                    // `/Annots`, which taking the signature widgets out shifts.
+                    if flatten {
+                        bytes = signatures::flattened_bytes(bytes)?;
+                    }
                     zip.start_file(section_name(index, &section.title), entry_options)
                         .map_err(failed)?;
                     zip.write_all(&bytes)
@@ -242,7 +254,7 @@ impl PdfiumEngine {
                     if operation.is_cancelled() {
                         return Ok(false);
                     }
-                    let bytes = self.with_archive_source(document_id, version, |source| {
+                    let mut bytes = self.with_archive_source(document_id, version, |source| {
                         let mut part = self
                             .pdfium
                             .create_new_pdf()
@@ -255,6 +267,10 @@ impl PdfiumEngine {
                         part.save_to_bytes()
                             .map_err(|error| format!("could not save a split PDF: {error}"))
                     })?;
+                    // Byte work, so off the lock `with_archive_source` holds.
+                    if flatten {
+                        bytes = signatures::flattened_bytes(bytes)?;
+                    }
                     // No navigation to restore: a single page carries no
                     // outline of its own, and every link off it is dropped.
                     zip.start_file(format!("{:04}.pdf", page + 1), entry_options)

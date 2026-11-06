@@ -1267,6 +1267,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
 
         if entry
             .owned_content
@@ -1310,6 +1311,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
 
         if !entry
             .owned_content
@@ -1346,6 +1348,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let config = config.validated(entry.page_ids.len() as i32)?;
 
         // Checked before any work, so an unchanged config never rebuilds the
@@ -1395,6 +1398,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
 
         if !entry
             .owned_content

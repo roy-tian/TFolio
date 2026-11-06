@@ -10,7 +10,7 @@ pub use pdfium::{
     AssemblePlan, AssembleSlot, CompressionEstimate, CompressionOptions, EnginePaths,
     ExportOutcome, ImageFormat, OperationTarget, OrganizeSourceInfo, PageNumbersConfig,
     PageNumbersPreferences, PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome,
-    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, TextNoteStyle,
-    WatermarkConfig, CJK_FONT_NAME, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, ORGANIZE_SOURCE_CHANGED,
-    PDFIUM_LIBRARY_NAME,
+    PdfSignatures, PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle,
+    SignatureDecision, TextNoteStyle, WatermarkConfig, CJK_FONT_NAME, MAX_PDF_BYTES,
+    MERGE_IMAGE_EXTENSIONS, ORGANIZE_SOURCE_CHANGED, PDFIUM_LIBRARY_NAME,
 };

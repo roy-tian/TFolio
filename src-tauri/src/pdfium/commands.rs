@@ -10,9 +10,9 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 use tfolio_engine::{
     download_fallback_font, size_limit_error, ExportOutcome, OperationTarget, PageNumbersConfig,
-    PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
-    PdfiumEngine, RectEffect, RectStyle, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES,
-    MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+    PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome, PdfSignatures,
+    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, SignatureDecision,
+    TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
@@ -461,6 +461,34 @@ pub async fn reorder_pdf_pages(
     tauri::async_runtime::spawn_blocking(move || engine.reorder_pages(document_id, &order))
         .await
         .map_err(|error| format!("PDFium reorder task failed: {error}"))?
+}
+
+/// What becomes of the document's intact signatures before the first change
+/// that breaks them; the engine refuses such a change until this is answered.
+#[tauri::command]
+pub async fn decide_pdf_signatures(
+    document_id: u64,
+    decision: SignatureDecision,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfSignatures, String> {
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || engine.decide_signatures(document_id, decision))
+        .await
+        .map_err(|error| format!("PDFium signature task failed: {error}"))?
+}
+
+/// Draws the document's signatures into its pages in place, before its first edit.
+#[tauri::command]
+pub async fn flatten_pdf_signatures(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || engine.flatten_signatures(document_id))
+        .await
+        .map_err(|error| format!("PDFium signature flatten task failed: {error}"))?
 }
 
 /// Turns the document rather than the view, unlike the reading views' rotate.

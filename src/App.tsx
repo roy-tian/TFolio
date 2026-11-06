@@ -16,6 +16,7 @@ import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { NoticeCenter } from "@/components/NoticeCenter"
 import { OrganizeFillPrompt } from "@/components/OrganizeFillPrompt"
+import { SignaturePrompt } from "@/components/SignaturePrompt"
 import { OrganizeWorkspace } from "@/components/OrganizeWorkspace"
 import {
   SettingsDialog,
@@ -37,6 +38,7 @@ import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
 import { useOrganizeFill, type FillTab } from "@/hooks/useOrganizeFill"
 import { useOrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
+import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
 import { PagesDropContext, type PagesDrop } from "@/hooks/usePagesDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
@@ -637,16 +639,32 @@ export default function App() {
     [activateTab, notices, replaceTabs, runOpenBatch, t],
   )
 
+  const signaturePrompt = useSignaturePrompt()
+  const askSignatures = signaturePrompt.ask
+  // A tab's pages going into another document, or into a new one of their own.
+  const ensureSourceSignatures = useCallback(
+    (documentId: number) =>
+      sessionRefs.current.get(documentId)?.ensureSignatures("export") ?? true,
+    [],
+  )
+
   // The pages a drag let go of on the strip's open space: the app's own new
   // document, like a blank one, but holding work a close would lose.
   const openPagesAsDocument = useCallback(
     (carried: CarriedPages) => {
       // At the release, not when the open queue reaches it: the page numbers
-      // name the source as it stands now, and could be stale by then.
-      const extracted = invoke<PdfDocumentInfo>("extract_pdf_pages", {
-        pageNumbers: carried.pages,
-        sourceDocumentId: carried.sourceDocumentId,
-      })
+      // name the source as it stands now, and could be stale by then. A
+      // signature prompt in between is modal, so nothing renumbers them.
+      const ready = ensureSourceSignatures(carried.sourceDocumentId)
+      const extract = () =>
+        invoke<PdfDocumentInfo>("extract_pdf_pages", {
+          pageNumbers: carried.pages,
+          sourceDocumentId: carried.sourceDocumentId,
+        })
+      const extracted =
+        ready === true
+          ? extract()
+          : ready.then((allowed) => (allowed ? extract() : null))
       const sourceName = tabsRef.current.find(
         (tab) => tab.id === carried.sourceDocumentId,
       )?.name
@@ -659,6 +677,10 @@ export default function App() {
 
         try {
           const document = await extracted
+
+          if (!document) {
+            return
+          }
 
           if (!mountedRef.current) {
             void invoke("close_pdf", { documentId: document.id }).catch(
@@ -690,7 +712,15 @@ export default function App() {
         }
       })
     },
-    [activateTab, notices, replaceTabs, runOpenBatch, setWorkspaceMode, t],
+    [
+      activateTab,
+      ensureSourceSignatures,
+      notices,
+      replaceTabs,
+      runOpenBatch,
+      setWorkspaceMode,
+      t,
+    ],
   )
 
   // The pages are about to land in this tab's column, so its sidebar shows
@@ -766,7 +796,11 @@ export default function App() {
     },
     [activateTab, notices, refreshRecentFiles, replaceTabs, setWorkspaceMode, t],
   )
-  const organize = useOrganizeWorkspace({ notices, onAssembled: openAssembled })
+  const organize = useOrganizeWorkspace({
+    askSignatures,
+    notices,
+    onAssembled: openAssembled,
+  })
   // Read by listeners bound once, which must reach the workspace as it is now.
   const organizeRef = useRef(organize)
 
@@ -2231,7 +2265,9 @@ export default function App() {
       {tabs.map((tab) => (
         <DocumentSession
           active={tab.id === activeId && viewing}
+          askSignatures={askSignatures}
           document={tab.document}
+          ensureSourceSignatures={ensureSourceSignatures}
           fileName={tab.name}
           initialSaveRequired={tab.initialSaveRequired}
           initialRecentView={tab.recentView}
@@ -2336,6 +2372,11 @@ export default function App() {
         onAnswer={organizeFill.answer}
         open={organizeFill.promptOpen}
         prompt={organizeFill.prompt}
+      />
+      <SignaturePrompt
+        onAnswer={signaturePrompt.answer}
+        open={signaturePrompt.open}
+        request={signaturePrompt.request}
       />
 
       <NoticeCenter

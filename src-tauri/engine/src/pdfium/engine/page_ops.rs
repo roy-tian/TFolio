@@ -227,6 +227,7 @@ impl PdfiumEngine {
     ) -> Result<PdfStructureUpdate, String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let Some(indices) = validate_page_order(order, entry.page_ids.len())? else {
             return Ok(structure_update(entry));
         };
@@ -263,6 +264,7 @@ impl PdfiumEngine {
         let turn = quarter_turn(degrees)?;
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let indices = validate_distinct_pages(page_numbers, entry.page_ids.len(), "a rotation")?;
 
         if turn == 0 {
@@ -320,6 +322,7 @@ impl PdfiumEngine {
     ) -> Result<PdfStructureUpdate, String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let indices = validate_pages_to_delete(page_numbers, entry.page_ids.len())?;
 
         let snapshot = entry
@@ -482,6 +485,7 @@ impl PdfiumEngine {
     ) -> Result<PdfStructureUpdate, String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let Some(stash) = entry.stashes.remove(&stash_id) else {
             return Err("there are no stashed pages under this undo entry".into());
         };
@@ -600,6 +604,7 @@ impl PdfiumEngine {
     ) -> Result<PdfStructureUpdate, String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let page_count = entry.page_ids.len();
         // One past the end is a position too, so the check is page_index's
         // with the count stretched by one.
@@ -731,6 +736,7 @@ impl PdfiumEngine {
     ) -> Result<PdfStructureUpdate, String> {
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let page_count = entry.page_ids.len();
         let sources = validate_distinct_pages(page_numbers, page_count, "an insert")?;
         // One past the end is a position too, exactly as a blank page's is.
@@ -814,6 +820,21 @@ impl PdfiumEngine {
         else {
             return Err("PDF document is no longer open".into());
         };
+        entry.ensure_editable()?;
+        // Only a copy of the chosen pages is rewritten, then taken whole.
+        let flattened = if source.output_flattens()? {
+            Some(signatures::flattened_pages(
+                self.pdfium,
+                &source.document,
+                &sources,
+            )?)
+        } else {
+            None
+        };
+        let range = match &flattened {
+            Some(_) => page_range_argument(&(0..sources.len()).collect::<Vec<_>>()),
+            None => page_range_argument(&sources),
+        };
         let merged = copy_only_pages(source, &sources);
 
         // The import may fail partway; snapshot first so a failure rolls the
@@ -824,8 +845,8 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
 
         if let Err(error) = entry.document.pages_mut().copy_pages_from_document(
-            &source.document,
-            &page_range_argument(&sources),
+            flattened.as_ref().unwrap_or(&source.document),
+            &range,
             slot as i32,
         ) {
             return Err(self.restore_document_snapshot(
@@ -852,13 +873,14 @@ impl PdfiumEngine {
         source_document_id: u64,
         page_numbers: &[i32],
     ) -> Result<PdfDocumentInfo, String> {
-        let (bytes, merged) = {
+        let (bytes, merged, flatten) = {
             // PDFium work like any other, so under the store's lock — given
             // back before `open_marked` takes it again.
             let documents = self.lock_documents()?;
             let source = open_entry(&documents, source_document_id)?;
             let sources =
                 validate_distinct_pages(page_numbers, source.page_ids.len(), "a new document")?;
+            let flatten = source.output_flattens()?;
             let mut document = self
                 .pdfium
                 .create_new_pdf()
@@ -882,7 +904,13 @@ impl PdfiumEngine {
                 .save_to_bytes()
                 .map_err(|error| format!("PDFium could not build the new document: {error}"))?;
 
-            (bytes, copy_only_pages(source, &sources))
+            (bytes, copy_only_pages(source, &sources), flatten)
+        };
+        // Byte work, so off the lock.
+        let bytes = if flatten {
+            signatures::flattened_bytes(bytes)?
+        } else {
+            bytes
         };
 
         self.open_marked(bytes, None, &merged)

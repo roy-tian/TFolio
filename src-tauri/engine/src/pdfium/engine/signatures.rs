@@ -10,7 +10,10 @@ use std::{
 };
 
 use super::io::{fingerprint, same_file, write_file_atomically, Fingerprint};
+use super::page_ops::page_range_argument;
+use super::signature_flatten::flatten_signatures;
 use super::*;
+use crate::pdfium::SignatureDecision;
 
 /// Far past any CMS a signer embeds; a larger `/Contents` is not checked.
 const MAX_SIGNATURE_BYTES: usize = 4 * 1024 * 1024;
@@ -22,6 +25,11 @@ pub(super) const SIGNED_ORIGINAL_CHANGED_ERROR: &str = "tfolio:signed-original-c
 /// A write aimed at a file whose intact signatures it would break. Matched as
 /// `EXPORT_SIGNED` in `src/lib/pdf.ts`.
 pub(super) const EXPORT_SIGNED_ERROR: &str = "tfolio:export-signed";
+
+/// A change or a new file that would break intact signatures, asked for before
+/// the reader said what becomes of them. The frontend asks first, so this only
+/// guards the command and nothing there matches it.
+pub(super) const SIGNATURES_UNDECIDED_ERROR: &str = "tfolio:signatures-undecided";
 
 /// A file read for a document, as it stood when read.
 #[derive(Clone, Debug)]
@@ -49,15 +57,165 @@ impl SignatureScan {
         !self.0.is_empty() && frames_intact(file, &self.0)
     }
 
+    pub(super) fn count(&self) -> usize {
+        self.0.len()
+    }
+
     pub(super) fn summary(&self, intact: bool) -> PdfSignatures {
         PdfSignatures {
             count: self.0.len(),
             intact,
+            decision: None,
+            flattened: false,
         }
     }
 }
 
+impl OpenDocument {
+    pub(super) fn signatures(&self) -> PdfSignatures {
+        PdfSignatures {
+            count: self.signature_count,
+            intact: self.bound_to_signed_original(),
+            decision: self.signature_decision,
+            flattened: self.signatures_flattened,
+        }
+    }
+
+    /// An edit breaks intact signatures, so it waits for the reader's word:
+    /// kept, or flattened, which happens in place before the first edit.
+    pub(super) fn ensure_editable(&self) -> Result<(), String> {
+        if self.signed_original.is_none()
+            || self.signature_decision == Some(SignatureDecision::Keep)
+            || self.signatures_flattened
+        {
+            Ok(())
+        } else {
+            Err(SIGNATURES_UNDECIDED_ERROR.into())
+        }
+    }
+
+    /// Whether a new file made of this document's pages draws its signatures
+    /// into them; refused while the reader has not said.
+    pub(super) fn output_flattens(&self) -> Result<bool, String> {
+        if self.signed_original.is_none() || self.signatures_flattened {
+            return Ok(false);
+        }
+
+        match self.signature_decision {
+            Some(decision) => Ok(decision == SignatureDecision::Flatten),
+            None => Err(SIGNATURES_UNDECIDED_ERROR.into()),
+        }
+    }
+}
+
+/// `document` with its signatures drawn into its pages, as a new document;
+/// `None` where there were none to draw. Under the documents lock.
+pub(super) fn flattened_copy(
+    pdfium: &'static Pdfium,
+    document: &PdfDocument<'_>,
+) -> Result<Option<PdfDocument<'static>>, String> {
+    let bytes = document
+        .save_to_bytes()
+        .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?;
+
+    flatten_signatures(&bytes)?
+        .map(|flattened| {
+            pdfium
+                .load_pdf_from_byte_vec(flattened, None)
+                .map_err(|error| format!("PDFium could not open the flattened document: {error}"))
+        })
+        .transpose()
+}
+
+/// Pages `indices` (0-based, ascending) of `source` alone in a new document,
+/// their signatures drawn in: a copy of just these pages, not of the whole
+/// document, goes through the rewrite. Under the documents lock.
+pub(super) fn flattened_pages(
+    pdfium: &'static Pdfium,
+    source: &PdfDocument<'_>,
+    indices: &[usize],
+) -> Result<PdfDocument<'static>, String> {
+    let mut pages = pdfium
+        .create_new_pdf()
+        .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+
+    pages
+        .pages_mut()
+        .copy_pages_from_document(source, &page_range_argument(indices), 0)
+        .map_err(|error| format!("PDFium could not copy the pages: {error}"))?;
+
+    Ok(flattened_copy(pdfium, &pages)?.unwrap_or(pages))
+}
+
+/// Whether page `index` carries a widget, which a signature always has: a
+/// page without one is copied as it is, sparing it the rewrite.
+pub(super) fn has_widgets(source: &PdfDocument<'_>, index: PdfPageIndex) -> Result<bool, String> {
+    let page = source
+        .pages()
+        .get(index)
+        .map_err(|error| format!("PDFium could not load page {}: {error}", index + 1))?;
+
+    Ok(page
+        .annotations()
+        .iter()
+        .any(|annotation| annotation.annotation_type() == PdfPageAnnotationType::Widget))
+}
+
+/// `bytes` with its signatures drawn into its pages: PDFium's fresh output, or
+/// lopdf's rewrite of it.
+pub(super) fn flattened_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    Ok(flatten_signatures(&bytes)?.unwrap_or(bytes))
+}
+
 impl PdfiumEngine {
+    /// Records what becomes of the document's intact signatures. An answer
+    /// may change only until it has acted in place, by an edit or a flatten,
+    /// so a flatten that failed can still give way to keeping the fields.
+    pub fn decide_signatures(
+        &self,
+        document_id: u64,
+        decision: SignatureDecision,
+    ) -> Result<PdfSignatures, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if !entry.signatures_flattened && entry.content_version == 0 {
+            entry.signature_decision = Some(decision);
+        }
+
+        Ok(entry.signatures())
+    }
+
+    /// Draws the document's signatures into its pages in place, before its
+    /// first change: nothing of this session's own is there to keep track of.
+    pub fn flatten_signatures(&self, document_id: u64) -> Result<PdfStructureUpdate, String> {
+        let _operation = self.begin_operation(OperationTarget::Document(document_id));
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if entry.signatures_flattened {
+            return Ok(structure_update(entry));
+        }
+
+        if entry.signature_decision == Some(SignatureDecision::Keep) {
+            return Err("the signatures were chosen to be kept".into());
+        }
+
+        if entry.content_version != 0 {
+            return Err("signatures are flattened only before the document's first change".into());
+        }
+
+        if let Some(flattened) = flattened_copy(self.pdfium, &entry.document)? {
+            entry.document = flattened;
+            entry.invalidate_all_page_revisions();
+        }
+
+        entry.signature_decision = Some(SignatureDecision::Flatten);
+        entry.signatures_flattened = true;
+
+        Ok(structure_update(entry))
+    }
+
     /// Whether a write to `path` would break intact signatures: the file an
     /// open document opened from, wherever it is bound now, or an organize
     /// source. Called with the documents lock held, which precedes organize's.

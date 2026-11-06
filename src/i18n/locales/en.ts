@@ -568,6 +568,29 @@ const en = {
   signatures: {
     count_one: "Contains {{count}} digital signature",
     count_other: "Contains {{count}} digital signatures",
+    promptTitle: "Change a digitally signed file?",
+    promptEdit_one:
+      "“{{name}}” carries a digital signature. Changing it breaks the signature, which may carry compliance risk.",
+    promptEdit_other:
+      "“{{name}}” carries {{count}} digital signatures. Changing it breaks them, which may carry compliance risk.",
+    promptExport_one:
+      "A new file of pages from “{{name}}” cannot keep its digital signature, which may carry compliance risk.",
+    promptExport_other:
+      "A new file of pages from “{{name}}” cannot keep its {{count}} digital signatures, which may carry compliance risk.",
+    promptOrganize_one:
+      "The new PDF takes pages from a signed file and cannot keep its digital signatures, which may carry compliance risk.",
+    promptOrganize_other:
+      "The new PDF takes pages from {{count}} signed files and cannot keep their digital signatures, which may carry compliance risk.",
+    promptOriginal: "The signed file itself is never overwritten.",
+    flattenHint:
+      "Flatten keeps the look: each signature's appearance becomes page content, and the signature itself is removed.",
+    keepHint:
+      "Keep signature fields leaves them in the file, where they show as invalid; an A4 fit drops them.",
+    flatten: "Flatten",
+    keep: "Keep signature fields",
+    cancel: "Cancel",
+    flattenFailed:
+      "The signatures could not be flattened, and nothing was changed. Try again, or keep the signature fields.",
   },
   about: {
     title: "TFolio",

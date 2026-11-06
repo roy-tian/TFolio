@@ -20,7 +20,7 @@ const document = {
     { height: 400, rotation: 0, width: 300 },
   ],
   path: "/tmp/moved.pdf",
-  signatures: { count: 1, intact: true },
+  signatures: { count: 1, decision: null, flattened: false, intact: true },
 }
 
 const payload: MovedTabPayload = {
