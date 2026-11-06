@@ -37,7 +37,6 @@ import {
   exceedsDragThreshold,
   orderWithBlockAt,
 } from "@/lib/pageDrag"
-import { viewRotation } from "@/lib/pageRotation"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -96,10 +95,10 @@ type SidebarThumbnailsProps = {
   /** Where a preview waits while an edit has its page out of the document. */
   parkedPreviews: ParkedPreviews
   renderEpochs: RenderEpochs
-  rotations: number[]
   selectedPages: ReadonlySet<number>
   /** Follow each page through a reorder, so its painted preview moves with it. */
   thumbnailKeys: number[]
+  viewRotation: number
 }
 
 /** The document's pages down the sidebar: where the reader finds a page, and
@@ -126,9 +125,9 @@ export function SidebarThumbnails({
   pages,
   parkedPreviews,
   renderEpochs,
-  rotations,
   selectedPages,
   thumbnailKeys,
+  viewRotation,
 }: SidebarThumbnailsProps) {
   const { t } = useTranslation()
   const listRef = useRef<HTMLDivElement>(null)
@@ -598,7 +597,7 @@ export function SidebarThumbnails({
                 index === incomingAt ? (
                   <CarriedHoles
                     key={CARRY_KEY}
-                    rotation={viewRotation(rotations)}
+                    rotation={viewRotation}
                     sizes={incoming!.carried.sizes}
                   />
                 ) : null
@@ -633,7 +632,7 @@ export function SidebarThumbnails({
                   pageWidth={page.width}
                   parked={parkedPreviews}
                   renderEpoch={renderEpochs[pageNumber] ?? 0}
-                  rotation={rotations[pageNumber - 1] ?? 0}
+                  rotation={viewRotation}
                 />,
               ]
             })}

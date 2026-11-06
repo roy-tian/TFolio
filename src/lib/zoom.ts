@@ -1,4 +1,3 @@
-import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import { dimensionsForRotation, MAX_PAGE_WIDTH, type PdfPageInfo } from "@/lib/pdf"
 
 // `auto` is the sizing a document opens with and has no toolbar toggle: the
@@ -94,13 +93,9 @@ export function zoomToPercent(scale: number) {
  * at this one boundary, so every scale downstream is a plain pixels-over-pixels
  * ratio.
  */
-export function pageFootprint(
-  page: PdfPageInfo,
-  pageNumber: number,
-  rotations: PageRotations,
-) {
+export function pageFootprint(page: PdfPageInfo, viewRotation: number) {
   return dimensionsForRotation(
-    rotationForPage(rotations, pageNumber),
+    viewRotation,
     page.width * POINT_TO_PX,
     page.height * POINT_TO_PX,
   )
@@ -126,15 +121,15 @@ export function pageDisplayWidth(
  */
 export function referenceDimensions(
   pages: PdfPageInfo[],
-  rotations: PageRotations,
+  viewRotation: number,
 ) {
   const counts = new Map<
     string,
     { count: number; height: number; width: number }
   >()
 
-  for (let index = 0; index < pages.length; index += 1) {
-    const { height, width } = pageFootprint(pages[index]!, index + 1, rotations)
+  for (const page of pages) {
+    const { height, width } = pageFootprint(page, viewRotation)
     const key = `${width}x${height}`
     const seen = counts.get(key)
 
@@ -205,7 +200,7 @@ export function autoScale(
 export function fitDimensions(
   pages: PdfPageInfo[],
   pageNumbers: number[],
-  rotations: PageRotations,
+  viewRotation: number,
   fallback: { height: number; width: number },
 ) {
   let height = 0
@@ -218,7 +213,7 @@ export function fitDimensions(
       continue
     }
 
-    const footprint = pageFootprint(page, pageNumber, rotations)
+    const footprint = pageFootprint(page, viewRotation)
     height = Math.max(height, footprint.height)
     width = Math.max(width, footprint.width)
   }

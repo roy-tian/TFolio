@@ -88,11 +88,7 @@ import {
   type PdfExportOutcome,
   type PdfStructureUpdate,
 } from "@/lib/pdf"
-import {
-  rotationForPage,
-  rotationsForPageCount,
-  rotationsAfterRotate,
-} from "@/lib/pageRotation"
+import { turnView } from "@/lib/pageRotation"
 import { ParkedPreviews } from "@/lib/parkedPreviews"
 import { isMacOS } from "@/lib/platform"
 import type {
@@ -244,8 +240,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         ),
       ),
     )
-    const [pageRotations, setPageRotations] = useState<number[]>(
-      () => movedSeed?.pageRotations ?? openedDocument.pages.map(() => 0),
+    const [viewRotation, setViewRotation] = useState(
+      () => movedSeed?.viewRotation ?? 0,
     )
     const [imageExportOpen, setImageExportOpen] = useState(false)
     const [splitOpen, setSplitOpen] = useState(false)
@@ -376,8 +372,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }
         : undefined,
       pages: pdfDocument.pages,
-      rotations: pageRotations,
       viewMode,
+      viewRotation,
       viewerRef,
     })
     // The sidebar's previews are where pages are chosen while they show;
@@ -620,9 +616,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           // The page numbers on the clipboard now name other pages — unless this
           // is the paste's own insert, which says how far they slid.
           pageClipboardStructureChanged(update.numPages)
-          setPageRotations((rotations) =>
-            rotationsForPageCount(rotations, update.numPages),
-          )
         },
         [
           clearNoteFontOffer,
@@ -750,7 +743,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const finishTextDrag = useTextDragSelection({
       enabled: textSelectable,
       pages: pdfDocument.pages,
-      rotations: pageRotations,
+      viewRotation,
       viewerRef,
     })
 
@@ -768,8 +761,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onCommit: annotations.commit,
       opacity: HIGHLIGHT_OPACITY,
       pages: pdfDocument.pages,
-      rotations: pageRotations,
       selectable: textSelectable,
+      viewRotation,
       viewerRef,
     })
 
@@ -778,8 +771,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       active: active && drawingRect,
       onCommit: annotations.commit,
       pages: pdfDocument.pages,
-      rotations: pageRotations,
       style: rectStyle,
+      viewRotation,
       viewerRef,
     })
 
@@ -788,7 +781,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       active: active && erasing,
       onErase: annotations.eraseAt,
       pages: pdfDocument.pages,
-      rotations: pageRotations,
+      viewRotation,
       viewerRef,
     })
 
@@ -798,8 +791,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onCommit: annotations.commit,
       suspended: !active,
       pages: pdfDocument.pages,
-      rotations: pageRotations,
       style: textNoteStyle,
+      viewRotation,
       viewerRef,
     })
 
@@ -1165,9 +1158,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       pdfDocument.pages,
       preferredViewMode,
       restoringRecentView,
-      pageRotations,
       recentPath,
       viewMode,
+      viewRotation,
       viewerHeight,
       viewerWidth,
       zoom.zoomPreviewing,
@@ -1217,16 +1210,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         seed: {
           history: annotationsSeed.history,
           marks: annotationsSeed.marks,
-          pageRotations,
           viewMode: preferredViewMode,
+          viewRotation,
         },
       }
     }, [
       annotations,
-      pageRotations,
       preferredViewMode,
       sampleCurrentView,
       textNote.draft?.text,
+      viewRotation,
     ])
 
     useEffect(() => {
@@ -1589,9 +1582,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               pages={pdfDocument.pages}
               parkedPreviews={parkedPreviews}
               renderEpochs={annotations.renderEpochs}
-              rotations={pageRotations}
               selectedPages={thumbnailSelection.selectedPages}
               thumbnailKeys={thumbnailKeys}
+              viewRotation={viewRotation}
             />
           )}
         </AppSidebar>
@@ -1673,7 +1666,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 key={pdfDocument.id}
                 pages={pdfDocument.pages}
                 renderEpochs={annotations.renderEpochs}
-                rotations={pageRotations}
                 scale={zoom.scale}
                 searchMatchesByPage={search.matchesByPage}
                 activeSearchIndex={search.activeIndex}
@@ -1688,6 +1680,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 textSelectAll={textSelectAll.selectedAll}
                 textSelectionDragging={highlightTool.selectionDragging}
                 viewMode={viewMode}
+                viewRotation={viewRotation}
                 viewerWidth={viewerWidth}
                 zoomPreviewing={zoom.zoomPreviewing}
                 zoomRequest={zoom.zoomRequest}
@@ -1698,7 +1691,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             <ViewerControls
               bookApplies={bookApplies}
               onChangeViewMode={changeViewMode}
-              onRotate={() => setPageRotations(rotationsAfterRotate)}
+              onRotate={() => setViewRotation(turnView)}
               page={{
                 count: pdfDocument.numPages,
                 current: currentPage,
@@ -1722,7 +1715,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             onTextChange={textNote.setText}
             page={pdfDocument.pages[textNote.draft.pageNumber - 1]!}
             preparing={textNote.preparing}
-            rotation={rotationForPage(pageRotations, textNote.draft.pageNumber)}
+            rotation={viewRotation}
             style={textNoteStyle}
             viewerRef={viewerRef}
           />

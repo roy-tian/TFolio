@@ -8,7 +8,6 @@ import {
   type BoxFraction,
 } from "@/lib/annotationGeometry"
 import type { RectCommand, RectStyle, RenderEpochs } from "@/lib/annotations"
-import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import {
   isRectLargeEnough,
@@ -23,8 +22,8 @@ type UseRectToolOptions = {
     onApplied: (epochs: RenderEpochs) => void,
   ) => Promise<boolean>
   pages: PdfPageInfo[]
-  rotations: PageRotations
   style: RectStyle
+  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -45,8 +44,8 @@ export function useRectTool({
   active,
   onCommit,
   pages,
-  rotations,
   style,
+  viewRotation,
   viewerRef,
 }: UseRectToolOptions) {
   const [draft, setDraft] = useState<RectDraft | null>(null)
@@ -178,7 +177,7 @@ export function useRectTool({
         current.from,
         to,
         current.page,
-        rotationForPage(rotations, current.pageNumber),
+        viewRotation,
       )
 
       if (!isRectLargeEnough(bounds)) {
@@ -227,7 +226,7 @@ export function useRectTool({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, onCommit, pages, release, rotations, style, takeId, viewerRef])
+  }, [active, onCommit, pages, release, style, takeId, viewRotation, viewerRef])
 
   return { drafts: draft ? [...previews, draft] : previews, onPagePaint }
 }

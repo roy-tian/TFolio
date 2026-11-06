@@ -112,8 +112,8 @@ export async function fetchWindowRects(): Promise<WindowRect[]> {
 export type MovedTabSeed = {
   history: AnnotationHistory
   marks: [entryId: number, markIds: number[]][]
-  pageRotations: number[]
   viewMode: ViewMode
+  viewRotation: number
 }
 
 /** Everything a tab is, beyond its document's engine state: what the strip
@@ -150,6 +150,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value)
+}
+
+// Layout swaps a page's sides only at exactly 90 and 270.
+function isQuarterTurn(value: unknown): value is number {
+  return value === 0 || value === 90 || value === 180 || value === 270
 }
 
 function isMarks(value: unknown): value is MovedTabSeed["marks"] {
@@ -198,9 +203,8 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     !isNumber(seed.history.nextId) ||
     !isNumber(seed.history.savedId) ||
     !isMarks(seed.marks) ||
-    !Array.isArray(seed.pageRotations) ||
-    !seed.pageRotations.every(isNumber) ||
-    !isViewMode(seed.viewMode)
+    !isViewMode(seed.viewMode) ||
+    !isQuarterTurn(seed.viewRotation)
   ) {
     return null
   }
@@ -219,8 +223,8 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     seed: {
       history: seed.history as unknown as AnnotationHistory,
       marks: seed.marks,
-      pageRotations: seed.pageRotations,
       viewMode: seed.viewMode,
+      viewRotation: seed.viewRotation,
     },
   }
 

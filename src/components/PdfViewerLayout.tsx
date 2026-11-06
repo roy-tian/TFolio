@@ -7,7 +7,6 @@ import { ViewportHold, ViewportHoldContext } from "@/hooks/useNearViewport"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview } from "@/hooks/useTextNoteTool"
 import type { RenderEpochs } from "@/lib/annotations"
-import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo, PdfSearchMatch } from "@/lib/pdf"
 import { pairPages, type ViewMode } from "@/lib/viewMode"
 import { BOOK_GAP, CONTENT_PADDING_X, pageDisplayWidth } from "@/lib/zoom"
@@ -63,13 +62,13 @@ type LayoutProps = {
   pages: PdfPageInfo[]
   renderEpochs: RenderEpochs
   renderScale: number
-  rotations: PageRotations
   /** Resolved zoom; the fit modes have already been worked out against it. */
   scale: number
   searchMatchesByPage: ReadonlyMap<number, IndexedPdfSearchMatch[]>
   textEpochs: RenderEpochs
   /** The app's own select-all stands, so every page paints its bands. */
   textSelectAll: boolean
+  viewRotation: number
 }
 
 function SingleLayout({
@@ -84,11 +83,11 @@ function SingleLayout({
   pages,
   renderEpochs,
   renderScale,
-  rotations,
   scale,
   searchMatchesByPage,
   textEpochs,
   textSelectAll,
+  viewRotation,
 }: LayoutProps) {
   return pages.map((page, index) => (
     <PdfPage
@@ -103,7 +102,7 @@ function SingleLayout({
       pageNumber={index + 1}
       renderEpoch={renderEpochs[index + 1] ?? 0}
       renderScale={renderScale}
-      rotation={rotationForPage(rotations, index + 1)}
+      rotation={viewRotation}
       scale={scale}
       searchMatches={searchMatchesByPage.get(index + 1) ?? NO_SEARCH_MATCHES}
       activeSearchIndex={activeSearchPage === index + 1 ? activeSearchIndex : null}
@@ -125,21 +124,17 @@ function BookLayout({
   pages,
   renderEpochs,
   renderScale,
-  rotations,
   scale,
   searchMatchesByPage,
   textEpochs,
   textSelectAll,
+  viewRotation,
 }: LayoutProps) {
   return pairPages(pages.length).map((row) => {
     // Each half is as wide as the spread's wider page, keeping every spine on
     // the column's axis; the padding pushes the left page to the spine.
     const widths = row.map((pageNumber) =>
-      pageDisplayWidth(
-        pages[pageNumber - 1]!,
-        rotationForPage(rotations, pageNumber),
-        scale,
-      ),
+      pageDisplayWidth(pages[pageNumber - 1]!, viewRotation, scale),
     )
     const halfWidth = Math.max(...widths)
 
@@ -169,7 +164,7 @@ function BookLayout({
             pageNumber={pageNumber}
             renderEpoch={renderEpochs[pageNumber] ?? 0}
             renderScale={renderScale}
-            rotation={rotationForPage(rotations, pageNumber)}
+            rotation={viewRotation}
             scale={scale}
             searchMatches={searchMatchesByPage.get(pageNumber) ?? NO_SEARCH_MATCHES}
             activeSearchIndex={activeSearchPage === pageNumber ? activeSearchIndex : null}
@@ -194,7 +189,6 @@ type PdfViewerLayoutProps = {
   fileName: string
   pages: PdfPageInfo[]
   renderEpochs: RenderEpochs
-  rotations: PageRotations
   scale: number
   searchMatchesByPage: ReadonlyMap<number, IndexedPdfSearchMatch[]>
   textEpochs: RenderEpochs
@@ -203,6 +197,7 @@ type PdfViewerLayoutProps = {
   textSelectAll: boolean
   onCopyAllText: () => void
   viewMode: ViewMode
+  viewRotation: number
   viewerWidth: number
   textSelectionDragging: boolean
   zoomPreviewing: boolean
@@ -227,12 +222,12 @@ export function PdfViewerLayout({
   fileName,
   pages,
   renderEpochs,
-  rotations,
   scale,
   searchMatchesByPage,
   textEpochs,
   textSelectAll,
   viewMode,
+  viewRotation,
   viewerWidth,
   textSelectionDragging,
   zoomPreviewing,
@@ -262,11 +257,11 @@ export function PdfViewerLayout({
     pages,
     renderEpochs,
     renderScale,
-    rotations,
     scale,
     searchMatchesByPage,
     textEpochs,
     textSelectAll,
+    viewRotation,
   }
 
   return (

@@ -1,21 +1,17 @@
 import { describe, expect, it } from "bun:test"
 
-import {
-  pagesToRotate,
-  rotationForPage,
-  rotationsAfterRotate,
-  rotationsForPageCount,
-} from "@/lib/pageRotation"
+import { pagesToRotate, turnView } from "@/lib/pageRotation"
 
 const selected = (...pages: number[]) => new Set(pages)
 
-describe("rotationsAfterRotate", () => {
-  it("turns every page of a reading view a quarter further", () => {
-    expect(rotationsAfterRotate([0, 90, 180])).toEqual([90, 180, 270])
+describe("turnView", () => {
+  it("turns a reading view a quarter further", () => {
+    expect(turnView(0)).toBe(90)
+    expect(turnView(180)).toBe(270)
   })
 
   it("wraps a full turn back to upright", () => {
-    expect(rotationsAfterRotate([270])).toEqual([0])
+    expect(turnView(270)).toBe(0)
   })
 })
 
@@ -34,19 +30,5 @@ describe("pagesToRotate", () => {
 
   it("leaves out a selected page the document no longer has", () => {
     expect(pagesToRotate(2, selected(2, 5))).toEqual([2])
-  })
-})
-
-describe("page rotation lookup", () => {
-  it("falls back to upright outside the current page list", () => {
-    expect(rotationForPage([90], 1)).toBe(90)
-    expect(rotationForPage([90], 2)).toBe(0)
-  })
-
-  it("gives every page after a structure change the turn the view shows", () => {
-    expect(rotationsForPageCount([90, 90, 90], 2)).toEqual([90, 90])
-    // The added pages are turned with the rest, not left upright at the end.
-    expect(rotationsForPageCount([270], 3)).toEqual([270, 270, 270])
-    expect(rotationsForPageCount([0, 0], 4)).toEqual([0, 0, 0, 0])
   })
 })
