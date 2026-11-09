@@ -148,6 +148,10 @@ struct PdfPageInfo {
     width: f32,
     height: f32,
     rotation: f32,
+    /// Shows a signature field's widget: its thumbnail is marked. Left out
+    /// when false, as nearly every page is.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    signed: bool,
 }
 
 /// A text run's bounding box in *unrotated* page points, top-left origin: the

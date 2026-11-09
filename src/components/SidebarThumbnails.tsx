@@ -20,6 +20,7 @@ import {
   type PageDragGhostState,
 } from "@/components/PageDragGhost"
 import { PageMenuContent } from "@/components/PageContextMenu"
+import { PageSignatureMark } from "@/components/SignatureBadge"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
@@ -633,6 +634,7 @@ export function SidebarThumbnails({
                   parked={parkedPreviews}
                   renderEpoch={renderEpochs[pageNumber] ?? 0}
                   rotation={viewRotation}
+                  signed={page.signed === true}
                 />,
               ]
             })}
@@ -747,6 +749,7 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
   parked,
   renderEpoch,
   rotation,
+  signed,
 }: {
   caption: number
   documentId: number
@@ -765,6 +768,7 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
   parked: ParkedPreviews
   renderEpoch: number
   rotation: number
+  signed: boolean
 }) {
   const itemRef = useRef<HTMLLIElement>(null)
   const nearView = useNearViewport(itemRef, RETAIN_MARGIN)
@@ -782,6 +786,7 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
           isCurrent={isCurrent}
           isCut={isCut}
           isSelected={isSelected}
+          mark={signed ? <PageSignatureMark /> : undefined}
           onOpen={onNavigate}
           onSelect={onSelect}
           pageHeight={pageHeight}

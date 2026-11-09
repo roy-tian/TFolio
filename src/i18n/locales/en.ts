@@ -603,6 +603,9 @@ const en = {
       "As set in Settings, the digital signatures are flattened for this change. The signed file stays as it is.",
     appliedKeep:
       "As set in Settings, the signature fields are kept for this change and will show as invalid. The signed file stays as it is.",
+    brokenCount_one: "Contains {{count}} broken digital signature",
+    brokenCount_other: "Contains {{count}} broken digital signatures",
+    page: "This page carries a digital signature",
   },
   about: {
     title: "TFolio",

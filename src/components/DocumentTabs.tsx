@@ -44,7 +44,7 @@ import {
   type TabId,
 } from "@/lib/documentTabs"
 import { TAB_SPRING_MS } from "@/lib/pageCarry"
-import type { PdfSignatures } from "@/lib/pdf"
+import { signatureMark, type PdfSignatures } from "@/lib/pdf"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
@@ -99,6 +99,8 @@ function TabDragGhost({ drag, tab }: {
   drag: ListDragState
   tab: DocumentTabItem
 }) {
+  const mark = signatureMark(tab.document.signatures)
+
   return createPortal(
     <div
       aria-hidden
@@ -122,8 +124,13 @@ function TabDragGhost({ drag, tab }: {
         <span className="size-2 shrink-0 rounded-full bg-primary" />
       ) : null}
       <span className="truncate">{tab.name}</span>
-      {tab.document.signatures.intact ? (
-        <FileSignature className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+      {mark ? (
+        <FileSignature
+          className={cn(
+            "ml-auto size-3.5 shrink-0",
+            mark === "broken" ? "text-warning" : "text-muted-foreground",
+          )}
+        />
       ) : null}
     </div>,
     document.body,
@@ -312,6 +319,7 @@ export function DocumentTabs({
                 const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
                 const divided = !selected && previousId !== activeId
                 const wayOffset = drag?.cellOffsets[index] ?? 0
+                const mark = signatureMark(tab.document.signatures)
 
                 return (
                   <ContextMenu key={tab.id}>
@@ -385,8 +393,9 @@ export function DocumentTabs({
                     </HintTooltip>
                     {/* Beside the tab's button, not in it: its own hint, and
                         no text added to the name the button reads as. */}
-                    {tab.document.signatures.intact ? (
+                    {mark ? (
                       <SignatureBadge
+                        broken={mark === "broken"}
                         className="size-6"
                         count={tab.document.signatures.count}
                         inDelayGroup
@@ -526,12 +535,20 @@ export function DocumentTabs({
               >
                 <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
                 <span className="min-w-0 flex-1 truncate">{tab.name}</span>
-                {tab.document.signatures.intact ? (
+                {signatureMark(tab.document.signatures) ? (
                   <FileSignature
-                    aria-label={t("signatures.count", {
-                      count: tab.document.signatures.count,
-                    })}
-                    className="size-3.5 shrink-0 text-muted-foreground"
+                    aria-label={t(
+                      signatureMark(tab.document.signatures) === "broken"
+                        ? "signatures.brokenCount"
+                        : "signatures.count",
+                      { count: tab.document.signatures.count },
+                    )}
+                    className={cn(
+                      "size-3.5 shrink-0",
+                      signatureMark(tab.document.signatures) === "broken"
+                        ? "text-warning"
+                        : "text-muted-foreground",
+                    )}
                     role="img"
                   />
                 ) : null}

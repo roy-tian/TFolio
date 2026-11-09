@@ -37,6 +37,7 @@ import type { FileBookmark, OrganizeGroup, OrganizeSourceKind } from "@/lib/orga
 import { DRAG_CLICK_WINDOW } from "@/lib/pageDrag"
 import { matchesShortcut, shortcuts } from "@/lib/shortcuts"
 import { choiceAfterClick, type SelectionModifiers } from "@/lib/thumbnailSelection"
+import { signatureMark } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
 function KindIcon({ kind }: { kind: OrganizeSourceKind }) {
@@ -147,8 +148,10 @@ type FileEntryProps = {
   onToggle: (groupId: number) => void
   open: boolean
   selected: boolean
-  /** Intact signatures in the file the group was added as; 0 for none. */
+  /** Signatures in the file the group was added as; 0 for none. */
   signatures: number
+  /** Those signatures no longer hold in that file. */
+  signaturesBroken: boolean
 }
 
 /** A file and the bookmarks under it. Memoised apart from its cell, which a
@@ -170,6 +173,7 @@ const FileEntry = memo(function FileEntry({
   open,
   selected,
   signatures,
+  signaturesBroken,
 }: FileEntryProps) {
   const { t } = useTranslation()
   const rowRef = useRef<HTMLDivElement>(null)
@@ -262,7 +266,11 @@ const FileEntry = memo(function FileEntry({
               </span>
             </HintTooltip>
             {signatures > 0 ? (
-              <SignatureBadge className="size-5" count={signatures} />
+              <SignatureBadge
+                broken={signaturesBroken}
+                className="size-5"
+                count={signatures}
+              />
             ) : null}
             <span className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums">
               {group.slots.length}
@@ -479,8 +487,9 @@ export function OrganizeFileList({
     sources.get(group.originSourceId)?.kind ?? "pdf"
   const signaturesOf = (group: OrganizeGroup) => {
     const signatures = sources.get(group.originSourceId)?.signatures
+    const mark = signatures ? signatureMark(signatures) : null
 
-    return signatures?.intact ? signatures.count : 0
+    return { broken: mark === "broken", count: mark ? signatures!.count : 0 }
   }
   const dragged = drag ? plan.groups[drag.index] : undefined
   const lifted = new Set(drag?.moving)
@@ -610,6 +619,7 @@ export function OrganizeFileList({
           {plan.groups.map((group, index) => {
             const offset = drag?.cellOffsets[index] ?? 0
             const moving = lifted.has(index)
+            const signatures = signaturesOf(group)
 
             return (
               <li
@@ -654,7 +664,8 @@ export function OrganizeFileList({
                     // tall, however many bookmarks it carries.
                     open={!drag && !closed.has(group.id)}
                     selected={fileSelection.has(group.id)}
-                    signatures={signaturesOf(group)}
+                    signatures={signatures.count}
+                    signaturesBroken={signatures.broken}
                   />
                 </div>
               </li>

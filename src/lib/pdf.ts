@@ -9,6 +9,8 @@ export type PdfPageInfo = {
   // Clockwise rotation in degrees (0/90/180/270). `width`/`height` are the
   // displayed dimensions with this rotation already applied.
   rotation: number
+  /** Shows a signature field's widget; absent on nearly every page. */
+  signed?: boolean
   width: number
 }
 
@@ -75,6 +77,17 @@ export type PdfDocumentInfo = {
   /** As the backend last reported them: an open, a structure update, or a
       Save As, which moves an edited document off the signed file. */
   signatures: PdfSignatures
+}
+
+/** What a file's badge says: signatures still intact in the file it is bound
+    to, or signatures it carries that no longer hold — a rewrite's, or ones
+    already broken when it opened. Flattened ones are page content, not signatures. */
+export function signatureMark(signatures: PdfSignatures): "intact" | "broken" | null {
+  if (signatures.intact) {
+    return "intact"
+  }
+
+  return signatures.count > 0 && !signatures.flattened ? "broken" : null
 }
 
 export function isPdfSignatures(value: unknown): value is PdfSignatures {

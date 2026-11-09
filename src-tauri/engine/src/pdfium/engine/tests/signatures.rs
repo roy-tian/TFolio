@@ -61,6 +61,7 @@ fn a_signed_file_opens_with_its_signatures_intact() {
         .expect("PDFium should open the signed PDF");
     assert_eq!(signed.signatures.count, 1);
     assert!(signed.signatures.intact);
+    assert!(signed.pages[0].signed, "the seal's page is marked");
 
     // From bytes there is no file to check the signature against.
     let unbound = engine
@@ -74,6 +75,7 @@ fn a_signed_file_opens_with_its_signatures_intact() {
         .expect("PDFium should open the PDF");
     assert_eq!(plain.signatures.count, 0);
     assert!(!plain.signatures.intact);
+    assert!(!plain.pages[0].signed);
 
     // PDFium's rewrite keeps the signature but moves what its range frames.
     let rewritten = directory.join("rewritten.pdf");
@@ -230,6 +232,7 @@ fn an_organize_source_reports_its_signatures() {
         .expect("the sources should be read");
     assert_eq!(infos[0].signatures.count, 1);
     assert!(infos[0].signatures.intact);
+    assert!(infos[0].pages[0].signed);
     assert_eq!(infos[1].signatures.count, 0);
 
     // An assembly saves through Save As; no document may replace the source.
@@ -275,9 +278,10 @@ fn an_edit_waits_for_the_reader_to_say_what_becomes_of_the_signatures() {
         .decide_signatures(signed.id, SignatureDecision::Keep)
         .expect("the answer should be recorded");
     assert_eq!(decided.decision, Some(SignatureDecision::Keep));
-    engine
+    let turned = engine
         .rotate_pages(signed.id, &[1], 90)
         .expect("a kept signature lets the edit through");
+    assert!(turned.pages[0].signed, "the mark follows its page");
 
     // An answer stands once it has acted: the edit above kept the fields.
     let again = engine
@@ -311,6 +315,10 @@ fn a_flatten_draws_the_seal_in_and_keeps_the_page_s_other_annotations() {
         .flatten_signatures(signed.id)
         .expect("PDFium should flatten the signatures");
     assert!(update.signatures.flattened);
+    assert!(
+        !update.pages[0].signed,
+        "a flattened page carries no signature"
+    );
     assert!(
         update.signatures.intact,
         "still bound to the signed file, which stays as it was"

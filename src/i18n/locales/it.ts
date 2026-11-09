@@ -604,6 +604,9 @@ const it = {
       "Come da Impostazioni, le firme digitali vengono appiattite per questa modifica. Il file firmato resta com’è.",
     appliedKeep:
       "Come da Impostazioni, i campi firma vengono mantenuti per questa modifica e risulteranno non validi. Il file firmato resta com’è.",
+    brokenCount_one: "Contiene {{count}} firma digitale danneggiata",
+    brokenCount_other: "Contiene {{count}} firme digitali danneggiate",
+    page: "Questa pagina contiene una firma digitale",
   },
   about: {
     title: "TFolio",

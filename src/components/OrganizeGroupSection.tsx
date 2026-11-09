@@ -9,6 +9,7 @@ import {
   PAPER_CONTROLS_SHOWN,
   PdfThumbnail,
 } from "@/components/PdfThumbnail"
+import { PageSignatureMark } from "@/components/SignatureBadge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useNearViewport } from "@/hooks/useNearViewport"
@@ -125,6 +126,7 @@ export function GroupSection({
               pageNumber={slot.kind === "page" ? slot.pageNumber : 0}
               pageWidth={page?.width ?? 0}
               paperWidth={paperWidth}
+              signed={page?.signed === true}
               slotKey={slot.key}
               sourceId={slot.kind === "page" ? slot.sourceId : -1}
               turn={slot.kind === "page" ? slot.turn : 0}
@@ -167,6 +169,7 @@ const SlotCell = memo(function SlotCell({
   pageNumber,
   pageWidth,
   paperWidth,
+  signed,
   slotKey,
   sourceId,
   turn,
@@ -186,6 +189,7 @@ const SlotCell = memo(function SlotCell({
   pageNumber: number
   pageWidth: number
   paperWidth: number
+  signed: boolean
   slotKey: number
   sourceId: number
   turn: number
@@ -268,6 +272,7 @@ const SlotCell = memo(function SlotCell({
             isCut={isCut}
             isSelected={isSelected}
             label={label}
+            mark={signed ? <PageSignatureMark /> : undefined}
             onOpen={noop}
             onSelect={noop}
             overlay={overlay}

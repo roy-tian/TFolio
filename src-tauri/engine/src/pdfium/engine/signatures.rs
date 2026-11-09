@@ -108,6 +108,38 @@ impl OpenDocument {
     }
 }
 
+/// Marks the pages showing a signature field's widget, which their thumbnails
+/// mark, and returns their indices; none for a document without signatures.
+pub(super) fn mark_signature_pages(
+    scan: &SignatureScan,
+    document: &PdfDocument<'_>,
+    pages: &mut [PdfPageInfo],
+) -> Vec<usize> {
+    if scan.count() == 0 {
+        return Vec::new();
+    }
+
+    let signed: Vec<usize> = document
+        .pages()
+        .iter()
+        .enumerate()
+        .filter(|(_, page)| {
+            page.annotations().iter().any(|annotation| {
+                matches!(annotation.as_form_field(), Some(PdfFormField::Signature(_)))
+            })
+        })
+        .map(|(index, _)| index)
+        .collect();
+
+    for &index in &signed {
+        if let Some(page) = pages.get_mut(index) {
+            page.signed = true;
+        }
+    }
+
+    signed
+}
+
 /// `document` with its signatures drawn into its pages, as a new document;
 /// `None` where there were none to draw. Under the documents lock.
 pub(super) fn flattened_copy(
@@ -212,6 +244,7 @@ impl PdfiumEngine {
 
         entry.signature_decision = Some(SignatureDecision::Flatten);
         entry.signatures_flattened = true;
+        entry.signed_page_ids.clear();
 
         Ok(structure_update(entry))
     }

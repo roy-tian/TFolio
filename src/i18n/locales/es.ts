@@ -605,6 +605,9 @@ const es = {
       "Según los ajustes, las firmas digitales se aplanan en este cambio. El archivo firmado queda como está.",
     appliedKeep:
       "Según los ajustes, los campos de firma se conservan en este cambio y aparecerán como no válidos. El archivo firmado queda como está.",
+    brokenCount_one: "Contiene {{count}} firma digital dañada",
+    brokenCount_other: "Contiene {{count}} firmas digitales dañadas",
+    page: "Esta página tiene una firma digital",
   },
   about: {
     title: "TFolio",

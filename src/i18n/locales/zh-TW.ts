@@ -591,6 +591,9 @@ const zhTW = {
     remember: "記住我的選擇（可在設定中變更）",
     appliedFlatten: "已依設定將數位簽章平面化。已簽署的原始檔案保持不變。",
     appliedKeep: "已依設定保留簽章欄位，它們將顯示為無效。已簽署的原始檔案保持不變。",
+    brokenCount_one: "含 {{count}} 個已損壞的數位簽章",
+    brokenCount_other: "含 {{count}} 個已損壞的數位簽章",
+    page: "此頁含數位簽章",
   },
   about: {
     title: "TFolio",

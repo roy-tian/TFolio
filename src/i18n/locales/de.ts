@@ -606,6 +606,9 @@ const de = {
       "Wie in den Einstellungen festgelegt, werden die digitalen Signaturen für diese Änderung reduziert. Die signierte Datei bleibt unverändert.",
     appliedKeep:
       "Wie in den Einstellungen festgelegt, bleiben die Signaturfelder für diese Änderung erhalten und erscheinen ungültig. Die signierte Datei bleibt unverändert.",
+    brokenCount_one: "Enthält {{count}} beschädigte digitale Signatur",
+    brokenCount_other: "Enthält {{count}} beschädigte digitale Signaturen",
+    page: "Diese Seite trägt eine digitale Signatur",
   },
   about: {
     title: "TFolio",

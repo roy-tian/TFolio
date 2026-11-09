@@ -12,6 +12,7 @@ import {
   pickCurrentPage,
   resolveOutputScale,
   SIGNED_ORIGINAL_CHANGED,
+  signatureMark,
 } from "./pdf"
 
 describe("isPdfPath", () => {
@@ -153,5 +154,22 @@ describe("resolveOutputScale", () => {
     expect(resolveOutputScale(1)).toBe(1)
     expect(resolveOutputScale(1.5)).toBe(1.5)
     expect(resolveOutputScale(2.5)).toBe(2)
+  })
+})
+
+describe("signatureMark", () => {
+  const signatures = { count: 2, decision: null, flattened: false, intact: true }
+
+  test("marks a document still bound to its intact signed file", () => {
+    expect(signatureMark(signatures)).toBe("intact")
+  })
+
+  test("marks signatures that no longer hold as broken", () => {
+    expect(signatureMark({ ...signatures, decision: "keep", intact: false })).toBe("broken")
+  })
+
+  test("leaves flattened and unsigned documents unmarked", () => {
+    expect(signatureMark({ ...signatures, flattened: true, intact: false })).toBeNull()
+    expect(signatureMark({ ...signatures, count: 0, intact: false })).toBeNull()
   })
 })

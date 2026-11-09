@@ -326,7 +326,7 @@ impl PdfiumEngine {
         let Ok(document) = load_merge_source(self.pdfium, file, &read_from) else {
             return refused(unreadable);
         };
-        let layout = document_layout(&document);
+        let mut layout = document_layout(&document);
 
         if layout.num_pages < 1 {
             return refused(unreadable);
@@ -335,6 +335,10 @@ impl PdfiumEngine {
         // A conversion is this app's own output, never a signed file.
         let scan =
             matches!(kind, MergeSourceKind::Pdf).then(|| signatures::SignatureScan::of(&document));
+
+        if let Some(scan) = &scan {
+            signatures::mark_signature_pages(scan, &document, &mut layout.pages);
+        }
 
         let mut organize = self.lock_organize();
         let id = self.next_organize_id.fetch_add(1, Ordering::Relaxed);

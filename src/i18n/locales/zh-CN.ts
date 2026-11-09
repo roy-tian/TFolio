@@ -574,6 +574,9 @@ const zhCN = {
     remember: "记住我的选择（可在设置中更改）",
     appliedFlatten: "已按设置将数字签名扁平化。已签名的原文件保持不变。",
     appliedKeep: "已按设置保留签名域，它们将显示为无效。已签名的原文件保持不变。",
+    brokenCount_one: "含 {{count}} 个已损坏的数字签名",
+    brokenCount_other: "含 {{count}} 个已损坏的数字签名",
+    page: "此页含数字签名",
   },
   about: {
     title: "TFolio",

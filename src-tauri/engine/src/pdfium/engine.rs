@@ -166,6 +166,9 @@ struct OpenDocument {
     signed_original: Option<OpenedFile>,
     /// As PDFium counted them at the open.
     signature_count: usize,
+    /// Pages showing a signature widget, which their thumbnails mark; they
+    /// follow their pages, and a flatten in place clears them.
+    signed_page_ids: HashSet<u64>,
     signature_decision: Option<SignatureDecision>,
     signatures_flattened: bool,
 }
@@ -590,11 +593,12 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not open the document: {error}"))?;
         let DocumentLayout {
             num_pages,
-            pages,
+            mut pages,
             outline,
         } = document_layout(&document);
         let source_path = source.as_ref().map(|source| source.path.clone());
         let scan = signatures::SignatureScan::of(&document);
+        let signed_pages = signatures::mark_signature_pages(&scan, &document, &mut pages);
         let id = self.next_document_id.fetch_add(1, Ordering::Relaxed);
         let path = source_path
             .as_deref()
@@ -621,6 +625,7 @@ impl PdfiumEngine {
                 compress_cache: None,
                 revisions: HashMap::new(),
                 signature_count: scan.count(),
+                signed_page_ids: signed_pages.iter().map(|&index| index as u64).collect(),
                 signature_decision: None,
                 signatures_flattened: false,
                 signed_original: None,
@@ -1054,6 +1059,7 @@ fn measure_page(page: &PdfPage<'_>) -> PdfPageInfo {
         width: page.width().value,
         height: page.height().value,
         rotation: page_rotation_degrees(page),
+        signed: false,
     }
 }
 
@@ -1075,6 +1081,7 @@ const UNMEASURED_PAGE: PdfPageInfo = PdfPageInfo {
     width: 595.0,
     height: 842.0,
     rotation: 0.0,
+    signed: false,
 };
 
 /// Measures only pages not measured before, so a reorder or delete touches
@@ -1104,8 +1111,9 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
     entry
         .page_ids
         .iter()
-        .map(|page_id| {
-            entry
+        .map(|page_id| PdfPageInfo {
+            signed: entry.signed_page_ids.contains(page_id),
+            ..entry
                 .page_geometry
                 .get(page_id)
                 .copied()

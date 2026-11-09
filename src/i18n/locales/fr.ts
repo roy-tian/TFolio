@@ -606,6 +606,9 @@ const fr = {
       "Comme le veulent les Réglages, les signatures numériques sont aplaties pour cette modification. Le fichier signé reste tel quel.",
     appliedKeep:
       "Comme le veulent les Réglages, les champs de signature sont gardés pour cette modification et apparaîtront non valides. Le fichier signé reste tel quel.",
+    brokenCount_one: "Contient {{count}} signature numérique rompue",
+    brokenCount_other: "Contient {{count}} signatures numériques rompues",
+    page: "Cette page porte une signature numérique",
   },
   about: {
     title: "TFolio",

@@ -65,6 +65,9 @@ type PdfThumbnailProps = {
   /** Controls over the paper, laid out against its box, which follows the
       paper through a turn and is a `PAPER_CONTROLS_HOST`. */
   overlay?: ReactNode
+  /** A sign beside the caption: over the paper it would take the page's
+      clicks in its corner, and the organize card's controls sit there. */
+  mark?: ReactNode
   /** Whether `rotation` is the page's own, so a change spins the preview as a
       page edit does. Otherwise it is the view's, turning every page at once,
       and snaps. */
@@ -98,6 +101,7 @@ export function PdfThumbnail({
   caption,
   frame,
   overlay,
+  mark,
   animateRotation = false,
   parked,
   parkKey,
@@ -329,11 +333,12 @@ export function PdfThumbnail({
       )}
       <span
         className={cn(
-          "flex items-end font-mono text-xs tabular-nums",
+          "flex items-end gap-1 font-mono text-xs tabular-nums",
           isCurrent ? "font-semibold text-foreground" : "text-muted-foreground",
         )}
         style={{ height: THUMBNAIL_CAPTION_HEIGHT }}
       >
+        {mark}
         {caption ?? pageNumber}
       </span>
     </div>

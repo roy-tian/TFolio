@@ -165,7 +165,9 @@ describe("TFolio signed documents", () => {
     await pointSaveAsAt(editedPath)
     await clickAppMenuItem("save-as")
     await expect(tabNamed("edited.pdf")).toHaveAttribute("aria-selected", "true")
-    await expect($(tabBadge)).not.toBeExisting()
+    // The kept field went into the rewrite, where its signature no longer holds.
+    await expect($(`${tabBadge}[data-signatures-broken]`)).toBeDisplayed()
+    expect(await tooltipOn(tabBadge)).toBe("Contains 1 broken digital signature")
     expect(existsSync(editedPath)).toBe(true)
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
   })
@@ -193,6 +195,8 @@ describe("TFolio signed documents", () => {
       ),
     workspace)
     expect(badges).toEqual(["1", null])
+    // Only the seal's page card is marked.
+    expect((await $$(`${workspace} [data-page-signature]`).getElements()).length).toBe(1)
 
     // The new PDF is PDFium's rewrite: over the signed source it would break
     // every signature, so the write is refused before it lands.
@@ -218,6 +222,10 @@ describe("TFolio signed documents", () => {
     await answerPrompt(null)
     expect(await tool.getAttribute("aria-pressed")).not.toBe("true")
 
+    const pageMark = "[data-active='true'] [data-page-signature]"
+    await $(pageMark).waitForExist()
+    await browser.saveScreenshot("artifacts/e2e/signatures-marks.png")
+
     await tool.click()
     await answerPrompt("signatures-flatten")
     await expect(tool).toHaveAttribute("aria-pressed", "true")
@@ -225,6 +233,8 @@ describe("TFolio signed documents", () => {
       timeout: 15_000,
       timeoutMsg: "the flattened page lost its seal",
     })
+    // Page content now, no longer a signature: the thumbnail mark goes.
+    await $(pageMark).waitForExist({ reverse: true })
 
     // Answered once: the edit itself goes through without another prompt.
     const clean = await pageInk()
@@ -240,6 +250,7 @@ describe("TFolio signed documents", () => {
     await clickAppMenuItem("save-as")
     await expect(tabNamed("edited.pdf")).toHaveAttribute("aria-selected", "true")
     expect(readFileSync(editedPath).includes("/ByteRange")).toBe(false)
+    await expect($(tabBadge)).not.toBeExisting()
     expect(readFileSync(sourcePath).equals(original)).toBe(true)
   })
 
