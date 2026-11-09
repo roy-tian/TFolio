@@ -56,7 +56,7 @@ impl OrganizeSources {
     pub(super) fn is_signed_source(&self, path: &Path) -> bool {
         self.entries
             .values()
-            .any(|source| source.signed && io::same_file(&source.path, path))
+            .any(|source| source.signed && same_file(&source.path, path))
     }
 
     fn entry(&self, scope: &str, id: u64) -> Result<&OrganizeSource, String> {

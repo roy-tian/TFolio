@@ -16,6 +16,7 @@ import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { NoticeCenter } from "@/components/NoticeCenter"
 import { OrganizeFillPrompt } from "@/components/OrganizeFillPrompt"
+import { ReloadPrompt } from "@/components/ReloadPrompt"
 import { SignaturePrompt } from "@/components/SignaturePrompt"
 import { OrganizeWorkspace } from "@/components/OrganizeWorkspace"
 import {
@@ -38,6 +39,7 @@ import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
 import { useOrganizeFill, type FillTab } from "@/hooks/useOrganizeFill"
 import { useOrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
+import { useReopenTab, type Reopened } from "@/hooks/useReopenTab"
 import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
 import { PagesDropContext, type PagesDrop } from "@/hooks/usePagesDrop"
@@ -56,7 +58,6 @@ import {
   reorderedTabs,
   selectOpenedTabId,
   tabElementId,
-  tabIdForPath,
   type OtherTabs,
   type TabId,
 } from "@/lib/documentTabs"
@@ -76,6 +77,7 @@ import {
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
 import { cn } from "@/lib/utils"
+import { findOpenFile } from "@/lib/openFiles"
 import {
   classifyOpenSource,
   isSourcePath,
@@ -136,6 +138,15 @@ type OpenTab = {
   recentView?: RecentPdfView
 }
 
+/** One open's shared answers: whether Word conversion is available, asked
+    when a Word source first needs it, and whether the reader stopped one. */
+type OpenBatch = { wordAvailable: boolean | null; wordStopped: boolean }
+
+/** `error` null is a load that ends quietly: stopped, or its page gone. */
+type LoadedSource =
+  | { kind: "opened"; tab: OpenTab }
+  | { error: NoticeKind | null; kind: "failed" }
+
 /** `changes` is whether a save here could keep anything; without them, what
     the close would cost here is only work still running, which no save can
     keep. */
@@ -166,7 +177,9 @@ type DragGeometry = {
     places, so the two have to be changed together. */
 const OPEN_REQUESTED_EVENT = "launch://open-requested"
 
-const FOCUS_DOCUMENT_EVENT = "workspace://focus-document"
+/** What `windows.rs` emits when another window was asked to open a file this
+    one holds; named in both places, as the launch event above is. */
+const REOPEN_DOCUMENT_EVENT = "workspace://reopen-document"
 
 /** What `quit.rs` emits: the macOS menu's Quit, asking this window to run the
     unsaved check, and every window's order to close once it has. */
@@ -410,6 +423,201 @@ export default function App() {
     [refreshRecentFiles],
   )
 
+  // One file read into a tab of its own, not yet on the strip: a fresh open
+  // appends it, a reload puts it where the old tab stood.
+  const loadSource = useCallback(
+    async (
+      kind: OpenSourceKind,
+      path: string,
+      batch: OpenBatch,
+    ): Promise<LoadedSource> => {
+      if (kind === "pdf") {
+        try {
+          const override = e2eOverride("openPdfFromPath")
+          const document = override
+            ? ((await override(path)) as PdfDocumentInfo)
+            : await invoke<PdfDocumentInfo>("open_pdf_from_path", { path })
+          const recentView = mountedRef.current
+            ? await readRecentPdfView(path)
+            : null
+
+          if (!mountedRef.current) {
+            void invoke("close_pdf", { documentId: document.id }).catch(
+              () => undefined,
+            )
+            return { error: null, kind: "failed" }
+          }
+
+          return {
+            kind: "opened",
+            tab: {
+              dirty: false,
+              document,
+              id: document.id,
+              name: fileNameFromPath(path),
+              path,
+              recentPath: path,
+              recentView: recentView ?? undefined,
+              savable: false,
+            },
+          }
+        } catch (error) {
+          return { error: noticeForOpenError(error), kind: "failed" }
+        }
+      }
+
+      if (kind === "word") {
+        if (batch.wordStopped) {
+          return { error: null, kind: "failed" }
+        }
+
+        batch.wordAvailable ??= await invoke<boolean>(
+          "word_conversion_available",
+        ).catch(() => false)
+
+        if (!batch.wordAvailable) {
+          return { error: "wordUnavailable", kind: "failed" }
+        }
+
+        // An office suite may take minutes, holding every open queued behind
+        // it; the corner says so and offers the way out.
+        wordStopRef.current = false
+        wordConvertingRef.current = true
+        notices.raise({
+          action: { kind: "wordConvertStop" },
+          kind: "wordConverting",
+          owner: workspaceOwner,
+          values: { name: fileNameFromPath(path) },
+        })
+      }
+
+      // A converted source opens like a created document: nothing on disk to
+      // bind as a save destination or remember. Rust keeps the source only to
+      // find this tab by when the same file is opened again.
+      try {
+        const override = e2eOverride("openConvertedFromPath")
+        const document = override
+          ? ((await override(path)) as PdfDocumentInfo)
+          : await invoke<PdfDocumentInfo>("open_converted_from_path", { path })
+
+        if (!mountedRef.current) {
+          void invoke("close_pdf", { documentId: document.id }).catch(
+            () => undefined,
+          )
+          return { error: null, kind: "failed" }
+        }
+
+        return {
+          kind: "opened",
+          tab: {
+            convertedFrom: path,
+            dirty: false,
+            document,
+            id: document.id,
+            name: fileNameFromPath(path),
+            path: "",
+            saveAsDefaultName: pdfNameFromSource(path),
+            savable: false,
+          },
+        }
+      } catch (error) {
+        return {
+          error:
+            kind === "word" && wordStopRef.current
+              ? null
+              : noticeForOpenError(error),
+          kind: "failed",
+        }
+      } finally {
+        if (kind === "word") {
+          wordConvertingRef.current = false
+          batch.wordStopped ||= wordStopRef.current
+          notices.retract(workspaceOwner, ["wordConverting"])
+        }
+      }
+    },
+    [notices],
+  )
+
+  // The file as it now stands, in the old tab's place; a failed read keeps
+  // the old tab. Its session closes the old document as it unmounts.
+  const reloadTab = useCallback(
+    async (
+      documentId: number,
+      batch: OpenBatch,
+      confirm: () => Promise<boolean>,
+    ): Promise<Reopened> => {
+      const tab = tabsRef.current.find((item) => item.id === documentId)
+      const kind = tab?.path
+        ? "pdf"
+        : tab?.convertedFrom
+          ? classifyOpenSource(tab.convertedFrom)
+          : null
+      const source = tab?.path || tab?.convertedFrom
+
+      if (!tab || !kind || !source) {
+        return { error: null, id: tab ? documentId : null }
+      }
+
+      // Stored for the file, as a close stores it, for the reload to read back.
+      await sessionRefs.current.get(documentId)?.rememberViewNow()
+
+      const loaded = await loadSource(kind, source, batch)
+
+      if (loaded.kind === "failed") {
+        return { error: loaded.error, id: documentId }
+      }
+
+      if (!(await confirm())) {
+        void invoke("close_pdf", { documentId: loaded.tab.id }).catch(
+          () => undefined,
+        )
+        return { error: null, id: documentId }
+      }
+
+      replaceTabs((current) =>
+        current.some((item) => item.id === documentId)
+          ? current.map((item) => (item.id === documentId ? loaded.tab : item))
+          : [...current, loaded.tab],
+      )
+      notices.retract({ documentId, scope: "document" })
+
+      if (activeIdRef.current === documentId) {
+        activeIdRef.current = loaded.tab.id
+        setActiveId(loaded.tab.id)
+      }
+
+      return { error: null, id: loaded.tab.id }
+    },
+    [loadSource, notices, replaceTabs],
+  )
+
+  const tabHasUnsavedWork = useCallback(
+    (documentId: number) =>
+      sessionRefs.current.get(documentId)?.hasUnsavedWorkNow() ??
+      tabsRef.current.some((tab) => tab.id === documentId && tab.dirty),
+    [],
+  )
+  const showTabInViewer = useCallback(
+    (documentId: number) => {
+      setWorkspaceMode("view")
+      activateTab(documentId)
+    },
+    [activateTab, setWorkspaceMode],
+  )
+  const tabName = useCallback(
+    (documentId: number) =>
+      tabsRef.current.find((tab) => tab.id === documentId)?.name ?? null,
+    [],
+  )
+  const reopenPrompt = useReopenTab<OpenBatch>({
+    hasUnsavedWork: tabHasUnsavedWork,
+    reload: reloadTab,
+    show: showTabInViewer,
+    tabName,
+  })
+  const reopenTab = reopenPrompt.reopen
+
   const openPaths = useCallback(
     (paths: string[], activate: "first" | "last" = "last") => {
       // Whatever opens, opens as a tab, which only the viewer shows.
@@ -430,152 +638,49 @@ export default function App() {
       return runOpenBatch(async () => {
         const openedIds: number[] = []
         let firstError: NoticeKind | null = null
-        // Asked once per batch, when a Word source first needs the answer.
-        let wordAvailable: boolean | null = null
-        // A Stop is the way out of the queue, not out of one file: the batch's
-        // later Word files would hold it just as long.
-        let wordStopped = false
+        const batch: OpenBatch = { wordAvailable: null, wordStopped: false }
 
         for (const { kind, path } of sources) {
-          if (kind !== "pdf") {
-            if (kind === "word") {
-              if (wordStopped) {
-                continue
-              }
-
-              if (wordAvailable === null) {
-                wordAvailable = await invoke<boolean>(
-                  "word_conversion_available",
-                ).catch(() => false)
-              }
-
-              if (!wordAvailable) {
-                firstError ??= "wordUnavailable"
-                continue
-              }
-            }
-
-            // An office suite may take minutes, holding every open queued
-            // behind it; the corner says so and offers the way out.
-            if (kind === "word") {
-              wordStopRef.current = false
-              wordConvertingRef.current = true
-              notices.raise({
-                action: { kind: "wordConvertStop" },
-                kind: "wordConverting",
-                owner: workspaceOwner,
-                values: { name: fileNameFromPath(path) },
-              })
-            }
-
-            // A converted source opens like a created document: nothing on
-            // disk to bind as a save destination, match a tab by, or remember.
-            try {
-              const override = e2eOverride("openConvertedFromPath")
-              const document = override
-                ? ((await override(path)) as PdfDocumentInfo)
-                : await invoke<PdfDocumentInfo>(
-                    "open_converted_from_path",
-                    { path },
-                  )
-
-              if (!mountedRef.current) {
-                void invoke("close_pdf", { documentId: document.id }).catch(
-                  () => undefined,
-                )
-                continue
-              }
-
-              const tab: OpenTab = {
-                convertedFrom: path,
-                dirty: false,
-                document,
-                id: document.id,
-                name: fileNameFromPath(path),
-                path: "",
-                saveAsDefaultName: pdfNameFromSource(path),
-                savable: false,
-              }
-              replaceTabs((current) => [...current, tab])
-              openedIds.push(tab.id)
-            } catch (error) {
-              if (!(kind === "word" && wordStopRef.current)) {
-                firstError ??= noticeForOpenError(error)
-              }
-            } finally {
-              if (kind === "word") {
-                wordConvertingRef.current = false
-                wordStopped ||= wordStopRef.current
-                notices.retract(workspaceOwner, ["wordConverting"])
-              }
-            }
-
+          // A Stop is the way out of the queue, not out of one file: the
+          // batch's later Word files would hold it just as long.
+          if (kind === "word" && batch.wordStopped) {
             continue
           }
 
-          const existingId = tabIdForPath(tabsRef.current, path)
-
-          if (existingId !== null) {
-            openedIds.push(existingId)
-            continue
-          }
-
-          // Independent edit histories over the same file would overwrite each other on save.
-          const heldElsewhere = await invoke<boolean>("focus_pdf_path", {
+          // Independent edit histories over one file would overwrite each
+          // other on save, however differently the file is named this time.
+          const holder = await findOpenFile(
             path,
-          }).catch(() => false)
+            tabsRef.current.map((tab) => tab.id),
+          )
 
-          if (heldElsewhere) {
+          if (holder.kind === "elsewhere") {
             notices.retract(workspaceOwner, openRefusals)
             continue
           }
 
-          try {
-            const override = e2eOverride("openPdfFromPath")
-            const document = override
-              ? ((await override(path)) as PdfDocumentInfo)
-              : await invoke<PdfDocumentInfo>("open_pdf_from_path", { path })
+          if (holder.kind === "here") {
+            const reopened = await reopenTab(holder.documentId, batch)
 
-            if (!mountedRef.current) {
-              void invoke("close_pdf", { documentId: document.id }).catch(
-                () => undefined,
-              )
+            firstError ??= reopened.error
+
+            if (reopened.id !== null) {
+              openedIds.push(reopened.id)
+            }
+
+            // Only a tab gone meanwhile leaves the file to open as new.
+            if (reopened.id !== null || reopened.error !== null) {
               continue
             }
+          }
 
-            const duplicateId = tabIdForPath(tabsRef.current, path)
+          const loaded = await loadSource(kind, path, batch)
 
-            if (duplicateId !== null) {
-              void invoke("close_pdf", { documentId: document.id }).catch(
-                () => undefined,
-              )
-              openedIds.push(duplicateId)
-              continue
-            }
-
-            const recentView = await readRecentPdfView(path)
-
-            if (!mountedRef.current) {
-              void invoke("close_pdf", { documentId: document.id }).catch(
-                () => undefined,
-              )
-              continue
-            }
-
-            const tab: OpenTab = {
-              dirty: false,
-              document,
-              id: document.id,
-              name: fileNameFromPath(path),
-              path,
-              recentPath: path,
-              recentView: recentView ?? undefined,
-              savable: false,
-            }
-            replaceTabs((current) => [...current, tab])
-            openedIds.push(tab.id)
-          } catch (error) {
-            firstError ??= noticeForOpenError(error)
+          if (loaded.kind === "opened") {
+            replaceTabs((current) => [...current, loaded.tab])
+            openedIds.push(loaded.tab.id)
+          } else {
+            firstError ??= loaded.error
           }
         }
 
@@ -602,7 +707,15 @@ export default function App() {
         }
       })
     },
-    [activateTab, notices, replaceTabs, runOpenBatch, setWorkspaceMode],
+    [
+      activateTab,
+      loadSource,
+      notices,
+      reopenTab,
+      replaceTabs,
+      runOpenBatch,
+      setWorkspaceMode,
+    ],
   )
 
   // The app's own rather than a file's: no path means no tab to match and
@@ -1300,6 +1413,7 @@ export default function App() {
         }
 
         const payload: MovedTabPayload = {
+          convertedFrom: tab.convertedFrom,
           document: snapshot.document,
           dirty: tab.dirty,
           name: tab.name,
@@ -1962,11 +2076,29 @@ export default function App() {
     let cancelled = false
     let unlisten: (() => void) | undefined
 
-    // The tab is only shown by the viewer: left in organize, the reader the
-    // focus was for would land on the workspace instead of the document.
-    void listen<number>(FOCUS_DOCUMENT_EVENT, (event) => {
+    // Another window was asked to open a file a tab here holds: this window
+    // shows it — reloaded, if something else has written the file since —
+    // and only the viewer shows tabs, so organize gives way.
+    void listen<number>(REOPEN_DOCUMENT_EVENT, (event) => {
       setWorkspaceMode("view")
-      activateTab(event.payload)
+      void runOpenBatch(async () => {
+        const reopened = await reopenTab(event.payload, {
+          wordAvailable: null,
+          wordStopped: false,
+        })
+
+        if (!mountedRef.current) {
+          return
+        }
+
+        if (reopened.id !== null) {
+          activateTab(reopened.id)
+        }
+
+        if (reopened.error) {
+          notices.raise({ kind: reopened.error, owner: workspaceOwner })
+        }
+      })
     }).then((stop) => {
       if (cancelled) {
         stop()
@@ -1979,7 +2111,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [activateTab, setWorkspaceMode])
+  }, [activateTab, notices, reopenTab, runOpenBatch, setWorkspaceMode])
 
   // A tab another window sent here, as the launch flow hands its files over:
   // bound before the first take, so a tab arriving between the two finds a
@@ -2006,6 +2138,7 @@ export default function App() {
             }
 
             const tab: OpenTab = {
+              convertedFrom: payload.convertedFrom,
               dirty: payload.dirty,
               document: payload.document,
               id: payload.document.id,
@@ -2417,6 +2550,11 @@ export default function App() {
         onAnswer={organizeFill.answer}
         open={organizeFill.promptOpen}
         prompt={organizeFill.prompt}
+      />
+      <ReloadPrompt
+        name={reopenPrompt.name}
+        onAnswer={reopenPrompt.answer}
+        open={reopenPrompt.open}
       />
       <SignaturePrompt
         onAnswer={signaturePrompt.answer}

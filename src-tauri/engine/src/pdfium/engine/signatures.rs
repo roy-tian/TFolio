@@ -9,10 +9,13 @@ use std::{
     ptr,
 };
 
-use super::io::{fingerprint, same_file, write_file_atomically, Fingerprint};
 use super::page_ops::page_range_argument;
 use super::signature_flatten::flatten_signatures;
 use super::*;
+use super::{
+    io::{fingerprint, write_file_atomically, Fingerprint},
+    same_file,
+};
 use crate::pdfium::SignatureDecision;
 
 /// Far past any CMS a signer embeds; a larger `/Contents` is not checked.

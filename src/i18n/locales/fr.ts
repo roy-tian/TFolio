@@ -60,6 +60,11 @@ const fr = {
     discardAndCloseTabs: "Abandonner et fermer les onglets",
     discardAndCloseAll: "Abandonner et tout fermer",
     saveBeforeClose: "Enregistrer",
+    reloadTitle: "« {{name}} » a été modifié ailleurs",
+    reloadDescription:
+      "Un autre programme a modifié ce fichier depuis son ouverture ici, et cet onglet contient des modifications non enregistrées. Le recharger reprend le fichier tel qu’il est maintenant, et ces modifications seront perdues.",
+    reloadKeep: "Garder mes modifications",
+    reloadConfirm: "Abandonner et recharger",
     unsavedQuitDescription:
       "Des documents ouverts contiennent des modifications non enregistrées. Si vous quittez, elles seront perdues.",
     unsavedQuitElsewhereDescription:

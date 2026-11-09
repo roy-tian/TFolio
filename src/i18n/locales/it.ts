@@ -60,6 +60,11 @@ const it = {
     discardAndCloseTabs: "Scarta e chiudi schede",
     discardAndCloseAll: "Scarta e chiudi tutto",
     saveBeforeClose: "Salva",
+    reloadTitle: "“{{name}}” è stato modificato altrove",
+    reloadDescription:
+      "Un altro programma ha modificato questo file da quando è stato aperto qui, e questa scheda contiene modifiche non salvate. Ricaricandolo si apre il file com’è ora e quelle modifiche verranno scartate.",
+    reloadKeep: "Mantieni le mie modifiche",
+    reloadConfirm: "Scarta e ricarica",
     unsavedQuitDescription:
       "I documenti aperti contengono modifiche non salvate. Uscendo, verranno scartate.",
     unsavedQuitElsewhereDescription:

@@ -26,10 +26,10 @@ pub use commands::{
     discard_pdf_stashes, download_pdf_note_font, duplicate_pdf_pages, export_pdf,
     extract_pdf_page_plain_text, extract_pdf_page_text, extract_pdf_pages, flatten_pdf_signatures,
     insert_pdf_blank_page, insert_pdf_pages_from_document, open_converted_from_path, open_pdf,
-    open_pdf_from_path, pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path, pick_pdf_paths,
-    remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page, render_pdf_page_thumbnail,
-    render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages, save_pdf,
-    search_pdf_text, word_conversion_available,
+    open_pdf_from_path, pdf_annotation_at_point, pdf_file_changed, pdf_text_note_font,
+    pick_pdf_path, pick_pdf_paths, remove_pdf_page_numbers, remove_pdf_watermark, render_pdf_page,
+    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
+    rotate_pdf_pages, save_pdf, search_pdf_text, word_conversion_available,
 };
 pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
@@ -88,7 +88,7 @@ impl PdfiumState {
     /// Kept rather than consumed: the reader may cancel the unsaved guard and
     /// open the same file again; the e2e build waives the check at call sites.
     #[cfg_attr(feature = "e2e", allow(dead_code))]
-    fn is_approved(&self, path: &Path) -> bool {
+    pub(crate) fn is_approved(&self, path: &Path) -> bool {
         self.approved
             .lock()
             .map(|approved| approved.contains(path))

@@ -21,6 +21,7 @@ mod compress;
 mod cross_document_pages;
 mod documents;
 mod duplicate_pages;
+mod file_changes;
 mod image_dpi;
 mod organize;
 mod page_numbers;

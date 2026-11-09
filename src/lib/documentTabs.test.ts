@@ -7,20 +7,9 @@ import {
   reorderedTabs,
   selectOpenedTabId,
   tabIdForKey,
-  tabIdForPath,
 } from "./documentTabs"
 
 describe("document tabs", () => {
-  test("finds only an exact duplicate path", () => {
-    const tabs = [
-      { id: 1, path: "/docs/a.pdf" },
-      { id: 2, path: "/docs/A.pdf" },
-    ]
-
-    expect(tabIdForPath(tabs, "/docs/a.pdf")).toBe(1)
-    expect(tabIdForPath(tabs, "/docs/./a.pdf")).toBeNull()
-  })
-
   test("activates only a batch-opened tab that is still open", () => {
     expect(selectOpenedTabId([1, 2, 3], [2, 3], "first")).toBe(2)
     expect(selectOpenedTabId([1, 2, 3], [1, 2], "last")).toBe(2)

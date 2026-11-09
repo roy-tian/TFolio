@@ -163,14 +163,23 @@ describe("parseMovedTabPayload", () => {
     expect(parsed).toEqual(payload)
   })
 
+  it("keeps the source a converted tab came from", () => {
+    const converted = { ...payload, convertedFrom: "/tmp/scan.png", path: "" }
+    const parsed = parseMovedTabPayload(JSON.parse(JSON.stringify(converted)))
+
+    expect(parsed?.convertedFrom).toBe("/tmp/scan.png")
+  })
+
   it("drops optional fields it never carried rather than inventing them", () => {
     const parsed = parseMovedTabPayload({
       ...JSON.parse(JSON.stringify(payload)),
+      convertedFrom: 7,
       recentPath: undefined,
       recentView: { position: { pageNumber: 0 } },
       saveAsDefaultName: undefined,
     })
 
+    expect(parsed?.convertedFrom).toBeUndefined()
     expect(parsed?.recentPath).toBeUndefined()
     expect(parsed?.recentView).toBeUndefined()
     expect(parsed?.saveAsDefaultName).toBeUndefined()

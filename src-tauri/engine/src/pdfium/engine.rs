@@ -157,6 +157,12 @@ struct OpenDocument {
     /// The file a save writes back over; `None` for opened-from-bytes, whose
     /// first export adopts its destination as the source.
     source_path: Option<PathBuf>,
+    /// `source_path` as this document last read or wrote it: what tells an
+    /// open of the file again that something else has written it since.
+    source_fingerprint: Option<Fingerprint>,
+    /// The image or Word file a converted document was made from, as it stood
+    /// when the conversion began; dropped once a Save As binds it to a PDF.
+    converted_from: Option<OpenedFile>,
     /// Set by a deletion: PDFium leaves the removed content's references behind
     /// until a save-and-reload collects them, so the next write takes that route.
     needs_compaction: bool,
@@ -232,7 +238,7 @@ impl OpenDocument {
         self.signed_original.as_ref().is_some_and(|original| {
             self.source_path
                 .as_deref()
-                .is_some_and(|source| io::same_file(source, &original.path))
+                .is_some_and(|source| same_file(source, &original.path))
         })
     }
 
@@ -511,12 +517,32 @@ impl PdfiumEngine {
     /// memory with no source binding, like `create_blank`: the file behind it
     /// is only ever read, so there is no destination for approval to guard.
     pub fn open_converted(&self, scope: &str, path: PathBuf) -> Result<PdfDocumentInfo, String> {
-        if is_merge_image(&path) {
+        // Before the read: a change made while converting is one the document
+        // never saw, and an open of the file again must find it changed.
+        let before = fingerprint(&path);
+        let document = self.convert_and_open(scope, &path)?;
+
+        if let Some(fingerprint) = before {
+            if let Some(entry) = self
+                .lock_documents()
+                .ok()
+                .as_deref_mut()
+                .and_then(|documents| documents.get_mut(&document.id()))
+            {
+                entry.converted_from = Some(OpenedFile { path, fingerprint });
+            }
+        }
+
+        Ok(document)
+    }
+
+    fn convert_and_open(&self, scope: &str, path: &Path) -> Result<PdfDocumentInfo, String> {
+        if is_merge_image(path) {
             // Decoded before the lock: a decode is no PDFium work.
-            let image = read_image(&path)?;
+            let image = read_image(path)?;
             let bytes = {
                 let _documents = self.lock_documents()?;
-                let document = image_page_document(self.pdfium, &image, &path)?;
+                let document = image_page_document(self.pdfium, &image, path)?;
 
                 document
                     .save_to_bytes()
@@ -526,7 +552,7 @@ impl PdfiumEngine {
             return self.open_with_source(bytes, None);
         }
 
-        if crate::convert::is_word_document(&path) {
+        if crate::convert::is_word_document(path) {
             // Stoppable like an inspection of the same file: an office suite's
             // startup is seconds the open flow must be able to walk away from.
             let entry = {
@@ -534,14 +560,9 @@ impl PdfiumEngine {
                     self.begin_operation(OperationTarget::OpenConverted(scope.to_string()));
                 let cancelled = || operation.is_cancelled();
 
-                self.resolve_word_documents(
-                    std::slice::from_ref(&path),
-                    true,
-                    &cancelled,
-                    &mut || {},
-                )
-                .into_iter()
-                .next()
+                self.resolve_word_documents(&[path.to_path_buf()], true, &cancelled, &mut || {})
+                    .into_iter()
+                    .next()
             };
 
             return match entry {
@@ -597,6 +618,7 @@ impl PdfiumEngine {
             outline,
         } = document_layout(&document);
         let source_path = source.as_ref().map(|source| source.path.clone());
+        let source_fingerprint = source.as_ref().map(|source| source.fingerprint);
         let scan = signatures::SignatureScan::of(&document);
         let signed_pages = signatures::mark_signature_pages(&scan, &document, &mut pages);
         let id = self.next_document_id.fetch_add(1, Ordering::Relaxed);
@@ -623,12 +645,14 @@ impl PdfiumEngine {
                 loaded_len: Some(bytes_len),
                 content_version: 0,
                 compress_cache: None,
+                converted_from: None,
                 revisions: HashMap::new(),
                 signature_count: scan.count(),
                 signed_page_ids: signed_pages.iter().map(|&index| index as u64).collect(),
                 signature_decision: None,
                 signatures_flattened: false,
                 signed_original: None,
+                source_fingerprint,
                 source_path,
                 stashes: HashMap::new(),
             },
@@ -1159,6 +1183,7 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
 
 mod archive_export;
 mod compress;
+mod file_identity;
 mod image_dpi;
 mod io;
 mod marks;
@@ -1172,8 +1197,11 @@ mod signatures;
 mod text_runs;
 mod watermark_preview;
 
+pub use file_identity::{same_file, FileKey};
 pub use io::is_merge_image;
-use io::{image_page_document, read_image, read_pdf_bytes, read_pdf_file};
+use io::{
+    fingerprint, image_page_document, read_image, read_pdf_bytes, read_pdf_file, Fingerprint,
+};
 pub use organize::{
     AssembleOutlineItem, AssemblePlan, AssembleSlot, OrganizeSourceInfo, ORGANIZE_SOURCE_CHANGED,
 };

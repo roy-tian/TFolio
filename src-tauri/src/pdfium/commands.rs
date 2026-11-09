@@ -16,7 +16,7 @@ use tfolio_engine::{
 };
 
 use crate::recent::RecentFiles;
-use crate::windows::{page_generation, record_document, DocumentOwners};
+use crate::windows::{page_generation, record_document, DocumentFile, DocumentOwners};
 
 use super::encode::{encode_png, encode_webp};
 use super::paths::fallback_font_destination;
@@ -79,7 +79,7 @@ pub async fn open_pdf(
         .await
         .map_err(|error| format!("PDFium open task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id(), None);
+    record_document(&owners, &window, page, document.id(), DocumentFile::None);
 
     Ok(document)
 }
@@ -97,7 +97,7 @@ pub async fn create_pdf(
         .await
         .map_err(|error| format!("PDFium create task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id(), None);
+    record_document(&owners, &window, page, document.id(), DocumentFile::None);
 
     Ok(document)
 }
@@ -624,7 +624,7 @@ pub async fn extract_pdf_pages(
     .await
     .map_err(|error| format!("PDFium extract task failed: {error}"))??;
 
-    record_document(&owners, &window, page, extracted.id(), None);
+    record_document(&owners, &window, page, extracted.id(), DocumentFile::None);
 
     Ok(extracted)
 }
@@ -721,7 +721,13 @@ pub async fn open_pdf_from_path(
     .await
     .map_err(|error| format!("PDFium open task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id(), Some(path));
+    record_document(
+        &owners,
+        &window,
+        page,
+        document.id(),
+        DocumentFile::Bound(path),
+    );
 
     Ok(document)
 }
@@ -744,15 +750,43 @@ pub async fn open_converted_from_path(
     let engine = Arc::clone(&state.engine);
     let page = page_generation(&window);
     let label = window.label().to_string();
+    let source = path.clone();
 
     let document =
-        tauri::async_runtime::spawn_blocking(move || engine.open_converted(&label, path))
+        tauri::async_runtime::spawn_blocking(move || engine.open_converted(&label, source))
             .await
             .map_err(|error| format!("conversion task failed: {error}"))??;
 
-    record_document(&owners, &window, page, document.id(), None);
+    record_document(
+        &owners,
+        &window,
+        page,
+        document.id(),
+        DocumentFile::Converted(path),
+    );
 
     Ok(document)
+}
+
+/// Whether something else has written the document's file since the document
+/// last read or wrote it: what an open of that file again reloads, or asks
+/// about over unsaved work.
+#[tauri::command]
+pub async fn pdf_file_changed(
+    document_id: u64,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<bool, String> {
+    if !owners.owns(document_id, window.label()) {
+        return Err("this window does not hold that document".into());
+    }
+
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || engine.document_file_changed(document_id))
+        .await
+        .map_err(|error| format!("file check task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -888,7 +922,7 @@ pub async fn export_pdf(
 
 /// A document bound to its destination becomes that file's tab, as an open
 /// would make it: listed as recent, approved for this run, and owned under the
-/// path `focus_pdf_path` looks it up by — the OS's own, as the outcome's string
+/// path `find_open_file` looks it up by — the OS's own, as the outcome's string
 /// is lossy. Moved straight after the write, so the gap an open could slip
 /// through is as short as it can be outside the documents lock.
 pub(super) fn export_and_bind(

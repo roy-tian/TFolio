@@ -119,6 +119,9 @@ export type MovedTabSeed = {
 /** Everything a tab is, beyond its document's engine state: what the strip
     shows, what the session rehydrates from, and where it was being read. */
 export type MovedTabPayload = {
+  /** The image or Word file a converted tab came from, which a reload of it
+      in the new window converts again. */
+  convertedFrom?: string
   document: PdfDocumentInfo
   dirty: boolean
   name: string
@@ -227,6 +230,10 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
       viewMode: seed.viewMode,
       viewRotation: seed.viewRotation,
     },
+  }
+
+  if (typeof value.convertedFrom === "string") {
+    payload.convertedFrom = value.convertedFrom
   }
 
   if (typeof value.recentPath === "string") {

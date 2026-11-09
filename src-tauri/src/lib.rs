@@ -23,7 +23,7 @@ use pdfium::{
     export_pdf, export_pdf_archive, extract_pdf_page_plain_text, extract_pdf_page_text,
     extract_pdf_pages, flatten_pdf_signatures, insert_pdf_blank_page,
     insert_pdf_pages_from_document, open_converted_from_path, open_pdf, open_pdf_from_path,
-    pdf_annotation_at_point, pdf_text_note_font, pick_pdf_path, pick_pdf_paths,
+    pdf_annotation_at_point, pdf_file_changed, pdf_text_note_font, pick_pdf_path, pick_pdf_paths,
     release_pdf_compression, remove_pdf_page_numbers, remove_pdf_watermark,
     render_organize_thumbnail, render_pdf_page, render_pdf_page_thumbnail,
     render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages,
@@ -40,7 +40,7 @@ use settings::{set_settings, settings};
 use tauri::Manager;
 use update::{check_updates, download_update, install_update, update_status, UpdateState};
 use window_state::WindowState;
-use windows::{focus_pdf_path, open_new_window, print_window, AppWindows, DocumentOwners};
+use windows::{find_open_file, open_new_window, print_window, AppWindows, DocumentOwners};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -152,6 +152,7 @@ pub fn run() {
             open_pdf,
             open_pdf_from_path,
             open_converted_from_path,
+            pdf_file_changed,
             pick_pdf_path,
             pick_pdf_paths,
             add_organize_sources,
@@ -199,7 +200,7 @@ pub fn run() {
             open_new_window,
             print_window,
             quit_app,
-            focus_pdf_path,
+            find_open_file,
             move_document,
             move_document_new_window,
             take_moved_tabs,

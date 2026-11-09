@@ -50,3 +50,7 @@ libc = "0.2"
 # Linux and macOS builds nothing.
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.6"
+# Whether two paths name one file, by volume serial and file index — what an
+# alias, a short name or a hard link of an open document shares with it.
+# Already in the app's tree: Tauri's build reaches it through walkdir.
+same-file = "1"

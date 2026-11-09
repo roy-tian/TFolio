@@ -60,6 +60,11 @@ const es = {
     discardAndCloseTabs: "Descartar y cerrar pestañas",
     discardAndCloseAll: "Descartar y cerrar todo",
     saveBeforeClose: "Guardar",
+    reloadTitle: "«{{name}}» se ha modificado en otro lugar",
+    reloadDescription:
+      "Otro programa ha modificado este archivo desde que se abrió aquí, y esta pestaña tiene cambios sin guardar. Al recargarlo, se abrirá tal como está ahora y esos cambios se descartarán.",
+    reloadKeep: "Conservar mis cambios",
+    reloadConfirm: "Descartar y recargar",
     unsavedQuitDescription:
       "Hay documentos abiertos con cambios sin guardar. Si sales, se descartarán.",
     unsavedQuitElsewhereDescription:

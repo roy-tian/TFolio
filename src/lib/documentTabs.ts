@@ -14,18 +14,6 @@ export function panelElementId(tabId: TabId) {
   return `workspace-panel-${tabId}`
 }
 
-export type DocumentTabIdentity = {
-  id: number
-  path: string
-}
-
-export function tabIdForPath(
-  tabs: readonly DocumentTabIdentity[],
-  path: string,
-): number | null {
-  return tabs.find((tab) => tab.path === path)?.id ?? null
-}
-
 export function selectOpenedTabId(
   openedIds: readonly number[],
   currentTabIds: readonly number[],

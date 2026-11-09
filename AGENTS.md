@@ -64,8 +64,10 @@
 - Every command returning a new document, including an in-memory one, must use `record_document`
   so an open finishing after window destruction releases the document.
 - Close documents on window destruction and page reload; frontend cleanup is insufficient.
-- Check `focus_pdf_path` before opening to prevent independent edit histories. Check the caller's
-  tabs locally because their ownership entries may be awaiting close.
+- Check `find_open_file` before opening to prevent independent edit histories. It matches by file
+  identity (`FileKey`), never spelling, and takes the caller's live tab ids because their
+  ownership entries may be awaiting close. A file opened again after another writer changed it
+  reloads its tab, asking first over unsaved work; saves record their own writes as not changes.
 - Never reuse window labels; delayed events must not target replacement windows. New windows
   inherit `tauri.conf.json`; production capabilities must cover `window-*`.
 - File-manager launches steal OS focus; route them to the last focused app window. Launch files
@@ -129,7 +131,7 @@
 ## Organize workspace
 
 - Organize sources are read-only and are not documents: no `record_document`, recent files, save
-  binding, or `focus_pdf_path`. Each window's registry releases them on window destruction and on
+  binding, or `find_open_file`. Each window's registry releases them on window destruction and on
   page reload up to the id cutoff taken at release, so a reloaded page keeps those added since.
 - A source whose fingerprint (mtime and size) changed blocks assembly until removed or re-added.
 - A viewer tab enters organize as its file on disk, never its document: ask about unsaved changes
@@ -143,8 +145,9 @@
 
 ## Word and image import
 
-- Images and Word files open as converted, sourceless in-memory PDFs. `openSources.ts` mirrors
-  the engine's `MERGE_IMAGE_EXTENSIONS`.
+- Images and Word files open as converted, sourceless in-memory PDFs, recorded as
+  `DocumentFile::Converted` so opening the source again finds their tab until Save As binds a PDF.
+  `openSources.ts` mirrors the engine's `MERGE_IMAGE_EXTENSIONS`.
 - Convert only through installed suites (Word, WPS, LibreOffice; Windows stops at WPS), detected
   without starting one; e2e passes `WordSuites::Absent`.
 - Suites read a staged copy, never the reader's file. Kill only processes this run spawned, never

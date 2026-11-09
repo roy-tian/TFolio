@@ -2,7 +2,7 @@
 //! destination takes when its page is ready — the same wait a launch file has,
 //! for the same reason: an event fired before a window listens reaches nobody.
 
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+use std::{collections::HashMap, sync::Mutex};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -11,18 +11,20 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
-use crate::windows::{page_generation, record_document, window_config_from, DocumentOwners};
+use crate::windows::{
+    page_generation, record_document, window_config_from, DocumentFile, DocumentOwners,
+};
 
 /// Carries nothing but that a take will find something; spelled again in
 /// `App.tsx`, which listens for it.
 pub const TAB_ARRIVED_EVENT: &str = "workspace://tab-arrived";
 
 /// The page state of a moved tab. Rust carries it without reading it: the
-/// `path` beside it is the owners table's own record, never the page's say.
+/// `file` beside it is the owners table's own record, never the page's say.
 pub struct HandoffEntry {
     pub document_id: u64,
     pub from: String,
-    pub path: Option<PathBuf>,
+    pub file: DocumentFile,
     pub tab: Value,
 }
 
@@ -90,7 +92,7 @@ pub async fn move_document(
         return Err("the destination window is gone".to_string());
     }
 
-    let Some(path) = owners.transfer(document_id, &from, &dest_label) else {
+    let Some(file) = owners.transfer(document_id, &from, &dest_label) else {
         return Err("this window does not hold that document".to_string());
     };
 
@@ -99,7 +101,7 @@ pub async fn move_document(
         HandoffEntry {
             document_id,
             from,
-            path,
+            file,
             tab,
         },
     );
@@ -149,7 +151,7 @@ pub async fn move_document_new_window(
         .map_err(|error| format!("a new window could not be opened: {error}"))?;
     let label = new_window.label().to_string();
 
-    let Some(path) = owners.transfer(document_id, &from, &label) else {
+    let Some(file) = owners.transfer(document_id, &from, &label) else {
         // Nothing moved, so the window just built has nothing to wait for:
         // take it back down rather than leave an empty frame on screen.
         let _ = new_window.destroy();
@@ -161,7 +163,7 @@ pub async fn move_document_new_window(
         HandoffEntry {
             document_id,
             from,
-            path,
+            file,
             tab,
         },
     );
@@ -230,7 +232,7 @@ pub async fn take_moved_tabs(
         .take(&label)
         .into_iter()
         .map(|entry| {
-            record_document(&owners, &window, page, entry.document_id, entry.path);
+            record_document(&owners, &window, page, entry.document_id, entry.file);
             entry.tab
         })
         .collect())
@@ -270,7 +272,7 @@ mod tests {
         HandoffEntry {
             document_id: id,
             from: from.to_string(),
-            path: None,
+            file: DocumentFile::None,
             tab: Value::Null,
         }
     }

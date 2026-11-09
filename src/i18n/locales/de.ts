@@ -60,6 +60,11 @@ const de = {
     discardAndCloseTabs: "Verwerfen und Tabs schließen",
     discardAndCloseAll: "Verwerfen und alle schließen",
     saveBeforeClose: "Speichern",
+    reloadTitle: "„{{name}}“ wurde an anderer Stelle geändert",
+    reloadDescription:
+      "Ein anderes Programm hat diese Datei geändert, seit sie hier geöffnet wurde, und dieser Tab enthält nicht gespeicherte Änderungen. Beim Neuladen wird die Datei in ihrem jetzigen Stand geöffnet und die Änderungen werden verworfen.",
+    reloadKeep: "Meine Änderungen behalten",
+    reloadConfirm: "Verwerfen und neu laden",
     unsavedQuitDescription:
       "Geöffnete Dokumente enthalten nicht gespeicherte Änderungen. Beim Beenden werden sie verworfen.",
     unsavedQuitElsewhereDescription:

@@ -59,6 +59,11 @@ const zhCN = {
     discardAndCloseTabs: "丢弃并关闭这些标签页",
     discardAndCloseAll: "丢弃并全部关闭",
     saveBeforeClose: "保存",
+    reloadTitle: "“{{name}}”已在别处修改",
+    reloadDescription:
+      "此文件在这里打开后已被其他程序改写，而此标签页尚有未保存的修改。重新加载将读取文件的当前内容，并丢弃这些修改。",
+    reloadKeep: "保留我的修改",
+    reloadConfirm: "丢弃并重新加载",
     unsavedQuitDescription: "已打开文档尚有未保存的修改，退出将丢弃这些修改。",
     unsavedQuitElsewhereDescription:
       "其他窗口尚有未保存的修改，或未能应答，退出将丢弃这些修改。",

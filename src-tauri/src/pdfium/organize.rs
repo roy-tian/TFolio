@@ -16,7 +16,9 @@ use super::{
     encode::encode_webp,
     PdfProgress, PdfiumState,
 };
-use crate::windows::{page_generation, record_document, DocumentOwners, PageGeneration};
+use crate::windows::{
+    page_generation, record_document, DocumentFile, DocumentOwners, PageGeneration,
+};
 
 /// The organize workspace's files, read for their pages and kept by the
 /// asking window. Approved like an open: a source's pages are its contents.
@@ -163,7 +165,7 @@ async fn assemble_into(
     };
     let owners = app.state::<DocumentOwners>();
 
-    record_document(&owners, &window, page, document.id(), None);
+    record_document(&owners, &window, page, document.id(), DocumentFile::None);
 
     if !owners.owns(document.id(), window.label()) {
         return Ok(None);

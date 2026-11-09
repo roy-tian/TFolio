@@ -60,6 +60,11 @@ const zhTW = {
     discardAndCloseTabs: "捨棄並關閉這些分頁",
     discardAndCloseAll: "捨棄並全部關閉",
     saveBeforeClose: "儲存",
+    reloadTitle: "「{{name}}」已在別處修改",
+    reloadDescription:
+      "此檔案在這裡開啟後已被其他程式改寫，而此分頁有尚未儲存的變更。重新載入將讀取檔案的目前內容，並捨棄這些變更。",
+    reloadKeep: "保留我的變更",
+    reloadConfirm: "捨棄並重新載入",
     unsavedQuitDescription:
       "已開啟的文件有尚未儲存的變更，結束將會捨棄這些變更。",
     unsavedQuitElsewhereDescription:

@@ -155,42 +155,21 @@ pub(super) fn bounded_file_name(name: &str) -> &str {
     &name[..end]
 }
 
-/// A path as the filesystem names it. A fresh destination resolves through its
-/// parent; the unresolvable stay literal, erring towards "different".
-fn resolved(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-
-    match (path.parent(), path.file_name()) {
-        (Some(parent), Some(name)) => match parent.canonicalize() {
-            Ok(parent) => parent.join(name),
-            Err(_) => path.to_path_buf(),
-        },
-        _ => path.to_path_buf(),
-    }
-}
-
-/// Whether two paths name one file.
-pub(super) fn same_file(left: &Path, right: &Path) -> bool {
-    resolved(left) == resolved(right)
-}
-
 /// Whether `path` is the file of an open document other than `except`, aliases
-/// included. The destination resolves once: the scan runs under the documents lock.
+/// included. The destination is read once: the scan runs under the documents lock.
 pub(super) fn is_open_document_file(
     documents: &HashMap<u64, OpenDocument>,
     path: &Path,
     except: Option<u64>,
 ) -> bool {
-    let target = resolved(path);
+    let target = FileKey::of(path);
 
     documents.iter().any(|(id, document)| {
         Some(*id) != except
             && document
                 .source_path
                 .as_deref()
-                .is_some_and(|source| resolved(source) == target)
+                .is_some_and(|source| FileKey::of(source).names_same_file(&target))
     })
 }
 
@@ -623,7 +602,49 @@ impl PdfiumEngine {
                     entry.loaded_len = loaded_len;
                 }
             });
-        })
+        })?;
+        self.record_written(document_id, &path);
+
+        Ok(())
+    }
+
+    /// Whether something other than this document has written its file since
+    /// the document last read or wrote it — for a converted one, its image or
+    /// Word file since the conversion. A file gone, or none to compare, has
+    /// nothing newer to offer.
+    pub fn document_file_changed(&self, document_id: u64) -> Result<bool, String> {
+        // A commit in flight would read as someone else's write until it has
+        // recorded its own; saves take this lock first, so this waits it out.
+        let _commits = self.lock_commits()?;
+        let (path, expected) = {
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
+
+            match (&entry.source_path, &entry.converted_from) {
+                (Some(path), _) => (path.clone(), entry.source_fingerprint),
+                (None, Some(source)) => (source.path.clone(), Some(source.fingerprint)),
+                (None, None) => return Ok(false),
+            }
+        };
+
+        // Off the documents lock: the file may sit on slow storage.
+        Ok(expected
+            .zip(fingerprint(&path))
+            .is_some_and(|(expected, current)| expected != current))
+    }
+
+    /// The file a commit just landed is this document's own write, which an
+    /// open of it again must not take for someone else's. Taken while the
+    /// writer still holds the commits lock, so no check sees the file first.
+    fn record_written(&self, document_id: u64, path: &Path) {
+        let written = fingerprint(path);
+
+        if let Ok(mut documents) = self.lock_documents() {
+            if let Ok(entry) = open_entry_mut(&mut documents, document_id) {
+                entry.source_fingerprint = written;
+                entry.converted_from = None;
+            }
+        }
     }
 
     /// The folder a save-as dialog should open in for this document: its own
@@ -721,6 +742,10 @@ impl PdfiumEngine {
             });
 
             return Err(error);
+        }
+
+        if saved_to_source {
+            self.record_written(document_id, path);
         }
 
         Ok(ExportOutcome {

@@ -58,6 +58,11 @@ const en = {
     discardAndCloseTabs: "Discard and close tabs",
     discardAndCloseAll: "Discard and close all",
     saveBeforeClose: "Save",
+    reloadTitle: "{{name}} was changed elsewhere",
+    reloadDescription:
+      "Another program has written this file since it was opened here, and this tab has unsaved changes. Reloading takes the file as it now stands and discards them.",
+    reloadKeep: "Keep my changes",
+    reloadConfirm: "Discard and reload",
     unsavedQuitDescription:
       "Open documents have changes that are not saved. Quitting will discard them.",
     unsavedQuitElsewhereDescription:
