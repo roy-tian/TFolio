@@ -44,6 +44,10 @@ const fr = {
     newFromPages_other: "Nouveau PDF avec {{count}} pages",
     pagesFrom: "Pages de {{name}}",
     extractFailed: "Impossible de créer un nouveau PDF avec ces pages.",
+    appendedNotice_one: "{{count}} page ajoutée à la fin de {{name}}",
+    appendedNotice_other: "{{count}} pages ajoutées à la fin de {{name}}",
+    appendBusy:
+      "Les pages n’ont pas été ajoutées : une opération est encore en cours sur {{name}}. Réessayez une fois qu’elle est terminée.",
     unsavedTabDescription:
       "Ce document contient des modifications non enregistrées. Si vous fermez son onglet, elles seront perdues.",
     unsavedWindowDescription:

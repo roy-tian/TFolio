@@ -135,6 +135,18 @@ export const noticeCatalogue = {
     textKey: "annotate.pageNumbersRebuilding",
     tone: "info",
   },
+  pagesAppendBusy: {
+    life: "transient",
+    slot: "pageAppend",
+    textKey: "tabs.appendBusy",
+    tone: "warning",
+  },
+  pagesAppended: {
+    life: "transient",
+    slot: "pageAppend",
+    textKey: "tabs.appendedNotice",
+    tone: "info",
+  },
   pagesCopied: {
     life: "transient",
     slot: "pageClipboard",

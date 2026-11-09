@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
+import type { AppendOffer } from "@/hooks/usePageCarry"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -62,6 +63,8 @@ const GHOST_EDGE_MARGIN = 4
 
 type DocumentTabsProps = {
   activeId: TabId
+  /** The tab whose end a release adds carried pages to — see `usePageCarry`. */
+  appendOffer: AppendOffer | null
   /** The tab carried pages are resting on, which is about to open under them
       — see `usePageCarry`. The bar beneath counts the rest out. */
   armedTabId: number | null
@@ -139,6 +142,7 @@ function TabDragGhost({ drag, tab }: {
 
 export function DocumentTabs({
   activeId,
+  appendOffer,
   armedTabId,
   newDocumentOffer,
   onActivate,
@@ -314,6 +318,8 @@ export function DocumentTabs({
               {tabs.map((tab, index) => {
                 const selected = tab.id === activeId
                 const armed = tab.id === armedTabId
+                const appendCount =
+                  appendOffer?.tabId === tab.id ? appendOffer.count : null
                 // A selected tab is parted from its neighbours by its own border;
                 // between two unselected ones nothing marks where one ends.
                 const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
@@ -338,7 +344,8 @@ export function DocumentTabs({
                               "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
                             // Held pages are over this tab: it reads as the one they are
                             // about to be taken to, ahead of it actually opening.
-                            armed && "border-primary bg-background text-foreground",
+                            (armed || appendCount !== null) &&
+                              "border-primary bg-background text-foreground",
                             drag &&
                               drag.index !== index &&
                               "transition-transform duration-200 ease-out",
@@ -431,6 +438,17 @@ export function DocumentTabs({
                         <X className="size-3.5" />
                       </button>
                     </HintTooltip>
+                    {/* Over the close button, which no drag can reach, so the
+                        name keeps its width. */}
+                    {appendCount !== null ? (
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute top-1.5 right-1 flex h-4.5 items-center rounded-full bg-primary px-1.5 text-xs leading-none font-medium text-primary-foreground tabular-nums"
+                        data-append-offer
+                      >
+                        +{appendCount}
+                      </span>
+                    ) : null}
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       <ContextMenuItem

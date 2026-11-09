@@ -44,6 +44,10 @@ const de = {
     newFromPages_other: "Neues PDF aus {{count}} Seiten",
     pagesFrom: "Seiten aus {{name}}",
     extractFailed: "Aus diesen Seiten konnte kein neues PDF erstellt werden.",
+    appendedNotice_one: "{{count}} Seite am Ende von {{name}} hinzugefügt",
+    appendedNotice_other: "{{count}} Seiten am Ende von {{name}} hinzugefügt",
+    appendBusy:
+      "Die Seiten wurden nicht hinzugefügt: In {{name}} läuft noch ein Vorgang. Versuchen Sie es erneut, sobald er abgeschlossen ist.",
     unsavedTabDescription:
       "Dieses Dokument enthält nicht gespeicherte Änderungen. Wenn Sie den Tab schließen, werden sie verworfen.",
     unsavedWindowDescription:

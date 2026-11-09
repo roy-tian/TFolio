@@ -17,6 +17,7 @@ import {
   textPdf,
   tooltipOn,
 } from "./helpers"
+import type { E2eOverrides } from "../../src/lib/e2e"
 
 /** Only the active document's sidebar is laid out, and only it is what a
     gesture means — a hidden tab's column is still in the tree. */
@@ -586,6 +587,7 @@ describe("TFolio pages carried to other documents", () => {
     await clickThumb(3, { ctrl: true })
     await liftThumb(3)
     await pointerAt("pointermove", await tabPoint("carry-target.pdf"))
+    await expect($("[data-append-offer]")).toHaveText("+2")
     // Resting on the tab opens it under the pages.
     await expect(tabButton("carry-target.pdf")).toHaveAttribute("aria-selected", "true")
 
@@ -595,6 +597,7 @@ describe("TFolio pages carried to other documents", () => {
     await $(`${activeSidebar} [data-drag-hole]`).waitForExist({
       timeoutMsg: "the column never made room for the pages",
     })
+    await expect($("[data-append-offer]")).not.toBeExisting()
     await pointerAt("pointerup", gap)
 
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
@@ -615,6 +618,128 @@ describe("TFolio pages carried to other documents", () => {
     await tabButton("carry-source.pdf").click()
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the source lost pages",
+    })
+  })
+
+  it("adds pages let go on another tab to the end of its file", async () => {
+    await openPdfFromDisk("append-target.pdf", textPdf(2))
+    const [targetFirst, targetSecond] = await paintedFingerprints(2)
+    await openPdfFromDisk("append-source.pdf", bandedPdf(4))
+    const [first, , third] = await paintedFingerprints(4)
+
+    await clickThumb(1)
+    await clickThumb(3, { ctrl: true })
+    await liftThumb(3)
+
+    // In one script, so the release lands well before the tab would open.
+    const tab = await tabPoint("append-target.pdf")
+
+    await browser.execute((at: Point) => {
+      for (const kind of ["pointermove", "pointerup"]) {
+        document.dispatchEvent(
+          new PointerEvent(kind, { bubbles: true, clientX: at.x, clientY: at.y }),
+        )
+      }
+    }, tab)
+
+    await $("[data-notice='pagesAppended']").waitForDisplayed({
+      timeoutMsg: "the copies never landed",
+    })
+    await expect($("[data-notice='pagesAppended']")).toHaveText(
+      expect.stringContaining("Added 2 pages to the end of append-target.pdf"),
+    )
+    await expect(tabButton("append-source.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(await thumbCount()).toBe(4)
+
+    await tabButton("append-target.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the target never showed the copies",
+    })
+    await waitForThumb(1, targetFirst!)
+    await waitForThumb(2, targetSecond!)
+    await waitForThumb(3, first!)
+    await waitForThumb(4, third!)
+    await expect(
+      $("button[role='tab'][aria-selected='true'] [aria-label='Unsaved changes']"),
+    ).toBeExisting()
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the undo never took the copies back",
+    })
+  })
+
+  it("refuses pages let go on a tab still at work, and says so", async () => {
+    await openPdfFromDisk("busy-target.pdf", textPdf(2))
+    await paintedFingerprints(2)
+    // A Save As whose dialog is never answered holds the tab's queue.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __finishSaveAs?: () => void
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: () =>
+          new Promise((resolve) => {
+            page.__finishSaveAs = () => resolve(null)
+          }),
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () => typeof (window as Window & { __finishSaveAs?: unknown }).__finishSaveAs === "function",
+        ),
+      { timeoutMsg: "the Save As never started" },
+    )
+
+    await openPdfFromDisk("busy-source.pdf", bandedPdf(4))
+    await paintedFingerprints(4)
+    await clickThumb(1)
+    await liftThumb(1)
+
+    const tab = await tabPoint("busy-target.pdf")
+
+    await pointerAt("pointermove", tab)
+    // The spring and the offer are set by the same move.
+    await $("[data-tab-spring]").waitForExist()
+    await expect($("[data-append-offer]")).not.toBeExisting()
+    await pointerAt("pointerup", tab)
+
+    await $("[data-notice='pagesAppendBusy']").waitForDisplayed()
+    await expect($("[data-notice='pagesAppendBusy']")).toHaveText(
+      expect.stringContaining("busy-target.pdf still has work in progress"),
+    )
+
+    // Once the work is done, the same release adds the page.
+    await browser.execute(() =>
+      (window as Window & { __finishSaveAs?: () => void }).__finishSaveAs?.(),
+    )
+    await tabButton("busy-source.pdf").click()
+    // The refused pages fly home first; a press before then lifts nothing.
+    await $(`${activeSidebar} [data-drag-hole]`).waitForExist({ reverse: true })
+    await clickThumb(1)
+    await liftThumb(1)
+    // The tab is asked on each move, as a held pointer's tremor would.
+    await browser.waitUntil(
+      async () => {
+        await pointerAt("pointermove", tab)
+        return $("[data-append-offer]").isExisting()
+      },
+      { timeoutMsg: "the tab never offered itself once its work was done" },
+    )
+    await expect($("[data-append-offer]")).toHaveText("+1")
+    await pointerAt("pointerup", tab)
+
+    // The same corner slot: the success replaces the refusal.
+    await $("[data-notice='pagesAppended']").waitForDisplayed()
+    await expect($("[data-notice='pagesAppendBusy']")).not.toBeExisting()
+    await tabButton("busy-target.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the page never landed once the tab was free",
     })
   })
 

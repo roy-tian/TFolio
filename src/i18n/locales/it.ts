@@ -44,6 +44,10 @@ const it = {
     newFromPages_other: "Nuovo PDF con {{count}} pagine",
     pagesFrom: "Pagine da {{name}}",
     extractFailed: "Impossibile creare un nuovo PDF con queste pagine.",
+    appendedNotice_one: "{{count}} pagina aggiunta alla fine di {{name}}",
+    appendedNotice_other: "{{count}} pagine aggiunte alla fine di {{name}}",
+    appendBusy:
+      "Le pagine non sono state aggiunte: su {{name}} è ancora in corso un’operazione. Riprova al termine.",
     unsavedTabDescription:
       "Questo documento contiene modifiche non salvate. Chiudendo la scheda, verranno scartate.",
     unsavedWindowDescription:

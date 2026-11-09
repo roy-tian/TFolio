@@ -44,6 +44,10 @@ const th = {
     newFromPages_other: "PDF ใหม่จาก {{count}} หน้า",
     pagesFrom: "หน้าจาก {{name}}",
     extractFailed: "ไม่สามารถสร้าง PDF ใหม่จากหน้าเหล่านั้นได้",
+    appendedNotice_one: "เพิ่ม {{count}} หน้าไว้ที่ท้าย {{name}} แล้ว",
+    appendedNotice_other: "เพิ่ม {{count}} หน้าไว้ที่ท้าย {{name}} แล้ว",
+    appendBusy:
+      "ไม่ได้เพิ่มหน้า เนื่องจาก {{name}} ยังมีงานที่กำลังดำเนินการอยู่ โปรดลองอีกครั้งเมื่องานเสร็จ",
     unsavedTabDescription:
       "เอกสารนี้มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก การปิดแท็บจะละทิ้งการเปลี่ยนแปลงเหล่านั้น",
     unsavedWindowDescription:

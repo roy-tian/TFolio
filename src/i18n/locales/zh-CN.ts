@@ -44,6 +44,10 @@ const zhCN = {
     newFromPages_other: "用 {{count}} 页新建 PDF",
     pagesFrom: "{{name}} 的页面",
     extractFailed: "无法用这些页面新建 PDF。",
+    appendedNotice_one: "已将 {{count}} 页添加到 {{name}} 末尾",
+    appendedNotice_other: "已将 {{count}} 页添加到 {{name}} 末尾",
+    appendBusy:
+      "页面未添加：{{name}} 仍有操作进行中，请等它完成后再试。",
     unsavedTabDescription: "此文档尚有未保存的修改，关闭标签页将丢弃这些修改。",
     unsavedWindowDescription:
       "一个或多个已打开文档尚有未保存的修改，关闭窗口将丢弃这些修改。",

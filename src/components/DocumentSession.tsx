@@ -76,6 +76,7 @@ import { copyPlainText } from "@/lib/clipboard"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
+import type { CarriedPages } from "@/lib/pageCarry"
 import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals } from "@/lib/notices"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
@@ -124,6 +125,11 @@ import { anchorCorrection, anchorOnPage } from "@/lib/viewportAnchor"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 export type DocumentSessionHandle = {
+  /** Another tab's pages let go on this one's tab: copies at the end, or null
+      where the document cannot take them now. Settles on whether they landed. */
+  appendCarriedPages: (carried: CarriedPages) => Promise<boolean> | null
+  /** Whether `appendCarriedPages` would take pages now. */
+  canTakePagesNow: () => boolean
   /** Lets go of the edit it held: the note's text lives nowhere else by then. */
   dismissNoteFont: () => void
   /** The reader's word on intact signatures before a change, or a new file of
@@ -886,6 +892,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       notice,
       thumbnailSelection,
     })
+    // The handle is not rebuilt per render; an append counts the pages now.
+    const pageOpsRef = useRef(pageOps)
+
+    useLayoutEffect(() => {
+      pageOpsRef.current = pageOps
+    })
+
     const {
       deleteThumbnailPage,
       insertBlankPage,
@@ -1595,6 +1608,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useImperativeHandle(
       ref,
       () => ({
+        appendCarriedPages: (carried) => pageOpsRef.current.appendCarriedPages(carried),
+        canTakePagesNow: () => pageOpsRef.current.canTakeCarriedPages(),
         dismissNoteFont: clearNoteFontOffer,
         ensureSignatures,
         fetchNoteFont: () => void fetchNoteFont(),

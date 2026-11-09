@@ -129,11 +129,13 @@ export function useThumbnailPageOps({
   const reorderPages = (order: number[]) =>
     editingBusy() ? Promise.resolve(false) : annotations.reorderPages(order)
 
-  /** Another tab's pages dragged in: copies, one undo step like a paste. Only
-      into an idle queue: a copy waiting behind other work would read the
+  /** Only an idle queue: a copy waiting behind other work would read the
       source's pages by numbers the reader may have changed meanwhile. */
+  const canTakeCarriedPages = () => !editingBusy() && !annotations.hasPendingWorkNow()
+
+  /** Another tab's pages dragged in: copies, one undo step like a paste. */
   const insertCarriedPages = (carried: CarriedPages, index: number) =>
-    !pdfDocument || editingBusy() || annotations.hasPendingWorkNow()
+    !pdfDocument || !canTakeCarriedPages()
       ? null
       : annotations.insertPages(
           carried.sourceDocumentId,
@@ -142,7 +144,12 @@ export function useThumbnailPageOps({
           pdfDocument.numPages,
         )
 
+  const appendCarriedPages = (carried: CarriedPages) =>
+    insertCarriedPages(carried, pdfDocument.numPages + 1)
+
   return {
+    appendCarriedPages,
+    canTakeCarriedPages,
     deleteThumbnailPage,
     insertBlankPage,
     insertCarriedPages,

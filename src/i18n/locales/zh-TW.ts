@@ -44,6 +44,10 @@ const zhTW = {
     newFromPages_other: "以 {{count}} 頁建立新的 PDF",
     pagesFrom: "{{name}} 的頁面",
     extractFailed: "無法以這些頁面建立新的 PDF。",
+    appendedNotice_one: "已將 {{count}} 頁加到 {{name}} 的結尾",
+    appendedNotice_other: "已將 {{count}} 頁加到 {{name}} 的結尾",
+    appendBusy:
+      "頁面未加入：{{name}} 仍有工作進行中，請等它完成後再試。",
     unsavedTabDescription:
       "此文件有尚未儲存的變更，關閉分頁將會捨棄這些變更。",
     unsavedWindowDescription:

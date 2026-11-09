@@ -739,9 +739,53 @@ export default function App() {
     [activateTab, sidebar],
   )
 
+  const canAppendToTab = useCallback(
+    (tabId: number) => sessionRefs.current.get(tabId)?.canTakePagesNow() ?? false,
+    [],
+  )
+
+  // Said in the corner: the tab that took the pages, or refused them, is
+  // usually not on screen.
+  const appendPagesToTab = useCallback(
+    (tabId: number, carried: CarriedPages) => {
+      const landing = sessionRefs.current.get(tabId)?.appendCarriedPages(carried) ?? null
+      const name = tabsRef.current.find((tab) => tab.id === tabId)?.name
+
+      if (!landing) {
+        if (name) {
+          notices.raise({
+            kind: "pagesAppendBusy",
+            owner: workspaceOwner,
+            values: { name },
+          })
+        }
+
+        return null
+      }
+
+      void landing.then(
+        (landed) => {
+          if (landed && name) {
+            notices.raise({
+              kind: "pagesAppended",
+              owner: workspaceOwner,
+              values: { count: carried.pages.length, name },
+            })
+          }
+        },
+        () => undefined,
+      )
+
+      return landing
+    },
+    [notices],
+  )
+
   const pageCarry = usePageCarry({
     activeIdRef,
+    canAppend: canAppendToTab,
     onActivate: carryIntoTab,
+    onAppend: appendPagesToTab,
     onNewDocument: openPagesAsDocument,
   })
 
@@ -2306,6 +2350,7 @@ export default function App() {
       <div hidden={!viewing}>
         <DocumentTabs
           activeId={activeId}
+          appendOffer={pageCarry.appendOffer}
           armedTabId={pageCarry.armedTabId}
           newDocumentOffer={pageCarry.newDocumentOffer}
           onActivate={activateTab}

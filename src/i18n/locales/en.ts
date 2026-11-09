@@ -42,6 +42,10 @@ const en = {
     newFromPages_other: "New PDF from {{count}} pages",
     pagesFrom: "Pages from {{name}}",
     extractFailed: "A new PDF could not be made from those pages.",
+    appendedNotice_one: "Added {{count}} page to the end of {{name}}",
+    appendedNotice_other: "Added {{count}} pages to the end of {{name}}",
+    appendBusy:
+      "The pages were not added: {{name}} still has work in progress. Try again once it finishes.",
     unsavedTabDescription:
       "This document has changes that are not saved. Closing its tab will discard them.",
     unsavedWindowDescription:
