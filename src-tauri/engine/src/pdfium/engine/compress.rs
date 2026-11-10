@@ -353,7 +353,9 @@ impl Basis {
 /// PDFium's rewrite — where unreferenced objects drop off — is the one step
 /// that needs the PDFium lock, so it happens here, under the caller's guard,
 /// once per content version.
-fn basis(entry: &mut OpenDocument) -> Result<Basis, String> {
+/// A document other files were added to compresses what its Save As writes,
+/// blank pages and file bookmarks with it.
+fn basis(engine: &PdfiumEngine, entry: &mut OpenDocument) -> Result<Basis, String> {
     // An estimate made before the reader's answer measures the signatures as
     // they stand.
     let flattens = entry.output_flattens().unwrap_or(false);
@@ -362,10 +364,13 @@ fn basis(entry: &mut OpenDocument) -> Result<Basis, String> {
             cache
         }
         _ => {
-            let mut rewritten = entry
-                .document
-                .save_to_bytes()
-                .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?;
+            let mut rewritten = match engine.combined_bytes(entry) {
+                Some(combined) => combined?,
+                None => entry
+                    .document
+                    .save_to_bytes()
+                    .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?,
+            };
 
             if flattens {
                 rewritten = signatures::flattened_bytes(rewritten)?;
@@ -484,7 +489,7 @@ impl PdfiumEngine {
     fn compress_basis(&self, document_id: u64) -> Result<Basis, String> {
         let mut documents = self.lock_documents()?;
 
-        basis(open_entry_mut(&mut documents, document_id)?)
+        basis(self, open_entry_mut(&mut documents, document_id)?)
     }
 
     /// Files a finished run's work for the next one — unless the document
@@ -573,7 +578,7 @@ impl PdfiumEngine {
             self.refuse_open_destination(&documents, path)?;
             let entry = open_entry_mut(&mut documents, document_id)?;
             entry.output_flattens()?;
-            basis(entry)?
+            basis(self, entry)?
         };
 
         // The estimate for these levels usually already made these very bytes.

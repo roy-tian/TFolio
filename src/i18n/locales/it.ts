@@ -143,7 +143,7 @@ const it = {
     menuLabel: "Salva come A4…",
     title: "Salva come A4",
     description: "Ogni pagina viene posta su un foglio A4 in un nuovo file, ridotta se serve ma mai ingrandita, le pagine larghe in orizzontale. Questa scheda mostrerà poi il nuovo file.",
-    leftBehind: "Annotazioni, link e campi modulo non vengono mantenuti; filigrana e numeri di pagina vengono scalati con la pagina.",
+    leftBehind: "Annotazioni, link e campi modulo non vengono mantenuti; filigrana e numeri di pagina vengono riposizionati sui fogli A4 nella loro dimensione.",
     keepsOriginal: "Questo documento ha modifiche non salvate: il file A4 si apre in una nuova scheda e questa resta com’è.",
     suffix: "A4",
     preparing: "Adattamento delle pagine ad A4…",
@@ -517,6 +517,7 @@ const it = {
     unreadable_other: "Impossibile leggere {{count}} file: {{names}}.",
     converterMissing: "Nessuna applicazione su questo computer può convertire documenti Word.",
     tooManyFiles: "Si possono aggiungere al massimo 64 file alla volta.",
+    changed: "Un file è cambiato sul disco dopo essere stato letto. Aggiungilo di nuovo per prenderlo com’è ora.",
   },
   bookmarks: {
     title: "Segnalibri",

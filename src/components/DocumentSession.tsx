@@ -418,6 +418,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         ? sections[0]!.outline
         : pdfDocument.outline
     const bookmarksApply = outline.length > 0 || severalFiles
+    // What a split by bookmarks cuts at once files were added: a bookmark per
+    // file where a Save As writes one, else each file's own.
+    const splitOutline = !pdfDocument.hasForeignPages
+      ? pdfDocument.outline
+      : severalFiles && pdfDocument.fileOptions?.perFileBookmarks
+        ? sections.map((section) => ({
+            items: section.outline,
+            pageNumber: pagesOfSection(pdfDocument.pages, section.id)[0] ?? null,
+            title: section.title,
+          }))
+        : sections.flatMap((section) => section.outline)
     const sidebar = useSidebar()
     // The page grid lies over the reading view, which stays laid out beneath
     // it, so leaving the grid finds the reader's place where it was.
@@ -832,13 +843,19 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             change?.movement === "inPlace" &&
             !samePadding(current.padding ?? NO_PADDING, update.padding ?? NO_PADDING)
           ) {
-            const pageNumber = currentPage.get()
-            const page = viewerRef.current?.querySelector<HTMLElement>(
-              `[data-page-number="${pageNumber}"]`,
-            )
+            // The page under the viewer's top edge as laid out now: the page
+            // tracked as current follows scrolling a moment behind.
+            const viewer = viewerRef.current
+            const edge = viewer?.getBoundingClientRect().top ?? 0
+            const page = Array.from(
+              viewer?.querySelectorAll<HTMLElement>("[data-page-number]") ?? [],
+            ).find((candidate) => candidate.getBoundingClientRect().bottom > edge)
 
             paddingAnchorRef.current = page
-              ? { pageNumber, top: page.getBoundingClientRect().top }
+              ? {
+                  pageNumber: Number(page.dataset.pageNumber),
+                  top: page.getBoundingClientRect().top,
+                }
               : null
           }
 
@@ -1074,8 +1091,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             },
           )
 
+          if (landed === "changed") {
+            notice.raise("filesChanged")
+          }
+
           // As every remembered answer is: nothing else shows it was given.
-          if (landed && signatures && remembered !== "ask") {
+          if (landed === true && signatures && remembered !== "ask") {
             notice.raise(
               signatures === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet",
             )
@@ -2210,6 +2231,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           <SplitPdfDialog
             document={pdfDocument}
             hidden={!active}
+            outline={splitOutline}
             suggestedName={exportBaseName}
             onExport={annotations.exportArchive}
             onClose={() => setSplitOpen(false)}

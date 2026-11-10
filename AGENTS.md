@@ -131,10 +131,13 @@
 ## Save as A4
 
 - `fit_to_a4` builds a copy of every page fitted onto A4 (with the blank pages and per-file
-  bookmarks a Save As writes); a form XObject leaves annotations, links and fields behind, and a
-  watermark or page numbers scale with their page. `save_a4_pdf` asks for the destination in
-  Rust first, records the copy with `record_document`, binds it like Save As, and the tab shows
-  it in place of the document it was made from.
+  bookmarks a Save As writes); a form XObject leaves annotations, links and fields behind. This
+  session's watermark and page numbers are lifted from a copy first (only where `verify_owned_tail`
+  holds, else they scale along) and stamped again on the sheets as the copy's own content
+  (`stamp_layers`). The stripped copy closes through `MergeDraft`, under the lock, however the
+  run ends. `save_a4_pdf` asks for the destination in Rust first, records the copy with
+  `record_document`, binds it like Save As, and the tab shows it in place of the document it was
+  made from.
 
 ## Files added to a document
 
@@ -147,7 +150,8 @@
   name keeps its own. A deleted page keeps its file for the restore an undo brings back.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
-  then the tab reopens the written file, its history gone.
+  then the tab reopens the written file, its history gone. A compressed copy compresses what a
+  Save As writes (`combined_bytes`), and a split by bookmarks cuts at the outline it writes.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, page grid,
   sidebar and print show them there, and only a Save As writes them. Structure commands never

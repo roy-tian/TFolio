@@ -442,6 +442,14 @@ impl<'a> MergeDraft<'a> {
         })
     }
 
+    /// A document made under the lock the caller holds, closed as a draft's.
+    pub(super) fn holding(engine: &'a PdfiumEngine, document: PdfDocument<'static>) -> Self {
+        Self {
+            engine,
+            document: Some(document),
+        }
+    }
+
     /// Only while the caller holds the lock.
     pub(super) fn document(&mut self) -> &mut PdfDocument<'static> {
         self.document
@@ -689,6 +697,22 @@ impl PdfiumEngine {
             .map(|parent| parent.to_path_buf())
     }
 
+    /// The refusals a new file written to `path` would meet, asked ahead of
+    /// work that could otherwise only end in one.
+    pub fn check_new_file_destination(&self, path: &Path) -> Result<(), String> {
+        let documents = self.lock_documents()?;
+
+        if is_open_document_file(&documents, path, None) {
+            return Err(EXPORT_TARGET_OPEN_ERROR.into());
+        }
+
+        if self.is_signed_file(&documents, path) {
+            return Err(signatures::EXPORT_SIGNED_ERROR.into());
+        }
+
+        Ok(())
+    }
+
     /// Writes to `path` and binds the document to it — a true save-as, after
     /// which `save` writes there and the old file stays as it was. A copy-only
     /// document with a file stays bound to it: `save` refuses that file, so
@@ -750,18 +774,13 @@ impl PdfiumEngine {
         // lopdf can: it rereads PDFium's bytes off the lock, then stages them.
         // So do an added file's pages left alone: PDFium's outline is still
         // the document's own, aimed at pages that may all be gone.
-        let outline = entry
-            .sections
-            .as_ref()
-            .filter(|_| entry.combined())
-            .map(|book| {
-                let padding = book.padding(&entry.page_ids);
-
-                (book.outline(&entry.page_ids, &padding), padding)
-            });
-        let staging = match outline {
+        let staging = match entry.save_as_layout() {
             None => Staging::Staged(self.stage_document(entry, path)?),
-            Some((nodes, padding)) => Staging::Outlined(self.padded_bytes(entry, &padding)?, nodes),
+            Some((padding, nodes)) => {
+                let bytes = self.document_bytes(entry)?;
+
+                Staging::Outlined(self.padded(bytes, entry, &padding)?, nodes)
+            }
         };
 
         // A copy-only document reaching here wrote somewhere other than its file.
@@ -869,12 +888,56 @@ impl PdfiumEngine {
         Ok(())
     }
 
-    /// The document's bytes with a blank page after each page `padding` names,
-    /// sized as that page shows: a copy's, so the reader's document keeps none.
-    fn padded_bytes(&self, entry: &mut OpenDocument, padding: &[usize]) -> Result<Vec<u8>, String> {
-        let bytes = self.document_bytes(entry)?;
+    /// What a Save As of a document other files were added to writes, as
+    /// bytes: its blank pages and its bookmarks a file at a time. `None` for a
+    /// document of its own pages alone, whose bytes are PDFium's as they stand.
+    /// Left as the reader's document is: no orphans collected, nothing bound.
+    pub(super) fn combined_bytes(&self, entry: &OpenDocument) -> Option<Result<Vec<u8>, String>> {
+        let (padding, nodes) = entry.save_as_layout()?;
 
-        if padding.is_empty() {
+        Some(
+            entry
+                .document
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not write the document: {error}"))
+                .and_then(|bytes| self.padded(bytes, entry, &padding))
+                .and_then(|bytes| outline::write_outline(bytes, &nodes)),
+        )
+    }
+
+    /// `bytes` with a blank page after each page `padding` names, sized as
+    /// that page shows: a copy's, so the reader's document keeps none.
+    fn padded(
+        &self,
+        bytes: Vec<u8>,
+        entry: &OpenDocument,
+        padding: &[usize],
+    ) -> Result<Vec<u8>, String> {
+        let sheets: Vec<_> = padding
+            .iter()
+            .map(|after| {
+                let shown = entry
+                    .page_ids
+                    .get(*after)
+                    .and_then(|page_id| entry.page_geometry.get(page_id))
+                    .copied()
+                    .unwrap_or(UNMEASURED_PAGE);
+
+                (*after, shown.width, shown.height)
+            })
+            .collect();
+
+        self.with_blank_pages(bytes, &sheets)
+    }
+
+    /// `bytes` with a blank page `width` by `height` after each page index
+    /// `sheets` names, in ascending order. Under the lock.
+    pub(super) fn with_blank_pages(
+        &self,
+        bytes: Vec<u8>,
+        sheets: &[(usize, f32, f32)],
+    ) -> Result<Vec<u8>, String> {
+        if sheets.is_empty() {
             return Ok(bytes);
         }
 
@@ -884,17 +947,10 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not reread the document: {error}"))?;
 
         // From the end, so each index still names the page it was taken for.
-        for after in padding.iter().rev() {
-            let (width, height) = entry
-                .page_ids
-                .get(*after)
-                .and_then(|page_id| entry.page_geometry.get(page_id))
-                .map(|page| (page.width, page.height))
-                .unwrap_or((UNMEASURED_PAGE.width, UNMEASURED_PAGE.height));
-
+        for (after, width, height) in sheets.iter().rev() {
             copy.pages_mut()
                 .create_page_at_index(
-                    PdfPagePaperSize::Custom(PdfPoints::new(width), PdfPoints::new(height)),
+                    PdfPagePaperSize::Custom(PdfPoints::new(*width), PdfPoints::new(*height)),
                     *after as i32 + 1,
                 )
                 .map_err(|error| format!("PDFium could not add a blank page: {error}"))?;
@@ -906,16 +962,23 @@ impl PdfiumEngine {
 
     /// `stage_document`'s bytes, for a caller that rewrites them before they land.
     fn document_bytes(&self, entry: &mut OpenDocument) -> Result<Vec<u8>, String> {
+        self.written(entry, |document| document.save_to_bytes())
+    }
+
+    /// A save's one step: collected of orphans first, and the file it reads
+    /// from no longer the bytes first opened once PDFium has rewritten them.
+    fn written<T>(
+        &self,
+        entry: &mut OpenDocument,
+        write: impl FnOnce(&PdfDocument<'static>) -> Result<T, PdfiumError>,
+    ) -> Result<T, String> {
         self.collect_orphans(entry)?;
 
-        let bytes = entry
-            .document
-            .save_to_bytes()
+        let written = write(&entry.document)
             .map_err(|error| format!("PDFium could not write the document: {error}"))?;
-        // The source may now be PDFium's rewrite, not the bytes first opened.
         entry.loaded_len = None;
 
-        Ok(bytes)
+        Ok(written)
     }
 
     /// The one write path under every save and export, so their files come out
@@ -927,15 +990,9 @@ impl PdfiumEngine {
         entry: &mut OpenDocument,
         path: &Path,
     ) -> Result<StagedFile, String> {
-        self.collect_orphans(entry)?;
-
         let mut staged = StagedFile::beside(path)?;
-        entry
-            .document
-            .save_to_writer(staged.file())
-            .map_err(|error| format!("PDFium could not write the document: {error}"))?;
-        // The source may now be PDFium's rewrite, not the bytes first opened.
-        entry.loaded_len = None;
+
+        self.written(entry, |document| document.save_to_writer(staged.file()))?;
 
         Ok(staged)
     }

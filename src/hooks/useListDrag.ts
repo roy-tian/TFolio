@@ -13,10 +13,6 @@ type UseListDragOptions = {
       bar by x. Decided once at measurement so the rest is axis-free. */
   axis?: "x" | "y"
   active: boolean
-  /** The cells a press on `index` lifts, itself among them, by ascending
-      index: that one alone by default. Asked once, as the press turns into a
-      drag. */
-  carry?: (index: number) => readonly number[]
   listRef: RefObject<HTMLElement | null>
   /** `moved` lands together, the first of them at `to` and the rest after it. */
   onReorder: (moved: readonly number[], to: number) => void
@@ -102,7 +98,6 @@ export type ListDragState = {
 export function useListDrag({
   active,
   axis = "y",
-  carry,
   listRef,
   onReorder,
   pressOnly = pressedButton,
@@ -113,11 +108,9 @@ export function useListDrag({
   const remeasureRef = useRef<(() => void) | null>(null)
   // Read through refs so an owner re-render mid-gesture cannot resubscribe the
   // listeners and drop the gesture in flight.
-  const carryRef = useRef(carry)
   const onReorderRef = useRef(onReorder)
   const onDropOutsideRef = useRef(onDropOutside)
 
-  carryRef.current = carry
   onReorderRef.current = onReorder
   onDropOutsideRef.current = onDropOutside
 
@@ -322,14 +315,8 @@ export function useListDrag({
           return
         }
 
-        const carried = carryRef.current?.(gesture.index)
-
         gesture.dragging = true
         gesture.stale = true
-
-        if (carried?.includes(gesture.index)) {
-          gesture.moving = carried
-        }
 
         // Held pointers stay this window's until release on every platform, but
         // only a capture hands the page the events beyond its own viewport —

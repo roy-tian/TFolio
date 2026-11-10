@@ -42,6 +42,11 @@ pub async fn save_a4_pdf(
         return Ok(None);
     };
 
+    // The dialog took the reader's time, in which the tab may have left.
+    if !owners.owns(document_id, window.label()) {
+        return Err("this window does not hold that document".into());
+    }
+
     fit_into(document_id, path, on_progress, app, window, page).await
 }
 
@@ -81,8 +86,15 @@ async fn fit_into(
     page: PageGeneration,
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&app.state::<PdfiumState>().engine);
-    let fitted = tauri::async_runtime::spawn_blocking(move || {
-        engine.fit_to_a4(document_id, channel_progress(on_progress))
+    let fitted = tauri::async_runtime::spawn_blocking({
+        let path = path.clone();
+
+        // Refused before the build rather than after it: a file open in
+        // another tab, or a signed one, could only end the work at the write.
+        move || {
+            engine.check_new_file_destination(&path)?;
+            engine.fit_to_a4(document_id, channel_progress(on_progress))
+        }
     })
     .await
     .map_err(|error| format!("PDFium A4 task failed: {error}"))??;

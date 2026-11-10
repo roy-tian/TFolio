@@ -15,7 +15,7 @@ use super::*;
 const OPEN_SOURCE_BUDGET: usize = 512 * 1024 * 1024;
 
 /// Why an insert refuses a source whose file is no longer what was read.
-pub const SOURCE_CHANGED: &str = "the file changed since it was added";
+pub const SOURCE_CHANGED: &str = "tfolio:source-changed";
 
 struct FileSource {
     scope: String,

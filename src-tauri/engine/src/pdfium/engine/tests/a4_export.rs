@@ -137,3 +137,72 @@ fn a_rotated_page_lands_on_a4_the_way_it_reads() {
         );
     }
 }
+
+/// A page `width` by `height` points with nothing on it.
+fn sized_page_pdf(width: u32, height: u32) -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        format!(
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents 4 0 R >>\nendobj\n"
+        ),
+        "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+    ])
+}
+
+/// How tall the first page's `1` stands, in points, as PDFium extracts it.
+fn label_height(engine: &PdfiumEngine, document_id: u64) -> f32 {
+    let documents = engine.lock_documents().unwrap();
+    let page = documents[&document_id].document.pages().get(0).unwrap();
+    let text = page.text().unwrap();
+    let chars = text.chars();
+    let label = chars
+        .iter()
+        .find(|char| char.unicode_char() == Some('1'))
+        .expect("the page should carry its number");
+    let bounds = label.tight_bounds().unwrap();
+
+    bounds.top().value - bounds.bottom().value
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn page_numbers_are_stamped_again_at_the_sheet_s_own_size() {
+    let engine = test_engine();
+    // Twice A4 each way: fitted with the page, its number would shrink by half.
+    let large = engine.open(sized_page_pdf(1190, 1684)).unwrap();
+    let a4 = engine.open(sized_page_pdf(595, 842)).unwrap();
+    let config = PageNumbersConfig {
+        mode: PageNumbersMode::Single,
+        position: PageNumbersPosition::BottomCenter,
+        range: None,
+        start: None,
+        smart_color: false,
+        blank_numbered: true,
+        blank_counted: true,
+    };
+
+    for id in [large.id, a4.id] {
+        assert!(engine.apply_page_numbers(id, config.clone()).unwrap());
+    }
+
+    let fitted = engine
+        .fit_to_a4(large.id, |_, _| {})
+        .expect("the page should fit")
+        .expect("nobody stopped it");
+    let expected = label_height(engine, a4.id);
+    let stamped = label_height(engine, fitted.id);
+
+    assert!(
+        (stamped - expected).abs() < 0.5,
+        "the number should be the sheet's own size: {stamped} against {expected}"
+    );
+    // Its own content now, with no layer left for this session to take off;
+    // the document fitted keeps its own.
+    assert!(engine.lock_documents().unwrap()[&fitted.id]
+        .owned_content
+        .is_none());
+    assert!(engine.lock_documents().unwrap()[&large.id]
+        .owned_content
+        .is_some());
+}

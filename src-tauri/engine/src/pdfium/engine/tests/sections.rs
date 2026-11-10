@@ -1,5 +1,10 @@
+use std::io::Read;
+use zip::ZipArchive;
+
 use super::support::*;
 use super::*;
+use crate::pdfium::archive::ArchiveOptions;
+use crate::pdfium::compress::CompressionOptions;
 
 /// A window of its own: the file source tests release and evict theirs.
 const SCOPE: &str = "sections";
@@ -530,7 +535,7 @@ fn a_file_that_cannot_be_added_leaves_the_document_as_it_was() {
     let refused = engine
         .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(true), None)
         .expect_err("a changed file should be refused");
-    assert!(refused.contains(SOURCE_CHANGED), "{refused}");
+    assert_eq!(refused, SOURCE_CHANGED);
 
     let after = engine
         .rotate_pages(own.id, &[1], 0)
@@ -747,6 +752,149 @@ fn an_a4_copy_of_several_files_keeps_their_blanks_and_bookmarks() {
             ("added.pdf".to_string(), Some(3)),
         ]
     );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+/// `outlined.pdf` (three pages, a "Chapter" bookmark) as the document's own,
+/// and `second.pdf` (two pages) added after it.
+fn own_and_second(engine: &PdfiumEngine, directory: &Path, smart_padding: bool) -> PdfDocumentInfo {
+    let own = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(directory, "second.pdf", two_page_pdf())],
+    );
+    let options = sections::FileOptions {
+        smart_padding,
+        per_file_bookmarks: true,
+    };
+
+    engine
+        .insert_sources(SCOPE, own.id, &ids, 4, "own.pdf", options, None)
+        .expect("the file should be added");
+    own
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_compressed_copy_of_added_files_is_what_a_save_as_writes() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-compress");
+    let own = own_and_second(engine, &directory, true);
+    let compressed = directory.join("compressed.pdf");
+
+    assert!(engine
+        .export_compressed(
+            own.id,
+            &compressed,
+            CompressionOptions { image_dpi: None },
+            |_, _| {}
+        )
+        .expect("the compressed copy should be written"));
+
+    let reopened = engine
+        .open_from_path(compressed)
+        .expect("the compressed copy should open");
+    let titles: Vec<_> = reopened
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    // The second file starts on page 5, past the blank the odd first leaves.
+    assert_eq!(reopened.num_pages, 6);
+    assert_eq!(
+        titles,
+        vec![
+            ("own.pdf".to_string(), Some(1)),
+            ("second.pdf".to_string(), Some(5)),
+        ]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_split_by_bookmarks_of_added_files_makes_a_pdf_of_each() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-split");
+    let own = own_and_second(engine, &directory, false);
+    let destination = directory.join("split.zip");
+
+    assert!(engine
+        .export_archive(own.id, &destination, ArchiveOptions::Bookmarks, |_, _| {})
+        .expect("the split should be written"));
+
+    let mut zip = ZipArchive::new(fs::File::open(destination).unwrap()).unwrap();
+
+    assert_eq!(zip.len(), 2);
+
+    for (name, pages, first) in [
+        ("001-own.pdf", 3, "own.pdf"),
+        ("002-second.pdf", 2, "second.pdf"),
+    ] {
+        let mut bytes = Vec::new();
+
+        zip.by_name(name)
+            .unwrap_or_else(|_| panic!("the split should hold {name}"))
+            .read_to_end(&mut bytes)
+            .unwrap();
+
+        let part = engine.open(bytes).expect("each part should open");
+
+        assert_eq!(part.num_pages, pages);
+        assert_eq!(part.outline[0].title, first);
+        engine.close(part.id).unwrap();
+    }
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn an_a4_copy_leaves_the_blank_between_files_bare_as_a_save_as_does() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-a4-blank");
+    let own = own_and_second(engine, &directory, true);
+
+    assert!(engine
+        .apply_page_numbers(
+            own.id,
+            PageNumbersConfig {
+                mode: PageNumbersMode::Single,
+                position: PageNumbersPosition::BottomCenter,
+                range: None,
+                start: None,
+                smart_color: false,
+                blank_numbered: true,
+                blank_counted: true,
+            },
+        )
+        .expect("the pages should be numbered"));
+
+    let fitted = engine
+        .fit_to_a4(own.id, |_, _| {})
+        .expect("the pages should fit")
+        .expect("nobody stopped it");
+    let text = |page: i32| {
+        let documents = engine.lock_documents().unwrap();
+        let page = documents[&fitted.id].document.pages().get(page).unwrap();
+        let text = page.text().unwrap().all();
+
+        text
+    };
+
+    // The blank after the third page, then the second file's first page,
+    // numbered on from three as the reader saw it.
+    assert_eq!(fitted.num_pages, 6);
+    assert!(text(3).trim().is_empty(), "the blank should stay bare");
+    assert!(text(4).contains('4'), "got {:?}", text(4));
 
     fs::remove_dir_all(directory).ok();
 }

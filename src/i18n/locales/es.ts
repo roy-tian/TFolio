@@ -143,7 +143,7 @@ const es = {
     menuLabel: "Guardar como A4…",
     title: "Guardar como A4",
     description: "Cada página se coloca en una hoja A4 en un archivo nuevo, reducida si hace falta pero nunca ampliada, las páginas anchas en horizontal. Después esta pestaña muestra el archivo nuevo.",
-    leftBehind: "Las anotaciones, los enlaces y los campos de formulario no se conservan; la marca de agua y los números de página se escalan con su página.",
+    leftBehind: "Las anotaciones, los enlaces y los campos de formulario no se conservan; la marca de agua y los números de página se vuelven a colocar en las hojas A4 a su propio tamaño.",
     keepsOriginal: "Este documento tiene cambios sin guardar, así que el archivo A4 se abre en una pestaña nueva y esta se queda como está.",
     suffix: "A4",
     preparing: "Ajustando las páginas a A4…",
@@ -518,6 +518,7 @@ const es = {
     unreadable_other: "No se pudieron leer {{count}} archivos: {{names}}.",
     converterMissing: "Ninguna aplicación de este equipo puede convertir documentos de Word.",
     tooManyFiles: "Se pueden añadir como máximo 64 archivos a la vez.",
+    changed: "Un archivo cambió en el disco después de leerse. Vuelva a añadirlo para tomarlo tal como está ahora.",
   },
   bookmarks: {
     title: "Marcadores",

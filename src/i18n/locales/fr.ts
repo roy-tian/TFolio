@@ -143,7 +143,7 @@ const fr = {
     menuLabel: "Enregistrer en A4…",
     title: "Enregistrer en A4",
     description: "Chaque page est placée sur une feuille A4 dans un nouveau fichier, réduite si besoin mais jamais agrandie, les pages larges à l’horizontale. Cet onglet affiche ensuite le nouveau fichier.",
-    leftBehind: "Les annotations, liens et champs de formulaire ne sont pas conservés ; le filigrane et les numéros de page sont mis à l’échelle avec leur page.",
+    leftBehind: "Les annotations, liens et champs de formulaire ne sont pas conservés ; le filigrane et les numéros de page sont replacés sur les feuilles A4 à leur propre taille.",
     keepsOriginal: "Ce document a des modifications non enregistrées : le fichier A4 s’ouvre dans un nouvel onglet et celui-ci reste tel quel.",
     suffix: "A4",
     preparing: "Mise des pages au format A4…",
@@ -519,6 +519,7 @@ const fr = {
     unreadable_other: "Impossible de lire {{count}} fichiers : {{names}}.",
     converterMissing: "Aucune application de cet ordinateur ne peut convertir les documents Word.",
     tooManyFiles: "64 fichiers au plus peuvent être ajoutés à la fois.",
+    changed: "Un fichier a changé sur le disque après sa lecture. Ajoutez-le à nouveau pour le prendre tel qu’il est maintenant.",
   },
   bookmarks: {
     title: "Signets",

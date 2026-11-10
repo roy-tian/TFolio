@@ -141,7 +141,7 @@ const zhTW = {
     menuLabel: "另存為 A4…",
     title: "另存為 A4",
     description: "每頁放到一張 A4 紙上，另存為新檔案：需要時按比例縮小，不會放大，寬的頁面橫放。儲存後這個分頁顯示新檔案。",
-    leftBehind: "頁面上的註解、連結和表單不會保留；浮水印和頁碼會隨頁面一起縮放。",
+    leftBehind: "頁面上的註解、連結和表單不會保留；浮水印和頁碼會以原本的大小重新放到 A4 頁面上。",
     keepsOriginal: "這個文件有未儲存的修改，A4 檔案會在新分頁中開啟，目前分頁保持不變。",
     suffix: "A4",
     preparing: "正在把頁面放到 A4 上…",
@@ -514,6 +514,7 @@ const zhTW = {
     unreadable_other: "無法讀取 {{count}} 個檔案：{{names}}",
     converterMissing: "這台電腦上沒有能轉換 Word 文件的應用程式。",
     tooManyFiles: "一次最多只能加入 64 個檔案。",
+    changed: "檔案在讀取後已在磁碟上被修改。請重新加入，以使用它現在的內容。",
   },
   bookmarks: {
     title: "書籤",

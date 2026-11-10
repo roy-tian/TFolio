@@ -134,7 +134,7 @@ const zhCN = {
     menuLabel: "另存为 A4…",
     title: "另存为 A4",
     description: "每页放到一张 A4 纸上，另存为新文件：需要时按比例缩小，不会放大，宽的页面横放。保存后这个标签显示新文件。",
-    leftBehind: "页面上的批注、链接和表单不会保留；水印和页码随页面一起缩放。",
+    leftBehind: "页面上的批注、链接和表单不会保留；水印和页码会以原本的大小重新放到 A4 页面上。",
     keepsOriginal: "这个文档有未保存的修改，A4 文件会在新标签中打开，当前标签保持不变。",
     suffix: "A4",
     preparing: "正在把页面放到 A4 上…",
@@ -497,6 +497,7 @@ const zhCN = {
     unreadable_other: "无法读取 {{count}} 个文件：{{names}}",
     converterMissing: "这台电脑上没有能转换 Word 文档的应用。",
     tooManyFiles: "一次最多只能添加 64 个文件。",
+    changed: "文件在读取后已在磁盘上被修改。请重新添加，以使用它现在的内容。",
   },
   bookmarks: {
     title: "书签",

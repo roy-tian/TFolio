@@ -13,7 +13,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { useAnnotations } from "@/hooks/useAnnotations"
-import type { PdfDocumentInfo } from "@/lib/pdf"
+import { noticeCatalogue } from "@/lib/notices"
+import { exportFailureNotice, type PdfDocumentInfo } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
 type A4ExportDialogProps = {
@@ -45,7 +46,9 @@ export function A4ExportDialog({
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)
-  const [failed, setFailed] = useState(false)
+  // Beside the button that failed, not in a corner: the refusals a reader can
+  // act on in their own words, as a Save As names them.
+  const [failure, setFailure] = useState<ReturnType<typeof exportFailureNotice> | null>(null)
   const [progress, setProgress] = useState<PdfProgress | null>(null)
   // Asked again with every report until the engine is there to hear it.
   const stopRequested = useRef(false)
@@ -62,7 +65,7 @@ export function A4ExportDialog({
 
   const start = async () => {
     setBusy(true)
-    setFailed(false)
+    setFailure(null)
     setProgress(null)
     stopRequested.current = false
 
@@ -83,8 +86,8 @@ export function A4ExportDialog({
     setBusy(false)
     setStopping(false)
 
-    if (outcome === "failed") {
-      setFailed(true)
+    if (outcome && "failed" in outcome) {
+      setFailure(exportFailureNotice(outcome.failed))
     } else if (outcome) {
       onSaved(outcome)
     } else {
@@ -110,9 +113,11 @@ export function A4ExportDialog({
             {t("a4Export.keepsOriginal")}
           </p>
         ) : null}
-        {failed ? (
+        {failure ? (
           <p className="text-sm text-destructive" role="alert">
-            {t("a4Export.failed")}
+            {failure === "exportFailed"
+              ? t("a4Export.failed")
+              : t(noticeCatalogue[failure].textKey)}
           </p>
         ) : null}
         {busy ? (

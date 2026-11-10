@@ -419,6 +419,37 @@ describe("TFolio blank pages between files", () => {
     await browser.waitUntil(async () => (await blanksIn(activeSidebar)).join() === "1")
   })
 
+  it("holds the reader's place within a page as the blanks before it come and go", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(3)
+    await browser.waitUntil(async () => (await blanksIn(viewer)).join() === "1")
+
+    // Page 2's top against the viewer's: below zero once read halfway down.
+    const place = () =>
+      browser.execute((scope: string) => {
+        const scroll = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+        const page = scroll.querySelector("[data-page-number='2']")!.getBoundingClientRect()
+
+        return Math.round(page.top - scroll.getBoundingClientRect().top)
+      }, session)
+
+    await browser.execute((scope: string) => {
+      const scroll = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      const page = scroll.querySelector("[data-page-number='2']")!.getBoundingClientRect()
+
+      scroll.scrollTop += page.top - scroll.getBoundingClientRect().top + page.height / 2
+    }, session)
+    await browser.pause(300)
+    const before = await place()
+    expect(before).toBeLessThan(0)
+
+    await $(`${activeSidebar} [data-slot='pages-smart-padding']`).click()
+    await browser.waitUntil(async () => (await blanksIn(viewer)).length === 0)
+    await browser.pause(300)
+    expect(Math.abs((await place()) - before)).toBeLessThanOrEqual(1)
+  })
+
   it("keeps the blank in its spread, so the next file opens the next one", async () => {
     await seedSettings({
       organize: { bookmarks: true, smartPadding: true },

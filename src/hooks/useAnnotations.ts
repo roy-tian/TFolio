@@ -43,6 +43,7 @@ import {
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
 import { e2eOverride } from "@/lib/e2e"
+import { isSourceChanged } from "@/lib/fileSources"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
@@ -954,14 +955,14 @@ export function useAnnotations({
         ownTitle: string
         signatures: SignatureDecision | null
       },
-    ) => {
+    ): Promise<boolean | "changed"> => {
       const ready = signedChangeReady("edit")
 
       if (ready !== true && !(await ready)) {
         return false
       }
 
-      let landed = false
+      let landed: boolean | "changed" = false
 
       structurePendingRef.current += 1
 
@@ -1001,12 +1002,20 @@ export function useAnnotations({
               return true
             },
           }
-        }, onAnnotateError)
+        }, (error) => {
+          // Said apart: the reader can add the file again as it now stands.
+          if (isSourceChanged(error)) {
+            landed = "changed"
+          } else {
+            onAnnotateError()
+          }
+        })
       } finally {
         structurePendingRef.current -= 1
       }
 
-      return landed
+      // Set by the queue, which narrowing cannot see.
+      return landed as boolean | "changed"
     },
     [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
@@ -1530,7 +1539,7 @@ export function useAnnotations({
     async (
       request: { filterLabel: string; suggestedName: string },
       onProgress: ProgressHandler,
-    ): Promise<PdfDocumentInfo | null | "failed"> => {
+    ): Promise<PdfDocumentInfo | null | { failed: unknown }> => {
       const ready = signedChangeReady("export")
 
       if (ready !== true && !(await ready)) {
@@ -1538,7 +1547,7 @@ export function useAnnotations({
       }
 
       let written: PdfDocumentInfo | null = null
-      let failed = false
+      let failed: { failed: unknown } | null = null
 
       await enqueue(
         (current) => ({
@@ -1555,12 +1564,12 @@ export function useAnnotations({
             return false
           },
         }),
-        () => {
-          failed = true
+        (error) => {
+          failed = { failed: error }
         },
       )
 
-      return failed ? "failed" : written
+      return failed ?? written
     },
     [documentId, enqueue, signedChangeReady],
   )

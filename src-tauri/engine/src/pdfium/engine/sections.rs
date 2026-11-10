@@ -387,6 +387,8 @@ impl PdfiumEngine {
             .as_mut()
             .ok_or("this document has no files to lay out")?
             .options = options;
+        // No page changed, but the compress basis holds the blanks and bookmarks.
+        entry.compress_cache = None;
 
         Ok(structure_update(entry))
     }
@@ -408,6 +410,7 @@ impl PdfiumEngine {
             .ok_or("this document has no files to name")?;
 
         book.rename(section_id, title)?;
+        entry.compress_cache = None;
 
         Ok(structure_update(entry))
     }
@@ -423,6 +426,16 @@ impl OpenDocument {
                 .sections
                 .as_ref()
                 .is_some_and(|book| book.several(&self.page_ids))
+    }
+
+    /// Where a Save As of several files puts its blank pages, and the outline
+    /// it writes; `None` for a document of its own pages alone.
+    pub(super) fn save_as_layout(&self) -> Option<(Vec<usize>, Vec<OutlineNode>)> {
+        let book = self.sections.as_ref().filter(|_| self.combined())?;
+        let padding = book.padding(&self.page_ids);
+        let nodes = book.outline(&self.page_ids, &padding);
+
+        Some((padding, nodes))
     }
 
     /// The blank pages a Save As will add, each after the 1-based page it

@@ -38,7 +38,27 @@ fn sections(outline: &[PdfOutlineItem], pages: i32) -> Result<Vec<Section>, Stri
         .collect())
 }
 
+fn outline_items(nodes: &[OutlineNode]) -> Vec<PdfOutlineItem> {
+    nodes
+        .iter()
+        .map(|node| PdfOutlineItem {
+            title: node.title.clone(),
+            page_number: i32::try_from(node.page + 1).ok(),
+            items: outline_items(&node.children),
+        })
+        .collect()
+}
+
 fn section_name(index: usize, title: &str) -> String {
+    // A part named for a file would otherwise end in `.pdf.pdf`.
+    let title = match title.len().checked_sub(4) {
+        Some(stem)
+            if title.is_char_boundary(stem) && title[stem..].eq_ignore_ascii_case(".pdf") =>
+        {
+            &title[..stem]
+        }
+        _ => title,
+    };
     let title: String = title
         .chars()
         .map(|ch| {
@@ -160,10 +180,17 @@ impl PdfiumEngine {
                 ArchiveOptions::Images { .. } => false,
                 _ => entry.output_flattens()?,
             };
+            // Files added to the document split as a Save As would bookmark
+            // them, a part per file where it writes a bookmark per file.
+            let outline = match entry.sections.as_ref().filter(|_| entry.combined()) {
+                Some(book) => outline_items(&book.outline(&entry.page_ids, &[])),
+                None => collect_bookmark_siblings(entry.document.bookmarks().root()),
+            };
+
             (
                 entry.content_version,
                 entry.document.pages().len() as usize,
-                collect_bookmark_siblings(entry.document.bookmarks().root()),
+                outline,
                 flatten,
             )
         };

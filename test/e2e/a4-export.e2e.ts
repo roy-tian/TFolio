@@ -107,6 +107,24 @@ describe("TFolio save as A4", () => {
     await expect($("//button[@role='tab'][normalize-space()='edited.pdf']")).toExist()
   })
 
+  it("names a refusal beside its button: a copy over a file open in another tab", async () => {
+    const other = await openPdfFromDisk("other.pdf", minimalPdf(1))
+    await openPdfFromDisk("own.pdf", minimalPdf(1, "0 0 200 200"))
+    // Two tabs: the hidden one's page would answer a wait for a rendered page.
+    await expect($("//button[@role='tab'][normalize-space()='own.pdf']")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    await pointA4At(other)
+    await $(`${session} [data-slot='pdf-save-menu-trigger']`).click()
+    await $("[data-action='save-a4']").click()
+    await $("[data-testid='a4-save']").click()
+    await expect($("[data-testid='a4-dialog'] [role='alert']")).toHaveText(
+      expect.stringContaining("open in another tab"),
+    )
+  })
+
   it("keeps the blanks between files and a bookmark for each", async () => {
     const own = await openPdfFromDisk("own.pdf", minimalPdf(1))
     await pointMultiPickerAt([writeScratchPdf("added.pdf", outlinedPdf())])

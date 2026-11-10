@@ -308,6 +308,11 @@ export const noticeCatalogue = {
     textKey: "files.unreadable",
     tone: "danger",
   },
+  filesChanged: {
+    life: "transient",
+    textKey: "files.changed",
+    tone: "warning",
+  },
   // Standing for as long as the conversion runs; the open retracts it.
   wordConverting: {
     life: "standing",

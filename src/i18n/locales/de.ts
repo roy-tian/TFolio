@@ -143,7 +143,7 @@ const de = {
     menuLabel: "Als A4 speichern…",
     title: "Als A4 speichern",
     description: "Jede Seite wird in einer neuen Datei auf ein A4-Blatt gesetzt – bei Bedarf verkleinert, nie vergrößert, breite Seiten quer. Danach zeigt dieser Tab die neue Datei.",
-    leftBehind: "Anmerkungen, Links und Formularfelder bleiben zurück; Wasserzeichen und Seitenzahlen werden mit ihrer Seite skaliert.",
+    leftBehind: "Anmerkungen, Links und Formularfelder bleiben zurück; Wasserzeichen und Seitenzahlen werden in ihrer eigenen Größe neu auf die A4-Blätter gesetzt.",
     keepsOriginal: "Dieses Dokument hat ungespeicherte Änderungen; die A4-Datei öffnet sich daher in einem neuen Tab, und dieser bleibt unverändert.",
     suffix: "A4",
     preparing: "Seiten werden auf A4 gesetzt…",
@@ -519,6 +519,7 @@ const de = {
     unreadable_other: "{{count}} Dateien konnten nicht gelesen werden: {{names}}.",
     converterMissing: "Auf diesem Computer kann keine Anwendung Word-Dokumente umwandeln.",
     tooManyFiles: "Höchstens 64 Dateien lassen sich auf einmal hinzufügen.",
+    changed: "Eine Datei hat sich nach dem Einlesen auf dem Datenträger geändert. Fügen Sie sie erneut hinzu, um sie im jetzigen Stand zu übernehmen.",
   },
   bookmarks: {
     title: "Lesezeichen",

@@ -10,6 +10,14 @@ import {
   type PdfSignatures,
 } from "@/lib/pdf"
 
+/** The engine's refusal of a file that changed on disk after it was read
+    (`SOURCE_CHANGED`): its pages may no longer be the ones the reader saw. */
+const SOURCE_CHANGED = "tfolio:source-changed"
+
+export function isSourceChanged(error: unknown) {
+  return error === SOURCE_CHANGED || (error instanceof Error && error.message === SOURCE_CHANGED)
+}
+
 /** What the backend learns of a file read for its pages; `id` is absent where
     it could not be read, and `error` then says why where "unreadable" would not. */
 export type FileSourceInfo = {

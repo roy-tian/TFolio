@@ -10,8 +10,9 @@ impl PdfiumEngine {
     /// where that shrinks it less — with a blank A4 sheet where a Save As puts
     /// one between files, and the bookmarks a Save As writes. A page's
     /// annotations, links and fields stay behind: the sheet takes a form of
-    /// its content alone, a watermark or page numbers with it. Opened as a
-    /// document of its own for the caller to write and bind; `None` once
+    /// its content alone. This session's watermark and page numbers are lifted
+    /// first and stamped again on the sheets, as their own content. Opened as
+    /// a document of its own for the caller to write and bind; `None` once
     /// stopped, which the closing of the document also does.
     pub fn fit_to_a4(
         &self,
@@ -20,32 +21,60 @@ impl PdfiumEngine {
     ) -> Result<Option<PdfDocumentInfo>, String> {
         let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut draft = MergeDraft::new(self)?;
-        let (version, flatten, padding, nodes, named, total) = {
+        let (version, flatten, sheets, nodes, named, total, layers, mut layered) = {
             let documents = self.lock_documents()?;
             let entry = open_entry(&documents, document_id)?;
             // A new file cannot keep the signatures; drawn in first, if asked.
             let flatten = entry.output_flattens()?;
-            let combined = entry.sections.as_ref().filter(|_| entry.combined());
-            let padding = combined
-                .map(|book| book.padding(&entry.page_ids))
-                .unwrap_or_default();
-            let nodes = match combined {
-                Some(book) => book.outline(&entry.page_ids, &padding),
-                None => section_outline(
-                    &collect_bookmark_siblings(entry.document.bookmarks().root()),
-                    0,
-                    entry.page_ids.len() as i32,
-                ),
-            };
+            let (padding, nodes) = entry.save_as_layout().unwrap_or_else(|| {
+                let own = collect_bookmark_siblings(entry.document.bookmarks().root());
+
+                (
+                    Vec::new(),
+                    section_outline(&own, 0, entry.page_ids.len() as i32),
+                )
+            });
+
+            // Each blank turned as the sheet of the page it backs.
+            let sheets: Vec<_> = padding
+                .iter()
+                .map(|after| {
+                    let shown = entry
+                        .page_geometry
+                        .get(&entry.page_ids[*after])
+                        .copied()
+                        .unwrap_or(UNMEASURED_PAGE);
+                    let sheet = a4_placement(shown.width, shown.height);
+
+                    (*after, sheet.sheet_width, sheet.sheet_height)
+                })
+                .collect();
+            // Taken before the copy, the last thing here that can fail: once
+            // made, the copy closes by taking the lock this block holds.
+            let layers = (
+                self.existing_watermark(entry)?,
+                self.existing_page_numbers(entry)?,
+            );
+            let layered = self
+                .layered_copy(entry, &operation)?
+                .map(|(copy, owned)| (MergeDraft::holding(self, copy), owned));
 
             (
                 entry.content_version,
                 flatten,
-                padding,
+                sheets,
                 nodes,
                 entry.source_path.clone().unwrap_or_default(),
                 entry.page_ids.len(),
+                layers,
+                layered,
             )
+        };
+        // Lifted layers are stamped again; ones that could not be go along.
+        let (watermark, page_numbers) = if layered.is_some() {
+            layers
+        } else {
+            (None, None)
         };
 
         for index in 0..total {
@@ -64,31 +93,22 @@ impl PdfiumEngine {
 
                 let fitted = draft.document();
                 let at = index as PdfPageIndex;
+                let source = match layered.as_mut() {
+                    Some((copy, owned)) => {
+                        let copy = copy.document();
 
-                if flatten && signatures::has_widgets(&entry.document, at)? {
-                    let page = signatures::flattened_pages(self.pdfium, &entry.document, &[index])?;
+                        Self::lift_owned_tail(copy, index, owned[index])?;
+                        &*copy
+                    }
+                    None => &entry.document,
+                };
+
+                if flatten && signatures::has_widgets(source, at)? {
+                    let page = signatures::flattened_pages(self.pdfium, source, &[index])?;
 
                     append_page_fitted_to_a4(fitted, &page, 0, &named)?;
                 } else {
-                    append_page_fitted_to_a4(fitted, &entry.document, at, &named)?;
-                }
-
-                if padding.contains(&index) {
-                    // The back of the page's leaf: turned as its sheet is.
-                    let shown = entry
-                        .page_geometry
-                        .get(&entry.page_ids[index])
-                        .copied()
-                        .unwrap_or(UNMEASURED_PAGE);
-                    let sheet = a4_placement(shown.width, shown.height);
-
-                    fitted
-                        .pages_mut()
-                        .create_page_at_end(PdfPagePaperSize::Custom(
-                            PdfPoints::new(sheet.sheet_width),
-                            PdfPoints::new(sheet.sheet_height),
-                        ))
-                        .map_err(|error| format!("PDFium could not add a blank page: {error}"))?;
+                    append_page_fitted_to_a4(fitted, source, at, &named)?;
                 }
             }
 
@@ -103,7 +123,47 @@ impl PdfiumEngine {
                 .map_err(|error| format!("PDFium could not write the A4 document: {error}"))?;
 
             draft.close();
+
+            if let Some((copy, _)) = layered.as_mut() {
+                copy.close();
+            }
+
             bytes
+        };
+        // Laid out for the A4 sheets, as a layer applied to them would be, and
+        // before the blanks go in: a Save As leaves those bare, neither numbered
+        // nor counted.
+        let bytes = if watermark.is_some() || page_numbers.is_some() {
+            let plain = self.open_with_source(bytes, None)?;
+            let stamped = self
+                .stamp_layers(plain.id, watermark, page_numbers, &operation)
+                .and_then(|landed| {
+                    if !landed {
+                        return Ok(None);
+                    }
+
+                    let documents = self.lock_documents()?;
+
+                    open_entry(&documents, plain.id)?
+                        .document
+                        .save_to_bytes()
+                        .map(Some)
+                        .map_err(|error| format!("PDFium could not write the A4 document: {error}"))
+                });
+
+            self.close(plain.id).ok();
+
+            match stamped? {
+                Some(bytes) => bytes,
+                None => return Ok(None),
+            }
+        } else {
+            bytes
+        };
+        let bytes = {
+            let _documents = self.lock_documents()?;
+
+            self.with_blank_pages(bytes, &sheets)?
         };
         // Byte work, off the lock: the sheets are new page objects, so the
         // bookmarks are written afresh rather than carried.

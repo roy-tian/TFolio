@@ -72,7 +72,7 @@ fn a_source_changed_on_disk_is_refused_once_it_must_be_read_again() {
     fs::write(&path, banded_pdf(&[20, 60])).expect("the file should change");
 
     let refused = insert(engine, "changed", &ids).expect_err("a changed file is refused");
-    assert!(refused.contains(SOURCE_CHANGED), "{refused}");
+    assert_eq!(refused, SOURCE_CHANGED);
 
     fs::remove_dir_all(directory).ok();
 }

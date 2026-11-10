@@ -141,7 +141,7 @@ const en = {
     menuLabel: "Save as A4…",
     title: "Save as A4",
     description: "Every page is placed on an A4 sheet in a new file, scaled down to fit but never enlarged, a wide page on its side. This tab then shows the new file.",
-    leftBehind: "Annotations, links and form fields stay behind; a watermark or page numbers are scaled with their page.",
+    leftBehind: "Annotations, links and form fields stay behind; a watermark or page numbers are placed again on the A4 sheets at their own size.",
     keepsOriginal: "This document has unsaved changes, so the A4 file opens in a new tab and this one stays as it is.",
     suffix: "A4",
     preparing: "Fitting pages onto A4…",
@@ -516,6 +516,7 @@ const en = {
     unreadable_other: "{{count}} files could not be read: {{names}}.",
     converterMissing: "No application on this computer can convert Word documents.",
     tooManyFiles: "At most 64 files can be added at once.",
+    changed: "A file changed on disk after it was read. Add it again to take it as it is now.",
   },
   bookmarks: {
     title: "Bookmarks",
