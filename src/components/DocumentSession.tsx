@@ -23,6 +23,14 @@ import { SessionDialogs } from "@/components/SessionDialogs"
 import { SessionHeader } from "@/components/SessionHeader"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { FileSectionsTree } from "@/components/FileSectionsTree"
+import {
+  NO_PADDING,
+  samePadding,
+  sheetSpreads,
+  sheetsOf,
+  spreadPagesOf,
+  spreadTurnTarget,
+} from "@/lib/padding"
 import { SidebarThumbnails } from "@/components/SidebarThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
@@ -83,7 +91,10 @@ import { transientDocumentRefusals } from "@/lib/notices"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
 import { readFileSources } from "@/lib/fileSources"
-import { storedOrganizePreferences } from "@/lib/organizePreferences"
+import {
+  storedOrganizePreferences,
+  storeOrganizePreferences,
+} from "@/lib/organizePreferences"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 import {
   formatPageRanges,
@@ -92,6 +103,7 @@ import {
 import {
   exportFailureNotice,
   fileNameFromPath,
+  type FileOptions,
   type PdfDocumentInfo,
   type PdfExportOutcome,
   type PdfSignatures,
@@ -120,7 +132,6 @@ import {
   hasBookSpread,
   pageTurnTarget,
   readStoredViewMode,
-  spreadPages,
   storeViewMode,
   type ViewMode,
 } from "@/lib/viewMode"
@@ -362,6 +373,30 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     const bookApplies = hasBookSpread(pdfDocument.numPages)
     const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
+    // The blank pages a Save As will add, shown and printed where it puts them.
+    const padding = pdfDocument.padding ?? NO_PADDING
+    // Where the page being read stood before blanks above it came or went: an
+    // in-place change moves no page, so the view holds it there.
+    const paddingAnchorRef = useRef<{ pageNumber: number; top: number } | null>(null)
+
+    useLayoutEffect(() => {
+      const anchor = paddingAnchorRef.current
+      const viewer = viewerRef.current
+
+      paddingAnchorRef.current = null
+
+      if (!anchor || !viewer) {
+        return
+      }
+
+      const page = viewer.querySelector<HTMLElement>(
+        `[data-page-number="${anchor.pageNumber}"]`,
+      )
+
+      if (page) {
+        viewer.scrollTop += page.getBoundingClientRect().top - anchor.top
+      }
+    }, [padding])
 
     // An edit replaces the outline wholesale. Deriving what is shown, rather
     // than switching the sidebar, lets the undo that restores bookmarks restore it.
@@ -417,6 +452,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             ),
           }
         : undefined,
+      padding,
       pages: pdfDocument.pages,
       viewMode,
       viewRotation,
@@ -771,12 +807,28 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
+          if (
+            change?.movement === "inPlace" &&
+            !samePadding(current.padding ?? NO_PADDING, update.padding ?? NO_PADDING)
+          ) {
+            const pageNumber = currentPage.get()
+            const page = viewerRef.current?.querySelector<HTMLElement>(
+              `[data-page-number="${pageNumber}"]`,
+            )
+
+            paddingAnchorRef.current = page
+              ? { pageNumber, top: page.getBoundingClientRect().top }
+              : null
+          }
+
           const next = {
             ...current,
             hasForeignPages: update.hasForeignPages,
             hasMergedPages: update.hasMergedPages,
             numPages: update.numPages,
             outline: update.outline,
+            fileOptions: update.fileOptions,
+            padding: update.padding,
             pages: update.pages,
             sections: update.sections,
             signatures: update.signatures,
@@ -965,6 +1017,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
+          const preferences = storedOrganizePreferences()
           const landed = await annotations.insertFiles(
             read.flatMap((info) =>
               info.id === undefined
@@ -974,8 +1027,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             current.numPages + 1,
             current.numPages,
             {
+              options: {
+                perFileBookmarks: preferences.bookmarks,
+                smartPadding: preferences.smartPadding,
+              },
               ownTitle: fileName,
-              perFileBookmarks: storedOrganizePreferences().bookmarks,
               signatures,
             },
           )
@@ -1030,6 +1086,24 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         if (previous !== undefined) {
           void annotations.renameSection(sectionId, title, previous)
         }
+      },
+      [annotations],
+    )
+
+    /** Undoable for this document, and remembered as the reader's choice for
+        the next document files are added to. */
+    const changeFileOptions = useCallback(
+      (change: Partial<FileOptions>) => {
+        if (!documentRef.current?.fileOptions) {
+          return
+        }
+
+        void annotations.setFileOptions(change, () => documentRef.current?.fileOptions)
+        // Only the choice made: another window may have changed the other since.
+        storeOrganizePreferences({
+          bookmarks: change.perFileBookmarks,
+          smartPadding: change.smartPadding,
+        })
       },
       [annotations],
     )
@@ -1100,6 +1174,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const print = usePrint({
       documentId: pdfDocument.id,
       onError: () => notice.raise("printFailed"),
+      padding,
       pages: pdfDocument.pages,
     })
     const discardPrint = print.discard
@@ -1427,16 +1502,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         event.preventDefault()
 
         const current = currentPage.get()
-        const target = pageTurnTarget(
-          current,
-          pdfDocument.numPages,
-          viewMode,
-          event.key === "PageDown" ? 1 : -1,
-        )
-        const currentRow =
+        // A spread is two sheets, a blank a Save As will add among them.
+        const spreads = sheetSpreads(sheetsOf(pdfDocument.numPages, padding))
+        const direction = event.key === "PageDown" ? 1 : -1
+        const target =
           viewMode === "book"
-            ? (spreadPages(current, pdfDocument.numPages)[0] ?? current)
-            : current
+            ? spreadTurnTarget(spreads, current, direction)
+            : pageTurnTarget(current, pdfDocument.numPages, direction)
+        const currentRow =
+          viewMode === "book" ? (spreadPagesOf(spreads, current)[0] ?? current) : current
 
         // Consume the key at either edge too: the WebView's own handling would
         // reintroduce a partial viewport scroll within the first or last page.
@@ -1454,7 +1528,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       return () => {
         document.removeEventListener("keydown", handlePageTurn)
       }
-    }, [active, currentPage, pdfDocument.numPages, scrollToPage, viewMode])
+    }, [active, currentPage, padding, pdfDocument.numPages, scrollToPage, viewMode])
 
     // Each mode stacks pages to a different height, so the kept offset would land
     // somewhere unrelated; queued here, ahead of the next render's layout effects.
@@ -1989,9 +2063,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onDeleteOnePage={deleteOnePage}
               onDeletePage={deleteThumbnailPage}
               isEditingNow={annotations.isStructureBusyNow}
+              fileOptions={pdfDocument.fileOptions}
               fileRows={sidebar.fileRows}
               onAddFiles={() => void chooseFiles()}
+              onFileOptionsChange={changeFileOptions}
               onFileRowsChange={sidebar.setFileRows}
+              padding={padding}
               onFocusChange={setThumbnailsFocused}
               onInsertBlankPage={insertBlankPage}
               onInsertCarriedPages={insertCarriedPages}
@@ -2084,6 +2161,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 ref={clientBoxRef}
               />
               <PdfViewerLayout
+                padding={padding}
                 documentId={pdfDocument.id}
                 drafts={rectTool.drafts}
                 notes={textNote.previews}

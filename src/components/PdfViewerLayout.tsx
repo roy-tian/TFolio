@@ -1,4 +1,5 @@
-import { useLayoutEffect, useMemo, useState } from "react"
+import { Fragment, useLayoutEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import { PdfPage } from "@/components/PdfPage"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -7,9 +8,10 @@ import { ViewportHold, ViewportHoldContext } from "@/hooks/useNearViewport"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview } from "@/hooks/useTextNoteTool"
 import type { RenderEpochs } from "@/lib/annotations"
-import type { PdfPageInfo, PdfSearchMatch } from "@/lib/pdf"
-import { pairPages, type ViewMode } from "@/lib/viewMode"
-import { BOOK_GAP, CONTENT_PADDING_X, pageDisplayWidth } from "@/lib/zoom"
+import { sheetSpreads, sheetsOf, type PaddingSheet } from "@/lib/padding"
+import { dimensionsForRotation, type PdfPageInfo, type PdfSearchMatch } from "@/lib/pdf"
+import type { ViewMode } from "@/lib/viewMode"
+import { BOOK_GAP, CONTENT_PADDING_X, pageDisplayWidth, POINT_TO_PX } from "@/lib/zoom"
 
 // The wheel preview already collapsed a gesture into one commit; holding the
 // bitmap a little longer also coalesces rapid clicks and resize-driven fits.
@@ -59,6 +61,8 @@ type LayoutProps = {
       absent, a page's menu falls back to whatever the reader dragged over. */
   onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
+  /** The blank pages a Save As will add, shown where it will put them. */
+  padding: readonly PaddingSheet[]
   pages: PdfPageInfo[]
   renderEpochs: RenderEpochs
   renderScale: number
@@ -71,6 +75,34 @@ type LayoutProps = {
   viewRotation: number
 }
 
+/** A blank page a Save As will add: white paper with a dashed edge, no page
+    of the document's own, so no `data-page-number` for tracking to count. */
+function BlankSheet({
+  rotation,
+  scale,
+  sheet,
+}: {
+  rotation: number
+  scale: number
+  sheet: PaddingSheet
+}) {
+  const { t } = useTranslation()
+  const shown = dimensionsForRotation(rotation, sheet.width, sheet.height)
+
+  return (
+    <div
+      aria-label={t("sidebar.paddingPage")}
+      className="shrink-0 border-2 border-dashed border-zinc-300 bg-white shadow-sm"
+      data-padding-after={sheet.after}
+      role="img"
+      style={{
+        height: shown.height * POINT_TO_PX * scale,
+        width: shown.width * POINT_TO_PX * scale,
+      }}
+    />
+  )
+}
+
 function SingleLayout({
   activeSearchIndex,
   activeSearchPage,
@@ -80,6 +112,7 @@ function SingleLayout({
   notesByPage,
   onCopyAllText,
   onPagePaint,
+  padding,
   pages,
   renderEpochs,
   renderScale,
@@ -89,26 +122,32 @@ function SingleLayout({
   textSelectAll,
   viewRotation,
 }: LayoutProps) {
+  const blanks = new Map(padding.map((sheet) => [sheet.after, sheet]))
+
   return pages.map((page, index) => (
-    <PdfPage
-      captureHighlight={captureHighlight}
-      documentId={documentId}
-      drafts={draftsByPage.get(index + 1) ?? NO_DRAFTS}
-      notes={notesByPage.get(index + 1) ?? NO_NOTES}
-      onCopyAllText={onCopyAllText}
-      onPagePaint={onPagePaint}
-      key={`${documentId}-${index + 1}`}
-      page={page}
-      pageNumber={index + 1}
-      renderEpoch={renderEpochs[index + 1] ?? 0}
-      renderScale={renderScale}
-      rotation={viewRotation}
-      scale={scale}
-      searchMatches={searchMatchesByPage.get(index + 1) ?? NO_SEARCH_MATCHES}
-      activeSearchIndex={activeSearchPage === index + 1 ? activeSearchIndex : null}
-      textEpoch={textEpochs[index + 1] ?? 0}
-      textSelectAll={textSelectAll}
-    />
+    <Fragment key={`${documentId}-${index + 1}`}>
+      <PdfPage
+        captureHighlight={captureHighlight}
+        documentId={documentId}
+        drafts={draftsByPage.get(index + 1) ?? NO_DRAFTS}
+        notes={notesByPage.get(index + 1) ?? NO_NOTES}
+        onCopyAllText={onCopyAllText}
+        onPagePaint={onPagePaint}
+        page={page}
+        pageNumber={index + 1}
+        renderEpoch={renderEpochs[index + 1] ?? 0}
+        renderScale={renderScale}
+        rotation={viewRotation}
+        scale={scale}
+        searchMatches={searchMatchesByPage.get(index + 1) ?? NO_SEARCH_MATCHES}
+        activeSearchIndex={activeSearchPage === index + 1 ? activeSearchIndex : null}
+        textEpoch={textEpochs[index + 1] ?? 0}
+        textSelectAll={textSelectAll}
+      />
+      {blanks.has(index + 1) ? (
+        <BlankSheet rotation={viewRotation} scale={scale} sheet={blanks.get(index + 1)!} />
+      ) : null}
+    </Fragment>
   ))
 }
 
@@ -121,6 +160,7 @@ function BookLayout({
   notesByPage,
   onCopyAllText,
   onPagePaint,
+  padding,
   pages,
   renderEpochs,
   renderScale,
@@ -130,11 +170,19 @@ function BookLayout({
   textSelectAll,
   viewRotation,
 }: LayoutProps) {
-  return pairPages(pages.length).map((row) => {
+  // Sheets, not pages: a blank a Save As will add takes the right half of the
+  // spread, so the next file opens the next spread as it will in print.
+  return sheetSpreads(sheetsOf(pages.length, padding)).map((row) => {
     // Each half is as wide as the spread's wider page, keeping every spine on
     // the column's axis; the padding pushes the left page to the spine.
-    const widths = row.map((pageNumber) =>
-      pageDisplayWidth(pages[pageNumber - 1]!, viewRotation, scale),
+    const widths = row.map((sheet) =>
+      pageDisplayWidth(
+        sheet.kind === "page"
+          ? pages[sheet.pageNumber - 1]!
+          : { height: sheet.height, rotation: 0, width: sheet.width },
+        viewRotation,
+        scale,
+      ),
     )
     const halfWidth = Math.max(...widths)
 
@@ -142,7 +190,7 @@ function BookLayout({
       <div
         className="flex scroll-mt-5 items-center"
         data-book-spread
-        key={`${documentId}-spread-${row[0]}`}
+        key={`${documentId}-spread-${row[0]!.kind === "page" ? row[0]!.pageNumber : 0}`}
         // Sized for a full spread even when holding a single trailing page, which
         // keeps that page in the left cell instead of centring it in the column.
         style={{
@@ -151,27 +199,36 @@ function BookLayout({
           width: halfWidth * 2 + BOOK_GAP,
         }}
       >
-        {row.map((pageNumber) => (
-          <PdfPage
-            captureHighlight={captureHighlight}
-            documentId={documentId}
-            drafts={draftsByPage.get(pageNumber) ?? NO_DRAFTS}
-            notes={notesByPage.get(pageNumber) ?? NO_NOTES}
-            onCopyAllText={onCopyAllText}
-            onPagePaint={onPagePaint}
-            key={`${documentId}-${pageNumber}`}
-            page={pages[pageNumber - 1]}
-            pageNumber={pageNumber}
-            renderEpoch={renderEpochs[pageNumber] ?? 0}
-            renderScale={renderScale}
-            rotation={viewRotation}
-            scale={scale}
-            searchMatches={searchMatchesByPage.get(pageNumber) ?? NO_SEARCH_MATCHES}
-            activeSearchIndex={activeSearchPage === pageNumber ? activeSearchIndex : null}
-            textEpoch={textEpochs[pageNumber] ?? 0}
-            textSelectAll={textSelectAll}
-          />
-        ))}
+        {row.map((sheet) =>
+          sheet.kind === "padding" ? (
+            <BlankSheet
+              key={`padding-${sheet.after}`}
+              rotation={viewRotation}
+              scale={scale}
+              sheet={sheet}
+            />
+          ) : (
+            <PdfPage
+              captureHighlight={captureHighlight}
+              documentId={documentId}
+              drafts={draftsByPage.get(sheet.pageNumber) ?? NO_DRAFTS}
+              notes={notesByPage.get(sheet.pageNumber) ?? NO_NOTES}
+              onCopyAllText={onCopyAllText}
+              onPagePaint={onPagePaint}
+              key={`${documentId}-${sheet.pageNumber}`}
+              page={pages[sheet.pageNumber - 1]}
+              pageNumber={sheet.pageNumber}
+              renderEpoch={renderEpochs[sheet.pageNumber] ?? 0}
+              renderScale={renderScale}
+              rotation={viewRotation}
+              scale={scale}
+              searchMatches={searchMatchesByPage.get(sheet.pageNumber) ?? NO_SEARCH_MATCHES}
+              activeSearchIndex={activeSearchPage === sheet.pageNumber ? activeSearchIndex : null}
+              textEpoch={textEpochs[sheet.pageNumber] ?? 0}
+              textSelectAll={textSelectAll}
+            />
+          ),
+        )}
       </div>
     )
   })
@@ -187,6 +244,7 @@ type PdfViewerLayoutProps = {
   notes: TextNotePreview[]
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   fileName: string
+  padding: readonly PaddingSheet[]
   pages: PdfPageInfo[]
   renderEpochs: RenderEpochs
   scale: number
@@ -220,6 +278,7 @@ export function PdfViewerLayout({
   onCopyAllText,
   onPagePaint,
   fileName,
+  padding,
   pages,
   renderEpochs,
   scale,
@@ -254,6 +313,7 @@ export function PdfViewerLayout({
     notesByPage,
     onCopyAllText: textSelectAll ? onCopyAllText : undefined,
     onPagePaint,
+    padding,
     pages,
     renderEpochs,
     renderScale,

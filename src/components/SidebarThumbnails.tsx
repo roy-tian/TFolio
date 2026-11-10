@@ -7,7 +7,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react"
-import { FilePlus2, Rows3 } from "lucide-react"
+import { BetweenHorizontalStart, Bookmark, FilePlus2, Rows3 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
@@ -22,6 +22,7 @@ import {
 } from "@/components/PageDragGhost"
 import { PageMenuContent } from "@/components/PageContextMenu"
 import { PageSignatureMark } from "@/components/SignatureBadge"
+import { HintTooltip } from "@/components/HintTooltip"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
@@ -46,7 +47,13 @@ import {
   pointInColumn,
 } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
-import { dimensionsForRotation, type PdfPageInfo, type PdfSection } from "@/lib/pdf"
+import type { PaddingSheet } from "@/lib/padding"
+import {
+  dimensionsForRotation,
+  type FileOptions,
+  type PdfPageInfo,
+  type PdfSection,
+} from "@/lib/pdf"
 import { THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -97,6 +104,11 @@ type SidebarThumbnailsProps = {
   /** Whether each file of a document of several starts a row of its own. */
   fileRows: boolean
   onFileRowsChange: (fileRows: boolean) => void
+  /** How the document's files are laid out and saved; absent with one file. */
+  fileOptions: FileOptions | undefined
+  onFileOptionsChange: (change: Partial<FileOptions>) => void
+  /** The blank pages a Save As will add, shown where it will put them. */
+  padding: readonly PaddingSheet[]
   /** The page a blank goes in front of, 1-based; one past the last appends.
       `section` is the file it joins, that of the page it was asked beside. */
   onInsertBlankPage: (index: number, section?: number) => void
@@ -148,8 +160,10 @@ export function SidebarThumbnails({
   onDeletePage,
   onDeleteOnePage,
   isEditingNow,
+  fileOptions,
   fileRows,
   onAddFiles,
+  onFileOptionsChange,
   onFileRowsChange,
   onFocusChange,
   onInsertBlankPage,
@@ -161,6 +175,7 @@ export function SidebarThumbnails({
   onRotatePage,
   onRotatePages,
   onSelectPage,
+  padding,
   pages,
   parkedPreviews,
   renderEpochs,
@@ -663,6 +678,10 @@ export function SidebarThumbnails({
   const byFile = fileRows && sections.length > 1
   const titles = new Map(sections.map((section) => [section.id, section.title]))
   const moving = new Set(drag?.basis === pages ? drag.moving : [])
+  // Stood down while pages are in hand: a drop lays the blanks out afresh.
+  const blanks = new Map(
+    drag || incoming ? [] : padding.map((sheet) => [sheet.after, sheet] as const),
+  )
   let headed: number | undefined
 
   return (
@@ -690,6 +709,38 @@ export function SidebarThumbnails({
               <Rows3 />
             </Toggle>
           </ToolbarTooltip>
+        ) : null}
+        {fileOptions ? (
+          <>
+            <ToolbarTooltip label={t("sidebar.smartPadding")}>
+              <Toggle
+                aria-label={t("sidebar.smartPadding")}
+                className="size-7 min-w-7 p-0"
+                data-slot="sidebar-smart-padding"
+                onPressedChange={(smartPadding) =>
+                  onFileOptionsChange({ smartPadding })
+                }
+                pressed={fileOptions.smartPadding}
+                size="sm"
+              >
+                <BetweenHorizontalStart />
+              </Toggle>
+            </ToolbarTooltip>
+            <ToolbarTooltip label={t("sidebar.fileBookmarks")}>
+              <Toggle
+                aria-label={t("sidebar.fileBookmarks")}
+                className="size-7 min-w-7 p-0"
+                data-slot="sidebar-file-bookmarks"
+                onPressedChange={(perFileBookmarks) =>
+                  onFileOptionsChange({ perFileBookmarks })
+                }
+                pressed={fileOptions.perFileBookmarks}
+                size="sm"
+              >
+                <Bookmark />
+              </Toggle>
+            </ToolbarTooltip>
+          </>
         ) : null}
         <ToolbarTooltip label={t("sidebar.addFiles")}>
           <Button
@@ -854,6 +905,15 @@ export function SidebarThumbnails({
                     rotation={viewRotation}
                     signed={page.signed === true}
                   />,
+                  blanks.has(pageNumber) ? (
+                    <PaddingCell
+                      frame={frame}
+                      key={`padding-${key}`}
+                      label={t("sidebar.paddingPage")}
+                      rotation={viewRotation}
+                      sheet={blanks.get(pageNumber)!}
+                    />
+                  ) : null,
                 ]
               })}
             </ol>
@@ -961,6 +1021,42 @@ function CarriedHoles({
       </li>
     )
   })
+}
+
+/** A blank page a Save As will add, where it will add it: white paper with a
+    dashed edge, no page of the document's own, so nothing to choose or drag.
+    No flip key, so a drop counts it no cell. */
+function PaddingCell({
+  frame,
+  label,
+  rotation,
+  sheet,
+}: {
+  frame: number | null
+  label: string
+  rotation: number
+  sheet: PaddingSheet
+}) {
+  const paper = thumbnailPaper(dimensionsForRotation(rotation, sheet.width, sheet.height))
+
+  return (
+    <li className="flex flex-col items-center" data-padding-after={sheet.after}>
+      <div
+        className="grid place-items-center"
+        style={frame === null ? undefined : { height: frame, width: frame }}
+      >
+        <HintTooltip label={label}>
+          <div
+            aria-label={label}
+            className="border-2 border-dashed border-muted-foreground/40 bg-white"
+            role="img"
+            style={{ height: paper.height, width: paper.width }}
+          />
+        </HintTooltip>
+      </div>
+      <span style={{ height: THUMBNAIL_CAPTION_HEIGHT }} />
+    </li>
+  )
 }
 
 /** Memoised on primitives alone, so the reader's page moving re-renders the

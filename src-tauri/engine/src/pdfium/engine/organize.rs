@@ -525,7 +525,7 @@ impl PdfiumEngine {
     /// run under its stash. A signed source needs `decision`, which a new file
     /// would ask for: its signatures cannot hold in this document either.
     /// `own_title` names the document's own pages, should this be the first
-    /// file added, and `per_file_bookmarks` how a Save As writes the files.
+    /// file added, and `options` how its files are laid out and saved.
     #[allow(clippy::too_many_arguments)]
     pub fn insert_organize_sources(
         &self,
@@ -534,7 +534,7 @@ impl PdfiumEngine {
         source_ids: &[u64],
         index: i32,
         own_title: &str,
-        per_file_bookmarks: bool,
+        options: sections::FileOptions,
         decision: Option<SignatureDecision>,
     ) -> Result<PdfStructureUpdate, String> {
         if source_ids.is_empty() {
@@ -598,10 +598,10 @@ impl PdfiumEngine {
                     own_title,
                     &entry.page_ids,
                     &outline,
-                    per_file_bookmarks,
+                    options,
                 ));
             } else if let Some(book) = entry.sections.as_mut() {
-                book.resume(&entry.page_ids, own_title, per_file_bookmarks);
+                book.resume(&entry.page_ids, own_title, options);
             }
 
             (slot, before)

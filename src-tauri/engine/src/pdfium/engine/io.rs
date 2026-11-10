@@ -610,7 +610,7 @@ impl PdfiumEngine {
 
         // The reader's choice, kept here so the WebView cannot skip it: the
         // file stays as it was, and the combined pages go to a new one.
-        if !entry.foreign_page_ids.is_empty() {
+        if entry.combined() {
             return Err(
                 "a document with pages added from other files may only be saved as a new file, not over its own"
                     .into(),
@@ -719,7 +719,7 @@ impl PdfiumEngine {
         // The same refusal `save` makes, at the other exit. This resolves
         // aliases: a missed twin would destroy the original. Added files'
         // pages go to a new file too, though the document then follows them.
-        if (copy_only || !entry.foreign_page_ids.is_empty())
+        if (copy_only || entry.combined())
             && entry
                 .source_path
                 .as_deref()
@@ -753,11 +753,15 @@ impl PdfiumEngine {
         let outline = entry
             .sections
             .as_ref()
-            .filter(|book| book.several(&entry.page_ids) || !entry.foreign_page_ids.is_empty())
-            .map(|book| book.outline(&entry.page_ids));
+            .filter(|_| entry.combined())
+            .map(|book| {
+                let padding = book.padding(&entry.page_ids);
+
+                (book.outline(&entry.page_ids, &padding), padding)
+            });
         let staging = match outline {
             None => Staging::Staged(self.stage_document(entry, path)?),
-            Some(nodes) => Staging::Outlined(self.document_bytes(entry)?, nodes),
+            Some((nodes, padding)) => Staging::Outlined(self.padded_bytes(entry, &padding)?, nodes),
         };
 
         // A copy-only document reaching here wrote somewhere other than its file.
@@ -863,6 +867,41 @@ impl PdfiumEngine {
         entry.needs_compaction = false;
 
         Ok(())
+    }
+
+    /// The document's bytes with a blank page after each page `padding` names,
+    /// sized as that page shows: a copy's, so the reader's document keeps none.
+    fn padded_bytes(&self, entry: &mut OpenDocument, padding: &[usize]) -> Result<Vec<u8>, String> {
+        let bytes = self.document_bytes(entry)?;
+
+        if padding.is_empty() {
+            return Ok(bytes);
+        }
+
+        let mut copy = self
+            .pdfium
+            .load_pdf_from_byte_vec(bytes, None)
+            .map_err(|error| format!("PDFium could not reread the document: {error}"))?;
+
+        // From the end, so each index still names the page it was taken for.
+        for after in padding.iter().rev() {
+            let (width, height) = entry
+                .page_ids
+                .get(*after)
+                .and_then(|page_id| entry.page_geometry.get(page_id))
+                .map(|page| (page.width, page.height))
+                .unwrap_or((UNMEASURED_PAGE.width, UNMEASURED_PAGE.height));
+
+            copy.pages_mut()
+                .create_page_at_index(
+                    PdfPagePaperSize::Custom(PdfPoints::new(width), PdfPoints::new(height)),
+                    *after as i32 + 1,
+                )
+                .map_err(|error| format!("PDFium could not add a blank page: {error}"))?;
+        }
+
+        copy.save_to_bytes()
+            .map_err(|error| format!("PDFium could not write the document: {error}"))
     }
 
     /// `stage_document`'s bytes, for a caller that rewrites them before they land.

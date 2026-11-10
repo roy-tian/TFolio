@@ -10,7 +10,8 @@ import {
 
 import type { CurrentPage } from "@/hooks/useCurrentPage"
 import type { PdfPageInfo } from "@/lib/pdf"
-import { spreadPages, type ViewMode } from "@/lib/viewMode"
+import { sheetSpreads, sheetsOf, spreadPagesOf, type PaddingSheet } from "@/lib/padding"
+import type { ViewMode } from "@/lib/viewMode"
 import { viewerReadingBounds } from "@/lib/viewerViewport"
 import {
   anchorCorrection,
@@ -74,6 +75,8 @@ type UseZoomOptions = {
   disabled: boolean
   /** A recent file's own zoom, over the fresh-document default. */
   initialZoom?: ZoomState
+  /** The blank pages a Save As will add, which share the spreads they stand in. */
+  padding: readonly PaddingSheet[]
   pages: PdfPageInfo[]
   viewMode: ViewMode
   viewRotation: number
@@ -86,6 +89,7 @@ export function useZoom({
   currentPage,
   disabled,
   initialZoom,
+  padding,
   pages,
   viewMode,
   viewRotation,
@@ -125,12 +129,12 @@ export function useZoom({
       fitDimensions(
         pages,
         viewMode === "book"
-          ? spreadPages(zoom.fitPage, pages.length)
+          ? spreadPagesOf(sheetSpreads(sheetsOf(pages.length, padding)), zoom.fitPage)
           : [zoom.fitPage],
         viewRotation,
         { height: referenceHeight, width: referenceWidth },
       ),
-    [pages, referenceHeight, referenceWidth, viewMode, viewRotation, zoom.fitPage],
+    [padding, pages, referenceHeight, referenceWidth, viewMode, viewRotation, zoom.fitPage],
   )
 
   const fits = useMemo(

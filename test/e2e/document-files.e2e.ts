@@ -2,8 +2,10 @@ import path from "node:path"
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
+import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   activeSidebar,
+  clickAppMenuItem,
   emitDrag,
   minimalPdf,
   openPdfFromDisk,
@@ -207,5 +209,118 @@ describe("TFolio files added to an open document", () => {
     await expect(bookmarks).toHaveText(expect.stringContaining("added.pdf"))
     await expect(bookmarks).toHaveText(expect.stringContaining("Second half"))
     expect(own.endsWith("own.pdf")).toBe(true)
+  })
+})
+
+const viewer = "[data-document-session][data-active='true'] [data-pdf-viewer-layout]"
+
+function blanksIn(scope: string) {
+  return browser.execute(
+    (selector: string) =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>(`${selector} [data-padding-after]`),
+        (blank) => Number(blank.dataset.paddingAfter),
+      ),
+    scope,
+  )
+}
+
+describe("TFolio blank pages between files", () => {
+  beforeEach(async () => {
+    await seedSettings({
+      organize: { bookmarks: true, smartPadding: true },
+      ui: { language: "en", viewMode: "single" },
+    })
+    await refreshApp()
+  })
+
+  it("shows the blank a Save As adds, in the sidebar and the pages, until turned off", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(3)
+
+    // One page, so the next file would start on page 2: a blank closes it.
+    await browser.waitUntil(async () => (await blanksIn(activeSidebar)).join() === "1")
+    expect(await blanksIn(viewer)).toEqual([1])
+
+    await $(`${activeSidebar} [data-slot='sidebar-smart-padding']`).click()
+    await browser.waitUntil(async () => (await blanksIn(activeSidebar)).length === 0)
+    expect(await blanksIn(viewer)).toEqual([])
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(async () => (await blanksIn(activeSidebar)).join() === "1")
+  })
+
+  it("keeps the blank in its spread, so the next file opens the next one", async () => {
+    await seedSettings({
+      organize: { bookmarks: true, smartPadding: true },
+      ui: { language: "en", viewMode: "book" },
+    })
+    await refreshApp()
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(3)
+
+    await browser.waitUntil(async () => {
+      const spreads = await browser.execute(
+        (selector: string) =>
+          Array.from(document.querySelectorAll(`${selector} [data-book-spread]`), (spread) =>
+            Array.from(spread.children, (child) =>
+              child.hasAttribute("data-padding-after")
+                ? "blank"
+                : (child.getAttribute("data-page-number") ?? "?"),
+            ).join(","),
+          ),
+        viewer,
+      )
+
+      return spreads.join(" | ") === "1,blank | 2,3"
+    })
+  })
+
+  it("prints the blank, and a Save As writes it", async () => {
+    const own = await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(3)
+
+    await browser.execute(() => {
+      const seam = window as Window & { __tfolioE2E?: E2eOverrides; __tfolioPrints?: number }
+
+      seam.__tfolioPrints = 0
+      seam.__tfolioE2E = {
+        ...seam.__tfolioE2E,
+        printWindow: () => {
+          seam.__tfolioPrints = (seam.__tfolioPrints ?? 0) + 1
+
+          return Promise.resolve()
+        },
+      }
+    })
+    await clickAppMenuItem("print")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () => ((window as Window & { __tfolioPrints?: number }).__tfolioPrints ?? 0) > 0,
+        ),
+      { timeout: 60_000, timeoutMsg: "the print dialog was never asked for" },
+    )
+    expect(
+      await browser.execute(() =>
+        Array.from(document.querySelectorAll("[data-print-sheet] .pdf-print-page"), (sheet) =>
+          sheet.querySelector("img") ? "page" : "blank",
+        ),
+      ),
+    ).toEqual(["page", "blank", "page", "page"])
+
+    await pointSaveAsAt(path.join(path.dirname(own), "padded.pdf"))
+    await $(saveTrigger).click()
+    await browser.waitUntil(
+      async () =>
+        (await $$(`//button[@role='tab'][normalize-space()='padded.pdf']`).length) === 1,
+      { timeout: 30_000, timeoutMsg: "the tab never became the saved file" },
+    )
+    // Saved, the blank is a page of the file like any other.
+    await waitForPages(4)
+    expect(await blanksIn(activeSidebar)).toEqual([])
   })
 })

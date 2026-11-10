@@ -1172,13 +1172,19 @@ fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
 
     PdfStructureUpdate {
         has_merged_pages: !entry.merged_page_ids.is_empty(),
-        has_foreign_pages: !entry.foreign_page_ids.is_empty(),
+        has_foreign_pages: entry.combined(),
+        padding: entry.padding_sheets(),
         sections: entry
             .sections
             .as_ref()
             .filter(|book| book.several(&entry.page_ids))
             .map(|book| book.infos(&entry.page_ids))
             .unwrap_or_default(),
+        file_options: entry
+            .sections
+            .as_ref()
+            .filter(|book| book.several(&entry.page_ids))
+            .map(|book| book.options),
         num_pages: pages.len() as i32,
         outline: collect_bookmark_siblings(entry.document.bookmarks().root()),
         pages,
@@ -1235,7 +1241,7 @@ pub use organize::{
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;
-pub use sections::PdfSection;
+pub use sections::{FileOptions, PdfPaddingSheet, PdfSection};
 use signatures::OpenedFile;
 
 #[cfg(test)]

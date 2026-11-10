@@ -27,8 +27,8 @@ use pdfium::{
     release_organize_sources, release_pdf_compression, remove_pdf_page_numbers,
     remove_pdf_watermark, rename_pdf_section, render_organize_thumbnail, render_pdf_page,
     render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_assembled_pdf, save_pdf, search_pdf_text, word_conversion_available,
-    PdfiumState,
+    rotate_pdf_pages, save_assembled_pdf, save_pdf, search_pdf_text, set_pdf_file_options,
+    word_conversion_available, PdfiumState,
 };
 #[cfg(feature = "e2e")]
 use pdfium::{export_pdf_to, save_assembled_pdf_to};
@@ -218,6 +218,7 @@ pub fn run() {
             insert_pdf_files,
             rename_pdf_section,
             release_organize_sources,
+            set_pdf_file_options,
             extract_pdf_pages,
             save_pdf,
             export_pdf,

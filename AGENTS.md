@@ -139,6 +139,11 @@
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf,
   as an assembly does), then the tab reopens the written file, its history gone.
+- Blank pages between files are never pages of the document: the engine reports where a Save As
+  will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
+  print show them there, and only a Save As writes them. Structure commands never see them.
+- Pages still showing as several files keep the document Save-As-only even with no foreign page
+  left, so a save never drops the blanks and file bookmarks the reader sees.
 
 ## Organize workspace
 

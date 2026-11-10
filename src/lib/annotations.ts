@@ -3,6 +3,7 @@ import {
   samePageNumbersConfig,
   type PageNumbersConfig,
 } from "@/lib/pageNumbers"
+import type { FileOptions } from "@/lib/pdf"
 import { sameWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
 /** A colour as `#rrggbb`, the form `<input type="color">` reads and writes. */
@@ -194,6 +195,13 @@ export type RenameSectionCommand = {
   title: string
 }
 
+/** How the document's files are laid out and saved; no page changes. */
+export type FileOptionsCommand = {
+  kind: "fileOptions"
+  next: FileOptions
+  previous: FileOptions
+}
+
 /** The mark-making entry is carried whole, not pointed at: an undo re-applies
     exactly that command, and every entry's undo knows its own marks by id. */
 export type EraseAnnotationCommand = {
@@ -221,6 +229,7 @@ export type AnnotationCommand =
   | InsertPagesCommand
   | InsertFilesCommand
   | RenameSectionCommand
+  | FileOptionsCommand
   | EraseAnnotationCommand
 
 /** Redoing re-runs the command and gets a fresh annotation out of PDFium, but
@@ -333,8 +342,9 @@ export function commandPageChange(
           : arrivals(insertPagesRange(command), command.pageCount),
         stashId: command.stashId,
       }
-    // A name changes; every page stays where it is.
+    // A name or a choice changes; every page stays where it is.
     case "renameSection":
+    case "fileOptions":
       return { movement: "inPlace" }
     default:
       return undefined
@@ -371,6 +381,7 @@ export function commandPages(command: AnnotationCommand): number[] {
       // `pageCount` spans before and after, covering the apply and the undo alike.
       return pagesFrom(command.index, command.pageCount)
     case "renameSection":
+    case "fileOptions":
       return []
     case "eraseAnnotation":
       // What the backend reported, once it has: the erased entry's own numbers
@@ -393,6 +404,7 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "insertFiles":
       return true
     case "renameSection":
+    case "fileOptions":
     case "highlight":
     case "rect":
     case "textNote":
@@ -701,6 +713,24 @@ export function planInsertFiles(
     stashId: history.nextId,
     titles,
   }
+
+  return { command, history: commit(history, command) }
+}
+
+/** A choice already made takes no undo step. */
+export function planFileOptions(
+  history: AnnotationHistory,
+  next: FileOptions,
+  previous: FileOptions,
+) {
+  if (
+    next.smartPadding === previous.smartPadding &&
+    next.perFileBookmarks === previous.perFileBookmarks
+  ) {
+    return null
+  }
+
+  const command: FileOptionsCommand = { kind: "fileOptions", next, previous }
 
   return { command, history: commit(history, command) }
 }

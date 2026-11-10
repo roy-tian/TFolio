@@ -2,7 +2,7 @@
 //! under file names, and what a Save As writes as one bookmark per file.
 //! Absent until a file is added; a document opened alone has one file.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::*;
 
@@ -16,9 +16,18 @@ pub(super) struct SectionBook {
     /// into the file it left, with no record of its own in the stash.
     page_section: HashMap<u64, u64>,
     next_id: u64,
-    /// Whether a Save As writes one bookmark per file above its own, or the
-    /// files' bookmarks one after another.
-    pub(super) per_file_bookmarks: bool,
+    pub(super) options: FileOptions,
+}
+
+/// How a document of several files is laid out and saved: a blank page
+/// closing a file that would leave the next to start on an even page, and one
+/// bookmark per file above its own rather than the files' own one after
+/// another. The reader's choices, undoable, kept with the document.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOptions {
+    pub smart_padding: bool,
+    pub per_file_bookmarks: bool,
 }
 
 struct Section {
@@ -34,6 +43,16 @@ struct SectionBookmark {
     title: String,
     page_id: Option<u64>,
     children: Vec<SectionBookmark>,
+}
+
+/// A blank page a Save As will add, after 1-based page `after`, as large as
+/// that page shows.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfPaddingSheet {
+    pub(super) after: usize,
+    pub(super) width: f32,
+    pub(super) height: f32,
 }
 
 /// One file of a document, as the sidebar's tree shows it: bookmarks numbered
@@ -120,7 +139,7 @@ impl SectionBook {
         title: String,
         page_ids: &[u64],
         outline: &[PdfOutlineItem],
-        per_file_bookmarks: bool,
+        options: FileOptions,
     ) -> Self {
         Self {
             sections: vec![Section {
@@ -130,7 +149,7 @@ impl SectionBook {
             }],
             page_section: page_ids.iter().map(|id| (*id, 0)).collect(),
             next_id: 1,
-            per_file_bookmarks,
+            options,
         }
     }
 
@@ -157,8 +176,8 @@ impl SectionBook {
 
     /// A document back to one file — an undo took the added ones out — goes
     /// by the name it has now, which a Save As since may have changed, and
-    /// writes its bookmarks as the reader chooses now.
-    pub(super) fn resume(&mut self, page_ids: &[u64], title: String, per_file_bookmarks: bool) {
+    /// lays out and saves its files as the reader chooses now.
+    pub(super) fn resume(&mut self, page_ids: &[u64], title: String, options: FileOptions) {
         if self.several(page_ids) {
             return;
         }
@@ -173,7 +192,7 @@ impl SectionBook {
             let _ = self.rename(id, title.clone());
         }
 
-        self.per_file_bookmarks = per_file_bookmarks;
+        self.options = options;
     }
 
     pub(super) fn contains(&self, section_id: u64) -> bool {
@@ -266,10 +285,43 @@ impl SectionBook {
             .collect()
     }
 
+    /// Where a Save As puts its blank pages, by the index of the page each
+    /// follows: before a file that would otherwise start on an even page, as
+    /// the back of the last leaf of the file before it.
+    pub(super) fn padding(&self, page_ids: &[u64]) -> Vec<usize> {
+        if !self.options.smart_padding || !self.several(page_ids) {
+            return Vec::new();
+        }
+
+        let mut after = Vec::new();
+        let mut written = 0usize;
+        let mut previous = None;
+
+        for (index, page_id) in page_ids.iter().enumerate() {
+            let section = self.section_of(*page_id);
+
+            if index > 0 && section != previous && written % 2 == 1 {
+                after.push(index - 1);
+                written += 1;
+            }
+
+            previous = section;
+            written += 1;
+        }
+
+        after
+    }
+
     /// The outline a Save As writes: a bookmark per run of a file's pages with
-    /// the file's own beneath its first, or the files' own one after another.
-    pub(super) fn outline(&self, page_ids: &[u64]) -> Vec<OutlineNode> {
-        let position = positions(page_ids);
+    /// the file's own beneath its first, or the files' own one after another,
+    /// its pages counted with `padding`'s blank pages in among them.
+    pub(super) fn outline(&self, page_ids: &[u64], padding: &[usize]) -> Vec<OutlineNode> {
+        let landed = |index: usize| index + padding.iter().filter(|after| **after < index).count();
+        let position: HashMap<u64, usize> = page_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (*id, landed(index)))
+            .collect();
         let mut nodes = Vec::new();
         let mut written = HashSet::new();
         let mut previous = None;
@@ -294,10 +346,10 @@ impl SectionBook {
                 Vec::new()
             };
 
-            if self.per_file_bookmarks {
+            if self.options.per_file_bookmarks {
                 nodes.push(OutlineNode {
                     title: section.title.clone(),
-                    page: index,
+                    page: landed(index),
                     children: own,
                 });
             } else {
@@ -318,6 +370,24 @@ fn positions(page_ids: &[u64]) -> HashMap<u64, usize> {
 }
 
 impl PdfiumEngine {
+    /// The document's own record of how its files are laid out and saved.
+    pub fn set_file_options(
+        &self,
+        document_id: u64,
+        options: FileOptions,
+    ) -> Result<PdfStructureUpdate, String> {
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        entry
+            .sections
+            .as_mut()
+            .ok_or("this document has no files to lay out")?
+            .options = options;
+
+        Ok(structure_update(entry))
+    }
+
     /// Gives a file of the document a new name: the one its bookmark takes in a
     /// Save As. Changes no page, so no signature decision is asked for.
     pub fn rename_section(
@@ -341,6 +411,43 @@ impl PdfiumEngine {
 }
 
 impl OpenDocument {
+    /// Another file's pages are here, or the pages still show as more than one
+    /// file: the document is no longer its file alone, so only a Save As may
+    /// write it, as the files, blanks and bookmarks the reader sees.
+    pub(super) fn combined(&self) -> bool {
+        !self.foreign_page_ids.is_empty()
+            || self
+                .sections
+                .as_ref()
+                .is_some_and(|book| book.several(&self.page_ids))
+    }
+
+    /// The blank pages a Save As will add, each after the 1-based page it
+    /// follows and sized as that page shows; what the viewer and print show.
+    pub(super) fn padding_sheets(&self) -> Vec<PdfPaddingSheet> {
+        let Some(book) = &self.sections else {
+            return Vec::new();
+        };
+
+        book.padding(&self.page_ids)
+            .into_iter()
+            .map(|after| {
+                let page = self
+                    .page_ids
+                    .get(after)
+                    .and_then(|page_id| self.page_geometry.get(page_id))
+                    .copied()
+                    .unwrap_or(UNMEASURED_PAGE);
+
+                PdfPaddingSheet {
+                    after: after + 1,
+                    width: page.width,
+                    height: page.height,
+                }
+            })
+            .collect()
+    }
+
     /// Refuses a file the document does not have before any page moves.
     pub(super) fn check_section(&self, section: Option<u64>) -> Result<(), String> {
         match (section, &self.sections) {

@@ -39,7 +39,7 @@ pub use compress::{
 pub use organize::save_assembled_pdf_to;
 pub use organize::{
     add_organize_sources, check_organize_watermark, insert_pdf_files, release_organize_sources,
-    rename_pdf_section, render_organize_thumbnail, save_assembled_pdf,
+    rename_pdf_section, render_organize_thumbnail, save_assembled_pdf, set_pdf_file_options,
 };
 
 /// Counts work units rather than bytes: pages for owned content, and

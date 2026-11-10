@@ -22,6 +22,7 @@ import {
   planInsertPages,
   planEraseAnnotation,
   planInsertBlankPage,
+  planFileOptions,
   planInsertFiles,
   planRenameSection,
   planPageNumbersChange,
@@ -46,6 +47,7 @@ import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
+  FileOptions,
   PdfExportOutcome,
   PdfStructureUpdate,
   SignatureDecision,
@@ -292,6 +294,16 @@ async function applyCommand(
         commandPageChange(command, false),
       )
       return []
+    case "fileOptions":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("set_pdf_file_options", {
+          documentId,
+          options: command.next,
+        }),
+        commandPageChange(command, false),
+      )
+      return []
   }
 }
 
@@ -441,6 +453,16 @@ async function retractCommand(
           documentId,
           sectionId: command.sectionId,
           title: command.previous,
+        }),
+        commandPageChange(command, true),
+      )
+      return []
+    case "fileOptions":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("set_pdf_file_options", {
+          documentId,
+          options: command.previous,
         }),
         commandPageChange(command, true),
       )
@@ -927,8 +949,8 @@ export function useAnnotations({
       index: number,
       pageCount: number,
       files: {
+        options: FileOptions
         ownTitle: string
-        perFileBookmarks: boolean
         signatures: SignatureDecision | null
       },
     ) => {
@@ -967,8 +989,8 @@ export function useAnnotations({
                 await invoke<PdfStructureUpdate>("insert_pdf_files", {
                   documentId,
                   index,
+                  options: files.options,
                   ownTitle: files.ownTitle,
-                  perFileBookmarks: files.perFileBookmarks,
                   signatures: files.signatures,
                   sourceIds: sources.map((source) => source.id),
                 }),
@@ -989,13 +1011,17 @@ export function useAnnotations({
   )
 
   /** Names no page's content, so no signature is asked about; a Save As
-      writes the name as the file's bookmark. */
-  const renameSection = useCallback(
-    async (sectionId: number, title: string, previous: string) => {
+      writes the name as the file's bookmark. A file options change, too. */
+  const commitFileChange = useCallback(
+    async (
+      plan: (
+        current: AnnotationHistory,
+      ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
+    ) => {
       let landed = false
 
       await enqueue((current) => {
-        const planned = planRenameSection(current, sectionId, title, previous)
+        const planned = plan(current)
 
         if (!planned) {
           return null
@@ -1022,6 +1048,24 @@ export function useAnnotations({
       return landed
     },
     [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  const renameSection = useCallback(
+    (sectionId: number, title: string, previous: string) =>
+      commitFileChange((current) => planRenameSection(current, sectionId, title, previous)),
+    [commitFileChange],
+  )
+
+  /** `current` is read when the change takes its turn, so a toggle made while
+      another is in flight builds on that one rather than undoing it. */
+  const setFileOptions = useCallback(
+    (change: Partial<FileOptions>, current: () => FileOptions | undefined) =>
+      commitFileChange((history) => {
+        const previous = current()
+
+        return previous ? planFileOptions(history, { ...previous, ...change }, previous) : null
+      }),
+    [commitFileChange],
   )
 
   /** Draws the document's signatures into its pages in place, ahead of the
@@ -1594,6 +1638,7 @@ export function useAnnotations({
       reset,
       rotatePages,
       save,
+      setFileOptions,
       setPageNumbers,
       setWatermark,
       settled,
@@ -1629,6 +1674,7 @@ export function useAnnotations({
       reset,
       rotatePages,
       save,
+      setFileOptions,
       setPageNumbers,
       setWatermark,
       settled,

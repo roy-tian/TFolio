@@ -8,8 +8,8 @@ use tauri::{
     AppHandle, Manager, State, WebviewWindow,
 };
 use tfolio_engine::{
-    AssemblePlan, OrganizeSourceInfo, PdfDocumentInfo, PdfStructureUpdate, SignatureDecision,
-    WatermarkConfig,
+    AssemblePlan, FileOptions, OrganizeSourceInfo, PdfDocumentInfo, PdfStructureUpdate,
+    SignatureDecision, WatermarkConfig,
 };
 
 #[cfg(not(feature = "e2e"))]
@@ -56,7 +56,7 @@ pub async fn insert_pdf_files(
     source_ids: Vec<u64>,
     index: i32,
     own_title: String,
-    per_file_bookmarks: bool,
+    options: FileOptions,
     signatures: Option<SignatureDecision>,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
@@ -76,7 +76,7 @@ pub async fn insert_pdf_files(
             &source_ids,
             index,
             &own_title,
-            per_file_bookmarks,
+            options,
             signatures,
         )
     })
@@ -100,6 +100,20 @@ pub async fn release_organize_sources(
     })
     .await
     .map_err(|error| format!("PDFium release task failed: {error}"))
+}
+
+/// How a document's files are laid out and saved, as the reader set it.
+#[tauri::command]
+pub async fn set_pdf_file_options(
+    document_id: u64,
+    options: FileOptions,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || engine.set_file_options(document_id, options))
+        .await
+        .map_err(|error| format!("PDFium options task failed: {error}"))?
 }
 
 /// The name a file of the document goes by, and its bookmark in a Save As.

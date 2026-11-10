@@ -19,6 +19,8 @@ type HistoryActionKey =
   | "annotate.actionInsertPages"
   | "annotate.actionInsertFiles"
   | "annotate.actionRenameFile"
+  | "annotate.actionSmartPadding"
+  | "annotate.actionFileBookmarks"
 
 /** The name of an edit, for the undo and redo labels: the locale key that
     names it, and the page count where the name counts pages. */
@@ -79,5 +81,12 @@ export function historyAction(command: AnnotationCommand): HistoryAction {
       return { count: command.titles.length, key: "annotate.actionInsertFiles" }
     case "renameSection":
       return { key: "annotate.actionRenameFile" }
+    case "fileOptions":
+      return {
+        key:
+          command.next.smartPadding !== command.previous.smartPadding
+            ? "annotate.actionSmartPadding"
+            : "annotate.actionFileBookmarks",
+      }
   }
 }

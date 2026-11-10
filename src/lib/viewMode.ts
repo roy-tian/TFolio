@@ -57,43 +57,15 @@ export function storeViewMode(mode: ViewMode) {
   rememberSettings({ ui: { viewMode: mode } })
 }
 
-/** A trailing odd page keeps the left slot of its own row, so it stays the
-    same size as the pages above it. */
-export function pairPages(numPages: number): number[][] {
-  const rows: number[][] = []
-
-  for (let pageNumber = 1; pageNumber <= numPages; pageNumber += 2) {
-    rows.push(spreadPages(pageNumber, numPages))
-  }
-
-  return rows
-}
-
-export function spreadPages(pageNumber: number, numPages: number): number[] {
-  const first = pageNumber % 2 === 1 ? pageNumber : pageNumber - 1
-
-  return first === numPages ? [first] : [first, first + 1]
-}
-
-/**
- * A book turn advances one spread and names its left page, so either half
- * being current gives the same answer; Page Up/Down turn pages, not pixels.
- */
+/** A single-page turn; a book turn goes by spreads (`spreadTurnTarget`).
+    Page Up/Down turn pages, not pixels. */
 export function pageTurnTarget(
   pageNumber: number,
   numPages: number,
-  viewMode: ViewMode,
   direction: -1 | 1,
 ): number {
   const lastPage = Math.max(1, numPages)
   const current = Math.min(lastPage, Math.max(1, pageNumber))
 
-  if (viewMode === "single") {
-    return Math.min(lastPage, Math.max(1, current + direction))
-  }
-
-  const spreadStart = current % 2 === 1 ? current : current - 1
-  const lastSpreadStart = lastPage % 2 === 1 ? lastPage : lastPage - 1
-
-  return Math.min(lastSpreadStart, Math.max(1, spreadStart + direction * 2))
+  return Math.min(lastPage, Math.max(1, current + direction))
 }

@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import type { PrintPage } from "@/components/PrintSheet"
 import { e2eOverride } from "@/lib/e2e"
+import type { PaddingSheet } from "@/lib/padding"
 import type { PdfPageInfo } from "@/lib/pdf"
 import { pngDataUrl, printDpi, printRenderWidth } from "@/lib/printSheet"
 import type { PdfProgress } from "@/lib/progress"
@@ -16,6 +17,8 @@ import type { PdfProgress } from "@/lib/progress"
 type PrintOptions = {
   documentId: number
   onError: () => void
+  /** The blank pages a Save As will add: printed too, as the file would be. */
+  padding: readonly PaddingSheet[]
   pages: PdfPageInfo[]
 }
 
@@ -28,6 +31,7 @@ type PrintOptions = {
 export function usePrint({
   documentId,
   onError,
+  padding,
   pages,
 }: PrintOptions) {
   const [preparing, setPreparing] = useState(false)
@@ -78,6 +82,11 @@ export function usePrint({
         }
 
         printed.push({ pageNumber, src: pngDataUrl(bytes) })
+
+        if (padding.some((sheet) => sheet.after === pageNumber)) {
+          printed.push({ pageNumber, src: null })
+        }
+
         setProgress({ completed: pageNumber, total: pages.length })
       }
     } catch {
@@ -92,7 +101,7 @@ export function usePrint({
     // The dialog waits on the effect below, which cannot open it until React
     // has put these images in the document for the printer to draw.
     setSheet(printed)
-  }, [documentId, pages])
+  }, [documentId, padding, pages])
 
   useEffect(() => {
     if (!sheet) {

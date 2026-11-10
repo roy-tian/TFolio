@@ -15,8 +15,8 @@ pub use archive::{ArchiveOptions, ImageFormat};
 pub use compress::{CompressionEstimate, CompressionOptions};
 pub use engine::{
     is_merge_image, AssembleOutlineItem, AssemblePlan, AssembleSlot, EnginePaths, FileKey,
-    OperationTarget, OrganizeSourceInfo, PdfSection, PdfiumEngine, MERGE_IMAGE_EXTENSIONS,
-    ORGANIZE_SOURCE_CHANGED,
+    FileOptions, OperationTarget, OrganizeSourceInfo, PdfPaddingSheet, PdfSection, PdfiumEngine,
+    MERGE_IMAGE_EXTENSIONS, ORGANIZE_SOURCE_CHANGED,
 };
 pub use font::{download_fallback_font, CJK_FONT_NAME};
 pub use library::PDFIUM_LIBRARY_NAME;
@@ -106,13 +106,21 @@ pub struct PdfStructureUpdate {
     /// Like a watermark, a copy of a page carrying one or page numbers leaves the
     /// document export-only; the frontend's save key reads this, not its history.
     has_merged_pages: bool,
-    /// Pages an added file brought in remain: a save may not replace the file
-    /// with them, only a Save As write them, as `save` itself enforces.
+    /// Pages an added file brought in remain, or the pages still show as
+    /// several files: a save may not replace the file with them, only a Save
+    /// As write them, as `save` itself enforces.
     has_foreign_pages: bool,
+    /// The blank pages a Save As will add between files, for the viewer and
+    /// print to show where it will put them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    padding: Vec<PdfPaddingSheet>,
     /// The files the pages came from, once more than one: empty for a document
     /// that is still its own file alone.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sections: Vec<PdfSection>,
+    /// How those files are laid out and saved; absent with one file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_options: Option<FileOptions>,
     signatures: PdfSignatures,
 }
 

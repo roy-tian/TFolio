@@ -1,3 +1,5 @@
+import type { PaddingSheet } from "@/lib/padding"
+
 export type PdfOutlineItem = {
   items: PdfOutlineItem[]
   pageNumber: number | null
@@ -15,6 +17,12 @@ export type PdfPageInfo = {
   /** Shows a signature field's widget; absent on nearly every page. */
   signed?: boolean
   width: number
+}
+
+/** How a document of several files is laid out and saved. */
+export type FileOptions = {
+  perFileBookmarks: boolean
+  smartPadding: boolean
 }
 
 /** One file of a document others were added to, as the sidebar shows it: its
@@ -87,6 +95,10 @@ export type PdfDocumentInfo = {
   /** The file this document was opened from; null when opened from bytes,
       which leaves nothing to save over. */
   path: string | null
+  /** As in a structure update. */
+  fileOptions?: FileOptions
+  /** As in a structure update. */
+  padding?: PaddingSheet[]
   /** As in a structure update. */
   sections?: PdfSection[]
   /** As the backend last reported them: an open, a structure update, or a
@@ -198,6 +210,11 @@ export type PdfStructureUpdate = {
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  /** How those files are laid out and saved; absent with one file. */
+  fileOptions?: FileOptions
+  /** The blank pages a Save As will add between files, shown where it puts
+      them; absent where there are none. */
+  padding?: PaddingSheet[]
   /** The files the pages come from, once more than one; absent otherwise. */
   sections?: PdfSection[]
   signatures: PdfSignatures
