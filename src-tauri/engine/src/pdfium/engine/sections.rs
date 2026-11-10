@@ -95,7 +95,7 @@ fn numbered(items: &[SectionBookmark], position: &HashMap<u64, usize>) -> Vec<Pd
         .collect()
 }
 
-/// A bookmark whose page is gone gives way to its children, as an assembly's
+/// A bookmark whose page is gone gives way to its children, as a split's
 /// outline drops one; 0-based pages.
 fn outline_nodes(items: &[SectionBookmark], position: &HashMap<u64, usize>) -> Vec<OutlineNode> {
     items

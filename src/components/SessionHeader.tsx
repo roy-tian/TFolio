@@ -16,7 +16,6 @@ import { SidebarToggle } from "@/components/AppSidebar"
 import { HistoryControls } from "@/components/HistoryControls"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WindowControls } from "@/components/WindowControls"
-import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -214,7 +213,7 @@ type ToolbarFrameProps = {
 
 /** The title bar right of the sidebar, ending in the app menu and the window
     controls. Without a docked sidebar beside it, it takes over the sidebar's
-    first row: the toggle, the workspace switch, the traffic lights. */
+    first row: the toggle and the traffic lights. */
 export function ToolbarFrame({
   active,
   appMenu,
@@ -238,12 +237,7 @@ export function ToolbarFrame({
           !docked && macOS && "pl-[68px]",
         )}
       >
-        {docked ? null : (
-          <>
-            <SidebarToggle />
-            <WorkspaceSwitch />
-          </>
-        )}
+        {docked ? null : <SidebarToggle />}
         {start}
       </div>
       <div className="flex items-center gap-1">

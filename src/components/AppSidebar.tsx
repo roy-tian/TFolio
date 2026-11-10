@@ -10,7 +10,6 @@ import { GalleryVertical, ListTree, PanelLeft } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
-import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useSidebar } from "@/hooks/useSidebar"
@@ -327,9 +326,6 @@ export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
         data-tauri-drag-region="deep"
       >
         <SidebarToggle />
-        <div className="ml-auto">
-          <WorkspaceSwitch />
-        </div>
       </div>
       <div className="flex h-(--document-tabs-height) shrink-0 items-center justify-center border-b px-2">
         {switcher}

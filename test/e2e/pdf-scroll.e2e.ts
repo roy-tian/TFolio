@@ -103,16 +103,22 @@ describe("PDF scrolling", () => {
     await expect($(`${session} [data-slot='zoom-controls']`))
       .toHaveAttribute("aria-label", "Zoom 200%")
 
-    const centring = () => browser.execute((scope: string) => {
-      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
-      const box = viewer.getBoundingClientRect()
-      const page = viewer.querySelector("[data-page-number='1']")!.getBoundingClientRect()
+    type Centring = { left: number; offCentre: number; overflow: number }
+    // Read once a frame has been drawn, as the reader sees it: the correction
+    // lands in that frame's resize observer, and a script can run between the
+    // click's commit and that frame.
+    const centring = () => browser.executeAsync((scope: string, done: (at: Centring) => void) => {
+      requestAnimationFrame(() => setTimeout(() => {
+        const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+        const box = viewer.getBoundingClientRect()
+        const page = viewer.querySelector("[data-page-number='1']")!.getBoundingClientRect()
 
-      return {
-        left: box.left,
-        offCentre: page.left + page.width / 2 - (box.left + viewer.clientWidth / 2),
-        overflow: viewer.scrollWidth - viewer.clientWidth,
-      }
+        done({
+          left: box.left,
+          offCentre: page.left + page.width / 2 - (box.left + viewer.clientWidth / 2),
+          overflow: viewer.scrollWidth - viewer.clientWidth,
+        })
+      }))
     }, session)
 
     await browser.execute((scope: string) => {

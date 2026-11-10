@@ -659,7 +659,7 @@ export function SidebarThumbnails({
   }
 
   // The page pressed alone only until its click's selection lands. Blanks and
-  // pastes go before the first or after the last, as on the organize board.
+  // pastes go before the first or after the last.
   // Folded, not spread: a select-all can pass the engine's argument limit.
   const menuPages: Iterable<number> =
     menuPage === null ? [] : selectedPages.has(menuPage) ? selectedPages : [menuPage]
@@ -1173,7 +1173,6 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
           renderEpoch={renderEpoch}
           retainBitmap={nearView}
           rotation={rotation}
-          surface="sidebar"
         />
       </div>
       {hole ? (

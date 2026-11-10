@@ -70,8 +70,8 @@ export function movesNothing(moving: readonly number[], to: number): boolean {
 /**
  * How far each item slides to make way for the moving items, by ascending
  * index, landing together at `to`. An item passed over moves by each passing
- * item's own extent, not its neighbour's: the organize list's files differ in
- * height by their bookmarks. The moving items stay put, hidden under the ghost.
+ * item's own extent, not its neighbour's: cells of a list may differ in
+ * height. The moving items stay put, hidden under the ghost.
  */
 export function wayOffsets(
   moving: readonly number[],

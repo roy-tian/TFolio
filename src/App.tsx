@@ -15,10 +15,8 @@ import {
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { HomePanel } from "@/components/HomePanel"
 import { NoticeCenter } from "@/components/NoticeCenter"
-import { OrganizeFillPrompt } from "@/components/OrganizeFillPrompt"
 import { ReloadPrompt } from "@/components/ReloadPrompt"
 import { SignaturePrompt } from "@/components/SignaturePrompt"
-import { OrganizeWorkspace } from "@/components/OrganizeWorkspace"
 import {
   SettingsDialog,
   type SettingsSection,
@@ -37,17 +35,11 @@ import {
 } from "@/components/ui/alert-dialog"
 import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
-import { useOrganizeFill, type FillTab } from "@/hooks/useOrganizeFill"
-import { useOrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
 import { useReopenTab, type Reopened } from "@/hooks/useReopenTab"
 import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
 import { PagesDropContext, type PagesDrop } from "@/hooks/usePagesDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
-import {
-  WorkspaceModeContext,
-  type WorkspaceMode,
-} from "@/hooks/useWorkspaceMode"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import { dropPointInCss, overSidebarPages, sidebarPagesShown } from "@/lib/fileDrop"
@@ -114,8 +106,8 @@ import { unsavedWorkElsewhere } from "@/lib/unsavedWork"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 
 type OpenTab = {
-  /** The image or Word document a converted tab was made from: what the
-      organize workspace reads for it while it has no file of its own. */
+  /** The image or Word document a converted tab was made from: what a reload
+      reads for it while it has no file of its own. */
   convertedFrom?: string
   dirty: boolean
   document: PdfDocumentInfo
@@ -126,7 +118,7 @@ type OpenTab = {
   movedSeed?: MovedTabSeed
   name: string
   path: string
-  /** A document-specific name for Save As — a converted or assembled document's,
+  /** A document-specific name for Save As — a converted document's,
       then the file Save As bound it to; ordinary PDFs use the annotation
       export name. */
   saveAsDefaultName?: string
@@ -154,14 +146,13 @@ type LoadedSource =
 type PendingClose = (
   | { kind: "all" }
   /** `elsewhere`: another window holds unsaved work, or did not answer —
-      nothing this window can save. `arrangement`: the organize workspace holds
-      pages no PDF has been made of, which no save keeps either. */
-  | { arrangement: boolean; kind: "quit"; elsewhere: boolean }
+      nothing this window can save. */
+  | { kind: "quit"; elsewhere: boolean }
   | { kind: "tab"; documentId: number }
   /** Some tabs, from another tab's menu: `anchorId` is that tab, where the
       workspace lands if the active one goes with them. */
   | { kind: "tabs"; anchorId: number; documentIds: number[] }
-  | { arrangement: boolean; kind: "window" }
+  | { kind: "window" }
 ) & { changes: boolean }
 
 /** What a drag crossing out of this window navigates by: the viewport's place
@@ -243,24 +234,11 @@ export default function App() {
   const { channel: notices, notices: raisedNotices } = useNotices()
   const tabsRef = useRef<OpenTab[]>([])
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
-  // Per tab, moved on by each save that may have rewritten its file: the
-  // organize workspace reads a file again once its revision has moved.
-  const fileRevisionsRef = useRef(new Map<number, number>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
   const openBatchesRef = useRef(0)
   const choosingFileRef = useRef(false)
   const mountedRef = useRef(true)
   const activeIdRef = useRef<TabId>(HOME_TAB_ID)
-  const [workspaceMode, setWorkspaceModeState] = useState<WorkspaceMode>("view")
-  const workspaceModeRef = useRef<WorkspaceMode>("view")
-  const setWorkspaceMode = useCallback((mode: WorkspaceMode) => {
-    workspaceModeRef.current = mode
-    setWorkspaceModeState(mode)
-  }, [])
-  // The tab the keyboard's document commands reach: none while the organize
-  // workspace covers the tabs, which stay mounted behind it.
-  const shownTabId = () =>
-    workspaceModeRef.current === "organize" ? HOME_TAB_ID : activeIdRef.current
   // A tab drag that left the strip: where this window's viewport sits on the
   // screen and which of the others the pointer is over. Loaded once per drag —
   // windows cannot move under a pointer the drag is holding.
@@ -671,13 +649,6 @@ export default function App() {
     [activateTab, putInPlaceOf, refreshRecentFiles, replaceTabs, tabHasUnsavedWork],
   )
 
-  const showTabInViewer = useCallback(
-    (documentId: number) => {
-      setWorkspaceMode("view")
-      activateTab(documentId)
-    },
-    [activateTab, setWorkspaceMode],
-  )
   const tabName = useCallback(
     (documentId: number) =>
       tabsRef.current.find((tab) => tab.id === documentId)?.name ?? null,
@@ -686,16 +657,13 @@ export default function App() {
   const reopenPrompt = useReopenTab<OpenBatch>({
     hasUnsavedWork: tabHasUnsavedWork,
     reload: reloadTab,
-    show: showTabInViewer,
+    show: activateTab,
     tabName,
   })
   const reopenTab = reopenPrompt.reopen
 
   const openPaths = useCallback(
     (paths: string[], activate: "first" | "last" = "last") => {
-      // Whatever opens, opens as a tab, which only the viewer shows.
-      setWorkspaceMode("view")
-
       const sources = paths
         .map((path) => ({ kind: classifyOpenSource(path), path }))
         .filter(
@@ -787,7 +755,6 @@ export default function App() {
       reopenTab,
       replaceTabs,
       runOpenBatch,
-      setWorkspaceMode,
     ],
   )
 
@@ -796,7 +763,6 @@ export default function App() {
   const createDocument = useCallback(
     () =>
       runOpenBatch(async () => {
-        setWorkspaceMode("view")
         try {
           const document = await invoke<PdfDocumentInfo>("create_pdf")
 
@@ -859,8 +825,6 @@ export default function App() {
       void extracted.catch(() => undefined)
 
       return runOpenBatch(async () => {
-        setWorkspaceMode("view")
-
         try {
           const document = await extracted
 
@@ -904,7 +868,6 @@ export default function App() {
       notices,
       replaceTabs,
       runOpenBatch,
-      setWorkspaceMode,
       t,
     ],
   )
@@ -981,88 +944,6 @@ export default function App() {
     )
   }, [notices])
 
-  // A saved one is the file the reader chose, so it opens as that file's tab
-  // would, the backend having listed it as recent. A preview is the app's own,
-  // like a new one, and export-only: it holds other files' pages, so a chosen
-  // destination is the only thing it can be written to.
-  const openAssembled = useCallback(
-    (document: PdfDocumentInfo) => {
-      if (!mountedRef.current) {
-        void invoke("close_pdf", { documentId: document.id }).catch(
-          () => undefined,
-        )
-        return
-      }
-
-      const tab: OpenTab = document.path
-        ? {
-            dirty: false,
-            document,
-            id: document.id,
-            name: fileNameFromPath(document.path),
-            path: document.path,
-            recentPath: document.path,
-            savable: false,
-          }
-        : {
-            dirty: true,
-            document,
-            id: document.id,
-            initialSaveRequired: true,
-            name: t("organize.untitled"),
-            path: "",
-            saveAsDefaultName: t("organize.untitled"),
-            savable: false,
-          }
-
-      replaceTabs((current) => [...current, tab])
-      setWorkspaceMode("view")
-      activateTab(tab.id)
-      notices.retract(workspaceOwner, openRefusals)
-
-      if (document.path) {
-        refreshRecentFiles()
-      }
-    },
-    [activateTab, notices, refreshRecentFiles, replaceTabs, setWorkspaceMode, t],
-  )
-  const organize = useOrganizeWorkspace({
-    askSignatures,
-    notices,
-    onAssembled: openAssembled,
-  })
-  // Read by listeners bound once, which must reach the workspace as it is now.
-  const organizeRef = useRef(organize)
-
-  useEffect(() => {
-    organizeRef.current = organize
-  }, [organize])
-
-  const findFillTab = useCallback(
-    (id: number): FillTab | null => tabsRef.current.find((tab) => tab.id === id) ?? null,
-    [],
-  )
-  const activeFillTab = useCallback(() => {
-    const id = activeIdRef.current
-
-    return id === HOME_TAB_ID ? null : findFillTab(id)
-  }, [findFillTab])
-  const fileRevision = useCallback(
-    (id: number) => fileRevisionsRef.current.get(id) ?? 0,
-    [],
-  )
-  const sessionHandle = useCallback((id: number) => sessionRefs.current.get(id), [])
-  const organizeFill = useOrganizeFill({
-    activeTab: activeFillTab,
-    findTab: findFillTab,
-    modeRef: workspaceModeRef,
-    organize: organizeRef,
-    revision: fileRevision,
-    session: sessionHandle,
-    setMode: setWorkspaceMode,
-  })
-  const { enterOrganize } = organizeFill
-
   // Only files a document can take its pages from; anything else is said to be
   // no such file, rather than opened as a tab the reader did not drop it as.
   const addDroppedFiles = useCallback(
@@ -1084,7 +965,6 @@ export default function App() {
   )
   const hasUnsavedWorkNow = useCallback(
     () =>
-      organizeRef.current.hasUnsavedWorkNow() ||
       tabsRef.current.some((tab) =>
         sessionRefs.current.get(tab.id)?.hasUnsavedWorkNow() ?? tab.dirty,
       ),
@@ -1122,7 +1002,6 @@ export default function App() {
 
       if (elsewhere || hasUnsavedWorkNow()) {
         askToClose({
-          arrangement: organizeRef.current.hasUnsavedArrangementNow(),
           changes: hasUnsavedChangesNow(tabsRef.current.map((tab) => tab.id)),
           elsewhere,
           kind: "quit",
@@ -1189,8 +1068,6 @@ export default function App() {
         appUpdate.requestInstall()
       } else if (kind === "noteFont" && notice.owner.scope === "document") {
         sessionRefs.current.get(notice.owner.documentId)?.fetchNoteFont()
-      } else if (kind === "noteFont") {
-        void organizeRef.current.fetchFont()
       } else if (
         kind === "layerStop" &&
         !notice.action?.busy &&
@@ -1202,9 +1079,10 @@ export default function App() {
         wordStopRef.current = true
         notices.raise({ ...notice, action: { busy: true, kind } })
         void stopWordOpen()
-      } else if (kind === "organizeAddStop" && !notice.action?.busy) {
+      } else if (kind === "fileAddStop" && !notice.action?.busy) {
+        // Stops the window's conversion, whichever document asked for it.
         notices.raise({ ...notice, action: { busy: true, kind } })
-        organizeRef.current.stopAdding()
+        void invoke("cancel_word_conversion").catch(() => undefined)
       }
     },
     [appUpdate, notices, stopWordOpen],
@@ -1220,8 +1098,6 @@ export default function App() {
         appUpdate.dismiss()
       } else if (slot === "noteFont" && notice.owner.scope === "document") {
         sessionRefs.current.get(notice.owner.documentId)?.dismissNoteFont()
-      } else if (slot === "noteFont") {
-        organizeRef.current.dismissFontOffer()
       }
 
       notices.dismiss(notice.id)
@@ -1460,7 +1336,6 @@ export default function App() {
 
         // Not `activateTab`: the prompt just answered is still mounted, and
         // would hold the tab back until after its Save As had opened.
-        setWorkspaceMode("view")
         showTab(id)
 
         if (!(await session.saveForClose())) {
@@ -1470,7 +1345,7 @@ export default function App() {
 
       closeNow(action)
     },
-    [closeNow, setWorkspaceMode, showTab],
+    [closeNow, showTab],
   )
 
   // The tab's own half of a move: what the strip shows and where it was being
@@ -1696,14 +1571,6 @@ export default function App() {
 
   const updateDirty = useCallback(
     (documentId: number, dirty: boolean) => {
-      // An undo back to the saved state also clears the flag; reading the
-      // unchanged file again costs only time.
-      if (!dirty && tabsRef.current.some((tab) => tab.id === documentId && tab.dirty)) {
-        const revisions = fileRevisionsRef.current
-
-        revisions.set(documentId, (revisions.get(documentId) ?? 0) + 1)
-      }
-
       replaceTabs((current) => {
         const tab = current.find((item) => item.id === documentId)
 
@@ -1787,20 +1654,6 @@ export default function App() {
     ],
   )
 
-  // The drop listener is bound once, so it reads refs: while the organize
-  // workspace shows, a drop joins its files instead of opening tabs.
-  const organizeDrop = useCallback((paths: string[]) => {
-    const sources = paths.filter((path) =>
-      isSourcePath(path, wordConversionAvailable()),
-    )
-
-    if (sources.length > 0) {
-      void organizeRef.current.addPaths(sources)
-    } else {
-      notices.raise({ kind: "invalidFile", owner: workspaceOwner })
-    }
-  }, [notices])
-
   // The WebView's find bar is replaced by the document's own; consumed even on
   // Home, where there is no current PDF for the interface to search.
   useEffect(() => {
@@ -1814,7 +1667,7 @@ export default function App() {
 
       event.preventDefault()
 
-      const tabId = shownTabId()
+      const tabId = activeIdRef.current
       if (tabId !== HOME_TAB_ID) {
         sessionRefs.current.get(tabId)?.openSearch()
       }
@@ -1850,7 +1703,7 @@ export default function App() {
         return
       }
 
-      const tabId = shownTabId()
+      const tabId = activeIdRef.current
       if (tabId !== HOME_TAB_ID) {
         sessionRefs.current.get(tabId)?.print()
       }
@@ -1876,7 +1729,7 @@ export default function App() {
         return
       }
 
-      const tabId = shownTabId()
+      const tabId = activeIdRef.current
       if (tabId !== HOME_TAB_ID) {
         sessionRefs.current.get(tabId)?.zoom(action)
       }
@@ -1914,11 +1767,6 @@ export default function App() {
       // A dialog or popup in front of the document owns the screen; the key is
       // still consumed there, since the interface behind it is not selectable.
       if (hasLayerOverWorkspace()) {
-        return
-      }
-
-      if (workspaceModeRef.current === "organize") {
-        organizeRef.current.selectAll()
         return
       }
 
@@ -1962,7 +1810,7 @@ export default function App() {
   // window's while it is focused, and take nothing from the desktop around it.
   useEffect(() => {
     const activeSession = () => {
-      const tabId = shownTabId()
+      const tabId = activeIdRef.current
 
       return tabId === HOME_TAB_ID ? undefined : sessionRefs.current.get(tabId)
     }
@@ -1988,18 +1836,12 @@ export default function App() {
       // A field's own undo is the one the reader means while typing in it.
       {
         fieldFirst: true,
-        run: () =>
-          workspaceModeRef.current === "organize"
-            ? organizeRef.current.undo()
-            : activeSession()?.undo(),
+        run: () => activeSession()?.undo(),
         shortcut: shortcuts.undo,
       },
       {
         fieldFirst: true,
-        run: () =>
-          workspaceModeRef.current === "organize"
-            ? organizeRef.current.redo()
-            : activeSession()?.redo(),
+        run: () => activeSession()?.redo(),
         shortcut: shortcuts.redo,
       },
     ]
@@ -2055,11 +1897,7 @@ export default function App() {
     // The viewer's sidebar pages are a target of their own while a document
     // shows: files let go there are added to it.
     const pagesDropAt = (position: { x: number; y: number }): PagesDrop => {
-      if (
-        workspaceModeRef.current !== "view" ||
-        activeIdRef.current === HOME_TAB_ID ||
-        !sidebarPagesShown()
-      ) {
+      if (activeIdRef.current === HOME_TAB_ID || !sidebarPagesShown()) {
         return null
       }
 
@@ -2087,11 +1925,8 @@ export default function App() {
           setIsDragging(false)
           setPagesDrop(null)
 
-          // The organize workspace takes every drop while it shows; anything
-          // else opens as tabs, unless it lands on the sidebar's pages.
-          if (workspaceModeRef.current === "organize") {
-            organizeDrop(event.payload.paths)
-          } else if (pagesDropAt(event.payload.position) === "over") {
+          // Opened as tabs, unless let go on the sidebar's pages.
+          if (pagesDropAt(event.payload.position) === "over") {
             addDroppedFiles(event.payload.paths)
           } else {
             void openPaths(event.payload.paths, "first")
@@ -2122,7 +1957,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [addDroppedFiles, openPaths, organizeDrop])
+  }, [addDroppedFiles, openPaths])
 
   // A double-clicked file reaches the app before this workspace exists, so
   // Rust holds it: the event carries no paths, only that a take will find some.
@@ -2173,10 +2008,8 @@ export default function App() {
     let unlisten: (() => void) | undefined
 
     // Another window was asked to open a file a tab here holds: this window
-    // shows it — reloaded, if something else has written the file since —
-    // and only the viewer shows tabs, so organize gives way.
+    // shows it — reloaded, if something else has written the file since.
     void listen<number>(REOPEN_DOCUMENT_EVENT, (event) => {
-      setWorkspaceMode("view")
       void runOpenBatch(async () => {
         const reopened = await reopenTab(event.payload, {
           wordAvailable: null,
@@ -2207,7 +2040,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [activateTab, notices, reopenTab, runOpenBatch, setWorkspaceMode])
+  }, [activateTab, notices, reopenTab, runOpenBatch])
 
   // A tab another window sent here, as the launch flow hands its files over:
   // bound before the first take, so a tab arriving between the two finds a
@@ -2253,13 +2086,12 @@ export default function App() {
           }
 
           if (arrived !== null) {
-            setWorkspaceMode("view")
             activateTab(arrived)
           }
         })
       })
       .catch(() => undefined)
-  }, [activateTab, replaceTabs, runOpenBatch, setWorkspaceMode])
+  }, [activateTab, replaceTabs, runOpenBatch])
 
   useEffect(() => {
     let cancelled = false
@@ -2340,11 +2172,9 @@ export default function App() {
 
     void getCurrentWindow()
       .onCloseRequested((event) => {
-        const hasUnsaved =
-          organizeRef.current.hasUnsavedWorkNow() ||
-          tabsRef.current.some((tab) =>
-            sessionRefs.current.get(tab.id)?.hasUnsavedWorkNow(),
-          )
+        const hasUnsaved = tabsRef.current.some((tab) =>
+          sessionRefs.current.get(tab.id)?.hasUnsavedWorkNow(),
+        )
 
         // Even a clean close waits for reading positions to reach Rust, or the
         // process could end ahead of the trailing persistence write.
@@ -2352,7 +2182,6 @@ export default function App() {
 
         if (hasUnsaved) {
           askToClose({
-            arrangement: organizeRef.current.hasUnsavedArrangementNow(),
             changes: hasUnsavedChangesNow(tabsRef.current.map((tab) => tab.id)),
             kind: "window",
           })
@@ -2420,27 +2249,8 @@ export default function App() {
     shown.changes &&
     !(shown.kind === "quit" && shown.elsewhere)
 
-  const arrangementAtStake = (action: PendingClose) =>
-    (action.kind === "quit" || action.kind === "window") && action.arrangement
-
   const closeLoses = (action: PendingClose) =>
-    action.changes ||
-    arrangementAtStake(action) ||
-    (action.kind === "quit" && action.elsewhere)
-
-  const closeDescription = (action: PendingClose) => {
-    const described = describeClose(action)
-
-    if (!arrangementAtStake(action)) {
-      return described
-    }
-
-    // Tabs saved or not, the arrangement goes: said on its own where nothing
-    // else is at stake, after what is otherwise.
-    return action.changes || (action.kind === "quit" && action.elsewhere)
-      ? `${described} ${t("organize.unsavedArrangementToo")}`
-      : t("organize.unsavedArrangement")
-  }
+    action.changes || (action.kind === "quit" && action.elsewhere)
 
   const describeClose = (action: PendingClose) => {
     if (action.kind === "quit") {
@@ -2494,17 +2304,6 @@ export default function App() {
     }
   }, [homeActive, refreshRecentFiles])
 
-  const viewing = workspaceMode === "view"
-  // The reader's own switch to organize may bring the shown tab's file along.
-  const workspaceModeState = useMemo(
-    () => ({
-      mode: workspaceMode,
-      setMode: (mode: WorkspaceMode) =>
-        mode === "organize" ? void enterOrganize() : setWorkspaceMode(mode),
-    }),
-    [enterOrganize, setWorkspaceMode, workspaceMode],
-  )
-
   const workspace = (
     <div
       className="app-surface h-svh overflow-hidden"
@@ -2512,7 +2311,7 @@ export default function App() {
       data-sidebar-width={sidebar.width === null ? undefined : ""}
       style={sidebarWidthStyle(sidebar.width, sidebar.reserved)}
     >
-      {homeActive && viewing ? (
+      {homeActive ? (
         // The document tools — bookmarks, view mode — have no document to act
         // on here, so the home toolbar carries only what still works.
         <>
@@ -2530,7 +2329,7 @@ export default function App() {
       ) : null}
 
       <HomePanel
-        active={homeActive && viewing}
+        active={homeActive}
         onNew={() => void createDocument()}
         onOpenFile={() => void chooseFile()}
         onOpenRecent={(path) => void openPaths([path])}
@@ -2542,7 +2341,7 @@ export default function App() {
 
       {tabs.map((tab) => (
         <DocumentSession
-          active={tab.id === activeId && viewing}
+          active={tab.id === activeId}
           askSignatures={askSignatures}
           document={tab.document}
           ensureSourceSignatures={ensureSourceSignatures}
@@ -2574,34 +2373,23 @@ export default function App() {
         />
       ))}
 
-      <OrganizeWorkspace
-        active={!viewing}
-        macOS={macOS}
-        menu={menuActions}
-        organize={organize}
+      <DocumentTabs
+        activeId={activeId}
+        appendOffer={pageCarry.appendOffer}
+        armedTabId={pageCarry.armedTabId}
+        newDocumentOffer={pageCarry.newDocumentOffer}
+        onActivate={activateTab}
+        onClose={requestCloseTab}
+        onCloseAll={requestCloseAll}
+        onCloseOthers={requestCloseOthers}
+        onOpenFile={() => void chooseFile()}
+        onReorder={reorderTabs}
+        onTabDragMove={handleTabDragMove}
+        onTabDropOutside={handleTabDropOutside}
+        onMoveToNewWindow={moveTabToNewWindowNow}
+        opening={isOpening}
+        tabs={tabs}
       />
-
-      {/* Hidden rather than gone: the strip keeps its scroll and its drags'
-          geometry for the way back. */}
-      <div hidden={!viewing}>
-        <DocumentTabs
-          activeId={activeId}
-          appendOffer={pageCarry.appendOffer}
-          armedTabId={pageCarry.armedTabId}
-          newDocumentOffer={pageCarry.newDocumentOffer}
-          onActivate={activateTab}
-          onClose={requestCloseTab}
-          onCloseAll={requestCloseAll}
-          onCloseOthers={requestCloseOthers}
-          onOpenFile={() => void chooseFile()}
-          onReorder={reorderTabs}
-          onTabDragMove={handleTabDragMove}
-          onTabDropOutside={handleTabDropOutside}
-          onMoveToNewWindow={moveTabToNewWindowNow}
-          opening={isOpening}
-          tabs={tabs}
-        />
-      </div>
 
       {tabHover ? (
         // Never in the way: the drag's pointer is over another window, and
@@ -2640,20 +2428,15 @@ export default function App() {
           <div className="flex flex-col items-center text-center">
             <FileUp className="mb-4 size-12" />
             <p className="text-lg font-semibold">
-              {viewing ? t("tabs.dropNow") : t("organize.dropNow")}
+              {t("tabs.dropNow")}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {viewing ? t("tabs.dropHint") : t("organize.dropHint")}
+              {t("tabs.dropHint")}
             </p>
           </div>
         </div>
       ) : null}
 
-      <OrganizeFillPrompt
-        onAnswer={organizeFill.answer}
-        open={organizeFill.promptOpen}
-        prompt={organizeFill.prompt}
-      />
       <ReloadPrompt
         name={reopenPrompt.name}
         onAnswer={reopenPrompt.answer}
@@ -2668,7 +2451,7 @@ export default function App() {
       />
 
       <NoticeCenter
-        activeDocumentId={activeId === HOME_TAB_ID || !viewing ? null : activeId}
+        activeDocumentId={activeId === HOME_TAB_ID ? null : activeId}
         notices={raisedNotices}
         onAction={runNoticeAction}
         onDismiss={dismissNotice}
@@ -2707,7 +2490,7 @@ export default function App() {
                 : t("viewer.unsavedTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {shown ? closeDescription(shown) : null}
+              {shown ? describeClose(shown) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2748,13 +2531,11 @@ export default function App() {
   return (
     <AppUpdateContext.Provider value={appUpdate}>
       <SidebarContext.Provider value={sidebar}>
-        <WorkspaceModeContext.Provider value={workspaceModeState}>
-          <PagesDropContext.Provider value={pagesDrop}>
-            <PageCarryContext.Provider value={pageCarry.carry}>
-              {workspace}
-            </PageCarryContext.Provider>
-          </PagesDropContext.Provider>
-        </WorkspaceModeContext.Provider>
+        <PagesDropContext.Provider value={pagesDrop}>
+          <PageCarryContext.Provider value={pageCarry.carry}>
+            {workspace}
+          </PageCarryContext.Provider>
+        </PagesDropContext.Provider>
       </SidebarContext.Provider>
     </AppUpdateContext.Provider>
   )

@@ -84,7 +84,7 @@
   known `style-src-elem` violation; new sources are regressions.
 - Capabilities do not gate custom `generate_handler!` commands: validate arguments in Rust.
   Do not register the transitive `tauri-plugin-fs` plugin.
-- Path-based open and organize sources require `ensure_approved` except in e2e.
+- Path-based opens and file sources require `ensure_approved` except in e2e.
   Approval must come from Rust-observed OS paths, dialogs, or the separate recent-files store.
 - Editable settings must never approve paths: an approved open also binds a later save destination.
 - `export_pdf` reduces suggested names with `Path::file_name()`; `save_pdf` uses only the
@@ -113,20 +113,20 @@
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
   wait on the PDFium lock held by the operation being cancelled.
 - Long loops under the shared PDFium lock need cancellation checks between pages/files and an
-  explicit completion result. Roll back rebuild snapshots on cancellation; publish assembled
-  documents only on completion.
+  explicit completion result. Roll back rebuild snapshots on cancellation; publish built copies
+  (an A4 copy) only on completion.
 - Annotation deletion and hit testing target only this session's mark IDs, never existing
   annotations or positions inferred from undo history.
 - Watermarks and page numbers are session-owned appended content, not redaction; after reopening
   they are input content. Save documents carrying them, or copies of pages that did, only to
   copies, checking symlink-resolved source paths on every write.
-- Every PDFium write breaks every digital signature. A file a document or organize source opened
+- Every PDFium write breaks every digital signature. A file a document opened, or a file added
   with intact signatures (byte ranges checked on disk, off the lock, never the CMS) is never
   written over by any writer, even after Save As rebinds the document; an unchanged document's
   Save As copies the file's bytes instead. Changes and new files that break intact signatures wait
-  for the reader's flatten-or-keep answer, which the engine records per document (per plan for an
-  assembly) and enforces; a document flattens in place only before its first change, and a new file
-  flattens its own copy.
+  for the reader's flatten-or-keep answer, which the engine records per document (per insert for
+  added files) and enforces; a document flattens in place only before its first change, and a new
+  file flattens its own copy.
 
 ## Save as A4
 
@@ -139,34 +139,24 @@
 ## Files added to a document
 
 - A document takes other files as files of its own (engine `SectionBook`): they are read through
-  the organize source list, then imported by `insert_pdf_files`, which releases the sources. One
-  history entry adds them all; its undo deletes the run under its stash.
+  the window's file sources (`read_pdf_sources`), then imported by `insert_pdf_files`, which
+  releases them; sources never added go by `release_pdf_sources`. One history entry adds them all;
+  its undo deletes the run under its stash.
 - Every insert names the file its pages join, and a reorder passes each position's file after
   and before: a page let go among another file's pages joins it. A deleted page keeps its file
   for the restore an undo brings back.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
-  and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf,
-  as an assembly does), then the tab reopens the written file, its history gone.
+  and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
+  then the tab reopens the written file, its history gone.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
   print show them there, and only a Save As writes them. Structure commands never see them.
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
-
-## Organize workspace
-
-- Organize sources are read-only and are not documents: no `record_document`, recent files, save
+- File sources are read-only and are not documents: no `record_document`, recent files, save
   binding, or `find_open_file`. Each window's registry releases them on window destruction and on
   page reload up to the id cutoff taken at release, so a reloaded page keeps those added since.
-- A source whose fingerprint (mtime and size) changed blocks assembly until removed or re-added.
-- A viewer tab enters organize as its file on disk, never its document: ask about unsaved changes
-  first. A fill the reader has not touched is not unsaved work and may be replaced without asking.
-- Every assembled PDF goes through `record_document`; there is no unsaved preview. Save as PDF
-  picks the destination in Rust's own dialog before assembling, writes and binds it like Save As,
-  then opens it as that file's tab; a failed write closes it. Writes refuse only open documents'
-  files and signed files, so a destination chosen over an unsigned source then blocks assembly.
-- The plan's watermark and page numbers are stamped before the write and dropped from session
-  ownership: the tab reads them as input content, as a reopen would, and may save over its file.
+  A source whose fingerprint (mtime and size) changed since it was read is refused.
 
 ## Word and image import
 

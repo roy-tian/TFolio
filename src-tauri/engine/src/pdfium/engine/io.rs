@@ -532,7 +532,7 @@ pub(super) fn image_limit_error() -> String {
 }
 
 pub(super) fn merge_file_limit_error() -> String {
-    format!("an organize workspace takes at most {MAX_MERGE_FILES} files at once")
+    format!("a document takes at most {MAX_MERGE_FILES} files at once")
 }
 
 impl PdfiumEngine {

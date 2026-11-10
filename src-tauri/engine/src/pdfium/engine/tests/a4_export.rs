@@ -63,3 +63,77 @@ fn a_large_landscape_page_lies_on_its_side_and_a_small_one_stays_upright() {
     assert!(fitted.pages[0].width > fitted.pages[0].height);
     assert!(fitted.pages[1].width < fitted.pages[1].height);
 }
+
+/// The smallest box around every non-white pixel, as fractions of the render:
+/// fractions let an A4 sheet and the page it carries be compared directly.
+fn rendered_ink_box(image: &image::RgbImage) -> (f32, f32, f32, f32) {
+    let mut left = u32::MAX;
+    let mut top = u32::MAX;
+    let mut right = 0u32;
+    let mut bottom = 0u32;
+
+    for (x, y, pixel) in image.enumerate_pixels() {
+        // Only ink well clear of the ground counts, so the box is the mark
+        // rather than its anti-aliased halo.
+        if pixel.0.iter().all(|channel| *channel > 200) {
+            continue;
+        }
+
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x + 1);
+        bottom = bottom.max(y + 1);
+    }
+
+    assert!(left < right && top < bottom, "the page should carry ink");
+
+    let width = image.width() as f32;
+    let height = image.height() as f32;
+
+    (
+        left as f32 / width,
+        top as f32 / height,
+        right as f32 / width,
+        bottom as f32 / height,
+    )
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_rotated_page_lands_on_a4_the_way_it_reads() {
+    let engine = test_engine();
+    let document = engine
+        .open(rotated_text_pdf())
+        .expect("PDFium should open the document");
+    // `/Rotate 90` makes the page read 300x200, and that is the shape the sheet
+    // carries — the rotation cannot survive, since the sheet has one of its own.
+    let (left, top, right, bottom) = rendered_ink_box(&rendered_rgb(engine, document.id));
+
+    let fitted = engine
+        .fit_to_a4(document.id, |_, _| {})
+        .expect("the page should fit")
+        .expect("nobody stopped it");
+    let sheet = rendered_ink_box(&rendered_rgb(engine, fitted.id));
+    let scale_x = 300.0 / A4_SHORT_POINTS;
+    let scale_y = 200.0 / A4_LONG_POINTS;
+    let margin_x = (1.0 - scale_x) / 2.0;
+    let margin_y = (1.0 - scale_y) / 2.0;
+    let expected = (
+        margin_x + left * scale_x,
+        margin_y + top * scale_y,
+        margin_x + right * scale_x,
+        margin_y + bottom * scale_y,
+    );
+
+    for (found, want) in [
+        (sheet.0, expected.0),
+        (sheet.1, expected.1),
+        (sheet.2, expected.2),
+        (sheet.3, expected.3),
+    ] {
+        assert!(
+            (found - want).abs() < 0.02,
+            "the rotated text should land at {want}, not {found} (whole box {sheet:?})"
+        );
+    }
+}

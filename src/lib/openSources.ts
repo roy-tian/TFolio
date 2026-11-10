@@ -1,5 +1,5 @@
 /** The open flow's source kinds: PDFs open as themselves, while images and
-    Word documents — what the organize workspace also reads — open as
+    Word documents — which a document's added files may also be — open as
     converted, in-memory PDFs. */
 
 import { isPdfPath } from "@/lib/pdf"

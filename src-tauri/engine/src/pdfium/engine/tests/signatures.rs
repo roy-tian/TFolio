@@ -1,7 +1,6 @@
 use std::io::Read;
 use zip::ZipArchive;
 
-use super::super::organize::{AssemblePlan, AssembleSlot};
 use super::super::signature_flatten::flatten_signatures;
 use super::super::signatures::{
     EXPORT_SIGNED_ERROR, SIGNATURES_UNDECIDED_ERROR, SIGNED_ORIGINAL_CHANGED_ERROR,
@@ -220,22 +219,22 @@ fn an_edited_signed_document_moves_to_its_copy() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn an_organize_source_reports_its_signatures() {
+fn a_file_source_reports_its_signatures() {
     let engine = test_engine();
-    let (directory, source) = signed_source("signatures-organize");
+    let (directory, source) = signed_source("signatures-source");
     let plain = directory.join("plain.pdf");
     fs::write(&plain, minimal_pdf()).expect("the fixture should be writable");
 
     let original = fs::read(&source).expect("the fixture should be readable");
     let infos = engine
-        .add_organize_sources("signatures-organize", vec![source.clone(), plain], false)
+        .read_sources("signatures-source", vec![source.clone(), plain], false)
         .expect("the sources should be read");
     assert_eq!(infos[0].signatures.count, 1);
     assert!(infos[0].signatures.intact);
     assert!(infos[0].pages[0].signed);
     assert_eq!(infos[1].signatures.count, 0);
 
-    // An assembly saves through Save As; no document may replace the source.
+    // No document may write over the source while it is read for adding.
     let other = engine
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
@@ -245,7 +244,7 @@ fn an_organize_source_reports_its_signatures() {
     assert_eq!(error, EXPORT_SIGNED_ERROR);
     assert_eq!(fs::read(&source).unwrap(), original);
 
-    engine.release_organize_scope("signatures-organize", u64::MAX);
+    engine.release_source_scope("signatures-source", u64::MAX);
     fs::remove_dir_all(&directory).ok();
 }
 
@@ -447,54 +446,46 @@ fn a_bookmark_split_flattens_its_parts_and_keeps_their_links() {
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
-fn an_assembly_of_signed_pages_waits_for_the_answer_and_keeps_the_seal_on_a4() {
+fn an_a4_copy_of_a_signed_file_waits_for_the_answer_and_keeps_the_seal_if_drawn_in() {
     let engine = test_engine();
-    let (directory, source) = signed_source("signatures-assemble");
-    let scope = "signatures-assemble";
-    let ids: Vec<u64> = engine
-        .add_organize_sources(scope, vec![source], false)
-        .expect("the source should be read")
-        .into_iter()
-        .map(|info| info.id.expect("the source should be readable"))
-        .collect();
-    let plan = |signatures| AssemblePlan {
-        slots: vec![AssembleSlot::Page {
-            source_id: ids[0],
-            page_number: 1,
-            turn: 0,
-        }],
-        normalize_a4: true,
-        outline: Vec::new(),
-        watermark: None,
-        page_numbers: None,
-        signatures,
-    };
+    let (directory, source) = signed_source("signatures-a4");
+    let kept = engine
+        .open_from_path(source.clone())
+        .expect("PDFium should open the signed file");
 
     assert_eq!(
         engine
-            .assemble_pdf(scope, plan(None), |_, _| {})
+            .fit_to_a4(kept.id, |_, _| {})
             .map(|document| document.map(|info| info.id)),
         Err(SIGNATURES_UNDECIDED_ERROR.to_string())
     );
 
-    let kept = engine
-        .assemble_pdf(scope, plan(Some(SignatureDecision::Keep)), |_, _| {})
-        .expect("PDFium should assemble the page")
-        .expect("the assembly should finish");
+    engine
+        .decide_signatures(kept.id, SignatureDecision::Keep)
+        .expect("the answer should be recorded");
+    let copy = engine
+        .fit_to_a4(kept.id, |_, _| {})
+        .expect("PDFium should fit the page")
+        .expect("nobody stopped it");
     assert_eq!(
-        seal_pixels(engine, kept.id),
+        seal_pixels(engine, copy.id),
         0,
         "an A4 fit leaves annotations behind, the seal with them"
     );
 
     let flattened = engine
-        .assemble_pdf(scope, plan(Some(SignatureDecision::Flatten)), |_, _| {})
-        .expect("PDFium should assemble the page")
-        .expect("the assembly should finish");
-    assert!(seal_pixels(engine, flattened.id) > 0);
-    assert_eq!(flattened.signatures.count, 0);
+        .open_from_path(source)
+        .expect("PDFium should open the signed file again");
+    engine
+        .decide_signatures(flattened.id, SignatureDecision::Flatten)
+        .expect("the answer should be recorded");
+    let copy = engine
+        .fit_to_a4(flattened.id, |_, _| {})
+        .expect("PDFium should fit the page")
+        .expect("nobody stopped it");
+    assert!(seal_pixels(engine, copy.id) > 0);
+    assert_eq!(copy.signatures.count, 0);
 
-    engine.release_organize_scope(scope, u64::MAX);
     fs::remove_dir_all(&directory).ok();
 }
 

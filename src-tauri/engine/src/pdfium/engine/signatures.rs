@@ -253,8 +253,9 @@ impl PdfiumEngine {
     }
 
     /// Whether a write to `path` would break intact signatures: the file an
-    /// open document opened from, wherever it is bound now, or an organize
-    /// source. Called with the documents lock held, which precedes organize's.
+    /// open document opened from, wherever it is bound now, or a file read
+    /// to be added. Called with the documents lock held, which precedes the
+    /// sources'.
     pub(super) fn is_signed_file(
         &self,
         documents: &HashMap<u64, OpenDocument>,
@@ -269,7 +270,7 @@ impl PdfiumEngine {
                     .signed_added
                     .iter()
                     .any(|added| same_file(added, path))
-        }) || self.lock_organize().is_signed_source(path)
+        }) || self.lock_sources().is_signed_source(path)
     }
 }
 

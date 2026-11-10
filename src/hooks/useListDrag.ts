@@ -141,8 +141,8 @@ export function useListDrag({
       /** Where the pointer last was, for a re-measure to answer about. */
       last: ClientPoint
       moving: readonly number[]
-      /** The cells predate the owner's drag layout — the organize list folds
-          its bookmarks away — so none may make way until they are measured
+      /** The cells predate the owner's drag layout — a list that folds rows
+          away while dragging — so none may make way until they are measured
           again after the commit that started the drag. */
       stale: boolean
       /** Takes back the padding `hold` gave the list, if it gave any. */
@@ -228,8 +228,8 @@ export function useListDrag({
     }
 
     /**
-     * The owner's drag layout may move the pressed cell — the organize list
-     * folds away the bookmarks above it — so the list scrolls to keep it under
+     * The owner's drag layout may move the pressed cell — a list folding
+     * rows away above it — so the list scrolls to keep it under
      * the pointer, and pads itself where scrolling cannot reach: a drag that
      * hardly moved still drops where it began.
      */

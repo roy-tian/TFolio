@@ -93,9 +93,9 @@ import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
 import { readFileSources } from "@/lib/fileSources"
 import {
-  storedOrganizePreferences,
-  storeOrganizePreferences,
-} from "@/lib/organizePreferences"
+  storedFilePreferences,
+  storeFilePreferences,
+} from "@/lib/filePreferences"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 import {
   formatPageRanges,
@@ -1023,7 +1023,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          const preferences = storedOrganizePreferences()
+          const preferences = storedFilePreferences()
           const landed = await annotations.insertFiles(
             read.flatMap((info) =>
               info.id === undefined
@@ -1054,7 +1054,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           // An add that landed took its sources with it; any other lets them
           // go, or a signed one would keep its file from every writer.
           if (read.length > 0) {
-            void invoke("release_organize_sources", {
+            void invoke("release_pdf_sources", {
               sourceIds: read.flatMap((info) => (info.id === undefined ? [] : [info.id])),
             }).catch(() => undefined)
           }
@@ -1072,8 +1072,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           : await invoke<string[]>("pick_pdf_paths", {
               filterLabel: t(
                 wordConversionAvailable()
-                  ? "organize.sourceFilter"
-                  : "organize.sourceFilterPlain",
+                  ? "files.sourceFilter"
+                  : "files.sourceFilterPlain",
               ),
             })
 
@@ -1106,7 +1106,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         void annotations.setFileOptions(change, () => documentRef.current?.fileOptions)
         // Only the choice made: another window may have changed the other since.
-        storeOrganizePreferences({
+        storeFilePreferences({
           bookmarks: change.perFileBookmarks,
           smartPadding: change.smartPadding,
         })
@@ -1325,8 +1325,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       [],
     )
 
-    // What every export names its file after: a converted or assembled
-    // document's own PDF name, else the file the document came from, else the
+    // What every export names its file after: a converted document's own PDF
+    // name, else the file the document came from, else the
     // tab's — never a Word or image source's name with its extension still on.
     const exportBaseName =
       saveAsDefaultName ??

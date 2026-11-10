@@ -282,7 +282,6 @@ fn open_entry_mut(
 pub enum OperationTarget {
     Document(u64),
     Archive(u64),
-    Merge(String),
     Search(u64),
     /// A compressed copy being written, whose page loop must stop when the
     /// reader walks away from the dialog.
@@ -358,11 +357,11 @@ pub struct PdfiumEngine {
     operations: Mutex<HashMap<u64, RunningOperation>>,
     next_operation_id: AtomicU64,
     word: crate::convert::WordConverter,
-    /// The organize workspaces' sources, every window's. Taken only while
-    /// `documents` is held, or alone without touching a document.
-    organize: Mutex<organize::OrganizeSources>,
+    /// Files read for the pages documents add, every window's. Taken only
+    /// while `documents` is held, or alone without touching a document.
+    sources: Mutex<file_sources::FileSources>,
     /// Apart from the store, so a release can mark its cutoff without a lock.
-    next_organize_id: AtomicU64,
+    next_source_id: AtomicU64,
 }
 
 /// Where the host keeps what the engine loads and writes. The host alone knows
@@ -402,8 +401,8 @@ impl PdfiumEngine {
                 &paths.retired_conversion_roots,
                 word_suites,
             ),
-            organize: Mutex::default(),
-            next_organize_id: AtomicU64::new(1),
+            sources: Mutex::default(),
+            next_source_id: AtomicU64::new(1),
         })
     }
 
@@ -468,10 +467,9 @@ impl PdfiumEngine {
         asked
     }
 
-    /// A scope's merge and conversions have nowhere to land once the host lets
-    /// it go; a Word suite would otherwise run on for minutes.
+    /// A scope's conversions have nowhere to land once the host lets it go;
+    /// a Word suite would otherwise run on for minutes.
     pub fn cancel_scope_work(&self, scope: &str) {
-        self.cancel_operation(OperationTarget::Merge(scope.to_string()));
         self.cancel_operation(OperationTarget::Convert(scope.to_string()));
         self.cancel_operation(OperationTarget::OpenConverted(scope.to_string()));
     }
@@ -1217,10 +1215,10 @@ mod a4_export;
 mod archive_export;
 mod compress;
 mod file_identity;
+mod file_sources;
 mod image_dpi;
 mod io;
 mod marks;
-mod organize;
 mod owned_content;
 mod page_ops;
 mod page_reorder;
@@ -1232,12 +1230,10 @@ mod text_runs;
 mod watermark_preview;
 
 pub use file_identity::{same_file, FileKey};
+pub use file_sources::{FileSourceInfo, SOURCE_CHANGED};
 pub use io::is_merge_image;
 use io::{
     fingerprint, image_page_document, read_image, read_pdf_bytes, read_pdf_file, Fingerprint,
-};
-pub use organize::{
-    AssembleOutlineItem, AssemblePlan, AssembleSlot, OrganizeSourceInfo, ORGANIZE_SOURCE_CHANGED,
 };
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};

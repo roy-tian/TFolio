@@ -12,12 +12,11 @@ export type Settings = {
     sidebarPanel?: unknown
     sidebarWidth?: unknown
     sidebarFileRows?: unknown
-    organizeThumbnailSize?: unknown
   }
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }
   watermark?: unknown
   pageNumbers?: unknown
-  organize?: { bookmarks?: unknown; normalizeA4?: unknown; smartPadding?: unknown }
+  organize?: { bookmarks?: unknown; smartPadding?: unknown }
   signatures?: { handling?: unknown }
 }
 

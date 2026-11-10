@@ -25,7 +25,7 @@ type PageMenuContentProps = {
   onRotate: (degrees: 90 | 270) => void
 }
 
-/** A page's right-click menu, the same in the sidebar and on the organize board. */
+/** A page's right-click menu in the sidebar, which also acts on a choice. */
 export function PageMenuContent({
   canPaste,
   count,

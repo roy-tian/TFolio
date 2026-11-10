@@ -3,7 +3,7 @@ mod archive;
 mod commands;
 mod compress;
 mod encode;
-mod organize;
+mod files;
 mod paths;
 
 use std::{
@@ -24,7 +24,7 @@ pub use archive::{cancel_pdf_archive, export_pdf_archive};
 pub use commands::export_pdf_to;
 pub use commands::{
     add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
-    add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_merge,
+    add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark,
     cancel_pdf_operation, cancel_pdf_search, cancel_word_conversion, cancel_word_open, close_pdf,
     create_pdf, decide_pdf_signatures, delete_pdf_annotations, delete_pdf_pages,
     discard_pdf_stashes, download_pdf_note_font, duplicate_pdf_pages, export_pdf,
@@ -39,11 +39,9 @@ pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
     export_compressed_pdf, release_pdf_compression,
 };
-#[cfg(feature = "e2e")]
-pub use organize::save_assembled_pdf_to;
-pub use organize::{
-    add_organize_sources, check_organize_watermark, insert_pdf_files, release_organize_sources,
-    rename_pdf_section, render_organize_thumbnail, save_assembled_pdf, set_pdf_file_options,
+pub use files::{
+    insert_pdf_files, read_pdf_sources, release_pdf_sources, rename_pdf_section,
+    set_pdf_file_options,
 };
 
 /// Counts work units rather than bytes: pages for owned content, and
@@ -114,7 +112,7 @@ impl PdfiumState {
         self.engine.cancel_scope_work(label);
     }
 
-    /// A window's organize sources go with it. Dropping them is PDFium work,
+    /// A window's file sources go with it. Dropping them is PDFium work,
     /// which must not block the window event loop. Only after
     /// `cancel_window_work`, which stops an add from keeping a source after this.
     pub fn release_window_sources(&self, label: &str) {
@@ -122,9 +120,9 @@ impl PdfiumState {
         let label = label.to_string();
         // Taken now, not when the lock is free: by then a reloaded page may
         // have added sources of its own under the same label.
-        let before = engine.organize_release_cutoff();
+        let before = engine.source_release_cutoff();
 
-        tauri::async_runtime::spawn_blocking(move || engine.release_organize_scope(&label, before));
+        tauri::async_runtime::spawn_blocking(move || engine.release_source_scope(&label, before));
     }
 
     pub fn remove_conversion_files(&self) {

@@ -13,25 +13,24 @@ mod windows;
 use handoff::{move_document, move_document_new_window, take_moved_tabs, HandoffQueue};
 use launch::{take_launch_files, LaunchQueue};
 use pdfium::{
-    add_organize_sources, add_pdf_highlight_annotation, add_pdf_rect_annotation,
-    add_pdf_rect_effect_annotation, add_pdf_text_note_annotation, apply_pdf_page_numbers,
-    apply_pdf_watermark, cancel_pdf_archive, cancel_pdf_compression,
-    cancel_pdf_compression_estimate, cancel_pdf_merge, cancel_pdf_operation, cancel_pdf_search,
-    cancel_word_conversion, cancel_word_open, check_organize_watermark, close_pdf, create_pdf,
+    add_pdf_highlight_annotation, add_pdf_rect_annotation, add_pdf_rect_effect_annotation,
+    add_pdf_text_note_annotation, apply_pdf_page_numbers, apply_pdf_watermark, cancel_pdf_archive,
+    cancel_pdf_compression, cancel_pdf_compression_estimate, cancel_pdf_operation,
+    cancel_pdf_search, cancel_word_conversion, cancel_word_open, close_pdf, create_pdf,
     decide_pdf_signatures, delete_pdf_annotations, delete_pdf_pages, discard_pdf_stashes,
     download_pdf_note_font, duplicate_pdf_pages, estimate_pdf_compression, export_compressed_pdf,
     export_pdf, export_pdf_archive, extract_pdf_page_plain_text, extract_pdf_page_text,
     extract_pdf_pages, flatten_pdf_signatures, insert_pdf_blank_page, insert_pdf_files,
     insert_pdf_pages_from_document, open_converted_from_path, open_pdf, open_pdf_from_path,
     pdf_annotation_at_point, pdf_file_changed, pdf_text_note_font, pick_pdf_path, pick_pdf_paths,
-    release_organize_sources, release_pdf_compression, remove_pdf_page_numbers,
-    remove_pdf_watermark, rename_pdf_section, render_organize_thumbnail, render_pdf_page,
-    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_a4_pdf, save_assembled_pdf, save_pdf, search_pdf_text,
-    set_pdf_file_options, word_conversion_available, PdfiumState,
+    read_pdf_sources, release_pdf_compression, release_pdf_sources, remove_pdf_page_numbers,
+    remove_pdf_watermark, rename_pdf_section, render_pdf_page, render_pdf_page_thumbnail,
+    render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages, rotate_pdf_pages,
+    save_a4_pdf, save_pdf, search_pdf_text, set_pdf_file_options, word_conversion_available,
+    PdfiumState,
 };
 #[cfg(feature = "e2e")]
-use pdfium::{export_pdf_to, save_a4_pdf_to, save_assembled_pdf_to};
+use pdfium::{export_pdf_to, save_a4_pdf_to};
 use quit::quit_app;
 use recent::{
     recent_pdf_view, recent_pdfs, remove_recent_pdf, reveal_recent_pdf, set_recent_pdf_view,
@@ -156,12 +155,7 @@ pub fn run() {
             pdf_file_changed,
             pick_pdf_path,
             pick_pdf_paths,
-            add_organize_sources,
-            check_organize_watermark,
-            render_organize_thumbnail,
-            save_assembled_pdf,
-            #[cfg(feature = "e2e")]
-            save_assembled_pdf_to,
+            read_pdf_sources,
             save_a4_pdf,
             #[cfg(feature = "e2e")]
             save_a4_pdf_to,
@@ -190,7 +184,6 @@ pub fn run() {
             apply_pdf_page_numbers,
             remove_pdf_page_numbers,
             cancel_pdf_operation,
-            cancel_pdf_merge,
             cancel_word_conversion,
             cancel_word_open,
             word_conversion_available,
@@ -220,7 +213,7 @@ pub fn run() {
             insert_pdf_pages_from_document,
             insert_pdf_files,
             rename_pdf_section,
-            release_organize_sources,
+            release_pdf_sources,
             set_pdf_file_options,
             extract_pdf_pages,
             save_pdf,

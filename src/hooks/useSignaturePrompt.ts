@@ -4,15 +4,14 @@ import type { SignatureDecision } from "@/lib/pdf"
 import { storeSignatureHandling } from "@/lib/signatureHandling"
 
 /** Where the change comes from: the document itself, a new file of its pages,
-    or an organize assembly taking pages from signed files. */
-export type SignaturePromptContext = "edit" | "export" | "insert" | "organize"
+    or signed files added to the document. */
+export type SignaturePromptContext = "edit" | "export" | "insert"
 
 export type SignaturePromptRequest = {
   context: SignaturePromptContext
-  /** Signatures in the document, or signed files in the assembly or among
-      the files added. */
+  /** Signatures in the document, or signed files among the files added. */
   count: number
-  /** The document's file name; unused for an assembly. */
+  /** The document's file name; unused for added files. */
   name: string
 }
 

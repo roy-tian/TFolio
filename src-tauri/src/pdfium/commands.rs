@@ -386,18 +386,6 @@ pub async fn cancel_pdf_operation(
         .cancel_operation(OperationTarget::Document(document_id)))
 }
 
-/// A merge has no document to name until it finishes, so it is the asking
-/// window's. Not `spawn_blocking`, for the reason above.
-#[tauri::command]
-pub async fn cancel_pdf_merge(
-    state: State<'_, PdfiumState>,
-    window: WebviewWindow,
-) -> Result<bool, String> {
-    Ok(state
-        .engine
-        .cancel_operation(OperationTarget::Merge(window.label().to_string())))
-}
-
 /// The Word open's own Stop; like the one below, it waits for nothing.
 #[tauri::command]
 pub async fn cancel_word_open(

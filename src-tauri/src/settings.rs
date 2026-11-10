@@ -62,19 +62,16 @@ struct UiPreferences {
     /// Whether the sidebar starts each file of a document on a row of its own.
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     sidebar_file_rows: Option<bool>,
-    /// The organize thumbnails' long side in CSS pixels.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    organize_thumbnail_size: Option<u32>,
 }
 
-/// The choices a new organize plan starts from: the last ones the reader made.
+/// How the next document files are added to lays them out and saves them: the
+/// last choices the reader made. `organize` still, the section's name since an
+/// earlier workspace made the same choices, so a file written then reads now.
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 struct OrganizePreferences {
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     smart_padding: Option<bool>,
-    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
-    normalize_a4: Option<bool>,
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     bookmarks: Option<bool>,
 }
@@ -267,7 +264,6 @@ mod tests {
                 sidebar_panel: Some("bookmarks".into()),
                 sidebar_width: Some(420),
                 sidebar_file_rows: Some(false),
-                organize_thumbnail_size: Some(200),
             }),
             annotate: Some(AnnotatePreferences {
                 highlight_color: Some("#ffd54a".into()),
@@ -282,7 +278,6 @@ mod tests {
             page_numbers: Some(page_numbers()),
             organize: Some(OrganizePreferences {
                 smart_padding: Some(false),
-                normalize_a4: Some(true),
                 bookmarks: None,
             }),
             signatures: Some(SignaturePreferences {
@@ -300,7 +295,6 @@ mod tests {
         assert_eq!(ui.theme.as_deref(), Some("dark"));
         assert_eq!(ui.sidebar_width, Some(420));
         assert_eq!(ui.sidebar_file_rows, Some(false));
-        assert_eq!(ui.organize_thumbnail_size, Some(200));
         assert_eq!(
             read.annotate
                 .and_then(|annotate| annotate.text_note)
@@ -313,7 +307,6 @@ mod tests {
             .organize
             .expect("the organize section should read back");
         assert_eq!(organize.smart_padding, Some(false));
-        assert_eq!(organize.normalize_a4, Some(true));
         assert_eq!(organize.bookmarks, None);
         assert_eq!(
             read.signatures
@@ -334,10 +327,8 @@ mod tests {
         assert!(rendered.contains("[pageNumbers]"));
         assert!(rendered.contains("fontSize"));
         assert!(rendered.contains("sidebarPanel"));
-        assert!(rendered.contains("organizeThumbnailSize = 200"));
         assert!(rendered.contains("[organize]"));
         assert!(rendered.contains("smartPadding = false"));
-        assert!(rendered.contains("normalizeA4 = true"));
         assert!(rendered.contains("[signatures]"));
         assert!(rendered.contains("handling = \"flatten\""));
         assert!(!rendered.contains("[watermark]"));
@@ -389,14 +380,14 @@ mod tests {
         let read = Settings::parse(
             r#"
             [organize]
-            normalizeA4 = "yes"
+            bookmarks = "yes"
             smartPadding = false
             "#,
         )
         .organize
         .expect("the readable choices should keep the section");
 
-        assert_eq!(read.normalize_a4, None);
+        assert_eq!(read.bookmarks, None);
         assert_eq!(read.smart_padding, Some(false));
 
         let sent = Settings::sent(&serde_json::json!({

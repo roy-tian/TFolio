@@ -942,7 +942,7 @@ export function useAnnotations({
   )
 
   /** `insertPages`' path for files read from disk: `sources` are what
-      `add_organize_sources` read, each a file of its own once added, and one
+      `read_pdf_sources` read, each a file of its own once added, and one
       undo takes them all out again. */
   const insertFiles = useCallback(
     async (

@@ -12,8 +12,8 @@ import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
 
-// An organize row holds many cells; preloading whole rows would queue dozens of
-// PDFium renders at once. Keep the window to what is visible.
+// A widened sidebar's row holds many cells; preloading whole rows would queue
+// dozens of PDFium renders at once. Keep the window to what is visible.
 const THUMBNAIL_ROOT_MARGIN = "0px"
 
 // The sidebar's previews stand in view beside the pages: ranked as this far
@@ -46,17 +46,9 @@ type PdfThumbnailProps = {
   renderEpoch: number
   /** False once the cell is well away from the view: it gives its pixels back. */
   retainBitmap: boolean
+  /** The view's turn, which turns every page at once and snaps. */
   rotation: number
-  /** The paper's long side in CSS pixels; the organize grid's size control. */
-  paperWidth?: number
-  /** The sidebar's previews and the organize grid's sit beside, or above, the
-      pages a viewer shows, so they never answer to `data-page-number`, which
-      finds those pages. An organize preview names a source's page. */
-  surface: "sidebar" | "organize"
-  /** Overrides the surface's own wording, for a page that is not this
-      document's — an organize source's. */
-  label?: string
-  /** The number under the paper, where it is not the page's own: an organize
+  /** The number under the paper, where it is not the page's own: a drag's
       preview shows where the page will stand. */
   caption?: number
   /** A box the paper stands centred in, the caption beneath it: cells of one
@@ -66,12 +58,8 @@ type PdfThumbnailProps = {
       paper through a turn and is a `PAPER_CONTROLS_HOST`. */
   overlay?: ReactNode
   /** A sign beside the caption: over the paper it would take the page's
-      clicks in its corner, and the organize card's controls sit there. */
+      clicks in its corner, where its checkbox sits. */
   mark?: ReactNode
-  /** Whether `rotation` is the page's own, so a change spins the preview as a
-      page edit does. Otherwise it is the view's, turning every page at once,
-      and snaps. */
-  animateRotation?: boolean
   /** Where the preview's pixels wait, under `parkKey`, while an edit has its
       page out of the document. */
   parked?: ParkedPreviews
@@ -79,8 +67,8 @@ type PdfThumbnailProps = {
 }
 
 /** A preview that selects rather than reads — no text layer, so a long column
-    stays cheap. Its page menu belongs to the owner: `SidebarThumbnails`,
-    `OrganizeBoard`. */
+    stays cheap. It never answers to `data-page-number`, which finds the pages
+    the viewer shows. Its page menu belongs to `SidebarThumbnails`. */
 export function PdfThumbnail({
   documentId,
   intrinsicRotation,
@@ -95,14 +83,10 @@ export function PdfThumbnail({
   renderEpoch,
   retainBitmap,
   rotation,
-  paperWidth,
-  surface,
-  label: labelOverride,
   caption,
   frame,
   overlay,
   mark,
-  animateRotation = false,
   parked,
   parkKey,
 }: PdfThumbnailProps) {
@@ -120,16 +104,12 @@ export function PdfThumbnail({
   // once, as the layout around it does; until the replacement is painted,
   // these pixels are turned and fitted to it rather than stretched.
   const [paintedPage, setPaintedPage] = useState(page)
-  const shownPageRef = useRef({ ...paintedPage, turn: rotation })
+  const shownPageRef = useRef(paintedPage)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
-    command:
-      surface === "organize"
-        ? "render_organize_thumbnail"
-        : "render_pdf_page_thumbnail",
+    command: "render_pdf_page_thumbnail",
     documentId,
-    idArgument: surface === "organize" ? "sourceId" : "documentId",
     isNearViewport,
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
@@ -140,15 +120,14 @@ export function PdfThumbnail({
     pageWidth,
     parked,
     parkKey,
-    priorityBias: surface === "sidebar" ? SIDEBAR_PRIORITY_BIAS : 0,
+    priorityBias: SIDEBAR_PRIORITY_BIAS,
     renderEpoch,
     retainBitmap,
     // The bitmap is drawn upright and a turn keeps the thumbnail's scale, so its
     // upright width serves every rotation and a turn needs no fresh render. The
     // page as it now measures, not as last painted: this sizes the replacement.
     rotation: 0,
-    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }, paperWidth)
-      .width,
+    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }).width,
   })
 
   // With no bitmap on show no pixels need the old geometry: the next paint
@@ -162,15 +141,12 @@ export function PdfThumbnail({
     shownPageRef.current = {
       height: pageHeight,
       rotation: intrinsicRotation,
-      turn: rotation,
       width: pageWidth,
     }
-    // A rotation that snaps leaves the old footprint at the turn standing now.
-    const turnedFrom = animateRotation ? previous.turn : rotation
     const paper = wrapperRef.current
     const spinner = spinRef.current
-    const turn =
-      ((intrinsicRotation + rotation - previous.rotation - turnedFrom + 540) % 360) - 180
+    // Only a page's own turn spins; the view's snaps.
+    const turn = ((intrinsicRotation - previous.rotation + 540) % 360) - 180
 
     if (
       !hasRendered ||
@@ -189,13 +165,12 @@ export function PdfThumbnail({
       [{ transform: `rotate(${-turn}deg)` }, { transform: "rotate(0deg)" }],
       TURN_MOTION,
     )
+    // The view's turn snaps, leaving the old footprint at the turn standing now.
     const oldPaper = thumbnailPaper(
-      dimensionsForRotation(turnedFrom, previous.width, previous.height),
-      paperWidth,
+      dimensionsForRotation(rotation, previous.width, previous.height),
     )
     const newPaper = thumbnailPaper(
       dimensionsForRotation(rotation, pageWidth, pageHeight),
-      paperWidth,
     )
     const resize = paper.animate(
       [
@@ -215,12 +190,11 @@ export function PdfThumbnail({
   // quarter turn leaves behind.
   const paperSize = thumbnailPaper(
     dimensionsForRotation(rotation, pageWidth, pageHeight),
-    paperWidth,
   )
   // Pixels painted before an edit turned or resized the page: a turn keeps the
   // scale, so they fit exactly once turned along; a resize letterboxes them.
   const pendingTurn = (intrinsicRotation - paintedPage.rotation + 360) % 360
-  const preview = thumbnailPaper(paintedPage, paperWidth)
+  const preview = thumbnailPaper(paintedPage)
   const previewFootprint = dimensionsForRotation(
     (rotation + pendingTurn) % 360,
     preview.width,
@@ -230,7 +204,7 @@ export function PdfThumbnail({
     paperSize.width / previewFootprint.width,
     paperSize.height / previewFootprint.height,
   )
-  const label = labelOverride ?? t("sidebar.thumbnailLabel", { pageNumber })
+  const label = t("sidebar.thumbnailLabel", { pageNumber })
 
   const paperBox = (
     <div className={cn("relative", overlay && PAPER_CONTROLS_HOST)}>

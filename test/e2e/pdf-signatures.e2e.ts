@@ -1,11 +1,8 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
-import { $, $$, browser, expect } from "@wdio/globals"
+import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
-
-import type { E2eOverrides } from "../../src/lib/e2e"
-import type { PdfDocumentInfo } from "../../src/lib/pdf"
 
 import {
   appMenuItem,
@@ -28,52 +25,12 @@ import {
 } from "./helpers"
 
 const tabBadge = "[data-document-tab] [data-signatures]"
-const workspace = "[data-organize-workspace]"
-
-/** Answers the organize save dialog with `destination` and runs the real
-    assembly and write behind it. */
-async function pointOrganizeSaveAt(destination: string) {
-  await browser.execute((target: string) => {
-    const seam = window as unknown as Window & {
-      __tfolioE2E?: E2eOverrides
-      __TAURI_INTERNALS__: {
-        invoke: (command: string, args?: unknown) => Promise<unknown>
-      }
-    }
-
-    seam.__tfolioE2E = {
-      ...seam.__tfolioE2E,
-      saveAssembledPdf: ({ onProgress, plan }) =>
-        seam.__TAURI_INTERNALS__.invoke("save_assembled_pdf_to", {
-          onProgress,
-          path: target,
-          plan,
-        }) as Promise<PdfDocumentInfo | null>,
-    }
-  }, destination)
-}
-
-async function organizeWith(paths: string[]) {
-  await $("button[aria-label='Organize pages']").click()
-  await $(`${workspace} [data-slot='organize-empty-add']`).waitForDisplayed()
-  await pointMultiPickerAt(paths)
-  await $(`${workspace} [data-slot='organize-empty-add']`).click()
-  await browser.waitUntil(
-    async () =>
-      (await $$(`${workspace} [data-slot='organize-file']`).getElements()).length ===
-      paths.length,
-    { timeout: 30_000, timeoutMsg: "the picked files never reached the list" },
-  )
-}
-
 const prompt = "[data-slot='signature-prompt']"
 
-/** The seal's red on the shown tab's first page. */
-function sealPixels() {
-  return browser.execute(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>(
-      "[data-active='true'] [data-page-number='1'] canvas",
-    )
+/** Red ink on a page's canvas: the reading view's first page by default. */
+function sealPixels(selector = "[data-active='true'] [data-page-number='1'] canvas") {
+  return browser.execute((target: string) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(target)
 
     if (!canvas || canvas.width === 0) {
       return 0
@@ -95,7 +52,7 @@ function sealPixels() {
     }
 
     return red
-  })
+  }, selector)
 }
 
 async function answerPrompt(action: "signatures-flatten" | "signatures-keep" | null) {
@@ -182,27 +139,26 @@ describe("TFolio signed documents", () => {
     await expect(tabNamed("signed.pdf")).toHaveAttribute("aria-selected", "true")
   })
 
-  it("marks a signed file on the organize list and never saves over it", async () => {
+  it("asks before a signed file is added, keeps its seal drawn in, and never saves over it", async () => {
     const signed = writeScratchPdf("signed.pdf", signedPdf())
     const original = readFileSync(signed)
-    const plain = writeScratchPdf("plain.pdf", textPdf())
 
-    await organizeWith([signed, plain])
-
-    const badges = await browser.execute((scope: string) =>
-      Array.from(document.querySelectorAll(`${scope} [data-slot='organize-file']`)).map(
-        (row) => row.querySelector("[data-signatures]")?.getAttribute("data-signatures") ?? null,
-      ),
-    workspace)
-    expect(badges).toEqual(["1", null])
-    // Only the seal's page card is marked.
-    expect((await $$(`${workspace} [data-page-signature]`).getElements()).length).toBe(1)
-
-    // The new PDF is PDFium's rewrite: over the signed source it would break
-    // every signature, so the write is refused before it lands.
-    await pointOrganizeSaveAt(signed)
-    await $(`${workspace} [data-slot='organize-save']`).click()
+    await openPdfFromDisk("own.pdf", textPdf())
+    await renderedPage()
+    await pointMultiPickerAt([signed])
+    await $("[data-active='true'] [data-slot='sidebar-add-files']").click()
     await answerPrompt("signatures-flatten")
+
+    // The added page, drawn with its seal as page content.
+    await browser.waitUntil(
+      async () =>
+        (await sealPixels("[data-active='true'] button[data-thumbnail-page='2'] canvas")) > 0,
+      { timeout: 15_000, timeoutMsg: "the added page lost the seal" },
+    )
+
+    // Its file stays as it was: a Save As over it is refused before it lands.
+    await pointSaveAsAt(signed)
+    await $("[data-active='true'] [data-slot='pdf-save-trigger']").click()
     await $("[data-notice='exportSigned']").waitForDisplayed({ timeout: 30_000 })
     expect(readFileSync(signed).equals(original)).toBe(true)
   })
@@ -282,23 +238,6 @@ describe("TFolio signed documents", () => {
     await clickAppMenuItem("save-as")
     await expect(tabNamed("edited.pdf")).toHaveAttribute("aria-selected", "true")
     expect(readFileSync(editedPath).includes("/ByteRange")).toBe(true)
-  })
-
-  it("asks before an organize save takes pages from a signed file", async () => {
-    const signed = writeScratchPdf("signed.pdf", signedPdf())
-    const assembledPath = path.join(path.dirname(signed), "assembled.pdf")
-
-    await organizeWith([signed])
-    await pointOrganizeSaveAt(assembledPath)
-    await $(`${workspace} [data-slot='organize-save']`).click()
-    await answerPrompt("signatures-flatten")
-
-    await expect(tabNamed("assembled.pdf")).toHaveAttribute("aria-selected", "true")
-    expect(readFileSync(assembledPath).includes("/ByteRange")).toBe(false)
-    await browser.waitUntil(async () => (await sealPixels()) > 0, {
-      timeout: 15_000,
-      timeoutMsg: "the new PDF lost the seal",
-    })
   })
 
   it("remembers an answer from the prompt and gives it, saying so, next time", async () => {

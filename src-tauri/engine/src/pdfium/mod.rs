@@ -14,9 +14,8 @@ use serde::{Deserialize, Serialize};
 pub use archive::{ArchiveOptions, ImageFormat};
 pub use compress::{CompressionEstimate, CompressionOptions};
 pub use engine::{
-    is_merge_image, AssembleOutlineItem, AssemblePlan, AssembleSlot, EnginePaths, FileKey,
-    FileOptions, OperationTarget, OrganizeSourceInfo, PdfPaddingSheet, PdfSection, PdfiumEngine,
-    MERGE_IMAGE_EXTENSIONS, ORGANIZE_SOURCE_CHANGED,
+    is_merge_image, EnginePaths, FileKey, FileOptions, FileSourceInfo, OperationTarget,
+    PdfPaddingSheet, PdfSection, PdfiumEngine, MERGE_IMAGE_EXTENSIONS, SOURCE_CHANGED,
 };
 pub use font::{download_fallback_font, CJK_FONT_NAME};
 pub use library::PDFIUM_LIBRARY_NAME;
