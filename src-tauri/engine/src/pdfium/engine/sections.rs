@@ -316,6 +316,9 @@ impl SectionBook {
     /// the file's own beneath its first, or the files' own one after another,
     /// its pages counted with `padding`'s blank pages in among them.
     pub(super) fn outline(&self, page_ids: &[u64], padding: &[usize]) -> Vec<OutlineNode> {
+        // One file left has no others to be told from: its own bookmarks, as
+        // the sidebar shows them, with no option left on screen to say otherwise.
+        let per_file = self.options.per_file_bookmarks && self.several(page_ids);
         let landed = |index: usize| index + padding.iter().filter(|after| **after < index).count();
         let position: HashMap<u64, usize> = page_ids
             .iter()
@@ -346,7 +349,7 @@ impl SectionBook {
                 Vec::new()
             };
 
-            if self.options.per_file_bookmarks {
+            if per_file {
                 nodes.push(OutlineNode {
                     title: section.title.clone(),
                     page: landed(index),

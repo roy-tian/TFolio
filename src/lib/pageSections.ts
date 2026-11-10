@@ -17,6 +17,29 @@ export function sectionAt(
   return (pages[index - 1] ?? pages[pages.length - 1])?.section
 }
 
+/** The 1-based numbers of file `section`'s pages, wherever they stand. */
+export function pagesOfSection(pages: readonly PdfPageInfo[], section: number): number[] {
+  return pages.flatMap((page, index) => (page.section === section ? [index + 1] : []))
+}
+
+/** Whether `moving` holds every page some file has: joined to another file
+    where they stand, that file would be left with no page at all. */
+export function emptiesItsFile(
+  pages: readonly PdfPageInfo[],
+  moving: readonly number[],
+): boolean {
+  const held = new Set(moving)
+
+  return moving.some((pageNumber) => {
+    const own = pages[pageNumber - 1]?.section
+
+    return (
+      own !== undefined &&
+      pages.every((page, index) => page.section !== own || held.has(index + 1))
+    )
+  })
+}
+
 /**
  * A reorder's files, position by position, before and after it: the pages in
  * `moving` join `target`, the file they were dropped among; the rest keep
@@ -40,4 +63,40 @@ export function reorderSections(
     ),
     before,
   }
+}
+
+/**
+ * The page order with every page of file `section` moved, keeping their own
+ * order, in front of the first page of file `before`, or to the end: a file
+ * dragged among the others lands whole, gathered from every run it had. Null
+ * where nothing would move.
+ */
+export function fileMoveOrder(
+  pages: readonly PdfPageInfo[],
+  section: number,
+  before: number | null,
+): number[] | null {
+  const moving: number[] = []
+  const staying: number[] = []
+
+  pages.forEach((page, index) => {
+    if (page.section === section) {
+      moving.push(index + 1)
+    } else {
+      staying.push(index + 1)
+    }
+  })
+
+  const at =
+    before === null
+      ? staying.length
+      : staying.findIndex((pageNumber) => pages[pageNumber - 1]?.section === before)
+
+  if (moving.length === 0 || at < 0) {
+    return null
+  }
+
+  const order = [...staying.slice(0, at), ...moving, ...staying.slice(at)]
+
+  return order.every((pageNumber, index) => pageNumber === index + 1) ? null : order
 }

@@ -6,7 +6,7 @@ import type { CarriedPages } from "@/lib/pageCarry"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { pagesToRotate } from "@/lib/pageRotation"
 import { pastePlan } from "@/lib/pageClipboard"
-import { reorderSections, sectionAt } from "@/lib/pageSections"
+import { emptiesItsFile, reorderSections, sectionAt } from "@/lib/pageSections"
 
 type UseThumbnailPageOpsOptions = {
   annotations: ReturnType<typeof useAnnotations>
@@ -111,7 +111,22 @@ export function useThumbnailPageOps({
     }
 
     const joins = section ?? sectionAt(pdfDocument.pages, index)
-    const plan = pastePlan(pageClipboard.clipboard, index, pdfDocument.numPages)
+    const clipboard = pageClipboard.clipboard
+    const pages = pdfDocument.pages
+    // A cut let go where it stands, but among another file's pages, moves no
+    // page and joins that file, as a drag let go there does — unless that
+    // would leave its own file with no page.
+    const plan =
+      pastePlan(clipboard, index, pdfDocument.numPages) ??
+      (clipboard?.mode === "cut" &&
+      joins !== undefined &&
+      index >= 1 &&
+      index <= pdfDocument.numPages + 1 &&
+      clipboard.pages.every((pageNumber) => pageNumber <= pdfDocument.numPages) &&
+      clipboard.pages.some((pageNumber) => pages[pageNumber - 1]?.section !== joins) &&
+      !emptiesItsFile(pages, clipboard.pages)
+        ? { kind: "move" as const, order: pages.map((_, at) => at + 1), pages: clipboard.pages }
+        : null)
 
     if (!plan) {
       return

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react"
 import {
   emptySelection,
   selectionAfterClick,
+  selectionAfterGroupClick,
   selectionOfAllPages,
   type SelectionModifiers,
   type ThumbnailSelection,
@@ -40,6 +41,13 @@ export function useThumbnailSelection({
     [],
   )
 
+  const selectGroup = useCallback(
+    (pages: readonly number[], modifiers: SelectionModifiers) => {
+      setSelection((current) => selectionAfterGroupClick(current, pages, modifiers))
+    },
+    [],
+  )
+
   useEffect(() => {
     if (!active) {
       setSelection(emptySelection)
@@ -59,5 +67,5 @@ export function useThumbnailSelection({
     }
   }, [active])
 
-  return { clear, select, selectAll, selectedPages: selection.pages }
+  return { clear, select, selectAll, selectGroup, selectedPages: selection.pages }
 }

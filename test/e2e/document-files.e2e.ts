@@ -14,6 +14,7 @@ import {
   pointSaveAsAt,
   refreshApp,
   seedSettings,
+  sidebarPageAction,
   writeScratchPdf,
 } from "./helpers"
 
@@ -76,6 +77,68 @@ function press(selector: string) {
     control.focus()
     control.click()
   }, selector)
+}
+
+/** A reader's drag from one element to the top of another, its press and
+    first move apart from the rest so the list lays out its drag between. */
+async function dragOnto(from: string, to: string, at: "top" | "left") {
+  await browser.execute((source: string) => {
+    const element = document.querySelector(source)!
+    const box = element.getBoundingClientRect()
+    const start = { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+
+    element.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: start.x,
+        clientY: start.y,
+        isPrimary: true,
+      }),
+    )
+    document.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: start.x,
+        clientY: start.y + 12,
+        isPrimary: true,
+      }),
+    )
+  }, from)
+  await browser.pause(200)
+  await browser.execute(
+    (target: string, edge: string) => {
+      const box = document.querySelector(target)!.getBoundingClientRect()
+      const point =
+        edge === "top"
+          ? { x: box.left + box.width / 2, y: box.top + 3 }
+          : { x: box.left + 6, y: box.top + box.height / 2 }
+
+      for (const type of ["pointermove", "pointerup"]) {
+        document.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            clientX: point.x,
+            clientY: point.y,
+            isPrimary: true,
+          }),
+        )
+      }
+    },
+    to,
+    at,
+  )
+}
+
+function chosen(scope: string) {
+  return browser.execute(
+    (within: string) =>
+      Array.from(
+        document.querySelectorAll(`${within} button[data-thumbnail-page][aria-pressed='true']`),
+        (button) => Number(button.getAttribute("data-thumbnail-page")),
+      ).sort((left, right) => left - right),
+    scope,
+  )
 }
 
 async function addFilesFromPicker(paths: string[]) {
@@ -207,6 +270,84 @@ describe("TFolio files added to an open document", () => {
     await $(`${activeSidebar} button[aria-label='Files']`).click()
     await expect($(`${activeSidebar} [data-section-id='1']`)).toHaveText(
       expect.stringContaining("first.pdf"),
+    )
+  })
+
+  it("chooses a file's pages by its name, and carries them whole by it", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([
+      writeScratchPdf("first.pdf", minimalPdf(2)),
+      writeScratchPdf("second.pdf", minimalPdf(1)),
+    ])
+    await waitForPages(4)
+    await $(`${session} button[aria-label='Thumbnails']`).click()
+    const grid = `${session} [data-page-thumbnails='grid']`
+    await waitForPages(4, grid)
+
+    await $(`${grid} [data-section-header='1'] button`).click()
+    expect(await chosen(grid)).toEqual([2, 3])
+
+    await dragOnto(
+      `${grid} [data-section-header='2'] button`,
+      `${grid} button[data-thumbnail-page='1']`,
+      "left",
+    )
+    await browser.waitUntil(
+      async () => (await headings(grid)).join() === "second.pdf,own.pdf,first.pdf",
+      { timeout: 15_000, timeoutMsg: "the file never moved whole to the front" },
+    )
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(
+      async () => (await headings(grid)).join() === "own.pdf,first.pdf,second.pdf",
+    )
+  })
+
+  it("moves a file whole by dragging its name in the sidebar's tree", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([
+      writeScratchPdf("first.pdf", minimalPdf(2)),
+      writeScratchPdf("second.pdf", minimalPdf(1)),
+    ])
+    await waitForPages(4)
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
+
+    await dragOnto(
+      `${activeSidebar} [data-section-id='2'] [data-slot='file-section-title']`,
+      `${activeSidebar} [data-section-id='0']`,
+      "top",
+    )
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await browser.waitUntil(
+      async () => (await headings()).join() === "second.pdf,own.pdf,first.pdf",
+      { timeout: 15_000, timeoutMsg: "the tree's file never moved to the front" },
+    )
+  })
+
+  it("pastes a cut page in place before the next file's pages into that file", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(1))])
+    await waitForPages(3)
+    expect(await pageFiles()).toEqual(["own.pdf", "own.pdf", "added.pdf"])
+
+    await sidebarPageAction(2, "cut-pages")
+    await sidebarPageAction(3, "paste-pages-before")
+    await browser.waitUntil(
+      async () => (await pageFiles()).join() === "own.pdf,added.pdf,added.pdf",
+      { timeout: 15_000, timeoutMsg: "the pasted page never joined the next file" },
+    )
+  })
+
+  it("shows the bookmarks of the one file left", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", outlinedPdf())])
+    await waitForPages(3)
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
+
+    await press(`${activeSidebar} [data-section-id='0'] [data-slot='file-section-remove']`)
+    await expect($(`${activeSidebar} [data-section-id='0']`)).not.toBeExisting()
+    await expect($(`${activeSidebar} nav[aria-label='Bookmarks']`)).toHaveText(
+      expect.stringContaining("Second half"),
     )
   })
 

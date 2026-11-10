@@ -51,6 +51,7 @@ import {
 } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import type { PaddingSheet } from "@/lib/padding"
+import { emptiesItsFile, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -136,8 +137,10 @@ type PageThumbnailsProps = {
   onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
   onRotatePages: (degrees: 90 | 270) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
+  /** A file's name pressed: its pages chosen as one. */
+  onSelectPages: (pages: readonly number[], modifiers: SelectionModifiers) => void
   pages: PdfPageInfo[]
-  /** The document's files, once more than one: their names head their pages. */
+  /** The document's files; once more than one, their names head their pages. */
   sections: PdfSection[]
   /** Where a preview waits while an edit has its page out of the document. */
   parkedPreviews: ParkedPreviews
@@ -181,6 +184,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   onRotatePage,
   onRotatePages,
   onSelectPage,
+  onSelectPages,
   padding,
   pages,
   parkedPreviews,
@@ -468,10 +472,27 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     [grid, onNavigate, onSelectPage],
   )
 
+  const selectFile = (
+    section: number,
+    event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean },
+  ) => {
+    if (performance.now() - draggedAtRef.current < DRAG_CLICK_GRACE_MS) {
+      return
+    }
+
+    onSelectPages(pagesOfSection(pagesRef.current, section), {
+      range: event.shiftKey,
+      toggle: event.ctrlKey || event.metaKey,
+    })
+  }
+
   const startDrag = (event: ReactPointerEvent) => {
-    const paper = (event.target as Element).closest<HTMLElement>(
-      "[data-thumbnail-page]",
-    )
+    // A file's name carries the whole file, lifted by the first page under it.
+    const heading = (event.target as Element).closest<HTMLElement>("[data-section-header]")
+    const wholeFile = heading ? Number(heading.dataset.sectionHeader) : undefined
+    const paper = heading
+      ? heading.nextElementSibling?.querySelector<HTMLElement>("[data-thumbnail-page]")
+      : (event.target as Element).closest<HTMLElement>("[data-thumbnail-page]")
     const list = listRef.current
     const column = columnRef.current
 
@@ -552,11 +573,14 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           return
         }
 
-        const chosen = selectionRef.current.has(pressed)
+        const chosen = wholeFile === undefined && selectionRef.current.has(pressed)
 
-        moving = chosen
-          ? [...selectionRef.current].sort((left, right) => left - right)
-          : [pressed]
+        moving =
+          wholeFile !== undefined
+            ? pagesOfSection(basis, wholeFile)
+            : chosen
+              ? [...selectionRef.current].sort((left, right) => left - right)
+              : [pressed]
         movingKeys = new Set(moving.map((pageNumber) => String(keyOf(pageNumber))))
         carried = {
           lead: moving.indexOf(pressed),
@@ -571,7 +595,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         // The block gathers where the pressed page stands.
         at = pressed - 1 - moving.filter((pageNumber) => pageNumber < pressed).length
 
-        if (!chosen) {
+        if (wholeFile !== undefined) {
+          onSelectPages(moving, { range: false, toggle: false })
+        } else if (!chosen) {
           onSelectPage(pressed, { range: false, toggle: false })
         }
 
@@ -633,20 +659,15 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           ? orderWithBlockAt(moving, at, basis.length)
           : null
       const moved = reorder?.some((pageNumber, index) => pageNumber !== index + 1) ?? false
-      const nearest = reorder ? sectionNear(point, (key) => movingKeys.has(key)) : undefined
+      // A whole file stays its own file wherever it lands.
+      const nearest =
+        reorder && wholeFile === undefined
+          ? sectionNear(point, (key) => movingKeys.has(key))
+          : undefined
       // Let go where they stand but beside the next file's first page, they
       // join it — unless that would leave their own file with no page at all:
       // a one-page file's page let go in place stays its file's.
-      const block = moving
-      const emptiesFile = block.some((pageNumber) => {
-        const own = basis[pageNumber - 1]?.section
-
-        return (
-          own !== undefined &&
-          basis.every((page, index) => page.section !== own || block.includes(index + 1))
-        )
-      })
-      const section = !moved && emptiesFile ? undefined : nearest
+      const section = !moved && emptiesItsFile(basis, moving) ? undefined : nearest
       const regrouped =
         section !== undefined &&
         moving.some((pageNumber) => basis[pageNumber - 1]?.section !== section)
@@ -919,12 +940,20 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   holesHere,
                   heads === undefined ? null : (
                     // No flip key: a heading is no page, and a drop counts none.
+                    // A press chooses the file's pages; a drag carries them.
                     <li
-                      className="w-full basis-full truncate px-1 pt-1 text-xs font-medium text-muted-foreground"
+                      className="flex w-full basis-full px-1 pt-1"
                       data-section-header={heads}
                       key={`section-${heads}-${pageNumber}`}
                     >
-                      {titles.get(heads)}
+                      <button
+                        className="max-w-full cursor-grab truncate rounded px-1 text-left text-xs font-medium text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                        data-slot="pages-file-heading"
+                        onClick={(event) => selectFile(heads, event)}
+                        type="button"
+                      >
+                        {titles.get(heads)}
+                      </button>
                     </li>
                   ),
                   <PageCell

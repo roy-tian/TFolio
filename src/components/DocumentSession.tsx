@@ -91,6 +91,7 @@ import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals } from "@/lib/notices"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
+import { fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
 import { readFileSources } from "@/lib/fileSources"
 import {
   storedFilePreferences,
@@ -409,7 +410,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // A document of several files shows them, and their bookmarks, as a tree.
     const sections = pdfDocument.sections ?? []
     const severalFiles = sections.length > 1
-    const bookmarksApply = pdfDocument.outline.length > 0 || severalFiles
+    // Down to one added file, it shows that file's own bookmarks, which a Save
+    // As writes, rather than those PDFium keeps for the document's own pages
+    // even once none are left; the own pages alone save PDFium's.
+    const outline =
+      sections.length === 1 && pdfDocument.hasForeignPages
+        ? sections[0]!.outline
+        : pdfDocument.outline
+    const bookmarksApply = outline.length > 0 || severalFiles
     const sidebar = useSidebar()
     // The page grid lies over the reading view, which stays laid out beneath
     // it, so leaving the grid finds the reader's place where it was.
@@ -1181,6 +1189,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       rotateOnePage,
       rotateThumbnailPages,
     } = pageOps
+
+    // A file dragged in the sidebar's tree keeps its own pages, wherever it
+    // goes. Not memoised: `reorderPages` is new every render.
+    const moveFile = (sectionId: number, before: number | null) => {
+      const pages = documentRef.current?.pages ?? []
+      const order = fileMoveOrder(pages, sectionId, before)
+
+      if (order) {
+        void reorderPages(order, pagesOfSection(pages, sectionId))
+      }
+    }
 
     const watermark = useWatermark({
       activeConfig: annotations.watermarkConfig,
@@ -2062,6 +2081,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       // Stable across renders, unlike a wrapper, so the memoised previews
       // skip the session's every re-render.
       onSelectPage: thumbnailSelection.select,
+      onSelectPages: thumbnailSelection.selectGroup,
       padding,
       pages: pdfDocument.pages,
       parkedPreviews,
@@ -2157,6 +2177,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
+              onMove={moveFile}
               onNavigate={navigateFromSidebar}
               onRemove={removeSection}
               onRename={renameSection}
@@ -2165,7 +2186,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             />
           ) : sidebarPanel === "bookmarks" ? (
             <BookmarkList
-              items={pdfDocument.outline}
+              items={outline}
               onNavigate={navigateFromSidebar}
             />
           ) : (

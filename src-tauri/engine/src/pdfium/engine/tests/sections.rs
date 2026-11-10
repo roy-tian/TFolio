@@ -283,7 +283,9 @@ fn an_undone_insert_lets_the_file_save_again_and_a_redo_brings_its_files_back() 
         .delete_pages(own.id, &[3, 4, 5], 7)
         .expect("the added pages should go");
     assert!(!undone.has_foreign_pages);
-    assert!(undone.sections.is_empty());
+    // One file shows, no longer several.
+    assert_eq!(undone.sections.len(), 1);
+    assert!(undone.file_options.is_none());
     engine
         .save(own.id)
         .expect("the file alone saves over itself again");
@@ -449,8 +451,17 @@ fn a_signed_file_is_added_only_once_its_signatures_are_answered_for() {
 #[ignore = "requires `bun run pdfium:download`"]
 fn an_added_file_left_alone_keeps_its_bookmarks_in_a_save_as() {
     let _guard = sections_test_guard();
+
+    // With no other file left to tell it from, its bookmarks stand as they are,
+    // a bookmark per file asked for or not.
+    for per_file in [false, true] {
+        left_alone_saves_its_own_bookmarks(per_file);
+    }
+}
+
+fn left_alone_saves_its_own_bookmarks(per_file: bool) {
     let engine = test_engine();
-    let directory = scratch_directory("sections-left-alone");
+    let directory = scratch_directory(&format!("sections-left-alone-{per_file}"));
     let own = engine
         .open(two_page_pdf())
         .expect("PDFium should open the document");
@@ -464,13 +475,16 @@ fn an_added_file_left_alone_keeps_its_bookmarks_in_a_save_as() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(false), None)
+        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(per_file), None)
         .expect("the file should be added");
 
     let left = engine
         .delete_pages(own.id, &[1, 2], 7)
         .expect("the document's own pages should go");
-    assert!(left.sections.is_empty());
+    // The one file left is still said, with the bookmarks a Save As writes.
+    assert_eq!(left.sections.len(), 1);
+    assert_eq!(left.sections[0].title, "outlined.pdf");
+    assert!(!left.sections[0].outline.is_empty());
     assert!(left.has_foreign_pages);
 
     let saved = directory.join("left.pdf");

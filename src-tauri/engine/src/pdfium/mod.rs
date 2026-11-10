@@ -113,8 +113,8 @@ pub struct PdfStructureUpdate {
     /// print to show where it will put them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     padding: Vec<PdfPaddingSheet>,
-    /// The files the pages came from, once more than one: empty for a document
-    /// that is still its own file alone.
+    /// The files the pages came from once any were added, still said with one
+    /// left: empty for a document that never had any.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sections: Vec<PdfSection>,
     /// How those files are laid out and saved; absent with one file.

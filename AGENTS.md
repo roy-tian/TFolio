@@ -143,8 +143,8 @@
   releases them; sources never added go by `release_pdf_sources`. One history entry adds them all;
   its undo deletes the run under its stash.
 - Every insert names the file its pages join, and a reorder passes each position's file after
-  and before: a page let go among another file's pages joins it. A deleted page keeps its file
-  for the restore an undo brings back.
+  and before: a page let go among another file's pages joins it, but a file moved whole by its
+  name keeps its own. A deleted page keeps its file for the restore an undo brings back.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
   then the tab reopens the written file, its history gone.

@@ -4,6 +4,7 @@ import {
   choiceAfterClick,
   emptySelection,
   selectionAfterClick,
+  selectionAfterGroupClick,
   selectionOfAllPages,
   type ThumbnailSelection,
 } from "@/lib/thumbnailSelection"
@@ -102,5 +103,33 @@ describe("choiceAfterClick", () => {
       anchor: 9,
       chosen: new Set([7]),
     })
+  })
+})
+
+describe("selectionAfterGroupClick", () => {
+  it("chooses a file's pages alone on a plain click", () => {
+    const before = selectionAfterClick(emptySelection, 1, plain)
+    const file = selectionAfterGroupClick(before, [4, 5, 6], plain)
+
+    expect(pagesOf(file)).toEqual([4, 5, 6])
+    expect(file.anchor).toBe(4)
+  })
+
+  it("adds a file's pages with a toggle, and lets them go once all are chosen", () => {
+    const one = selectionAfterClick(emptySelection, 1, plain)
+    const added = selectionAfterGroupClick(one, [3, 4], toggle)
+
+    expect(pagesOf(added)).toEqual([1, 3, 4])
+    expect(pagesOf(selectionAfterGroupClick(added, [3, 4], toggle))).toEqual([1])
+  })
+
+  it("reaches from the anchor to the file's far end with a range", () => {
+    const anchored = selectionAfterClick(emptySelection, 2, plain)
+
+    expect(pagesOf(selectionAfterGroupClick(anchored, [5, 6], range))).toEqual([2, 3, 4, 5, 6])
+
+    const later = selectionAfterClick(emptySelection, 7, plain)
+
+    expect(pagesOf(selectionAfterGroupClick(later, [3, 4], range))).toEqual([3, 4, 5, 6, 7])
   })
 })

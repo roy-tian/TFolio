@@ -60,6 +60,47 @@ export function selectionAfterClick(
   return { anchor: pageNumber, pages: new Set([pageNumber]) }
 }
 
+/** A click on a run of pages as one, a file's name over its pages: plain
+    chooses them alone, a toggle adds them or, all chosen, lets them go, and
+    a range reaches from the anchor to the run's far end. */
+export function selectionAfterGroupClick(
+  selection: ThumbnailSelection,
+  pages: readonly number[],
+  modifiers: SelectionModifiers,
+): ThumbnailSelection {
+  if (pages.length === 0) {
+    return selection
+  }
+
+  // Folded, not spread: a long file can pass the engine's argument limit.
+  const first = pages.reduce((low, pageNumber) => Math.min(low, pageNumber))
+  const last = pages.reduce((high, pageNumber) => Math.max(high, pageNumber))
+
+  if (modifiers.range && selection.anchor !== null) {
+    return {
+      anchor: selection.anchor,
+      pages: range(Math.min(selection.anchor, first), Math.max(selection.anchor, last)),
+    }
+  }
+
+  if (modifiers.toggle) {
+    const next = new Set(selection.pages)
+    const all = pages.every((pageNumber) => next.has(pageNumber))
+
+    for (const pageNumber of pages) {
+      if (all) {
+        next.delete(pageNumber)
+      } else {
+        next.add(pageNumber)
+      }
+    }
+
+    return { anchor: first, pages: next }
+  }
+
+  return { anchor: first, pages: new Set(pages) }
+}
+
 /** A click over items listed in `order`, as `selectionAfterClick` takes one;
     an anchor no longer listed makes a range click a plain one. */
 export function choiceAfterClick<T>(

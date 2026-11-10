@@ -1172,10 +1172,11 @@ fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
         has_merged_pages: !entry.merged_page_ids.is_empty(),
         has_foreign_pages: entry.combined(),
         padding: entry.padding_sheets(),
+        // Down to one file, still said: its own bookmarks are what a Save As
+        // writes once none of the document's own pages are left.
         sections: entry
             .sections
             .as_ref()
-            .filter(|book| book.several(&entry.page_ids))
             .map(|book| book.infos(&entry.page_ids))
             .unwrap_or_default(),
         file_options: entry

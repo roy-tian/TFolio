@@ -215,7 +215,8 @@ export type PdfStructureUpdate = {
   /** The blank pages a Save As will add between files, shown where it puts
       them; absent where there are none. */
   padding?: PaddingSheet[]
-  /** The files the pages come from, once more than one; absent otherwise. */
+  /** The files the pages come from, once any were added, even with one left;
+      absent for a document that never had any. */
   sections?: PdfSection[]
   signatures: PdfSignatures
 }

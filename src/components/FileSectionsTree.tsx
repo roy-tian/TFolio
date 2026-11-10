@@ -7,10 +7,15 @@ import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useListDrag } from "@/hooks/useListDrag"
+import { DRAG_CLICK_WINDOW } from "@/lib/pageDrag"
 import type { PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
 type FileSectionsTreeProps = {
+  /** A file dragged among the others: its pages go, whole, in front of file
+      `before`, or to the end. */
+  onMove: (sectionId: number, before: number | null) => void
   onNavigate: (pageNumber: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
@@ -21,9 +26,11 @@ type FileSectionsTreeProps = {
 /**
  * A document of several files, each under its name with its own bookmarks:
  * the outline a Save As writes, one bookmark per file above the file's own.
- * A file's name is where its first page stands; it can be renamed or removed.
+ * A file's name is where its first page stands; it can be renamed, removed,
+ * or dragged among the others, every file folded to its name meanwhile.
  */
 export function FileSectionsTree({
+  onMove,
   onNavigate,
   onRemove,
   onRename,
@@ -34,6 +41,22 @@ export function FileSectionsTree({
   const navRef = useRef<HTMLElement>(null)
   const [folded, setFolded] = useState<ReadonlySet<number>>(new Set())
   const [editing, setEditing] = useState<number | null>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const draggedAtRef = useRef(0)
+  const { drag } = useListDrag({
+    active: editing === null,
+    listRef,
+    onReorder: (moved, to) => {
+      const from = moved[0]!
+      const rest = sections.filter((_, index) => index !== from)
+
+      draggedAtRef.current = performance.now()
+      onMove(sections[from]!.id, rest[to]?.id ?? null)
+    },
+    // The name alone is the handle: the file's bookmarks and buttons are pressed.
+    pressOnly: (target) => target.closest("[data-slot='file-section-title']") === null,
+  })
+  const dragged = drag ? sections[drag.index] : undefined
   const firstPage = new Map<number, number>()
   const pageCount = new Map<number, number>()
 
@@ -68,13 +91,20 @@ export function FileSectionsTree({
         data-slot="file-sections"
         ref={navRef}
       >
-        <ul className="flex flex-col gap-0.5">
-          {sections.map((section) => {
-            const open = !folded.has(section.id) && section.outline.length > 0
+        <ul className="flex flex-col gap-0.5" ref={listRef}>
+          {sections.map((section, index) => {
+            const open = !drag && !folded.has(section.id) && section.outline.length > 0
             const count = pageCount.get(section.id) ?? 0
+            const offset = drag?.cellOffsets[index] ?? 0
 
             return (
-              <li data-section-id={section.id} key={section.id}>
+              <li
+                className={cn(drag?.index === index && "opacity-40")}
+                data-list-index={index}
+                data-section-id={section.id}
+                key={section.id}
+                style={offset ? { transform: `translateY(${offset}px)` } : undefined}
+              >
                 <div className="group/file flex items-center gap-1 rounded-md pr-1 hover:bg-sidebar-accent">
                   <button
                     aria-expanded={section.outline.length > 0 ? open : undefined}
@@ -109,7 +139,10 @@ export function FileSectionsTree({
                         onClick={() => {
                           const first = firstPage.get(section.id)
 
-                          if (first !== undefined) {
+                          if (
+                            first !== undefined &&
+                            performance.now() - draggedAtRef.current >= DRAG_CLICK_WINDOW
+                          ) {
                             onNavigate(first)
                           }
                         }}
@@ -170,6 +203,19 @@ export function FileSectionsTree({
         </ul>
       </nav>
       <OverlayScrollbars viewportRef={navRef} />
+      {drag && dragged ? (
+        <div
+          className="pointer-events-none fixed z-50 flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-sm font-medium shadow-lg"
+          style={{
+            left: drag.pointer.x + drag.grip.x,
+            top: drag.pointer.y + drag.grip.y,
+            width: drag.width,
+          }}
+        >
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{dragged.title}</span>
+        </div>
+      ) : null}
     </div>
   )
 }
