@@ -53,10 +53,10 @@ export function sidebarWidthOf(stored: unknown): number | null {
     : null
 }
 
-/** The sidebar's pages lay out in cells this wide once it fits two of them. */
-export const THUMBNAIL_GRID_GAP = 12
+/** The page grid's gap between cells, which also holds a blank's way in. */
+export const THUMBNAIL_GRID_GAP = 24
 
-/** How many fixed-size previews fit across the sidebar's content box. */
+/** How many fixed-size previews fit across the grid's content box. */
 export function thumbnailColumns(contentWidth: number, cell: number) {
   return Math.max(1, Math.floor((contentWidth + THUMBNAIL_GRID_GAP) / (cell + THUMBNAIL_GRID_GAP)))
 }

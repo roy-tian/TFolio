@@ -50,15 +50,19 @@ const panelOptions = [
 ] as const
 
 /** Which of a document's two panels the sidebar shows. A document of several
-    files shows them, with their bookmarks, where the bookmarks would be. */
+    files shows them, with their bookmarks, where the bookmarks would be.
+    While the page grid shows, the pages are there and the sidebar keeps to
+    the bookmarks. */
 export function SidebarPanelSwitch({
   bookmarksApply,
   files = false,
   panel,
+  thumbnailsApply = true,
 }: {
   bookmarksApply: boolean
   files?: boolean
   panel: SidebarPanel
+  thumbnailsApply?: boolean
 }) {
   const { t } = useTranslation()
   const sidebar = useSidebar()
@@ -82,13 +86,13 @@ export function SidebarPanelSwitch({
         const Icon = option.icon
         const label =
           option.value === "bookmarks" && files ? t("sidebar.files") : t(option.labelKey)
-        const unavailable = option.value === "bookmarks" && !bookmarksApply
+        const unavailable =
+          option.value === "bookmarks" ? !bookmarksApply : !thumbnailsApply
+        const why =
+          option.value === "bookmarks" ? t("sidebar.noBookmarks") : t("sidebar.pagesInGrid")
 
         return (
-          <ToolbarTooltip
-            key={option.value}
-            label={unavailable ? t("sidebar.noBookmarks") : label}
-          >
+          <ToolbarTooltip key={option.value} label={unavailable ? why : label}>
             <ToggleGroupItem
               aria-label={label}
               className="gap-1.5 px-3"
@@ -106,8 +110,8 @@ export function SidebarPanelSwitch({
 }
 
 /**
- * The sidebar's right edge, dragged or arrowed to widen it: wide, its pages
- * flow into columns. Double-click goes back to the opening width. The drag
+ * The sidebar's right edge, dragged or arrowed to widen it, for long bookmark
+ * titles. Double-click goes back to the opening width. The drag
  * sets the workspace root's width itself, frame by frame, and settles it in
  * the window's state only on release, so App renders once per drag.
  */

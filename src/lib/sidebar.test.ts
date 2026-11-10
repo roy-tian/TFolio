@@ -75,12 +75,11 @@ describe("sidebar width", () => {
 })
 
 describe("thumbnailColumns", () => {
-  test("stays one column at the opening width and adds one per cell of room", () => {
-    // 16rem less the column's own padding.
-    expect(thumbnailColumns(240, 160)).toBe(1)
-    expect(thumbnailColumns(331, 160)).toBe(1)
-    expect(thumbnailColumns(332, 160)).toBe(2)
-    expect(thumbnailColumns(504, 160)).toBe(3)
+  test("adds a column per cell and gap of room, and keeps at least one", () => {
+    expect(thumbnailColumns(343, 160)).toBe(1)
+    expect(thumbnailColumns(344, 160)).toBe(2)
+    expect(thumbnailColumns(527, 160)).toBe(2)
+    expect(thumbnailColumns(528, 160)).toBe(3)
     expect(thumbnailColumns(0, 160)).toBe(1)
   })
 })

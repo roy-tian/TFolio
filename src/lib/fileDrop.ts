@@ -11,15 +11,15 @@ export function dropPointInCss(
     : { x: position.x, y: position.y }
 }
 
-/** On the shown tab's sidebar pages, a drop combines the dragged files with
-    that tab's own instead of opening them. */
-const PAGES_SELECTOR = "[data-document-session][data-active='true'] [data-sidebar-pages]"
+/** On the shown tab's pages, down the sidebar or across the grid, a drop adds
+    the dragged files to that tab's document instead of opening them. */
+const PAGES_SELECTOR = "[data-document-session][data-active='true'] [data-pages-surface]"
 
-export function sidebarPagesShown() {
+export function pagesShown() {
   return (document.querySelector(PAGES_SELECTOR)?.getClientRects().length ?? 0) > 0
 }
 
 /** Drop overlays take no pointer events, so the hit lands on what they cover. */
-export function overSidebarPages(point: { x: number; y: number }) {
+export function overPages(point: { x: number; y: number }) {
   return (document.elementFromPoint(point.x, point.y)?.closest(PAGES_SELECTOR) ?? null) !== null
 }

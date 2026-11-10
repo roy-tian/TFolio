@@ -36,6 +36,9 @@ export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
+  /** Every drawing tool needs a page under the pointer, which the page grid
+      does not show; the watermark and page numbers act on the document. */
+  drawingApplies: boolean
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle, transient?: boolean) => void
@@ -48,6 +51,7 @@ type AnnotationToolbarProps = {
 
 export function AnnotationToolbar({
   activeTool,
+  drawingApplies,
   highlightColor,
   onHighlightColorChange,
   onPageNumbers,
@@ -83,6 +87,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "highlight" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "highlight"}
             style={{ "--tool-ink": highlightColor } as CSSProperties}
             variant="outline"
@@ -140,6 +145,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "rect" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "rect"}
             style={
               rectBarFromColour
@@ -188,6 +194,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "textNote" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "textNote"}
             style={{ "--tool-ink": textNoteColor } as CSSProperties}
             variant="outline"
@@ -209,6 +216,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "eraser" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "eraser"}
             variant="outline"
           >

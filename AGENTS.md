@@ -149,8 +149,12 @@
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
   then the tab reopens the written file, its history gone.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
-  will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
-  print show them there, and only a Save As writes them. Structure commands never see them.
+  will put them (`SectionBook::padding`) with every structure change, the viewer, page grid,
+  sidebar and print show them there, and only a Save As writes them. Structure commands never
+  see them.
+- The page grid lies over the reading view, which stays mounted and laid out (`inert`) beneath
+  it: leaving the grid finds the reader's place, and the sidebar meanwhile keeps to the
+  bookmarks, so one `PageThumbnails` shows the pages at a time.
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
 - File sources are read-only and are not documents: no `record_document`, recent files, save

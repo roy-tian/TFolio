@@ -1670,6 +1670,8 @@ export function useAnnotations({
       insertBlankPage,
       insertFiles,
       insertPages,
+      /** An edit is queued or under way; a new one would wait behind it. */
+      isBusy,
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,

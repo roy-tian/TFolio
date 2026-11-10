@@ -56,6 +56,7 @@ type SessionHeaderProps = {
   searchOpen: boolean
   tool: {
     activeTool: AnnotationTool
+    drawingApplies: boolean
     highlightColor: HexColor
     onHighlightColorChange: (color: HexColor) => void
     onPageNumbers: () => void
@@ -105,6 +106,7 @@ export function SessionHeader({
           />
           <AnnotationToolbar
             activeTool={tool.activeTool}
+            drawingApplies={tool.drawingApplies}
             highlightColor={tool.highlightColor}
             onHighlightColorChange={tool.onHighlightColorChange}
             onPageNumbers={tool.onPageNumbers}

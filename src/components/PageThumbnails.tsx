@@ -1,7 +1,8 @@
 import {
-  memo,
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
@@ -11,9 +12,8 @@ import { BetweenHorizontalStart, Bookmark, FilePlus2, Rows3 } from "lucide-react
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
-import { PageControls, type PageActionHandler } from "@/components/PageCardControls"
+import type { PageActionHandler } from "@/components/PageCardControls"
 import {
-  DragHole,
   landingBox,
   liftGhost,
   PageDragGhost,
@@ -21,19 +21,22 @@ import {
   type PageDragGhostState,
 } from "@/components/PageDragGhost"
 import { PageMenuContent } from "@/components/PageContextMenu"
-import { PageSignatureMark } from "@/components/SignatureBadge"
-import { HintTooltip } from "@/components/HintTooltip"
-import { PdfThumbnail } from "@/components/PdfThumbnail"
+import {
+  CarriedHoles,
+  fileDropSlot,
+  PageCell,
+  PaddingCell,
+  PagesDropTarget,
+  type PageThumbnailsLayout,
+} from "@/components/PageThumbnailCells"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
-import { useNearViewport } from "@/hooks/useNearViewport"
 import { CARRY_KEY, useIncomingPages } from "@/hooks/useIncomingPages"
 import { usePageCarryContext, type CarryLanding } from "@/hooks/usePageCarry"
-import { usePagesDrop } from "@/hooks/usePagesDrop"
 import type { RenderEpochs } from "@/lib/annotations"
 import { stripSpotAt, type CarriedPages } from "@/lib/pageCarry"
 import {
@@ -48,29 +51,20 @@ import {
 } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import type { PaddingSheet } from "@/lib/padding"
-import {
-  dimensionsForRotation,
-  type FileOptions,
-  type PdfPageInfo,
-  type PdfSection,
-} from "@/lib/pdf"
+import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
-import { THUMBNAIL_CAPTION_HEIGHT, THUMBNAIL_WIDTH, thumbnailPaper } from "@/lib/viewMode"
+import { THUMBNAIL_WIDTH } from "@/lib/viewMode"
 
-// A column shows a handful of pages; keeping pixels further out than a few
-// screens would hold a long document's every preview for one scroll through.
-const RETAIN_MARGIN = "1500px 0px"
 // The click a drag ends on belongs to the drag; one later than this is a choice.
 const DRAG_CLICK_GRACE_MS = 300
 const NO_HOLES: ReadonlySet<number> = new Set()
 
-/** Square cells as wide as a paper's long side, once a widened sidebar fits two:
-    portrait and landscape pages then line up in rows, and a turn moves no other
-    page. One column keeps each paper its own size, as it always has. */
-function gridFrame(columns: number) {
-  return columns > 1 ? THUMBNAIL_WIDTH : null
+export type PageThumbnailsHandle = {
+  /** Where files let go at a point on screen would go: the count of pages
+      before them, the page count past the last. */
+  fileDropSlot: (point: { x: number; y: number }) => number | null
 }
 
 type ColumnDrag = {
@@ -83,9 +77,12 @@ type ColumnDrag = {
   moving: number[]
 }
 
-type SidebarThumbnailsProps = {
-  /** A background tab's column is laid out only once its tab is shown. */
+type PageThumbnailsProps = {
+  /** A background tab's pages are laid out only once its tab is shown. */
   active: boolean
+  /** An edit is under way, which a page's own controls would only be
+      refused behind: they dim until it lands. */
+  busy: boolean
   canPaste: boolean
   currentPage: CurrentPage
   /** Pages a cut is standing over: still in the document, empty for a copy. */
@@ -125,7 +122,11 @@ type SidebarThumbnailsProps = {
   /** A right-click, before its menu opens: a page outside the selection
       becomes the selection, so the menu means what is on screen. */
   onMenuPage: (pageNumber: number) => void
+  /** Down the sidebar, a plain click on a page goes to it. */
   onNavigate: (pageNumber: number) => void
+  /** A double-click: the grid gives way to the reading view on that page. */
+  onOpen: (pageNumber: number) => void
+  layout: PageThumbnailsLayout
   onPastePages: (index: number, section?: number) => void
   /** Settles once the reorder has landed or been refused: the column holds
       the dropped order until then, rather than flash the old one. `moving`
@@ -147,10 +148,13 @@ type SidebarThumbnailsProps = {
   viewRotation: number
 }
 
-/** The document's pages down the sidebar: where the reader finds a page, and
-    where pages are chosen, reordered, turned and removed. */
-export function SidebarThumbnails({
+/** The document's pages, down the sidebar or across the main area's grid:
+    where the reader finds a page, and where pages are chosen, reordered,
+    turned and removed. The grid alone edits a page from its own controls. */
+export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsProps>(
+  function PageThumbnails({
   active,
+  busy,
   canPaste,
   currentPage,
   cutPages,
@@ -168,8 +172,10 @@ export function SidebarThumbnails({
   onFocusChange,
   onInsertBlankPage,
   onInsertCarriedPages,
+  layout,
   onMenuPage,
   onNavigate,
+  onOpen,
   onPastePages,
   onReorderPages,
   onRotatePage,
@@ -183,8 +189,9 @@ export function SidebarThumbnails({
   selectedPages,
   thumbnailKeys,
   viewRotation,
-}: SidebarThumbnailsProps) {
+}, ref) {
   const { t } = useTranslation()
+  const grid = layout === "grid"
   const listRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef<HTMLOListElement>(null)
   const current = useCurrentPage(currentPage)
@@ -256,7 +263,10 @@ export function SidebarThumbnails({
   // A column gone before its ghost is down still lets the taker's holes close.
   const pendingLandedRef = useRef<(() => void) | undefined>(undefined)
   const [columns, setColumns] = useState(1)
-  const frame = gridFrame(columns)
+  // Square cells as wide as a paper's long side: portrait and landscape pages
+  // line up in rows, and a turn moves no other page. Down the sidebar each
+  // paper keeps its own size.
+  const frame = grid ? THUMBNAIL_WIDTH : null
   const numPages = pages.length
   const { prime } = useFlipLayout(
     columnRef,
@@ -283,11 +293,19 @@ export function SidebarThumbnails({
   keysRef.current = thumbnailKeys
   isEditingRef.current = isEditingNow
 
-  // Every width the reader drags the sidebar to, not only the window's.
+  useImperativeHandle(
+    ref,
+    () => ({
+      fileDropSlot: (point) => (columnRef.current ? fileDropSlot(columnRef.current, point) : null),
+    }),
+    [],
+  )
+
+  // The grid fills the main area across, whatever width the sidebar leaves it.
   useLayoutEffect(() => {
     const list = listRef.current
 
-    if (!list) {
+    if (!list || !grid) {
       return
     }
 
@@ -306,13 +324,13 @@ export function SidebarThumbnails({
     observer.observe(list)
 
     return () => observer.disconnect()
-  }, [])
+  }, [grid])
 
   // One page's own controls act on that page alone. Read through a ref, so the
   // memoised previews keep one handler across the session's every render.
-  const actionsRef = useRef({ onDeleteOnePage, onRotatePage, onSelectPage })
+  const actionsRef = useRef({ onDeleteOnePage, onInsertBlankPage, onRotatePage, onSelectPage })
 
-  actionsRef.current = { onDeleteOnePage, onRotatePage, onSelectPage }
+  actionsRef.current = { onDeleteOnePage, onInsertBlankPage, onRotatePage, onSelectPage }
 
   const act = useCallback<PageActionHandler>((pageNumber, action) => {
     const actions = actionsRef.current
@@ -338,6 +356,15 @@ export function SidebarThumbnails({
         actions.onDeleteOnePage(pageNumber)
         break
     }
+  }, [])
+
+  // Before the page, the file it joins is that page's; after the last, the
+  // last page's.
+  const insertBlank = useCallback((pageNumber: number, side: "before" | "after") => {
+    actionsRef.current.onInsertBlankPage(
+      side === "before" ? pageNumber : pageNumber + 1,
+      pagesRef.current[pageNumber - 1]?.section,
+    )
   }, [])
 
   // A column unmounted with focus in it (an overlay dismissed, the sidebar
@@ -423,8 +450,9 @@ export function SidebarThumbnails({
       })
   }, [landing])
 
-  // A plain click both chooses the page and goes to it; Ctrl or Shift only
-  // add to the choice, leaving the reader where they are.
+  // Down the sidebar a plain click both chooses the page and goes to it; Ctrl
+  // or Shift only add to the choice, leaving the reader where they are. The
+  // grid only chooses: it is where the pages are worked on.
   const select = useCallback(
     (pageNumber: number, modifiers: SelectionModifiers) => {
       if (performance.now() - draggedAtRef.current < DRAG_CLICK_GRACE_MS) {
@@ -433,11 +461,11 @@ export function SidebarThumbnails({
 
       onSelectPage(pageNumber, modifiers)
 
-      if (!modifiers.range && !modifiers.toggle) {
+      if (!grid && !modifiers.range && !modifiers.toggle) {
         onNavigate(pageNumber)
       }
     },
-    [onNavigate, onSelectPage],
+    [grid, onNavigate, onSelectPage],
   )
 
   const startDrag = (event: ReactPointerEvent) => {
@@ -687,21 +715,26 @@ export function SidebarThumbnails({
   return (
     <div
       className="flex h-full flex-col"
-      // Pages under a stack in hand, this column's or another tab's, show none
-      // of their controls.
+      data-page-thumbnails={layout}
+      data-pages-busy={busy ? "" : undefined}
+      // Pages under a stack in hand, these or another tab's, show none of
+      // their controls.
       data-pages-dragging={drag !== null || ghost !== null || incoming !== null ? "" : undefined}
-      data-sidebar-pages
+      data-pages-surface
     >
       <div
-        className="flex h-9 shrink-0 items-center gap-1 border-b px-2"
-        data-slot="sidebar-pages-bar"
+        className={cn(
+          "flex h-9 shrink-0 items-center gap-1 border-b px-2",
+          grid && "bg-background",
+        )}
+        data-slot="pages-bar"
       >
         {sections.length > 1 ? (
           <ToolbarTooltip label={t("sidebar.fileRows")}>
             <Toggle
               aria-label={t("sidebar.fileRows")}
               className="size-7 min-w-7 p-0"
-              data-slot="sidebar-file-rows"
+              data-slot="pages-file-rows"
               onPressedChange={onFileRowsChange}
               pressed={fileRows}
               size="sm"
@@ -716,7 +749,7 @@ export function SidebarThumbnails({
               <Toggle
                 aria-label={t("sidebar.smartPadding")}
                 className="size-7 min-w-7 p-0"
-                data-slot="sidebar-smart-padding"
+                data-slot="pages-smart-padding"
                 onPressedChange={(smartPadding) =>
                   onFileOptionsChange({ smartPadding })
                 }
@@ -730,7 +763,7 @@ export function SidebarThumbnails({
               <Toggle
                 aria-label={t("sidebar.fileBookmarks")}
                 className="size-7 min-w-7 p-0"
-                data-slot="sidebar-file-bookmarks"
+                data-slot="pages-file-bookmarks"
                 onPressedChange={(perFileBookmarks) =>
                   onFileOptionsChange({ perFileBookmarks })
                 }
@@ -746,7 +779,7 @@ export function SidebarThumbnails({
           <Button
             aria-label={t("sidebar.addFiles")}
             className="ml-auto"
-            data-slot="sidebar-add-files"
+            data-slot="pages-add-files"
             onClick={onAddFiles}
             size="icon-sm"
             variant="ghost"
@@ -770,8 +803,11 @@ export function SidebarThumbnails({
             render={
               <div
                 aria-label={t("sidebar.thumbnails")}
-                className="overlay-scroll-viewport h-full overflow-y-auto overscroll-contain px-2 pt-3 pb-4 outline-none select-none"
-                data-slot="sidebar-thumbnails"
+                className={cn(
+                  "overlay-scroll-viewport h-full overflow-y-auto overscroll-contain outline-none select-none",
+                  grid ? "workspace-background px-6 pt-5 pb-8" : "px-2 pt-3 pb-4",
+                )}
+                data-slot={grid ? "page-grid" : "sidebar-thumbnails"}
                 data-thumbnail-scroll-root
                 onBlur={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget)) {
@@ -798,6 +834,17 @@ export function SidebarThumbnails({
                 onFocus={() => onFocusChange(true)}
                 onKeyDown={(event) => {
                   const first = Math.min(...selectionRef.current)
+                  const paper = (event.target as Element).closest<HTMLElement>(
+                    "[data-thumbnail-page]",
+                  )
+
+                  // Enter on a page in the grid opens it, as a double-click
+                  // does; down the sidebar a click already goes there.
+                  if (grid && event.key === "Enter" && paper) {
+                    event.preventDefault()
+                    onOpen(Number(paper.dataset.thumbnailPage))
+                    return
+                  }
 
                   if (
                     (event.key === "Delete" || event.key === "Backspace") &&
@@ -812,7 +859,7 @@ export function SidebarThumbnails({
                 }}
                 onPointerDown={startDrag}
                 ref={listRef}
-                role="navigation"
+                role={grid ? "region" : "navigation"}
                 // WebKit on macOS never focuses a clicked button; the column takes
                 // the focus instead, so the page keys still reach it.
                 tabIndex={-1}
@@ -820,7 +867,7 @@ export function SidebarThumbnails({
             }
           >
             {/* Positioned: the slides read each cell's place off it. As wide as
-                its columns, so a short last row starts at the left. */}
+                the grid's columns, so a short last row starts at the left. */}
             <ol
               className={cn(
                 "relative flex",
@@ -843,6 +890,7 @@ export function SidebarThumbnails({
                 const holesHere =
                   index === incomingAt ? (
                     <CarriedHoles
+                      carryKey={CARRY_KEY}
                       frame={frame}
                       key={CARRY_KEY}
                       rotation={viewRotation}
@@ -879,7 +927,7 @@ export function SidebarThumbnails({
                       {titles.get(heads)}
                     </li>
                   ),
-                  <SidebarThumbnail
+                  <PageCell
                     // Where the page stands in a drag's preview, as it will once
                     // the pages land.
                     caption={index + 1 + carriedAhead}
@@ -892,10 +940,18 @@ export function SidebarThumbnails({
                     intrinsicRotation={page.rotation}
                     isCurrent={current === pageNumber}
                     isCut={cutPages.has(pageNumber)}
+                    isLast={pageNumber === numPages}
                     isSelected={selectedPages.has(pageNumber)}
                     key={key}
+                    label={
+                      grid
+                        ? t("sidebar.pageLabel", { pageNumber })
+                        : t("sidebar.thumbnailLabel", { pageNumber })
+                    }
+                    layout={layout}
                     onAction={act}
-                    onNavigate={onNavigate}
+                    onInsertBlank={insertBlank}
+                    onOpen={onOpen}
                     onSelect={select}
                     pageHeight={page.height}
                     pageNumber={pageNumber}
@@ -954,235 +1010,8 @@ export function SidebarThumbnails({
           ) : null}
         </ContextMenu>
         <OverlayScrollbars viewportRef={listRef} />
-        <PagesDropTarget />
+        <PagesDropTarget flowRef={columnRef} layout={layout} />
       </div>
     </div>
-  )
-}
-
-/** Shown over the column while a file drag offers it; a drop there adds the
-    files to this document. */
-function PagesDropTarget() {
-  const { t } = useTranslation()
-  const drop = usePagesDrop()
-
-  if (!drop) {
-    return null
-  }
-
-  return (
-    <div
-      className={cn(
-        "pointer-events-none absolute inset-2 z-10 grid place-items-center rounded-xl border-2 border-dashed p-3 text-center backdrop-blur-sm",
-        drop === "over"
-          ? "border-primary/70 bg-background/90"
-          : "border-muted-foreground/40 bg-background/75 text-muted-foreground",
-      )}
-      data-over={drop === "over" ? "" : undefined}
-      data-testid="sidebar-pages-drop"
-    >
-      <div className="flex flex-col items-center">
-        <FilePlus2 className="mb-3 size-8" />
-        <p className="text-sm font-semibold">{t("sidebar.dropFiles")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{t("sidebar.dropFilesHint")}</p>
-      </div>
-    </div>
-  )
-}
-
-/** Where another document's pages will stand, one hole each, keyed apart from
-    every page; a fragment, so each is a row of the column's own. Turned as
-    this view turns its pages, which the copies take on, not as the source's. */
-function CarriedHoles({
-  frame,
-  rotation,
-  sizes,
-}: {
-  frame: number | null
-  rotation: number
-  sizes: CarriedPages["sizes"]
-}) {
-  return sizes.map((size, index) => {
-    const paper = thumbnailPaper(dimensionsForRotation(rotation, size.width, size.height))
-
-    return (
-      <li className="relative" data-flip-key={`${CARRY_KEY}${index}`} key={index}>
-        <div
-          style={{
-            height: `calc(${frame ?? paper.height}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
-            width: frame ?? paper.width,
-          }}
-        />
-        <DragHole
-          height={paper.height}
-          top={frame === null ? 0 : (frame - paper.height) / 2}
-          width={paper.width}
-        />
-      </li>
-    )
-  })
-}
-
-/** A blank page a Save As will add, where it will add it: white paper with a
-    dashed edge, no page of the document's own, so nothing to choose or drag.
-    No flip key, so a drop counts it no cell. */
-function PaddingCell({
-  frame,
-  label,
-  rotation,
-  sheet,
-}: {
-  frame: number | null
-  label: string
-  rotation: number
-  sheet: PaddingSheet
-}) {
-  const paper = thumbnailPaper(dimensionsForRotation(rotation, sheet.width, sheet.height))
-
-  return (
-    <li className="flex flex-col items-center" data-padding-after={sheet.after}>
-      <div
-        className="grid place-items-center"
-        style={frame === null ? undefined : { height: frame, width: frame }}
-      >
-        <HintTooltip label={label}>
-          <div
-            aria-label={label}
-            className="border-2 border-dashed border-muted-foreground/40 bg-white"
-            role="img"
-            style={{ height: paper.height, width: paper.width }}
-          />
-        </HintTooltip>
-      </div>
-      <span style={{ height: THUMBNAIL_CAPTION_HEIGHT }} />
-    </li>
-  )
-}
-
-/** Memoised on primitives alone, so the reader's page moving re-renders the
-    two previews it moves between, not the column. */
-const SidebarThumbnail = memo(function SidebarThumbnail({
-  caption,
-  deleteDisabled,
-  documentId,
-  flipKey,
-  frame,
-  hole,
-  intrinsicRotation,
-  isCurrent,
-  isCut,
-  isSelected,
-  onAction,
-  onNavigate,
-  onSelect,
-  pageHeight,
-  pageNumber,
-  pageWidth,
-  parked,
-  renderEpoch,
-  rotation,
-  signed,
-}: {
-  caption: number
-  deleteDisabled: boolean
-  documentId: number
-  flipKey: number
-  /** The square cell of a widened sidebar's grid, or null down one column. */
-  frame: number | null
-  /** The page is in hand: its place shows where it will land. */
-  hole: boolean
-  intrinsicRotation: number
-  isCurrent: boolean
-  isCut: boolean
-  isSelected: boolean
-  onAction: PageActionHandler
-  onNavigate: (pageNumber: number) => void
-  onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
-  pageHeight: number
-  pageNumber: number
-  pageWidth: number
-  parked: ParkedPreviews
-  renderEpoch: number
-  rotation: number
-  signed: boolean
-}) {
-  const itemRef = useRef<HTMLLIElement>(null)
-  const nearView = useNearViewport(itemRef, RETAIN_MARGIN)
-  // A focused control stays however far the column scrolls from it: unmounting
-  // it would drop keyboard focus back to the start of the document.
-  const [focusWithin, setFocusWithin] = useState(false)
-  const paper = thumbnailPaper(dimensionsForRotation(rotation, pageWidth, pageHeight))
-  // Each control carries a tooltip; hundreds would slow every selection.
-  const showControls = nearView || focusWithin
-
-  // A control hidden or removed under focus may send no blur. Check again as
-  // the page leaves the view, where a stale flag would keep its controls.
-  useEffect(() => {
-    if (!nearView && focusWithin && !itemRef.current?.contains(document.activeElement)) {
-      setFocusWithin(false)
-    }
-  }, [focusWithin, nearView])
-
-  return (
-    <li
-      className="relative"
-      data-flip-key={flipKey}
-      onBlur={(event) => {
-        // Leaving the window blurs with no `relatedTarget` but keeps
-        // `activeElement`, and focus comes back to the same control.
-        if (
-          !event.currentTarget.contains(event.relatedTarget) &&
-          !event.currentTarget.contains(document.activeElement)
-        ) {
-          setFocusWithin(false)
-        }
-      }}
-      onFocus={() => setFocusWithin(true)}
-      ref={itemRef}
-    >
-      {/* Faded rather than hidden: a hidden button would give up its focus,
-          and the column's keys with it. */}
-      <div className={cn(hole && "opacity-0")}>
-        <PdfThumbnail
-          caption={caption}
-          documentId={documentId}
-          frame={frame === null ? undefined : { height: frame, width: frame }}
-          intrinsicRotation={intrinsicRotation}
-          isCurrent={isCurrent}
-          isCut={isCut}
-          isSelected={isSelected}
-          mark={signed ? <PageSignatureMark /> : undefined}
-          onOpen={onNavigate}
-          onSelect={onSelect}
-          overlay={
-            showControls ? (
-              <PageControls
-                caption={caption}
-                deleteDisabled={deleteDisabled}
-                isSelected={isSelected}
-                itemKey={pageNumber}
-                onAction={onAction}
-              />
-            ) : null
-          }
-          pageHeight={pageHeight}
-          pageNumber={pageNumber}
-          pageWidth={pageWidth}
-          parkKey={flipKey}
-          parked={parked}
-          renderEpoch={renderEpoch}
-          retainBitmap={nearView}
-          rotation={rotation}
-        />
-      </div>
-      {hole ? (
-        <DragHole
-          height={paper.height}
-          top={frame === null ? 0 : (frame - paper.height) / 2}
-          width={paper.width}
-        />
-      ) : null}
-    </li>
   )
 })
-

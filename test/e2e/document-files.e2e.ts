@@ -19,29 +19,31 @@ import {
 
 const saveTrigger = `[data-document-session][data-active='true'] [data-slot='pdf-save-trigger']`
 
-function pageCount() {
+const session = "[data-document-session][data-active='true']"
+
+function pageCount(scope = activeSidebar) {
   return browser.execute(
-    (scope: string) => document.querySelectorAll(`${scope} button[data-thumbnail-page]`).length,
-    activeSidebar,
+    (within: string) => document.querySelectorAll(`${within} button[data-thumbnail-page]`).length,
+    scope,
   )
 }
 
-async function waitForPages(count: number) {
-  await browser.waitUntil(async () => (await pageCount()) === count, {
+async function waitForPages(count: number, scope = activeSidebar) {
+  await browser.waitUntil(async () => (await pageCount(scope)) === count, {
     timeout: 30_000,
     timeoutMsg: `the document never held ${count} pages`,
   })
 }
 
-/** The file names heading the sidebar's pages, top to bottom. */
-function headings() {
+/** The file names heading the pages, top to bottom. */
+function headings(scope = activeSidebar) {
   return browser.execute(
-    (scope: string) =>
+    (within: string) =>
       Array.from(
-        document.querySelectorAll<HTMLElement>(`${scope} [data-section-header]`),
+        document.querySelectorAll<HTMLElement>(`${within} [data-section-header]`),
         (heading) => heading.textContent ?? "",
       ),
-    activeSidebar,
+    scope,
   )
 }
 
@@ -78,7 +80,7 @@ function press(selector: string) {
 
 async function addFilesFromPicker(paths: string[]) {
   await pointMultiPickerAt(paths)
-  await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
+  await $(`${activeSidebar} [data-slot='pages-add-files']`).click()
 }
 
 describe("TFolio files added to an open document", () => {
@@ -129,27 +131,52 @@ describe("TFolio files added to an open document", () => {
     await waitForPages(2)
     expect(await headings()).toEqual(["own.pdf", "added.pdf"])
 
-    await $(`${activeSidebar} [data-slot='sidebar-file-rows']`).click()
+    await $(`${activeSidebar} [data-slot='pages-file-rows']`).click()
     await browser.waitUntil(async () => (await headings()).length === 0)
   })
 
-  it("adds files dropped on the sidebar's pages", async () => {
+  it("adds files dropped below the sidebar's pages at the end", async () => {
     await openPdfFromDisk("own.pdf", minimalPdf(2))
     await waitForPages(2)
     const point = await browser.execute((scope: string) => {
-      const box = document.querySelector(`${scope} [data-sidebar-pages]`)!.getBoundingClientRect()
+      const box = document.querySelector(`${scope} [data-pages-surface]`)!.getBoundingClientRect()
 
-      return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+      return { x: box.left + box.width / 2, y: box.bottom - 24 }
     }, activeSidebar)
     const dropped = writeScratchPdf("dropped.pdf", minimalPdf(3, "0 0 300 200"))
 
     await emitDrag("drag-over", point, [dropped])
-    await expect($("[data-testid='sidebar-pages-drop']")).toHaveAttribute("data-over", "")
+    await expect($("[data-testid='pages-drop']")).toHaveAttribute("data-over", "")
     await emitDrag("drag-drop", point, [dropped])
     await waitForPages(5)
     expect(await headings()).toEqual(["own.pdf", "dropped.pdf"])
     // Added to this document, not opened beside it.
     expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
+  })
+
+  it("adds files dropped between two pages of the grid there", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await $(`${session} button[aria-label='Thumbnails']`).click()
+    const grid = `${session} [data-page-thumbnails='grid']`
+    await waitForPages(2, grid)
+    // Over the second page's left edge: the gap in front of it.
+    const point = await browser.execute((scope: string) => {
+      const box = document
+        .querySelector(`${scope} button[data-thumbnail-page='2']`)!
+        .getBoundingClientRect()
+
+      return { x: box.left + 8, y: box.top + box.height / 2 }
+    }, grid)
+    const dropped = writeScratchPdf("between.pdf", minimalPdf(3, "0 0 300 200"))
+
+    await emitDrag("drag-over", point, [dropped])
+    await expect($("[data-testid='pages-drop-marker']")).toBeDisplayed()
+    await emitDrag("drag-drop", point, [dropped])
+    await waitForPages(5, grid)
+    expect(await headings(grid)).toEqual(["own.pdf", "between.pdf", "own.pdf"])
+
+    await browser.keys(["Control", "z"])
+    await waitForPages(2, grid)
   })
 
   it("renames a file and removes one, each undoably", async () => {
@@ -243,7 +270,7 @@ describe("TFolio blank pages between files", () => {
     await browser.waitUntil(async () => (await blanksIn(activeSidebar)).join() === "1")
     expect(await blanksIn(viewer)).toEqual([1])
 
-    await $(`${activeSidebar} [data-slot='sidebar-smart-padding']`).click()
+    await $(`${activeSidebar} [data-slot='pages-smart-padding']`).click()
     await browser.waitUntil(async () => (await blanksIn(activeSidebar)).length === 0)
     expect(await blanksIn(viewer)).toEqual([])
 

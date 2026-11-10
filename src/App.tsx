@@ -38,11 +38,11 @@ import { useNotices } from "@/hooks/useNotices"
 import { useReopenTab, type Reopened } from "@/hooks/useReopenTab"
 import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
-import { PagesDropContext, type PagesDrop } from "@/hooks/usePagesDrop"
+import { PagesDropContext, setPagesDropPoint, type PagesDrop } from "@/hooks/usePagesDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
-import { dropPointInCss, overSidebarPages, sidebarPagesShown } from "@/lib/fileDrop"
+import { dropPointInCss, overPages, pagesShown } from "@/lib/fileDrop"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
@@ -947,7 +947,7 @@ export default function App() {
   // Only files a document can take its pages from; anything else is said to be
   // no such file, rather than opened as a tab the reader did not drop it as.
   const addDroppedFiles = useCallback(
-    (paths: string[]) => {
+    (paths: string[], point: { x: number; y: number }) => {
       const sources = paths.filter((path) => isSourcePath(path, wordConversionAvailable()))
 
       if (sources.length === 0) {
@@ -958,7 +958,7 @@ export default function App() {
       const shown = activeIdRef.current
 
       if (shown !== HOME_TAB_ID) {
-        sessionRefs.current.get(shown)?.addFiles(sources)
+        sessionRefs.current.get(shown)?.addFiles(sources, point)
       }
     },
     [notices],
@@ -1894,16 +1894,16 @@ export default function App() {
     // nothing to open: left alone rather than met with a drop target and an error.
     let namesNoFile = false
     const windows = isWindows()
-    // The viewer's sidebar pages are a target of their own while a document
-    // shows: files let go there are added to it.
+    // A document's pages, down the sidebar or across the grid, are a target
+    // of their own while it shows: files let go there are added to it.
+    const cssPoint = (position: { x: number; y: number }) =>
+      dropPointInCss(position, windows, window.devicePixelRatio)
     const pagesDropAt = (position: { x: number; y: number }): PagesDrop => {
-      if (activeIdRef.current === HOME_TAB_ID || !sidebarPagesShown()) {
+      if (activeIdRef.current === HOME_TAB_ID || !pagesShown()) {
         return null
       }
 
-      return overSidebarPages(dropPointInCss(position, windows, window.devicePixelRatio))
-        ? "over"
-        : "offered"
+      return overPages(cssPoint(position)) ? "over" : "offered"
     }
 
     void getCurrentWebview()
@@ -1917,6 +1917,7 @@ export default function App() {
           namesNoFile = false
           setIsDragging(false)
           setPagesDrop(null)
+          setPagesDropPoint(null)
           return
         }
 
@@ -1924,10 +1925,11 @@ export default function App() {
           namesNoFile = false
           setIsDragging(false)
           setPagesDrop(null)
+          setPagesDropPoint(null)
 
-          // Opened as tabs, unless let go on the sidebar's pages.
+          // Opened as tabs, unless let go on the pages, where they join them.
           if (pagesDropAt(event.payload.position) === "over") {
-            addDroppedFiles(event.payload.paths)
+            addDroppedFiles(event.payload.paths, cssPoint(event.payload.position))
           } else {
             void openPaths(event.payload.paths, "first")
           }
@@ -1941,8 +1943,11 @@ export default function App() {
         }
 
         if (!namesNoFile) {
+          const drop = pagesDropAt(event.payload.position)
+
           setIsDragging(true)
-          setPagesDrop(pagesDropAt(event.payload.position))
+          setPagesDrop(drop)
+          setPagesDropPoint(drop === "over" ? cssPoint(event.payload.position) : null)
         }
       })
       .then((stop) => {

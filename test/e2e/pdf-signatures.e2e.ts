@@ -146,7 +146,7 @@ describe("TFolio signed documents", () => {
     await openPdfFromDisk("own.pdf", textPdf())
     await renderedPage()
     await pointMultiPickerAt([signed])
-    await $("[data-active='true'] [data-slot='sidebar-add-files']").click()
+    await $("[data-active='true'] [data-slot='pages-add-files']").click()
     await answerPrompt("signatures-flatten")
 
     // The added page, drawn with its seal as page content.

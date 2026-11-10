@@ -67,7 +67,7 @@ export function PageControls({
       />
       <div
         className={cn(
-          "absolute bottom-1.5 left-1/2 flex -translate-x-1/2 rounded-md border bg-background p-0.5 shadow-sm transition-opacity in-data-[pages-busy]:hidden",
+          "absolute bottom-1.5 left-1/2 flex -translate-x-1/2 rounded-md border bg-background p-0.5 shadow-sm transition-opacity",
           PAPER_CONTROLS_SHOWN,
         )}
       >
@@ -75,7 +75,12 @@ export function PageControls({
           <HintTooltip key={action} label={label}>
             <Button
               aria-label={label}
-              className={cn(action === "delete" && "hover:text-destructive")}
+              // Dimmed, not hidden, while an edit runs, which a press would
+              // only be refused behind: a hidden button gives up its focus.
+              className={cn(
+                "in-data-[pages-busy]:cursor-wait in-data-[pages-busy]:opacity-50",
+                action === "delete" && "hover:text-destructive",
+              )}
               data-page-action={action}
               disabled={action === "delete" && deleteDisabled}
               // A click the keyboard made counts no presses.

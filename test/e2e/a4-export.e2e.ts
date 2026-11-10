@@ -110,7 +110,7 @@ describe("TFolio save as A4", () => {
   it("keeps the blanks between files and a bookmark for each", async () => {
     const own = await openPdfFromDisk("own.pdf", minimalPdf(1))
     await pointMultiPickerAt([writeScratchPdf("added.pdf", outlinedPdf())])
-    await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
+    await $(`${activeSidebar} [data-slot='pages-add-files']`).click()
     await browser.waitUntil(async () =>
       browser
         .execute(
