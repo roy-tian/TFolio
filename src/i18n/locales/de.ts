@@ -484,6 +484,9 @@ const de = {
     movedNotice_other: "{{count}} Seiten vor Seite {{at}} verschoben",
     movedAtEndNotice_one: "1 Seite ans Ende verschoben",
     movedAtEndNotice_other: "{{count}} Seiten ans Ende verschoben",
+    selectPage: "Seite {{pageNumber}} auswählen",
+    rotateClockwise: "Im Uhrzeigersinn drehen",
+    rotateCounterclockwise: "Gegen den Uhrzeigersinn drehen",
   },
   organize: {
     modes: "Arbeitsbereich",
@@ -519,10 +522,7 @@ const de = {
     pagesFromFilesWithBlanks_other: "{{pages}} aus {{files}} (davon {{count}} leere Seiten)",
     pageLabel: "Seite {{pageNumber}} von {{name}}",
     blankPage: "Leere Seite",
-    selectPage: "Seite {{pageNumber}} auswählen",
     padding: "Leere Seite, damit die nächste Datei auf einer ungeraden Seite beginnt",
-    rotateClockwise: "Im Uhrzeigersinn drehen",
-    rotateCounterclockwise: "Gegen den Uhrzeigersinn drehen",
     delete: "Seiten löschen",
     smartPadding: "Jede Datei auf einer ungeraden Seite beginnen",
     normalizeA4: "Alle Seiten auf A4 einpassen",
@@ -577,6 +577,7 @@ const de = {
   sidebar: {
     show: "Seitenleiste einblenden",
     hide: "Seitenleiste ausblenden",
+    resize: "Breite der Seitenleiste ändern",
     panels: "Inhalt der Seitenleiste",
     bookmarks: "Lesezeichen",
     thumbnails: "Seiten",

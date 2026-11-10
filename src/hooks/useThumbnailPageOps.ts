@@ -53,6 +53,24 @@ export function useThumbnailPageOps({
     void annotations.deletePages(pages, pdfDocument.numPages)
   }
 
+  /** A page's own control: that page alone, whatever else is chosen. */
+  const deleteOnePage = (pageNumber: number) => {
+    if (!pdfDocument || editingBusy() || pdfDocument.numPages <= 1) {
+      return
+    }
+
+    void annotations.deletePages([pageNumber], pdfDocument.numPages)
+  }
+
+  /** A page's own control: that page alone, whatever else is chosen. */
+  const rotateOnePage = (pageNumber: number, degrees: 90 | 270) => {
+    if (!pdfDocument || editingBusy()) {
+      return
+    }
+
+    void annotations.rotatePages([pageNumber], degrees)
+  }
+
   const insertBlankPage = (index: number) => {
     if (!pdfDocument || editingBusy()) {
       return
@@ -150,12 +168,14 @@ export function useThumbnailPageOps({
   return {
     appendCarriedPages,
     canTakeCarriedPages,
+    deleteOnePage,
     deleteThumbnailPage,
     insertBlankPage,
     insertCarriedPages,
     menuThumbnailPage,
     pastePages,
     reorderPages,
+    rotateOnePage,
     rotateThumbnailPages,
   }
 }

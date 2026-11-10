@@ -210,9 +210,9 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
               </Button>
             </ToolbarTooltip>
             <ButtonGroup>
-              <ToolbarTooltip label={t("organize.rotateCounterclockwise")}>
+              <ToolbarTooltip label={t("pageEdit.rotateCounterclockwise")}>
                 <Button
-                  aria-label={t("organize.rotateCounterclockwise")}
+                  aria-label={t("pageEdit.rotateCounterclockwise")}
                   data-slot="organize-rotate-left"
                   disabled={busy || nothingChosen}
                   onClick={() => organize.rotateChosen(270)}
@@ -222,9 +222,9 @@ export const OrganizeWorkspace = memo(function OrganizeWorkspace({
                   <RotateCcw />
                 </Button>
               </ToolbarTooltip>
-              <ToolbarTooltip label={t("organize.rotateClockwise")}>
+              <ToolbarTooltip label={t("pageEdit.rotateClockwise")}>
                 <Button
-                  aria-label={t("organize.rotateClockwise")}
+                  aria-label={t("pageEdit.rotateClockwise")}
                   data-slot="organize-rotate"
                   disabled={busy || nothingChosen}
                   onClick={() => organize.rotateChosen(90)}

@@ -56,6 +56,9 @@ struct UiPreferences {
     sidebar: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sidebar_panel: Option<String>,
+    /// In CSS pixels; the frontend clamps it to the window it opens in.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    sidebar_width: Option<u32>,
     /// The organize thumbnails' long side in CSS pixels.
     #[serde(skip_serializing_if = "Option::is_none")]
     organize_thumbnail_size: Option<u32>,
@@ -65,27 +68,32 @@ struct UiPreferences {
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 struct OrganizePreferences {
-    #[serde(deserialize_with = "flag", skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     smart_padding: Option<bool>,
-    #[serde(deserialize_with = "flag", skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     normalize_a4: Option<bool>,
-    #[serde(deserialize_with = "flag", skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     bookmarks: Option<bool>,
 }
 
-/// A choice this version cannot read costs that choice alone, not the
-/// section: the three are independent, and the frontend falls back on each.
-fn flag<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
+/// A choice this version cannot read costs that choice alone, not its
+/// section: the frontend falls back on each, and a hand-edited file may carry
+/// any value.
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
     #[derive(Deserialize)]
     #[serde(untagged)]
-    enum Flag {
-        Set(bool),
+    enum Lenient<T> {
+        Set(T),
         Unreadable(IgnoredAny),
     }
 
-    Ok(match Flag::deserialize(deserializer)? {
-        Flag::Set(value) => Some(value),
-        Flag::Unreadable(_) => None,
+    Ok(match Lenient::deserialize(deserializer)? {
+        Lenient::Set(value) => Some(value),
+        Lenient::Unreadable(_) => None,
     })
 }
 
@@ -254,6 +262,7 @@ mod tests {
                 view_mode: None,
                 sidebar: Some("hidden".into()),
                 sidebar_panel: Some("bookmarks".into()),
+                sidebar_width: Some(420),
                 organize_thumbnail_size: Some(200),
             }),
             annotate: Some(AnnotatePreferences {
@@ -285,6 +294,7 @@ mod tests {
 
         let ui = read.ui.expect("the ui section should read back");
         assert_eq!(ui.theme.as_deref(), Some("dark"));
+        assert_eq!(ui.sidebar_width, Some(420));
         assert_eq!(ui.organize_thumbnail_size, Some(200));
         assert_eq!(
             read.annotate
@@ -392,6 +402,31 @@ mod tests {
 
         assert_eq!(sent.bookmarks, Some(false));
         assert_eq!(sent.smart_padding, None);
+    }
+
+    #[test]
+    fn an_unreadable_sidebar_width_costs_only_itself() {
+        let read = Settings::parse(
+            r#"
+            [ui]
+            language = "en"
+            sidebarWidth = "wide"
+            "#,
+        )
+        .ui
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(read.language.as_deref(), Some("en"));
+        assert_eq!(read.sidebar_width, None);
+
+        let sent = Settings::sent(&serde_json::json!({
+            "ui": { "sidebar": "shown", "sidebarWidth": -40 },
+        }))
+        .ui
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(sent.sidebar.as_deref(), Some("shown"));
+        assert_eq!(sent.sidebar_width, None);
     }
 
     #[test]

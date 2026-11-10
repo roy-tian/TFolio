@@ -484,6 +484,9 @@ const fr = {
     movedNotice_other: "{{count}} pages déplacées avant la page {{at}}",
     movedAtEndNotice_one: "{{count}} page déplacée à la fin",
     movedAtEndNotice_other: "{{count}} pages déplacées à la fin",
+    selectPage: "Sélectionner la page {{pageNumber}}",
+    rotateClockwise: "Faire pivoter vers la droite",
+    rotateCounterclockwise: "Faire pivoter vers la gauche",
   },
   organize: {
     modes: "Espace de travail",
@@ -519,10 +522,7 @@ const fr = {
     pagesFromFilesWithBlanks_other: "{{pages}} de {{files}} (dont {{count}} pages blanches)",
     pageLabel: "Page {{pageNumber}} de {{name}}",
     blankPage: "Page blanche",
-    selectPage: "Sélectionner la page {{pageNumber}}",
     padding: "Page blanche ajoutée pour que le fichier suivant commence sur une page impaire",
-    rotateClockwise: "Faire pivoter vers la droite",
-    rotateCounterclockwise: "Faire pivoter vers la gauche",
     delete: "Supprimer les pages",
     smartPadding: "Commencer chaque fichier sur une page impaire",
     normalizeA4: "Ajuster toutes les pages au format A4",
@@ -577,6 +577,7 @@ const fr = {
   sidebar: {
     show: "Afficher la barre latérale",
     hide: "Masquer la barre latérale",
+    resize: "Redimensionner la barre latérale",
     panels: "Contenu de la barre latérale",
     bookmarks: "Signets",
     thumbnails: "Pages",

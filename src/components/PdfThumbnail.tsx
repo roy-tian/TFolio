@@ -321,16 +321,15 @@ export function PdfThumbnail({
       )}
       data-cut={isCut ? "" : undefined}
     >
-      {frame ? (
-        <div
-          className="grid place-items-center"
-          style={{ height: frame.height, width: frame.width }}
-        >
-          {paperBox}
-        </div>
-      ) : (
-        paperBox
-      )}
+      {/* Always there, boxless without a frame: a sidebar widened into a grid
+          gives its previews one, and a new parent would remount the canvas,
+          losing the pixels already painted into it. */}
+      <div
+        className={frame ? "grid place-items-center" : "contents"}
+        style={frame ? { height: frame.height, width: frame.width } : undefined}
+      >
+        {paperBox}
+      </div>
       <span
         className={cn(
           "flex items-end gap-1 font-mono text-xs tabular-nums",

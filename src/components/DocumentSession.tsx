@@ -900,12 +900,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     })
 
     const {
+      deleteOnePage,
       deleteThumbnailPage,
       insertBlankPage,
       insertCarriedPages,
       menuThumbnailPage,
       pastePages,
       reorderPages,
+      rotateOnePage,
       rotateThumbnailPages,
     } = pageOps
 
@@ -1788,6 +1790,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               documentId={pdfDocument.id}
               onCopyPages={pageClipboard.copy}
               onCutPages={pageClipboard.cut}
+              onDeleteOnePage={deleteOnePage}
               onDeletePage={deleteThumbnailPage}
               isEditingNow={annotations.isStructureBusyNow}
               onFocusChange={setThumbnailsFocused}
@@ -1797,6 +1800,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onNavigate={navigateFromSidebar}
               onPastePages={pastePages}
               onReorderPages={reorderPages}
+              onRotatePage={rotateOnePage}
               onRotatePages={rotateThumbnailPages}
               // Stable across renders, unlike a wrapper, so the column's
               // memoised previews skip the session's every re-render.

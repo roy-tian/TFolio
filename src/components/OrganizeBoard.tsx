@@ -8,12 +8,8 @@ import {
 } from "react"
 import { useTranslation } from "react-i18next"
 
-import {
-  GroupSection,
-  PAGE_CONTROL,
-  type PaddingPage,
-  type PageActionHandler,
-} from "@/components/OrganizeGroupSection"
+import { GroupSection, type PaddingPage } from "@/components/OrganizeGroupSection"
+import { PAGE_CONTROL, type PageActionHandler } from "@/components/PageCardControls"
 import {
   landingBox,
   liftGhost,
@@ -465,9 +461,9 @@ export function OrganizeBoard({ organize, paperWidth, scrollRef }: OrganizeBoard
             data-organize-board
             // While files are added or assembled every edit is refused, as the
             // toolbar's disabled buttons say; the pages' own say so by hiding.
-            data-organize-busy={organize.adding || organize.assembling ? "" : undefined}
+            data-pages-busy={organize.adding || organize.assembling ? "" : undefined}
             // Pages under a dragged stack show none of their controls.
-            data-organize-dragging={drag !== null || ghost !== null ? "" : undefined}
+            data-pages-dragging={drag !== null || ghost !== null ? "" : undefined}
             onClick={(event) => {
               if (performance.now() - dragEndedAtRef.current < DRAG_CLICK_WINDOW) {
                 dragEndedAtRef.current = Number.NEGATIVE_INFINITY

@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react"
@@ -10,10 +11,13 @@ import {
 import {
   readStoredSidebarOpen,
   readStoredSidebarPanel,
+  readStoredSidebarWidth,
   sidebarDockMinWidth,
   sidebarMode,
+  sidebarReservedWidth,
   storeSidebarOpen,
   storeSidebarPanel,
+  storeSidebarWidth,
   type SidebarMode,
   type SidebarPanel,
 } from "@/lib/sidebar"
@@ -24,8 +28,19 @@ export type SidebarState = {
   dismiss: () => void
   mode: SidebarMode
   panel: SidebarPanel
+  /** The room the sidebar leaves the rest of the window, in CSS pixels. */
+  reserved: number
   setPanel: (panel: SidebarPanel) => void
+  /** Stores the width last set without storing. */
+  persistWidth: () => void
+  /** Settles a width the reader chose; null goes back to the opening width.
+      `persist: false` leaves the file alone until `persistWidth`, so a held
+      arrow key writes the settings once, not at the key's repeat rate. */
+  setWidth: (width: number | null, persist?: boolean) => void
   toggle: () => void
+  /** The reader's width before the window clamps it, or null for the
+      opening width. */
+  width: number | null
 }
 
 export const SidebarContext = createContext<SidebarState | null>(null)
@@ -60,6 +75,8 @@ export function useSidebarState(macOS: boolean): SidebarState {
   const docked = useMediaQuery(`(min-width: ${sidebarDockMinWidth(macOS)}px)`)
   const [open, setOpen] = useState(readStoredSidebarOpen)
   const [panel, setPanelState] = useState(readStoredSidebarPanel)
+  const [width, setWidthState] = useState(readStoredSidebarWidth)
+  const widthRef = useRef(width)
   // Never stored: a narrow window opens the sidebar over the pages only for
   // the moment it takes to pick one.
   const [peeking, setPeeking] = useState(false)
@@ -87,8 +104,21 @@ export function useSidebarState(macOS: boolean): SidebarState {
     storeSidebarPanel(next)
   }, [])
 
+  const setWidth = useCallback((next: number | null, persist = true) => {
+    widthRef.current = next
+    setWidthState(next)
+
+    if (persist) {
+      storeSidebarWidth(next)
+    }
+  }, [])
+
+  const persistWidth = useCallback(() => storeSidebarWidth(widthRef.current), [])
+
+  const reserved = sidebarReservedWidth(macOS, docked)
+
   return useMemo(
-    () => ({ dismiss, mode, panel, setPanel, toggle }),
-    [dismiss, mode, panel, setPanel, toggle],
+    () => ({ dismiss, mode, panel, persistWidth, reserved, setPanel, setWidth, toggle, width }),
+    [dismiss, mode, panel, persistWidth, reserved, setPanel, setWidth, toggle, width],
   )
 }

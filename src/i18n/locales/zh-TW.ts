@@ -479,6 +479,9 @@ const zhTW = {
     movedNotice_other: "已將 {{count}} 頁移到第 {{at}} 頁前",
     movedAtEndNotice_one: "已將 {{count}} 頁移到結尾",
     movedAtEndNotice_other: "已將 {{count}} 頁移到結尾",
+    selectPage: "選取第 {{pageNumber}} 頁",
+    rotateClockwise: "順時針旋轉",
+    rotateCounterclockwise: "逆時針旋轉",
   },
   organize: {
     modes: "工作區",
@@ -514,10 +517,7 @@ const zhTW = {
     pagesFromFilesWithBlanks_other: "共 {{pages}}，{{files}}（含 {{count}} 張空白頁）",
     pageLabel: "{{name}} 第 {{pageNumber}} 頁",
     blankPage: "空白頁",
-    selectPage: "選取第 {{pageNumber}} 頁",
     padding: "自動補上的空白頁，讓下一個檔案從奇數頁開始",
-    rotateClockwise: "順時針旋轉",
-    rotateCounterclockwise: "逆時針旋轉",
     delete: "刪除頁面",
     smartPadding: "每個檔案都從奇數頁開始",
     normalizeA4: "所有頁面統一為 A4",
@@ -572,6 +572,7 @@ const zhTW = {
   sidebar: {
     show: "顯示側欄",
     hide: "隱藏側欄",
+    resize: "調整側欄寬度",
     panels: "側欄內容",
     bookmarks: "書籤",
     thumbnails: "縮圖",

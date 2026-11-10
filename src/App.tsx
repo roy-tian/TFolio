@@ -76,6 +76,7 @@ import {
   type PdfDocumentInfo,
 } from "@/lib/pdf"
 import { isMacOS, isWindows } from "@/lib/platform"
+import { sidebarWidthStyle } from "@/lib/sidebar"
 import { cn } from "@/lib/utils"
 import { findOpenFile } from "@/lib/openFiles"
 import {
@@ -2410,7 +2411,12 @@ export default function App() {
   )
 
   const workspace = (
-    <div className="app-surface h-svh overflow-hidden" data-sidebar={sidebar.mode}>
+    <div
+      className="app-surface h-svh overflow-hidden"
+      data-sidebar={sidebar.mode}
+      data-sidebar-width={sidebar.width === null ? undefined : ""}
+      style={sidebarWidthStyle(sidebar.width, sidebar.reserved)}
+    >
       {homeActive && viewing ? (
         // The document tools — bookmarks, view mode — have no document to act
         // on here, so the home toolbar carries only what still works.

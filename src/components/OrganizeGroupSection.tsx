@@ -1,17 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
-import { Plus, RotateCcw, RotateCw, Trash2, type LucideIcon } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
+import { PageControls, type PageActionHandler } from "@/components/PageCardControls"
 import { DragHole } from "@/components/PageDragGhost"
-import {
-  PAPER_CONTROLS_HOST,
-  PAPER_CONTROLS_SHOWN,
-  PdfThumbnail,
-} from "@/components/PdfThumbnail"
+import { PAPER_CONTROLS_HOST, PdfThumbnail } from "@/components/PdfThumbnail"
 import { PageSignatureMark } from "@/components/SignatureBadge"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { isOutOfSight, prefersReducedMotion, TURN_MOTION } from "@/lib/motion"
 import type { OrganizeGroup, SourceMap } from "@/lib/organize"
@@ -25,22 +20,6 @@ const RETAIN_MARGIN = "1500px 0px"
 const COLUMN_GAP = 24
 
 const noop = () => {}
-
-/** A press or a click on a page's own controls is theirs: no drag, no choice
-    of page, and an insertion gap's empty white is not the page beside it. */
-export const PAGE_CONTROL = "[data-page-control]"
-
-export type PageAction =
-  | "toggle"
-  | "rotate-left"
-  | "rotate-right"
-  | "delete"
-  | "insert-before"
-  | "insert-after"
-
-/** `byKeyboard`: pressed from the keyboard, whose focus must land somewhere
-    if the page goes. */
-export type PageActionHandler = (key: number, action: PageAction, byKeyboard: boolean) => void
 
 type Frame = { height: number; width: number }
 
@@ -224,8 +203,8 @@ const SlotCell = memo(function SlotCell({
     <PageControls
       caption={caption}
       isSelected={isSelected}
+      itemKey={slotKey}
       onAction={onAction}
-      slotKey={slotKey}
     />
   ) : null
 
@@ -322,71 +301,6 @@ const SlotCell = memo(function SlotCell({
   )
 })
 
-/** A page's checkbox, in its top left corner, and its own bar along the
-    bottom; both show under the pointer, the checkbox also while it is ticked. */
-function PageControls({
-  caption,
-  isSelected,
-  onAction,
-  slotKey,
-}: {
-  caption: number
-  isSelected: boolean
-  onAction: PageActionHandler
-  slotKey: number
-}) {
-  const { t } = useTranslation()
-  const buttons: { action: PageAction; icon: LucideIcon; label: string }[] = [
-    { action: "rotate-left", icon: RotateCcw, label: t("organize.rotateCounterclockwise") },
-    { action: "rotate-right", icon: RotateCw, label: t("organize.rotateClockwise") },
-    { action: "delete", icon: Trash2, label: t("pageEdit.delete", { count: 1 }) },
-  ]
-
-  return (
-    <div
-      // Focus inside the controls shows them, not focus on the paper: WebKitGTK
-      // can keep a clicked paper `:focus-visible`, and its bar would stay up.
-      className="has-focus-visible:[--paper-controls:1] in-data-[organize-dragging]:hidden"
-      data-page-control
-    >
-      <Checkbox
-        aria-label={t("organize.selectPage", { pageNumber: caption })}
-        checked={isSelected}
-        className={cn(
-          // The paper is white in either theme, so the box keeps the light
-          // theme's colours; the dark theme's would vanish against it.
-          "absolute top-1.5 left-1.5 border-neutral-400 bg-white shadow-sm transition-opacity after:-inset-1 data-checked:border-neutral-900 data-checked:bg-neutral-900 data-checked:text-white dark:bg-white dark:data-checked:bg-neutral-900",
-          !isSelected && PAPER_CONTROLS_SHOWN,
-        )}
-        data-page-action="toggle"
-        onCheckedChange={() => onAction(slotKey, "toggle", false)}
-      />
-      <div
-        className={cn(
-          "absolute bottom-1.5 left-1/2 flex -translate-x-1/2 rounded-md border bg-background p-0.5 shadow-sm transition-opacity in-data-[organize-busy]:hidden",
-          PAPER_CONTROLS_SHOWN,
-        )}
-      >
-        {buttons.map(({ action, icon: Icon, label }) => (
-          <HintTooltip key={action} label={label}>
-            <Button
-              aria-label={label}
-              className={cn(action === "delete" && "hover:text-destructive")}
-              data-page-action={action}
-              // A click the keyboard made counts no presses.
-              onClick={(event) => onAction(slotKey, action, event.detail === 0)}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <Icon />
-            </Button>
-          </HintTooltip>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /**
  * The white between two pages: under the pointer it shows a line and a +
  * that inserts a blank page there. Only the + acts; a click on the white
@@ -416,7 +330,7 @@ function InsertZone({
 }) {
   return (
     <div
-      className="absolute top-0 z-10 [--zone-shown:0] hover:[--zone-shown:1] has-focus-visible:[--zone-shown:1] in-data-[organize-busy]:hidden in-data-[organize-dragging]:hidden"
+      className="absolute top-0 z-10 [--zone-shown:0] hover:[--zone-shown:1] has-focus-visible:[--zone-shown:1] in-data-[pages-busy]:hidden in-data-[pages-dragging]:hidden"
       data-insert-zone={action}
       data-page-control
       style={{ height, left, width }}

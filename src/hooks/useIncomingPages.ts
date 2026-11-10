@@ -3,7 +3,13 @@ import { useEffect, useRef, useState, type RefObject } from "react"
 import { landingBox } from "@/components/PageDragGhost"
 import { usePageCarryContext, type CarryLanding } from "@/hooks/usePageCarry"
 import type { CarriedPages, Point } from "@/lib/pageCarry"
-import { besideColumn, columnEdgeStep, columnLanding } from "@/lib/pageDrag"
+import {
+  besideColumn,
+  columnEdgeStep,
+  flowCells,
+  flowLanding,
+  pointInColumn,
+} from "@/lib/pageDrag"
 import type { PdfPageInfo } from "@/lib/pdf"
 
 /** Flip keys of the holes another document's pages are about to fill: strings,
@@ -26,7 +32,7 @@ export type IncomingPages = {
 }
 
 type UseIncomingPagesOptions = {
-  /** The positioned list of rows, every `[data-flip-key]` a child of it. */
+  /** The positioned flow of cells, every `[data-flip-key]` a child of it. */
   columnRef: RefObject<HTMLElement | null>
   documentId: number
   /** Null where the document cannot take the pages now; else settles on
@@ -85,16 +91,9 @@ export function useIncomingPages({
       }
 
       const at = besideColumn(point.x, view.getBoundingClientRect())
-        ? columnLanding(
-            point.y - column.getBoundingClientRect().top,
-            Array.from(
-              column.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"),
-              (row) => ({
-                height: row.offsetHeight,
-                moving: row.dataset.flipKey!.startsWith(CARRY_KEY),
-                top: row.offsetTop,
-              }),
-            ),
+        ? flowLanding(
+            pointInColumn(column, point),
+            flowCells(column, (key) => key.startsWith(CARRY_KEY)),
             current?.basis === basis ? current.at : null,
           )
         : null

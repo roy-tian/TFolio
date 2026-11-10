@@ -10,6 +10,7 @@ export type Settings = {
     viewMode?: unknown
     sidebar?: unknown
     sidebarPanel?: unknown
+    sidebarWidth?: unknown
     organizeThumbnailSize?: unknown
   }
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }

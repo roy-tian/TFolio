@@ -238,3 +238,53 @@ export function flowCellAt(
 
   return null
 }
+
+/**
+ * `columnLanding` for any flow of cells: down a column by rows, across a grid
+ * by cells, placed before or after the cell under the pointer by its middle.
+ * A column is a flow whose every cell starts below the one before it; its
+ * rows can differ in width, a portrait page beside a landscape one.
+ */
+export function flowLanding(
+  point: { x: number; y: number },
+  cells: (Box & { moving: boolean })[],
+  current: number | null,
+): number | null {
+  const column = cells.every(
+    (cell, index) =>
+      index === 0 || cell.top >= cells[index - 1]!.top + cells[index - 1]!.height,
+  )
+
+  if (column) {
+    return columnLanding(point.y, cells, current)
+  }
+
+  const hit = flowCellAt(point, cells)
+
+  if (!hit || cells[hit.index]!.moving) {
+    return current
+  }
+
+  const staying = cells.slice(0, hit.index).filter((cell) => !cell.moving).length
+
+  return hit.after ? staying + 1 : staying
+}
+
+/** A flow's cells as laid out now, read off its `[data-flip-key]` children
+    against the positioned flow itself. */
+export function flowCells(flow: HTMLElement, moving: (key: string) => boolean) {
+  return Array.from(flow.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"), (cell) => ({
+    height: cell.offsetHeight,
+    left: cell.offsetLeft,
+    moving: moving(cell.dataset.flipKey!),
+    top: cell.offsetTop,
+    width: cell.offsetWidth,
+  }))
+}
+
+/** A point on the screen in the flow's own space, where `flowCells` stand. */
+export function pointInColumn(flow: HTMLElement, point: { x: number; y: number }) {
+  const box = flow.getBoundingClientRect()
+
+  return { x: point.x - box.left, y: point.y - box.top }
+}

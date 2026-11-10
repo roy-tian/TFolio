@@ -462,6 +462,9 @@ const zhCN = {
     movedNotice_other: "已移动 {{count}} 页到第 {{at}} 页前",
     movedAtEndNotice_one: "已移动 {{count}} 页到末尾",
     movedAtEndNotice_other: "已移动 {{count}} 页到末尾",
+    selectPage: "选择第 {{pageNumber}} 页",
+    rotateClockwise: "顺时针旋转",
+    rotateCounterclockwise: "逆时针旋转",
   },
   organize: {
     modes: "工作区",
@@ -497,10 +500,7 @@ const zhCN = {
     pagesFromFilesWithBlanks_other: "共 {{pages}}，{{files}}（含 {{count}} 张空白页）",
     pageLabel: "{{name}} 第 {{pageNumber}} 页",
     blankPage: "空白页",
-    selectPage: "选择第 {{pageNumber}} 页",
     padding: "自动补的空白页，让下一个文件从奇数页开始",
-    rotateClockwise: "顺时针旋转",
-    rotateCounterclockwise: "逆时针旋转",
     delete: "删除页面",
     smartPadding: "每个文件都从奇数页开始",
     normalizeA4: "所有页面统一为 A4",
@@ -555,6 +555,7 @@ const zhCN = {
   sidebar: {
     show: "显示侧栏",
     hide: "隐藏侧栏",
+    resize: "调整侧栏宽度",
     panels: "侧栏内容",
     bookmarks: "书签",
     thumbnails: "缩略图",

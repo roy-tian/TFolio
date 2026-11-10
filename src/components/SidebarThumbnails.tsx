@@ -11,6 +11,7 @@ import { Layers } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import { PageControls, type PageActionHandler } from "@/components/PageCardControls"
 import {
   DragHole,
   landingBox,
@@ -34,15 +35,18 @@ import { stripSpotAt, type CarriedPages } from "@/lib/pageCarry"
 import {
   besideColumn,
   columnEdgeStep,
-  columnLanding,
   exceedsDragThreshold,
+  flowCells,
+  flowLanding,
   orderWithBlockAt,
+  pointInColumn,
 } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
+import { THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
-import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
+import { THUMBNAIL_CAPTION_HEIGHT, THUMBNAIL_WIDTH, thumbnailPaper } from "@/lib/viewMode"
 
 // A column shows a handful of pages; keeping pixels further out than a few
 // screens would hold a long document's every preview for one scroll through.
@@ -50,6 +54,13 @@ const RETAIN_MARGIN = "1500px 0px"
 // The click a drag ends on belongs to the drag; one later than this is a choice.
 const DRAG_CLICK_GRACE_MS = 300
 const NO_HOLES: ReadonlySet<number> = new Set()
+
+/** Square cells as wide as a paper's long side, once a widened sidebar fits two:
+    portrait and landscape pages then line up in rows, and a turn moves no other
+    page. One column keeps each paper its own size, as it always has. */
+function gridFrame(columns: number) {
+  return columns > 1 ? THUMBNAIL_WIDTH : null
+}
 
 type ColumnDrag = {
   /** The page list the drag was measured against: an edit landing under it
@@ -73,6 +84,8 @@ type SidebarThumbnailsProps = {
   onCutPages: () => void
   /** On a chosen page, the whole choice goes with it. */
   onDeletePage: (pageNumber: number) => void
+  /** A page's own delete control: that page alone, chosen or not. */
+  onDeleteOnePage: (pageNumber: number) => void
   /** Whether focus is in the column: the clipboard keys are its only then. */
   onFocusChange: (focused: boolean) => void
   /** The page a blank goes in front of, 1-based; one past the last appends. */
@@ -90,6 +103,8 @@ type SidebarThumbnailsProps = {
   /** Settles once the reorder has landed or been refused: the column holds
       the dropped order until then, rather than flash the old one. */
   onReorderPages: (order: number[]) => Promise<unknown>
+  /** A page's own turn control: that page alone, chosen or not. */
+  onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
   onRotatePages: (degrees: 90 | 270) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   pages: PdfPageInfo[]
@@ -113,6 +128,7 @@ export function SidebarThumbnails({
   onCopyPages,
   onCutPages,
   onDeletePage,
+  onDeleteOnePage,
   isEditingNow,
   onFocusChange,
   onInsertBlankPage,
@@ -121,6 +137,7 @@ export function SidebarThumbnails({
   onNavigate,
   onPastePages,
   onReorderPages,
+  onRotatePage,
   onRotatePages,
   onSelectPage,
   pages,
@@ -178,6 +195,8 @@ export function SidebarThumbnails({
   const isEditingRef = useRef(isEditingNow)
   // A column gone before its ghost is down still lets the taker's holes close.
   const pendingLandedRef = useRef<(() => void) | undefined>(undefined)
+  const [columns, setColumns] = useState(1)
+  const frame = gridFrame(columns)
   const numPages = pages.length
   const { prime } = useFlipLayout(
     columnRef,
@@ -203,6 +222,63 @@ export function SidebarThumbnails({
   pagesRef.current = pages
   keysRef.current = thumbnailKeys
   isEditingRef.current = isEditingNow
+
+  // Every width the reader drags the sidebar to, not only the window's.
+  useLayoutEffect(() => {
+    const list = listRef.current
+
+    if (!list) {
+      return
+    }
+
+    const fit = (width: number) => {
+      // A background tab's column has no box; it keeps the columns it had.
+      if (width > 0) {
+        setColumns(thumbnailColumns(width, THUMBNAIL_WIDTH))
+      }
+    }
+    const observer = new ResizeObserver(([entry]) => fit(entry?.contentRect.width ?? 0))
+    const style = getComputedStyle(list)
+
+    // Before the first paint too: the observer's first report lands a frame
+    // late, which would show a stored wide sidebar as one column first.
+    fit(list.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight))
+    observer.observe(list)
+
+    return () => observer.disconnect()
+  }, [])
+
+  // One page's own controls act on that page alone. Read through a ref, so the
+  // memoised previews keep one handler across the session's every render.
+  const actionsRef = useRef({ onDeleteOnePage, onRotatePage, onSelectPage })
+
+  actionsRef.current = { onDeleteOnePage, onRotatePage, onSelectPage }
+
+  const act = useCallback<PageActionHandler>((pageNumber, action) => {
+    const actions = actionsRef.current
+
+    switch (action) {
+      case "toggle":
+        actions.onSelectPage(pageNumber, { range: false, toggle: true })
+        break
+      case "rotate-left":
+        actions.onRotatePage(pageNumber, 270)
+        break
+      case "rotate-right":
+        actions.onRotatePage(pageNumber, 90)
+        break
+      case "delete":
+        // The control leaves with its page, and a removed element fires no
+        // blur: the column keeps the focus, and with it the page keys. A click
+        // focuses the control too, except in WebKit on macOS.
+        if (listRef.current?.contains(document.activeElement)) {
+          listRef.current?.focus({ preventScroll: true })
+        }
+
+        actions.onDeleteOnePage(pageNumber)
+        break
+    }
+  }, [])
 
   // A column unmounted with focus in it (an overlay dismissed, the sidebar
   // hidden) fires no blur, which would leave the clipboard keys on the pages.
@@ -354,17 +430,10 @@ export function SidebarThumbnails({
 
       const next =
         home && pagesRef.current === basis
-          ? columnLanding(
-              point.y - column.getBoundingClientRect().top,
-              // Rows only: a page leaving fades among them, keyless.
-              Array.from(
-                column.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"),
-                (row) => ({
-                  height: row.offsetHeight,
-                  moving: movingKeys.has(row.dataset.flipKey!),
-                  top: row.offsetTop,
-                }),
-              ),
+          ? flowLanding(
+              pointInColumn(column, point),
+              // Cells only: a page leaving fades among them, keyless.
+              flowCells(column, (key) => movingKeys.has(key)),
               at,
             )
           : null
@@ -527,7 +596,13 @@ export function SidebarThumbnails({
   }
 
   return (
-    <div className="relative h-full" data-sidebar-pages>
+    <div
+      className="relative h-full"
+      // Pages under a stack in hand, this column's or another tab's, show none
+      // of their controls.
+      data-pages-dragging={drag !== null || ghost !== null || incoming !== null ? "" : undefined}
+      data-sidebar-pages
+    >
       <ContextMenu
         onOpenChange={(open) => {
           if (!open) {
@@ -551,9 +626,10 @@ export function SidebarThumbnails({
                 }
               }}
               onContextMenu={(event) => {
-                const paper = (event.target as Element).closest<HTMLElement>(
-                  "[data-thumbnail-page]",
-                )
+                // A press on a page's own controls means that page too.
+                const paper = (event.target as Element)
+                  .closest("[data-flip-key]")
+                  ?.querySelector<HTMLElement>("[data-thumbnail-page]")
 
                 // Only a page has a menu; elsewhere the WebView's own stays away.
                 if (!paper) {
@@ -590,13 +666,31 @@ export function SidebarThumbnails({
             />
           }
         >
-          {/* Positioned: the slides read each row's place off it. */}
-          <ol className="relative flex flex-col items-center gap-3" ref={columnRef}>
+          {/* Positioned: the slides read each cell's place off it. As wide as
+              its columns, so a short last row starts at the left. */}
+          <ol
+            className={cn(
+              "relative flex",
+              frame === null ? "flex-col items-center gap-3" : "mx-auto flex-wrap",
+            )}
+            data-thumbnail-columns={columns}
+            ref={columnRef}
+            style={
+              frame === null
+                ? undefined
+                : {
+                    columnGap: THUMBNAIL_GRID_GAP,
+                    rowGap: THUMBNAIL_GRID_GAP,
+                    width: columns * frame + (columns - 1) * THUMBNAIL_GRID_GAP,
+                  }
+            }
+          >
             {/* Flat, so each preview keeps its key among the column's rows. */}
             {[...order, null].flatMap((pageNumber, index) => {
               const holesHere =
                 index === incomingAt ? (
                   <CarriedHoles
+                    frame={frame}
                     key={CARRY_KEY}
                     rotation={viewRotation}
                     sizes={incoming!.carried.sizes}
@@ -618,14 +712,18 @@ export function SidebarThumbnails({
                   // Where the page stands in a drag's preview, as it will once
                   // the pages land.
                   caption={index + 1 + carriedAhead}
+                  // A document keeps one page; the backend refuses a delete of them all.
+                  deleteDisabled={numPages <= 1}
                   documentId={documentId}
                   flipKey={key}
+                  frame={frame}
                   hole={holes.has(key) || arrived.has(key)}
                   intrinsicRotation={page.rotation}
                   isCurrent={current === pageNumber}
                   isCut={cutPages.has(pageNumber)}
                   isSelected={selectedPages.has(pageNumber)}
                   key={key}
+                  onAction={act}
                   onNavigate={onNavigate}
                   onSelect={select}
                   pageHeight={page.height}
@@ -707,9 +805,11 @@ function PagesDropTarget() {
     every page; a fragment, so each is a row of the column's own. Turned as
     this view turns its pages, which the copies take on, not as the source's. */
 function CarriedHoles({
+  frame,
   rotation,
   sizes,
 }: {
+  frame: number | null
   rotation: number
   sizes: CarriedPages["sizes"]
 }) {
@@ -720,11 +820,15 @@ function CarriedHoles({
       <li className="relative" data-flip-key={`${CARRY_KEY}${index}`} key={index}>
         <div
           style={{
-            height: `calc(${paper.height}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
-            width: paper.width,
+            height: `calc(${frame ?? paper.height}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
+            width: frame ?? paper.width,
           }}
         />
-        <DragHole height={paper.height} width={paper.width} />
+        <DragHole
+          height={paper.height}
+          top={frame === null ? 0 : (frame - paper.height) / 2}
+          width={paper.width}
+        />
       </li>
     )
   })
@@ -734,13 +838,16 @@ function CarriedHoles({
     two previews it moves between, not the column. */
 const SidebarThumbnail = memo(function SidebarThumbnail({
   caption,
+  deleteDisabled,
   documentId,
   flipKey,
+  frame,
   hole,
   intrinsicRotation,
   isCurrent,
   isCut,
   isSelected,
+  onAction,
   onNavigate,
   onSelect,
   pageHeight,
@@ -752,14 +859,18 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
   signed,
 }: {
   caption: number
+  deleteDisabled: boolean
   documentId: number
   flipKey: number
+  /** The square cell of a widened sidebar's grid, or null down one column. */
+  frame: number | null
   /** The page is in hand: its place shows where it will land. */
   hole: boolean
   intrinsicRotation: number
   isCurrent: boolean
   isCut: boolean
   isSelected: boolean
+  onAction: PageActionHandler
   onNavigate: (pageNumber: number) => void
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
   pageHeight: number
@@ -772,16 +883,45 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
 }) {
   const itemRef = useRef<HTMLLIElement>(null)
   const nearView = useNearViewport(itemRef, RETAIN_MARGIN)
+  // A focused control stays however far the column scrolls from it: unmounting
+  // it would drop keyboard focus back to the start of the document.
+  const [focusWithin, setFocusWithin] = useState(false)
   const paper = thumbnailPaper(dimensionsForRotation(rotation, pageWidth, pageHeight))
+  // Each control carries a tooltip; hundreds would slow every selection.
+  const showControls = nearView || focusWithin
+
+  // A control hidden or removed under focus may send no blur. Check again as
+  // the page leaves the view, where a stale flag would keep its controls.
+  useEffect(() => {
+    if (!nearView && focusWithin && !itemRef.current?.contains(document.activeElement)) {
+      setFocusWithin(false)
+    }
+  }, [focusWithin, nearView])
 
   return (
-    <li className="relative" data-flip-key={flipKey} ref={itemRef}>
+    <li
+      className="relative"
+      data-flip-key={flipKey}
+      onBlur={(event) => {
+        // Leaving the window blurs with no `relatedTarget` but keeps
+        // `activeElement`, and focus comes back to the same control.
+        if (
+          !event.currentTarget.contains(event.relatedTarget) &&
+          !event.currentTarget.contains(document.activeElement)
+        ) {
+          setFocusWithin(false)
+        }
+      }}
+      onFocus={() => setFocusWithin(true)}
+      ref={itemRef}
+    >
       {/* Faded rather than hidden: a hidden button would give up its focus,
           and the column's keys with it. */}
       <div className={cn(hole && "opacity-0")}>
         <PdfThumbnail
           caption={caption}
           documentId={documentId}
+          frame={frame === null ? undefined : { height: frame, width: frame }}
           intrinsicRotation={intrinsicRotation}
           isCurrent={isCurrent}
           isCut={isCut}
@@ -789,6 +929,17 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
           mark={signed ? <PageSignatureMark /> : undefined}
           onOpen={onNavigate}
           onSelect={onSelect}
+          overlay={
+            showControls ? (
+              <PageControls
+                caption={caption}
+                deleteDisabled={deleteDisabled}
+                isSelected={isSelected}
+                itemKey={pageNumber}
+                onAction={onAction}
+              />
+            ) : null
+          }
           pageHeight={pageHeight}
           pageNumber={pageNumber}
           pageWidth={pageWidth}
@@ -800,7 +951,13 @@ const SidebarThumbnail = memo(function SidebarThumbnail({
           surface="sidebar"
         />
       </div>
-      {hole ? <DragHole height={paper.height} width={paper.width} /> : null}
+      {hole ? (
+        <DragHole
+          height={paper.height}
+          top={frame === null ? 0 : (frame - paper.height) / 2}
+          width={paper.width}
+        />
+      ) : null}
     </li>
   )
 })

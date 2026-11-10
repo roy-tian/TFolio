@@ -482,6 +482,9 @@ const th = {
     movedNotice_other: "ย้าย {{count}} หน้าไปไว้ก่อนหน้าที่ {{at}} แล้ว",
     movedAtEndNotice_one: "ย้าย {{count}} หน้าไปไว้ที่ท้ายเอกสารแล้ว",
     movedAtEndNotice_other: "ย้าย {{count}} หน้าไปไว้ที่ท้ายเอกสารแล้ว",
+    selectPage: "เลือกหน้าที่ {{pageNumber}}",
+    rotateClockwise: "หมุนตามเข็มนาฬิกา",
+    rotateCounterclockwise: "หมุนทวนเข็มนาฬิกา",
   },
   organize: {
     modes: "พื้นที่ทำงาน",
@@ -517,10 +520,7 @@ const th = {
     pagesFromFilesWithBlanks_other: "รวม {{pages}} จาก {{files}} (รวมหน้าว่าง {{count}} หน้า)",
     pageLabel: "หน้า {{pageNumber}} ของ {{name}}",
     blankPage: "หน้าว่าง",
-    selectPage: "เลือกหน้าที่ {{pageNumber}}",
     padding: "หน้าว่างที่เพิ่มให้ไฟล์ถัดไปเริ่มที่หน้าคี่",
-    rotateClockwise: "หมุนตามเข็มนาฬิกา",
-    rotateCounterclockwise: "หมุนทวนเข็มนาฬิกา",
     delete: "ลบหน้า",
     smartPadding: "ให้ทุกไฟล์เริ่มที่หน้าคี่",
     normalizeA4: "ปรับทุกหน้าเป็น A4",
@@ -575,6 +575,7 @@ const th = {
   sidebar: {
     show: "แสดงแถบด้านข้าง",
     hide: "ซ่อนแถบด้านข้าง",
+    resize: "ปรับความกว้างแถบด้านข้าง",
     panels: "เนื้อหาแถบด้านข้าง",
     bookmarks: "บุ๊กมาร์ก",
     thumbnails: "หน้า",

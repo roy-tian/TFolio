@@ -7,6 +7,7 @@ import {
   dropGapForRow,
   exceedsDragThreshold,
   flowCellAt,
+  flowLanding,
   indexAfterMove,
   movesNothing,
   orderAfterMove,
@@ -199,5 +200,51 @@ describe("flowCellAt", () => {
 
   it("has nothing to answer in an empty flow", () => {
     expect(flowCellAt({ x: 0, y: 0 }, [])).toBeNull()
+  })
+})
+
+describe("flowLanding", () => {
+  const cell = (left: number, top: number, moving = false) => ({
+    height: 180,
+    left,
+    moving,
+    top,
+    width: 160,
+  })
+
+  it("reads a centred column of mixed widths by rows, not by its lefts", () => {
+    const column = [
+      { height: 182, left: 24, moving: false, top: 0, width: 113 },
+      { height: 135, left: 0, moving: false, top: 194, width: 160 },
+      { height: 182, left: 24, moving: false, top: 341, width: 113 },
+    ]
+
+    expect(flowLanding({ x: 150, y: 20 }, column, null)).toBe(0)
+    expect(flowLanding({ x: 5, y: 300 }, column, null)).toBe(2)
+    expect(flowLanding({ x: 5, y: 900 }, column, null)).toBe(3)
+  })
+
+  it("lands a grid's block before or after the cell under the pointer", () => {
+    // Two rows of three, the second page in hand.
+    const grid = [
+      cell(0, 0),
+      cell(172, 0, true),
+      cell(344, 0),
+      cell(0, 192),
+      cell(172, 192),
+      cell(344, 192),
+    ]
+
+    expect(flowLanding({ x: 20, y: 40 }, grid, null)).toBe(0)
+    expect(flowLanding({ x: 150, y: 40 }, grid, null)).toBe(1)
+    expect(flowLanding({ x: 300, y: 260 }, grid, null)).toBe(4)
+    expect(flowLanding({ x: 480, y: 260 }, grid, null)).toBe(5)
+  })
+
+  it("keeps the landing still over the block's own holes", () => {
+    const grid = [cell(0, 0), cell(172, 0, true), cell(344, 0)]
+
+    expect(flowLanding({ x: 250, y: 40 }, grid, 2)).toBe(2)
+    expect(flowLanding({ x: 250, y: 40 }, grid, null)).toBeNull()
   })
 })

@@ -481,6 +481,9 @@ const en = {
     movedNotice_other: "{{count}} pages moved before page {{at}}",
     movedAtEndNotice_one: "1 page moved to the end",
     movedAtEndNotice_other: "{{count}} pages moved to the end",
+    selectPage: "Select page {{pageNumber}}",
+    rotateClockwise: "Rotate clockwise",
+    rotateCounterclockwise: "Rotate counterclockwise",
   },
   organize: {
     modes: "Workspace",
@@ -516,10 +519,7 @@ const en = {
     pagesFromFilesWithBlanks_other: "{{pages}} from {{files}} (including {{count}} blank pages)",
     pageLabel: "Page {{pageNumber}} of {{name}}",
     blankPage: "Blank page",
-    selectPage: "Select page {{pageNumber}}",
     padding: "A blank page added so the next file starts on an odd page",
-    rotateClockwise: "Rotate clockwise",
-    rotateCounterclockwise: "Rotate counterclockwise",
     delete: "Delete pages",
     smartPadding: "Start every file on an odd page",
     normalizeA4: "Fit every page to A4",
@@ -574,6 +574,7 @@ const en = {
   sidebar: {
     show: "Show sidebar",
     hide: "Hide sidebar",
+    resize: "Resize sidebar",
     panels: "Sidebar contents",
     bookmarks: "Bookmarks",
     thumbnails: "Pages",
