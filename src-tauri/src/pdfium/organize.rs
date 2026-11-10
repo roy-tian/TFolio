@@ -7,7 +7,10 @@ use tauri::{
     ipc::{Channel, Response},
     AppHandle, Manager, State, WebviewWindow,
 };
-use tfolio_engine::{AssemblePlan, OrganizeSourceInfo, PdfDocumentInfo, WatermarkConfig};
+use tfolio_engine::{
+    AssemblePlan, OrganizeSourceInfo, PdfDocumentInfo, PdfStructureUpdate, SignatureDecision,
+    WatermarkConfig,
+};
 
 #[cfg(not(feature = "e2e"))]
 use super::commands::ensure_approved;
@@ -42,6 +45,78 @@ pub async fn add_organize_sources(
     tauri::async_runtime::spawn_blocking(move || engine.add_organize_sources(&label, paths, word))
         .await
         .map_err(|error| format!("PDFium source task failed: {error}"))?
+}
+
+/// Files `add_organize_sources` read, added to a document of this window as
+/// files of its own: the sources are this window's, and so must the document be.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn insert_pdf_files(
+    document_id: u64,
+    source_ids: Vec<u64>,
+    index: i32,
+    own_title: String,
+    per_file_bookmarks: bool,
+    signatures: Option<SignatureDecision>,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfStructureUpdate, String> {
+    if !owners.owns(document_id, window.label()) {
+        return Err("this window does not hold that document".into());
+    }
+
+    let engine = Arc::clone(&state.engine);
+    let label = window.label().to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.insert_organize_sources(
+            &label,
+            document_id,
+            &source_ids,
+            index,
+            &own_title,
+            per_file_bookmarks,
+            signatures,
+        )
+    })
+    .await
+    .map_err(|error| format!("PDFium file insertion task failed: {error}"))?
+}
+
+/// Sources read for files that were never added after all; only this
+/// window's are let go.
+#[tauri::command]
+pub async fn release_organize_sources(
+    source_ids: Vec<u64>,
+    state: State<'_, PdfiumState>,
+    window: WebviewWindow,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.engine);
+    let label = window.label().to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.release_organize_sources(&label, &source_ids)
+    })
+    .await
+    .map_err(|error| format!("PDFium release task failed: {error}"))
+}
+
+/// The name a file of the document goes by, and its bookmark in a Save As.
+#[tauri::command]
+pub async fn rename_pdf_section(
+    document_id: u64,
+    section_id: u64,
+    title: String,
+    state: State<'_, PdfiumState>,
+) -> Result<PdfStructureUpdate, String> {
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.rename_section(document_id, section_id, &title)
+    })
+    .await
+    .map_err(|error| format!("PDFium rename task failed: {error}"))?
 }
 
 /// Only the asking window's sources: the engine refuses another's id.

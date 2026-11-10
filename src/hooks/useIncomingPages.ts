@@ -37,7 +37,7 @@ type UseIncomingPagesOptions = {
   documentId: number
   /** Null where the document cannot take the pages now; else settles on
       whether they landed. */
-  onInsert: (carried: CarriedPages, index: number) => Promise<boolean> | null
+  onInsert: (carried: CarriedPages, index: number, point: Point) => Promise<boolean> | null
   pages: PdfPageInfo[]
   /** The layout's places before the holes first open, for the rows to slide. */
   prime: () => void
@@ -142,7 +142,7 @@ export function useIncomingPages({
         const current = incomingRef.current
         const settled =
           current && current.at !== null && current.basis === pagesRef.current
-            ? insertRef.current(carried, current.at + 1)
+            ? insertRef.current(carried, current.at + 1, at)
             : null
 
         if (!current || !settled) {

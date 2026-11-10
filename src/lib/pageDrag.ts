@@ -288,3 +288,26 @@ export function pointInColumn(flow: HTMLElement, point: { x: number; y: number }
 
   return { x: point.x - box.left, y: point.y - box.top }
 }
+
+/** The box a point is over, or else the one nearest it: what a drop between
+    two files' pages is taken to be beside. -1 for no boxes at all. */
+export function nearestBox(
+  point: { x: number; y: number },
+  boxes: readonly { height: number; left: number; top: number; width: number }[],
+): number {
+  let nearest = -1
+  let best = Number.POSITIVE_INFINITY
+
+  boxes.forEach((box, index) => {
+    const dx = Math.max(box.left - point.x, 0, point.x - (box.left + box.width))
+    const dy = Math.max(box.top - point.y, 0, point.y - (box.top + box.height))
+    const distance = Math.hypot(dx, dy)
+
+    if (distance < best) {
+      best = distance
+      nearest = index
+    }
+  })
+
+  return nearest
+}

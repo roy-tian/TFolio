@@ -593,6 +593,26 @@ export default function App() {
     [loadSource, notices, replaceTabs],
   )
 
+  // A document other files were added to was saved as a file of its own: the
+  // tab shows that file as a reopen would, one file whose bookmarks name the
+  // parts. The old document goes with its history, as the reader agreed.
+  const reopenCombinedTab = useCallback(
+    (documentId: number) => {
+      void runOpenBatch(async () => {
+        const batch: OpenBatch = { wordAvailable: null, wordStopped: false }
+        // A tab closed while the file was read stays closed.
+        const reopened = await reloadTab(documentId, batch, () =>
+          Promise.resolve(tabsRef.current.some((tab) => tab.id === documentId)),
+        )
+
+        if (reopened.error && mountedRef.current) {
+          notices.raise({ kind: reopened.error, owner: workspaceOwner })
+        }
+      })
+    },
+    [notices, reloadTab, runOpenBatch],
+  )
+
   const tabHasUnsavedWork = useCallback(
     (documentId: number) =>
       sessionRefs.current.get(documentId)?.hasUnsavedWorkNow() ??
@@ -984,13 +1004,32 @@ export default function App() {
     activeTab: activeFillTab,
     findTab: findFillTab,
     modeRef: workspaceModeRef,
-    notices,
     organize: organizeRef,
     revision: fileRevision,
     session: sessionHandle,
     setMode: setWorkspaceMode,
   })
-  const { canMergeDrop, enterOrganize, mergeDrop } = organizeFill
+  const { enterOrganize } = organizeFill
+
+  // Only files a document can take its pages from; anything else is said to be
+  // no such file, rather than opened as a tab the reader did not drop it as.
+  const addDroppedFiles = useCallback(
+    (paths: string[]) => {
+      const sources = paths.filter((path) => isSourcePath(path, wordConversionAvailable()))
+
+      if (sources.length === 0) {
+        notices.raise({ kind: "invalidFile", owner: workspaceOwner })
+        return
+      }
+
+      const shown = activeIdRef.current
+
+      if (shown !== HOME_TAB_ID) {
+        sessionRefs.current.get(shown)?.addFiles(sources)
+      }
+    },
+    [notices],
+  )
   const hasUnsavedWorkNow = useCallback(
     () =>
       organizeRef.current.hasUnsavedWorkNow() ||
@@ -1961,10 +2000,14 @@ export default function App() {
     // nothing to open: left alone rather than met with a drop target and an error.
     let namesNoFile = false
     const windows = isWindows()
-    // The viewer's sidebar pages are a target of their own while the shown tab
-    // has a file to combine the dropped ones with.
+    // The viewer's sidebar pages are a target of their own while a document
+    // shows: files let go there are added to it.
     const pagesDropAt = (position: { x: number; y: number }): PagesDrop => {
-      if (workspaceModeRef.current !== "view" || !canMergeDrop() || !sidebarPagesShown()) {
+      if (
+        workspaceModeRef.current !== "view" ||
+        activeIdRef.current === HOME_TAB_ID ||
+        !sidebarPagesShown()
+      ) {
         return null
       }
 
@@ -1997,7 +2040,7 @@ export default function App() {
           if (workspaceModeRef.current === "organize") {
             organizeDrop(event.payload.paths)
           } else if (pagesDropAt(event.payload.position) === "over") {
-            void mergeDrop(event.payload.paths)
+            addDroppedFiles(event.payload.paths)
           } else {
             void openPaths(event.payload.paths, "first")
           }
@@ -2027,7 +2070,7 @@ export default function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [canMergeDrop, mergeDrop, openPaths, organizeDrop])
+  }, [addDroppedFiles, openPaths, organizeDrop])
 
   // A double-clicked file reaches the app before this workspace exists, so
   // Rust holds it: the event carries no paths, only that a take will find some.
@@ -2464,6 +2507,7 @@ export default function App() {
           notices={notices}
           onDirtyChange={updateDirty}
           onSavableChange={updateSavable}
+          onCombinedSaved={reopenCombinedTab}
           onSourceChange={updateSource}
           ref={(handle) => {
             if (handle) {

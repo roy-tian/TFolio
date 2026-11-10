@@ -450,17 +450,22 @@ pub async fn pdf_annotation_at_point(
     .map_err(|error| format!("PDFium annotation hit test task failed: {error}"))?
 }
 
+/// `sections`, in a document of several files, names each page's file once
+/// the pages land.
 #[tauri::command]
 pub async fn reorder_pdf_pages(
     document_id: u64,
     order: Vec<i32>,
+    sections: Option<Vec<u64>>,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
     let engine = Arc::clone(&state.engine);
 
-    tauri::async_runtime::spawn_blocking(move || engine.reorder_pages(document_id, &order))
-        .await
-        .map_err(|error| format!("PDFium reorder task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.reorder_pages(document_id, &order, sections.as_deref())
+    })
+    .await
+    .map_err(|error| format!("PDFium reorder task failed: {error}"))?
 }
 
 /// What becomes of the document's intact signatures before the first change
@@ -563,12 +568,13 @@ pub async fn duplicate_pdf_pages(
     document_id: u64,
     page_numbers: Vec<i32>,
     index: i32,
+    section: Option<u64>,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
     let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.duplicate_pages(document_id, &page_numbers, index)
+        engine.duplicate_pages(document_id, &page_numbers, index, section)
     })
     .await
     .map_err(|error| format!("PDFium page duplication task failed: {error}"))?
@@ -576,12 +582,14 @@ pub async fn duplicate_pdf_pages(
 
 /// Nothing is read from disk, so there is no path to approve; what is checked
 /// instead is that this window holds both documents.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn insert_pdf_pages_from_document(
     document_id: u64,
     source_document_id: u64,
     page_numbers: Vec<i32>,
     index: i32,
+    section: Option<u64>,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
@@ -596,7 +604,13 @@ pub async fn insert_pdf_pages_from_document(
     let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.insert_pages_from_document(document_id, source_document_id, &page_numbers, index)
+        engine.insert_pages_from_document(
+            document_id,
+            source_document_id,
+            &page_numbers,
+            index,
+            section,
+        )
     })
     .await
     .map_err(|error| format!("PDFium insert task failed: {error}"))?
@@ -633,13 +647,16 @@ pub async fn extract_pdf_pages(
 pub async fn insert_pdf_blank_page(
     document_id: u64,
     index: i32,
+    section: Option<u64>,
     state: State<'_, PdfiumState>,
 ) -> Result<PdfStructureUpdate, String> {
     let engine = Arc::clone(&state.engine);
 
-    tauri::async_runtime::spawn_blocking(move || engine.insert_blank_page(document_id, index))
-        .await
-        .map_err(|error| format!("PDFium page insertion task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.insert_blank_page(document_id, index, section)
+    })
+    .await
+    .map_err(|error| format!("PDFium page insertion task failed: {error}"))?
 }
 
 #[tauri::command]

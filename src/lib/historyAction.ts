@@ -17,6 +17,8 @@ type HistoryActionKey =
   | "annotate.actionInsertBlankPage"
   | "annotate.actionDuplicatePages"
   | "annotate.actionInsertPages"
+  | "annotate.actionInsertFiles"
+  | "annotate.actionRenameFile"
 
 /** The name of an edit, for the undo and redo labels: the locale key that
     names it, and the page count where the name counts pages. */
@@ -73,5 +75,9 @@ export function historyAction(command: AnnotationCommand): HistoryAction {
         count: command.sourcePages.length,
         key: "annotate.actionInsertPages",
       }
+    case "insertFiles":
+      return { count: command.titles.length, key: "annotate.actionInsertFiles" }
+    case "renameSection":
+      return { key: "annotate.actionRenameFile" }
   }
 }

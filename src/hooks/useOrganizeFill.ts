@@ -1,12 +1,8 @@
 import { useCallback, useRef, useState, type RefObject } from "react"
 
 import type { DocumentSessionHandle } from "@/components/DocumentSession"
-import type { NoticeChannel } from "@/hooks/useNotices"
 import type { OrganizeWorkspace } from "@/hooks/useOrganizeWorkspace"
 import type { WorkspaceMode } from "@/hooks/useWorkspaceMode"
-import { workspaceOwner } from "@/lib/notices"
-import { isSourcePath } from "@/lib/openSources"
-import { wordConversionAvailable } from "@/lib/wordConversion"
 
 /** What a fill needs of a viewer tab. A converted tab has no file of its own
     until saved, but organize reads the image or Word document it came from. */
@@ -19,19 +15,16 @@ export type FillTab = {
   path: string
 }
 
-export type FillPrompt =
-  | { canSave: boolean; kind: "unsaved"; name: string; via: "drop" | "switch" }
-  | { kind: "startOver" }
+export type FillPrompt = { canSave: boolean; kind: "unsaved"; name: string }
 
-/** null is every way out: Cancel, Esc, and the switch's "Don't add". */
-export type FillAnswer = "confirm" | "save" | "saved" | null
+/** null is every way out: Esc, and the switch's "Don't add". */
+export type FillAnswer = "save" | "saved" | null
 
 type UseOrganizeFillOptions = {
   /** The tab the viewer shows; null on the home tab. */
   activeTab: () => FillTab | null
   findTab: (id: number) => FillTab | null
   modeRef: RefObject<WorkspaceMode>
-  notices: NoticeChannel
   organize: RefObject<OrganizeWorkspace>
   /** Moves on whenever the tab's file may have been rewritten, so a fill read
       before then is read again. */
@@ -62,7 +55,6 @@ export function useOrganizeFill({
   activeTab,
   findTab,
   modeRef,
-  notices,
   organize,
   revision,
   session,
@@ -100,7 +92,6 @@ export function useOrganizeFill({
     async (
       tab: FillTab,
       file: { key: string; path: string },
-      via: "drop" | "switch",
     ): Promise<{ key: string; path: string } | "skipped" | "stayed"> => {
       const handle = session(tab.id)
 
@@ -112,7 +103,6 @@ export function useOrganizeFill({
         canSave: !handle.isCopyOnlyNow(),
         kind: "unsaved",
         name: tab.name,
-        via,
       })
 
       if (choice === "saved") {
@@ -172,7 +162,7 @@ export function useOrganizeFill({
     let settled: Awaited<ReturnType<typeof settle>>
 
     try {
-      settled = await settle(tab, file, "switch")
+      settled = await settle(tab, file)
     } finally {
       // Released before the read, which may take minutes for a Word document:
       // the workspace's own busy state guards it, and a switch back to the
@@ -193,64 +183,5 @@ export function useOrganizeFill({
     }
   }, [activeTab, modeRef, organize, revision, session, settle, setMode])
 
-  /** Whether the shown tab has a file a drop on its pages could combine with,
-      and the workspace could take it now: otherwise the drop opens as tabs
-      rather than vanishing. */
-  const canMergeDrop = useCallback(() => {
-    const tab = activeTab()
-
-    return (
-      !runningRef.current &&
-      !organize.current.isBusyNow() &&
-      tab !== null &&
-      fileOf(tab, 0) !== null
-    )
-  }, [activeTab, organize])
-
-  const mergeDrop = useCallback(
-    async (paths: string[]) => {
-      const tab = activeTab()
-      const file = tab ? fileOf(tab, revision(tab.id)) : null
-
-      if (!tab || !file || runningRef.current || organize.current.isBusyNow()) {
-        return
-      }
-
-      const dropped = paths.filter((path) =>
-        isSourcePath(path, wordConversionAvailable()),
-      )
-
-      if (dropped.length === 0) {
-        notices.raise({ kind: "invalidFile", owner: workspaceOwner })
-        return
-      }
-
-      runningRef.current = true
-      let settled: Awaited<ReturnType<typeof settle>>
-
-      try {
-        if (
-          !organize.current.isUntouchedNow() &&
-          (await ask({ kind: "startOver" })) !== "confirm"
-        ) {
-          return
-        }
-
-        settled = await settle(tab, file, "drop")
-      } finally {
-        // As in `enterOrganize`: the read is the workspace's to guard.
-        runningRef.current = false
-      }
-
-      if (typeof settled === "string") {
-        return
-      }
-
-      setMode("organize")
-      await organize.current.startOver([settled.path, ...dropped])
-    },
-    [activeTab, ask, notices, organize, revision, settle, setMode],
-  )
-
-  return { answer, canMergeDrop, enterOrganize, mergeDrop, prompt, promptOpen }
+  return { answer, enterOrganize, prompt, promptOpen }
 }

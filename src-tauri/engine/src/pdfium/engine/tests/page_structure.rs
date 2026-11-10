@@ -96,7 +96,7 @@ fn reorders_pages_and_their_content() {
 
     let order = [3, 1, 4, 2];
     let update = engine
-        .reorder_pages(document.id, &order)
+        .reorder_pages(document.id, &order, None)
         .expect("PDFium should reorder the pages");
 
     assert_eq!(update.num_pages, 4, "a reorder keeps every page");
@@ -160,7 +160,7 @@ fn reported_page_geometry_follows_the_pages_through_every_structure_edit() {
     );
 
     let reordered = engine
-        .reorder_pages(document.id, &[3, 1, 2])
+        .reorder_pages(document.id, &[3, 1, 2], None)
         .expect("PDFium should reorder the pages");
 
     assert_eq!(
@@ -180,7 +180,7 @@ fn reported_page_geometry_follows_the_pages_through_every_structure_edit() {
     );
 
     let inserted = engine
-        .insert_blank_page(document.id, 1)
+        .insert_blank_page(document.id, 1, None)
         .expect("PDFium should insert a blank page");
 
     assert_eq!(
@@ -402,7 +402,7 @@ fn reorder_is_a_no_op_for_the_identity_order() {
     };
     let captured = revision();
     let update = engine
-        .reorder_pages(document.id, &[1, 2])
+        .reorder_pages(document.id, &[1, 2], None)
         .expect("the identity order is accepted");
 
     assert_eq!(update.num_pages, 2);
@@ -432,7 +432,7 @@ fn reorder_keeps_annotations_with_their_page() {
         .expect("PDFium should create the highlight");
 
     engine
-        .reorder_pages(document.id, &[2, 3, 1])
+        .reorder_pages(document.id, &[2, 3, 1], None)
         .expect("PDFium should reorder the pages");
 
     for page_number in [1, 2] {
@@ -510,7 +510,7 @@ fn reorder_keeps_outline_destinations() {
     );
 
     let update = engine
-        .reorder_pages(document.id, &[3, 1, 2])
+        .reorder_pages(document.id, &[3, 1, 2], None)
         .expect("PDFium should reorder the pages");
 
     assert_eq!(
@@ -734,13 +734,13 @@ fn same_stash_id_supports_the_insert_undo_cycle() {
     // Insert, undo, redo, undo again: the second undo reuses the stash id the
     // redo never consumed, and must replace the leftover stash, not refuse.
     engine
-        .insert_blank_page(document.id, 2)
+        .insert_blank_page(document.id, 2, None)
         .expect("PDFium should insert the blank page");
     engine
         .delete_pages(document.id, &[2], 42)
         .expect("the undo should stash the blank page");
     engine
-        .insert_blank_page(document.id, 2)
+        .insert_blank_page(document.id, 2, None)
         .expect("the redo should insert a fresh blank page");
     engine
         .delete_pages(document.id, &[2], 42)
@@ -768,7 +768,7 @@ fn inserted_blank_page_matches_its_neighbor() {
         .expect("PDFium should open the two-size PDF");
 
     let update = engine
-        .insert_blank_page(document.id, 1)
+        .insert_blank_page(document.id, 1, None)
         .expect("PDFium should insert at the front");
 
     assert_eq!(update.num_pages, 3);
@@ -779,7 +779,7 @@ fn inserted_blank_page_matches_its_neighbor() {
     );
 
     let update = engine
-        .insert_blank_page(document.id, 4)
+        .insert_blank_page(document.id, 4, None)
         .expect("PDFium should insert at the end");
 
     assert_eq!(update.num_pages, 4);
@@ -798,7 +798,7 @@ fn inserted_blank_page_matches_its_neighbor() {
 
     for (case, index) in [("front", 0), ("end", 6)] {
         let error = engine
-            .insert_blank_page(document.id, index)
+            .insert_blank_page(document.id, index, None)
             .expect_err("an out-of-range position must be refused");
 
         assert!(
@@ -819,7 +819,7 @@ fn inserted_blank_page_ignores_the_neighbors_rotation() {
     // The neighbour displays 300x200 through its /Rotate 90; the blank page
     // takes its unrotated 200x300 and no rotation of its own.
     let update = engine
-        .insert_blank_page(document.id, 1)
+        .insert_blank_page(document.id, 1, None)
         .expect("PDFium should insert the blank page");
 
     assert_eq!(
@@ -851,7 +851,7 @@ fn insert_extends_watermark_state_with_an_empty_entry() {
         .apply_watermark(document.id, watermark_config("DRAFT"))
         .expect("PDFium should apply the watermark");
     engine
-        .insert_blank_page(document.id, 2)
+        .insert_blank_page(document.id, 2, None)
         .expect("PDFium should insert into the marked document");
 
     let objects_on = |page_number: i32| {
@@ -912,7 +912,7 @@ fn structure_change_invalidates_a_captured_rect_effect() {
     let captured = revisions();
 
     engine
-        .reorder_pages(document.id, &[2, 1])
+        .reorder_pages(document.id, &[2, 1], None)
         .expect("PDFium should reorder the pages");
 
     let after_reorder = revisions();
@@ -923,7 +923,7 @@ fn structure_change_invalidates_a_captured_rect_effect() {
     );
 
     engine
-        .insert_blank_page(document.id, 1)
+        .insert_blank_page(document.id, 1, None)
         .expect("PDFium should insert the blank page");
 
     let after_insert = revisions();

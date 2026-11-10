@@ -10,6 +10,7 @@ import {
 } from "./tabMove"
 
 const document = {
+  hasForeignPages: false,
   hasMergedPages: true,
   id: 7,
   numPages: 3,

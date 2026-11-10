@@ -265,6 +265,10 @@ impl PdfiumEngine {
                 .signed_original
                 .as_ref()
                 .is_some_and(|original| same_file(&original.path, path))
+                || document
+                    .signed_added
+                    .iter()
+                    .any(|added| same_file(added, path))
         }) || self.lock_organize().is_signed_source(path)
     }
 }

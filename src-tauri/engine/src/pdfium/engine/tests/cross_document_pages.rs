@@ -24,7 +24,7 @@ fn inserts_another_documents_pages_into_a_gap() {
     let into = page_fingerprints(engine, target.id, 2);
 
     let update = engine
-        .insert_pages_from_document(target.id, source.id, &[3, 1], 2)
+        .insert_pages_from_document(target.id, source.id, &[3, 1], 2, None)
         .expect("PDFium should copy the pages across");
 
     assert_eq!(update.num_pages, 4);
@@ -61,12 +61,12 @@ fn refuses_an_insert_from_itself_or_of_pages_and_places_that_do_not_exist() {
         .expect("PDFium should open the target");
 
     let itself = engine
-        .insert_pages_from_document(target.id, target.id, &[1], 1)
+        .insert_pages_from_document(target.id, target.id, &[1], 1, None)
         .expect_err("a document's own pages move by reorder");
     assert!(itself.contains("from itself"), "why: {itself}");
 
     let unknown_page = engine
-        .insert_pages_from_document(target.id, source.id, &[3], 1)
+        .insert_pages_from_document(target.id, source.id, &[3], 1, None)
         .expect_err("the source has two pages");
     assert!(
         unknown_page.contains("does not exist"),
@@ -74,7 +74,7 @@ fn refuses_an_insert_from_itself_or_of_pages_and_places_that_do_not_exist() {
     );
 
     let past_end = engine
-        .insert_pages_from_document(target.id, source.id, &[1], 3)
+        .insert_pages_from_document(target.id, source.id, &[1], 3, None)
         .expect_err("position 3 is two past the target's last page");
     assert!(
         past_end.contains("cannot go to position"),
@@ -82,7 +82,7 @@ fn refuses_an_insert_from_itself_or_of_pages_and_places_that_do_not_exist() {
     );
 
     let closed = engine
-        .insert_pages_from_document(target.id, u64::MAX, &[1], 1)
+        .insert_pages_from_document(target.id, u64::MAX, &[1], 1, None)
         .expect_err("no document has that id");
     assert!(closed.contains("no longer open"), "why: {closed}");
 
@@ -109,7 +109,7 @@ fn a_copy_of_another_documents_watermarked_page_keeps_the_target_export_only() {
         .expect("PDFium should apply the watermark");
 
     let update = engine
-        .insert_pages_from_document(target.id, source.id, &[2], 2)
+        .insert_pages_from_document(target.id, source.id, &[2], 2, None)
         .expect("PDFium should copy the watermarked page");
 
     assert!(
@@ -130,7 +130,7 @@ fn a_redo_brings_the_copies_back_after_the_source_has_closed() {
         .expect("PDFium should open the target");
 
     engine
-        .insert_pages_from_document(target.id, source.id, &[1, 2], 1)
+        .insert_pages_from_document(target.id, source.id, &[1, 2], 1, None)
         .expect("PDFium should copy the pages across");
 
     let inserted = page_fingerprints(engine, target.id, 3);
@@ -192,7 +192,7 @@ fn an_extracted_copy_of_a_watermarked_page_keeps_the_new_document_export_only() 
         .expect("PDFium should apply the watermark");
     // Inserted after the apply, so the layer never covered it.
     engine
-        .insert_blank_page(source.id, 3)
+        .insert_blank_page(source.id, 3, None)
         .expect("PDFium should add a bare page");
 
     let watermarked = page_fingerprints(engine, source.id, 1);

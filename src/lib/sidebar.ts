@@ -83,6 +83,16 @@ export function storeSidebarWidth(width: number | null) {
   }
 }
 
+/** A document of several files shows each on rows of its own until the
+    reader runs them together. */
+export function readStoredFileRows() {
+  return storedSettings().ui?.sidebarFileRows !== false
+}
+
+export function storeFileRows(fileRows: boolean) {
+  void rememberSettings({ ui: { sidebarFileRows: fileRows } })
+}
+
 export function isSidebarPanel(value: unknown): value is SidebarPanel {
   return sidebarPanels.includes(value as SidebarPanel)
 }

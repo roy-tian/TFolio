@@ -15,7 +15,7 @@ pub use archive::{ArchiveOptions, ImageFormat};
 pub use compress::{CompressionEstimate, CompressionOptions};
 pub use engine::{
     is_merge_image, AssembleOutlineItem, AssemblePlan, AssembleSlot, EnginePaths, FileKey,
-    OperationTarget, OrganizeSourceInfo, PdfiumEngine, MERGE_IMAGE_EXTENSIONS,
+    OperationTarget, OrganizeSourceInfo, PdfSection, PdfiumEngine, MERGE_IMAGE_EXTENSIONS,
     ORGANIZE_SOURCE_CHANGED,
 };
 pub use font::{download_fallback_font, CJK_FONT_NAME};
@@ -49,6 +49,10 @@ pub struct PdfDocumentInfo {
     /// As in [`PdfStructureUpdate`]: a new document of another one's pages can
     /// open already export-only.
     has_merged_pages: bool,
+    /// As in [`PdfStructureUpdate`]; a document opens as its file alone.
+    has_foreign_pages: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sections: Vec<PdfSection>,
     signatures: PdfSignatures,
 }
 
@@ -102,6 +106,13 @@ pub struct PdfStructureUpdate {
     /// Like a watermark, a copy of a page carrying one or page numbers leaves the
     /// document export-only; the frontend's save key reads this, not its history.
     has_merged_pages: bool,
+    /// Pages an added file brought in remain: a save may not replace the file
+    /// with them, only a Save As write them, as `save` itself enforces.
+    has_foreign_pages: bool,
+    /// The files the pages came from, once more than one: empty for a document
+    /// that is still its own file alone.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sections: Vec<PdfSection>,
     signatures: PdfSignatures,
 }
 
@@ -153,6 +164,9 @@ struct PdfPageInfo {
     /// when false, as nearly every page is.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     signed: bool,
+    /// The file the page belongs to, once the document has more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    section: Option<u64>,
 }
 
 /// A text run's bounding box in *unrotated* page points, top-left origin: the

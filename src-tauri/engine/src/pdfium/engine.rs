@@ -177,6 +177,14 @@ struct OpenDocument {
     signed_page_ids: HashSet<u64>,
     signature_decision: Option<SignatureDecision>,
     signatures_flattened: bool,
+    /// The files the pages came in with, once one was added to the document.
+    sections: Option<sections::SectionBook>,
+    /// Pages an added file brought in, and copies of them: while any remain,
+    /// the document is no longer its file alone, and a save may not replace it.
+    foreign_page_ids: HashSet<u64>,
+    /// Signed files added here, as `signed_original` is kept: their sources
+    /// are released once read in, and no write may land on them still.
+    signed_added: Vec<PathBuf>,
 }
 
 impl OpenDocument {
@@ -655,6 +663,9 @@ impl PdfiumEngine {
                 source_fingerprint,
                 source_path,
                 stashes: HashMap::new(),
+                sections: None,
+                foreign_page_ids: HashSet::new(),
+                signed_added: Vec::new(),
             },
         );
         drop(documents);
@@ -682,6 +693,8 @@ impl PdfiumEngine {
             outline,
             path,
             has_merged_pages,
+            has_foreign_pages: false,
+            sections: Vec::new(),
             signatures: scan.summary(intact),
         })
     }
@@ -1084,6 +1097,7 @@ fn measure_page(page: &PdfPage<'_>) -> PdfPageInfo {
         height: page.height().value,
         rotation: page_rotation_degrees(page),
         signed: false,
+        section: None,
     }
 }
 
@@ -1106,6 +1120,7 @@ const UNMEASURED_PAGE: PdfPageInfo = PdfPageInfo {
     height: 842.0,
     rotation: 0.0,
     signed: false,
+    section: None,
 };
 
 /// Measures only pages not measured before, so a reorder or delete touches
@@ -1137,6 +1152,10 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
         .iter()
         .map(|page_id| PdfPageInfo {
             signed: entry.signed_page_ids.contains(page_id),
+            section: entry
+                .sections
+                .as_ref()
+                .and_then(|book| book.section_of(*page_id)),
             ..entry
                 .page_geometry
                 .get(page_id)
@@ -1153,6 +1172,13 @@ fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
 
     PdfStructureUpdate {
         has_merged_pages: !entry.merged_page_ids.is_empty(),
+        has_foreign_pages: !entry.foreign_page_ids.is_empty(),
+        sections: entry
+            .sections
+            .as_ref()
+            .filter(|book| book.several(&entry.page_ids))
+            .map(|book| book.infos(&entry.page_ids))
+            .unwrap_or_default(),
         num_pages: pages.len() as i32,
         outline: collect_bookmark_siblings(entry.document.bookmarks().root()),
         pages,
@@ -1192,6 +1218,7 @@ mod owned_content;
 mod page_ops;
 mod page_reorder;
 mod raster;
+mod sections;
 mod signature_flatten;
 mod signatures;
 mod text_runs;
@@ -1208,6 +1235,7 @@ pub use organize::{
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;
+pub use sections::PdfSection;
 use signatures::OpenedFile;
 
 #[cfg(test)]

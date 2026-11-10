@@ -59,6 +59,9 @@ struct UiPreferences {
     /// In CSS pixels; the frontend clamps it to the window it opens in.
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     sidebar_width: Option<u32>,
+    /// Whether the sidebar starts each file of a document on a row of its own.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    sidebar_file_rows: Option<bool>,
     /// The organize thumbnails' long side in CSS pixels.
     #[serde(skip_serializing_if = "Option::is_none")]
     organize_thumbnail_size: Option<u32>,
@@ -263,6 +266,7 @@ mod tests {
                 sidebar: Some("hidden".into()),
                 sidebar_panel: Some("bookmarks".into()),
                 sidebar_width: Some(420),
+                sidebar_file_rows: Some(false),
                 organize_thumbnail_size: Some(200),
             }),
             annotate: Some(AnnotatePreferences {
@@ -295,6 +299,7 @@ mod tests {
         let ui = read.ui.expect("the ui section should read back");
         assert_eq!(ui.theme.as_deref(), Some("dark"));
         assert_eq!(ui.sidebar_width, Some(420));
+        assert_eq!(ui.sidebar_file_rows, Some(false));
         assert_eq!(ui.organize_thumbnail_size, Some(200));
         assert_eq!(
             read.annotate

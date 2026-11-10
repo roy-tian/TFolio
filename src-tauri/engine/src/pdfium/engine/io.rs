@@ -75,6 +75,18 @@ impl StagedFile {
             .expect("a staged file keeps its handle until it is committed")
     }
 
+    /// Staged already written: bytes another step made of PDFium's.
+    pub(super) fn holding(path: &Path, bytes: &[u8]) -> Result<Self, String> {
+        let mut staged = Self::beside(path)?;
+
+        staged
+            .file()
+            .write_all(bytes)
+            .map_err(|error| format!("could not write the document: {error}"))?;
+
+        Ok(staged)
+    }
+
     pub(super) fn commit(mut self) -> Result<(), String> {
         let file = self
             .file
@@ -110,6 +122,13 @@ impl StagedFile {
 
         Ok(())
     }
+}
+
+/// How an export lands its file: PDFium's write staged at once, or PDFium's
+/// bytes still to be given their outline, off the documents lock.
+enum Staging {
+    Staged(StagedFile),
+    Outlined(Vec<u8>, Vec<OutlineNode>),
 }
 
 impl Drop for StagedFile {
@@ -589,6 +608,15 @@ impl PdfiumEngine {
             );
         }
 
+        // The reader's choice, kept here so the WebView cannot skip it: the
+        // file stays as it was, and the combined pages go to a new one.
+        if !entry.foreign_page_ids.is_empty() {
+            return Err(
+                "a document with pages added from other files may only be saved as a new file, not over its own"
+                    .into(),
+            );
+        }
+
         let path = entry.source_path.clone().ok_or_else(|| {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
@@ -689,8 +717,9 @@ impl PdfiumEngine {
             || !entry.merged_page_ids.is_empty();
 
         // The same refusal `save` makes, at the other exit. This resolves
-        // aliases: a missed twin would destroy the original.
-        if copy_only
+        // aliases: a missed twin would destroy the original. Added files'
+        // pages go to a new file too, though the document then follows them.
+        if (copy_only || !entry.foreign_page_ids.is_empty())
             && entry
                 .source_path
                 .as_deref()
@@ -717,7 +746,19 @@ impl PdfiumEngine {
         }
 
         let (version, loaded_len) = (entry.content_version, entry.loaded_len);
-        let staged = self.stage_document(entry, path)?;
+        // Several files write their bookmarks afresh, one each, which only
+        // lopdf can: it rereads PDFium's bytes off the lock, then stages them.
+        // So do an added file's pages left alone: PDFium's outline is still
+        // the document's own, aimed at pages that may all be gone.
+        let outline = entry
+            .sections
+            .as_ref()
+            .filter(|book| book.several(&entry.page_ids) || !entry.foreign_page_ids.is_empty())
+            .map(|book| book.outline(&entry.page_ids));
+        let staging = match outline {
+            None => Staging::Staged(self.stage_document(entry, path)?),
+            Some(nodes) => Staging::Outlined(self.document_bytes(entry)?, nodes),
+        };
 
         // A copy-only document reaching here wrote somewhere other than its file.
         // Bound before the commit, under the lock that checked the destination;
@@ -731,7 +772,14 @@ impl PdfiumEngine {
 
         drop(documents);
 
-        if let Err(error) = staged.commit() {
+        let written = match staging {
+            Staging::Staged(staged) => Ok(staged),
+            Staging::Outlined(bytes, nodes) => outline::write_outline(bytes, &nodes)
+                .and_then(|bytes| StagedFile::holding(path, &bytes)),
+        }
+        .and_then(StagedFile::commit);
+
+        if let Err(error) = written {
             self.after_failed_commit(document_id, |entry| {
                 if saved_to_source {
                     entry.source_path = previous_source;
@@ -815,6 +863,20 @@ impl PdfiumEngine {
         entry.needs_compaction = false;
 
         Ok(())
+    }
+
+    /// `stage_document`'s bytes, for a caller that rewrites them before they land.
+    fn document_bytes(&self, entry: &mut OpenDocument) -> Result<Vec<u8>, String> {
+        self.collect_orphans(entry)?;
+
+        let bytes = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not write the document: {error}"))?;
+        // The source may now be PDFium's rewrite, not the bytes first opened.
+        entry.loaded_len = None;
+
+        Ok(bytes)
     }
 
     /// The one write path under every save and export, so their files come out

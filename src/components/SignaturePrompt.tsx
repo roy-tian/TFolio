@@ -53,9 +53,11 @@ export function SignaturePrompt({
           <AlertDialogDescription>
             {request?.context === "organize"
               ? t("signatures.promptOrganize", values)
-              : request?.context === "export"
-                ? t("signatures.promptExport", values)
-                : t("signatures.promptEdit", values)}{" "}
+              : request?.context === "insert"
+                ? t("signatures.promptInsert", values)
+                : request?.context === "export"
+                  ? t("signatures.promptExport", values)
+                  : t("signatures.promptEdit", values)}{" "}
             {t("signatures.promptOriginal")}
           </AlertDialogDescription>
         </AlertDialogHeader>

@@ -380,7 +380,7 @@ fn a_new_file_flattens_its_copy_and_leaves_the_document_signed() {
         .open(minimal_pdf())
         .expect("PDFium should open the PDF");
     engine
-        .insert_pages_from_document(other.id, signed.id, &[1], 1)
+        .insert_pages_from_document(other.id, signed.id, &[1], 1, None)
         .expect("the pages should go in");
     assert_eq!(
         with_page(engine, other.id, 1, |page| page.annotations().len()),

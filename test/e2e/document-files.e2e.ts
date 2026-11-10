@@ -1,0 +1,211 @@
+import path from "node:path"
+import { $, $$, browser, expect } from "@wdio/globals"
+import "@wdio/tauri-service"
+
+import {
+  activeSidebar,
+  emitDrag,
+  minimalPdf,
+  openPdfFromDisk,
+  outlinedPdf,
+  pointMultiPickerAt,
+  pointSaveAsAt,
+  refreshApp,
+  seedSettings,
+  writeScratchPdf,
+} from "./helpers"
+
+const saveTrigger = `[data-document-session][data-active='true'] [data-slot='pdf-save-trigger']`
+
+function pageCount() {
+  return browser.execute(
+    (scope: string) => document.querySelectorAll(`${scope} button[data-thumbnail-page]`).length,
+    activeSidebar,
+  )
+}
+
+async function waitForPages(count: number) {
+  await browser.waitUntil(async () => (await pageCount()) === count, {
+    timeout: 30_000,
+    timeoutMsg: `the document never held ${count} pages`,
+  })
+}
+
+/** The file names heading the sidebar's pages, top to bottom. */
+function headings() {
+  return browser.execute(
+    (scope: string) =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>(`${scope} [data-section-header]`),
+        (heading) => heading.textContent ?? "",
+      ),
+    activeSidebar,
+  )
+}
+
+/** Each page's file, by the heading above it. */
+function pageFiles() {
+  return browser.execute((scope: string) => {
+    let file = ""
+
+    return Array.from(
+      document.querySelectorAll<HTMLElement>(
+        `${scope} [data-section-header], ${scope} button[data-thumbnail-page]`,
+      ),
+      (element) => {
+        if (element.dataset.sectionHeader !== undefined) {
+          file = element.textContent ?? ""
+          return null
+        }
+
+        return file
+      },
+    ).filter((name) => name !== null)
+  }, activeSidebar)
+}
+
+/** Pressed the way the keyboard would: the controls show under a real pointer. */
+function press(selector: string) {
+  return browser.execute((target: string) => {
+    const control = document.querySelector<HTMLElement>(target)!
+
+    control.focus()
+    control.click()
+  }, selector)
+}
+
+async function addFilesFromPicker(paths: string[]) {
+  await pointMultiPickerAt(paths)
+  await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
+}
+
+describe("TFolio files added to an open document", () => {
+  beforeEach(async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+  })
+
+  it("adds files at the end as files of their own, one undo away", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await waitForPages(2)
+    expect(await headings()).toEqual([])
+
+    await addFilesFromPicker([
+      writeScratchPdf("first.pdf", minimalPdf(1)),
+      writeScratchPdf("second.pdf", outlinedPdf()),
+    ])
+    await waitForPages(5)
+
+    expect(await headings()).toEqual(["own.pdf", "first.pdf", "second.pdf"])
+    expect(await pageFiles()).toEqual([
+      "own.pdf",
+      "own.pdf",
+      "first.pdf",
+      "second.pdf",
+      "second.pdf",
+    ])
+    // Saved only as a new file: the save button is Save As itself.
+    await expect($(saveTrigger)).toHaveAttribute("data-save-as-only", "")
+    await expect($(saveTrigger)).toBeEnabled()
+
+    // The files, and each one's bookmarks, where the bookmarks would be.
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    const files = $(`${activeSidebar} [data-slot='file-sections']`)
+    await expect(files).toHaveText(expect.stringContaining("second.pdf"))
+    await expect(files).toHaveText(expect.stringContaining("Second half"))
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+
+    await browser.keys(["Control", "z"])
+    await waitForPages(2)
+    expect(await headings()).toEqual([])
+    await expect($(saveTrigger)).not.toHaveAttribute("data-save-as-only")
+  })
+
+  it("runs the files together when the reader turns their rows off", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(1))])
+    await waitForPages(2)
+    expect(await headings()).toEqual(["own.pdf", "added.pdf"])
+
+    await $(`${activeSidebar} [data-slot='sidebar-file-rows']`).click()
+    await browser.waitUntil(async () => (await headings()).length === 0)
+  })
+
+  it("adds files dropped on the sidebar's pages", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await waitForPages(2)
+    const point = await browser.execute((scope: string) => {
+      const box = document.querySelector(`${scope} [data-sidebar-pages]`)!.getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+    }, activeSidebar)
+    const dropped = writeScratchPdf("dropped.pdf", minimalPdf(3, "0 0 300 200"))
+
+    await emitDrag("drag-over", point, [dropped])
+    await expect($("[data-testid='sidebar-pages-drop']")).toHaveAttribute("data-over", "")
+    await emitDrag("drag-drop", point, [dropped])
+    await waitForPages(5)
+    expect(await headings()).toEqual(["own.pdf", "dropped.pdf"])
+    // Added to this document, not opened beside it.
+    expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
+  })
+
+  it("renames a file and removes one, each undoably", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([
+      writeScratchPdf("first.pdf", minimalPdf(2)),
+      writeScratchPdf("second.pdf", minimalPdf(1)),
+    ])
+    await waitForPages(4)
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
+
+    await press(`${activeSidebar} [data-section-id='1'] [data-slot='file-section-rename']`)
+    const input = $(`${activeSidebar} [data-slot='file-section-title-input']`)
+    await input.setValue("Appendix")
+    await browser.keys("Enter")
+    await expect($(`${activeSidebar} [data-section-id='1']`)).toHaveText(
+      expect.stringContaining("Appendix"),
+    )
+
+    await press(`${activeSidebar} [data-section-id='1'] [data-slot='file-section-remove']`)
+    await expect($(`${activeSidebar} [data-section-id='1']`)).not.toBeExisting()
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await waitForPages(2)
+
+    await browser.keys(["Control", "z"])
+    await waitForPages(4)
+    await browser.keys(["Control", "z"])
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await expect($(`${activeSidebar} [data-section-id='1']`)).toHaveText(
+      expect.stringContaining("first.pdf"),
+    )
+  })
+
+  it("saves a document with added files only to a new file, which the tab then shows", async () => {
+    const own = await openPdfFromDisk("own.pdf", outlinedPdf())
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(1))])
+    await waitForPages(3)
+
+    // Beside the opened file, whose scratch folder goes at exit.
+    const destination = path.join(path.dirname(own), "combined.pdf")
+    await pointSaveAsAt(destination)
+    await $(saveTrigger).click()
+
+    // The tab is the new file now, read back as a reopen would: one file,
+    // whose bookmarks name the parts it was put together from.
+    await browser.waitUntil(
+      async () =>
+        (await $$(`//button[@role='tab'][normalize-space()='combined.pdf']`).length) === 1,
+      { timeout: 30_000, timeoutMsg: "the tab never became the saved file" },
+    )
+    await waitForPages(3)
+    expect(await headings()).toEqual([])
+    await expect($(saveTrigger)).not.toHaveAttribute("data-save-as-only")
+    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    await expect(bookmarks).toHaveText(expect.stringContaining("own.pdf"))
+    await expect(bookmarks).toHaveText(expect.stringContaining("added.pdf"))
+    await expect(bookmarks).toHaveText(expect.stringContaining("Second half"))
+    expect(own.endsWith("own.pdf")).toBe(true)
+  })
+})

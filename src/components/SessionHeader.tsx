@@ -41,6 +41,9 @@ type SessionHeaderProps = {
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
   saveLabel: string
+  /** A document other files were added to saves only to a new file, so its
+      save button is Save As itself, its key with it. */
+  saveAsOnly: boolean
   searchOpen: boolean
   tool: {
     activeTool: AnnotationTool
@@ -72,6 +75,7 @@ export function SessionHeader({
   onSplit,
   onToolChange,
   onUndo,
+  saveAsOnly,
   saveLabel,
   searchOpen,
   tool,
@@ -122,15 +126,16 @@ export function SessionHeader({
             {/* The outline variant's dark: border outranks a plain border-r override. */}
             <ToolbarTooltip label={saveLabel} shortcut={shortcuts.save}>
               <Button
-                aria-label={t("annotate.save")}
+                aria-label={saveAsOnly ? t("menu.saveAs") : t("annotate.save")}
                 className="border-r-transparent peer/save dark:border-r-transparent"
+                data-save-as-only={saveAsOnly ? "" : undefined}
                 data-slot="pdf-save-trigger"
-                disabled={!canSave}
-                onClick={onSave}
+                disabled={!saveAsOnly && !canSave}
+                onClick={saveAsOnly ? onSaveAs : onSave}
                 size="icon-sm"
                 variant="outline"
               >
-                <Save />
+                {saveAsOnly ? <Upload /> : <Save />}
               </Button>
             </ToolbarTooltip>
             <DropdownMenu>

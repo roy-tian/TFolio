@@ -128,6 +128,18 @@
   assembly) and enforces; a document flattens in place only before its first change, and a new file
   flattens its own copy.
 
+## Files added to a document
+
+- A document takes other files as files of its own (engine `SectionBook`): they are read through
+  the organize source list, then imported by `insert_pdf_files`, which releases the sources. One
+  history entry adds them all; its undo deletes the run under its stash.
+- Every insert names the file its pages join, and a reorder passes each position's file after
+  and before: a page let go among another file's pages joins it. A deleted page keeps its file
+  for the restore an undo brings back.
+- Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
+  and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf,
+  as an assembly does), then the tab reopens the written file, its history gone.
+
 ## Organize workspace
 
 - Organize sources are read-only and are not documents: no `record_document`, recent files, save

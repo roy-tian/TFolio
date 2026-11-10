@@ -1,0 +1,43 @@
+import { describe, expect, test } from "bun:test"
+
+import { reorderSections, sectionAt, sectionsOf } from "./pageSections"
+
+const page = (section?: number) => ({ height: 842, rotation: 0, section, width: 595 })
+
+describe("sectionsOf", () => {
+  test("names each position's file, or nothing for a file alone", () => {
+    expect(sectionsOf([page(0), page(1), page(1)])).toEqual([0, 1, 1])
+    expect(sectionsOf([page(), page()])).toBeNull()
+  })
+})
+
+describe("sectionAt", () => {
+  const pages = [page(0), page(0), page(1)]
+
+  test("joins the file of the page it goes in front of", () => {
+    expect(sectionAt(pages, 1)).toBe(0)
+    expect(sectionAt(pages, 3)).toBe(1)
+  })
+
+  test("joins the last page's file at the very end", () => {
+    expect(sectionAt(pages, 4)).toBe(1)
+    expect(sectionAt([], 1)).toBeUndefined()
+  })
+})
+
+describe("reorderSections", () => {
+  const pages = [page(0), page(0), page(1), page(1)]
+
+  test("takes the moved pages into the file they were dropped among", () => {
+    // Page 1 dropped between the second file's pages.
+    expect(reorderSections(pages, [2, 3, 1, 4], new Set([1]), 1)).toEqual({
+      after: [0, 1, 1, 1],
+      before: [0, 0, 1, 1],
+    })
+  })
+
+  test("has nothing to lay out without files or a file to join", () => {
+    expect(reorderSections([page(), page()], [2, 1], new Set([1]), 0)).toBeUndefined()
+    expect(reorderSections(pages, [2, 1, 3, 4], new Set([1]), undefined)).toBeUndefined()
+  })
+})

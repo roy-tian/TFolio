@@ -11,6 +11,7 @@ export type Settings = {
     sidebar?: unknown
     sidebarPanel?: unknown
     sidebarWidth?: unknown
+    sidebarFileRows?: unknown
     organizeThumbnailSize?: unknown
   }
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }

@@ -232,7 +232,7 @@ fn a_copy_only_export_leaves_the_document_on_its_source() {
         .apply_watermark(merged.id, watermark_config("COPY"))
         .expect("PDFium should apply the watermark");
     engine
-        .duplicate_pages(merged.id, &[1], 2)
+        .duplicate_pages(merged.id, &[1], 2, None)
         .expect("PDFium should copy the watermarked page");
     engine
         .remove_watermark(merged.id)

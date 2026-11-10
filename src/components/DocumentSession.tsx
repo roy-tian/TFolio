@@ -22,6 +22,7 @@ import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SessionDialogs } from "@/components/SessionDialogs"
 import { SessionHeader } from "@/components/SessionHeader"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import { FileSectionsTree } from "@/components/FileSectionsTree"
 import { SidebarThumbnails } from "@/components/SidebarThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
@@ -80,6 +81,10 @@ import type { CarriedPages } from "@/lib/pageCarry"
 import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals } from "@/lib/notices"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
+import { e2eOverride } from "@/lib/e2e"
+import { readFileSources } from "@/lib/fileSources"
+import { storedOrganizePreferences } from "@/lib/organizePreferences"
+import { wordConversionAvailable } from "@/lib/wordConversion"
 import {
   formatPageRanges,
   type PageClipboard,
@@ -162,6 +167,9 @@ export type DocumentSessionHandle = {
   saveForClose: () => Promise<boolean>
   /** The Stop on a layer undo or redo's notice. */
   stopLayerWork: () => void
+  /** Files dropped on the sidebar's pages, added to the end as files of
+      their own. */
+  addFiles: (paths: string[]) => void
   redo: () => void
   selectAll: () => void
   undo: () => void
@@ -189,6 +197,9 @@ type DocumentSessionProps = {
   /** Where this session says what happened. Write-only, and bound to this
       document below, so a session cannot speak for another's tab. */
   notices: NoticeChannel
+  /** A Save As wrote a document of several files to a file of its own: the
+      tab now shows that file, as opening it again would. */
+  onCombinedSaved: (documentId: number) => void
   onDirtyChange: (documentId: number, dirty: boolean) => void
   /** Whether this document may now be written back over its own file. Only the
       session can say: the workspace cannot see what makes it export-only. */
@@ -224,6 +235,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       initialViewMode,
       menu,
       notices,
+      onCombinedSaved,
       onDirtyChange,
       onSavableChange,
       onSourceChange,
@@ -238,6 +250,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [pdfDocument, setPdfDocument] = useState<PdfDocumentInfo>(openedDocument)
     const [saveRequired, setSaveRequired] = useState(initialSaveRequired)
     const saveRequiredRef = useRef(initialSaveRequired)
+    // A Save As on the way out: the tab is about to close, so a combined
+    // document is not reopened as the file it wrote.
+    const savingForCloseRef = useRef(false)
     // Thumbnail canvases follow their pages through every structure edit and its
     // undo: a preview keeps its pixels, and the column shows where it went.
     // Written outside any updater, which StrictMode runs twice, as the previews
@@ -255,6 +270,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // export-only, like those layers. The backend says so at the open and with
     // every structure update, so no replay.
     const hasMergedPages = pdfDocument.hasMergedPages
+    // Another file's pages were added: the reader chose that the file then
+    // stays as it was, and the combined pages go to a new one.
+    const hasForeignPages = pdfDocument.hasForeignPages
     // Bound to a file whose signatures are intact: any save would break them.
     const signedOriginal = pdfDocument.signatures.intact
     const [currentPage] = useState(() =>
@@ -347,7 +365,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     // An edit replaces the outline wholesale. Deriving what is shown, rather
     // than switching the sidebar, lets the undo that restores bookmarks restore it.
-    const bookmarksApply = pdfDocument.outline.length > 0
+    // A document of several files shows them, and their bookmarks, as a tree.
+    const sections = pdfDocument.sections ?? []
+    const severalFiles = sections.length > 1
+    const bookmarksApply = pdfDocument.outline.length > 0 || severalFiles
     const sidebar = useSidebar()
     const sidebarPanel = shownSidebarPanel(sidebar.panel, bookmarksApply)
 
@@ -707,8 +728,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           documentRef.current = next
           setPdfDocument(next)
           onSourceChange(documentId, outcome.path, next.signatures)
+
+          if (current.hasForeignPages && !savingForCloseRef.current) {
+            onCombinedSaved(documentId)
+          }
         },
-        [onSourceChange],
+        [onCombinedSaved, onSourceChange],
       ),
       onSaveError: useCallback(
         () => notice.raise("saveFailed"),
@@ -748,10 +773,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
           const next = {
             ...current,
+            hasForeignPages: update.hasForeignPages,
             hasMergedPages: update.hasMergedPages,
             numPages: update.numPages,
             outline: update.outline,
             pages: update.pages,
+            sections: update.sections,
             signatures: update.signatures,
           }
 
@@ -884,6 +911,146 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
       viewMode,
     })
+
+    // One batch at a time: a second, while the first is still being read or
+    // converted, would be placed against a page count about to move.
+    const addingFilesRef = useRef(false)
+
+    /** Files read from disk, added to the end as files of their own; signed
+        ones wait for the reader's word on their signatures, as a new file
+        made of their pages would. */
+    const addFiles = useCallback(
+      async (paths: string[]) => {
+        if (paths.length === 0) {
+          return
+        }
+
+        // Said, not swallowed: the reader let these files go here.
+        if (addingFilesRef.current) {
+          notice.raise("pagesAppendBusy", { values: { name: fileName } })
+          return
+        }
+
+        addingFilesRef.current = true
+        let read: Awaited<ReturnType<typeof readFileSources>> = []
+
+        try {
+          read = await readFileSources(paths, notices)
+
+          if (read.length === 0) {
+            return
+          }
+
+          const signed = read.filter((info) => info.signatures.intact).length
+          const remembered = signed > 0 ? storedSignatureHandling() : "ask"
+          let signatures: SignatureDecision | null = null
+
+          if (signed > 0) {
+            signatures =
+              remembered === "ask"
+                ? await askSignaturesRef.current({ context: "insert", count: signed, name: "" })
+                : remembered
+
+            if (!signatures) {
+              return
+            }
+          }
+
+          // The end as it stands once queued edits land: a read may take
+          // minutes, and an edit still in flight would move it.
+          await annotations.settled()
+          const current = documentRef.current
+
+          if (!current) {
+            return
+          }
+
+          const landed = await annotations.insertFiles(
+            read.flatMap((info) =>
+              info.id === undefined
+                ? []
+                : [{ id: info.id, pages: info.pages.length, title: fileNameFromPath(info.path) }],
+            ),
+            current.numPages + 1,
+            current.numPages,
+            {
+              ownTitle: fileName,
+              perFileBookmarks: storedOrganizePreferences().bookmarks,
+              signatures,
+            },
+          )
+
+          // As every remembered answer is: nothing else shows it was given.
+          if (landed && signatures && remembered !== "ask") {
+            notice.raise(
+              signatures === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet",
+            )
+          }
+        } finally {
+          addingFilesRef.current = false
+
+          // An add that landed took its sources with it; any other lets them
+          // go, or a signed one would keep its file from every writer.
+          if (read.length > 0) {
+            void invoke("release_organize_sources", {
+              sourceIds: read.flatMap((info) => (info.id === undefined ? [] : [info.id])),
+            }).catch(() => undefined)
+          }
+        }
+      },
+      [annotations, fileName, notice, notices],
+    )
+
+    // The backend's own dialog, which also approves the chosen files for reading.
+    const chooseFiles = useCallback(async () => {
+      try {
+        const pick = e2eOverride("pickPdfPaths")
+        const paths = pick
+          ? await pick()
+          : await invoke<string[]>("pick_pdf_paths", {
+              filterLabel: t(
+                wordConversionAvailable()
+                  ? "organize.sourceFilter"
+                  : "organize.sourceFilterPlain",
+              ),
+            })
+
+        await addFiles(paths)
+      } catch {
+        notice.raise("openFailed")
+      }
+    }, [addFiles, notice, t])
+
+    const renameSection = useCallback(
+      (sectionId: number, title: string) => {
+        const previous = documentRef.current?.sections?.find(
+          (section) => section.id === sectionId,
+        )?.title
+
+        if (previous !== undefined) {
+          void annotations.renameSection(sectionId, title, previous)
+        }
+      },
+      [annotations],
+    )
+
+    /** Every page of the file, wherever they stand: one undo puts them back. */
+    const removeSection = useCallback(
+      (sectionId: number) => {
+        const current = documentRef.current
+
+        if (!current || annotations.isStructureBusyNow()) {
+          return
+        }
+
+        const pages = current.pages.flatMap((page, index) =>
+          page.section === sectionId ? [index + 1] : [],
+        )
+
+        void annotations.deletePages(pages, current.numPages)
+      },
+      [annotations],
+    )
 
     const pageOps = useThumbnailPageOps({
       annotations,
@@ -1092,6 +1259,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         Boolean(documentRef.current?.path) &&
         (annotations.hasOwnedContentNow() ||
           documentRef.current?.hasMergedPages === true ||
+          documentRef.current?.hasForeignPages === true ||
           documentRef.current?.signatures.intact === true),
       [annotations],
     )
@@ -1516,6 +1684,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       annotations.isDirty &&
       !hasOwnedContent &&
       !hasMergedPages &&
+      !hasForeignPages &&
       !signedOriginal
     // Only where the reason is not already in front of the reader. Owned page
     // content is named first — it is the stricter, less recoverable reason.
@@ -1523,11 +1692,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       ? t("annotate.saveOwnedContent")
       : signedOriginal
         ? t("annotate.saveSigned")
-        : hasMergedPages
-          ? t("annotate.saveMerged")
-          : hasSourceFile
-            ? undefined
-            : t("annotate.saveNoSource")
+        : hasForeignPages
+          ? t("annotate.saveForeign")
+          : hasMergedPages
+            ? t("annotate.saveMerged")
+            : hasSourceFile
+              ? undefined
+              : t("annotate.saveNoSource")
     // The toolbar's button has only its tooltip to carry the reason, so a
     // disabled save names it there rather than repeating the action's name.
     const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
@@ -1547,7 +1718,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const saveFromKey = useCallback(() => {
       if (canSave) {
         void annotations.save()
-      } else if (!hasSourceFile) {
+      } else if (!hasSourceFile || hasForeignPages) {
+        // Where the save control itself is Save As, so is its key.
         void exportPdf()
       } else if (hasOwnedContent) {
         notice.raise("saveOwnedContentOnly")
@@ -1560,6 +1732,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       annotations,
       canSave,
       exportPdf,
+      hasForeignPages,
       hasMergedPages,
       hasOwnedContent,
       hasSourceFile,
@@ -1590,11 +1763,20 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         !saveRequiredRef.current &&
         !annotations.hasOwnedContentNow() &&
         !documentRef.current?.hasMergedPages &&
+        !documentRef.current?.hasForeignPages &&
         !documentRef.current?.signatures.intact
 
-      return writesBack
-        ? annotations.save()
-        : (await exportPdf()) === "saved"
+      if (writesBack) {
+        return annotations.save()
+      }
+
+      savingForCloseRef.current = true
+
+      try {
+        return (await exportPdf()) === "saved"
+      } finally {
+        savingForCloseRef.current = false
+      }
     }, [annotations, commitTextNote, exportPdf, unfontedEdit])
 
     // Only the session can answer this, so the workspace's save-all is told
@@ -1610,6 +1792,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useImperativeHandle(
       ref,
       () => ({
+        addFiles: (paths) => void addFiles(paths),
         appendCarriedPages: (carried) => pageOpsRef.current.appendCarriedPages(carried),
         canTakePagesNow: () => pageOpsRef.current.canTakeCarriedPages(),
         dismissNoteFont: clearNoteFontOffer,
@@ -1752,6 +1935,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
           onSearchClose={search.closeSearch}
+          saveAsOnly={hasForeignPages}
           onSearchOpen={search.openSearch}
           onSplit={() => setSplitOpen(true)}
           onToolChange={chooseTool}
@@ -1773,10 +1957,22 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         <AppSidebar
           macOS={macOS}
           switcher={
-            <SidebarPanelSwitch bookmarksApply={bookmarksApply} panel={sidebarPanel} />
+            <SidebarPanelSwitch
+              bookmarksApply={bookmarksApply}
+              files={severalFiles}
+              panel={sidebarPanel}
+            />
           }
         >
-          {sidebarPanel === "bookmarks" ? (
+          {sidebarPanel === "bookmarks" && severalFiles ? (
+            <FileSectionsTree
+              onNavigate={navigateFromSidebar}
+              onRemove={removeSection}
+              onRename={renameSection}
+              pages={pdfDocument.pages}
+              sections={sections}
+            />
+          ) : sidebarPanel === "bookmarks" ? (
             <BookmarkList
               items={pdfDocument.outline}
               onNavigate={navigateFromSidebar}
@@ -1793,6 +1989,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onDeleteOnePage={deleteOnePage}
               onDeletePage={deleteThumbnailPage}
               isEditingNow={annotations.isStructureBusyNow}
+              fileRows={sidebar.fileRows}
+              onAddFiles={() => void chooseFiles()}
+              onFileRowsChange={sidebar.setFileRows}
               onFocusChange={setThumbnailsFocused}
               onInsertBlankPage={insertBlankPage}
               onInsertCarriedPages={insertCarriedPages}
@@ -1808,6 +2007,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               pages={pdfDocument.pages}
               parkedPreviews={parkedPreviews}
               renderEpochs={annotations.renderEpochs}
+              sections={sections}
               selectedPages={thumbnailSelection.selectedPages}
               thumbnailKeys={thumbnailKeys}
               viewRotation={viewRotation}

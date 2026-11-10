@@ -9,9 +9,20 @@ export type PdfPageInfo = {
   // Clockwise rotation in degrees (0/90/180/270). `width`/`height` are the
   // displayed dimensions with this rotation already applied.
   rotation: number
+  /** The file the page belongs to, once a file was added to the document:
+      an id among its `sections`. */
+  section?: number
   /** Shows a signature field's widget; absent on nearly every page. */
   signed?: boolean
   width: number
+}
+
+/** One file of a document others were added to, as the sidebar shows it: its
+    bookmarks numbered for the pages as they now stand. */
+export type PdfSection = {
+  id: number
+  outline: PdfOutlineItem[]
+  title: string
 }
 
 /**
@@ -64,6 +75,8 @@ export type PdfSignatures = {
 }
 
 export type PdfDocumentInfo = {
+  /** As in a structure update; a document opens as its file alone. */
+  hasForeignPages: boolean
   /** As in a structure update, which the session copies here: a new document
       of another one's pages can open already export-only. */
   hasMergedPages: boolean
@@ -74,6 +87,8 @@ export type PdfDocumentInfo = {
   /** The file this document was opened from; null when opened from bytes,
       which leaves nothing to save over. */
   path: string | null
+  /** As in a structure update. */
+  sections?: PdfSection[]
   /** As the backend last reported them: an open, a structure update, or a
       Save As, which moves an edited document off the signed file. */
   signatures: PdfSignatures
@@ -174,12 +189,17 @@ export function exportFailureNotice(
 /** Nothing here is patched into place: the page list and outline are
     replaced wholesale, the backend's document being the only truth. */
 export type PdfStructureUpdate = {
+  /** Pages an added file brought in remain: a save may not replace the
+      document's file, only a Save As write the combined pages. */
+  hasForeignPages: boolean
   /** Whether a page another file brought in is still in the document, which
       leaves it export-only; the backend answers, it being what `save_pdf` refuses. */
   hasMergedPages: boolean
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  /** The files the pages come from, once more than one; absent otherwise. */
+  sections?: PdfSection[]
   signatures: PdfSignatures
 }
 

@@ -8,7 +8,7 @@ use super::io::{
     merge_file_limit_error, read_merge_source, Fingerprint, MergeDraft, SourceFile,
     MAX_MERGE_FILES,
 };
-use super::page_ops::{page_index, quarter_turn, quarter_turn_rotation};
+use super::page_ops::{page_index, page_range_argument, quarter_turn, quarter_turn_rotation};
 use super::page_reorder::move_pages;
 use super::*;
 
@@ -388,10 +388,14 @@ impl PdfiumEngine {
         &self,
         scope: &str,
         id: u64,
-        work: impl FnOnce(&PdfDocument<'static>, &Path) -> Result<T, String>,
+        work: impl FnOnce(
+            &mut HashMap<u64, OpenDocument>,
+            &PdfDocument<'static>,
+            &Path,
+        ) -> Result<T, String>,
     ) -> Result<T, String> {
         let (path, read_from, recorded, page_count) = {
-            let _documents = self.lock_documents()?;
+            let mut documents = self.lock_documents()?;
             let mut organize = self.lock_organize();
             let entry = organize.entry(scope, id)?;
             let facts = (
@@ -402,7 +406,7 @@ impl PdfiumEngine {
             );
 
             if let Some(document) = organize.touch(id) {
-                return work(document, &facts.0);
+                return work(&mut documents, document, &facts.0);
             }
 
             facts
@@ -416,7 +420,7 @@ impl PdfiumEngine {
 
         let file = read_merge_source(&read_from)?;
         let cost = source_cost(&file);
-        let _documents = self.lock_documents()?;
+        let mut documents = self.lock_documents()?;
         let mut organize = self.lock_organize();
 
         // Released, or read back by another call, while this one read the disk.
@@ -434,7 +438,7 @@ impl PdfiumEngine {
 
         let document = organize.touch(id).expect("the source was just kept open");
 
-        work(document, &path)
+        work(&mut documents, document, &path)
     }
 
     pub fn render_organize_thumbnail(
@@ -450,7 +454,7 @@ impl PdfiumEngine {
             ));
         }
 
-        let raw = self.with_organize_source(scope, source_id, |document, _| {
+        let raw = self.with_organize_source(scope, source_id, |_, document, _| {
             let pages = document.pages();
             // Checked before the subtraction, which overflows under the lock.
             let index = page_index(page_number, pages.len() as usize)
@@ -478,6 +482,21 @@ impl PdfiumEngine {
         organize.open.retain(|open| !ids.contains(&open.id));
     }
 
+    /// Lets go of sources read for a document they never reached: a prompt
+    /// declined, an insert refused. Another window's ids are passed over.
+    pub fn release_organize_sources(&self, scope: &str, ids: &[u64]) {
+        let Ok(_documents) = self.lock_documents() else {
+            return;
+        };
+        let mut organize = self.lock_organize();
+
+        for id in ids {
+            if organize.entry(scope, *id).is_ok() {
+                organize.remove(*id);
+            }
+        }
+    }
+
     /// Where a release taken now must stop: read without a lock, so a window
     /// event can take it while an assembly holds every PDFium lock.
     pub fn organize_release_cutoff(&self) -> u64 {
@@ -498,6 +517,173 @@ impl PdfiumEngine {
         for id in ids.into_iter().filter(|id| *id < before) {
             organize.remove(id);
         }
+    }
+
+    /// Adds files `add_organize_sources` read to an open document, all before
+    /// 1-based `index`, each a file of its own and in order; the sources go
+    /// once their pages are in. One step: the caller's undo deletes the whole
+    /// run under its stash. A signed source needs `decision`, which a new file
+    /// would ask for: its signatures cannot hold in this document either.
+    /// `own_title` names the document's own pages, should this be the first
+    /// file added, and `per_file_bookmarks` how a Save As writes the files.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_organize_sources(
+        &self,
+        scope: &str,
+        document_id: u64,
+        source_ids: &[u64],
+        index: i32,
+        own_title: &str,
+        per_file_bookmarks: bool,
+        decision: Option<SignatureDecision>,
+    ) -> Result<PdfStructureUpdate, String> {
+        if source_ids.is_empty() {
+            return Err("no files to add".into());
+        }
+
+        if source_ids.len() > MAX_MERGE_FILES {
+            return Err(merge_file_limit_error());
+        }
+
+        if source_ids.iter().collect::<HashSet<_>>().len() != source_ids.len() {
+            return Err("a file can be added only once at a time".into());
+        }
+
+        let own_title = sections::section_title(own_title)?;
+        let mut signed_paths = Vec::new();
+        let flatten = {
+            let organize = self.lock_organize();
+
+            for id in source_ids {
+                let source = organize.entry(scope, *id)?;
+
+                if source.signed {
+                    signed_paths.push(source.path.clone());
+                }
+            }
+
+            match (!signed_paths.is_empty(), decision) {
+                (false, _) => false,
+                (true, Some(decision)) => decision == SignatureDecision::Flatten,
+                (true, None) => {
+                    return Err("an added file's signatures need an answer first".into())
+                }
+            }
+        };
+        // Closing the document stops it between files, as any long edit stops.
+        let operation = self.begin_operation(OperationTarget::Document(document_id));
+        let (slot, before) = {
+            let mut documents = self.lock_documents()?;
+            let entry = open_entry_mut(&mut documents, document_id)?;
+            entry.ensure_editable()?;
+            let Some(slot) = page_index(index, entry.page_ids.len() + 1) else {
+                return Err(format!("a page cannot go to position {index}"));
+            };
+            let snapshot = entry
+                .document
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+            let before = InsertRollback {
+                snapshot,
+                page_ids: entry.page_ids.clone(),
+                owned_content: entry.owned_content.clone(),
+                foreign_page_ids: entry.foreign_page_ids.clone(),
+                started_sections: entry.sections.is_none(),
+            };
+
+            if entry.sections.is_none() {
+                let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
+
+                entry.sections = Some(sections::SectionBook::begin(
+                    own_title,
+                    &entry.page_ids,
+                    &outline,
+                    per_file_bookmarks,
+                ));
+            } else if let Some(book) = entry.sections.as_mut() {
+                book.resume(&entry.page_ids, own_title, per_file_bookmarks);
+            }
+
+            (slot, before)
+        };
+        let mut at = slot;
+        let mut added = Vec::with_capacity(source_ids.len());
+
+        for id in source_ids {
+            let inserted = if operation.is_cancelled() {
+                Err("the files were not added: the document closed".to_string())
+            } else {
+                self.with_organize_source(scope, *id, |documents, source, path| {
+                    let entry = open_entry_mut(documents, document_id)?;
+                    let count = source.pages().len() as usize;
+                    let all: Vec<usize> = (0..count).collect();
+                    let flattened = if flatten {
+                        Some(signatures::flattened_pages(self.pdfium, source, &all)?)
+                    } else {
+                        None
+                    };
+
+                    entry
+                        .document
+                        .pages_mut()
+                        .copy_pages_from_document(
+                            flattened.as_ref().unwrap_or(source),
+                            &page_range_argument(&all),
+                            at as i32,
+                        )
+                        .map_err(|error| {
+                            format!("PDFium could not add {}: {error}", path.display())
+                        })?;
+                    Self::record_inserted_pages(entry, at, &vec![false; count])?;
+
+                    let ids = entry.page_ids[at..at + count].to_vec();
+                    let title = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .and_then(|name| sections::section_title(&name).ok())
+                        .unwrap_or_else(|| path.display().to_string());
+                    let outline = collect_bookmark_siblings(source.bookmarks().root());
+
+                    entry
+                        .sections
+                        .as_mut()
+                        .expect("the files began before the first was added")
+                        .add(title, &ids, &outline);
+                    entry.foreign_page_ids.extend(ids);
+
+                    Ok(count)
+                })
+            };
+
+            match inserted {
+                Ok(count) => {
+                    at += count;
+                    added.push(*id);
+                }
+                Err(error) => {
+                    let mut documents = self.lock_documents()?;
+                    let entry = open_entry_mut(&mut documents, document_id)?;
+
+                    return Err(before.roll_back(self, entry, error));
+                }
+            }
+        }
+
+        let mut documents = self.lock_documents()?;
+        let entry = open_entry_mut(&mut documents, document_id)?;
+        let mut organize = self.lock_organize();
+
+        // Their pages are this document's own copies now: an undo's stash, not
+        // the source, brings them back.
+        for id in added {
+            organize.remove(id);
+        }
+
+        drop(organize);
+        entry.signed_added.extend(signed_paths);
+        entry.invalidate_all_page_revisions();
+
+        Ok(structure_update(entry))
     }
 
     /// A new document of the plan's pages, in its order, with its outline and
@@ -767,7 +953,7 @@ impl PdfiumEngine {
                 .map(|&(_, page_number)| page_number - 1)
                 .collect();
 
-            self.with_organize_source(scope, *source_id, |source, path| {
+            self.with_organize_source(scope, *source_id, |_, source, path| {
                 let document = draft.document();
                 let bindings = document.bindings();
                 let start = document.pages().len();
@@ -819,7 +1005,7 @@ impl PdfiumEngine {
                     return Ok(false);
                 }
 
-                self.with_organize_source(scope, *source_id, |source, path| {
+                self.with_organize_source(scope, *source_id, |_, source, path| {
                     let document = draft.document();
 
                     draft_index[position] = document.pages().len();
@@ -883,5 +1069,30 @@ impl PdfiumEngine {
         }
 
         Ok(())
+    }
+}
+
+/// The document as an insert of files found it, put back whole if one of them
+/// cannot be added: the bytes, and every page-keyed record the files touched.
+struct InsertRollback {
+    snapshot: Vec<u8>,
+    page_ids: Vec<u64>,
+    owned_content: Option<OwnedContentState>,
+    foreign_page_ids: HashSet<u64>,
+    /// The first file added began the document's files, which go again.
+    started_sections: bool,
+}
+
+impl InsertRollback {
+    fn roll_back(self, engine: &PdfiumEngine, entry: &mut OpenDocument, cause: String) -> String {
+        entry.page_ids = self.page_ids;
+        entry.owned_content = self.owned_content;
+        entry.foreign_page_ids = self.foreign_page_ids;
+
+        if self.started_sections {
+            entry.sections = None;
+        }
+
+        engine.restore_document_snapshot(entry, self.snapshot, cause)
     }
 }

@@ -130,17 +130,6 @@ async function slotAction(label: string, action: string) {
   await item.waitForDisplayed({ reverse: true, timeout: 5_000 })
 }
 
-/** The middle of the shown tab's sidebar pages, where a file drop combines. */
-function sidebarPagesPoint() {
-  return browser.execute(() => {
-    const box = document
-      .querySelector("[data-document-session][data-active='true'] [data-sidebar-pages]")!
-      .getBoundingClientRect()
-
-    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
-  })
-}
-
 async function waitForTotal(expected: string) {
   await browser.waitUntil(async () => (await total()) === expected, {
     timeout: 30_000,
@@ -1239,38 +1228,5 @@ describe("TFolio organize workspace", () => {
     await $("button[aria-label='Organize pages']").click()
     await $("[role='alertdialog']").$("button=Save and add").click()
     await waitForTotal("1 page from 1 file")
-  })
-
-  it("combines files dropped on the sidebar's pages, starting over only when told", async () => {
-    await openPdfFromDisk("portrait.pdf", minimalPdf(2, "0 0 200 300"))
-    await $(
-      "[data-document-session][data-active='true'] button[data-thumbnail-page='2']",
-    ).waitForExist({ timeout: 30_000 })
-    const point = await sidebarPagesPoint()
-    const dropped = landscape()
-
-    await emitDrag("drag-over", point, [dropped])
-    await expect($("[data-testid='sidebar-pages-drop']")).toHaveAttribute("data-over", "")
-    await emitDrag("drag-drop", point, [dropped])
-    await expect($(workspace)).toBeDisplayed()
-    await waitForTotal("5 pages from 2 files")
-    expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
-
-    await $("button[aria-label='View and edit']").click()
-    const prompt = $("[role='alertdialog']")
-    const one = writeScratchPdf("one.pdf", minimalPdf(1))
-
-    await emitDrag("drag-drop", point, [one])
-    await expect(prompt).toHaveText(expect.stringContaining("start over"))
-    await prompt.$("button=Cancel").click()
-    await expect(prompt).not.toBeDisplayed()
-    await expect($(workspace)).not.toBeDisplayed()
-
-    await emitDrag("drag-drop", point, [one])
-    await prompt.$("button=Start over").click()
-    await waitForTotal("3 pages from 2 files")
-
-    await browser.keys(["Control", "z"])
-    await waitForTotal("5 pages from 2 files")
   })
 })

@@ -19,8 +19,8 @@ type OrganizeFillPromptProps = {
 }
 
 /** What bringing the viewer's file into the organize workspace asks first:
-    whether to start the workspace over, and what to do with unsaved changes
-    organize, which reads the file on disk, would not see. */
+    what to do with unsaved changes organize, which reads the file on disk,
+    would not see. */
 export function OrganizeFillPrompt({ onAnswer, open, prompt }: OrganizeFillPromptProps) {
   const { t } = useTranslation()
   const offerSave = prompt?.kind === "unsaved" && prompt.canSave
@@ -35,25 +35,7 @@ export function OrganizeFillPrompt({ onAnswer, open, prompt }: OrganizeFillPromp
       open={open}
     >
       <AlertDialogContent data-slot="organize-fill-prompt">
-        {prompt?.kind === "startOver" ? (
-          <>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("organize.startOverTitle")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("organize.startOverDescription")}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t("organize.fillCancel")}</AlertDialogCancel>
-              <AlertDialogAction
-                data-action="start-over"
-                onClick={() => onAnswer("confirm")}
-              >
-                {t("organize.startOverConfirm")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </>
-        ) : prompt ? (
+        {prompt ? (
           <>
             <AlertDialogHeader>
               <AlertDialogTitle>
@@ -67,11 +49,7 @@ export function OrganizeFillPrompt({ onAnswer, open, prompt }: OrganizeFillPromp
             </AlertDialogHeader>
             {/* Stacked: three choices this long fit no row in every language. */}
             <AlertDialogFooter className={offerSave ? "sm:flex-col-reverse" : undefined}>
-              <AlertDialogCancel>
-                {prompt.via === "switch"
-                  ? t("organize.fillSkip")
-                  : t("organize.fillCancel")}
-              </AlertDialogCancel>
+              <AlertDialogCancel>{t("organize.fillSkip")}</AlertDialogCancel>
               <AlertDialogAction
                 data-action="add-saved"
                 onClick={() => onAnswer("saved")}

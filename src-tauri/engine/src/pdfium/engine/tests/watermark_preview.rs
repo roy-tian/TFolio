@@ -98,7 +98,7 @@ fn watermark_preview_tracks_page_ids_and_leaves_inserted_pages_alone() {
     engine
         .apply_watermark(document.id, watermark_config("ALPHA"))
         .unwrap();
-    engine.insert_blank_page(document.id, 1).unwrap();
+    engine.insert_blank_page(document.id, 1, None).unwrap();
 
     assert_eq!(
         engine

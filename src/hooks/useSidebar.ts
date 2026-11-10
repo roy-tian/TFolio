@@ -9,12 +9,14 @@ import {
 } from "react"
 
 import {
+  readStoredFileRows,
   readStoredSidebarOpen,
   readStoredSidebarPanel,
   readStoredSidebarWidth,
   sidebarDockMinWidth,
   sidebarMode,
   sidebarReservedWidth,
+  storeFileRows,
   storeSidebarOpen,
   storeSidebarPanel,
   storeSidebarWidth,
@@ -26,10 +28,13 @@ import { VIEWER_WILL_MOVE_EVENT } from "@/lib/viewerViewport"
 export type SidebarState = {
   /** Lets an overlay go; a docked sidebar stays until the reader hides it. */
   dismiss: () => void
+  /** Whether each file of a document of several starts a row of its own. */
+  fileRows: boolean
   mode: SidebarMode
   panel: SidebarPanel
   /** The room the sidebar leaves the rest of the window, in CSS pixels. */
   reserved: number
+  setFileRows: (fileRows: boolean) => void
   setPanel: (panel: SidebarPanel) => void
   /** Stores the width last set without storing. */
   persistWidth: () => void
@@ -76,6 +81,7 @@ export function useSidebarState(macOS: boolean): SidebarState {
   const [open, setOpen] = useState(readStoredSidebarOpen)
   const [panel, setPanelState] = useState(readStoredSidebarPanel)
   const [width, setWidthState] = useState(readStoredSidebarWidth)
+  const [fileRows, setFileRowsState] = useState(readStoredFileRows)
   const widthRef = useRef(width)
   // Never stored: a narrow window opens the sidebar over the pages only for
   // the moment it takes to pick one.
@@ -115,10 +121,39 @@ export function useSidebarState(macOS: boolean): SidebarState {
 
   const persistWidth = useCallback(() => storeSidebarWidth(widthRef.current), [])
 
+  const setFileRows = useCallback((next: boolean) => {
+    setFileRowsState(next)
+    storeFileRows(next)
+  }, [])
+
   const reserved = sidebarReservedWidth(macOS, docked)
 
   return useMemo(
-    () => ({ dismiss, mode, panel, persistWidth, reserved, setPanel, setWidth, toggle, width }),
-    [dismiss, mode, panel, persistWidth, reserved, setPanel, setWidth, toggle, width],
+    () => ({
+      dismiss,
+      fileRows,
+      mode,
+      panel,
+      persistWidth,
+      reserved,
+      setFileRows,
+      setPanel,
+      setWidth,
+      toggle,
+      width,
+    }),
+    [
+      dismiss,
+      fileRows,
+      mode,
+      panel,
+      persistWidth,
+      reserved,
+      setFileRows,
+      setPanel,
+      setWidth,
+      toggle,
+      width,
+    ],
   )
 }

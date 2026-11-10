@@ -9,7 +9,7 @@ import { e2eOverride } from "@/lib/e2e"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { usesEmbeddedFont } from "@/lib/embeddedFont"
 import { workspaceOwner, type NoticeKind } from "@/lib/notices"
-import { isWordPath } from "@/lib/openSources"
+import { readFileSources } from "@/lib/fileSources"
 import {
   addSources,
   assembleSlots,
@@ -36,7 +36,6 @@ import {
   type OrganizeOptions,
   type OrganizePlan,
   type OrganizeSource,
-  type OrganizeSourceInfo,
 } from "@/lib/organize"
 import {
   storedOrganizePreferences,
@@ -46,7 +45,6 @@ import {
 import { pageNumbersFit } from "@/lib/pageNumbers"
 import {
   exportFailureNotice,
-  fileNameFromPath,
   type PdfDocumentInfo,
   type SignatureDecision,
 } from "@/lib/pdf"
@@ -238,23 +236,10 @@ export function useOrganizeWorkspace({
       busyRef.current = true
       setAdding(true)
 
-      // An office suite may take minutes; the corner says so and offers Stop.
-      const converting = paths.some(isWordPath)
-
-      if (converting) {
-        notices.raise({
-          action: { kind: "organizeAddStop" },
-          kind: "organizeAdding",
-          owner: workspaceOwner,
-        })
-      }
-
       try {
-        const infos = await invoke<OrganizeSourceInfo[]>("add_organize_sources", {
-          paths,
-        })
-        const added = infos.flatMap((info) => sourceFromInfo(info) ?? [])
-        const refused = infos.filter((info) => info.id === undefined)
+        const added = (await readFileSources(paths, notices)).flatMap(
+          (info) => sourceFromInfo(info) ?? [],
+        )
 
         if (added.length > 0) {
           const next = new Map(sourcesRef.current)
@@ -267,33 +252,12 @@ export function useOrganizeWorkspace({
           setSources(next)
           place(added)
         }
-
-        if (refused.length > 0) {
-          raise(
-            refused.some((info) => info.error === "converterMissing")
-              ? "organizeConverterMissing"
-              : "organizeUnreadable",
-            {
-              count: refused.length,
-              names: refused.map((info) => fileNameFromPath(info.path)).join(", "),
-            },
-          )
-        }
-      } catch (error) {
-        raise(
-          String(error).includes("at most") ? "organizeTooManyFiles" : "organizeUnreadable",
-          { count: paths.length, names: paths.map(fileNameFromPath).join(", ") },
-        )
       } finally {
         busyRef.current = false
         setAdding(false)
-
-        if (converting) {
-          notices.retract(workspaceOwner, ["organizeAdding"])
-        }
       }
     },
-    [notices, raise],
+    [notices],
   )
 
   /** `index` is where the new files go on the list, its end by default. A

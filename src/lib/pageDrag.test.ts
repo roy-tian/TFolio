@@ -10,6 +10,7 @@ import {
   flowLanding,
   indexAfterMove,
   movesNothing,
+  nearestBox,
   orderAfterMove,
   orderWithBlockAt,
   wayOffsets,
@@ -246,5 +247,19 @@ describe("flowLanding", () => {
 
     expect(flowLanding({ x: 250, y: 40 }, grid, 2)).toBe(2)
     expect(flowLanding({ x: 250, y: 40 }, grid, null)).toBeNull()
+  })
+})
+
+describe("nearestBox", () => {
+  const boxes = [
+    { height: 100, left: 0, top: 0, width: 80 },
+    { height: 100, left: 0, top: 140, width: 80 },
+  ]
+
+  it("takes the box under the point, or the nearest one", () => {
+    expect(nearestBox({ x: 40, y: 50 }, boxes)).toBe(0)
+    expect(nearestBox({ x: 40, y: 135 }, boxes)).toBe(1)
+    expect(nearestBox({ x: 300, y: 105 }, boxes)).toBe(0)
+    expect(nearestBox({ x: 0, y: 0 }, [])).toBe(-1)
   })
 })

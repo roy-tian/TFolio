@@ -98,6 +98,9 @@ export type ReorderPagesCommand = {
   kind: "reorderPages"
   order: number[]
   inverse: number[]
+  /** Each position's file after the move and before it, in a document of
+      several files: a page dropped among another file's joins it. */
+  sections?: { after: number[]; before: number[] }
 }
 
 /** Turns the file itself, not the view. The turn is a step, not a destination:
@@ -125,6 +128,8 @@ export type InsertBlankPageCommand = {
   kind: "insertBlankPage"
   /** 1-based position the blank page takes, from 1 to page count + 1. */
   index: number
+  /** The file it joins, in a document of several. */
+  section?: number
   /** Pages in the document after the insertion. */
   pageCount: number
   /** The history entry's own id; the undo's delete stashes under it, and a
@@ -138,6 +143,8 @@ export type DuplicatePagesCommand = {
   kind: "duplicatePages"
   /** 1-based position the first copy takes, from 1 to page count + 1. */
   index: number
+  /** The file the copies join, in a document of several. */
+  section?: number
   /** Pages in the document after the copies landed. */
   pageCount: number
   /** Ascending 1-based page numbers, as the document stood before the paste. */
@@ -153,6 +160,8 @@ export type InsertPagesCommand = {
   kind: "insertPages"
   /** 1-based position the first copy takes, from 1 to page count + 1. */
   index: number
+  /** The file the copies join, in a document of several. */
+  section?: number
   /** Pages in the document after the copies landed. */
   pageCount: number
   sourceDocumentId: number
@@ -161,6 +170,28 @@ export type InsertPagesCommand = {
   /** The history entry's own id: the undo deletes the copied range under it,
       and the redo restores exactly that stash. */
   stashId: number
+}
+
+/** Files read from disk, added before `index` as files of their own. Like a
+    paste, the first apply reads them and a redo restores the undo's stash. */
+export type InsertFilesCommand = {
+  kind: "insertFiles"
+  index: number
+  /** Pages in the document after the files landed. */
+  pageCount: number
+  /** How many pages the files brought, all of them together. */
+  count: number
+  /** Their names, for the history's words. */
+  titles: string[]
+  stashId: number
+}
+
+/** The name a file of the document goes by, and its bookmark in a Save As. */
+export type RenameSectionCommand = {
+  kind: "renameSection"
+  previous: string
+  sectionId: number
+  title: string
 }
 
 /** The mark-making entry is carried whole, not pointed at: an undo re-applies
@@ -188,6 +219,8 @@ export type AnnotationCommand =
   | InsertBlankPageCommand
   | DuplicatePagesCommand
   | InsertPagesCommand
+  | InsertFilesCommand
+  | RenameSectionCommand
   | EraseAnnotationCommand
 
 /** Redoing re-runs the command and gets a fresh annotation out of PDFium, but
@@ -293,12 +326,16 @@ export function commandPageChange(
       }
     case "duplicatePages":
     case "insertPages":
+    case "insertFiles":
       return {
         movement: undoing
           ? departures(insertPagesRange(command), command.pageCount)
           : arrivals(insertPagesRange(command), command.pageCount),
         stashId: command.stashId,
       }
+    // A name changes; every page stays where it is.
+    case "renameSection":
+      return { movement: "inPlace" }
     default:
       return undefined
   }
@@ -329,9 +366,12 @@ export function commandPages(command: AnnotationCommand): number[] {
       return pagesFrom(command.index, command.pageCount)
     case "duplicatePages":
     case "insertPages":
+    case "insertFiles":
       // Only from the gap on — an append at the very end invalidates nothing.
       // `pageCount` spans before and after, covering the apply and the undo alike.
       return pagesFrom(command.index, command.pageCount)
+    case "renameSection":
+      return []
     case "eraseAnnotation":
       // What the backend reported, once it has: the erased entry's own numbers
       // are the ones it was made with, which a structure edit may have moved.
@@ -350,7 +390,9 @@ export function movesPages(command: AnnotationCommand): boolean {
     case "insertBlankPage":
     case "duplicatePages":
     case "insertPages":
+    case "insertFiles":
       return true
+    case "renameSection":
     case "highlight":
     case "rect":
     case "textNote":
@@ -378,6 +420,7 @@ export function commandTextPages(command: AnnotationCommand): number[] {
     case "insertBlankPage":
     case "duplicatePages":
     case "insertPages":
+    case "insertFiles":
       return commandPages(command)
     // A rotation moves no text: the spans keep their places in the page's own
     // space, and it is the layer drawn over them that turns.
@@ -481,8 +524,17 @@ export function isIdentityOrder(order: number[]) {
 
 /** Plans a reorder from the history the mutation queue reached; the identity
     order is dropped here so it never occupies an undo step. */
-export function planReorderPages(history: AnnotationHistory, order: number[]) {
-  if (isIdentityOrder(order)) {
+export function planReorderPages(
+  history: AnnotationHistory,
+  order: number[],
+  sections?: ReorderPagesCommand["sections"],
+) {
+  // A page moved to the edge of the next file stands where it was, yet joins it.
+  const regrouped =
+    sections !== undefined &&
+    sections.after.some((section, index) => section !== sections.before[index])
+
+  if (isIdentityOrder(order) && !regrouped) {
     return null
   }
 
@@ -490,6 +542,7 @@ export function planReorderPages(history: AnnotationHistory, order: number[]) {
     inverse: inversePermutation(order),
     kind: "reorderPages",
     order,
+    ...(sections === undefined ? {} : { sections }),
   }
 
   return { command, history: commit(history, command) }
@@ -545,6 +598,7 @@ export function planInsertBlankPage(
   history: AnnotationHistory,
   index: number,
   pageCount: number,
+  section?: number,
 ) {
   if (index < 1 || index > pageCount + 1) {
     return null
@@ -554,6 +608,7 @@ export function planInsertBlankPage(
     index,
     kind: "insertBlankPage",
     pageCount: pageCount + 1,
+    ...(section === undefined ? {} : { section }),
     stashId: history.nextId,
   }
 
@@ -563,9 +618,12 @@ export function planInsertBlankPage(
 /** The pages a copied block's undo deletes and its redo restores, valid at the
     LIFO moment the insert sits at the top of history. */
 export function insertPagesRange(
-  command: DuplicatePagesCommand | InsertPagesCommand,
+  command: DuplicatePagesCommand | InsertPagesCommand | InsertFilesCommand,
 ): number[] {
-  return pageRange(command.index, command.sourcePages.length)
+  return pageRange(
+    command.index,
+    command.kind === "insertFiles" ? command.count : command.sourcePages.length,
+  )
 }
 
 /** An out-of-range position is the reader's own: refused, never clamped. The
@@ -575,6 +633,7 @@ export function planDuplicatePages(
   sourcePages: number[],
   index: number,
   pageCount: number,
+  section?: number,
 ) {
   const pages = [...new Set(sourcePages)].sort((left, right) => left - right)
 
@@ -586,6 +645,7 @@ export function planDuplicatePages(
     index,
     kind: "duplicatePages",
     pageCount: pageCount + pages.length,
+    ...(section === undefined ? {} : { section }),
     sourcePages: pages,
     stashId: history.nextId,
   }
@@ -600,6 +660,7 @@ export function planInsertPages(
   sourcePages: number[],
   index: number,
   pageCount: number,
+  section?: number,
 ) {
   const pages = [...new Set(sourcePages)].sort((left, right) => left - right)
 
@@ -611,9 +672,57 @@ export function planInsertPages(
     index,
     kind: "insertPages",
     pageCount: pageCount + pages.length,
+    ...(section === undefined ? {} : { section }),
     sourceDocumentId,
     sourcePages: pages,
     stashId: history.nextId,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+/** Files already read for their pages, `count` of them in all. */
+export function planInsertFiles(
+  history: AnnotationHistory,
+  titles: string[],
+  count: number,
+  index: number,
+  pageCount: number,
+) {
+  if (titles.length === 0 || count < 1 || index < 1 || index > pageCount + 1) {
+    return null
+  }
+
+  const command: InsertFilesCommand = {
+    count,
+    index,
+    kind: "insertFiles",
+    pageCount: pageCount + count,
+    stashId: history.nextId,
+    titles,
+  }
+
+  return { command, history: commit(history, command) }
+}
+
+/** A name the file already has takes no undo step. */
+export function planRenameSection(
+  history: AnnotationHistory,
+  sectionId: number,
+  title: string,
+  previous: string,
+) {
+  const trimmed = title.trim()
+
+  if (trimmed === "" || trimmed === previous) {
+    return null
+  }
+
+  const command: RenameSectionCommand = {
+    kind: "renameSection",
+    previous,
+    sectionId,
+    title: trimmed,
   }
 
   return { command, history: commit(history, command) }
@@ -808,6 +917,7 @@ export function droppedStashIds(
       case "insertBlankPage":
       case "duplicatePages":
       case "insertPages":
+      case "insertFiles":
         return [entry.command.stashId]
       default:
         return []

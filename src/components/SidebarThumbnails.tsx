@@ -7,7 +7,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react"
-import { Layers } from "lucide-react"
+import { FilePlus2, Rows3 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
@@ -23,6 +23,9 @@ import {
 import { PageMenuContent } from "@/components/PageContextMenu"
 import { PageSignatureMark } from "@/components/SignatureBadge"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
+import { Button } from "@/components/ui/button"
+import { Toggle } from "@/components/ui/toggle"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
@@ -38,11 +41,12 @@ import {
   exceedsDragThreshold,
   flowCells,
   flowLanding,
+  nearestBox,
   orderWithBlockAt,
   pointInColumn,
 } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
-import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
+import { dimensionsForRotation, type PdfPageInfo, type PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -88,26 +92,40 @@ type SidebarThumbnailsProps = {
   onDeleteOnePage: (pageNumber: number) => void
   /** Whether focus is in the column: the clipboard keys are its only then. */
   onFocusChange: (focused: boolean) => void
-  /** The page a blank goes in front of, 1-based; one past the last appends. */
-  onInsertBlankPage: (index: number) => void
-  /** Copies another document's pages in before this 1-based page. Null where
-      the document cannot take them now; else settles on whether they landed. */
-  onInsertCarriedPages: (carried: CarriedPages, index: number) => Promise<boolean> | null
+  /** Files chosen from disk, added at the end as files of their own. */
+  onAddFiles: () => void
+  /** Whether each file of a document of several starts a row of its own. */
+  fileRows: boolean
+  onFileRowsChange: (fileRows: boolean) => void
+  /** The page a blank goes in front of, 1-based; one past the last appends.
+      `section` is the file it joins, that of the page it was asked beside. */
+  onInsertBlankPage: (index: number, section?: number) => void
+  /** Copies another document's pages in before this 1-based page, into the
+      file they were let go among. Null where the document cannot take them
+      now; else settles on whether they landed. */
+  onInsertCarriedPages: (
+    carried: CarriedPages,
+    index: number,
+    section?: number,
+  ) => Promise<boolean> | null
   /** A page edit in flight is about to renumber the pages a drag names. */
   isEditingNow: () => boolean
   /** A right-click, before its menu opens: a page outside the selection
       becomes the selection, so the menu means what is on screen. */
   onMenuPage: (pageNumber: number) => void
   onNavigate: (pageNumber: number) => void
-  onPastePages: (index: number) => void
+  onPastePages: (index: number, section?: number) => void
   /** Settles once the reorder has landed or been refused: the column holds
-      the dropped order until then, rather than flash the old one. */
-  onReorderPages: (order: number[]) => Promise<unknown>
+      the dropped order until then, rather than flash the old one. `moving`
+      joins `section`, the file it was let go among. */
+  onReorderPages: (order: number[], moving: number[], section?: number) => Promise<unknown>
   /** A page's own turn control: that page alone, chosen or not. */
   onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
   onRotatePages: (degrees: 90 | 270) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
   pages: PdfPageInfo[]
+  /** The document's files, once more than one: their names head their pages. */
+  sections: PdfSection[]
   /** Where a preview waits while an edit has its page out of the document. */
   parkedPreviews: ParkedPreviews
   renderEpochs: RenderEpochs
@@ -130,6 +148,9 @@ export function SidebarThumbnails({
   onDeletePage,
   onDeleteOnePage,
   isEditingNow,
+  fileRows,
+  onAddFiles,
+  onFileRowsChange,
   onFocusChange,
   onInsertBlankPage,
   onInsertCarriedPages,
@@ -143,6 +164,7 @@ export function SidebarThumbnails({
   pages,
   parkedPreviews,
   renderEpochs,
+  sections,
   selectedPages,
   thumbnailKeys,
   viewRotation,
@@ -177,10 +199,33 @@ export function SidebarThumbnails({
   // is reached through a ref the layout fills in below.
   const primeRef = useRef(() => {})
   const primeIncoming = useCallback(() => primeRef.current(), [])
+  // The file of the page a drop lands nearest, other than those in hand: a
+  // drop between two files' pages joins the one it was let go beside.
+  const sectionNear = useCallback(
+    (point: { x: number; y: number }, moving: (key: string) => boolean) => {
+      const cells = Array.from(
+        columnRef.current?.querySelectorAll<HTMLElement>(":scope > [data-flip-key]") ?? [],
+      ).filter((cell) => !moving(cell.dataset.flipKey!))
+      const nearest = cells[nearestBox(point, cells.map((cell) => cell.getBoundingClientRect()))]
+      const paper = nearest?.querySelector<HTMLElement>("[data-thumbnail-page]")
+
+      return paper ? pagesRef.current[Number(paper.dataset.thumbnailPage) - 1]?.section : undefined
+    },
+    [],
+  )
+  const insertCarried = useCallback(
+    (carried: CarriedPages, index: number, point: { x: number; y: number }) =>
+      onInsertCarriedPages(
+        carried,
+        index,
+        sectionNear(point, (key) => key.startsWith(CARRY_KEY)),
+      ),
+    [onInsertCarriedPages, sectionNear],
+  )
   const incoming = useIncomingPages({
     columnRef,
     documentId,
-    onInsert: onInsertCarriedPages,
+    onInsert: insertCarried,
     pages,
     prime: primeIncoming,
     viewRef: listRef,
@@ -544,7 +589,25 @@ export function SidebarThumbnails({
         commit && at !== null && pagesRef.current === basis
           ? orderWithBlockAt(moving, at, basis.length)
           : null
-      const changes = reorder?.some((pageNumber, index) => pageNumber !== index + 1)
+      const moved = reorder?.some((pageNumber, index) => pageNumber !== index + 1) ?? false
+      const nearest = reorder ? sectionNear(point, (key) => movingKeys.has(key)) : undefined
+      // Let go where they stand but beside the next file's first page, they
+      // join it — unless that would leave their own file with no page at all:
+      // a one-page file's page let go in place stays its file's.
+      const block = moving
+      const emptiesFile = block.some((pageNumber) => {
+        const own = basis[pageNumber - 1]?.section
+
+        return (
+          own !== undefined &&
+          basis.every((page, index) => page.section !== own || block.includes(index + 1))
+        )
+      })
+      const section = !moved && emptiesFile ? undefined : nearest
+      const regrouped =
+        section !== undefined &&
+        moving.some((pageNumber) => basis[pageNumber - 1]?.section !== section)
+      const changes = moved || (reorder !== null && regrouped)
 
       // Otherwise the pages go back where they were and the ghost with them.
       if (!changes) {
@@ -555,7 +618,7 @@ export function SidebarThumbnails({
       setDrag({ at, basis, moving })
       setLanding({
         leadKey,
-        settled: changes ? onReorderPages(reorder!) : Promise.resolve(),
+        settled: changes ? onReorderPages(reorder!, moving, section) : Promise.resolve(),
       })
     }
     const release = (released: PointerEvent) => {
@@ -595,184 +658,250 @@ export function SidebarThumbnails({
     menuLast = Math.max(menuLast, pageNumber)
   }
 
+  // Each file's name heads its first page, once the document has several and
+  // the reader keeps them apart; pages in hand stand among others for now.
+  const byFile = fileRows && sections.length > 1
+  const titles = new Map(sections.map((section) => [section.id, section.title]))
+  const moving = new Set(drag?.basis === pages ? drag.moving : [])
+  let headed: number | undefined
+
   return (
     <div
-      className="relative h-full"
+      className="flex h-full flex-col"
       // Pages under a stack in hand, this column's or another tab's, show none
       // of their controls.
       data-pages-dragging={drag !== null || ghost !== null || incoming !== null ? "" : undefined}
       data-sidebar-pages
     >
-      <ContextMenu
-        onOpenChange={(open) => {
-          if (!open) {
-            setMenu(null)
-          }
-        }}
-        // Opened by a press on a page alone: elsewhere in the column there is
-        // nothing for the entries to act on.
-        open={menuPage !== null}
+      <div
+        className="flex h-9 shrink-0 items-center gap-1 border-b px-2"
+        data-slot="sidebar-pages-bar"
       >
-        <ContextMenuTrigger
-          render={
-            <div
-              aria-label={t("sidebar.thumbnails")}
-              className="overlay-scroll-viewport h-full overflow-y-auto overscroll-contain px-2 pt-3 pb-4 outline-none select-none"
-              data-slot="sidebar-thumbnails"
-              data-thumbnail-scroll-root
-              onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) {
-                  onFocusChange(false)
-                }
-              }}
-              onContextMenu={(event) => {
-                // A press on a page's own controls means that page too.
-                const paper = (event.target as Element)
-                  .closest("[data-flip-key]")
-                  ?.querySelector<HTMLElement>("[data-thumbnail-page]")
-
-                // Only a page has a menu; elsewhere the WebView's own stays away.
-                if (!paper) {
-                  event.preventDefault()
-                  return
-                }
-
-                const pageNumber = Number(paper.dataset.thumbnailPage)
-
-                onMenuPage(pageNumber)
-                setMenu({ pageNumber, pages })
-              }}
-              onFocus={() => onFocusChange(true)}
-              onKeyDown={(event) => {
-                const first = Math.min(...selectionRef.current)
-
-                if (
-                  (event.key === "Delete" || event.key === "Backspace") &&
-                  Number.isFinite(first)
-                ) {
-                  event.preventDefault()
-                  // A focused preview leaves with its page, and a removed
-                  // element fires no blur: the column keeps the focus instead.
-                  event.currentTarget.focus({ preventScroll: true })
-                  onDeletePage(first)
-                }
-              }}
-              onPointerDown={startDrag}
-              ref={listRef}
-              role="navigation"
-              // WebKit on macOS never focuses a clicked button; the column takes
-              // the focus instead, so the page keys still reach it.
-              tabIndex={-1}
-            />
-          }
+        {sections.length > 1 ? (
+          <ToolbarTooltip label={t("sidebar.fileRows")}>
+            <Toggle
+              aria-label={t("sidebar.fileRows")}
+              className="size-7 min-w-7 p-0"
+              data-slot="sidebar-file-rows"
+              onPressedChange={onFileRowsChange}
+              pressed={fileRows}
+              size="sm"
+            >
+              <Rows3 />
+            </Toggle>
+          </ToolbarTooltip>
+        ) : null}
+        <ToolbarTooltip label={t("sidebar.addFiles")}>
+          <Button
+            aria-label={t("sidebar.addFiles")}
+            className="ml-auto"
+            data-slot="sidebar-add-files"
+            onClick={onAddFiles}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <FilePlus2 />
+          </Button>
+        </ToolbarTooltip>
+      </div>
+      <div className="relative min-h-0 flex-1">
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (!open) {
+              setMenu(null)
+            }
+          }}
+          // Opened by a press on a page alone: elsewhere in the column there is
+          // nothing for the entries to act on.
+          open={menuPage !== null}
         >
-          {/* Positioned: the slides read each cell's place off it. As wide as
-              its columns, so a short last row starts at the left. */}
-          <ol
-            className={cn(
-              "relative flex",
-              frame === null ? "flex-col items-center gap-3" : "mx-auto flex-wrap",
-            )}
-            data-thumbnail-columns={columns}
-            ref={columnRef}
-            style={
-              frame === null
-                ? undefined
-                : {
-                    columnGap: THUMBNAIL_GRID_GAP,
-                    rowGap: THUMBNAIL_GRID_GAP,
-                    width: columns * frame + (columns - 1) * THUMBNAIL_GRID_GAP,
+          <ContextMenuTrigger
+            render={
+              <div
+                aria-label={t("sidebar.thumbnails")}
+                className="overlay-scroll-viewport h-full overflow-y-auto overscroll-contain px-2 pt-3 pb-4 outline-none select-none"
+                data-slot="sidebar-thumbnails"
+                data-thumbnail-scroll-root
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    onFocusChange(false)
                   }
+                }}
+                onContextMenu={(event) => {
+                  // A press on a page's own controls means that page too.
+                  const paper = (event.target as Element)
+                    .closest("[data-flip-key]")
+                    ?.querySelector<HTMLElement>("[data-thumbnail-page]")
+
+                  // Only a page has a menu; elsewhere the WebView's own stays away.
+                  if (!paper) {
+                    event.preventDefault()
+                    return
+                  }
+
+                  const pageNumber = Number(paper.dataset.thumbnailPage)
+
+                  onMenuPage(pageNumber)
+                  setMenu({ pageNumber, pages })
+                }}
+                onFocus={() => onFocusChange(true)}
+                onKeyDown={(event) => {
+                  const first = Math.min(...selectionRef.current)
+
+                  if (
+                    (event.key === "Delete" || event.key === "Backspace") &&
+                    Number.isFinite(first)
+                  ) {
+                    event.preventDefault()
+                    // A focused preview leaves with its page, and a removed
+                    // element fires no blur: the column keeps the focus instead.
+                    event.currentTarget.focus({ preventScroll: true })
+                    onDeletePage(first)
+                  }
+                }}
+                onPointerDown={startDrag}
+                ref={listRef}
+                role="navigation"
+                // WebKit on macOS never focuses a clicked button; the column takes
+                // the focus instead, so the page keys still reach it.
+                tabIndex={-1}
+              />
             }
           >
-            {/* Flat, so each preview keeps its key among the column's rows. */}
-            {[...order, null].flatMap((pageNumber, index) => {
-              const holesHere =
-                index === incomingAt ? (
-                  <CarriedHoles
-                    frame={frame}
-                    key={CARRY_KEY}
-                    rotation={viewRotation}
-                    sizes={incoming!.carried.sizes}
-                  />
-                ) : null
-
-              if (pageNumber === null) {
-                return [holesHere]
+            {/* Positioned: the slides read each cell's place off it. As wide as
+                its columns, so a short last row starts at the left. */}
+            <ol
+              className={cn(
+                "relative flex",
+                frame === null ? "flex-col items-center gap-3" : "mx-auto flex-wrap",
+              )}
+              data-thumbnail-columns={columns}
+              ref={columnRef}
+              style={
+                frame === null
+                  ? undefined
+                  : {
+                      columnGap: THUMBNAIL_GRID_GAP,
+                      rowGap: THUMBNAIL_GRID_GAP,
+                      width: columns * frame + (columns - 1) * THUMBNAIL_GRID_GAP,
+                    }
               }
+            >
+              {/* Flat, so each preview keeps its key among the column's rows. */}
+              {[...order, null].flatMap((pageNumber, index) => {
+                const holesHere =
+                  index === incomingAt ? (
+                    <CarriedHoles
+                      frame={frame}
+                      key={CARRY_KEY}
+                      rotation={viewRotation}
+                      sizes={incoming!.carried.sizes}
+                    />
+                  ) : null
 
-              const page = pages[pageNumber - 1]!
-              const key = thumbnailKeys[pageNumber - 1] ?? pageNumber - 1
-              const carriedAhead =
-                incomingAt !== null && index >= incomingAt ? incoming!.carried.pages.length : 0
+                if (pageNumber === null) {
+                  return [holesHere]
+                }
 
-              return [
-                holesHere,
-                <SidebarThumbnail
-                  // Where the page stands in a drag's preview, as it will once
-                  // the pages land.
-                  caption={index + 1 + carriedAhead}
-                  // A document keeps one page; the backend refuses a delete of them all.
-                  deleteDisabled={numPages <= 1}
-                  documentId={documentId}
-                  flipKey={key}
-                  frame={frame}
-                  hole={holes.has(key) || arrived.has(key)}
-                  intrinsicRotation={page.rotation}
-                  isCurrent={current === pageNumber}
-                  isCut={cutPages.has(pageNumber)}
-                  isSelected={selectedPages.has(pageNumber)}
-                  key={key}
-                  onAction={act}
-                  onNavigate={onNavigate}
-                  onSelect={select}
-                  pageHeight={page.height}
-                  pageNumber={pageNumber}
-                  pageWidth={page.width}
-                  parked={parkedPreviews}
-                  renderEpoch={renderEpochs[pageNumber] ?? 0}
-                  rotation={viewRotation}
-                  signed={page.signed === true}
-                />,
-              ]
-            })}
-          </ol>
-        </ContextMenuTrigger>
-        {menuPage !== null ? (
-          <PageMenuContent
-            canPaste={canPaste}
-            count={menuCount}
-            // A document keeps one page; the backend refuses a delete of them all.
-            deleteDisabled={menuCount >= numPages}
-            onCopy={onCopyPages}
-            onCut={onCutPages}
-            onDelete={() => onDeletePage(menuPage)}
-            onInsertBlank={(side) =>
-              onInsertBlankPage(side === "before" ? menuFirst : menuLast + 1)
-            }
-            onPaste={(side) => onPastePages(side === "before" ? menuFirst : menuLast + 1)}
-            onRotate={onRotatePages}
-          />
-        ) : null}
-        {ghost ? (
-          <PageDragGhost
-            count={ghost.count}
-            grip={ghost.grip}
-            key={ghost.id}
-            paper={ghost.paper}
-            point={ghost.point}
-            ref={ghostRef}
-          />
-        ) : null}
-      </ContextMenu>
-      <OverlayScrollbars viewportRef={listRef} />
-      <PagesDropTarget />
+                const page = pages[pageNumber - 1]!
+                const key = thumbnailKeys[pageNumber - 1] ?? pageNumber - 1
+                const carriedAhead =
+                  incomingAt !== null && index >= incomingAt ? incoming!.carried.pages.length : 0
+                const heads =
+                  byFile && !moving.has(pageNumber) && page.section !== headed
+                    ? page.section
+                    : undefined
+
+                if (heads !== undefined) {
+                  headed = heads
+                }
+
+                return [
+                  holesHere,
+                  heads === undefined ? null : (
+                    // No flip key: a heading is no page, and a drop counts none.
+                    <li
+                      className="w-full basis-full truncate px-1 pt-1 text-xs font-medium text-muted-foreground"
+                      data-section-header={heads}
+                      key={`section-${heads}-${pageNumber}`}
+                    >
+                      {titles.get(heads)}
+                    </li>
+                  ),
+                  <SidebarThumbnail
+                    // Where the page stands in a drag's preview, as it will once
+                    // the pages land.
+                    caption={index + 1 + carriedAhead}
+                    // A document keeps one page; the backend refuses a delete of them all.
+                    deleteDisabled={numPages <= 1}
+                    documentId={documentId}
+                    flipKey={key}
+                    frame={frame}
+                    hole={holes.has(key) || arrived.has(key)}
+                    intrinsicRotation={page.rotation}
+                    isCurrent={current === pageNumber}
+                    isCut={cutPages.has(pageNumber)}
+                    isSelected={selectedPages.has(pageNumber)}
+                    key={key}
+                    onAction={act}
+                    onNavigate={onNavigate}
+                    onSelect={select}
+                    pageHeight={page.height}
+                    pageNumber={pageNumber}
+                    pageWidth={page.width}
+                    parked={parkedPreviews}
+                    renderEpoch={renderEpochs[pageNumber] ?? 0}
+                    rotation={viewRotation}
+                    signed={page.signed === true}
+                  />,
+                ]
+              })}
+            </ol>
+          </ContextMenuTrigger>
+          {menuPage !== null ? (
+            <PageMenuContent
+              canPaste={canPaste}
+              count={menuCount}
+              // A document keeps one page; the backend refuses a delete of them all.
+              deleteDisabled={menuCount >= numPages}
+              onCopy={onCopyPages}
+              onCut={onCutPages}
+              onDelete={() => onDeletePage(menuPage)}
+              onInsertBlank={(side) =>
+                onInsertBlankPage(
+                  side === "before" ? menuFirst : menuLast + 1,
+                  pages[(side === "before" ? menuFirst : menuLast) - 1]?.section,
+                )
+              }
+              onPaste={(side) =>
+                onPastePages(
+                  side === "before" ? menuFirst : menuLast + 1,
+                  pages[(side === "before" ? menuFirst : menuLast) - 1]?.section,
+                )
+              }
+              onRotate={onRotatePages}
+            />
+          ) : null}
+          {ghost ? (
+            <PageDragGhost
+              count={ghost.count}
+              grip={ghost.grip}
+              key={ghost.id}
+              paper={ghost.paper}
+              point={ghost.point}
+              ref={ghostRef}
+            />
+          ) : null}
+        </ContextMenu>
+        <OverlayScrollbars viewportRef={listRef} />
+        <PagesDropTarget />
+      </div>
     </div>
   )
 }
 
-/** Shown over the column while a file drag offers it; a drop there combines
-    the files with this one in the organize workspace. */
+/** Shown over the column while a file drag offers it; a drop there adds the
+    files to this document. */
 function PagesDropTarget() {
   const { t } = useTranslation()
   const drop = usePagesDrop()
@@ -793,9 +922,9 @@ function PagesDropTarget() {
       data-testid="sidebar-pages-drop"
     >
       <div className="flex flex-col items-center">
-        <Layers className="mb-3 size-8" />
-        <p className="text-sm font-semibold">{t("organize.mergeDropNow")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{t("organize.mergeDropHint")}</p>
+        <FilePlus2 className="mb-3 size-8" />
+        <p className="text-sm font-semibold">{t("sidebar.dropFiles")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t("sidebar.dropFilesHint")}</p>
       </div>
     </div>
   )

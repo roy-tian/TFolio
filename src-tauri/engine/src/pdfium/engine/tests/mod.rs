@@ -28,6 +28,7 @@ mod page_numbers;
 mod page_structure;
 mod rect_effect;
 mod save_export;
+mod sections;
 mod signatures;
 mod text_notes;
 mod text_search;

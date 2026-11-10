@@ -6,6 +6,7 @@ import type { CarriedPages } from "@/lib/pageCarry"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { pagesToRotate } from "@/lib/pageRotation"
 import { pastePlan } from "@/lib/pageClipboard"
+import { reorderSections, sectionAt } from "@/lib/pageSections"
 
 type UseThumbnailPageOpsOptions = {
   annotations: ReturnType<typeof useAnnotations>
@@ -71,12 +72,18 @@ export function useThumbnailPageOps({
     void annotations.rotatePages([pageNumber], degrees)
   }
 
-  const insertBlankPage = (index: number) => {
+  /** `section` is the file the page joins, in a document of several: the
+      page it was asked for beside. Else the page it goes in front of. */
+  const insertBlankPage = (index: number, section?: number) => {
     if (!pdfDocument || editingBusy()) {
       return
     }
 
-    void annotations.insertBlankPage(index, pdfDocument.numPages)
+    void annotations.insertBlankPage(
+      index,
+      pdfDocument.numPages,
+      section ?? sectionAt(pdfDocument.pages, index),
+    )
   }
 
   /**
@@ -98,11 +105,12 @@ export function useThumbnailPageOps({
    * A cut is a move, one undo step by way of the reorder command; a copy stays
    * on the clipboard, following the pages its own insert pushed down.
    */
-  const pastePages = (index: number) => {
+  const pastePages = (index: number, section?: number) => {
     if (!pdfDocument || editingBusy()) {
       return
     }
 
+    const joins = section ?? sectionAt(pdfDocument.pages, index)
     const plan = pastePlan(pageClipboard.clipboard, index, pdfDocument.numPages)
 
     if (!plan) {
@@ -115,14 +123,19 @@ export function useThumbnailPageOps({
     // Said once the edit has landed rather than when it was asked for: a
     // refusal has its own notice, and two would be one too many.
     if (plan.kind === "move") {
-      void annotations.reorderPages(plan.order).then((landed) => {
-        if (landed) {
-          notice.raise(
-            at === undefined ? "pagesMovedToEnd" : "pagesMoved",
-            { values: at === undefined ? { count } : { at, count } },
-          )
-        }
-      })
+      void annotations
+        .reorderPages(
+          plan.order,
+          reorderSections(pdfDocument.pages, plan.order, new Set(plan.pages), joins),
+        )
+        .then((landed) => {
+          if (landed) {
+            notice.raise(
+              at === undefined ? "pagesMovedToEnd" : "pagesMoved",
+              { values: at === undefined ? { count } : { at, count } },
+            )
+          }
+        })
 
       return
     }
@@ -131,7 +144,7 @@ export function useThumbnailPageOps({
     // reaches the clipboard first — and disarmed if that insert never lands.
     pageClipboard.armPaste(index, count, pdfDocument.numPages)
     void annotations
-      .duplicatePages(plan.pages, index, pdfDocument.numPages)
+      .duplicatePages(plan.pages, index, pdfDocument.numPages, joins)
       .then((landed) => {
         if (landed) {
           notice.raise(
@@ -144,15 +157,21 @@ export function useThumbnailPageOps({
       })
   }
 
-  const reorderPages = (order: number[]) =>
-    editingBusy() ? Promise.resolve(false) : annotations.reorderPages(order)
+  /** `moving` joins `section`, the file it was dropped among. */
+  const reorderPages = (order: number[], moving: number[] = [], section?: number) =>
+    editingBusy()
+      ? Promise.resolve(false)
+      : annotations.reorderPages(
+          order,
+          reorderSections(pdfDocument.pages, order, new Set(moving), section),
+        )
 
   /** Only an idle queue: a copy waiting behind other work would read the
       source's pages by numbers the reader may have changed meanwhile. */
   const canTakeCarriedPages = () => !editingBusy() && !annotations.hasPendingWorkNow()
 
   /** Another tab's pages dragged in: copies, one undo step like a paste. */
-  const insertCarriedPages = (carried: CarriedPages, index: number) =>
+  const insertCarriedPages = (carried: CarriedPages, index: number, section?: number) =>
     !pdfDocument || !canTakeCarriedPages()
       ? null
       : annotations.insertPages(
@@ -160,6 +179,7 @@ export function useThumbnailPageOps({
           carried.pages,
           index,
           pdfDocument.numPages,
+          section ?? sectionAt(pdfDocument.pages, index),
         )
 
   const appendCarriedPages = (carried: CarriedPages) =>

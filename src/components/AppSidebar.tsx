@@ -50,12 +50,15 @@ const panelOptions = [
   { icon: ListTree, labelKey: "sidebar.bookmarks", value: "bookmarks" },
 ] as const
 
-/** Which of a document's two panels the sidebar shows. */
+/** Which of a document's two panels the sidebar shows. A document of several
+    files shows them, with their bookmarks, where the bookmarks would be. */
 export function SidebarPanelSwitch({
   bookmarksApply,
+  files = false,
   panel,
 }: {
   bookmarksApply: boolean
+  files?: boolean
   panel: SidebarPanel
 }) {
   const { t } = useTranslation()
@@ -78,7 +81,8 @@ export function SidebarPanelSwitch({
     >
       {panelOptions.map((option) => {
         const Icon = option.icon
-        const label = t(option.labelKey)
+        const label =
+          option.value === "bookmarks" && files ? t("sidebar.files") : t(option.labelKey)
         const unavailable = option.value === "bookmarks" && !bookmarksApply
 
         return (
