@@ -128,6 +128,14 @@
   assembly) and enforces; a document flattens in place only before its first change, and a new file
   flattens its own copy.
 
+## Save as A4
+
+- `fit_to_a4` builds a copy of every page fitted onto A4 (with the blank pages and per-file
+  bookmarks a Save As writes); a form XObject leaves annotations, links and fields behind, and a
+  watermark or page numbers scale with their page. `save_a4_pdf` asks for the destination in
+  Rust first, records the copy with `record_document`, binds it like Save As, and the tab shows
+  it in place of the document it was made from.
+
 ## Files added to a document
 
 - A document takes other files as files of its own (engine `SectionBook`): they are read through

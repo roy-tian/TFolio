@@ -8,6 +8,7 @@ import {
   LogOut,
   Menu,
   Printer,
+  RectangleVertical,
   Save,
   SaveAll,
   Scissors,
@@ -69,6 +70,7 @@ type AppMenuProps = AppMenuActions & {
   canSave?: boolean
   onSave?: () => void
   onSaveAs?: () => void
+  onSaveA4?: () => void
   onExportImages?: () => void
   onSplit?: () => void
   onCompress?: () => void
@@ -90,6 +92,7 @@ export function AppMenu({
   onSave,
   onSaveAll,
   onSaveAs,
+  onSaveA4,
   onShowSettings,
   onExportImages,
   onSplit,
@@ -209,6 +212,14 @@ export function AppMenu({
             <DropdownMenuShortcut>
               {formatShortcut(shortcuts.saveAs)}
             </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="save-a4"
+            disabled={!onSaveA4}
+            onClick={onSaveA4}
+          >
+            <RectangleVertical />
+            {t("a4Export.menuLabel")}
           </DropdownMenuItem>
           <DropdownMenuItem
             data-action="export-images"

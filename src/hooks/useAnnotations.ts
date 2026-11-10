@@ -48,6 +48,7 @@ import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
   FileOptions,
+  PdfDocumentInfo,
   PdfExportOutcome,
   PdfStructureUpdate,
   SignatureDecision,
@@ -1522,6 +1523,48 @@ export function useAnnotations({
     [documentId, enqueue, signedChangeReady],
   )
 
+  /** Queued behind the reader's edits, so the A4 copy holds what the pages
+      show. The copy is a document of its own, bound to the file it was
+      written to; null for a dialog cancelled or a run stopped. */
+  const exportA4 = useCallback(
+    async (
+      request: { filterLabel: string; suggestedName: string },
+      onProgress: ProgressHandler,
+    ): Promise<PdfDocumentInfo | null | "failed"> => {
+      const ready = signedChangeReady("export")
+
+      if (ready !== true && !(await ready)) {
+        return null
+      }
+
+      let written: PdfDocumentInfo | null = null
+      let failed = false
+
+      await enqueue(
+        (current) => ({
+          next: current,
+          pages: [],
+          textPages: [],
+          work: async () => {
+            const args = { ...request, documentId, onProgress: progressChannel(onProgress) }
+            const override = e2eOverride("saveA4Pdf")
+
+            written = override
+              ? await override(args)
+              : await invoke<PdfDocumentInfo | null>("save_a4_pdf", args)
+            return false
+          },
+        }),
+        () => {
+          failed = true
+        },
+      )
+
+      return failed ? "failed" : written
+    },
+    [documentId, enqueue, signedChangeReady],
+  )
+
   /** Writes the document back over its own file. A clean history is a no-op —
       judged inside the queue, against the history it has actually reached. */
   const save = useCallback(async () => {
@@ -1616,6 +1659,7 @@ export function useAnnotations({
       deletePages,
       duplicatePages,
       eraseAt,
+      exportA4,
       exportCopy,
       exportArchive,
       exportCompressed,
@@ -1653,6 +1697,7 @@ export function useAnnotations({
       deletePages,
       duplicatePages,
       eraseAt,
+      exportA4,
       exportCopy,
       exportArchive,
       exportCompressed,

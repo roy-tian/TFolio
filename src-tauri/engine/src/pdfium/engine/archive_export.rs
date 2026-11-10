@@ -57,7 +57,7 @@ fn section_name(index: usize, title: &str) -> String {
     }
 }
 
-fn section_outline(items: &[PdfOutlineItem], start: i32, end: i32) -> Vec<OutlineNode> {
+pub(super) fn section_outline(items: &[PdfOutlineItem], start: i32, end: i32) -> Vec<OutlineNode> {
     items
         .iter()
         .flat_map(|item| {

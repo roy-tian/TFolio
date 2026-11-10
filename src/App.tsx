@@ -540,8 +540,27 @@ export default function App() {
     [notices],
   )
 
+  // A tab closed meanwhile leaves `tab` to append. The old tab's session
+  // closes its document as it unmounts.
+  const putInPlaceOf = useCallback(
+    (documentId: number, tab: OpenTab) => {
+      replaceTabs((current) =>
+        current.some((item) => item.id === documentId)
+          ? current.map((item) => (item.id === documentId ? tab : item))
+          : [...current, tab],
+      )
+      notices.retract({ documentId, scope: "document" })
+
+      if (activeIdRef.current === documentId) {
+        activeIdRef.current = tab.id
+        setActiveId(tab.id)
+      }
+    },
+    [notices, replaceTabs],
+  )
+
   // The file as it now stands, in the old tab's place; a failed read keeps
-  // the old tab. Its session closes the old document as it unmounts.
+  // the old tab.
   const reloadTab = useCallback(
     async (
       documentId: number,
@@ -576,21 +595,11 @@ export default function App() {
         return { error: null, id: documentId }
       }
 
-      replaceTabs((current) =>
-        current.some((item) => item.id === documentId)
-          ? current.map((item) => (item.id === documentId ? loaded.tab : item))
-          : [...current, loaded.tab],
-      )
-      notices.retract({ documentId, scope: "document" })
-
-      if (activeIdRef.current === documentId) {
-        activeIdRef.current = loaded.tab.id
-        setActiveId(loaded.tab.id)
-      }
+      putInPlaceOf(documentId, loaded.tab)
 
       return { error: null, id: loaded.tab.id }
     },
-    [loadSource, notices, replaceTabs],
+    [loadSource, putInPlaceOf],
   )
 
   // A document other files were added to was saved as a file of its own: the
@@ -613,12 +622,55 @@ export default function App() {
     [notices, reloadTab, runOpenBatch],
   )
 
+  // Save as A4's copy, written and bound to its file, takes the tab's place:
+  // the tab shows that file as an open of it would, the old document closing
+  // with its session.
   const tabHasUnsavedWork = useCallback(
     (documentId: number) =>
       sessionRefs.current.get(documentId)?.hasUnsavedWorkNow() ??
       tabsRef.current.some((tab) => tab.id === documentId && tab.dirty),
     [],
   )
+
+  // A document with unsaved work keeps its tab: the copy cannot carry its
+  // annotations, so they would be gone for good. The copy opens beside it.
+  const replaceWithWritten = useCallback(
+    (documentId: number, document: PdfDocumentInfo) => {
+      const path = document.path
+
+      if (!mountedRef.current || !path) {
+        void invoke("close_pdf", { documentId: document.id }).catch(() => undefined)
+        return
+      }
+
+      const tab: OpenTab = {
+        dirty: false,
+        document,
+        id: document.id,
+        name: fileNameFromPath(path),
+        path,
+        recentPath: path,
+        savable: false,
+      }
+
+      if (tabHasUnsavedWork(documentId)) {
+        replaceTabs((current) => {
+          const at = current.findIndex((item) => item.id === documentId)
+
+          return at < 0
+            ? [...current, tab]
+            : [...current.slice(0, at + 1), tab, ...current.slice(at + 1)]
+        })
+        activateTab(tab.id)
+      } else {
+        putInPlaceOf(documentId, tab)
+      }
+
+      refreshRecentFiles()
+    },
+    [activateTab, putInPlaceOf, refreshRecentFiles, replaceTabs, tabHasUnsavedWork],
+  )
+
   const showTabInViewer = useCallback(
     (documentId: number) => {
       setWorkspaceMode("view")
@@ -2508,6 +2560,7 @@ export default function App() {
           onDirtyChange={updateDirty}
           onSavableChange={updateSavable}
           onCombinedSaved={reopenCombinedTab}
+          onReplacedByFile={replaceWithWritten}
           onSourceChange={updateSource}
           ref={(handle) => {
             if (handle) {

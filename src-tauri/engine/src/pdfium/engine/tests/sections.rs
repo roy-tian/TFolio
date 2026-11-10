@@ -654,3 +654,47 @@ fn pages_still_shown_as_several_files_save_only_as_a_new_file() {
 
     fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_a4_copy_of_several_files_keeps_their_blanks_and_bookmarks() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-a4");
+    let own = engine
+        .open(banded_pdf(&[20]))
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[60, 100]))],
+    );
+    let padded = sections::FileOptions {
+        smart_padding: true,
+        per_file_bookmarks: true,
+    };
+
+    engine
+        .insert_organize_sources(SCOPE, own.id, &ids, 2, "own.pdf", padded, None)
+        .expect("the file should be added");
+
+    let fitted = engine
+        .fit_to_a4(own.id, |_, _| {})
+        .expect("the pages should fit")
+        .expect("nobody stopped it");
+    let starts: Vec<_> = fitted
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    assert_eq!(fitted.num_pages, 4);
+    assert_eq!(
+        starts,
+        vec![
+            ("own.pdf".to_string(), Some(1)),
+            ("added.pdf".to_string(), Some(3)),
+        ]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}

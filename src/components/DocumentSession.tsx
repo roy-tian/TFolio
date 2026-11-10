@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next"
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { AppSidebar, SidebarPanelSwitch } from "@/components/AppSidebar"
 import { BookmarkList } from "@/components/BookmarkList"
+import { A4ExportDialog } from "@/components/A4ExportDialog"
 import { CompressExportDialog } from "@/components/CompressExportDialog"
 import { ImageExportDialog } from "@/components/ImageExportDialog"
 import { SplitPdfDialog } from "@/components/SplitPdfDialog"
@@ -212,6 +213,9 @@ type DocumentSessionProps = {
       tab now shows that file, as opening it again would. */
   onCombinedSaved: (documentId: number) => void
   onDirtyChange: (documentId: number, dirty: boolean) => void
+  /** A copy written to a file of its own that this tab now shows — Save as
+      A4's — in place of the document it was made from. */
+  onReplacedByFile: (documentId: number, document: PdfDocumentInfo) => void
   /** Whether this document may now be written back over its own file. Only the
       session can say: the workspace cannot see what makes it export-only. */
   onSavableChange: (documentId: number, canSave: boolean) => void
@@ -248,6 +252,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       notices,
       onCombinedSaved,
       onDirtyChange,
+      onReplacedByFile,
       onSavableChange,
       onSourceChange,
       recentPath,
@@ -300,6 +305,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [imageExportOpen, setImageExportOpen] = useState(false)
     const [splitOpen, setSplitOpen] = useState(false)
     const [compressOpen, setCompressOpen] = useState(false)
+    const [a4Open, setA4Open] = useState(false)
     // The one notice this session holds rather than raises: it stands until the
     // reader answers it, and the held edit below is what the answer is for.
     const [noteFontOffer, setNoteFontOffer] = useState<
@@ -1969,6 +1975,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         onExportImages={() => setImageExportOpen(true)}
         onPrint={print.preparing ? undefined : () => void startPrint()}
         onSave={saveDocument}
+        onSaveA4={() => setA4Open(true)}
         onSaveAs={() => void exportPdf()}
         onSplit={() => setSplitOpen(true)}
         saveHint={saveHint}
@@ -2005,6 +2012,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           canSave={canSave}
           macOS={macOS}
           onCompress={() => setCompressOpen(true)}
+          onSaveA4={() => setA4Open(true)}
           onExportImages={() => setImageExportOpen(true)}
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
@@ -2111,6 +2119,21 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             suggestedName={exportBaseName}
             onExport={annotations.exportArchive}
             onClose={() => setSplitOpen(false)}
+          />
+        ) : null}
+
+        {a4Open ? (
+          <A4ExportDialog
+            document={pdfDocument}
+            hidden={!active}
+            keepsOriginal={annotations.isDirty || saveRequired}
+            onClose={() => setA4Open(false)}
+            onExport={annotations.exportA4}
+            onSaved={(written) => {
+              setA4Open(false)
+              onReplacedByFile(openedDocument.id, written)
+            }}
+            suggestedName={exportBaseName}
           />
         ) : null}
 

@@ -1,4 +1,13 @@
-import { ChevronDown, FileImage, Save, Scissors, Search, Shrink, Upload } from "lucide-react"
+import {
+  ChevronDown,
+  FileImage,
+  RectangleVertical,
+  Save,
+  Scissors,
+  Search,
+  Shrink,
+  Upload,
+} from "lucide-react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -32,6 +41,7 @@ type SessionHeaderProps = {
   canSave: boolean
   macOS: boolean
   onCompress: () => void
+  onSaveA4: () => void
   onExportImages: () => void
   onSave: () => void
   onSaveAs: () => void
@@ -67,6 +77,7 @@ export function SessionHeader({
   canSave,
   macOS,
   onCompress,
+  onSaveA4,
   onExportImages,
   onSave,
   onSaveAs,
@@ -164,6 +175,10 @@ export function SessionHeader({
                   <DropdownMenuShortcut>
                     {formatShortcut(shortcuts.saveAs)}
                   </DropdownMenuShortcut>
+                </DropdownMenuItem>
+                <DropdownMenuItem data-action="save-a4" onClick={onSaveA4}>
+                  <RectangleVertical />
+                  {t("a4Export.menuLabel")}
                 </DropdownMenuItem>
                 <DropdownMenuItem data-action="export-images" onClick={onExportImages}>
                   <FileImage />

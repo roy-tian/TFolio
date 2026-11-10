@@ -15,13 +15,11 @@ use tfolio_engine::{
 #[cfg(not(feature = "e2e"))]
 use super::commands::ensure_approved;
 use super::{
-    commands::{channel_progress, export_and_bind, export_dialog},
+    commands::{bind_new_document, channel_progress, pick_new_pdf},
     encode::encode_webp,
     PdfProgress, PdfiumState,
 };
-use crate::windows::{
-    page_generation, record_document, DocumentFile, DocumentOwners, PageGeneration,
-};
+use crate::windows::{page_generation, DocumentOwners, PageGeneration};
 
 /// The organize workspace's files, read for their pages and kept by the
 /// asking window. Approved like an open: a source's pages are its contents.
@@ -180,34 +178,13 @@ pub async fn save_assembled_pdf(
     filter_label: String,
     on_progress: Channel<PdfProgress>,
     app: AppHandle,
-    state: State<'_, PdfiumState>,
     window: WebviewWindow,
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let page = page_generation(&window);
-    let engine = Arc::clone(&state.engine);
-    let dialog_app = app.clone();
-    // `blocking_save_file` would deadlock the main thread outside `spawn_blocking`.
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        export_dialog(
-            &dialog_app,
-            &engine,
-            None,
-            filter_label,
-            &["pdf"],
-            &suggested_name,
-        )
-        .blocking_save_file()
-    })
-    .await
-    .map_err(|error| format!("dialog task failed: {error}"))?;
-    // A page that reloaded or closed while the dialog was up has nothing left
-    // to show the PDF in, and a destroy's cancellation came before the build.
-    let Some(picked) = picked.filter(|_| page_generation(&window) == page) else {
+    let Some(path) = pick_new_pdf(&app, None, filter_label, suggested_name, &window, page).await?
+    else {
         return Ok(None);
     };
-    let path = picked
-        .into_path()
-        .map_err(|error| format!("the chosen destination is unusable: {error}"))?;
 
     assemble_into(plan, path, on_progress, app, window, page).await
 }
@@ -229,10 +206,9 @@ pub async fn save_assembled_pdf_to(
     assemble_into(plan, PathBuf::from(path), on_progress, app, window, page).await
 }
 
-/// Builds the plan's document, records it as the window's, and writes it to
-/// `path`, which it is then bound to: it opens as that file's tab, as an open
-/// of it would. `None` for a stopped assembly, and for one whose page reloaded
-/// or closed meanwhile: that has already closed the document.
+/// Builds the plan's document and binds it to `path`, as an open of that file
+/// would; `None` for a stopped assembly and for one whose page reloaded or
+/// closed meanwhile.
 async fn assemble_into(
     plan: AssemblePlan,
     path: PathBuf,
@@ -243,40 +219,14 @@ async fn assemble_into(
 ) -> Result<Option<PdfDocumentInfo>, String> {
     let engine = Arc::clone(&app.state::<PdfiumState>().engine);
     let label = window.label().to_string();
-    let assembly_engine = Arc::clone(&engine);
     let assembled = tauri::async_runtime::spawn_blocking(move || {
-        assembly_engine.assemble_pdf(&label, plan, channel_progress(on_progress))
+        engine.assemble_pdf(&label, plan, channel_progress(on_progress))
     })
     .await
     .map_err(|error| format!("PDFium assembly task failed: {error}"))??;
     let Some(document) = assembled else {
         return Ok(None);
     };
-    let owners = app.state::<DocumentOwners>();
 
-    record_document(&owners, &window, page, document.id(), DocumentFile::None);
-
-    if !owners.owns(document.id(), window.label()) {
-        return Ok(None);
-    }
-
-    let id = document.id();
-    let shown = path.to_string_lossy().into_owned();
-    let task_app = app.clone();
-    let written =
-        tauri::async_runtime::spawn_blocking(move || export_and_bind(&task_app, &engine, id, path))
-            .await
-            .map_err(|error| format!("PDFium export task failed: {error}"));
-
-    match written {
-        Ok(Ok(_)) => Ok(Some(document.bound_to(shown))),
-        // An unwritten document has no file to open as; the arrangement is
-        // still there to try another destination.
-        Ok(Err(error)) | Err(error) => {
-            owners.release(id);
-            app.state::<PdfiumState>().close_document_detached(id);
-
-            Err(error)
-        }
-    }
+    bind_new_document(document, path, app, &window, page).await
 }

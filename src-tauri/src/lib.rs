@@ -27,11 +27,11 @@ use pdfium::{
     release_organize_sources, release_pdf_compression, remove_pdf_page_numbers,
     remove_pdf_watermark, rename_pdf_section, render_organize_thumbnail, render_pdf_page,
     render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_assembled_pdf, save_pdf, search_pdf_text, set_pdf_file_options,
-    word_conversion_available, PdfiumState,
+    rotate_pdf_pages, save_a4_pdf, save_assembled_pdf, save_pdf, search_pdf_text,
+    set_pdf_file_options, word_conversion_available, PdfiumState,
 };
 #[cfg(feature = "e2e")]
-use pdfium::{export_pdf_to, save_assembled_pdf_to};
+use pdfium::{export_pdf_to, save_a4_pdf_to, save_assembled_pdf_to};
 use quit::quit_app;
 use recent::{
     recent_pdf_view, recent_pdfs, remove_recent_pdf, reveal_recent_pdf, set_recent_pdf_view,
@@ -162,6 +162,9 @@ pub fn run() {
             save_assembled_pdf,
             #[cfg(feature = "e2e")]
             save_assembled_pdf_to,
+            save_a4_pdf,
+            #[cfg(feature = "e2e")]
+            save_a4_pdf_to,
             recent_pdfs,
             recent_pdf_view,
             set_recent_pdf_view,

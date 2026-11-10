@@ -11,6 +11,12 @@ import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
   /** Stands in for `save_assembled_pdf`, whose save dialog no driver can answer. */
+  saveA4Pdf?: (args: {
+    documentId: number
+    filterLabel: string
+    onProgress: Channel<PdfProgress>
+    suggestedName: string
+  }) => Promise<PdfDocumentInfo | null>
   saveAssembledPdf?: (args: {
     filterLabel: string
     onProgress: Channel<PdfProgress>

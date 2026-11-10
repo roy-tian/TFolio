@@ -1,3 +1,4 @@
+mod a4;
 mod archive;
 mod commands;
 mod compress;
@@ -15,6 +16,9 @@ use serde::Serialize;
 use tauri::AppHandle;
 use tfolio_engine::{PdfiumEngine, WordSuites};
 
+pub use a4::save_a4_pdf;
+#[cfg(feature = "e2e")]
+pub use a4::save_a4_pdf_to;
 pub use archive::{cancel_pdf_archive, export_pdf_archive};
 #[cfg(feature = "e2e")]
 pub use commands::export_pdf_to;

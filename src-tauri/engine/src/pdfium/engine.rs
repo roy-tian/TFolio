@@ -1213,6 +1213,7 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
     items
 }
 
+mod a4_export;
 mod archive_export;
 mod compress;
 mod file_identity;

@@ -15,6 +15,7 @@ use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 
 mod support;
 
+mod a4_export;
 mod annotations;
 mod archive_export;
 mod compress;

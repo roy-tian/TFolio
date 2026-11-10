@@ -16,7 +16,9 @@ use tfolio_engine::{
 };
 
 use crate::recent::RecentFiles;
-use crate::windows::{page_generation, record_document, DocumentFile, DocumentOwners};
+use crate::windows::{
+    page_generation, record_document, DocumentFile, DocumentOwners, PageGeneration,
+};
 
 use super::encode::{encode_png, encode_webp};
 use super::paths::fallback_font_destination;
@@ -957,6 +959,83 @@ pub(super) fn export_and_bind(
     }
 
     Ok(outcome)
+}
+
+/// Where a new PDF goes, asked before it is built: a cancelled dialog costs no
+/// build. The dialog is the caller's own, since a path argument would be an
+/// arbitrary-file write for any page code. `None` also for a page that reloaded
+/// or closed meanwhile, which has nothing left to show the PDF in.
+pub(super) async fn pick_new_pdf(
+    app: &AppHandle,
+    document_id: Option<u64>,
+    filter_label: String,
+    suggested_name: String,
+    window: &WebviewWindow,
+    page: PageGeneration,
+) -> Result<Option<PathBuf>, String> {
+    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
+    let dialog_app = app.clone();
+    // `blocking_save_file` would deadlock the main thread outside `spawn_blocking`.
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        export_dialog(
+            &dialog_app,
+            &engine,
+            document_id,
+            filter_label,
+            &["pdf"],
+            &suggested_name,
+        )
+        .blocking_save_file()
+    })
+    .await
+    .map_err(|error| format!("dialog task failed: {error}"))?;
+    let Some(picked) = picked.filter(|_| page_generation(window) == page) else {
+        return Ok(None);
+    };
+
+    picked
+        .into_path()
+        .map(Some)
+        .map_err(|error| format!("the chosen destination is unusable: {error}"))
+}
+
+/// A document just built for the window, recorded as its own and written to
+/// `path`, which it is then bound to: it opens as that file's tab, as an open
+/// of it would. `None` for a page that reloaded or closed meanwhile, which has
+/// already closed it; an unwritten one is closed, having no file to show.
+pub(super) async fn bind_new_document(
+    document: PdfDocumentInfo,
+    path: PathBuf,
+    app: AppHandle,
+    window: &WebviewWindow,
+    page: PageGeneration,
+) -> Result<Option<PdfDocumentInfo>, String> {
+    let owners = app.state::<DocumentOwners>();
+
+    record_document(&owners, window, page, document.id(), DocumentFile::None);
+
+    if !owners.owns(document.id(), window.label()) {
+        return Ok(None);
+    }
+
+    let id = document.id();
+    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
+    let shown = path.to_string_lossy().into_owned();
+    let task_app = app.clone();
+    let written =
+        tauri::async_runtime::spawn_blocking(move || export_and_bind(&task_app, &engine, id, path))
+            .await
+            .map_err(|error| format!("PDFium export task failed: {error}"));
+
+    match written {
+        Ok(Ok(_)) => Ok(Some(document.bound_to(shown))),
+        Ok(Err(error)) | Err(error) => {
+            owners.release(id);
+            app.state::<PdfiumState>().close_document_detached(id);
+
+            Err(error)
+        }
+    }
 }
 
 /// `export_pdf` past its dialog, which no driver can answer. Taking the path
