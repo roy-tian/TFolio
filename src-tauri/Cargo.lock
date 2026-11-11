@@ -5095,7 +5095,7 @@ dependencies = [
 
 [[package]]
 name = "tfolio"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "base64 0.23.1",
  "image",
