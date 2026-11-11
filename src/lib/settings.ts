@@ -8,7 +8,6 @@ export type Settings = {
     theme?: unknown
     language?: unknown
     viewMode?: unknown
-    pageGrid?: unknown
     sidebar?: unknown
     sidebarPanel?: unknown
     sidebarWidth?: unknown

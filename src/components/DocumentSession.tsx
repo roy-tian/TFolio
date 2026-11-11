@@ -133,9 +133,7 @@ import {
   effectiveViewMode,
   hasBookSpread,
   pageTurnTarget,
-  readStoredPageGrid,
   readStoredViewMode,
-  storePageGrid,
   storeViewMode,
   type ViewMode,
 } from "@/lib/viewMode"
@@ -156,6 +154,9 @@ export type DocumentSessionHandle = {
       these pages, breaks them; `true` where none is owed. */
   ensureSignatures: (change: SignedChange) => true | Promise<boolean>
   fetchNoteFont: () => void
+  /** Whether the page grid shows: a tab that takes this one's place takes
+      its view with it. */
+  gridShownNow: () => boolean
   /** Edits and a typed note, which a save would keep; `hasUnsavedWorkNow`
       also counts work still running, which no save can. */
   hasUnsavedChangesNow: () => boolean
@@ -204,6 +205,10 @@ type DocumentSessionProps = {
   initialSaveRequired?: boolean
   /** A path-backed document's last reading view. */
   initialRecentView?: RecentPdfView
+  /** The page grid is a tab's own, never a preference: a document opens on
+      its pages to be read, unless its tab came from one that showed the grid
+      — moved from another window, or written from it and put in its place. */
+  initialGrid?: boolean
   /** Overrides the stored preference: a tab moved from another window keeps
       the view it was being read in. */
   initialViewMode?: ViewMode
@@ -248,6 +253,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       document: openedDocument,
       ensureSourceSignatures,
       fileName,
+      initialGrid = false,
       initialRecentView,
       initialSaveRequired = false,
       initialViewMode,
@@ -423,7 +429,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const sidebar = useSidebar()
     // The page grid lies over the reading view, which stays laid out beneath
     // it, so leaving the grid finds the reader's place where it was.
-    const [gridShown, setGridShown] = useState(readStoredPageGrid)
+    const [gridShown, setGridShown] = useState(initialGrid)
+    const gridShownRef = useRef(gridShown)
+
+    gridShownRef.current = gridShown
     const thumbnailsRef = useRef<PageThumbnailsHandle>(null)
     // While the grid shows the pages, the sidebar keeps to the bookmarks.
     const sidebarPanel = gridShown ? "bookmarks" : shownSidebarPanel(sidebar.panel, bookmarksApply)
@@ -1543,18 +1552,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       storeViewMode(preferredViewMode)
     }, [preferredViewMode])
 
-    // As the reading view's mode is: what this tab opened on is no choice.
-    const gridChosen = useRef(false)
-
-    useEffect(() => {
-      if (!gridChosen.current) {
-        gridChosen.current = true
-        return
-      }
-
-      storePageGrid(gridShown)
-    }, [gridShown])
-
     // Undo and redo can move a note's anchored page out from under it and cannot
     // take the note as their target, so the uncommitted draft goes before a step.
     const cancelTextNote = textNote.cancel
@@ -1810,6 +1807,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         recentView: sampleCurrentView(),
         saveRequired: saveRequiredRef.current,
         seed: {
+          grid: gridShown,
           history: annotationsSeed.history,
           marks: annotationsSeed.marks,
           viewMode: preferredViewMode,
@@ -1818,6 +1816,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [
       annotations,
+      gridShown,
       preferredViewMode,
       sampleCurrentView,
       textNote.draft?.text,
@@ -2022,6 +2021,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         dismissNoteFont: clearNoteFontOffer,
         ensureSignatures,
         fetchNoteFont: () => void fetchNoteFont(),
+        gridShownNow: () => gridShownRef.current,
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         isCopyOnlyNow,

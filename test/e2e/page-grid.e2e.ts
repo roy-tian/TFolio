@@ -356,22 +356,19 @@ describe("TFolio page grid", () => {
     await expect($(preview(grid, 1))).toHaveAttribute("data-rotation", "0")
   })
 
-  it("opens the next document on the grid while the reader last left one there", async () => {
+  it("keeps the grid to the tab it was chosen in: the next document opens to be read", async () => {
     await openPdfFromDisk("first.pdf", bandedPdf(2))
     await showGrid()
-    await settingsHold(["pageGrid = true"])
 
     // A document of its own, opened in a tab of its own.
     await openPdfFromDisk("second.pdf", bandedPdf(3))
-    await $(grid).waitForExist()
-    await browser.waitUntil(async () => (await pageCount(grid)) === 3)
-
-    await $(`${session} button[aria-label='Single page']`).click()
-    await $(grid).waitForExist({ reverse: true })
-    await settingsHold(["pageGrid = false"])
-    await openPdfFromDisk("third.pdf", bandedPdf(1))
     await $(`${session} [data-page-number='1']`).waitForExist()
     await expect($(grid)).not.toExist()
+
+    // The first tab is where the reader left it.
+    await $("//button[@role='tab'][normalize-space()='first.pdf']").click()
+    await $(grid).waitForExist()
+    await browser.waitUntil(async () => (await pageCount(grid)) === 2)
   })
 
   it("goes to a bookmark's page beside the grid, which follows and chooses it", async () => {

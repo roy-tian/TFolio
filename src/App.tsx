@@ -117,6 +117,9 @@ type OpenTab = {
       no fresh open could derive. Read once, at the session's first mount. */
   movedSeed?: MovedTabSeed
   name: string
+  /** The tab this one was written from showed the page grid, and so does
+      this one: read once, like `movedSeed`. */
+  onGrid?: boolean
   path: string
   /** A document-specific name for Save As — a converted document's,
       then the file Save As bound it to; ordinary PDFs use the annotation
@@ -520,10 +523,19 @@ export default function App() {
     [notices],
   )
 
+  // The page grid is a tab's own: a tab written or reloaded from one that
+  // showed it carries on there, where a document opened afresh is read.
+  const onGridOf = useCallback(
+    (documentId: number) => sessionRefs.current.get(documentId)?.gridShownNow() === true,
+    [],
+  )
+
   // A tab closed meanwhile leaves `tab` to append. The old tab's session
   // closes its document as it unmounts.
   const putInPlaceOf = useCallback(
-    (documentId: number, tab: OpenTab) => {
+    (documentId: number, replacement: OpenTab) => {
+      const tab = { ...replacement, onGrid: onGridOf(documentId) }
+
       replaceTabs((current) =>
         current.some((item) => item.id === documentId)
           ? current.map((item) => (item.id === documentId ? tab : item))
@@ -536,7 +548,7 @@ export default function App() {
         setActiveId(tab.id)
       }
     },
-    [notices, replaceTabs],
+    [notices, onGridOf, replaceTabs],
   )
 
   // The file as it now stands, in the old tab's place; a failed read keeps
@@ -634,12 +646,15 @@ export default function App() {
       }
 
       if (tabHasUnsavedWork(documentId)) {
+        // Beside the tab it was made from, as in its place.
+        const beside = { ...tab, onGrid: onGridOf(documentId) }
+
         replaceTabs((current) => {
           const at = current.findIndex((item) => item.id === documentId)
 
           return at < 0
-            ? [...current, tab]
-            : [...current.slice(0, at + 1), tab, ...current.slice(at + 1)]
+            ? [...current, beside]
+            : [...current.slice(0, at + 1), beside, ...current.slice(at + 1)]
         })
         activateTab(tab.id)
       } else {
@@ -648,7 +663,7 @@ export default function App() {
 
       refreshRecentFiles()
     },
-    [activateTab, putInPlaceOf, refreshRecentFiles, replaceTabs, tabHasUnsavedWork],
+    [activateTab, onGridOf, putInPlaceOf, refreshRecentFiles, replaceTabs, tabHasUnsavedWork],
   )
 
   const tabName = useCallback(
@@ -2354,6 +2369,7 @@ export default function App() {
           document={tab.document}
           ensureSourceSignatures={ensureSourceSignatures}
           fileName={tab.name}
+          initialGrid={tab.movedSeed?.grid ?? tab.onGrid}
           initialSaveRequired={tab.initialSaveRequired}
           initialRecentView={tab.recentView}
           // A moved tab keeps the view it was being read in even where no

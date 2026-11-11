@@ -110,6 +110,9 @@ export async function fetchWindowRects(): Promise<WindowRect[]> {
     it owns are what keep the document's dirty state, its export-only refusals,
     and annotation deletion answering as they did where it came from. */
 export type MovedTabSeed = {
+  /** Whether the page grid lay over its reading view: the grid is a tab's
+      own, so it goes where the tab goes. */
+  grid: boolean
   history: AnnotationHistory
   marks: [entryId: number, markIds: number[]][]
   viewMode: ViewMode
@@ -228,6 +231,7 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     saveRequired: value.saveRequired === true,
     savable: value.savable === true,
     seed: {
+      grid: seed.grid === true,
       history: seed.history as unknown as AnnotationHistory,
       marks: seed.marks,
       viewMode: seed.viewMode,

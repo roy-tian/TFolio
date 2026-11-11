@@ -519,8 +519,13 @@ describe("TFolio files added to an open document", () => {
         (await $$(`//button[@role='tab'][normalize-space()='combined.pdf']`).length) === 1,
       { timeout: 30_000, timeoutMsg: "the tab never became the saved file" },
     )
+    // The old tab takes the file's name before the file is read back: its
+    // headings going is what says the reopened file shows.
+    await browser.waitUntil(async () => (await headings()).length === 0, {
+      timeout: 30_000,
+      timeoutMsg: "the tab never showed the saved file as one file",
+    })
     await waitForPages(3)
-    expect(await headings()).toEqual([])
     await expect($(saveTrigger)).not.toHaveAttribute("data-save-as-only")
     await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
@@ -528,6 +533,32 @@ describe("TFolio files added to an open document", () => {
     await expect(bookmarks).toHaveText(expect.stringContaining("added.pdf"))
     await expect(bookmarks).toHaveText(expect.stringContaining("Second half"))
     expect(own.endsWith("own.pdf")).toBe(true)
+  })
+
+  it("keeps the tab on the page grid through the Save As that puts the file in it", async () => {
+    const own = await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(1))])
+    await waitForPages(3)
+    await $(`${session} button[aria-label='Thumbnails']`).click()
+    const grid = `${session} [data-page-thumbnails='grid']`
+    await waitForPages(3, grid)
+
+    await pointSaveAsAt(path.join(path.dirname(own), "arranged.pdf"))
+    await $(saveTrigger).click()
+    await browser.waitUntil(
+      async () =>
+        (await $$(`//button[@role='tab'][normalize-space()='arranged.pdf']`).length) === 1,
+      { timeout: 30_000, timeoutMsg: "the tab never became the saved file" },
+    )
+    // The grid is the tab's, and the written file took the tab's place: the
+    // reader arranging pages is not sent back to reading them. The old tab
+    // takes the file's name before the file is read back, so its headings
+    // going is what tells the two apart.
+    await browser.waitUntil(async () => (await headings(grid)).length === 0, {
+      timeout: 30_000,
+      timeoutMsg: "the tab never showed the saved file as one file",
+    })
+    await waitForPages(3, grid)
   })
 })
 

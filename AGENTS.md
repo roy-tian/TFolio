@@ -169,8 +169,11 @@
   bookmarks, so one `PageThumbnails` shows the pages at a time. With no bookmarks or files to
   keep to, the sidebar gives the grid its column (`setVacant`) and opens only over it, as in a
   narrow window. The grid shows pages as a save keeps them: it ignores the view's turn and
-  offers none, since there a turn means the page's own. Documents open on the grid while the
-  reader last left one there (`ui.pageGrid`).
+  offers none, since there a turn means the page's own.
+- The grid is a tab's own state, never a stored preference: a document opens on its reading
+  view. Only a tab that comes from one on the grid starts there: moved from another window
+  (`MovedTabSeed.grid`), or written or reloaded from it and put in its place or beside it
+  (`onGrid`) — a Save As of added files, an A4 copy, a file changed elsewhere.
 - A file dragged over the grid is told only that a drop joins the document, and by the tab strip
   where one would open tabs: the workspace's offer to open, laid over the grid, says the
   opposite of what the drop does.

@@ -52,9 +52,6 @@ struct UiPreferences {
     language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     view_mode: Option<String>,
-    /// Whether documents open on the page grid, as the reader last left one.
-    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
-    page_grid: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sidebar: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -263,7 +260,6 @@ mod tests {
                 theme: Some("dark".into()),
                 language: Some("en".into()),
                 view_mode: None,
-                page_grid: Some(true),
                 sidebar: Some("hidden".into()),
                 sidebar_panel: Some("bookmarks".into()),
                 sidebar_width: Some(420),
@@ -299,7 +295,6 @@ mod tests {
         assert_eq!(ui.theme.as_deref(), Some("dark"));
         assert_eq!(ui.sidebar_width, Some(420));
         assert_eq!(ui.sidebar_file_rows, Some(false));
-        assert_eq!(ui.page_grid, Some(true));
         assert_eq!(
             read.annotate
                 .and_then(|annotate| annotate.text_note)
