@@ -1973,12 +1973,22 @@ export default function App() {
           stop()
         } else {
           unlisten = stop
+
+          // The listeners bind a few IPC turns after the first paint, and a
+          // drop a spec emits before then reaches nobody: it waits on this.
+          if (isE2eBuild) {
+            document.documentElement.dataset.fileDrops = "listening"
+          }
         }
       })
 
     return () => {
       cancelled = true
       unlisten?.()
+
+      if (isE2eBuild) {
+        delete document.documentElement.dataset.fileDrops
+      }
     }
   }, [addDroppedFiles, openPaths])
 

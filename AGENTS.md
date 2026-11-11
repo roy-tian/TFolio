@@ -37,6 +37,8 @@
   feature, not a GUI copy.
 - e2e cannot drive native dialogs; use `window.__tfolioE2E` in e2e mode and `seedSettings` for
   settings that must survive refresh.
+- An event a spec emits reaches only listeners already bound, and the app binds its own some IPC
+  turns after a reload paints: `emitDrag` waits on the e2e build's `html[data-file-drops]` mark.
 - WebDriver input is not real input: scripted keys ignore `preventDefault`, typing appends over a
   selection, clicks make no `dblclick` or hover. `test/e2e/nativePointer.ts` drives real pointers.
 - GUI tests drive only `main`; check multi-window changes manually, a different file per window.

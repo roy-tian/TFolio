@@ -910,11 +910,16 @@ export async function renderedPage(pageSelector = "[data-page-number='1']") {
  * WebDriver cannot start a desktop drag, so the event the window hears through
  * Tauri's event system is emitted directly, in CSS pixels (GTK logical units).
  */
-export function emitDrag(
+export async function emitDrag(
   name: "drag-over" | "drag-drop",
   point: { x: number; y: number },
   paths: string[],
 ) {
+  // The app binds its drop listeners a few IPC turns after it first paints, and
+  // an event emitted before then reaches nobody: straight after a reload, on a
+  // busy machine, that lost the whole drop.
+  await $("html[data-file-drops]").waitForExist()
+
   return browser.execute(
     (event: string, x: number, y: number, files: string[]) => {
       const tauri = (
