@@ -1,7 +1,6 @@
 import {
   ClipboardPaste,
   Copy,
-  Eye,
   Pencil,
   RotateCcw,
   RotateCw,
@@ -33,9 +32,6 @@ type PageMenuContentProps = {
   onCut: () => void
   onDelete: () => void
   onInsertBlank: (side: PageMenuSide) => void
-  /** In the grid, where a click only chooses: the reading view on the page
-      under the pointer. */
-  onOpen?: () => void
   onPaste: (side: PageMenuSide) => void
   onRotate: (degrees: 90 | 270) => void
 }
@@ -49,7 +45,6 @@ export function PageMenuContent({
   onCut,
   onDelete,
   onInsertBlank,
-  onOpen,
   onPaste,
   onRotate,
 }: PageMenuContentProps) {
@@ -57,15 +52,6 @@ export function PageMenuContent({
 
   return (
     <ContextMenuContent>
-      {onOpen ? (
-        <>
-          <ContextMenuItem data-action="open-page" onClick={onOpen}>
-            <Eye />
-            {t("pageEdit.open")}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-        </>
-      ) : null}
       <ContextMenuItem data-action="rotate-pages" onClick={() => onRotate(90)}>
         <RotateCw />
         {t("pageEdit.rotate", { count })}
@@ -132,8 +118,8 @@ export function PageMenuContent({
 /** Where in a file a paste lands: before its first page, or after its last. */
 export type FileMenuEnd = "start" | "end"
 
-/** A file's right-click menu, by its name in the grid or the sidebar's tree:
-    what its hover buttons do, and pastes that join it at either end. */
+/** A file's right-click menu, by its name over its pages or in the tree of
+    files: what its hover buttons do, and pastes that join it at either end. */
 export function FileMenuContent({
   canPaste,
   onPaste,
@@ -146,8 +132,8 @@ export function FileMenuContent({
   onPaste: (end: FileMenuEnd) => void
   onRemove: () => void
   onRename: () => void
-  /** Absent where no pages show to be chosen: beside a reading view, the
-      tree stands in for the sidebar's pages. */
+  /** Absent where no pages show to be chosen: the tree of files stands in
+      the sidebar where the pages would. */
   onSelect?: () => void
   /** A document keeps a page; its last file stays. */
   removeDisabled: boolean

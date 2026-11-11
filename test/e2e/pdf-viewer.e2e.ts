@@ -13,7 +13,6 @@ import {
   renderedPage,
   seedSettings,
   textPdf,
-  tooltipOn,
 } from "./helpers"
 
 // The zoom listener is bound natively and non-passively, so the wheel goes out
@@ -219,9 +218,13 @@ describe("TFolio PDF viewer", () => {
     await browser.keys("Enter")
     await expect(pageInput).toHaveValue("1")
 
-    const bookmarksPanel = `${activeSidebar} button[aria-label='Bookmarks']`
-    await expect($(bookmarksPanel)).toBeDisabled()
-    expect(await tooltipOn(bookmarksPanel)).toBe("This document has no bookmarks")
+    // Either panel opens for any document: one with no bookmarks says so.
+    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    await expect($(`${activeSidebar} nav[aria-label='Bookmarks']`)).toHaveText(
+      "This document has no bookmarks",
+    )
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} [data-slot='sidebar-thumbnails']`).waitForExist()
 
     await clickAppMenuItem("settings")
     await expect($("[role='dialog']")).toBeDisplayed()

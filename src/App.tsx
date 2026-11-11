@@ -42,7 +42,7 @@ import { PagesDropContext, setPagesDropPoint, type PagesDrop } from "@/hooks/use
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
-import { dropPointInCss, overPages, pagesFillWorkspace, pagesShown } from "@/lib/fileDrop"
+import { dropPointInCss, overPages, pagesShown } from "@/lib/fileDrop"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
@@ -117,9 +117,6 @@ type OpenTab = {
       no fresh open could derive. Read once, at the session's first mount. */
   movedSeed?: MovedTabSeed
   name: string
-  /** The tab this one was written from showed the page grid, and so does
-      this one: read once, like `movedSeed`. */
-  onGrid?: boolean
   path: string
   /** A document-specific name for Save As — a converted document's,
       then the file Save As bound it to; ordinary PDFs use the annotation
@@ -228,8 +225,6 @@ export default function App() {
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [pagesDrop, setPagesDrop] = useState<PagesDrop>(null)
-  // The pages a drop joins are the page grid, over the whole main area.
-  const [pagesFill, setPagesFill] = useState(false)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
   // What the prompt keeps showing while it fades out after an answer.
   const [shownClose, setShownClose] = useState<PendingClose | null>(null)
@@ -523,19 +518,10 @@ export default function App() {
     [notices],
   )
 
-  // The page grid is a tab's own: a tab written or reloaded from one that
-  // showed it carries on there, where a document opened afresh is read.
-  const onGridOf = useCallback(
-    (documentId: number) => sessionRefs.current.get(documentId)?.gridShownNow() === true,
-    [],
-  )
-
   // A tab closed meanwhile leaves `tab` to append. The old tab's session
   // closes its document as it unmounts.
   const putInPlaceOf = useCallback(
-    (documentId: number, replacement: OpenTab) => {
-      const tab = { ...replacement, onGrid: onGridOf(documentId) }
-
+    (documentId: number, tab: OpenTab) => {
       replaceTabs((current) =>
         current.some((item) => item.id === documentId)
           ? current.map((item) => (item.id === documentId ? tab : item))
@@ -548,7 +534,7 @@ export default function App() {
         setActiveId(tab.id)
       }
     },
-    [notices, onGridOf, replaceTabs],
+    [notices, replaceTabs],
   )
 
   // The file as it now stands, in the old tab's place; a failed read keeps
@@ -646,15 +632,12 @@ export default function App() {
       }
 
       if (tabHasUnsavedWork(documentId)) {
-        // Beside the tab it was made from, as in its place.
-        const beside = { ...tab, onGrid: onGridOf(documentId) }
-
         replaceTabs((current) => {
           const at = current.findIndex((item) => item.id === documentId)
 
           return at < 0
-            ? [...current, beside]
-            : [...current.slice(0, at + 1), beside, ...current.slice(at + 1)]
+            ? [...current, tab]
+            : [...current.slice(0, at + 1), tab, ...current.slice(at + 1)]
         })
         activateTab(tab.id)
       } else {
@@ -663,7 +646,7 @@ export default function App() {
 
       refreshRecentFiles()
     },
-    [activateTab, onGridOf, putInPlaceOf, refreshRecentFiles, replaceTabs, tabHasUnsavedWork],
+    [activateTab, putInPlaceOf, refreshRecentFiles, replaceTabs, tabHasUnsavedWork],
   )
 
   const tabName = useCallback(
@@ -1911,8 +1894,8 @@ export default function App() {
     // nothing to open: left alone rather than met with a drop target and an error.
     let namesNoFile = false
     const windows = isWindows()
-    // A document's pages, down the sidebar or across the grid, are a target
-    // of their own while it shows: files let go there are added to it.
+    // The viewer's sidebar pages are a target of their own while a document
+    // shows: files let go there are added to it.
     const cssPoint = (position: { x: number; y: number }) =>
       dropPointInCss(position, windows, window.devicePixelRatio)
     const pagesDropAt = (position: { x: number; y: number }): PagesDrop => {
@@ -1964,7 +1947,6 @@ export default function App() {
 
           setIsDragging(true)
           setPagesDrop(drop)
-          setPagesFill(drop !== null && pagesFillWorkspace())
           setPagesDropPoint(drop === "over" ? cssPoint(event.payload.position) : null)
         }
       })
@@ -2379,7 +2361,6 @@ export default function App() {
           document={tab.document}
           ensureSourceSignatures={ensureSourceSignatures}
           fileName={tab.name}
-          initialGrid={tab.movedSeed?.grid ?? tab.onGrid}
           initialSaveRequired={tab.initialSaveRequired}
           initialRecentView={tab.recentView}
           // A moved tab keeps the view it was being read in even where no
@@ -2444,27 +2425,7 @@ export default function App() {
         </div>
       ) : null}
 
-      {isDragging && pagesDrop && pagesFill ? (
-        // The page grid fills the main area and says itself that a drop on it
-        // joins the document: an offer to open laid over it would say the
-        // opposite of what the drop does. Opening keeps the bars, and the tab
-        // strip, where tabs come to be, says so.
-        <div
-          className={cn(
-            "pointer-events-none fixed top-(--toolbar-height) right-0 left-(--sidebar-inset) z-60 flex h-(--document-tabs-height) items-center justify-center gap-2 border-2 border-dashed px-3 text-sm font-medium backdrop-blur-sm",
-            pagesDrop === "over"
-              ? "border-muted-foreground/30 bg-background/75 text-muted-foreground"
-              : "border-primary/60 bg-background/90",
-          )}
-          data-strip=""
-          data-testid="workspace-file-drop"
-        >
-          <FileUp className="size-4 shrink-0" />
-          <span className="truncate">
-            {t(pagesDrop === "over" ? "tabs.dropStripHint" : "tabs.dropStripNow")}
-          </span>
-        </div>
-      ) : isDragging ? (
+      {isDragging ? (
         <div
           className={cn(
             "pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] right-3 bottom-3 z-60 grid place-items-center rounded-2xl border-2 border-dashed backdrop-blur-sm",

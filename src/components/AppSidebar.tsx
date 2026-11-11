@@ -49,20 +49,17 @@ const panelOptions = [
   { icon: ListTree, labelKey: "sidebar.bookmarks", value: "bookmarks" },
 ] as const
 
-/** Which of a document's two panels the sidebar shows. A document of several
-    files shows them, with their bookmarks, where the bookmarks would be.
-    While the page grid shows, the pages are there and the sidebar keeps to
-    the bookmarks. */
+/** Which of a document's two panels the sidebar shows: both are there for
+    every document, whatever it holds. A document of several files shows
+    them, with their bookmarks, where the bookmarks would be. It stands in
+    the sidebar's one row beside the toggle, so a long language's words give
+    way before the row does: each still says itself whole under the pointer. */
 export function SidebarPanelSwitch({
-  bookmarksApply,
   files = false,
   panel,
-  thumbnailsApply = true,
 }: {
-  bookmarksApply: boolean
   files?: boolean
   panel: SidebarPanel
-  thumbnailsApply?: boolean
 }) {
   const { t } = useTranslation()
   const sidebar = useSidebar()
@@ -70,6 +67,7 @@ export function SidebarPanelSwitch({
   return (
     <ToggleGroup
       aria-label={t("sidebar.panels")}
+      className="max-w-full"
       onValueChange={([next]) => {
         // Pressing the shown panel again would empty the group; one
         // panel always shows.
@@ -86,21 +84,16 @@ export function SidebarPanelSwitch({
         const Icon = option.icon
         const label =
           option.value === "bookmarks" && files ? t("sidebar.files") : t(option.labelKey)
-        const unavailable =
-          option.value === "bookmarks" ? !bookmarksApply : !thumbnailsApply
-        const why =
-          option.value === "bookmarks" ? t("sidebar.noBookmarks") : t("sidebar.pagesInGrid")
 
         return (
-          <ToolbarTooltip key={option.value} label={unavailable ? why : label}>
+          <ToolbarTooltip key={option.value} label={label}>
             <ToggleGroupItem
               aria-label={label}
-              className="gap-1.5 px-3"
-              disabled={unavailable}
+              className="min-w-0 shrink gap-1.5 px-2.5"
               value={option.value}
             >
               <Icon />
-              {label}
+              <span className="truncate">{label}</span>
             </ToggleGroupItem>
           </ToolbarTooltip>
         )
@@ -110,8 +103,8 @@ export function SidebarPanelSwitch({
 }
 
 /**
- * The sidebar's right edge, dragged or arrowed to widen it, for long bookmark
- * titles. Double-click goes back to the opening width. The drag
+ * The sidebar's right edge, dragged or arrowed to widen it: wide, its pages
+ * stand in rows of several. Double-click goes back to the opening width. The drag
  * sets the workspace root's width itself, frame by frame, and settles it in
  * the window's state only on release, so App renders once per drag.
  */
@@ -259,12 +252,12 @@ function SidebarResizeHandle() {
 type AppSidebarProps = {
   children?: ReactNode
   macOS: boolean
-  /** The second row: what the rest of the column shows. */
+  /** At the far end of the first row: what the rest of the column shows. */
   switcher?: ReactNode
 }
 
-/** The window's left column: its first row is the title bar's, the second
-    switches what the rest of it shows. */
+/** The window's left column: its first row is the title bar's, the toggle at
+    one end and, at the other, the switch for what the rest of it shows. */
 export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
   const sidebar = useSidebar()
   const asideRef = useRef<HTMLElement>(null)
@@ -323,16 +316,17 @@ export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
     >
       <div
         className={cn(
-          "flex h-(--toolbar-height) shrink-0 items-center gap-1 px-2",
+          // As the toolbar beside it: its line under the row, and pb-px to
+          // keep the content box even, so the toggle stands at one height
+          // whichever of the two rows holds it.
+          "flex h-(--toolbar-height) shrink-0 items-center gap-2 border-b px-2 pb-px",
           // The traffic lights sit over this corner of the window.
           macOS && "pl-[76px]",
         )}
         data-tauri-drag-region="deep"
       >
         <SidebarToggle />
-      </div>
-      <div className="flex h-(--document-tabs-height) shrink-0 items-center justify-center border-b px-2">
-        {switcher}
+        {switcher ? <div className="ml-auto flex min-w-0 justify-end">{switcher}</div> : null}
       </div>
       <div className="min-h-0 flex-1">{children}</div>
       <SidebarResizeHandle />

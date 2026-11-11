@@ -195,11 +195,12 @@ export function columnLanding(
 /**
  * The cell a point is over in a flex-wrap flow, nearest by row and then by
  * column: gaps go to the closer neighbour, and points beyond the flow to its
- * edge cells. `after` once past the cell's middle.
+ * edge cells. `after` once past the cell's middle: across it, or down it for
+ * a `bar`, which is a row of its own.
  */
 export function flowCellAt(
   point: { x: number; y: number },
-  cells: Box[],
+  cells: (Box & { bar?: boolean })[],
 ): { after: boolean; index: number } | null {
   if (cells.length === 0) {
     return null
@@ -232,7 +233,12 @@ export function flowCellAt(
     const next = index < row.last ? cells[index + 1]! : undefined
 
     if (!next || point.x < (cell.left + cell.width + next.left) / 2) {
-      return { after: point.x > cell.left + cell.width / 2, index }
+      return {
+        after: cell.bar
+          ? point.y > cell.top + cell.height / 2
+          : point.x > cell.left + cell.width / 2,
+        index,
+      }
     }
   }
 
@@ -247,7 +253,7 @@ export function flowCellAt(
  */
 export function flowLanding(
   point: { x: number; y: number },
-  cells: (Box & { moving: boolean })[],
+  cells: (Box & { bar?: boolean; moving: boolean })[],
   current: number | null,
 ): number | null {
   const column = cells.every(
@@ -271,15 +277,71 @@ export function flowLanding(
 }
 
 /** A flow's cells as laid out now, read off its `[data-flip-key]` children
-    against the positioned flow itself. */
+    against the positioned flow itself. A `[data-flip-bar]` is a row of its
+    own: a folded file's name, standing for the pages under it. */
 export function flowCells(flow: HTMLElement, moving: (key: string) => boolean) {
   return Array.from(flow.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"), (cell) => ({
+    bar: cell.dataset.flipBar !== undefined,
+    element: cell,
     height: cell.offsetHeight,
+    key: cell.dataset.flipKey!,
     left: cell.offsetLeft,
     moving: moving(cell.dataset.flipKey!),
     top: cell.offsetTop,
     width: cell.offsetWidth,
   }))
+}
+
+export type FlowCell = ReturnType<typeof flowCells>[number]
+
+/** A cell of a flow by what it stands for: one page, or the pages folded
+    under a file's name. */
+type Weighed = { moving: boolean; pages: number }
+
+export type WeighedFlowCell = FlowCell & Weighed
+
+/** The pages that stay standing before the place `flowLanding` gave: its
+    count is of cells, and a folded file's is many pages. */
+export function pagesBeforeSlot(cells: readonly Weighed[], slot: number): number {
+  let pages = 0
+  let staying = 0
+
+  for (const cell of cells) {
+    if (cell.moving) {
+      continue
+    }
+
+    if (staying === slot) {
+      break
+    }
+
+    pages += cell.pages
+    staying += 1
+  }
+
+  return pages
+}
+
+/** `pagesBeforeSlot` the other way: the place among the cells that stay with
+    `pages` pages before it, the first where a cell of no pages makes two. */
+export function slotOfPages(cells: readonly Weighed[], pages: number): number {
+  let before = 0
+  let staying = 0
+
+  for (const cell of cells) {
+    if (cell.moving) {
+      continue
+    }
+
+    if (before >= pages) {
+      break
+    }
+
+    before += cell.pages
+    staying += 1
+  }
+
+  return staying
 }
 
 /** A point on the screen in the flow's own space, where `flowCells` stand. */

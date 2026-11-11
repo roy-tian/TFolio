@@ -159,32 +159,29 @@
 - Every insert names the file its pages join, and a reorder passes each position's file after
   and before: a page let go among another file's pages joins it, but a file moved whole by its
   name keeps its own. A deleted page keeps its file for the restore an undo brings back.
-- A file let go among another's pages parts it into runs. The grid's headings, the sidebar's
-  tree (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list a file once per
-  run, its own bookmarks under the first; rename, remove, choose and drag act on the file whole.
+- A file let go among another's pages parts it into runs. The headings over the sidebar's
+  pages, its tree of files (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list
+  a file once per run, its own bookmarks under the first; rename, remove, choose, fold and drag
+  act on the file whole.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
   then the tab reopens the written file, its history gone. A compressed copy compresses what a
   Save As writes (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which
   the engine reports as `splitsByBookmarks`.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
-  will put them (`SectionBook::padding`) with every structure change, the viewer, page grid,
-  sidebar and print show them there, and only a Save As writes them. Structure commands never
-  see them. A drag shows them where its drop would leave them by the same rule
-  (`paddingPositions`, kept in step with `SectionBook::padding`).
-- The page grid lies over the reading view, which stays mounted and laid out (`inert`) beneath
-  it: leaving the grid finds the reader's place, and the sidebar meanwhile keeps to the
-  bookmarks, so one `PageThumbnails` shows the pages at a time. With no bookmarks or files to
-  keep to, the sidebar gives the grid its column (`setVacant`) and opens only over it, as in a
-  narrow window. The grid shows pages as a save keeps them: it ignores the view's turn and
-  offers none, since there a turn means the page's own.
-- The grid is a tab's own state, never a stored preference: a document opens on its reading
-  view. Only a tab that comes from one on the grid starts there: moved from another window
-  (`MovedTabSeed.grid`), or written or reloaded from it and put in its place or beside it
-  (`onGrid`) — a Save As of added files, an A4 copy, a file changed elsewhere.
-- A file dragged over the grid is told only that a drop joins the document, and by the tab strip
-  where one would open tabs: the workspace's offer to open, laid over the grid, says the
-  opposite of what the drop does.
+  will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
+  print show them there, and only a Save As writes them. Structure commands never see them. A
+  drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
+  step with `SectionBook::padding`).
+- The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
+  fixed-size cells once widened (`ui.sidebarWidth`), each page with its own controls. The
+  pages and the bookmarks (the tree of files, for several) are both there for every document:
+  which shows is the window's layout, never a matter of what the document holds.
+- A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,
+  `flowItems`): a drop lands above or below it, never inside. `flowLanding` counts cells, so
+  every landing goes through `pagesBeforeSlot` before it names a page. Folding is a tab's own
+  state, kept while the sidebar shows something else, never a stored preference, and lets go of
+  the pages chosen in the file: none is deleted or cut unseen.
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
 - File sources are read-only and are not documents: no `record_document`, recent files, save

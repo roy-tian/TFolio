@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test"
 import {
   clampSidebarWidth,
   isSidebarPanel,
-  shownSidebarPanel,
   SIDEBAR_MIN_WIDTH,
   sidebarDockMinWidth,
   sidebarMode,
@@ -18,14 +17,6 @@ describe("isSidebarPanel", () => {
     expect(isSidebarPanel("thumbnails")).toBe(true)
     expect(isSidebarPanel("Bookmarks")).toBe(false)
     expect(isSidebarPanel(undefined)).toBe(false)
-  })
-})
-
-describe("shownSidebarPanel", () => {
-  test("falls back to the pages without bookmarks, keeping the choice", () => {
-    expect(shownSidebarPanel("bookmarks", false)).toBe("thumbnails")
-    expect(shownSidebarPanel("bookmarks", true)).toBe("bookmarks")
-    expect(shownSidebarPanel("thumbnails", true)).toBe("thumbnails")
   })
 })
 
@@ -76,6 +67,8 @@ describe("sidebar width", () => {
 
 describe("thumbnailColumns", () => {
   test("adds a column per cell and gap of room, and keeps at least one", () => {
+    // The sidebar as it opens, less the column's own padding.
+    expect(thumbnailColumns(208, 160)).toBe(1)
     expect(thumbnailColumns(343, 160)).toBe(1)
     expect(thumbnailColumns(344, 160)).toBe(2)
     expect(thumbnailColumns(527, 160)).toBe(2)

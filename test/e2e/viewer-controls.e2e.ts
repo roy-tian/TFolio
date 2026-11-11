@@ -39,7 +39,6 @@ describe("TFolio viewer controls", () => {
       "Page number",
       "Single page",
       "Book",
-      "Thumbnails",
       "Zoom out",
       "Zoom",
       "Zoom in",

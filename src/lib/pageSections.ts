@@ -24,8 +24,8 @@ export function pagesOfSection(pages: readonly PdfPageInfo[], section: number): 
 
 /**
  * A file's pages standing together. A file let go among another's pages parts
- * it in two, and each part is a run: what the grid heads with the file's name,
- * the sidebar's tree lists, and a Save As writes a bookmark for.
+ * it in two, and each part is a run: what the sidebar's pages head with the
+ * file's name, its tree lists, and a Save As writes a bookmark for.
  */
 export type FileRun = {
   count: number

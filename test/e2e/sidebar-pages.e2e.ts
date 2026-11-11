@@ -4,24 +4,16 @@ import "@wdio/tauri-service"
 import {
   activeSidebar,
   bandedPdf,
-  contextMenuAction,
   openPdfFromDisk,
-  outlinedPdf,
   refreshApp,
   seedSettings,
   settingsHold,
 } from "./helpers"
 
 const session = "[data-document-session][data-active='true']"
-const grid = `${session} [data-page-thumbnails='grid']`
 const handle = `${activeSidebar} [data-slot='sidebar-resize']`
-const preview = (scope: string, pageNumber: number) =>
-  `${scope} button[data-thumbnail-page='${pageNumber}']`
-
-async function showGrid() {
-  await $(`${session} button[aria-label='Thumbnails']`).click()
-  await $(grid).waitForExist()
-}
+const preview = (pageNumber: number) =>
+  `${activeSidebar} button[data-thumbnail-page='${pageNumber}']`
 
 function sidebarWidth() {
   return browser.execute(
@@ -30,7 +22,7 @@ function sidebarWidth() {
   )
 }
 
-function columns(scope: string) {
+function columns() {
   return browser.execute(
     (within: string) =>
       Number(
@@ -38,18 +30,18 @@ function columns(scope: string) {
           .querySelector(`${within} [data-thumbnail-columns]`)
           ?.getAttribute("data-thumbnail-columns"),
       ),
-    scope,
+    activeSidebar,
   )
 }
 
-function pageCount(scope: string) {
+function pageCount() {
   return browser.execute(
     (within: string) => document.querySelectorAll(`${within} button[data-thumbnail-page]`).length,
-    scope,
+    activeSidebar,
   )
 }
 
-/** Page numbers row by row, as the grid lays them out on screen. */
+/** Page numbers row by row, as the sidebar lays them out on screen. */
 function rows() {
   return browser.execute((scope: string) => {
     const lines = new Map<number, number[]>()
@@ -64,7 +56,7 @@ function rows() {
     }
 
     return [...lines.entries()].sort(([a], [b]) => a - b).map(([, pages]) => pages)
-  }, grid)
+  }, activeSidebar)
 }
 
 /** The widest a docked sidebar goes here: the toolbar beside it keeps the room
@@ -146,13 +138,13 @@ function dragThumbBefore(from: number, target: number) {
         new PointerEvent("pointerup", { bubbles: true, clientX: dest.x, clientY: dest.y }),
       )
     },
-    preview(grid, from),
-    preview(grid, target),
+    preview(from),
+    preview(target),
   )
 }
 
 /** Each page's ink, top to bottom of its band: a banded page names itself. */
-function bandOrder(scope: string) {
+function bandOrder(scope = activeSidebar) {
   return browser.execute((within: string) => {
     return Array.from(
       document.querySelectorAll<HTMLElement>(`${within} button[data-thumbnail-page]`),
@@ -178,14 +170,14 @@ function bandOrder(scope: string) {
   }, scope)
 }
 
-async function settledBands(scope: string, count: number) {
+async function settledBands(count: number) {
   let previous: number[] = []
   let current: number[] = []
 
   await browser.waitUntil(
     async () => {
       previous = current
-      current = await bandOrder(scope)
+      current = await bandOrder()
 
       return (
         current.length === count &&
@@ -213,7 +205,7 @@ function pressControl(pageNumber: number, control: string) {
       pressed.focus()
       pressed.click()
     },
-    grid,
+    activeSidebar,
     pageNumber,
     control,
   )
@@ -226,7 +218,7 @@ function selectedThumbs() {
         document.querySelectorAll(`${scope} button[data-thumbnail-page][aria-pressed='true']`),
         (button) => Number(button.getAttribute("data-thumbnail-page")),
       ).sort((left, right) => left - right),
-    grid,
+    activeSidebar,
   )
 }
 
@@ -235,24 +227,29 @@ function shape(pageNumber: number) {
     const box = document.querySelector(selector)!.getBoundingClientRect()
 
     return box.width > box.height ? "landscape" : "portrait"
-  }, preview(grid, pageNumber))
+  }, preview(pageNumber))
 }
 
 function pageStatus() {
   return $(`${session} [data-slot='page-status']`).getAttribute("aria-label")
 }
 
-describe("TFolio page grid", () => {
+/** Wide enough for rows of two in the suite's window, which clamps it to
+    the room the toolbar leaves. */
+const TWO_COLUMNS = 440
+
+describe("TFolio sidebar pages", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
     await refreshApp()
   })
 
-  it("keeps the sidebar to one column however wide, and its width through a reload", async () => {
+  it("widens from one column into rows of pages, and keeps its width through a reload", async () => {
     await openPdfFromDisk("column.pdf", bandedPdf(4))
-    await settledBands(activeSidebar, 4)
+    await settledBands(4)
 
     const opening = await sidebarWidth()
+    expect(await columns()).toBe(1)
 
     // An arrow press on the focused edge widens it a step.
     await browser.execute((selector: string) => {
@@ -267,14 +264,13 @@ describe("TFolio page grid", () => {
     await browser.waitUntil(async () => Math.round(await sidebarWidth()) === widest, {
       timeoutMsg: "the sidebar never settled at its widest",
     })
-    expect(await columns(activeSidebar)).toBe(1)
-    // Down the sidebar a page is found, not edited: no controls of its own.
-    expect(
-      await browser.execute(
-        (scope: string) => document.querySelectorAll(`${scope} [data-page-action]`).length,
-        activeSidebar,
-      ),
-    ).toBe(0)
+    await browser.waitUntil(async () => (await columns()) === 2, {
+      timeoutMsg: "the widened sidebar never laid its pages out in rows",
+    })
+    expect(await rows()).toEqual([
+      [1, 2],
+      [3, 4],
+    ])
     await settingsHold([`sidebarWidth = ${widest}`])
 
     // Esc takes a drag back to where it started.
@@ -286,133 +282,55 @@ describe("TFolio page grid", () => {
     await browser.waitUntil(async () => Math.round(await sidebarWidth()) === widest, {
       timeoutMsg: "the stored width did not come back",
     })
+    expect(await columns()).toBe(2)
   })
 
-  it("lays the pages out over the reading view, which a double-click goes back to", async () => {
-    await openPdfFromDisk("grid.pdf", bandedPdf(6))
-    await showGrid()
-    await browser.waitUntil(async () => (await pageCount(grid)) === 6)
+  it("goes to the page a click chooses, the pages to read staying beside it", async () => {
+    await openPdfFromDisk("read.pdf", bandedPdf(6))
+    await $(preview(5)).waitForExist({ timeout: 30_000 })
 
-    const across = await columns(grid)
-    expect(across).toBeGreaterThan(2)
-    expect((await rows())[0]).toEqual(Array.from({ length: across }, (_, index) => index + 1))
-    // The pages are in the grid, so the sidebar keeps to the bookmarks; the
-    // reading view's scale and drawing tools have nothing to act on.
-    await expect($(`${activeSidebar} [data-page-thumbnails]`)).not.toExist()
-    await expect($(`${session} [data-slot='zoom-controls']`)).not.toExist()
-    await expect($(`${session} button[aria-label='Highlight text']`)).toBeDisabled()
-    // A turn of the view would pass here for a turn of the pages, which
-    // their own controls make.
-    await expect($(`${session} button[aria-label='Rotate the view clockwise']`)).not.toExist()
-    // With no bookmarks to keep to, the sidebar gives the grid its column.
-    await expect($("[data-sidebar]")).toHaveAttribute("data-sidebar", "hidden")
-
-    // A click chooses, and the grid stays.
-    await $(preview(grid, 5)).click()
+    await $(preview(5)).click()
     expect(await selectedThumbs()).toEqual([5])
-    await expect($(grid)).toExist()
-
-    // Enter opens the focused page, as a double-click does.
-    await browser.execute((selector: string) => {
-      document.querySelector<HTMLElement>(selector)!.focus()
-    }, preview(grid, 3))
-    await browser.keys("Enter")
-    await $(grid).waitForExist({ reverse: true })
-    await browser.waitUntil(async () => (await pageStatus()) === "Page 3 of 6", {
-      timeoutMsg: "Enter never opened page 3",
-    })
-    await expect($("[data-sidebar]")).toHaveAttribute("data-sidebar", "docked")
-    await showGrid()
-
-    // So does the page's menu, for a reader who never tries a double-click.
-    await contextMenuAction(preview(grid, 2), "open-page")
-    await $(grid).waitForExist({ reverse: true })
-    await browser.waitUntil(async () => (await pageStatus()) === "Page 2 of 6", {
-      timeoutMsg: "the menu never opened page 2",
-    })
-    await showGrid()
-
-    // WebDriver makes no double-click of its own.
-    await browser.execute((selector: string) => {
-      document
-        .querySelector(selector)!
-        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 }))
-    }, preview(grid, 5))
-    await $(grid).waitForExist({ reverse: true })
     await browser.waitUntil(async () => (await pageStatus()) === "Page 5 of 6", {
-      timeoutMsg: "the reading view never came back on page 5",
+      timeoutMsg: "the click never went to page 5",
     })
+    // The pages are worked on beside the view they are read in, which keeps
+    // its scale, its turn and its drawing tools: there is no view of the
+    // pages alone to switch to.
     await expect($(`${session} [data-slot='zoom-controls']`)).toExist()
+    await expect($(`${session} button[aria-label='Highlight text']`)).toBeEnabled()
+    await expect($(`${session} button[aria-label='Thumbnails']`)).not.toExist()
   })
 
-  it("shows the pages as a save keeps them, whatever turn the reading view has", async () => {
-    await openPdfFromDisk("turned.pdf", bandedPdf(2))
-    await $(`${session} button[aria-label='Rotate the view clockwise']`).click()
-    await expect($(preview(activeSidebar, 1))).toHaveAttribute("data-rotation", "90")
-
-    // The grid turns pages for good and has no turn of the view to undo this
-    // one with: left standing, it would pass for a turn of the pages.
-    await showGrid()
-    await expect($(preview(grid, 1))).toHaveAttribute("data-rotation", "0")
-  })
-
-  it("keeps the grid to the tab it was chosen in: the next document opens to be read", async () => {
-    await openPdfFromDisk("first.pdf", bandedPdf(2))
-    await showGrid()
-
-    // A document of its own, opened in a tab of its own.
-    await openPdfFromDisk("second.pdf", bandedPdf(3))
-    await $(`${session} [data-page-number='1']`).waitForExist()
-    await expect($(grid)).not.toExist()
-
-    // The first tab is where the reader left it.
-    await $("//button[@role='tab'][normalize-space()='first.pdf']").click()
-    await $(grid).waitForExist()
-    await browser.waitUntil(async () => (await pageCount(grid)) === 2)
-  })
-
-  it("goes to a bookmark's page beside the grid, which follows and chooses it", async () => {
-    await openPdfFromDisk("outlined.pdf", outlinedPdf())
-    await showGrid()
-    await $(`${activeSidebar} nav[aria-label='Bookmarks']`).waitForExist()
-
-    await browser.execute((scope: string) => {
-      Array.from(document.querySelectorAll<HTMLElement>(`${scope} nav[aria-label='Bookmarks'] button`))
-        .find((button) => button.textContent?.includes("Second half"))!
-        .click()
-    }, activeSidebar)
-    await browser.waitUntil(async () => (await selectedThumbs()).join() === "2", {
-      timeoutMsg: "the bookmark's page was never chosen",
-    })
-    await expect($(grid)).toExist()
-  })
-
-  it("drags a page across a row of the grid", async () => {
-    await openPdfFromDisk("grid-drag.pdf", bandedPdf(4))
-    await showGrid()
-    const [first, second, third, fourth] = await settledBands(grid, 4)
+  it("drags a page across a row of the widened sidebar", async () => {
+    await seedSettings({ ui: { language: "en", sidebarWidth: TWO_COLUMNS, viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("row-drag.pdf", bandedPdf(4))
+    const [first, second, third, fourth] = await settledBands(4)
+    expect(await columns()).toBe(2)
 
     await dragThumbBefore(4, 1)
     await browser.waitUntil(
-      async () => (await bandOrder(grid)).join() === [fourth, first, second, third].join(),
+      async () => (await bandOrder()).join() === [fourth, first, second, third].join(),
       { timeout: 15_000, timeoutMsg: "the dragged page never landed first" },
     )
 
     await browser.keys(["Control", "z"])
     await browser.waitUntil(
-      async () => (await bandOrder(grid)).join() === [first, second, third, fourth].join(),
+      async () => (await bandOrder()).join() === [first, second, third, fourth].join(),
       { timeout: 15_000, timeoutMsg: "undo never put the page back" },
     )
   })
 
   it("turns, removes and chooses one page by its own controls", async () => {
     await openPdfFromDisk("controls.pdf", bandedPdf(4))
-    await showGrid()
-    await settledBands(grid, 4)
+    await settledBands(4)
 
     await pressControl(2, "[data-page-action='toggle']")
     await pressControl(3, "[data-page-action='toggle']")
     expect(await selectedThumbs()).toEqual([2, 3])
+    // A tick only adds to the choice: the reader stays on the page they read.
+    expect(await pageStatus()).toBe("Page 1 of 4")
 
     // A page's own turn is that page's alone, chosen or not.
     await pressControl(4, "[data-page-action='rotate-right']")
@@ -421,30 +339,39 @@ describe("TFolio page grid", () => {
     expect(await shape(3)).toBe("portrait")
 
     await pressControl(1, "[data-page-action='delete']")
-    await browser.waitUntil(async () => (await pageCount(grid)) === 3, {
+    await browser.waitUntil(async () => (await pageCount()) === 3, {
       timeoutMsg: "the page's own delete never took it",
     })
 
     await browser.keys(["Control", "z"])
-    await browser.waitUntil(async () => (await pageCount(grid)) === 4)
+    await browser.waitUntil(async () => (await pageCount()) === 4)
   })
 
-  it("inserts a blank page from the gap between two pages", async () => {
-    await openPdfFromDisk("gaps.pdf", bandedPdf(3))
-    await showGrid()
-    const [first, second, third] = await settledBands(grid, 3)
+  for (const layout of ["down the column", "across a row"] as const) {
+    it(`inserts a blank page from the gap before a page, ${layout}`, async () => {
+      if (layout === "across a row") {
+        await seedSettings({
+          ui: { language: "en", sidebarWidth: TWO_COLUMNS, viewMode: "single" },
+        })
+        await refreshApp()
+      }
 
-    await pressControl(2, "[data-insert-gap='before']")
-    await browser.waitUntil(async () => (await pageCount(grid)) === 4, {
-      timeoutMsg: "the gap's blank never came in",
+      await openPdfFromDisk("gaps.pdf", bandedPdf(3))
+      const [first, second, third] = await settledBands(3)
+      expect(await columns()).toBe(layout === "across a row" ? 2 : 1)
+
+      await pressControl(2, "[data-insert-gap='before']")
+      await browser.waitUntil(async () => (await pageCount()) === 4, {
+        timeoutMsg: "the gap's blank never came in",
+      })
+      await browser.waitUntil(
+        async () => (await bandOrder()).join() === [first, 0, second, third].join(),
+        { timeout: 15_000, timeoutMsg: "the blank is not between the first two pages" },
+      )
+
+      // The last page's gap after it adds at the end.
+      await pressControl(4, "[data-insert-gap='after']")
+      await browser.waitUntil(async () => (await pageCount()) === 5)
     })
-    await browser.waitUntil(
-      async () => (await bandOrder(grid)).join() === [first, 0, second, third].join(),
-      { timeout: 15_000, timeoutMsg: "the blank is not between the first two pages" },
-    )
-
-    // The last page's gap after it adds at the end.
-    await pressControl(4, "[data-insert-gap='after']")
-    await browser.waitUntil(async () => (await pageCount(grid)) === 5)
-  })
+  }
 })

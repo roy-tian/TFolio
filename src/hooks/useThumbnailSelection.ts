@@ -5,6 +5,7 @@ import {
   selectionAfterClick,
   selectionAfterGroupClick,
   selectionOfAllPages,
+  selectionWithout,
   type SelectionModifiers,
   type ThumbnailSelection,
 } from "@/lib/thumbnailSelection"
@@ -48,6 +49,10 @@ export function useThumbnailSelection({
     [],
   )
 
+  const deselect = useCallback((pages: readonly number[]) => {
+    setSelection((current) => selectionWithout(current, pages))
+  }, [])
+
   useEffect(() => {
     if (!active) {
       setSelection(emptySelection)
@@ -67,5 +72,5 @@ export function useThumbnailSelection({
     }
   }, [active])
 
-  return { clear, select, selectAll, selectGroup, selectedPages: selection.pages }
+  return { clear, deselect, select, selectAll, selectGroup, selectedPages: selection.pages }
 }

@@ -13,6 +13,8 @@ import {
   nearestBox,
   orderAfterMove,
   orderWithBlockAt,
+  pagesBeforeSlot,
+  slotOfPages,
   wayOffsets,
 } from "@/lib/pageDrag"
 
@@ -247,6 +249,50 @@ describe("flowLanding", () => {
 
     expect(flowLanding({ x: 250, y: 40 }, grid, 2)).toBe(2)
     expect(flowLanding({ x: 250, y: 40 }, grid, null)).toBeNull()
+  })
+
+  it("lands above or below a folded file's name, a row of its own among the cells", () => {
+    // A row of two pages, a folded file's bar, then one page more.
+    const grid = [
+      cell(0, 0),
+      cell(184, 0),
+      { bar: true, height: 28, left: 0, moving: false, top: 204, width: 344 },
+      cell(0, 256),
+    ]
+
+    // Across the bar the half is told down it, not across it.
+    expect(flowLanding({ x: 20, y: 210 }, grid, null)).toBe(2)
+    expect(flowLanding({ x: 330, y: 210 }, grid, null)).toBe(2)
+    expect(flowLanding({ x: 20, y: 226 }, grid, null)).toBe(3)
+    expect(flowLanding({ x: 330, y: 226 }, grid, null)).toBe(3)
+  })
+})
+
+describe("places among folded files", () => {
+  // A page, a folded file of three, a page in hand, a folded file with every
+  // page in hand, and a last page.
+  const cells = [
+    { moving: false, pages: 1 },
+    { moving: false, pages: 3 },
+    { moving: true, pages: 1 },
+    { moving: true, pages: 0 },
+    { moving: false, pages: 1 },
+  ]
+
+  it("counts a folded file as the pages under its name", () => {
+    expect(pagesBeforeSlot(cells, 0)).toBe(0)
+    expect(pagesBeforeSlot(cells, 1)).toBe(1)
+    expect(pagesBeforeSlot(cells, 2)).toBe(4)
+    expect(pagesBeforeSlot(cells, 3)).toBe(5)
+  })
+
+  it("finds the place a count of pages stands at, and back again", () => {
+    for (const slot of [0, 1, 2, 3]) {
+      expect(slotOfPages(cells, pagesBeforeSlot(cells, slot))).toBe(slot)
+    }
+
+    // No place stands inside a folded file: the next one after it.
+    expect(slotOfPages(cells, 2)).toBe(2)
   })
 })
 

@@ -38,10 +38,6 @@ export type SidebarState = {
   setPanel: (panel: SidebarPanel) => void
   /** Stores the width last set without storing. */
   persistWidth: () => void
-  /** The shown tab's sidebar has nothing to list: it gives its column up
-      until it has, opening over the pages only when asked, as in a narrow
-      window. */
-  setVacant: (vacant: boolean) => void
   /** Settles a width the reader chose; null goes back to the opening width.
       `persist: false` leaves the file alone until `persistWidth`, so a held
       arrow key writes the settings once, not at the key's repeat rate. */
@@ -81,32 +77,8 @@ function useMediaQuery(query: string) {
 /** The window's one sidebar state, which every tab's sidebar shows: it is how
     the reader lays the window out, not a property of a document. */
 export function useSidebarState(macOS: boolean): SidebarState {
-  const roomy = useMediaQuery(`(min-width: ${sidebarDockMinWidth(macOS)}px)`)
-  // Never stored: it is the shown document's state, not the reader's choice.
-  const [vacant, setVacantState] = useState(false)
-  const docked = roomy && !vacant
+  const docked = useMediaQuery(`(min-width: ${sidebarDockMinWidth(macOS)}px)`)
   const [open, setOpen] = useState(readStoredSidebarOpen)
-  const vacantRef = useRef(vacant)
-  // Whether a docked column is what vacancy takes away and gives back.
-  const dockableRef = useRef(roomy && open)
-
-  dockableRef.current = roomy && open
-
-  // The viewer's left edge moves with the column, as when the reader hides
-  // it: warned first, the reading view keeps its place under the page grid.
-  const setVacant = useCallback((next: boolean) => {
-    if (next === vacantRef.current) {
-      return
-    }
-
-    vacantRef.current = next
-
-    if (dockableRef.current) {
-      window.dispatchEvent(new Event(VIEWER_WILL_MOVE_EVENT))
-    }
-
-    setVacantState(next)
-  }, [])
   const [panel, setPanelState] = useState(readStoredSidebarPanel)
   const [width, setWidthState] = useState(readStoredSidebarWidth)
   const [fileRows, setFileRowsState] = useState(readStoredFileRows)
@@ -166,7 +138,6 @@ export function useSidebarState(macOS: boolean): SidebarState {
       reserved,
       setFileRows,
       setPanel,
-      setVacant,
       setWidth,
       toggle,
       width,

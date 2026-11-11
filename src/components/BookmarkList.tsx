@@ -67,8 +67,8 @@ export function BookmarkList({ items, onNavigate }: BookmarkListProps) {
         className="overlay-scroll-viewport h-full overflow-auto overscroll-contain p-2"
         ref={navRef}
       >
-        {/* Shown with none only beside the page grid, which keeps the
-            sidebar to the bookmarks. */}
+        {/* The panel is the reader's choice of what the sidebar shows, whatever
+            the document holds: one with none says so. */}
         {items.length === 0 ? (
           <p className="px-2 py-3 text-sm text-muted-foreground">{t("sidebar.noBookmarks")}</p>
         ) : (

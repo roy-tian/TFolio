@@ -101,6 +101,29 @@ export function selectionAfterGroupClick(
   return { anchor: first, pages: new Set(pages) }
 }
 
+/** The selection with `pages` let go: folded away under their file's name,
+    they would be deleted or cut unseen. An anchor among them goes too, or
+    the next range would start from a page that does not show. */
+export function selectionWithout(
+  selection: ThumbnailSelection,
+  pages: readonly number[],
+): ThumbnailSelection {
+  const gone = new Set(pages)
+  const kept = new Set<number>()
+
+  for (const pageNumber of selection.pages) {
+    if (!gone.has(pageNumber)) {
+      kept.add(pageNumber)
+    }
+  }
+
+  const anchor = selection.anchor !== null && gone.has(selection.anchor) ? null : selection.anchor
+
+  return kept.size === selection.pages.size && anchor === selection.anchor
+    ? selection
+    : { anchor, pages: kept }
+}
+
 /** A click over items listed in `order`, as `selectionAfterClick` takes one;
     an anchor no longer listed makes a range click a plain one. */
 export function choiceAfterClick<T>(

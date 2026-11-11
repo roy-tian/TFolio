@@ -8,7 +8,8 @@ export type GhostPaper = {
       holds, as page bitmaps never become `blob:` URLs. */
   canvas: HTMLCanvasElement | null
   height: number
-  /** A page with no canvas — a blank — shows its name instead. */
+  /** What is lifted with no canvas — a folded file, by its name — shows
+      that name instead. */
   label?: string
   /** The quarter turn the preview shows its upright bitmap at. */
   rotation: number
@@ -281,7 +282,9 @@ export function PageDragGhost({
           {paper.canvas ? (
             <canvas className="absolute inset-0 block size-full" ref={canvasRef} />
           ) : (
-            paper.label
+            <span className="max-w-full truncate px-1 font-medium text-zinc-700">
+              {paper.label}
+            </span>
           )}
         </div>
         {count > 1 ? (

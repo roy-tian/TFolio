@@ -1,7 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
-import { Plus } from "lucide-react"
+import { ChevronRight, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { PaddingDismiss } from "@/components/PaddingDismiss"
 import { PageControls, type PageActionHandler } from "@/components/PageCardControls"
 import { DragHole } from "@/components/PageDragGhost"
@@ -15,7 +16,7 @@ import { flowCells, flowLanding, pointInColumn } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import type { PaddingSheet } from "@/lib/padding"
 import { dimensionsForRotation } from "@/lib/pdf"
-import { THUMBNAIL_GRID_GAP } from "@/lib/sidebar"
+import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
@@ -24,25 +25,29 @@ import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
 // screens would hold a long document's every preview for one scroll through.
 const RETAIN_MARGIN = "1500px 0px"
 
-/** How pages lie: down the sidebar, or across the main area as a grid. */
-export type PageThumbnailsLayout = "column" | "grid"
+// A blank's way in, as tall as its button, where one column's gap is narrower.
+const INSERT_SEAM = 20
 
-/** Where files let go at `point` go among `flow`'s pages: the count of pages
-    before them, the page count past the last, or null with no pages. */
-export function fileDropSlot(flow: HTMLElement, point: { x: number; y: number }) {
-  return flowLanding(pointInColumn(flow, point), flowCells(flow, () => false), null)
+/** The name of a file's pages under one heading: the handle a press chooses
+    the file by, a drag carries it by, and a folded file's ghost lands on. */
+export const FILE_HEADING_NAME = "[data-slot='pages-file-heading']"
+
+/** The flip key of a folded file's bar, by the preview key of its first page. */
+export function foldedBarKey(firstKey: number) {
+  return `fold-${firstKey}`
 }
 
 /** While a file drag offers the pages, an edge around them and, under the
-    pointer, a bar where the files would go. */
+    pointer, a bar where the files would go. What a drop does is said in the
+    bar over the pages, where it covers none of them. */
 export function PagesDropTarget({
   flowRef,
-  layout,
+  grid,
 }: {
   flowRef: RefObject<HTMLOListElement | null>
-  layout: PageThumbnailsLayout
+  /** Whether the pages stand in rows of several, not down one column. */
+  grid: boolean
 }) {
-  const { t } = useTranslation()
   const drop = usePagesDrop()
 
   if (!drop) {
@@ -52,23 +57,13 @@ export function PagesDropTarget({
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-1 z-10 flex justify-center rounded-xl border-2 border-dashed",
+        "pointer-events-none absolute inset-1 z-10 rounded-xl border-2 border-dashed",
         drop === "over" ? "border-primary/70" : "border-muted-foreground/40",
       )}
       data-over={drop === "over" ? "" : undefined}
       data-testid="pages-drop"
     >
-      {/* Across the grid this is all a drag is told about the pages, so it
-          is said at the size of what it lies over. */}
-      <p
-        className={cn(
-          "mt-2 h-fit rounded-full bg-background/95 font-medium shadow-sm",
-          layout === "grid" ? "px-4 py-1.5 text-sm" : "px-3 py-1 text-xs",
-        )}
-      >
-        {t("sidebar.dropFiles")}
-      </p>
-      {drop === "over" ? <DropMarker flowRef={flowRef} layout={layout} /> : null}
+      {drop === "over" ? <DropMarker flowRef={flowRef} grid={grid} /> : null}
     </div>
   )
 }
@@ -77,10 +72,10 @@ export function PagesDropTarget({
     in the drop target's own space. Re-rendered by the pointer alone. */
 function DropMarker({
   flowRef,
-  layout,
+  grid,
 }: {
   flowRef: RefObject<HTMLOListElement | null>
-  layout: PageThumbnailsLayout
+  grid: boolean
 }) {
   const point = usePagesDropPoint()
   const markerRef = useRef<HTMLDivElement>(null)
@@ -97,24 +92,28 @@ function DropMarker({
       return
     }
 
-    const cells = Array.from(flow.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"))
-    const slot = fileDropSlot(flow, point) ?? cells.length
-    const cell = cells[Math.min(slot, cells.length - 1)]
+    // By cells, which the marker stands between: the drop itself counts
+    // pages, a folded file's name being one cell of many.
+    const cells = flowCells(flow, () => false)
+    const slot = flowLanding(pointInColumn(flow, point), cells, null) ?? cells.length
+    const landing = cells[Math.min(slot, cells.length - 1)]
 
-    if (!cell) {
+    if (!landing) {
       setBox(null)
       return
     }
 
     // In the middle of the flow's own gap, off the cell's edge rather than the
     // paper's: a portrait paper stands inside its square, a caption below it.
+    const cell = landing.element
     const style = getComputedStyle(flow)
     const edge = cell.getBoundingClientRect()
     const paper = (cell.querySelector("[data-thumbnail-page]") ?? cell).getBoundingClientRect()
     const origin = host.getBoundingClientRect()
     const after = slot >= cells.length
 
-    if (layout === "grid") {
+    // A folded file's name is a row of its own, whatever stands around it.
+    if (grid && !landing.bar) {
       const half = parseFloat(style.columnGap) / 2 || 0
 
       setBox({
@@ -133,7 +132,7 @@ function DropMarker({
         width: paper.width,
       })
     }
-  }, [flowRef, layout, point])
+  }, [flowRef, grid, point])
 
   return (
     <div
@@ -222,34 +221,158 @@ export function PaddingCell({
   )
 }
 
-/** A blank page's way in, in the gap beside a grid cell: shown under the
-    pointer or the keyboard's focus only, since a row of plus signs would
-    crowd the pages. */
+/**
+ * The name over a file's pages, in a document of several: a press chooses
+ * the file, a drag carries it whole, and its arrow folds the pages away under
+ * it. Folded, it is a cell of the flow that stands for them — a bar a drop
+ * lands above or below — and says how many it holds.
+ */
+export function FileHeading({
+  count,
+  current,
+  flipKey,
+  folded,
+  hole,
+  onFold,
+  onRename,
+  onRenameDone,
+  onSelect,
+  renaming,
+  runFirst,
+  section,
+  selected,
+  title,
+}: {
+  /** The pages under this name, where they stand together. */
+  count: number
+  /** Folded over the page being read. */
+  current: boolean
+  flipKey: string
+  folded: boolean
+  /** Folded and in hand: its place shows where the file will land. */
+  hole: boolean
+  onFold: (folded: boolean) => void
+  onRename: () => void
+  onRenameDone: (title: string | null) => void
+  onSelect: (event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void
+  renaming: boolean
+  /** The first page under the name, which tells one run of a parted file
+      from the other. */
+  runFirst: number
+  section: number
+  /** Folded, with every page under the name chosen. */
+  selected: boolean
+  title: string
+}) {
+  const { t } = useTranslation()
+  const foldLabel = t(folded ? "sidebar.unfoldFile" : "sidebar.foldFile", { name: title })
+
+  return (
+    <li
+      // No flip key while its pages show: a heading is no page, and a drop
+      // counts none.
+      className={cn("relative flex w-full basis-full items-center gap-0.5 px-1", !folded && "pt-1")}
+      data-flip-bar={folded ? "" : undefined}
+      data-flip-key={folded ? flipKey : undefined}
+      data-run-first={runFirst}
+      data-section-header={section}
+    >
+      {/* Faded rather than hidden, as a page in hand is: a hidden button
+          would give up its focus, and the flow's keys with it. */}
+      <div className={cn("flex min-w-0 flex-1 items-center gap-0.5", hole && "opacity-0")}>
+        <button
+          aria-expanded={!folded}
+          aria-label={foldLabel}
+          className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+          data-fold-toggle
+          onClick={() => onFold(!folded)}
+          type="button"
+        >
+          <ChevronRight className={cn("size-3.5 transition-transform", !folded && "rotate-90")} />
+        </button>
+        {renaming ? (
+          <FileTitleEditor
+            className="h-6 max-w-64 text-xs md:text-xs"
+            label={t("sidebar.fileName")}
+            onDone={onRenameDone}
+            title={title}
+          />
+        ) : (
+          <button
+            aria-current={current ? "page" : undefined}
+            aria-pressed={folded ? selected : undefined}
+            className={cn(
+              "min-w-0 cursor-grab truncate rounded px-1 text-left text-xs font-medium text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+              current && "text-foreground",
+              selected && "bg-primary/10 text-foreground ring-1 ring-primary hover:bg-primary/15",
+            )}
+            data-slot="pages-file-heading"
+            onClick={onSelect}
+            onDoubleClick={onRename}
+            type="button"
+          >
+            {title}
+          </button>
+        )}
+        {folded && !renaming ? (
+          <span
+            className="ml-auto shrink-0 pl-1 text-xs text-muted-foreground tabular-nums"
+            data-slot="pages-file-count"
+          >
+            {t("sidebar.filePages", { count })}
+          </span>
+        ) : null}
+      </div>
+      {hole ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 inset-y-0 rounded border-2 border-dashed border-primary/60 bg-primary/5"
+        />
+      ) : null}
+    </li>
+  )
+}
+
+/** A blank page's way in, in the gap before a page — beside it across a row,
+    above it down one column: shown under the pointer or the keyboard's focus
+    only, since a row of plus signs would crowd the pages. */
 function InsertGap({
   frame,
   label,
   onInsert,
   side,
 }: {
-  frame: number
+  frame: number | null
   label: string
   onInsert: () => void
   side: "before" | "after"
 }) {
   return (
     <div
-      className="absolute top-0 z-10 grid place-items-center in-data-[pages-dragging]:hidden"
+      // Only the button takes a press: down one column the seam reaches a
+      // little over the papers it lies between.
+      className="pointer-events-none absolute z-10 grid place-items-center in-data-[pages-dragging]:hidden"
       data-page-control
-      style={{
-        [side === "before" ? "left" : "right"]: -THUMBNAIL_GRID_GAP,
-        height: frame,
-        width: THUMBNAIL_GRID_GAP,
-      }}
+      style={
+        frame === null
+          ? {
+              [side === "before" ? "top" : "bottom"]: -(THUMBNAIL_COLUMN_GAP + INSERT_SEAM) / 2,
+              height: INSERT_SEAM,
+              left: 0,
+              right: 0,
+            }
+          : {
+              [side === "before" ? "left" : "right"]: -THUMBNAIL_GRID_GAP,
+              height: frame,
+              top: 0,
+              width: THUMBNAIL_GRID_GAP,
+            }
+      }
     >
       <HintTooltip label={label}>
         <button
           aria-label={label}
-          className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-sm outline-none transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 in-data-[pages-busy]:cursor-wait"
+          className="pointer-events-auto grid size-5 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-sm outline-none transition-opacity hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 in-data-[pages-busy]:cursor-wait"
           data-insert-gap={side}
           onClick={onInsert}
           type="button"
@@ -276,10 +399,8 @@ export const PageCell = memo(function PageCell({
   isLast,
   isSelected,
   label,
-  layout,
   onAction,
   onInsertBlank,
-  onOpen,
   onSelect,
   pageHeight,
   pageNumber,
@@ -293,22 +414,21 @@ export const PageCell = memo(function PageCell({
   deleteDisabled: boolean
   documentId: number
   flipKey: number
-  /** The square cell of the grid, or null down the sidebar's column. */
+  /** The square cell of a sidebar wide enough for rows of several, or null
+      down its one column. */
   frame: number | null
   /** The page is in hand: its place shows where it will land. */
   hole: boolean
   intrinsicRotation: number
   isCurrent: boolean
   isCut: boolean
-  /** The grid's last page also offers a blank after it. */
+  /** The last page also offers a blank after it. */
   isLast: boolean
   isSelected: boolean
   label: string
-  layout: PageThumbnailsLayout
   onAction: PageActionHandler
   /** A blank before the page, or after it from the last page's gap. */
   onInsertBlank: (pageNumber: number, side: "before" | "after") => void
-  onOpen: (pageNumber: number) => void
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
   pageHeight: number
   pageNumber: number
@@ -321,13 +441,13 @@ export const PageCell = memo(function PageCell({
   const { t } = useTranslation()
   const itemRef = useRef<HTMLLIElement>(null)
   const nearView = useNearViewport(itemRef, RETAIN_MARGIN)
-  // A focused control stays however far the grid scrolls from it: unmounting
+  // A focused control stays however far the pages scroll from it: unmounting
   // it would drop keyboard focus back to the start of the document.
   const [focusWithin, setFocusWithin] = useState(false)
   const paper = thumbnailPaper(dimensionsForRotation(rotation, pageWidth, pageHeight))
-  // Only the grid edits a page from its own controls, each with a tooltip;
-  // hundreds would slow every selection, so only those near the view.
-  const showControls = layout === "grid" && (nearView || focusWithin)
+  // Each control has a tooltip; hundreds would slow every selection, so only
+  // the pages near the view have theirs.
+  const showControls = nearView || focusWithin
 
   // A control hidden or removed under focus may send no blur. Check again as
   // the page leaves the view, where a stale flag would keep its controls.
@@ -367,7 +487,6 @@ export const PageCell = memo(function PageCell({
           isSelected={isSelected}
           label={label}
           mark={signed ? <PageSignatureMark /> : undefined}
-          onOpen={onOpen}
           onSelect={onSelect}
           overlay={
             showControls ? (
@@ -390,7 +509,7 @@ export const PageCell = memo(function PageCell({
           rotation={rotation}
         />
       </div>
-      {showControls && frame !== null ? (
+      {showControls ? (
         <>
           <InsertGap
             frame={frame}
@@ -418,4 +537,3 @@ export const PageCell = memo(function PageCell({
     </li>
   )
 })
-

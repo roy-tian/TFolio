@@ -6,9 +6,10 @@ import type { CarriedPages, Point } from "@/lib/pageCarry"
 import {
   besideColumn,
   columnEdgeStep,
-  flowCells,
   flowLanding,
+  pagesBeforeSlot,
   pointInColumn,
+  type WeighedFlowCell,
 } from "@/lib/pageDrag"
 import type { PdfPageInfo } from "@/lib/pdf"
 
@@ -31,9 +32,15 @@ export type IncomingPages = {
   joins?: number
   /** Released: the copies are on their way in. */
   landing: boolean
+  /** `at` as the flow counts it, by cells: a folded file is one, of many
+      pages. What the next landing is read against. */
+  slot: number | null
 }
 
 type UseIncomingPagesOptions = {
+  /** The flow's cells as laid out now, each with the pages it stands for,
+      the holes `moving` names in hand. */
+  cells: (moving: (key: string) => boolean) => WeighedFlowCell[]
   /** The positioned flow of cells, every `[data-flip-key]` a child of it. */
   columnRef: RefObject<HTMLElement | null>
   documentId: number
@@ -44,8 +51,8 @@ type UseIncomingPagesOptions = {
     index: number,
     joins: number | undefined,
   ) => Promise<boolean> | null
-  /** The file pages let go at `point` would join. */
-  joinsAt: (point: Point) => number | undefined
+  /** The file pages let go at `point` among `cells` would join. */
+  joinsAt: (point: Point, cells: WeighedFlowCell[]) => number | undefined
   pages: PdfPageInfo[]
   /** The layout's places before the holes first open, for the rows to slide. */
   prime: () => void
@@ -56,6 +63,7 @@ type UseIncomingPagesOptions = {
 /** The sidebar column as somewhere another tab's carried pages can land:
     holes open where they would, and a release copies them in there. */
 export function useIncomingPages({
+  cells,
   columnRef,
   documentId,
   joinsAt,
@@ -70,7 +78,9 @@ export function useIncomingPages({
   const pagesRef = useRef(pages)
   const insertRef = useRef(onInsert)
   const joinsAtRef = useRef(joinsAt)
+  const cellsRef = useRef(cells)
 
+  cellsRef.current = cells
   pagesRef.current = pages
   insertRef.current = onInsert
   joinsAtRef.current = joinsAt
@@ -106,19 +116,25 @@ export function useIncomingPages({
 
       placedAt = point
 
-      const at = besideColumn(point.x, view.getBoundingClientRect())
+      // Read only beside the column: a carry over the strip or the viewer
+      // would otherwise measure every cell at each move.
+      const laidOut = besideColumn(point.x, view.getBoundingClientRect())
+        ? cellsRef.current((key) => key.startsWith(CARRY_KEY))
+        : null
+      const slot = laidOut
         ? flowLanding(
             pointInColumn(column, point),
-            flowCells(column, (key) => key.startsWith(CARRY_KEY)),
-            current?.basis === basis ? current.at : null,
+            laidOut,
+            current?.basis === basis ? current.slot : null,
           )
         : null
-
-      const joins = at === null ? undefined : joinsAtRef.current(point)
+      const at = laidOut && slot !== null ? pagesBeforeSlot(laidOut, slot) : null
+      const joins = laidOut && slot !== null ? joinsAtRef.current(point, laidOut) : undefined
 
       if (
         current?.basis === basis &&
         current.at === at &&
+        current.slot === slot &&
         current.carried === held &&
         current.joins === joins
       ) {
@@ -129,7 +145,7 @@ export function useIncomingPages({
         prime()
       }
 
-      setNext({ at, basis, carried: held, ghostDown: false, joins, landing: false })
+      setNext({ at, basis, carried: held, ghostDown: false, joins, landing: false, slot })
     }
     const edgeScroll = () => {
       const view = viewRef.current

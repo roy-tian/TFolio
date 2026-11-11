@@ -122,7 +122,6 @@ import type {
 import type { PdfOwnedLayer, PdfProgress } from "@/lib/progress"
 import { type RecentPdfView } from "@/lib/recentFiles"
 import type { ZoomShortcut } from "@/lib/shortcuts"
-import { shownSidebarPanel } from "@/lib/sidebar"
 import {
   followPages,
   forgetStashes,
@@ -154,9 +153,6 @@ export type DocumentSessionHandle = {
       these pages, breaks them; `true` where none is owed. */
   ensureSignatures: (change: SignedChange) => true | Promise<boolean>
   fetchNoteFont: () => void
-  /** Whether the page grid shows: a tab that takes this one's place takes
-      its view with it. */
-  gridShownNow: () => boolean
   /** Edits and a typed note, which a save would keep; `hasUnsavedWorkNow`
       also counts work still running, which no save can. */
   hasUnsavedChangesNow: () => boolean
@@ -184,7 +180,7 @@ export type DocumentSessionHandle = {
   /** The Stop on a layer undo or redo's notice. */
   stopLayerWork: () => void
   /** Files added as files of their own where they were let go, a point on
-      screen over the pages, or at the end. */
+      screen over the sidebar's pages, or at the end. */
   addFiles: (paths: string[], point?: { x: number; y: number }) => void
   redo: () => void
   selectAll: () => void
@@ -205,10 +201,6 @@ type DocumentSessionProps = {
   initialSaveRequired?: boolean
   /** A path-backed document's last reading view. */
   initialRecentView?: RecentPdfView
-  /** The page grid is a tab's own, never a preference: a document opens on
-      its pages to be read, unless its tab came from one that showed the grid
-      — moved from another window, or written from it and put in its place. */
-  initialGrid?: boolean
   /** Overrides the stored preference: a tab moved from another window keeps
       the view it was being read in. */
   initialViewMode?: ViewMode
@@ -241,6 +233,8 @@ type DocumentSessionProps = {
   movedSeed?: MovedTabSeed
 }
 
+const NO_FILES: ReadonlySet<number> = new Set()
+
 function closePdf(documentId: number) {
   void invoke("close_pdf", { documentId }).catch(() => undefined)
 }
@@ -253,7 +247,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       document: openedDocument,
       ensureSourceSignatures,
       fileName,
-      initialGrid = false,
       initialRecentView,
       initialSaveRequired = false,
       initialViewMode,
@@ -425,31 +418,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       sections.length === 1 && pdfDocument.hasForeignPages
         ? sections[0]!.outline
         : pdfDocument.outline
-    const bookmarksApply = outline.length > 0 || severalFiles
     const sidebar = useSidebar()
-    // The page grid lies over the reading view, which stays laid out beneath
-    // it, so leaving the grid finds the reader's place where it was.
-    const [gridShown, setGridShown] = useState(initialGrid)
-    const gridShownRef = useRef(gridShown)
-
-    gridShownRef.current = gridShown
     const thumbnailsRef = useRef<PageThumbnailsHandle>(null)
-    // While the grid shows the pages, the sidebar keeps to the bookmarks.
-    const sidebarPanel = gridShown ? "bookmarks" : shownSidebarPanel(sidebar.panel, bookmarksApply)
-    // With none to keep to, it would stand beside the grid as an empty column.
-    const sidebarVacant = gridShown && !bookmarksApply
-    const setSidebarVacant = sidebar.setVacant
-
-    // Before the paint, so the grid never shows beside the empty column first.
-    useLayoutEffect(() => {
-      if (!active) {
-        return
-      }
-
-      setSidebarVacant(sidebarVacant)
-
-      return () => setSidebarVacant(false)
-    }, [active, setSidebarVacant, sidebarVacant])
+    // Either panel shows for any document, whatever it holds: which one is
+    // how the reader laid the window out.
+    const sidebarPanel = sidebar.panel
+    // The files whose pages the sidebar folds away under their names: the
+    // tab's own, kept while the sidebar shows something else.
+    const [foldedFiles, setFoldedFiles] = useState<ReadonlySet<number>>(NO_FILES)
 
     const scrollToPage = useCallback(
       (pageNumber: number, behavior: ScrollBehavior = "smooth") => {
@@ -486,7 +462,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       contentHeight: Math.max(0, viewerHeight - CONTENT_PADDING_Y),
       contentWidth: Math.max(0, viewerWidth - CONTENT_PADDING_X),
       currentPage,
-      disabled: !active || gridShown,
+      disabled: !active,
       initialZoom: initialRecentView
         ? {
             ...initialRecentView.zoom,
@@ -502,20 +478,48 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewRotation,
       viewerRef,
     })
-    // The previews are where pages are chosen while they show, in the grid or
-    // down the sidebar; hiding them lets go of what was chosen.
-    const thumbnailsShown =
-      gridShown || (sidebar.mode !== "hidden" && sidebarPanel === "thumbnails")
-    // The clipboard and select-all keys are the pages' while the grid shows,
-    // or while focus is in the sidebar's column: elsewhere they are the
-    // text's, as they always were.
-    const [thumbnailsFocused, setThumbnailsFocused] = useState(false)
-    const pageKeys = gridShown || thumbnailsFocused
+    // The previews are where pages are chosen while they show; hiding them
+    // lets go of what was chosen.
+    const thumbnailsShown = sidebar.mode !== "hidden" && sidebarPanel === "thumbnails"
+    // The clipboard and select-all keys are the pages' while focus is in the
+    // sidebar's column: elsewhere they are the text's, as they always were.
+    const [pageKeys, setThumbnailsFocused] = useState(false)
     const thumbnailSelection = useThumbnailSelection({
       active: active && thumbnailsShown,
       numPages: pdfDocument.numPages,
     })
     const clearThumbnailSelection = thumbnailSelection.clear
+    const deselectPages = thumbnailSelection.deselect
+    const foldFiles = useCallback(
+      (sectionIds: readonly number[], folded: boolean) => {
+        setFoldedFiles((current) => {
+          const next = new Set(current)
+
+          for (const sectionId of sectionIds) {
+            if (folded) {
+              next.add(sectionId)
+            } else {
+              next.delete(sectionId)
+            }
+          }
+
+          return next
+        })
+
+        // A page chosen and then folded away would be deleted or cut with
+        // nothing on screen to say so: folding a file lets go of its pages.
+        if (folded) {
+          const files = new Set(sectionIds)
+
+          deselectPages(
+            (documentRef.current?.pages ?? []).flatMap((page, index) =>
+              page.section !== undefined && files.has(page.section) ? [index + 1] : [],
+            ),
+          )
+        }
+      },
+      [deselectPages],
+    )
     // The paste's own work needs the history below, which is set up after this;
     // the hook only ever calls it from a keypress, by which time it is here.
     const pastePagesRef = useRef<(index: number) => void>(() => {})
@@ -972,11 +976,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           return
         }
 
-        // A key may still name one; the grid has no page under the pointer.
-        if (gridShown) {
-          return
-        }
-
         if (tool === "eraser") {
           setActiveTool(tool)
           return
@@ -994,7 +993,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           })
         }
       },
-      [ensureSignatures, gridShown],
+      [ensureSignatures],
     )
 
     // After the commit new keys land in: a page brought back has taken its
@@ -1262,13 +1261,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // From the file's name in the sidebar's tree: in front of 1-based page
     // `index`, as one of that file's pages.
     const pasteIntoFile = (sectionId: number, index: number) => pastePages(index, sectionId)
-
-    // A file's pages chosen as one, from its name's menu.
-    const selectFile = (sectionId: number) =>
-      thumbnailSelection.selectGroup(
-        pagesOfSection(documentRef.current?.pages ?? [], sectionId),
-        { range: false, toggle: false },
-      )
 
     const watermark = useWatermark({
       activeConfig: annotations.watermarkConfig,
@@ -1588,9 +1580,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       pdfDocument.pages,
     )
 
-    // Over the page grid the keys scroll the grid, not the view beneath it.
     useEffect(() => {
-      if (!active || gridShown) {
+      if (!active) {
         return
       }
 
@@ -1647,7 +1638,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       return () => {
         document.removeEventListener("keydown", handlePageTurn)
       }
-    }, [active, currentPage, gridShown, padding, pdfDocument.numPages, scrollToPage, viewMode])
+    }, [active, currentPage, padding, pdfDocument.numPages, scrollToPage, viewMode])
 
     // Each mode stacks pages to a different height, so the kept offset would land
     // somewhere unrelated; queued here, ahead of the next render's layout effects.
@@ -1656,36 +1647,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         pendingScrollPageRef.current = currentPage.get()
       }
 
-      setGridShown(false)
       setPreferredViewMode(mode)
     }
 
-    const showGrid = () => {
-      setActiveTool(null)
-
-      // Its matches step through the reading view, which the grid covers.
-      if (search.searchOpen) {
-        search.closeSearch()
-      }
-
-      setGridShown(true)
-    }
-
-    // Back to the reading view the grid lay over, on the page asked for.
-    const openFromGrid = useCallback(
-      (pageNumber: number) => {
-        setGridShown(false)
-        scrollToPage(pageNumber, "auto")
-      },
-      [scrollToPage],
-    )
-
-    // A search shows its matches in the reading view.
-    const openSearchNow = search.openSearch
-    const openSearch = useCallback(() => {
-      setGridShown(false)
-      openSearchNow()
-    }, [openSearchNow])
+    const openSearch = search.openSearch
 
     const { queueRecentView, rememberViewNow: flushAndRememberView } = useRecentView({ recentPath })
 
@@ -1807,7 +1772,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         recentView: sampleCurrentView(),
         saveRequired: saveRequiredRef.current,
         seed: {
-          grid: gridShown,
           history: annotationsSeed.history,
           marks: annotationsSeed.marks,
           viewMode: preferredViewMode,
@@ -1816,7 +1780,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [
       annotations,
-      gridShown,
       preferredViewMode,
       sampleCurrentView,
       textNote.draft?.text,
@@ -2021,7 +1984,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         dismissNoteFont: clearNoteFontOffer,
         ensureSignatures,
         fetchNoteFont: () => void fetchNoteFont(),
-        gridShownNow: () => gridShownRef.current,
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         isCopyOnlyNow,
@@ -2050,12 +2012,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             undoStep()
           }
         },
-        // A key leaves the eye on the page, far from the bar's readout. The
-        // grid has no scale of its own.
+        // A key leaves the eye on the page, far from the bar's readout.
         zoom: (action) => {
-          if (gridShown) {
-            return
-          } else if (action === "in") {
+          if (action === "in") {
             zoom.zoomIn({ announce: true })
           } else if (action === "out") {
             zoom.zoomOut({ announce: true })
@@ -2071,7 +2030,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         ensureSignatures,
         exportPdf,
         fetchNoteFont,
-        gridShown,
         hasUnsavedChangesNow,
         hasUnsavedWorkNow,
         isCopyOnlyNow,
@@ -2107,65 +2065,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       scrollToPage(pageNumber)
     }
 
-    // Over the grid, the reading view beneath goes to the page, which the
-    // grid follows and shows chosen.
-    const selectPage = thumbnailSelection.select
     const navigateFromSidebar = useCallback(
       (pageNumber: number) => {
         scrollToPage(pageNumber)
         sidebar.dismiss()
-
-        if (gridShown) {
-          selectPage(pageNumber, { range: false, toggle: false })
-        }
       },
-      [gridShown, scrollToPage, selectPage, sidebar],
+      [scrollToPage, sidebar],
     )
-
-    // Down the sidebar or across the grid, never both at once: the grid has
-    // the sidebar keep to the bookmarks.
-    const pageThumbnails = {
-      active,
-      busy: annotations.isBusy,
-      canPaste: clipboard !== null,
-      currentPage,
-      cutPages: cutThumbnailPages,
-      documentId: pdfDocument.id,
-      fileOptions: pdfDocument.fileOptions,
-      fileRows: sidebar.fileRows,
-      isEditingNow: annotations.isStructureBusyNow,
-      onAddFiles: () => void chooseFiles(),
-      onCopyPages: pageClipboard.copy,
-      onCutPages: pageClipboard.cut,
-      onDeleteOnePage: deleteOnePage,
-      onDeletePage: deleteThumbnailPage,
-      onFileOptionsChange: changeFileOptions,
-      onFileRowsChange: sidebar.setFileRows,
-      onFocusChange: setThumbnailsFocused,
-      onInsertBlankPage: insertBlankPage,
-      onInsertCarriedPages: insertCarriedPages,
-      onMenuPage: menuThumbnailPage,
-      onNavigate: navigateFromSidebar,
-      onPastePages: pastePages,
-      onRemoveFile: removeSection,
-      onRenameFile: renameSection,
-      onReorderPages: reorderPages,
-      onRotatePage: rotateOnePage,
-      onRotatePages: rotateThumbnailPages,
-      // Stable across renders, unlike a wrapper, so the memoised previews
-      // skip the session's every re-render.
-      onSelectPage: thumbnailSelection.select,
-      onSelectPages: thumbnailSelection.selectGroup,
-      padding,
-      pages: pdfDocument.pages,
-      parkedPreviews,
-      ref: thumbnailsRef,
-      renderEpochs: annotations.renderEpochs,
-      sections,
-      selectedPages: thumbnailSelection.selectedPages,
-      thumbnailKeys,
-      viewRotation,
-    }
 
     const appMenu = (
       <AppMenu
@@ -2227,7 +2133,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           searchOpen={search.searchOpen}
           tool={{
             activeTool,
-            drawingApplies: !gridShown,
             highlightColor,
             onHighlightColorChange: changeHighlightColor,
             onPageNumbers: openPageNumbersDialog,
@@ -2240,15 +2145,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         <AppSidebar
           macOS={macOS}
-          switcher={
-            <SidebarPanelSwitch
-              // Over the grid the tree shows, bookmarks or none.
-              bookmarksApply={bookmarksApply || gridShown}
-              files={severalFiles}
-              panel={sidebarPanel}
-              thumbnailsApply={!gridShown}
-            />
-          }
+          switcher={<SidebarPanelSwitch files={severalFiles} panel={sidebarPanel} />}
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
@@ -2259,9 +2156,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onPaste={pasteIntoFile}
               onRemove={removeSection}
               onRename={renameSection}
-              // Beside a reading view the tree has taken the pages' place in
-              // the sidebar: there is nowhere for a choice of pages to show.
-              onSelect={gridShown ? selectFile : undefined}
               pages={pdfDocument.pages}
               sections={sections}
             />
@@ -2271,7 +2165,50 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onNavigate={navigateFromSidebar}
             />
           ) : (
-            <PageThumbnails {...pageThumbnails} layout="column" onOpen={navigateFromSidebar} />
+            <PageThumbnails
+              active={active}
+              busy={annotations.isBusy}
+              canPaste={clipboard !== null}
+              currentPage={currentPage}
+              cutPages={cutThumbnailPages}
+              documentId={pdfDocument.id}
+              fileOptions={pdfDocument.fileOptions}
+              fileRows={sidebar.fileRows}
+              foldedFiles={foldedFiles}
+              isEditingNow={annotations.isStructureBusyNow}
+              onAddFiles={() => void chooseFiles()}
+              onCopyPages={pageClipboard.copy}
+              onCutPages={pageClipboard.cut}
+              onDeleteOnePage={deleteOnePage}
+              onDeletePage={deleteThumbnailPage}
+              onFileOptionsChange={changeFileOptions}
+              onFileRowsChange={sidebar.setFileRows}
+              onFocusChange={setThumbnailsFocused}
+              onFoldFiles={foldFiles}
+              onInsertBlankPage={insertBlankPage}
+              onInsertCarriedPages={insertCarriedPages}
+              onMenuPage={menuThumbnailPage}
+              onNavigate={navigateFromSidebar}
+              onPastePages={pastePages}
+              onRemoveFile={removeSection}
+              onRenameFile={renameSection}
+              onReorderPages={reorderPages}
+              onRotatePage={rotateOnePage}
+              onRotatePages={rotateThumbnailPages}
+              // Stable across renders, unlike a wrapper, so the memoised
+              // previews skip the session's every re-render.
+              onSelectPage={thumbnailSelection.select}
+              onSelectPages={thumbnailSelection.selectGroup}
+              padding={padding}
+              pages={pdfDocument.pages}
+              parkedPreviews={parkedPreviews}
+              ref={thumbnailsRef}
+              renderEpochs={annotations.renderEpochs}
+              sections={sections}
+              selectedPages={thumbnailSelection.selectedPages}
+              thumbnailKeys={thumbnailKeys}
+              viewRotation={viewRotation}
+            />
           )}
         </AppSidebar>
 
@@ -2356,7 +2293,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               className="pdf-scroll-viewport overlay-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
               data-pdf-scroll-root
               data-tool-cursor={toolCursor}
-              inert={gridShown}
               ref={viewerRef}
               tabIndex={-1}
             >
@@ -2398,25 +2334,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             </main>
             <OverlayScrollbars viewportRef={viewerRef} />
             <ZoomIndicator flash={zoom.zoomAnnouncement} percent={zoom.zoomPercent} />
-            {gridShown ? (
-              <div className="absolute inset-0 z-10 bg-background" data-page-grid-layer>
-                <PageThumbnails
-                  {...pageThumbnails}
-                  layout="grid"
-                  onOpen={openFromGrid}
-                  // The grid is where pages are turned for good, and offers no
-                  // turn of the view: one made over the reading view would
-                  // stand here as a turn of the pages, with no way to undo it.
-                  viewRotation={0}
-                />
-              </div>
-            ) : null}
             <ViewerControls
               bookApplies={bookApplies}
-              gridShown={gridShown}
               onChangeViewMode={changeViewMode}
               onRotate={() => setViewRotation(turnView)}
-              onShowGrid={showGrid}
               page={{
                 count: pdfDocument.numPages,
                 current: currentPage,
@@ -2430,7 +2351,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         {/* Outside the viewer's scroll box, in the screen space it positions
             itself against — inside, it would scroll away with the page it is on. */}
-        {!gridShown && textNote.draft && pdfDocument.pages[textNote.draft.pageNumber - 1] ? (
+        {textNote.draft && pdfDocument.pages[textNote.draft.pageNumber - 1] ? (
           <TextNoteEditor
             draft={textNote.draft}
             editorRef={textNote.editorRef}

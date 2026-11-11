@@ -12,8 +12,8 @@ import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
 
-// A grid row holds many cells; preloading whole rows would queue dozens of
-// PDFium renders at once. Keep the window to what is visible.
+// A widened sidebar's row holds many cells; preloading whole rows would queue
+// dozens of PDFium renders at once. Keep the window to what is visible.
 const THUMBNAIL_ROOT_MARGIN = "0px"
 
 // The sidebar's previews stand in view beside the pages: ranked as this far
@@ -36,7 +36,6 @@ type PdfThumbnailProps = {
       is what would move it. */
   isCut: boolean
   isSelected: boolean
-  onOpen: (pageNumber: number) => void
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
   /** The page's size in points, taken apart rather than as a `PdfPageInfo`:
       every structure edit replaces the page list, and cells must compare equal. */
@@ -48,13 +47,13 @@ type PdfThumbnailProps = {
   retainBitmap: boolean
   /** The view's turn, which turns every page at once and snaps. */
   rotation: number
-  /** What the paper is to a screen reader: where a click goes, or the page. */
+  /** What the paper is to a screen reader: where a click goes. */
   label: string
   /** The number under the paper, where it is not the page's own: a drag's
       preview shows where the page will stand. */
   caption?: number
   /** A box the paper stands centred in, the caption beneath it: cells of one
-      size line portrait and landscape pages up in rows and columns. */
+      size line portrait and landscape pages up in rows of several. */
   frame?: { height: number; width: number }
   /** Controls over the paper, laid out against its box, which follows the
       paper through a turn and is a `PAPER_CONTROLS_HOST`. */
@@ -77,7 +76,6 @@ export function PdfThumbnail({
   isCurrent,
   isCut,
   isSelected,
-  onOpen,
   onSelect,
   pageHeight,
   pageNumber,
@@ -241,7 +239,6 @@ export function PdfThumbnail({
               toggle: event.ctrlKey || event.metaKey,
             })
           }
-          onDoubleClick={() => onOpen(pageNumber)}
           ref={wrapperRef}
           style={{ height: paperSize.height, width: paperSize.width }}
           type="button"
@@ -297,8 +294,9 @@ export function PdfThumbnail({
       )}
       data-cut={isCut ? "" : undefined}
     >
-      {/* Boxless without a frame, down the sidebar's column; the grid's
-          square cells give each paper one. */}
+      {/* Always there, boxless without a frame: a sidebar widened into rows
+          of several gives its previews one, and a new parent would remount
+          the canvas, losing the pixels already painted into it. */}
       <div
         className={frame ? "grid place-items-center" : "contents"}
         style={frame ? { height: frame.height, width: frame.width } : undefined}

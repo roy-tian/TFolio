@@ -15,10 +15,6 @@ import { fileRuns, type FileRun } from "@/lib/pageSections"
 import type { PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
-// A row's two buttons and their gaps: a hint beside a name goes past them,
-// out over the pages, rather than over the buttons its hover brought up.
-const ROW_BUTTONS_WIDTH = 60
-
 type FileSectionsTreeProps = {
   canPaste: boolean
   onAddFiles: () => void
@@ -31,8 +27,6 @@ type FileSectionsTreeProps = {
   onPaste: (sectionId: number, index: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
-  /** A file's pages chosen as one; absent while no pages show to be chosen. */
-  onSelect?: (sectionId: number) => void
   pages: PdfPageInfo[]
   sections: PdfSection[]
 }
@@ -42,7 +36,8 @@ type FileSectionsTreeProps = {
  * the outline a Save As writes, one bookmark per run of a file's pages, the
  * file's own beneath its first. A name is where that run's first page stands;
  * a file can be renamed, removed, or dragged among the others, every file
- * folded to its name meanwhile.
+ * folded to its name meanwhile. A row ends on how many pages it holds, which
+ * give their place to its rename and remove buttons under the pointer.
  */
 export function FileSectionsTree({
   canPaste,
@@ -52,7 +47,6 @@ export function FileSectionsTree({
   onPaste,
   onRemove,
   onRename,
-  onSelect,
   pages,
   sections,
 }: FileSectionsTreeProps) {
@@ -134,7 +128,6 @@ export function FileSectionsTree({
                   onPaste={onPaste}
                   onRemove={onRemove}
                   onRename={onRename}
-                  onSelect={onSelect}
                   onToggle={toggle}
                   // A document keeps a page; the last file's go no further.
                   removeDisabled={(filePages.get(section.id) ?? 0) >= pages.length}
@@ -191,7 +184,6 @@ function FileRunRow({
   onPaste,
   onRemove,
   onRename,
-  onSelect,
   onToggle,
   removeDisabled,
   run,
@@ -210,7 +202,6 @@ function FileRunRow({
   onPaste: (sectionId: number, index: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
-  onSelect?: (sectionId: number) => void
   onToggle: (sectionId: number) => void
   removeDisabled: boolean
   run: FileRun
@@ -237,7 +228,12 @@ function FileRunRow({
         <ContextMenuTrigger
           render={
             <div
-              className="group/file flex items-center gap-1 rounded-md pr-1 hover:bg-sidebar-accent"
+              // A property the row sets, because the count is no child of
+              // the buttons that take its place: see `PAPER_CONTROLS_HOST`.
+              // The keyboard's focus sets it too, from inside the buttons
+              // alone: WebKitGTK can keep a clicked name `:focus-visible`,
+              // and its row would stay lit.
+              className="relative flex items-center gap-1 rounded-md pr-1 [--row-tools:0] hover:bg-sidebar-accent hover:[--row-tools:1] has-[[data-slot=file-section-tools]_:focus-visible]:bg-sidebar-accent has-[[data-slot=file-section-tools]_:focus-visible]:[--row-tools:1]"
               data-slot="file-section-row"
             />
           }
@@ -271,7 +267,6 @@ function FileRunRow({
             <HintTooltip
               label={section.title}
               side="right"
-              sideOffset={ROW_BUTTONS_WIDTH}
               // Only a name the column cut short has more to say.
               cutShort={nameRef}
             >
@@ -286,18 +281,26 @@ function FileRunRow({
                 <span className="truncate" ref={nameRef}>
                   {section.title}
                 </span>
-                <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground tabular-nums">
+                {/* No narrower than the buttons that stand over it, so they
+                    cover no part of a long name. */}
+                <span
+                  className="ml-auto min-w-13 shrink-0 text-right text-xs font-normal text-muted-foreground tabular-nums opacity-[calc(1_-_var(--row-tools))]"
+                  data-slot="file-section-count"
+                >
                   {t("sidebar.filePages", { count: run.count })}
                 </span>
               </button>
             </HintTooltip>
           )}
           {editing ? null : (
-            <>
+            // Over the count, in its place while the row shows them.
+            <div
+              className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-(--row-tools)"
+              data-slot="file-section-tools"
+            >
               <HintTooltip label={t("sidebar.renameFile", { name: section.title })}>
                 <Button
                   aria-label={t("sidebar.renameFile", { name: section.title })}
-                  className="opacity-0 group-hover/file:opacity-100 focus-visible:opacity-100"
                   data-slot="file-section-rename"
                   onClick={() => onEdit(true)}
                   size="icon-xs"
@@ -309,7 +312,7 @@ function FileRunRow({
               <HintTooltip label={t("sidebar.removeFile", { name: section.title })}>
                 <Button
                   aria-label={t("sidebar.removeFile", { name: section.title })}
-                  className="opacity-0 group-hover/file:opacity-100 hover:text-destructive focus-visible:opacity-100"
+                  className="hover:text-destructive"
                   data-slot="file-section-remove"
                   disabled={removeDisabled}
                   onClick={() => onRemove(section.id)}
@@ -319,7 +322,7 @@ function FileRunRow({
                   <X />
                 </Button>
               </HintTooltip>
-            </>
+            </div>
           )}
         </ContextMenuTrigger>
         {/* Gone with the menu, not faded out after it: a menu still on screen
@@ -333,7 +336,6 @@ function FileRunRow({
             }
             onRemove={() => onRemove(section.id)}
             onRename={() => onEdit(true)}
-            onSelect={onSelect ? () => onSelect(section.id) : undefined}
             removeDisabled={removeDisabled}
           />
         ) : null}

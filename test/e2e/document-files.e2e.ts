@@ -25,29 +25,32 @@ const saveTrigger = `[data-document-session][data-active='true'] [data-slot='pdf
 
 const session = "[data-document-session][data-active='true']"
 
-function pageCount(scope = activeSidebar) {
+function pageCount() {
   return browser.execute(
     (within: string) => document.querySelectorAll(`${within} button[data-thumbnail-page]`).length,
-    scope,
+    activeSidebar,
   )
 }
 
-async function waitForPages(count: number, scope = activeSidebar) {
-  await browser.waitUntil(async () => (await pageCount(scope)) === count, {
+async function waitForPages(count: number) {
+  await browser.waitUntil(async () => (await pageCount()) === count, {
     timeout: 30_000,
     timeoutMsg: `the document never held ${count} pages`,
   })
 }
 
+const fileName = (section: number) =>
+  `${activeSidebar} [data-section-header='${section}'] [data-slot='pages-file-heading']`
+
 /** The file names heading the pages, top to bottom. */
-function headings(scope = activeSidebar) {
+function headings() {
   return browser.execute(
     (within: string) =>
       Array.from(
-        document.querySelectorAll<HTMLElement>(`${within} [data-section-header]`),
+        document.querySelectorAll<HTMLElement>(`${within} [data-slot='pages-file-heading']`),
         (heading) => heading.textContent ?? "",
       ),
-    scope,
+    activeSidebar,
   )
 }
 
@@ -62,7 +65,7 @@ function pageFiles() {
       ),
       (element) => {
         if (element.dataset.sectionHeader !== undefined) {
-          file = element.textContent ?? ""
+          file = element.querySelector("[data-slot='pages-file-heading']")?.textContent ?? ""
           return null
         }
 
@@ -133,15 +136,27 @@ async function dragOnto(from: string, to: string, at: "top" | "left") {
   )
 }
 
-function chosen(scope: string) {
+function chosen() {
   return browser.execute(
     (within: string) =>
       Array.from(
         document.querySelectorAll(`${within} button[data-thumbnail-page][aria-pressed='true']`),
         (button) => Number(button.getAttribute("data-thumbnail-page")),
       ).sort((left, right) => left - right),
-    scope,
+    activeSidebar,
   )
+}
+
+/** Folds every file to its name, or shows their pages again, from the menu
+    over the pages. */
+async function foldAllFiles(folded: boolean) {
+  await $(`${activeSidebar} [data-slot='pages-file-options']`).click()
+
+  const item = $(`[data-action='${folded ? "fold-files" : "unfold-files"}']`)
+
+  await item.waitForDisplayed({ timeout: 5_000 })
+  await item.click()
+  await item.waitForDisplayed({ reverse: true, timeout: 5_000 })
 }
 
 async function addFilesFromPicker(paths: string[]) {
@@ -291,34 +306,38 @@ describe("TFolio files added to an open document", () => {
     expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
   })
 
-  it("adds files dropped between two pages of the grid there", async () => {
+  it("adds files dropped between two pages there", async () => {
     await openPdfFromDisk("own.pdf", minimalPdf(2))
-    await $(`${session} button[aria-label='Thumbnails']`).click()
-    const grid = `${session} [data-page-thumbnails='grid']`
-    await waitForPages(2, grid)
-    // Over the second page's left edge: the gap in front of it.
+    await waitForPages(2)
+    // Over the second page's top edge: the gap in front of it.
     const point = await browser.execute((scope: string) => {
       const box = document
         .querySelector(`${scope} button[data-thumbnail-page='2']`)!
         .getBoundingClientRect()
 
-      return { x: box.left + 8, y: box.top + box.height / 2 }
-    }, grid)
+      return { x: box.left + box.width / 2, y: box.top + 8 }
+    }, activeSidebar)
     const dropped = writeScratchPdf("between.pdf", minimalPdf(3, "0 0 300 200"))
 
     await emitDrag("drag-over", point, [dropped])
     await expect($("[data-testid='pages-drop-marker']")).toBeDisplayed()
-    // Over the grid nothing offers to open the files: only the tab strip
-    // says where a drop would, and the grid that this one joins the document.
-    await expect($("[data-testid='workspace-file-drop']")).toHaveAttribute("data-strip", "")
+    // What the drop does is said in the bar over the pages, where it covers
+    // none of them, in place of the bar's own controls.
+    await expect($(`${activeSidebar} [data-slot='pages-drop-hint']`)).toHaveText(
+      "Drop to add to this document",
+    )
+    await expect($(`${activeSidebar} [data-slot='pages-add-files']`)).not.toBeDisplayed()
     await emitDrag("drag-drop", point, [dropped])
-    await waitForPages(5, grid)
-    expect(await headings(grid)).toEqual(["own.pdf", "between.pdf", "own.pdf"])
-    // The tree lists the parted file as the grid heads it, and a Save As writes it.
+    await waitForPages(5)
+    await expect($(`${activeSidebar} [data-slot='pages-add-files']`)).toBeDisplayed()
+    expect(await headings()).toEqual(["own.pdf", "between.pdf", "own.pdf"])
+    // The tree lists the parted file as the pages head it, and a Save As writes it.
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
     expect(await treeFiles()).toEqual(["own.pdf", "between.pdf", "own.pdf"])
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
 
     await browser.keys(["Control", "z"])
-    await waitForPages(2, grid)
+    await waitForPages(2)
   })
 
   it("renames a file and removes one, each undoably", async () => {
@@ -329,6 +348,46 @@ describe("TFolio files added to an open document", () => {
     ])
     await waitForPages(4)
     await $(`${activeSidebar} button[aria-label='Files']`).click()
+
+    // A row ends on its page count, at its right edge; its two buttons stand
+    // in the count's place, never over the name, and take it only while the
+    // pointer or the keyboard is on them.
+    const rowEnd = () =>
+      browser.execute((scope: string) => {
+        const part = (slot: string) =>
+          document.querySelector(`${scope} [data-section-id='1'] [data-slot='${slot}']`)!
+        const [line, count, tools] = ["row", "count", "tools"].map((slot) =>
+          part(`file-section-${slot}`).getBoundingClientRect(),
+        )
+
+        return {
+          count: getComputedStyle(part("file-section-count")).opacity,
+          countFromEdge: Math.round(line!.right - count!.right),
+          tools: getComputedStyle(part("file-section-tools")).opacity,
+          toolsInCountsPlace: tools!.right === count!.right && tools!.left >= count!.left,
+        }
+      }, activeSidebar)
+    expect(await rowEnd()).toEqual({
+      count: "1",
+      countFromEdge: 4,
+      tools: "0",
+      toolsInCountsPlace: true,
+    })
+
+    // Tabbed to, as the keyboard reaches them: out to the name and back.
+    await browser.execute((scope: string) => {
+      document
+        .querySelector<HTMLElement>(
+          `${scope} [data-section-id='1'] [data-slot='file-section-rename']`,
+        )!
+        .focus()
+    }, activeSidebar)
+    await browser.keys(["Shift", "Tab"])
+    await browser.keys("Tab")
+    await browser.waitUntil(async () => (await rowEnd()).tools === "1", {
+      timeoutMsg: "the keyboard's focus never showed the row's buttons",
+    })
+    expect((await rowEnd()).count).toBe("0")
 
     await press(`${activeSidebar} [data-section-id='1'] [data-slot='file-section-rename']`)
     const input = $(`${activeSidebar} [data-slot='file-section-title-input']`)
@@ -356,32 +415,27 @@ describe("TFolio files added to an open document", () => {
     await openPdfFromDisk("own.pdf", minimalPdf(1))
     await addFilesFromPicker([writeScratchPdf("first.pdf", minimalPdf(2))])
     await waitForPages(3)
-    await $(`${session} button[aria-label='Thumbnails']`).click()
-    const grid = `${session} [data-page-thumbnails='grid']`
-    await waitForPages(3, grid)
 
-    // A page chosen, to prove the name's keys are the name's: Backspace in
-    // the grid deletes what is chosen.
-    await $(`${grid} button[data-thumbnail-page='1']`).click()
-    await contextMenuAction(`${grid} [data-section-header='1'] button`, "rename-file")
-    const input = $(`${grid} [data-slot='file-section-title-input']`)
+    // A page chosen, to prove the name's keys are the name's: Backspace
+    // among the pages deletes what is chosen.
+    await $(`${activeSidebar} button[data-thumbnail-page='1']`).click()
+    await contextMenuAction(fileName(1), "rename-file")
+    const input = $(`${activeSidebar} [data-slot='file-section-title-input']`)
     await input.waitForDisplayed()
     await expect(input).toBeFocused()
     await browser.keys("Backspace")
     await input.setValue("Appendix")
     await browser.keys("Enter")
-    await browser.waitUntil(async () => (await headings(grid)).join() === "own.pdf,Appendix", {
+    await browser.waitUntil(async () => (await headings()).join() === "own.pdf,Appendix", {
       timeoutMsg: "the heading never took the typed name",
     })
-    expect(await pageCount(grid)).toBe(3)
+    expect(await pageCount()).toBe(3)
 
-    // Beside the grid the tree's menu chooses the file's pages there.
-    await contextMenuAction(
-      `${activeSidebar} [data-section-id='1'] [data-slot='file-section-row']`,
-      "select-file",
-    )
-    expect(await chosen(grid)).toEqual([2, 3])
+    await contextMenuAction(fileName(1), "select-file")
+    expect(await chosen()).toEqual([2, 3])
 
+    // The tree of files renames in place from its own menu too.
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
     await contextMenuAction(
       `${activeSidebar} [data-section-id='1'] [data-slot='file-section-row']`,
       "rename-file",
@@ -390,11 +444,12 @@ describe("TFolio files added to an open document", () => {
     await treeInput.waitForDisplayed()
     await expect(treeInput).toBeFocused()
     await browser.keys("Escape")
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
 
-    await contextMenuAction(`${grid} [data-section-header='1'] button`, "remove-file")
-    await waitForPages(1, grid)
+    await contextMenuAction(fileName(1), "remove-file")
+    await waitForPages(1)
     await browser.keys(["Control", "z"])
-    await waitForPages(3, grid)
+    await waitForPages(3)
   })
 
   it("chooses a file's pages by its name, and carries them whole by it", async () => {
@@ -404,26 +459,77 @@ describe("TFolio files added to an open document", () => {
       writeScratchPdf("second.pdf", minimalPdf(1)),
     ])
     await waitForPages(4)
-    await $(`${session} button[aria-label='Thumbnails']`).click()
-    const grid = `${session} [data-page-thumbnails='grid']`
-    await waitForPages(4, grid)
 
-    await $(`${grid} [data-section-header='1'] button`).click()
-    expect(await chosen(grid)).toEqual([2, 3])
-
-    await dragOnto(
-      `${grid} [data-section-header='2'] button`,
-      `${grid} button[data-thumbnail-page='1']`,
-      "left",
-    )
+    // A name pressed chooses the file's pages and goes to the first of them.
+    await $(fileName(1)).click()
+    expect(await chosen()).toEqual([2, 3])
     await browser.waitUntil(
-      async () => (await headings(grid)).join() === "second.pdf,own.pdf,first.pdf",
+      async () =>
+        (await $(`${session} [data-slot='page-status']`).getAttribute("aria-label")) ===
+        "Page 2 of 4",
+      { timeoutMsg: "the name never went to its file's first page" },
+    )
+
+    await dragOnto(fileName(2), `${activeSidebar} button[data-thumbnail-page='1']`, "top")
+    await browser.waitUntil(
+      async () => (await headings()).join() === "second.pdf,own.pdf,first.pdf",
       { timeout: 15_000, timeoutMsg: "the file never moved whole to the front" },
     )
 
     await browser.keys(["Control", "z"])
     await browser.waitUntil(
-      async () => (await headings(grid)).join() === "own.pdf,first.pdf,second.pdf",
+      async () => (await headings()).join() === "own.pdf,first.pdf,second.pdf",
+    )
+  })
+
+  it("folds files to their names, and carries a folded file whole by its name", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([
+      writeScratchPdf("first.pdf", minimalPdf(2)),
+      writeScratchPdf("second.pdf", minimalPdf(1)),
+    ])
+    await waitForPages(4)
+
+    // A page chosen and then folded away is let go: a Delete would take it
+    // with nothing on screen to say so.
+    await $(`${activeSidebar} button[data-thumbnail-page='2']`).click()
+    expect(await chosen()).toEqual([2])
+    await press(`${activeSidebar} [data-section-header='1'] [data-fold-toggle]`)
+    await waitForPages(2)
+    await press(`${activeSidebar} [data-section-header='1'] [data-fold-toggle]`)
+    await waitForPages(4)
+    expect(await chosen()).toEqual([])
+
+    // One file's pages go under its name, which says how many it holds.
+    await press(`${activeSidebar} [data-section-header='1'] [data-fold-toggle]`)
+    await waitForPages(2)
+    await expect(
+      $(`${activeSidebar} [data-section-header='1'] [data-slot='pages-file-count']`),
+    ).toHaveText("2 pages")
+    // Its name still chooses them, though none shows.
+    await $(fileName(1)).click()
+    await expect($(fileName(1))).toHaveAttribute("aria-pressed", "true")
+    await browser.keys("Escape")
+
+    await foldAllFiles(true)
+    await waitForPages(0)
+    expect(await headings()).toEqual(["own.pdf", "first.pdf", "second.pdf"])
+
+    // Folded, the files are a list to put in order.
+    await dragOnto(fileName(2), `${activeSidebar} [data-section-header='0']`, "top")
+    await browser.waitUntil(
+      async () => (await headings()).join() === "second.pdf,own.pdf,first.pdf",
+      { timeout: 15_000, timeoutMsg: "the folded file never moved to the front" },
+    )
+
+    await foldAllFiles(false)
+    await waitForPages(4)
+    expect(await pageFiles()).toEqual(["second.pdf", "own.pdf", "first.pdf", "first.pdf"])
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(
+      async () => (await headings()).join() === "own.pdf,first.pdf,second.pdf",
+      { timeout: 15_000, timeoutMsg: "undo never put the file back" },
     )
   })
 
@@ -469,7 +575,7 @@ describe("TFolio files added to an open document", () => {
 
     // From the name heading the file's pages: after its last page, its own.
     await sidebarPageAction(1, "cut-pages")
-    await contextMenuAction(`${activeSidebar} [data-section-header='1'] button`, "paste-file-end")
+    await contextMenuAction(fileName(1), "paste-file-end")
     await browser.waitUntil(
       async () => (await pageFiles()).join() === "own.pdf,added.pdf,added.pdf,added.pdf",
       { timeout: 15_000, timeoutMsg: "the pasted page never closed the added file" },
@@ -533,32 +639,6 @@ describe("TFolio files added to an open document", () => {
     await expect(bookmarks).toHaveText(expect.stringContaining("added.pdf"))
     await expect(bookmarks).toHaveText(expect.stringContaining("Second half"))
     expect(own.endsWith("own.pdf")).toBe(true)
-  })
-
-  it("keeps the tab on the page grid through the Save As that puts the file in it", async () => {
-    const own = await openPdfFromDisk("own.pdf", minimalPdf(2))
-    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(1))])
-    await waitForPages(3)
-    await $(`${session} button[aria-label='Thumbnails']`).click()
-    const grid = `${session} [data-page-thumbnails='grid']`
-    await waitForPages(3, grid)
-
-    await pointSaveAsAt(path.join(path.dirname(own), "arranged.pdf"))
-    await $(saveTrigger).click()
-    await browser.waitUntil(
-      async () =>
-        (await $$(`//button[@role='tab'][normalize-space()='arranged.pdf']`).length) === 1,
-      { timeout: 30_000, timeoutMsg: "the tab never became the saved file" },
-    )
-    // The grid is the tab's, and the written file took the tab's place: the
-    // reader arranging pages is not sent back to reading them. The old tab
-    // takes the file's name before the file is read back, so its headings
-    // going is what tells the two apart.
-    await browser.waitUntil(async () => (await headings(grid)).length === 0, {
-      timeout: 30_000,
-      timeoutMsg: "the tab never showed the saved file as one file",
-    })
-    await waitForPages(3, grid)
   })
 })
 
@@ -631,24 +711,20 @@ describe("TFolio blank pages between files", () => {
     await openPdfFromDisk("own.pdf", minimalPdf(2))
     await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
     await waitForPages(4)
-    await $(`${session} button[aria-label='Thumbnails']`).click()
-    const grid = `${session} [data-page-thumbnails='grid']`
-    await waitForPages(4, grid)
-    expect(await blanksIn(grid)).toEqual([])
+    expect(await blanksIn(activeSidebar)).toEqual([])
 
     // The document's first page held past the added file's last: its own
     // file would be left one page, which a blank then backs.
-    await holdPageAfter(grid, 1, 4)
-    await browser.waitUntil(async () => (await blanksIn(grid)).join() === "2", {
+    await holdPageAfter(activeSidebar, 1, 4)
+    await browser.waitUntil(async () => (await blanksIn(activeSidebar)).join() === "2", {
       timeoutMsg: "the held page never showed the blank its drop would add",
     })
 
     await letGoOfPage()
-    await browser.waitUntil(async () => (await blanksIn(grid)).join() === "1", {
+    await browser.waitUntil(async () => (await blanksIn(activeSidebar)).join() === "1", {
       timeout: 15_000,
       timeoutMsg: "the drop never laid the blank out after the one page left",
     })
-    await $(`${session} button[aria-label='Single page']`).click()
     await browser.waitUntil(
       async () => (await pageFiles()).join() === "own.pdf,added.pdf,added.pdf,added.pdf",
       { timeoutMsg: "the held page never joined the added file at its end" },

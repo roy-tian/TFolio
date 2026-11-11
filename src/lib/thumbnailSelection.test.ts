@@ -6,6 +6,7 @@ import {
   selectionAfterClick,
   selectionAfterGroupClick,
   selectionOfAllPages,
+  selectionWithout,
   type ThumbnailSelection,
 } from "@/lib/thumbnailSelection"
 
@@ -58,6 +59,31 @@ describe("selectionAfterClick", () => {
 
     expect(pagesOf(selection)).toEqual([4])
     expect(selection.anchor).toBe(4)
+  })
+})
+
+describe("selectionWithout", () => {
+  it("lets go of the pages named and keeps the rest", () => {
+    const chosen = selectionAfterClick(selectionAfterClick(emptySelection, 2, plain), 6, range)
+    const left = selectionWithout(chosen, [4, 5, 9])
+
+    expect(pagesOf(left)).toEqual([2, 3, 6])
+    expect(left.anchor).toBe(2)
+  })
+
+  it("drops an anchor among them, so the next range starts afresh", () => {
+    const chosen = selectionAfterClick(selectionAfterClick(emptySelection, 4, plain), 1, toggle)
+    const left = selectionWithout(chosen, [1, 2])
+
+    expect(pagesOf(left)).toEqual([4])
+    expect(left.anchor).toBeNull()
+    expect(pagesOf(selectionAfterClick(left, 6, range))).toEqual([6])
+  })
+
+  it("is the same selection where none of them was chosen", () => {
+    const chosen = selectionAfterClick(emptySelection, 2, plain)
+
+    expect(selectionWithout(chosen, [5, 6])).toBe(chosen)
   })
 })
 
