@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactElement, ReactNode } from "react"
+import type { ComponentProps, ReactElement, ReactNode, RefObject } from "react"
 
 import {
   Tooltip,
@@ -13,6 +13,9 @@ const HINT_TOOLTIP_DELAY = 600
 
 type HintTooltipProps = {
   children: ReactElement
+  /** The text on screen that the label only repeats: the hint then opens
+      only while that text is cut short. */
+  cutShort?: RefObject<HTMLElement | null>
   inDelayGroup?: boolean
   label: string | undefined
   /** Whether a focus opens it, as for a reader arriving by keyboard. Off where
@@ -30,6 +33,7 @@ export function HintTooltipGroup({ children }: { children: ReactNode }) {
     controls answer faster — see `ToolbarTooltip`. */
 export function HintTooltip({
   children,
+  cutShort,
   inDelayGroup = false,
   label,
   openOnFocus = true,
@@ -40,6 +44,13 @@ export function HintTooltip({
     return children
   }
 
+  // Measured as the hint is about to open, not as the text is laid out.
+  const repeatsWhatShows = () => {
+    const text = cutShort?.current
+
+    return cutShort !== undefined && (!text || text.scrollWidth <= text.clientWidth)
+  }
+
   // The hint stands over its neighbours, and what is under it has to stay
   // clickable, so the popup takes no pointer of its own.
   const tooltip = (
@@ -47,7 +58,10 @@ export function HintTooltip({
       disableHoverablePopup
       onOpenChange={(open, details) => {
         // A focus the app moves itself is not a reader asking to read.
-        if (open && !openOnFocus && details.reason === "trigger-focus") {
+        if (
+          open &&
+          ((!openOnFocus && details.reason === "trigger-focus") || repeatsWhatShows())
+        ) {
           details.cancel()
         }
       }}

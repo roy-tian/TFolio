@@ -106,7 +106,14 @@ export function isAbortError(error: unknown): boolean {
     for one in view. What the queue orders page work by. */
 export function distanceFromView(element: Element | null): number {
   // No box, as in a hidden tab, measures all zeros, which would read as in view.
-  if (!element || !element.isConnected || element.getClientRects().length === 0) {
+  // Nor does an inert view: the reading view under the page grid is laid out
+  // but unseen, and would otherwise outrank the grid's own previews.
+  if (
+    !element ||
+    !element.isConnected ||
+    element.getClientRects().length === 0 ||
+    element.closest("[inert]") !== null
+  ) {
     return Number.POSITIVE_INFINITY
   }
 

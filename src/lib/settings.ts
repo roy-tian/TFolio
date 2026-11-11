@@ -10,11 +10,14 @@ export type Settings = {
     viewMode?: unknown
     sidebar?: unknown
     sidebarPanel?: unknown
-    organizeThumbnailSize?: unknown
+    sidebarWidth?: unknown
+    sidebarFileRows?: unknown
   }
   annotate?: { highlightColor?: unknown; rect?: unknown; textNote?: unknown }
   watermark?: unknown
   pageNumbers?: unknown
+  organize?: { bookmarks?: unknown; smartPadding?: unknown }
+  signatures?: { handling?: unknown }
 }
 
 let current: Settings = {}
@@ -125,6 +128,8 @@ function merged(base: Settings, patch: Settings): Settings {
     ...patch,
     ui: mergedSection(base.ui, patch.ui),
     annotate: mergedSection(base.annotate, patch.annotate),
+    organize: mergedSection(base.organize, patch.organize),
+    signatures: mergedSection(base.signatures, patch.signatures),
   }
 }
 

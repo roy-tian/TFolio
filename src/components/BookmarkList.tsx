@@ -67,9 +67,15 @@ export function BookmarkList({ items, onNavigate }: BookmarkListProps) {
         className="overlay-scroll-viewport h-full overflow-auto overscroll-contain p-2"
         ref={navRef}
       >
-        <ul>
-          <BookmarkItems items={items} onNavigate={onNavigate} />
-        </ul>
+        {/* Shown with none only beside the page grid, which keeps the
+            sidebar to the bookmarks. */}
+        {items.length === 0 ? (
+          <p className="px-2 py-3 text-sm text-muted-foreground">{t("sidebar.noBookmarks")}</p>
+        ) : (
+          <ul>
+            <BookmarkItems items={items} onNavigate={onNavigate} />
+          </ul>
+        )}
       </nav>
       <OverlayScrollbars viewportRef={navRef} />
     </div>

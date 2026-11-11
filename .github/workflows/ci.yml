@@ -135,6 +135,8 @@ jobs:
         env:
           NO_AT_BRIDGE: "1"
           FONTCONFIG_FILE: ${{ github.workspace }}/test/e2e/fontconfig.conf
+          # The timing locks under test/e2e/extended run here, not in a local run.
+          TFOLIO_E2E_EXTENDED: "1"
         run: bun run test:e2e:headless
 
       - name: Upload GUI failure artifacts

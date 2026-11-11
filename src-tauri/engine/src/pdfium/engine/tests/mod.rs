@@ -15,17 +15,22 @@ use crate::pdfium::page_numbers::{PageNumbersMode, PageNumbersPosition};
 
 mod support;
 
+mod a4_export;
 mod annotations;
 mod archive_export;
 mod compress;
+mod cross_document_pages;
 mod documents;
 mod duplicate_pages;
+mod file_changes;
+mod file_sources;
 mod image_dpi;
-mod organize;
 mod page_numbers;
 mod page_structure;
 mod rect_effect;
 mod save_export;
+mod sections;
+mod signatures;
 mod text_notes;
 mod text_search;
 mod watermark;

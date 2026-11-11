@@ -65,6 +65,19 @@ describe("historyAction", () => {
     ).toEqual({ count: 1, key: "annotate.actionDuplicatePages" })
   })
 
+  it("counts the pages another document gave", () => {
+    expect(
+      historyAction({
+        index: 1,
+        kind: "insertPages",
+        pageCount: 5,
+        sourceDocumentId: 3,
+        sourcePages: [2, 4],
+        stashId: 1,
+      }),
+    ).toEqual({ count: 2, key: "annotate.actionInsertPages" })
+  })
+
   it("counts the pages a turn took", () => {
     expect(
       historyAction({ degrees: 90, kind: "rotatePages", pages: [2, 3, 4] }),

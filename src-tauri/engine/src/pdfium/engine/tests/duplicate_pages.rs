@@ -18,7 +18,7 @@ fn duplicates_chosen_pages_into_a_gap_of_the_same_document() {
     let before = page_fingerprints(engine, document.id, 3);
 
     let update = engine
-        .duplicate_pages(document.id, &[1, 3], 2)
+        .duplicate_pages(document.id, &[1, 3], 2, None)
         .expect("PDFium should copy the pages back in");
 
     assert_eq!(update.num_pages, 5);
@@ -48,7 +48,7 @@ fn refuses_duplicate_pages_and_positions_that_do_not_exist() {
         .expect("PDFium should open the document");
 
     let unknown_page = engine
-        .duplicate_pages(document.id, &[3], 1)
+        .duplicate_pages(document.id, &[3], 1, None)
         .expect_err("the document has two pages");
     assert!(
         unknown_page.contains("does not exist"),
@@ -56,12 +56,12 @@ fn refuses_duplicate_pages_and_positions_that_do_not_exist() {
     );
 
     let repeated = engine
-        .duplicate_pages(document.id, &[2, 2], 1)
+        .duplicate_pages(document.id, &[2, 2], 1, None)
         .expect_err("a page cannot be copied twice in one paste");
     assert!(repeated.contains("appears twice"), "why: {repeated}");
 
     let past_end = engine
-        .duplicate_pages(document.id, &[1], 4)
+        .duplicate_pages(document.id, &[1], 4, None)
         .expect_err("position 4 is two past the last page");
     assert!(
         past_end.contains("cannot go to position"),
@@ -93,7 +93,7 @@ fn duplicating_a_watermarked_page_keeps_the_document_export_only() {
         .expect("PDFium should apply the watermark");
 
     let update = engine
-        .duplicate_pages(document.id, &[1], 3)
+        .duplicate_pages(document.id, &[1], 3, None)
         .expect("PDFium should copy the watermarked page");
 
     assert!(
@@ -107,7 +107,7 @@ fn duplicating_a_watermarked_page_keeps_the_document_export_only() {
 
     assert!(
         engine
-            .duplicate_pages(document.id, &[2], 1)
+            .duplicate_pages(document.id, &[2], 1, None)
             .expect("PDFium should copy a page the watermark never covered")
             .has_merged_pages,
         "the baked copy is still there, so the guard stands",

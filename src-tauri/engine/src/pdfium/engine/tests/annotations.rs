@@ -705,7 +705,7 @@ fn a_mark_follows_its_page_through_a_reorder() {
         .expect("PDFium should draw the rectangle");
 
     engine
-        .reorder_pages(document.id, &[2, 1])
+        .reorder_pages(document.id, &[2, 1], None)
         .expect("PDFium should reorder the pages");
 
     assert_eq!(

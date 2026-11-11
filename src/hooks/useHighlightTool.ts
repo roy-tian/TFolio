@@ -3,7 +3,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import type { PagePointsRect } from "@/lib/annotationGeometry"
 import type { HighlightCommand, HighlightTarget } from "@/lib/annotations"
 import { selectedLineRectsOnPage } from "@/lib/textSelection"
-import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import { isMacOS } from "@/lib/platform"
 import type { PdfPageInfo } from "@/lib/pdf"
 
@@ -15,8 +14,8 @@ type UseHighlightToolOptions = {
   onCommit: (command: HighlightCommand) => void
   opacity: number
   pages: PdfPageInfo[]
-  rotations: PageRotations
   selectable: boolean
+  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -40,7 +39,7 @@ function selectionTargets(
   selection: Selection,
   viewer: HTMLElement,
   pages: PdfPageInfo[],
-  rotations: PageRotations,
+  viewRotation: number,
 ): HighlightTarget[] {
   if (selection.isCollapsed || selection.rangeCount === 0) {
     return []
@@ -60,12 +59,7 @@ function selectionTargets(
       continue
     }
 
-    const quads = quadsOnPage(
-      selection,
-      pageElement,
-      page,
-      rotationForPage(rotations, pageNumber),
-    )
+    const quads = quadsOnPage(selection, pageElement, page, viewRotation)
 
     if (quads.length > 0) {
       targets.push({ pageNumber, quads })
@@ -90,17 +84,17 @@ export function useHighlightTool({
   onCommit,
   opacity,
   pages,
-  rotations,
   selectable,
+  viewRotation,
   viewerRef,
 }: UseHighlightToolOptions) {
   const [selectionDragging, setSelectionDragging] = useState(false)
 
   // Read when called, not depended on: every mounted page holds the capture,
   // and a fresh one would re-render them all.
-  const latest = useRef({ color, onCommit, opacity, pages, rotations })
+  const latest = useRef({ color, onCommit, opacity, pages, viewRotation })
   useLayoutEffect(() => {
-    latest.current = { color, onCommit, opacity, pages, rotations }
+    latest.current = { color, onCommit, opacity, pages, viewRotation }
   })
 
   // Shared by the tool's drag and the page menu, which marks in the tool's
@@ -113,8 +107,8 @@ export function useHighlightTool({
       return null
     }
 
-    const { color, onCommit, opacity, pages, rotations } = latest.current
-    const targets = selectionTargets(selection, viewer, pages, rotations)
+    const { color, onCommit, opacity, pages, viewRotation } = latest.current
+    const targets = selectionTargets(selection, viewer, pages, viewRotation)
 
     if (targets.length === 0) {
       return null

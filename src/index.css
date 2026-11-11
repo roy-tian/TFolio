@@ -212,6 +212,13 @@ body {
   --sidebar-inset: 0px;
 }
 
+/* A width the reader dragged to; the window narrows it as it shrinks, so the
+   toolbar beside a docked sidebar keeps its room. In pixels, as the drag and
+   `SIDEBAR_MIN_WIDTH` measure it, whatever the root font size. */
+[data-sidebar][data-sidebar-width] {
+  --sidebar-width: max(256px, min(var(--sidebar-chosen), 100vw - var(--sidebar-reserved)));
+}
+
 [data-sidebar="docked"] {
   --sidebar-inset: var(--sidebar-width);
 }
@@ -468,6 +475,18 @@ body {
   @keyframes digit-close {
     to {
       width: 0;
+    }
+  }
+}
+
+/* The bar that counts out a page drag's dwell on a tab. DocumentTabs.tsx sets
+   the real duration from TAB_SPRING_MS; the one here is only a fallback. */
+@theme {
+  --animate-tab-spring: tab-spring 600ms linear both;
+
+  @keyframes tab-spring {
+    from {
+      transform: scaleX(0);
     }
   }
 }

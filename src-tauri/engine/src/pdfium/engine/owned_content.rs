@@ -235,6 +235,15 @@ pub(super) fn place_text_object(
     Ok(object)
 }
 
+/// What a stopped or failed rebuild leaves behind.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RebuildFailure {
+    /// The document as it was, from a snapshot taken first.
+    RollBack,
+    /// Whatever it reached: a copy its caller throws away needs no snapshot.
+    Discard,
+}
+
 impl PdfiumEngine {
     /// Whole-document preflight, run before anything is touched: every page
     /// must still end with exactly the objects this session recorded. It holds
@@ -329,6 +338,145 @@ impl PdfiumEngine {
         Ok(true)
     }
 
+    /// Stamps layers on a document nobody holds yet, as content of its own
+    /// rather than this session's: the file written from it reads as an open
+    /// of that file would, saved over without refusal. `false` is a stopped run.
+    /// Such a document is the caller's to throw away on a failure or a stop,
+    /// so nothing is kept to roll it back.
+    pub(super) fn stamp_layers(
+        &self,
+        document_id: u64,
+        watermark: Option<WatermarkResources>,
+        page_numbers: Option<PageNumbersResources>,
+        on_progress: &mut dyn FnMut(usize, usize),
+        operation: &OperationGuard<'_>,
+    ) -> Result<bool, String> {
+        let mut documents = self.lock_documents()?;
+
+        if operation.is_cancelled() {
+            return Ok(false);
+        }
+
+        let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if !self.rebuild_owned_content(
+            entry,
+            watermark,
+            page_numbers,
+            on_progress,
+            operation,
+            RebuildFailure::Discard,
+        )? {
+            return Ok(false);
+        }
+
+        entry.owned_content = None;
+
+        Ok(true)
+    }
+
+    /// A copy of the document whose pages still end in this session's
+    /// watermark and page numbers as recorded, and how many objects each page's
+    /// take: for work that lifts them a page at a time (`lift_owned_tail`) and
+    /// lays the pages out afresh. `None` with no layer on, or where the tails no
+    /// longer end the pages as recorded, and the layers then go along as page
+    /// content. Under the lock; a stop ends the check.
+    pub(super) fn layered_copy(
+        &self,
+        entry: &OpenDocument,
+        operation: &OperationGuard<'_>,
+    ) -> Result<Option<(PdfDocument<'static>, Vec<usize>)>, String> {
+        let Some(state) = entry
+            .owned_content
+            .as_ref()
+            .filter(|state| state.has_active_layer())
+        else {
+            return Ok(None);
+        };
+        let bytes = entry
+            .document
+            .save_to_bytes()
+            .map_err(|error| format!("PDFium could not copy the document: {error}"))?;
+        let mut copy = self
+            .pdfium
+            .load_pdf_from_byte_vec(bytes, None)
+            .map_err(|error| format!("PDFium could not reread the document: {error}"))?;
+
+        if !matches!(
+            Self::verify_owned_tail(
+                &copy,
+                &entry.page_ids,
+                state,
+                Some(operation),
+                &mut |_, _| {}
+            ),
+            Ok(true)
+        ) {
+            return Ok(None);
+        }
+
+        // Past the last page: lifted objects wait there to go with the copy.
+        copy.pages_mut()
+            .create_page_at_end(PdfPagePaperSize::a4())
+            .map_err(|error| format!("PDFium could not create a scratch page: {error}"))?;
+
+        let owned = entry
+            .page_ids
+            .iter()
+            .map(|page_id| {
+                state
+                    .per_page
+                    .get(page_id)
+                    .map(OwnedTailState::owned_objects)
+                    .unwrap_or(0)
+            })
+            .collect();
+
+        Ok(Some((copy, owned)))
+    }
+
+    /// Takes the last `owned` objects off page `index` of a `layered_copy`.
+    pub(super) fn lift_owned_tail(
+        copy: &mut PdfDocument<'static>,
+        index: usize,
+        owned: usize,
+    ) -> Result<(), String> {
+        if owned == 0 {
+            return Ok(());
+        }
+
+        let bin = copy.pages().len() - 1;
+        let mut page = copy
+            .pages_mut()
+            .get(index as PdfPageIndex)
+            .map_err(|error| format!("PDFium could not load page {}: {error}", index + 1))?;
+        let mut retired = Vec::with_capacity(owned);
+
+        page.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
+
+        for _ in 0..owned {
+            let last = page
+                .objects()
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| "a page's watermark or number went missing".to_string())?;
+
+            retired.push(
+                page.objects_mut()
+                    .remove_object_at_index(last)
+                    .map_err(|error| {
+                        format!("PDFium could not lift the watermark or number: {error}")
+                    })?,
+            );
+        }
+
+        page.regenerate_content()
+            .map_err(|error| format!("PDFium could not regenerate the page: {error}"))?;
+        drop(page);
+
+        Self::retire_owned_objects(copy, bin, retired)
+    }
+
     /// A layer change's two walks as one run of progress — the tails checked
     /// once, then rebuilt in two passes — and one stop for either: nothing is
     /// touched until the check has passed, and the rebuild rolls itself back.
@@ -366,6 +514,7 @@ impl PdfiumEngine {
             page_numbers,
             &mut |done, total| on_progress(checked + done, checked + total),
             operation,
+            RebuildFailure::RollBack,
         )
     }
 
@@ -770,6 +919,7 @@ impl PdfiumEngine {
         page_numbers: Option<PageNumbersResources>,
         on_progress: &mut dyn FnMut(usize, usize),
         operation: &OperationGuard<'_>,
+        on_failure: RebuildFailure,
     ) -> Result<bool, String> {
         let page_count = entry.document.pages().len() as usize;
         let total = page_count * 2;
@@ -782,10 +932,15 @@ impl PdfiumEngine {
         }
 
         let previous = entry.owned_content.clone();
-        let snapshot = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+        let snapshot = match on_failure {
+            RebuildFailure::RollBack => Some(
+                entry
+                    .document
+                    .save_to_bytes()
+                    .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?,
+            ),
+            RebuildFailure::Discard => None,
+        };
 
         // `None` is the reader's stop: the rollback below is the same one a
         // failure takes, so a stopped run leaves the document it started on.
@@ -1094,11 +1249,11 @@ impl PdfiumEngine {
             }))
         })();
 
-        let state = match rebuilt {
-            Ok(Some(state)) => state,
+        let state = match (rebuilt, snapshot) {
+            (Ok(Some(state)), _) => state,
             // A stop is a failure only when the rollback itself fails — the one
             // case leaving a document neither reader nor session asked for.
-            Ok(None) => {
+            (Ok(None), Some(snapshot)) => {
                 return match self.load_document_snapshot(entry, snapshot) {
                     Ok(()) => Ok(false),
                     Err(error) => Err(format!(
@@ -1106,9 +1261,11 @@ impl PdfiumEngine {
                     )),
                 };
             }
-            Err(error) => {
+            (Ok(None), None) => return Ok(false),
+            (Err(error), Some(snapshot)) => {
                 return Err(self.restore_document_snapshot(entry, snapshot, error));
             }
+            (Err(error), None) => return Err(error),
         };
 
         // A rebuild that had something to pop leaves orphaned fonts and content
@@ -1231,6 +1388,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
 
         if entry
             .owned_content
@@ -1274,6 +1432,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
 
         if !entry
             .owned_content
@@ -1310,6 +1469,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
         let config = config.validated(entry.page_ids.len() as i32)?;
 
         // Checked before any work, so an unchanged config never rebuilds the
@@ -1359,6 +1519,7 @@ impl PdfiumEngine {
         }
 
         let entry = open_entry_mut(&mut documents, document_id)?;
+        entry.ensure_editable()?;
 
         if !entry
             .owned_content

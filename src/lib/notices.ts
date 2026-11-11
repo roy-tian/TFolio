@@ -35,7 +35,7 @@ export type NoticeActionKind =
   | "updateRetry"
   | "layerStop"
   | "wordConvertStop"
-  | "organizeAddStop"
+  | "fileAddStop"
 
 export type NoticeAction = {
   busy?: boolean
@@ -62,6 +62,7 @@ export const noticeCatalogue = {
     tone: "danger",
   },
   createFailed: { life: "transient", textKey: "menu.newFailed", tone: "danger" },
+  extractFailed: { life: "transient", textKey: "tabs.extractFailed", tone: "danger" },
   exportCopyOnly: {
     life: "transient",
     textKey: "annotate.exportCopyOnly",
@@ -77,10 +78,40 @@ export const noticeCatalogue = {
     textKey: "annotate.exportFailed",
     tone: "danger",
   },
+  exportSigned: {
+    life: "transient",
+    textKey: "annotate.exportSigned",
+    tone: "warning",
+  },
+  exportSignedChanged: {
+    life: "transient",
+    textKey: "annotate.exportSignedChanged",
+    tone: "warning",
+  },
   exportTargetOpen: {
     life: "transient",
     textKey: "annotate.exportTargetOpen",
     tone: "warning",
+  },
+  exportNoSpace: {
+    life: "transient",
+    textKey: "annotate.exportNoSpace",
+    tone: "warning",
+  },
+  exportTargetMissing: {
+    life: "transient",
+    textKey: "annotate.exportTargetMissing",
+    tone: "warning",
+  },
+  exportDocumentChanged: {
+    life: "transient",
+    textKey: "annotate.exportDocumentChanged",
+    tone: "warning",
+  },
+  a4LayersScaled: {
+    life: "transient",
+    textKey: "a4Export.layersScaled",
+    tone: "info",
   },
   fileTooLarge: {
     life: "transient",
@@ -122,6 +153,18 @@ export const noticeCatalogue = {
     life: "standing",
     slot: "layerRebuild",
     textKey: "annotate.pageNumbersRebuilding",
+    tone: "info",
+  },
+  pagesAppendBusy: {
+    life: "transient",
+    slot: "pageAppend",
+    textKey: "tabs.appendBusy",
+    tone: "warning",
+  },
+  pagesAppended: {
+    life: "transient",
+    slot: "pageAppend",
+    textKey: "tabs.appendedNotice",
     tone: "info",
   },
   pagesCopied: {
@@ -184,6 +227,29 @@ export const noticeCatalogue = {
     textKey: "annotate.saveOwnedContent",
     tone: "warning",
   },
+  saveSignedOnly: {
+    life: "transient",
+    slot: "saveCopyOnly",
+    textKey: "annotate.saveSigned",
+    tone: "warning",
+  },
+  // A remembered answer given in the reader's place: said every time, since
+  // nothing else shows the signatures were just let go.
+  signaturesFlattenedAsSet: {
+    life: "transient",
+    textKey: "signatures.appliedFlatten",
+    tone: "warning",
+  },
+  signaturesFlattenFailed: {
+    life: "transient",
+    textKey: "signatures.flattenFailed",
+    tone: "warning",
+  },
+  signaturesKeptAsSet: {
+    life: "transient",
+    textKey: "signatures.appliedKeep",
+    tone: "warning",
+  },
   tabMoveBusy: {
     life: "transient",
     textKey: "tabs.moveBusy",
@@ -240,37 +306,32 @@ export const noticeCatalogue = {
     textKey: "annotate.watermarkRebuilding",
     tone: "info",
   },
-  // Standing while the workspace reads files it was given; the add retracts it.
-  organizeAdding: {
+  // Standing while files added to a document are read; the add retracts it.
+  fileAdding: {
     life: "standing",
     running: true,
-    textKey: "organize.adding",
+    textKey: "files.adding",
     tone: "info",
   },
-  organizeConverterMissing: {
+  filesConverterMissing: {
     life: "transient",
-    textKey: "organize.converterMissing",
+    textKey: "files.converterMissing",
     tone: "warning",
   },
-  organizeFailed: {
+  filesTooMany: {
     life: "transient",
-    textKey: "organize.failed",
+    textKey: "files.tooManyFiles",
+    tone: "warning",
+  },
+  filesUnreadable: {
+    life: "transient",
+    textKey: "files.unreadable",
     tone: "danger",
   },
-  organizeSourceChanged: {
+  filesChanged: {
     life: "transient",
-    textKey: "organize.sourceChanged",
+    textKey: "files.changed",
     tone: "warning",
-  },
-  organizeTooManyFiles: {
-    life: "transient",
-    textKey: "organize.tooManyFiles",
-    tone: "warning",
-  },
-  organizeUnreadable: {
-    life: "transient",
-    textKey: "organize.unreadable",
-    tone: "danger",
   },
   // Standing for as long as the conversion runs; the open retracts it.
   wordConverting: {
@@ -304,9 +365,9 @@ export const noticeActions = {
     busyLabelKey: "viewer.wordConvertStopping",
     labelKey: "viewer.wordConvertStop",
   },
-  organizeAddStop: {
-    busyLabelKey: "organize.stopping",
-    labelKey: "organize.stop",
+  fileAddStop: {
+    busyLabelKey: "files.stopping",
+    labelKey: "files.stop",
   },
 } as const satisfies Record<
   NoticeActionKind,
@@ -319,7 +380,12 @@ export const documentRefusals = [
   "annotateFailed",
   "exportCopyOnly",
   "exportDenied",
+  "exportDocumentChanged",
   "exportFailed",
+  "exportNoSpace",
+  "exportSigned",
+  "exportSignedChanged",
+  "exportTargetMissing",
   "exportTargetOpen",
   "noteFontFailed",
   "noteFontMissing",

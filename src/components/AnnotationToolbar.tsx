@@ -36,6 +36,9 @@ export type AnnotationTool = "highlight" | "rect" | "textNote" | "eraser" | null
 
 type AnnotationToolbarProps = {
   activeTool: AnnotationTool
+  /** Every drawing tool needs a page under the pointer, which the page grid
+      does not show; the watermark and page numbers act on the document. */
+  drawingApplies: boolean
   highlightColor: HexColor
   onHighlightColorChange: (color: HexColor) => void
   onRectStyleChange: (style: RectStyle, transient?: boolean) => void
@@ -48,6 +51,7 @@ type AnnotationToolbarProps = {
 
 export function AnnotationToolbar({
   activeTool,
+  drawingApplies,
   highlightColor,
   onHighlightColorChange,
   onPageNumbers,
@@ -64,6 +68,10 @@ export function AnnotationToolbar({
   const eraserLabel = t("annotate.eraser")
   const watermarkLabel = t("watermark.open")
   const pageNumbersLabel = t("pageNumbers.open")
+  // A drawing tool the page grid has switched off says where it works: a
+  // greyed button alone leaves the reader to guess why.
+  const toolHint = (tool: string) =>
+    drawingApplies ? tool : t("annotate.toolInReadingView", { tool })
   // A translucent wash is the colour the reader chose; a blur or a mosaic is
   // built from the page's own pixels, so only the wash re-inks the bottom bar.
   const rectBarFromColour = rectStyle.effect === "translucent"
@@ -73,7 +81,7 @@ export function AnnotationToolbar({
       <ButtonGroup>
         {/* A Toggle rather than a Button: unlike the fit control next to it, a
         tool really is on or off, and pressing the active one puts it away. */}
-        <ToolbarTooltip label={highlightLabel}>
+        <ToolbarTooltip label={toolHint(highlightLabel)}>
           <Toggle
             aria-label={highlightLabel}
             className={cn(
@@ -83,6 +91,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "highlight" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "highlight"}
             style={{ "--tool-ink": highlightColor } as CSSProperties}
             variant="outline"
@@ -127,7 +136,7 @@ export function AnnotationToolbar({
           </PopoverContent>
         </Popover>
 
-        <ToolbarTooltip label={rectLabel}>
+        <ToolbarTooltip label={toolHint(rectLabel)}>
           <Toggle
             aria-label={rectLabel}
             className={cn(
@@ -140,6 +149,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "rect" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "rect"}
             style={
               rectBarFromColour
@@ -177,7 +187,7 @@ export function AnnotationToolbar({
           </PopoverContent>
         </Popover>
 
-        <ToolbarTooltip label={textNoteLabel}>
+        <ToolbarTooltip label={toolHint(textNoteLabel)}>
           <Toggle
             aria-label={textNoteLabel}
             className={cn(
@@ -188,6 +198,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "textNote" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "textNote"}
             style={{ "--tool-ink": textNoteColor } as CSSProperties}
             variant="outline"
@@ -198,7 +209,7 @@ export function AnnotationToolbar({
 
         {/* The one that undoes the others' work: it takes off a mark this
             session made, wherever in the stack — what plain undo cannot. */}
-        <ToolbarTooltip label={eraserLabel}>
+        <ToolbarTooltip label={toolHint(eraserLabel)}>
           <Toggle
             aria-label={eraserLabel}
             className={cn(
@@ -209,6 +220,7 @@ export function AnnotationToolbar({
             onPressedChange={(pressed) =>
               onToolChange(pressed ? "eraser" : null)
             }
+            disabled={!drawingApplies}
             pressed={activeTool === "eraser"}
             variant="outline"
           >

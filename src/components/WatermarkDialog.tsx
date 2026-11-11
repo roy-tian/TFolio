@@ -36,7 +36,8 @@ type WatermarkDialogProps = {
   onRemove: () => void
   onStop: () => void
   open: boolean
-  preview: Omit<DocumentWatermarkPreviewProps, "config">
+  /** The document's own pages; without one, an A4 sheet stands in. */
+  preview?: Omit<DocumentWatermarkPreviewProps, "config">
   progress: PdfProgress | null
   validationError: WatermarkValidationError | null
 }
@@ -106,7 +107,9 @@ export function WatermarkDialog({
               className="overlay-scroll-viewport min-h-0 flex-1 overflow-y-auto p-5"
               draft={draft}
               preview={
-                open ? <DocumentWatermarkPreview {...preview} config={draft} /> : null
+                open && preview ? (
+                  <DocumentWatermarkPreview {...preview} config={draft} />
+                ) : null
               }
               onDraftChange={onDraftChange}
               ref={bodyRef}

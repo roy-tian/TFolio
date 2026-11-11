@@ -9,9 +9,9 @@ import {
 } from "react"
 
 import type { CurrentPage } from "@/hooks/useCurrentPage"
-import type { PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
-import { spreadPages, type ViewMode } from "@/lib/viewMode"
+import { sheetSpreads, sheetsOf, spreadPagesOf, type PaddingSheet } from "@/lib/padding"
+import type { ViewMode } from "@/lib/viewMode"
 import { viewerReadingBounds } from "@/lib/viewerViewport"
 import {
   anchorCorrection,
@@ -75,9 +75,11 @@ type UseZoomOptions = {
   disabled: boolean
   /** A recent file's own zoom, over the fresh-document default. */
   initialZoom?: ZoomState
+  /** The blank pages a Save As will add, which share the spreads they stand in. */
+  padding: readonly PaddingSheet[]
   pages: PdfPageInfo[]
-  rotations: PageRotations
   viewMode: ViewMode
+  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -87,9 +89,10 @@ export function useZoom({
   currentPage,
   disabled,
   initialZoom,
+  padding,
   pages,
-  rotations,
   viewMode,
+  viewRotation,
   viewerRef,
 }: UseZoomOptions) {
   const [zoom, setZoom] = useState<ZoomState>(
@@ -111,8 +114,8 @@ export function useZoom({
   const previewDeadlineRef = useRef(0)
 
   const { referenceHeight, referenceWidth, widestWidth } = useMemo(
-    () => referenceDimensions(pages, rotations),
-    [pages, rotations],
+    () => referenceDimensions(pages, viewRotation),
+    [pages, viewRotation],
   )
 
   // A spread is centred on its spine, so a page in it has half the column.
@@ -126,12 +129,12 @@ export function useZoom({
       fitDimensions(
         pages,
         viewMode === "book"
-          ? spreadPages(zoom.fitPage, pages.length)
+          ? spreadPagesOf(sheetSpreads(sheetsOf(pages.length, padding)), zoom.fitPage)
           : [zoom.fitPage],
-        rotations,
+        viewRotation,
         { height: referenceHeight, width: referenceWidth },
       ),
-    [pages, referenceHeight, referenceWidth, rotations, viewMode, zoom.fitPage],
+    [padding, pages, referenceHeight, referenceWidth, viewMode, viewRotation, zoom.fitPage],
   )
 
   const fits = useMemo(

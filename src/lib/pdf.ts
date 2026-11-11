@@ -1,3 +1,5 @@
+import type { PaddingSheet } from "@/lib/padding"
+
 export type PdfOutlineItem = {
   items: PdfOutlineItem[]
   pageNumber: number | null
@@ -9,7 +11,26 @@ export type PdfPageInfo = {
   // Clockwise rotation in degrees (0/90/180/270). `width`/`height` are the
   // displayed dimensions with this rotation already applied.
   rotation: number
+  /** The file the page belongs to, once a file was added to the document:
+      an id among its `sections`. */
+  section?: number
+  /** Shows a signature field's widget; absent on nearly every page. */
+  signed?: boolean
   width: number
+}
+
+/** How a document of several files is laid out and saved. */
+export type FileOptions = {
+  perFileBookmarks: boolean
+  smartPadding: boolean
+}
+
+/** One file of a document others were added to, as the sidebar shows it: its
+    bookmarks numbered for the pages as they now stand. */
+export type PdfSection = {
+  id: number
+  outline: PdfOutlineItem[]
+  title: string
 }
 
 /**
@@ -44,14 +65,75 @@ export type PdfSearchOutcome = {
   matches: PdfSearchMatch[]
 }
 
+/** What becomes of intact signatures once something would break them:
+    flattened into the pages, keeping their look, or kept as fields that then
+    read as invalid. */
+export type SignatureDecision = "flatten" | "keep"
+
+/** The digital signatures a file opened with. `intact` checks their structure
+    in the file on disk, never who signed, and holds while the document is
+    bound to that file, which is then never written over. */
+export type PdfSignatures = {
+  count: number
+  /** The reader's answer, asked before the first change that breaks them. */
+  decision: SignatureDecision | null
+  /** Drawn into the pages in place, as a flatten does before the first edit. */
+  flattened: boolean
+  intact: boolean
+}
+
 export type PdfDocumentInfo = {
+  /** As in a structure update; a document opens as its file alone. */
+  hasForeignPages: boolean
+  /** As in a structure update, which the session copies here: a new document
+      of another one's pages can open already export-only. */
+  hasMergedPages: boolean
   id: number
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  /** As in a structure update. */
+  splitsByBookmarks: boolean
   /** The file this document was opened from; null when opened from bytes,
       which leaves nothing to save over. */
   path: string | null
+  /** As in a structure update. */
+  fileOptions?: FileOptions
+  /** As in a structure update. */
+  padding?: PaddingSheet[]
+  /** As in a structure update. */
+  sections?: PdfSection[]
+  /** As the backend last reported them: an open, a structure update, or a
+      Save As, which moves an edited document off the signed file. */
+  signatures: PdfSignatures
+}
+
+/** What a file's badge says: signatures still intact in the file it is bound
+    to, or signatures it carries that no longer hold — a rewrite's, or ones
+    already broken when it opened. Flattened ones are page content, not signatures. */
+export function signatureMark(signatures: PdfSignatures): "intact" | "broken" | null {
+  if (signatures.intact) {
+    return "intact"
+  }
+
+  return signatures.count > 0 && !signatures.flattened ? "broken" : null
+}
+
+export function isPdfSignatures(value: unknown): value is PdfSignatures {
+  if (typeof value !== "object" || value === null) {
+    return false
+  }
+
+  const { count, decision, flattened, intact } = value as Record<string, unknown>
+
+  return (
+    typeof count === "number" &&
+    Number.isInteger(count) &&
+    count >= 0 &&
+    (decision === null || decision === "flatten" || decision === "keep") &&
+    typeof flattened === "boolean" &&
+    typeof intact === "boolean"
+  )
 }
 
 /** Whether the document is now bound to the file the export wrote: that, not
@@ -59,6 +141,17 @@ export type PdfDocumentInfo = {
 export type PdfExportOutcome = {
   path: string
   savedToSource: boolean
+  /** After the write: an unchanged copy leaves the document on the signed
+      file, an edited one moves it off. */
+  signatures: PdfSignatures
+}
+
+/** A written A4 copy, bound to its file. */
+export type A4Saved = {
+  document: PdfDocumentInfo
+  /** The session's watermark or page numbers went along at the page's scale:
+      they could not be lifted to be laid out again on the sheets. */
+  layersScaled: boolean
 }
 
 /** The backend's refusal to write over a file another tab holds, kept in step
@@ -73,6 +166,26 @@ export const EXPORT_COPY_ONLY = "tfolio:export-copy-only"
     `EXPORT_DENIED_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
 export const EXPORT_DENIED = "tfolio:export-denied"
 
+/** A destination with no room left for the file, kept in step with
+    `EXPORT_NO_SPACE_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
+export const EXPORT_NO_SPACE = "tfolio:export-no-space"
+
+/** A destination whose folder is gone since it was chosen, kept in step with
+    `EXPORT_TARGET_MISSING_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
+export const EXPORT_TARGET_MISSING = "tfolio:export-target-missing"
+
+/** A copy whose document changed while it was built, kept in step with
+    `EXPORT_DOCUMENT_CHANGED_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
+export const EXPORT_DOCUMENT_CHANGED = "tfolio:export-document-changed"
+
+/** A write over a file whose intact signatures it would break, kept in step
+    with `EXPORT_SIGNED_ERROR` in `src-tauri/engine/src/pdfium/engine/signatures.rs`. */
+export const EXPORT_SIGNED = "tfolio:export-signed"
+
+/** An unchanged signed document's copy, refused because its file changed on
+    disk since the open; kept in step with `SIGNED_ORIGINAL_CHANGED_ERROR`. */
+export const SIGNED_ORIGINAL_CHANGED = "tfolio:signed-original-changed"
+
 function isRefusal(error: unknown, code: string): boolean {
   return error === code || (error instanceof Error && error.message === code)
 }
@@ -81,13 +194,42 @@ function isRefusal(error: unknown, code: string): boolean {
     are named, and anything else is the generic failure. */
 export function exportFailureNotice(
   error: unknown,
-): "exportCopyOnly" | "exportDenied" | "exportFailed" | "exportTargetOpen" {
+):
+  | "exportCopyOnly"
+  | "exportDenied"
+  | "exportDocumentChanged"
+  | "exportFailed"
+  | "exportNoSpace"
+  | "exportSigned"
+  | "exportSignedChanged"
+  | "exportTargetMissing"
+  | "exportTargetOpen" {
   if (isRefusal(error, EXPORT_TARGET_OPEN)) {
     return "exportTargetOpen"
   }
 
+  if (isRefusal(error, EXPORT_NO_SPACE)) {
+    return "exportNoSpace"
+  }
+
+  if (isRefusal(error, EXPORT_TARGET_MISSING)) {
+    return "exportTargetMissing"
+  }
+
+  if (isRefusal(error, EXPORT_DOCUMENT_CHANGED)) {
+    return "exportDocumentChanged"
+  }
+
   if (isRefusal(error, EXPORT_COPY_ONLY)) {
     return "exportCopyOnly"
+  }
+
+  if (isRefusal(error, EXPORT_SIGNED)) {
+    return "exportSigned"
+  }
+
+  if (isRefusal(error, SIGNED_ORIGINAL_CHANGED)) {
+    return "exportSignedChanged"
   }
 
   return isRefusal(error, EXPORT_DENIED) ? "exportDenied" : "exportFailed"
@@ -96,12 +238,27 @@ export function exportFailureNotice(
 /** Nothing here is patched into place: the page list and outline are
     replaced wholesale, the backend's document being the only truth. */
 export type PdfStructureUpdate = {
+  /** Pages an added file brought in remain: a save may not replace the
+      document's file, only a Save As write the combined pages. */
+  hasForeignPages: boolean
   /** Whether a page another file brought in is still in the document, which
       leaves it export-only; the backend answers, it being what `save_pdf` refuses. */
   hasMergedPages: boolean
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  /** Whether a split by bookmarks has a bookmark to cut at: the document's
+      own, or once files were added, those a Save As would write. */
+  splitsByBookmarks: boolean
+  /** How those files are laid out and saved; absent with one file. */
+  fileOptions?: FileOptions
+  /** The blank pages a Save As will add between files, shown where it puts
+      them; absent where there are none. */
+  padding?: PaddingSheet[]
+  /** The files the pages come from, once any were added, even with one left;
+      absent for a document that never had any. */
+  sections?: PdfSection[]
+  signatures: PdfSignatures
 }
 
 /** Widest a single page may render on screen, in CSS pixels. */
@@ -127,6 +284,13 @@ export function isPdfPath(path: string) {
     than the whole path. */
 export function fileNameFromPath(path: string) {
   return path.split(/[/\\]/).pop() || path
+}
+
+/** A leading dot is part of the name, as in ".profile". */
+export function fileStem(name: string) {
+  const dot = name.lastIndexOf(".")
+
+  return dot > 0 ? name.slice(0, dot) : name
 }
 
 export function dimensionsForRotation(

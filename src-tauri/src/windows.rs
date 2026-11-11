@@ -7,16 +7,18 @@ use std::{
     },
 };
 
+use serde::Serialize;
 use tauri::{
-    utils::config::WindowConfig, AppHandle, Emitter, Manager, State, WebviewWindow,
-    WebviewWindowBuilder,
+    utils::config::WindowConfig, AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder,
 };
+use tfolio_engine::FileKey;
 
 use crate::handoff::{return_pending, HandoffQueue};
 use crate::launch::reroute_launches;
 use crate::pdfium::PdfiumState;
 
-pub const FOCUS_DOCUMENT_EVENT: &str = "workspace://focus-document";
+/// Carries the document id; spelled again in `App.tsx`, which listens for it.
+pub const REOPEN_DOCUMENT_EVENT: &str = "workspace://reopen-document";
 
 const CASCADE_STEP: f64 = 32.0;
 
@@ -221,22 +223,43 @@ pub fn cascade_from(reference: &WebviewWindow, config: &mut WindowConfig) {
     config.y = Some(y);
 }
 
+/// The file on disk a document stands for: what an open of that file again
+/// finds it by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DocumentFile {
+    /// Blank, extracted, or not written yet: no path finds it.
+    None,
+    /// The file a save writes back over.
+    Bound(PathBuf),
+    /// The image or Word file it was converted from, until a Save As binds it.
+    Converted(PathBuf),
+}
+
+impl DocumentFile {
+    fn path(&self) -> Option<&Path> {
+        match self {
+            Self::None => None,
+            Self::Bound(path) | Self::Converted(path) => Some(path),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct DocumentOwners(Mutex<HashMap<u64, DocumentOwner>>);
 
 struct DocumentOwner {
     window: String,
-    path: Option<PathBuf>,
+    file: DocumentFile,
 }
 
 impl DocumentOwners {
-    pub fn record(&self, document_id: u64, window: &str, path: Option<PathBuf>) {
+    pub fn record(&self, document_id: u64, window: &str, file: DocumentFile) {
         if let Ok(mut owners) = self.0.lock() {
             owners.insert(
                 document_id,
                 DocumentOwner {
                     window: window.to_string(),
-                    path,
+                    file,
                 },
             );
         }
@@ -250,9 +273,9 @@ impl DocumentOwners {
         label: &str,
         page: PageGeneration,
         document_id: u64,
-        path: Option<PathBuf>,
+        file: DocumentFile,
     ) -> bool {
-        self.record(document_id, label, path);
+        self.record(document_id, label, file);
 
         if windows.page(label) == page {
             return true;
@@ -271,7 +294,7 @@ impl DocumentOwners {
     pub fn adopt_path(&self, document_id: u64, path: PathBuf) {
         if let Ok(mut owners) = self.0.lock() {
             if let Some(owner) = owners.get_mut(&document_id) {
-                owner.path = Some(path);
+                owner.file = DocumentFile::Bound(path);
             }
         }
     }
@@ -287,9 +310,9 @@ impl DocumentOwners {
     }
 
     /// Moves a document to another window whole, under one lock, or not at all:
-    /// `None` means the sending window did not hold it. The answer is the path
+    /// `None` means the sending window did not hold it. The answer is the file
     /// the record keeps standing for, which the move carries beside its payload.
-    pub fn transfer(&self, document_id: u64, from: &str, to: &str) -> Option<Option<PathBuf>> {
+    pub fn transfer(&self, document_id: u64, from: &str, to: &str) -> Option<DocumentFile> {
         let mut owners = self.0.lock().ok()?;
 
         let owner = owners.get_mut(&document_id)?;
@@ -299,17 +322,33 @@ impl DocumentOwners {
         }
 
         owner.window = to.to_string();
-        Some(owner.path.clone())
+        Some(owner.file.clone())
     }
 
-    /// The caller already checked its tabs; its own match may be a close still in flight.
-    fn holder_of(&self, path: &Path, asking: &str) -> Option<(String, u64)> {
-        let owners = self.0.lock().ok()?;
-
-        owners
+    /// Every window and document standing for the file at `path`, matched by
+    /// identity. The disk is read off the lock, which every command's
+    /// ownership check waits on.
+    fn holders_of(&self, path: &Path) -> Vec<(String, u64)> {
+        let Ok(owners) = self.0.lock() else {
+            return Vec::new();
+        };
+        let files: Vec<(String, u64, PathBuf)> = owners
             .iter()
-            .find(|(_, owner)| owner.window != asking && owner.path.as_deref() == Some(path))
-            .map(|(document_id, owner)| (owner.window.clone(), *document_id))
+            .filter_map(|(document_id, owner)| {
+                let file = owner.file.path()?;
+
+                Some((owner.window.clone(), *document_id, file.to_path_buf()))
+            })
+            .collect();
+        drop(owners);
+
+        let asked = FileKey::of(path);
+
+        files
+            .into_iter()
+            .filter(|(_, _, file)| FileKey::of(file).names_same_file(&asked))
+            .map(|(window, document_id, _)| (window, document_id))
+            .collect()
     }
 
     /// The ids a window stood for, minus the kept ones, which stay standing:
@@ -341,11 +380,11 @@ pub fn record_document(
     window: &WebviewWindow,
     page: PageGeneration,
     document_id: u64,
-    path: Option<PathBuf>,
+    file: DocumentFile,
 ) {
     let app = window.app_handle();
     let recorded = app.try_state::<AppWindows>().is_none_or(|windows| {
-        owners.record_for_page(&windows, window.label(), page, document_id, path)
+        owners.record_for_page(&windows, window.label(), page, document_id, file)
     });
 
     if !recorded {
@@ -394,28 +433,75 @@ fn release_window(app: &AppHandle, label: &str) {
     }
 }
 
-/// No path approval is needed: this only checks ownership, without disk access or a save target.
+/// Where a file asked to open already is.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OpenFileHolder {
+    None,
+    /// One of the asking window's own tabs.
+    #[serde(rename_all = "camelCase")]
+    Here {
+        document_id: u64,
+    },
+    /// Another window's, brought forward to take the open itself.
+    Elsewhere,
+}
+
+/// The asker's own live tab first: its records may include a close still in
+/// flight, which `tab_ids` leaves out.
+fn pick_holder(holders: &[(String, u64)], asking: &str, tab_ids: &[u64]) -> Option<OpenFileHolder> {
+    holders
+        .iter()
+        .find(|(window, document_id)| window == asking && tab_ids.contains(document_id))
+        .map(|(_, document_id)| OpenFileHolder::Here {
+            document_id: *document_id,
+        })
+}
+
+/// Two documents over one file would each save over the other's edits, so an
+/// alias of an open file — another spelling, a link, a different case — finds
+/// the document already standing for it. The path is read for its identity,
+/// so it needs approval like the open it precedes.
 #[tauri::command]
-pub async fn focus_pdf_path(
+pub async fn find_open_file(
     path: String,
+    tab_ids: Vec<u64>,
     app: AppHandle,
-    owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
-) -> Result<bool, String> {
-    let Some((label, document_id)) = owners.holder_of(Path::new(&path), window.label()) else {
-        return Ok(false);
-    };
+) -> Result<OpenFileHolder, String> {
+    let path = PathBuf::from(path);
 
-    let Some(window) = app.get_webview_window(&label) else {
-        window_gone(&app, &label);
-        return Ok(false);
-    };
+    #[cfg(not(feature = "e2e"))]
+    if !app.state::<PdfiumState>().is_approved(&path) {
+        return Ok(OpenFileHolder::None);
+    }
 
-    let _ = window.unminimize();
-    let _ = window.set_focus();
-    let _ = app.emit_to(label.as_str(), FOCUS_DOCUMENT_EVENT, document_id);
+    let lookup = app.clone();
+    let holders = tauri::async_runtime::spawn_blocking(move || {
+        lookup.state::<DocumentOwners>().holders_of(&path)
+    })
+    .await
+    .map_err(|error| format!("open file lookup failed: {error}"))?;
+    let asking = window.label();
 
-    Ok(true)
+    if let Some(here) = pick_holder(&holders, asking, &tab_ids) {
+        return Ok(here);
+    }
+
+    for (label, document_id) in holders.into_iter().filter(|(label, _)| label != asking) {
+        let Some(holder) = app.get_webview_window(&label) else {
+            window_gone(&app, &label);
+            continue;
+        };
+
+        let _ = holder.unminimize();
+        let _ = holder.set_focus();
+        let _ = app.emit_to(label.as_str(), REOPEN_DOCUMENT_EVENT, document_id);
+
+        return Ok(OpenFileHolder::Elsewhere);
+    }
+
+    Ok(OpenFileHolder::None)
 }
 
 /// The dialog's nested loop must run on the event loop, not inside a
@@ -431,30 +517,83 @@ pub async fn print_window(window: WebviewWindow) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn sends_a_path_to_the_window_that_holds_it() {
-        let owners = DocumentOwners::default();
-        owners.record(1, "main", Some(PathBuf::from("/tmp/a.pdf")));
+    fn bound(path: &str) -> DocumentFile {
+        DocumentFile::Bound(PathBuf::from(path))
+    }
 
-        assert_eq!(
-            owners.holder_of(Path::new("/tmp/a.pdf"), "window-2"),
-            Some(("main".to_string(), 1))
-        );
-        assert_eq!(owners.holder_of(Path::new("/tmp/b.pdf"), "window-2"), None);
+    /// Real files in a directory of their own, so every platform resolves them.
+    fn scratch_files(label: &str, names: &[&str]) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("tfolio-owners-{}-{label}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        for name in names {
+            std::fs::write(directory.join(name), name.as_bytes()).unwrap();
+        }
+
+        directory
     }
 
     #[test]
-    fn leaves_the_asking_window_its_own_documents() {
+    fn finds_a_file_by_any_spelling_of_it() {
+        let directory = scratch_files("spellings", &["a.pdf", "b.pdf"]);
         let owners = DocumentOwners::default();
-        owners.record(1, "main", Some(PathBuf::from("/tmp/a.pdf")));
+        owners.record(1, "main", DocumentFile::Bound(directory.join("a.pdf")));
+        owners.record(2, "window-2", DocumentFile::None);
 
-        assert_eq!(owners.holder_of(Path::new("/tmp/a.pdf"), "main"), None);
+        let main = vec![("main".to_string(), 1)];
+        assert_eq!(owners.holders_of(&directory.join("a.pdf")), main);
+        assert_eq!(owners.holders_of(&directory.join(".").join("a.pdf")), main);
+        assert!(owners.holders_of(&directory.join("b.pdf")).is_empty());
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_converted_document_answers_for_its_source_until_save_as_binds_it() {
+        let directory = scratch_files("converted", &["photo.png", "photo.pdf"]);
+        let owners = DocumentOwners::default();
+        owners.record(
+            1,
+            "main",
+            DocumentFile::Converted(directory.join("photo.png")),
+        );
+
+        assert_eq!(
+            owners.holders_of(&directory.join("photo.png")),
+            vec![("main".to_string(), 1)]
+        );
+
+        owners.adopt_path(1, directory.join("photo.pdf"));
+        assert!(owners.holders_of(&directory.join("photo.png")).is_empty());
+        assert_eq!(
+            owners.holders_of(&directory.join("photo.pdf")),
+            vec![("main".to_string(), 1)]
+        );
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_asker_finds_only_its_own_live_tabs_here() {
+        let holders = vec![("window-2".to_string(), 4), ("main".to_string(), 1)];
+
+        assert_eq!(
+            pick_holder(&holders, "main", &[1, 2]),
+            Some(OpenFileHolder::Here { document_id: 1 })
+        );
+        assert_eq!(
+            pick_holder(&holders, "main", &[2]),
+            None,
+            "a tab already closing is not where the file is"
+        );
+        assert_eq!(pick_holder(&holders, "window-3", &[4]), None);
     }
 
     #[test]
     fn owns_only_this_window_own_documents() {
         let owners = DocumentOwners::default();
-        owners.record(1, "main", None);
+        owners.record(1, "main", DocumentFile::None);
 
         assert!(owners.owns(1, "main"));
         assert!(!owners.owns(1, "window-2"));
@@ -469,40 +608,40 @@ mod tests {
 
     #[test]
     fn a_first_export_makes_a_document_stand_for_the_file_it_adopted() {
+        let directory = scratch_files("adopted", &["exported.pdf"]);
         let owners = DocumentOwners::default();
-        owners.record(1, "main", None);
-        owners.adopt_path(1, PathBuf::from("/tmp/exported.pdf"));
+        owners.record(1, "main", DocumentFile::None);
+        owners.adopt_path(1, directory.join("exported.pdf"));
 
         assert_eq!(
-            owners.holder_of(Path::new("/tmp/exported.pdf"), "window-2"),
-            Some(("main".to_string(), 1))
+            owners.holders_of(&directory.join("exported.pdf")),
+            vec![("main".to_string(), 1)]
         );
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn hands_back_only_the_documents_of_the_window_that_went() {
         let owners = DocumentOwners::default();
-        owners.record(1, "main", Some(PathBuf::from("/tmp/a.pdf")));
-        owners.record(2, "window-2", None);
-        owners.record(3, "window-2", Some(PathBuf::from("/tmp/b.pdf")));
+        owners.record(1, "main", bound("/tmp/a.pdf"));
+        owners.record(2, "window-2", DocumentFile::None);
+        owners.record(3, "window-2", bound("/tmp/b.pdf"));
 
         let mut taken = owners.take_window_except("window-2", &[]);
         taken.sort_unstable();
 
         assert_eq!(taken, vec![2, 3]);
         assert!(owners.take_window_except("window-2", &[]).is_empty());
-        assert_eq!(
-            owners.holder_of(Path::new("/tmp/a.pdf"), "window-2"),
-            Some(("main".to_string(), 1))
-        );
+        assert!(owners.owns(1, "main"));
     }
 
     #[test]
     fn a_release_keeps_what_a_handoff_is_still_waiting_on() {
         let owners = DocumentOwners::default();
-        owners.record(1, "window-2", Some(PathBuf::from("/tmp/a.pdf")));
-        owners.record(2, "window-2", None);
-        owners.record(3, "window-2", None);
+        owners.record(1, "window-2", bound("/tmp/a.pdf"));
+        owners.record(2, "window-2", DocumentFile::None);
+        owners.record(3, "window-2", DocumentFile::None);
 
         assert_eq!(owners.take_window_except("window-2", &[1, 3]), vec![2]);
         assert!(owners.owns(1, "window-2"), "the pending handoff stands");
@@ -513,11 +652,11 @@ mod tests {
     #[test]
     fn a_transfer_moves_only_what_the_sender_holds() {
         let owners = DocumentOwners::default();
-        owners.record(1, "main", Some(PathBuf::from("/tmp/a.pdf")));
+        owners.record(1, "main", bound("/tmp/a.pdf"));
 
         assert_eq!(
             owners.transfer(1, "main", "window-2"),
-            Some(Some(PathBuf::from("/tmp/a.pdf")))
+            Some(bound("/tmp/a.pdf"))
         );
         assert!(owners.owns(1, "window-2"));
         assert!(!owners.owns(1, "main"));
@@ -527,8 +666,11 @@ mod tests {
         assert!(owners.owns(1, "window-2"));
 
         // A path-less document moves the same, carrying its emptiness.
-        owners.record(2, "main", None);
-        assert_eq!(owners.transfer(2, "main", "window-2"), Some(None));
+        owners.record(2, "main", DocumentFile::None);
+        assert_eq!(
+            owners.transfer(2, "main", "window-2"),
+            Some(DocumentFile::None)
+        );
 
         // Nobody's document goes nowhere.
         assert_eq!(owners.transfer(7, "main", "window-2"), None);
@@ -541,12 +683,12 @@ mod tests {
         windows.start_page("main");
 
         let page = windows.page("main");
-        assert!(owners.record_for_page(&windows, "main", page, 1, None));
+        assert!(owners.record_for_page(&windows, "main", page, 1, DocumentFile::None));
         assert!(owners.owns(1, "main"));
 
         windows.start_page("main");
         assert!(
-            !owners.record_for_page(&windows, "main", page, 2, None),
+            !owners.record_for_page(&windows, "main", page, 2, DocumentFile::None),
             "the page that asked for it is gone"
         );
         assert!(!owners.owns(2, "main"));

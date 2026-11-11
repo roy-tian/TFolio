@@ -1,10 +1,40 @@
 export const DRAG_THRESHOLD = 4
 
+// A release's click lands within this of the drag's end; a later one is the
+// reader's own, even when the drag ended elsewhere and sent no click.
+export const DRAG_CLICK_WINDOW = 300
+
 export function exceedsDragThreshold(
   from: { x: number; y: number },
   to: { x: number; y: number },
 ) {
   return Math.hypot(to.x - from.x, to.y - from.y) > DRAG_THRESHOLD
+}
+
+type Bounds = { bottom: number; left: number; right: number; top: number }
+
+// A pointer this far beside the sidebar's column has left it: nothing moves
+// there, and letting go puts the pages back.
+const COLUMN_AWAY_MARGIN = 32
+// Near this close to the column's edge, a drag scrolls it.
+const COLUMN_EDGE_BAND = 40
+const COLUMN_EDGE_STEP = 12
+
+export function besideColumn(x: number, column: Bounds): boolean {
+  return x >= column.left - COLUMN_AWAY_MARGIN && x <= column.right + COLUMN_AWAY_MARGIN
+}
+
+/** The scroll a drag beside the column asks of it this frame. */
+export function columnEdgeStep(point: { x: number; y: number }, column: Bounds): number {
+  if (!besideColumn(point.x, column)) {
+    return 0
+  }
+
+  return point.y < column.top + COLUMN_EDGE_BAND
+    ? -COLUMN_EDGE_STEP
+    : point.y > column.bottom - COLUMN_EDGE_BAND
+      ? COLUMN_EDGE_STEP
+      : 0
 }
 
 /** The gap a point falls in among stacked rows: before the first row whose
@@ -24,10 +54,60 @@ export function dropGapForRow(
   return rows.length
 }
 
-/** The gap counts positions between the items as they stand, so every gap
-    past the dragged item's own place shifts down by the hole it leaves. */
-export function indexAfterMove(from: number, gap: number): number {
-  return gap > from ? gap - 1 : gap
+/** Where the first of the moving items, by ascending index, stands once they
+    land together at `gap`. The gap counts positions between the items as they
+    stand, so each moving item before it shifts it down by the hole it leaves. */
+export function indexAfterMove(moving: readonly number[], gap: number): number {
+  return gap - moving.filter((index) => index < gap).length
+}
+
+/** Only a run with no gaps in it, landing on its own first place, leaves
+    every item where it stands. */
+export function movesNothing(moving: readonly number[], to: number): boolean {
+  return moving.every((index, offset) => index === to + offset)
+}
+
+/**
+ * How far each item slides to make way for the moving items, by ascending
+ * index, landing together at `to`. An item passed over moves by each passing
+ * item's own extent, not its neighbour's: cells of a list may differ in
+ * height. The moving items stay put, hidden under the ghost.
+ */
+export function wayOffsets(
+  moving: readonly number[],
+  to: number,
+  cells: readonly { height: number; top: number }[],
+): number[] {
+  const lifted = new Set(moving)
+  const staying = cells.flatMap((_, index) => (lifted.has(index) ? [] : [index]))
+  const order = [...staying.slice(0, to), ...moving, ...staying.slice(to)]
+  const place: number[] = []
+
+  order.forEach((index, at) => {
+    place[index] = at
+  })
+
+  return cells.map((_, index) => {
+    let offset = 0
+
+    if (lifted.has(index)) {
+      return offset
+    }
+
+    for (const item of moving) {
+      const cell = cells[item]!
+
+      if (item > index && place[item]! < place[index]!) {
+        const before = cells[item - 1]!
+
+        offset += cell.top + cell.height - (before.top + before.height)
+      } else if (item < index && place[item]! > place[index]!) {
+        offset += cell.top - cells[item + 1]!.top
+      }
+    }
+
+    return offset
+  })
 }
 
 /** A drop that reproduces the current order comes back as the identity,
@@ -157,4 +237,77 @@ export function flowCellAt(
   }
 
   return null
+}
+
+/**
+ * `columnLanding` for any flow of cells: down a column by rows, across a grid
+ * by cells, placed before or after the cell under the pointer by its middle.
+ * A column is a flow whose every cell starts below the one before it; its
+ * rows can differ in width, a portrait page beside a landscape one.
+ */
+export function flowLanding(
+  point: { x: number; y: number },
+  cells: (Box & { moving: boolean })[],
+  current: number | null,
+): number | null {
+  const column = cells.every(
+    (cell, index) =>
+      index === 0 || cell.top >= cells[index - 1]!.top + cells[index - 1]!.height,
+  )
+
+  if (column) {
+    return columnLanding(point.y, cells, current)
+  }
+
+  const hit = flowCellAt(point, cells)
+
+  if (!hit || cells[hit.index]!.moving) {
+    return current
+  }
+
+  const staying = cells.slice(0, hit.index).filter((cell) => !cell.moving).length
+
+  return hit.after ? staying + 1 : staying
+}
+
+/** A flow's cells as laid out now, read off its `[data-flip-key]` children
+    against the positioned flow itself. */
+export function flowCells(flow: HTMLElement, moving: (key: string) => boolean) {
+  return Array.from(flow.querySelectorAll<HTMLElement>(":scope > [data-flip-key]"), (cell) => ({
+    height: cell.offsetHeight,
+    left: cell.offsetLeft,
+    moving: moving(cell.dataset.flipKey!),
+    top: cell.offsetTop,
+    width: cell.offsetWidth,
+  }))
+}
+
+/** A point on the screen in the flow's own space, where `flowCells` stand. */
+export function pointInColumn(flow: HTMLElement, point: { x: number; y: number }) {
+  const box = flow.getBoundingClientRect()
+
+  return { x: point.x - box.left, y: point.y - box.top }
+}
+
+/** The box a point is over, or else the one nearest it: what a drop between
+    two files' pages is taken to be beside. -1 for no boxes at all. */
+export function nearestBox(
+  point: { x: number; y: number },
+  boxes: readonly { height: number; left: number; top: number; width: number }[],
+): number {
+  let nearest = -1
+  let best = Number.POSITIVE_INFINITY
+
+  boxes.forEach((box, index) => {
+    const dx = Math.max(box.left - point.x, 0, point.x - (box.left + box.width))
+    const dy = Math.max(box.top - point.y, 0, point.y - (box.top + box.height))
+    const distance = Math.hypot(dx, dy)
+
+    if (distance < best) {
+      best = distance
+      nearest = index
+    }
+  })
+
+  return nearest
 }

@@ -156,7 +156,7 @@ describe("TFolio toolbar tooltips", () => {
     // Every focus change flips `:focus-within` on the focused element's
     // ancestors up to the root, and for a rule reaching their descendants
     // WebKit restyles the whole document: one group-focus-within-* made each
-    // focus change on a 400-page organize board take 29 ms, against 2 ms.
+    // focus change on a 400-page board of thumbnails take 29 ms, against 2 ms.
     expect((await shippedSelectors()).filter(focusWithinOverEveryElement)).toEqual([])
   })
 

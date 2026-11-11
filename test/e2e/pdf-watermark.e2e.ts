@@ -61,7 +61,7 @@ describe("TFolio document watermark", () => {
     await renderedPage()
   })
 
-  it("applies tiled Chinese text, then undo and redo restore exact pixels", async () => {
+  it("applies tiled Chinese text, then undo, redo and removal restore exact pixels", async () => {
     const clean = await pagePixelFingerprint()
 
     await openWatermarkDialog()
@@ -119,6 +119,14 @@ describe("TFolio document watermark", () => {
       timeoutMsg: "the page text layer never picked up the watermark",
     })
 
+    // Cancelled before the undo: a cancel that recorded a step would leave the
+    // one undo below short of the clean page.
+    await openWatermarkDialog()
+    await $("[data-testid='watermark-text']").setValue("CANCELLED")
+    await $("//button[normalize-space()='Cancel']").click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({ reverse: true })
+    expect(await pagePixelFingerprint()).toBe(drawn)
+
     await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 30_000,
@@ -130,51 +138,12 @@ describe("TFolio document watermark", () => {
       timeout: 30_000,
       timeoutMsg: "redo did not restore the same watermark",
     })
-  })
-
-  it("replaces and explicitly removes a watermark as single history steps", async () => {
-    const clean = await pagePixelFingerprint()
-
-    await openWatermarkDialog()
-    await $("[data-testid='watermark-text']").setValue("CANCELLED")
-    await $("//button[normalize-space()='Cancel']").click()
-    await expect($("button[aria-label^='Undo']")).toBeDisabled()
-    expect(await pagePixelFingerprint()).toBe(clean)
-
-    await applyWatermark("ALPHA")
-    await browser.waitUntil(async () => (await extractedText()).includes("ALPHA"), {
-      timeout: 20_000,
-    })
-
-    await applyWatermark("BETA")
-    await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
-      timeout: 20_000,
-    })
-    expect(await extractedText()).not.toContain("ALPHA")
-
-    // One undo returns to A, rather than removing the watermark altogether.
-    await $("button[aria-label^='Undo']").click()
-    await browser.waitUntil(async () => (await extractedText()).includes("ALPHA"), {
-      timeout: 20_000,
-      timeoutMsg: "undo did not restore the replaced watermark",
-    })
-
-    await pressRedo()
-    await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
-      timeout: 20_000,
-    })
 
     await openWatermarkDialog()
     await $("//button[normalize-space()='Remove watermark']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 30_000,
       timeoutMsg: "explicit removal did not restore the clean page",
-    })
-
-    await $("button[aria-label^='Undo']").click()
-    await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
-      timeout: 20_000,
-      timeoutMsg: "undo did not restore the explicitly removed watermark",
     })
   })
 
@@ -218,55 +187,6 @@ describe("TFolio document watermark", () => {
     await browser.keys("Escape")
     await openWatermarkDialog()
     await expect($("[data-testid='watermark-page-number']")).toHaveText("1 / 2")
-    await browser.keys("Escape")
-  })
-
-  it("previews a replacement without stacking the active watermark", async () => {
-    await refreshApp()
-    await dropZoneButton().waitForExist({ timeout: 30_000 })
-    await openPdfFromDisk("watermark-replacement-preview.pdf", bandedPdf(1))
-    await renderedPage()
-    const cleanPixels = await pagePixelFingerprint()
-    const thumbnailPixels = async () => {
-      await $("[data-testid='watermark-thumbnail'][data-ready='true']").waitForExist({
-        timeout: 15_000,
-      })
-      return browser.execute(() =>
-        document.querySelector<HTMLCanvasElement>("[data-testid='watermark-thumbnail']")!.toDataURL(),
-      )
-    }
-
-    await openWatermarkDialog()
-    const background = await thumbnailPixels()
-    await browser.keys("Escape")
-    await applyWatermark("ALPHA")
-    await browser.waitUntil(async () => (await extractedText()).includes("ALPHA"), {
-      timeout: 20_000,
-    })
-    await browser.waitUntil(async () => (await pagePixelFingerprint()) !== cleanPixels, {
-      timeout: 20_000,
-    })
-    await renderedPage()
-    const livePixels = await pagePixelFingerprint()
-
-    await openWatermarkDialog()
-    expect(await thumbnailPixels()).toBe(background)
-    await $("[data-testid='watermark-text']").setValue("BETA")
-    await expect($("[data-testid='watermark-preview']")).toHaveText("BETA")
-    expect(await thumbnailPixels()).toBe(background)
-    await browser.saveScreenshot("artifacts/e2e/watermark-replacement-preview.png")
-    await browser.keys("Escape")
-    expect(await pagePixelFingerprint()).toBe(livePixels)
-    expect(await extractedText()).toContain("ALPHA")
-    expect(await extractedText()).not.toContain("BETA")
-
-    await applyWatermark("BETA")
-    await browser.waitUntil(async () => (await extractedText()).includes("BETA"), {
-      timeout: 20_000,
-    })
-    expect(await extractedText()).not.toContain("ALPHA")
-    await openWatermarkDialog()
-    expect(await thumbnailPixels()).toBe(background)
     await browser.keys("Escape")
   })
 

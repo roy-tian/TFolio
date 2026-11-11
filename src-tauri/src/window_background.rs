@@ -33,6 +33,10 @@ pub async fn set_workspace_background(
     }
 }
 
+/// The first build with `DWMWA_SYSTEMBACKDROP_TYPE`, window-vibrancy's own test.
+#[cfg(target_os = "windows")]
+const SYSTEM_BACKDROP_BUILD: u32 = 22523;
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn apply_background(
     window: &WebviewWindow,
@@ -49,6 +53,13 @@ fn apply_background(
             Some(tauri::Theme::Light)
         };
         window.set_theme(theme).map_err(|error| error.to_string())?;
+
+        // Without the system backdrop (Windows 10, Windows 11 21H2),
+        // window-vibrancy falls back to the undocumented accent API, whose
+        // acrylic lags every drag and resize; those windows stay opaque.
+        if windows_version::OsVersion::current().build < SYSTEM_BACKDROP_BUILD {
+            return Ok(false);
+        }
 
         // Only the docked sidebar lets it through; a dense tint keeps the
         // desktop behind it faint.

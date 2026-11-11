@@ -37,9 +37,7 @@ export function SplitPdfDialog({
   onClose,
 }: SplitPdfDialogProps) {
   const { t } = useTranslation()
-  const hasBookmarks = document.outline.some((item) =>
-    item.pageNumber !== null && item.pageNumber >= 1 && item.pageNumber <= document.numPages,
-  )
+  const hasBookmarks = document.splitsByBookmarks
   const [mode, setMode] = useState<SplitMode>(hasBookmarks ? "bookmarks" : "pages")
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)

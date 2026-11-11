@@ -4,6 +4,8 @@ import {
   dropGapForRow,
   exceedsDragThreshold,
   indexAfterMove,
+  movesNothing,
+  wayOffsets,
 } from "@/lib/pageDrag"
 
 type UseListDragOptions = {
@@ -12,7 +14,8 @@ type UseListDragOptions = {
   axis?: "x" | "y"
   active: boolean
   listRef: RefObject<HTMLElement | null>
-  onReorder: (from: number, to: number) => void
+  /** `moved` lands together, the first of them at `to` and the rest after it. */
+  onReorder: (moved: readonly number[], to: number) => void
   /** Targets that are pressed, not dragged. A row's own buttons by default;
       the tab strip overrides it to the close button alone, its title button
       being the handle. */
@@ -72,45 +75,19 @@ function outsideElement(
 }
 
 export type ListDragState = {
+  /** The pressed cell, whose ghost the pointer carries. */
   index: number
   gap: number
   grip: { x: number; y: number }
   height: number
+  /** The cells lifted, the pressed one among them, by ascending index. */
+  moving: readonly number[]
   /** The pointer has left the drop area, so this drag is no longer a reorder:
       no insertion gap is shown and the release goes to `onDropOutside`. */
   outside: boolean
   pointer: { x: number; y: number }
   cellOffsets: number[]
   width: number
-}
-
-function makeWayOffsets(
-  index: number,
-  gap: number,
-  cells: { height: number; top: number }[],
-) {
-  const offsets = Array.from({ length: cells.length }, () => 0)
-  const destination = indexAfterMove(index, gap)
-  const dragged = cells[index]!
-
-  // Every cell passed over moves by the dragged cell's own extent, not its
-  // neighbour's: the organize list's files differ in height by their bookmarks.
-  if (destination < index) {
-    const before = cells[index - 1]!
-    const shift = dragged.top + dragged.height - (before.top + before.height)
-
-    for (let cell = destination; cell < index; cell += 1) {
-      offsets[cell] = shift
-    }
-  } else if (destination > index) {
-    const shift = dragged.top - cells[index + 1]!.top
-
-    for (let cell = index + 1; cell <= destination; cell += 1) {
-      offsets[cell] = shift
-    }
-  }
-
-  return offsets
 }
 
 /**
@@ -156,8 +133,9 @@ export function useListDrag({
       dragging: boolean
       /** Where the pointer last was, for a re-measure to answer about. */
       last: ClientPoint
-      /** The cells predate the owner's drag layout — the organize list folds
-          its bookmarks away — so none may make way until they are measured
+      moving: readonly number[]
+      /** The cells predate the owner's drag layout — a list that folds rows
+          away while dragging — so none may make way until they are measured
           again after the commit that started the drag. */
       stale: boolean
       /** Takes back the padding `hold` gave the list, if it gave any. */
@@ -234,6 +212,7 @@ export function useListDrag({
         height: cellRect.height,
         index,
         last: event,
+        moving: [index],
         pointerId: event.pointerId,
         stale: false,
         unpad: null,
@@ -242,8 +221,8 @@ export function useListDrag({
     }
 
     /**
-     * The owner's drag layout may move the pressed cell — the organize list
-     * folds away the bookmarks above it — so the list scrolls to keep it under
+     * The owner's drag layout may move the pressed cell — a list folding
+     * rows away above it — so the list scrolls to keep it under
      * the pointer, and pads itself where scrolling cannot reach: a drag that
      * hardly moved still drops where it began.
      */
@@ -297,11 +276,12 @@ export function useListDrag({
       setDrag({
         cellOffsets: still
           ? Array.from({ length: current.cells.length }, () => 0)
-          : makeWayOffsets(current.index, gap, current.cells),
+          : wayOffsets(current.moving, indexAfterMove(current.moving, gap), current.cells),
         gap,
         grip: current.grip,
         height: current.height,
         index: current.index,
+        moving: current.moving,
         outside,
         pointer: { x: current.last.clientX, y: current.last.clientY },
         width: current.width,
@@ -403,12 +383,12 @@ export function useListDrag({
         }
 
         const to = indexAfterMove(
-          current.index,
+          current.moving,
           dropGapForRow(coordinate, current.cells),
         )
 
-        if (to !== current.index) {
-          onReorderRef.current(current.index, to)
+        if (!movesNothing(current.moving, to)) {
+          onReorderRef.current(current.moving, to)
         }
       } finally {
         current.unpad?.()

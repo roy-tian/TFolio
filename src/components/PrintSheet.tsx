@@ -5,7 +5,8 @@ import { createPortal } from "react-dom"
     not printed (D2), so the rendered image is the page, turned or not. */
 export type PrintPage = {
   pageNumber: number
-  src: string
+  /** Null for a blank page a Save As will add, which prints as one. */
+  src: string | null
 }
 
 type PrintSheetProps = {
@@ -20,10 +21,10 @@ export const PrintSheet = memo(function PrintSheet({ pages }: PrintSheetProps) {
       {pages.map((page) => (
         <div
           className="pdf-print-page"
-          data-print-page={page.pageNumber}
-          key={page.pageNumber}
+          data-print-page={page.src === null ? undefined : page.pageNumber}
+          key={page.src === null ? `blank-${page.pageNumber}` : page.pageNumber}
         >
-          <img alt="" src={page.src} />
+          {page.src === null ? null : <img alt="" src={page.src} />}
         </div>
       ))}
     </div>,

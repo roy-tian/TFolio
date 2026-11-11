@@ -4,12 +4,18 @@ import {
   dimensionsForRotation,
   EXPORT_COPY_ONLY,
   EXPORT_DENIED,
+  EXPORT_DOCUMENT_CHANGED,
+  EXPORT_NO_SPACE,
+  EXPORT_SIGNED,
+  EXPORT_TARGET_MISSING,
   EXPORT_TARGET_OPEN,
   exportFailureNotice,
   fileNameFromPath,
   isPdfPath,
   pickCurrentPage,
   resolveOutputScale,
+  SIGNED_ORIGINAL_CHANGED,
+  signatureMark,
 } from "./pdf"
 
 describe("isPdfPath", () => {
@@ -32,6 +38,13 @@ describe("exportFailureNotice", () => {
     )
     expect(exportFailureNotice(EXPORT_COPY_ONLY)).toBe("exportCopyOnly")
     expect(exportFailureNotice(new Error(EXPORT_DENIED))).toBe("exportDenied")
+    expect(exportFailureNotice(EXPORT_SIGNED)).toBe("exportSigned")
+    expect(exportFailureNotice(new Error(SIGNED_ORIGINAL_CHANGED))).toBe(
+      "exportSignedChanged",
+    )
+    expect(exportFailureNotice(EXPORT_NO_SPACE)).toBe("exportNoSpace")
+    expect(exportFailureNotice(new Error(EXPORT_TARGET_MISSING))).toBe("exportTargetMissing")
+    expect(exportFailureNotice(EXPORT_DOCUMENT_CHANGED)).toBe("exportDocumentChanged")
   })
 
   test("leaves any other failure to the generic notice", () => {
@@ -147,5 +160,22 @@ describe("resolveOutputScale", () => {
     expect(resolveOutputScale(1)).toBe(1)
     expect(resolveOutputScale(1.5)).toBe(1.5)
     expect(resolveOutputScale(2.5)).toBe(2)
+  })
+})
+
+describe("signatureMark", () => {
+  const signatures = { count: 2, decision: null, flattened: false, intact: true }
+
+  test("marks a document still bound to its intact signed file", () => {
+    expect(signatureMark(signatures)).toBe("intact")
+  })
+
+  test("marks signatures that no longer hold as broken", () => {
+    expect(signatureMark({ ...signatures, decision: "keep", intact: false })).toBe("broken")
+  })
+
+  test("leaves flattened and unsigned documents unmarked", () => {
+    expect(signatureMark({ ...signatures, flattened: true, intact: false })).toBeNull()
+    expect(signatureMark({ ...signatures, count: 0, intact: false })).toBeNull()
   })
 })

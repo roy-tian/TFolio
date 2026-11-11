@@ -1,8 +1,10 @@
 import {
+  copyFileSync,
   existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -36,6 +38,25 @@ function writePdf(name: string, pages: number) {
 
 function tabButtons() {
   return $$("button[role='tab']")
+}
+
+function activePageStatus() {
+  return $("[data-active='true'] [data-slot='page-status']").getAttribute(
+    "aria-label",
+  )
+}
+
+function waitForPageCount(count: number, timeoutMsg: string) {
+  return browser.waitUntil(
+    async () => (await activePageStatus())?.endsWith(` of ${count}`),
+    { timeoutMsg },
+  )
+}
+
+/** The strip's open button stays disabled while an open is still running. */
+async function openAgain(filePath: string) {
+  await openFileButton().waitForEnabled()
+  await openPathViaDialog(filePath)
 }
 
 function tabButton(name: string) {
@@ -461,6 +482,113 @@ describe("independent document tabs", () => {
       "aria-selected",
       "true",
     )
+  })
+
+  it("finds an open file however it is named again", async () => {
+    const filePath = writePdf("named.pdf", 2)
+    const link = path.join(
+      mkdtempSync(path.join(tmpdir(), "tfolio-tabs-")),
+      "link.pdf",
+    )
+    symlinkSync(filePath, link)
+
+    await openPathViaDialog(filePath)
+    await tabButton("named.pdf").waitForExist()
+
+    for (const alias of [`${path.dirname(filePath)}//named.pdf`, link]) {
+      await $("#workspace-tab-home").click()
+      await openAgain(alias)
+      await browser.waitUntil(
+        async () =>
+          (await tabButton("named.pdf").getAttribute("aria-selected")) ===
+          "true",
+        { timeoutMsg: `${alias} did not lead back to the open tab` },
+      )
+      await expect(tabButtons()).toBeElementsArrayOfSize(2)
+    }
+  })
+
+  it("reloads a clean tab whose file was changed elsewhere", async () => {
+    const filePath = writePdf("changing.pdf", 2)
+
+    await openPathViaDialog(filePath)
+    await waitForPageCount(2, "the file never opened")
+    const panel = await tabButton("changing.pdf").getAttribute("aria-controls")
+
+    // Unchanged, an open only shows the tab the file is already in.
+    await $("#workspace-tab-home").click()
+    await openAgain(filePath)
+    await expect(tabButton("changing.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await expect(tabButton("changing.pdf")).toHaveAttribute(
+      "aria-controls",
+      panel,
+    )
+
+    writeFileSync(filePath, minimalPdf(5))
+    await $("#workspace-tab-home").click()
+    await openAgain(filePath)
+    await waitForPageCount(5, "the changed file never replaced the tab's")
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
+    await expect($("[data-slot='reload-prompt']")).not.toBeExisting()
+  })
+
+  it("asks before a changed file replaces unsaved changes", async () => {
+    const filePath = writePdf("edited.pdf", 3)
+    // Queried afresh each time: the dialog unmounts between asks, and the
+    // reload replaces the session the button belonged to.
+    const prompt = () => $("[data-slot='reload-prompt']")
+    const undo = () => $("[data-active='true'] button[aria-label^='Undo']")
+
+    await openPathViaDialog(filePath)
+    await waitForPageCount(3, "the file never opened")
+    await deletePageFromSidebar(1)
+    await waitForPageCount(2, "the page deletion never landed")
+
+    writeFileSync(filePath, minimalPdf(5))
+
+    await openAgain(filePath)
+    await prompt().waitForDisplayed()
+    await $("[data-action='reload-keep']").click()
+    await prompt().waitForDisplayed({ reverse: true })
+    expect(await activePageStatus()).toMatch(/ of 2$/)
+    await expect(undo()).toBeEnabled()
+
+    await openAgain(filePath)
+    await prompt().waitForDisplayed()
+    await $("[data-action='reload-confirm']").click()
+    await waitForPageCount(5, "the reload never took the changed file")
+    await expect(undo()).toBeDisabled()
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
+  })
+
+  it("shows an image's tab when opened again, converting it afresh once changed", async () => {
+    const image = path.join(
+      mkdtempSync(path.join(tmpdir(), "tfolio-tabs-")),
+      "scan.png",
+    )
+    copyFileSync(path.resolve("src-tauri/icons/32x32.png"), image)
+
+    await openPathViaDialog(image)
+    await tabButton("scan.png").waitForExist()
+    const panel = await tabButton("scan.png").getAttribute("aria-controls")
+
+    await $("#workspace-tab-home").click()
+    await openAgain(image)
+    await expect(tabButton("scan.png")).toHaveAttribute("aria-selected", "true")
+    await expect(tabButton("scan.png")).toHaveAttribute("aria-controls", panel)
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
+
+    copyFileSync(path.resolve("src-tauri/icons/128x128.png"), image)
+    await openAgain(image)
+    await browser.waitUntil(
+      async () =>
+        (await tabButton("scan.png").getAttribute("aria-controls")) !== panel,
+      { timeoutMsg: "the changed image was never converted again" },
+    )
+    await expect(tabButtons()).toBeElementsArrayOfSize(2)
   })
 
   it("removes one entry from the home tab's recent list", async () => {

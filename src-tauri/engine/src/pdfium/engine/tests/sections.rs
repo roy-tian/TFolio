@@ -1,0 +1,1118 @@
+use std::io::Read;
+use zip::ZipArchive;
+
+use super::support::*;
+use super::*;
+use crate::pdfium::archive::ArchiveOptions;
+use crate::pdfium::compress::CompressionOptions;
+
+/// A window of its own: the file source tests release and evict theirs.
+const SCOPE: &str = "sections";
+
+/// File sources live in one registry for every window; tests that add them
+/// run one at a time, as the file source tests do.
+fn sections_test_guard() -> MutexGuard<'static, ()> {
+    static GUARD: Mutex<()> = Mutex::new(());
+
+    GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn read_files(engine: &PdfiumEngine, paths: Vec<PathBuf>) -> Vec<u64> {
+    engine
+        .read_sources(SCOPE, paths, false)
+        .expect("the files should be read")
+        .into_iter()
+        .map(|info| info.id.expect("every file should be readable"))
+        .collect()
+}
+
+fn options(per_file_bookmarks: bool) -> sections::FileOptions {
+    sections::FileOptions {
+        smart_padding: false,
+        per_file_bookmarks,
+    }
+}
+
+fn write_file(directory: &Path, name: &str, bytes: Vec<u8>) -> PathBuf {
+    let path = directory.join(name);
+
+    fs::write(&path, bytes).expect("the file should write to disk");
+    path
+}
+
+fn sections_of(update: &PdfStructureUpdate) -> Vec<(u64, String)> {
+    update
+        .sections
+        .iter()
+        .map(|section| (section.id, section.title.clone()))
+        .collect()
+}
+
+fn page_sections(update: &PdfStructureUpdate) -> Vec<Option<u64>> {
+    update.pages.iter().map(|page| page.section).collect()
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn added_files_land_before_the_index_each_a_file_of_its_own() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-insert");
+    let own = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the document");
+    let added = banded_pdf(&[20, 60]);
+    let added_prints = {
+        let opened = engine
+            .open(added.clone())
+            .expect("PDFium should open the file");
+
+        page_fingerprints(engine, opened.id, 2)
+    };
+    let ids = read_files(
+        engine,
+        vec![
+            write_file(&directory, "added.pdf", added),
+            write_file(&directory, "outlined.pdf", outlined_three_page_pdf()),
+        ],
+    );
+
+    let update = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            2,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the files should be added");
+
+    assert_eq!(update.num_pages, 8);
+    assert!(update.has_foreign_pages);
+    assert_eq!(
+        sections_of(&update),
+        vec![
+            (0, "own.pdf".to_string()),
+            (1, "added.pdf".to_string()),
+            (2, "outlined.pdf".to_string()),
+        ]
+    );
+    assert_eq!(
+        page_sections(&update),
+        vec![
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(2),
+            Some(2),
+            Some(2),
+            Some(0),
+            Some(0)
+        ]
+    );
+    // Each file's bookmark follows its page: the document's own chapter was
+    // page 3 and is now page 8, the added copy's lands on its own page 3.
+    assert_eq!(update.sections[0].outline[0].page_number, Some(8));
+    assert_eq!(update.sections[2].outline[0].page_number, Some(6));
+    assert_eq!(page_fingerprints(engine, own.id, 8)[1..3], added_prints[..]);
+    // Consumed: the pages are the document's own copies now.
+    assert!(engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids[..1],
+            1,
+            "own.pdf",
+            options(true),
+            &HashMap::new()
+        )
+        .is_err());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_document_with_added_files_saves_only_as_a_new_file_with_a_bookmark_each() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-save");
+    let own_path = write_file(&directory, "own.pdf", outlined_three_page_pdf());
+    let own = engine
+        .open_from_path(own_path.clone())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[20, 60]))],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            4,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+
+    let refused = engine
+        .save(own.id)
+        .expect_err("a save over the document's own file should be refused");
+    assert!(refused.contains("new file"), "{refused}");
+
+    let refused = engine
+        .export_to(own.id, &own_path)
+        .expect_err("a Save As over the document's own file should be refused");
+    assert_eq!(refused, io::EXPORT_COPY_ONLY_ERROR);
+
+    let combined = directory.join("combined.pdf");
+    let outcome = engine
+        .export_to(own.id, &combined)
+        .expect("a Save As should write the combined document");
+    assert!(outcome.saved_to_source());
+
+    let reopened = engine
+        .open_from_path(combined)
+        .expect("the combined file should open");
+    let titles: Vec<_> = reopened
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    assert_eq!(
+        titles,
+        vec![
+            ("own.pdf".to_string(), Some(1)),
+            ("added.pdf".to_string(), Some(4)),
+        ]
+    );
+    assert_eq!(reopened.outline[0].items[0].title, "Chapter");
+    assert_eq!(reopened.outline[0].items[0].page_number, Some(3));
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn writing_the_files_bookmarks_leaves_the_pages_as_pdfium_saved_them() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-outline-roundtrip");
+    let own = engine
+        .open_from_path(write_file(&directory, "own.pdf", banded_pdf(&[20, 60])))
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[110]))],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            2,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+
+    // The bookmarks go in through lopdf's reparse and rewrite of PDFium's
+    // output, which must change nothing a page shows.
+    let combined = directory.join("combined.pdf");
+    engine
+        .export_to(own.id, &combined)
+        .expect("a Save As should write the combined document");
+    let reopened = engine
+        .open_from_path(combined)
+        .expect("the combined file should open");
+
+    assert!(!reopened.outline.is_empty());
+    assert_eq!(
+        page_fingerprints(engine, reopened.id, 3),
+        page_fingerprints(engine, own.id, 3),
+        "the outline pass leaves every page rendering exactly as it did"
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn without_a_bookmark_per_file_the_files_bookmarks_follow_one_another() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-flat");
+    let own = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(
+            &directory,
+            "second.pdf",
+            outlined_three_page_pdf(),
+        )],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            4,
+            "own.pdf",
+            options(false),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+
+    let combined = directory.join("flat.pdf");
+    engine
+        .export_to(own.id, &combined)
+        .expect("a Save As should write the combined document");
+    let reopened = engine
+        .open_from_path(combined)
+        .expect("the combined file should open");
+    let titles: Vec<_> = reopened
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    assert_eq!(
+        titles,
+        vec![
+            ("Chapter".to_string(), Some(3)),
+            ("Chapter".to_string(), Some(6)),
+        ]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_undone_insert_lets_the_file_save_again_and_a_redo_brings_its_files_back() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-undo");
+    let own_path = write_file(&directory, "own.pdf", two_page_pdf());
+    let own = engine
+        .open_from_path(own_path)
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(
+            &directory,
+            "added.pdf",
+            banded_pdf(&[20, 60, 100]),
+        )],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+
+    // The undo of an insert deletes its run under the entry's stash.
+    let undone = engine
+        .delete_pages(own.id, &[3, 4, 5], 7)
+        .expect("the added pages should go");
+    assert!(!undone.has_foreign_pages);
+    // One file shows, no longer several.
+    assert_eq!(undone.sections.len(), 1);
+    assert!(undone.file_options.is_none());
+    engine
+        .save(own.id)
+        .expect("the file alone saves over itself again");
+
+    let redone = engine
+        .restore_pages(own.id, 7)
+        .expect("the redo should bring the pages back");
+    assert!(redone.has_foreign_pages);
+    assert_eq!(redone.sections.len(), 2);
+    assert_eq!(
+        page_sections(&redone),
+        vec![Some(0), Some(0), Some(1), Some(1), Some(1)]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn pages_move_between_files_by_the_layout_and_new_ones_join_the_file_named() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-layout");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[20, 60]))],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+
+    // Page 1 dropped between the added file's two pages joins that file.
+    let moved = engine
+        .reorder_pages(own.id, &[2, 3, 1, 4], Some(&[0, 1, 1, 1]))
+        .expect("the reorder should land");
+    assert_eq!(
+        page_sections(&moved),
+        vec![Some(0), Some(1), Some(1), Some(1)]
+    );
+    assert!(engine
+        .reorder_pages(own.id, &[1, 2, 3, 4], Some(&[0, 1]))
+        .is_err());
+    assert!(engine
+        .reorder_pages(own.id, &[1, 2, 3, 4], Some(&[0, 9, 1, 1]))
+        .is_err());
+
+    let blank = engine
+        .insert_blank_page(own.id, 2, Some(1))
+        .expect("the blank page should land");
+    assert_eq!(page_sections(&blank)[1], Some(1));
+
+    // Unnamed, a new page joins the file before it.
+    let defaulted = engine
+        .insert_blank_page(own.id, 6, None)
+        .expect("the blank page should land");
+    assert_eq!(page_sections(&defaulted)[5], Some(1));
+    assert!(engine.insert_blank_page(own.id, 1, Some(9)).is_err());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_copy_of_an_added_page_is_still_another_file_s() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-copy");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[20]))],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+    engine
+        .duplicate_pages(own.id, &[3], 1, Some(0))
+        .expect("the copy should land");
+
+    // The original goes; the copy keeps the document from its own file.
+    let left = engine
+        .delete_pages(own.id, &[4], 3)
+        .expect("the original should go");
+    assert!(left.has_foreign_pages);
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_file_takes_a_new_name_but_never_an_empty_one() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-rename");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[20]))],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+
+    let renamed = engine
+        .rename_section(own.id, 1, "  Appendix  ")
+        .expect("the rename should land");
+    assert_eq!(renamed.sections[1].title, "Appendix");
+    assert!(engine.rename_section(own.id, 1, "   ").is_err());
+    assert!(engine.rename_section(own.id, 9, "Other").is_err());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_signed_file_is_added_only_once_its_signatures_are_answered_for() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-signed");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let signed_path = write_file(&directory, "signed.pdf", signed_pdf());
+    let ids = read_files(engine, vec![signed_path.clone()]);
+
+    assert!(engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            1,
+            "own.pdf",
+            options(true),
+            &HashMap::new()
+        )
+        .is_err());
+
+    let added = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            1,
+            "own.pdf",
+            options(true),
+            &HashMap::from([(ids[0], SignatureDecision::Flatten)]),
+        )
+        .expect("the answered file should be added");
+    assert_eq!(added.num_pages, 3);
+
+    // Its source is released, yet the signed file stays out of every write.
+    let refused = engine
+        .export_to(own.id, &signed_path)
+        .expect_err("a Save As over the signed file should be refused");
+    assert_eq!(refused, super::super::signatures::EXPORT_SIGNED_ERROR);
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_split_by_bookmarks_is_offered_where_the_split_would_cut() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-split-offer");
+    let outlined = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the document");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+
+    assert!(outlined.splits_by_bookmarks);
+    assert!(!own.splits_by_bookmarks);
+
+    // Files of no bookmarks of their own split by their names, once a Save As
+    // would write one each, and not otherwise.
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[20]))],
+    );
+    let added = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+    assert!(added.splits_by_bookmarks);
+
+    let flat = engine
+        .set_file_options(own.id, options(false))
+        .expect("the options should change");
+    assert!(!flat.splits_by_bookmarks);
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn each_signed_file_of_a_batch_takes_its_own_answer() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-signed-each");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let paths = vec![
+        write_file(&directory, "flattened.pdf", signed_pdf()),
+        write_file(&directory, "plain.pdf", banded_pdf(&[100])),
+        write_file(&directory, "kept.pdf", signed_pdf()),
+    ];
+    let ids = read_files(engine, paths);
+
+    // One answer does not stand for another signed file, and a file with no
+    // signature needs none.
+    assert!(engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::from([(ids[0], SignatureDecision::Flatten)]),
+        )
+        .is_err());
+
+    let added = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::from([
+                (ids[0], SignatureDecision::Flatten),
+                (ids[2], SignatureDecision::Keep),
+            ]),
+        )
+        .expect("every signed file is answered");
+    assert_eq!(added.num_pages, 5);
+
+    let widgets = |page_number| {
+        with_page(engine, own.id, page_number, |page| {
+            page.annotations()
+                .iter()
+                .filter(|annotation| annotation.annotation_type() == PdfPageAnnotationType::Widget)
+                .count()
+        })
+    };
+
+    assert_eq!(widgets(3), 0, "the flattened file's seal is page content");
+    assert_eq!(widgets(5), 1, "the kept file keeps its signature field");
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_added_file_left_alone_keeps_its_bookmarks_in_a_save_as() {
+    let _guard = sections_test_guard();
+
+    // With no other file left to tell it from, its bookmarks stand as they are,
+    // a bookmark per file asked for or not.
+    for per_file in [false, true] {
+        left_alone_saves_its_own_bookmarks(per_file);
+    }
+}
+
+fn left_alone_saves_its_own_bookmarks(per_file: bool) {
+    let engine = test_engine();
+    let directory = scratch_directory(&format!("sections-left-alone-{per_file}"));
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(
+            &directory,
+            "outlined.pdf",
+            outlined_three_page_pdf(),
+        )],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(per_file),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+
+    let left = engine
+        .delete_pages(own.id, &[1, 2], 7)
+        .expect("the document's own pages should go");
+    // The one file left is still said, with the bookmarks a Save As writes.
+    assert_eq!(left.sections.len(), 1);
+    assert_eq!(left.sections[0].title, "outlined.pdf");
+    assert!(!left.sections[0].outline.is_empty());
+    assert!(left.has_foreign_pages);
+
+    let saved = directory.join("left.pdf");
+    engine
+        .export_to(own.id, &saved)
+        .expect("a Save As should write what is left");
+    let reopened = engine
+        .open_from_path(saved)
+        .expect("the written file should open");
+    let titles: Vec<_> = reopened
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    assert_eq!(titles, vec![("Chapter".to_string(), Some(3))]);
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_file_that_cannot_be_added_leaves_the_document_as_it_was() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-rollback");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let changing = write_file(&directory, "changing.pdf", banded_pdf(&[20]));
+    let ids = read_files(
+        engine,
+        vec![
+            write_file(&directory, "steady.pdf", banded_pdf(&[60])),
+            changing.clone(),
+        ],
+    );
+
+    // Let the second go from memory, then change it on disk.
+    engine.unload_sources(SCOPE);
+    fs::write(&changing, banded_pdf(&[20, 60])).expect("the file should change");
+
+    let refused = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect_err("a changed file should be refused");
+    assert_eq!(refused, SOURCE_CHANGED);
+
+    let after = engine
+        .rotate_pages(own.id, &[1], 0)
+        .expect("the document should still answer");
+    assert_eq!(after.num_pages, 2);
+    assert!(!after.has_foreign_pages);
+    assert!(after.sections.is_empty());
+    assert!(page_sections(&after).iter().all(Option::is_none));
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_document_back_to_one_file_adds_the_next_under_the_name_it_has_now() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-resume");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let first = read_files(
+        engine,
+        vec![write_file(&directory, "first.pdf", banded_pdf(&[20]))],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &first,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+    engine
+        .delete_pages(own.id, &[3], 5)
+        .expect("the undo should take the file out");
+
+    let second = read_files(
+        engine,
+        vec![write_file(&directory, "second.pdf", banded_pdf(&[60]))],
+    );
+    let added = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &second,
+            3,
+            "renamed.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the next file should be added");
+
+    assert_eq!(
+        sections_of(&added),
+        vec![
+            (0, "renamed.pdf".to_string()),
+            (2, "second.pdf".to_string())
+        ]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_save_as_pads_a_file_that_would_leave_the_next_on_an_even_page() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-padding");
+    let own = engine
+        .open(banded_pdf(&[20]))
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[60, 100]))],
+    );
+    let padded = sections::FileOptions {
+        smart_padding: true,
+        per_file_bookmarks: true,
+    };
+
+    let added = engine
+        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", padded, &HashMap::new())
+        .expect("the file should be added");
+    // The document itself takes no blank page; only what a Save As writes does,
+    // which the viewer is told of to show it.
+    assert_eq!(added.num_pages, 3);
+    assert_eq!(added.file_options, Some(padded));
+    assert_eq!(
+        added
+            .padding
+            .iter()
+            .map(|sheet| sheet.after)
+            .collect::<Vec<_>>(),
+        vec![1]
+    );
+
+    let written = directory.join("padded.pdf");
+    engine
+        .export_to(own.id, &written)
+        .expect("a Save As should write the padded document");
+    let reopened = engine
+        .open_from_path(written)
+        .expect("the padded file should open");
+    let starts: Vec<_> = reopened
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    assert_eq!(reopened.num_pages, 4);
+    assert_eq!(
+        starts,
+        vec![
+            ("own.pdf".to_string(), Some(1)),
+            ("added.pdf".to_string(), Some(3)),
+        ]
+    );
+    // The blank is the back of the own file's leaf, sized as its page is.
+    assert_eq!(rendered_darkness(engine, reopened.id, 2), 0);
+
+    // Off, the files run on as they stand.
+    let unpadded = sections::FileOptions {
+        smart_padding: false,
+        ..padded
+    };
+    let set = engine
+        .set_file_options(own.id, unpadded)
+        .expect("the options should change");
+    assert_eq!(set.file_options, Some(unpadded));
+
+    let plain = directory.join("plain.pdf");
+    engine
+        .export_to(own.id, &plain)
+        .expect("a Save As should write the unpadded document");
+    assert_eq!(
+        engine
+            .open_from_path(plain)
+            .expect("the unpadded file should open")
+            .num_pages,
+        3
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn pages_still_shown_as_several_files_save_only_as_a_new_file() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-several");
+    let own_path = write_file(&directory, "own.pdf", two_page_pdf());
+    let own = engine
+        .open_from_path(own_path)
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[20]))],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+    // The own file's second page joins the added file, whose own page then goes.
+    engine
+        .reorder_pages(own.id, &[1, 2, 3], Some(&[0, 1, 1]))
+        .expect("the layout should land");
+    let left = engine
+        .delete_pages(own.id, &[3], 4)
+        .expect("the added page should go");
+
+    assert!(left.has_foreign_pages);
+    assert_eq!(left.sections.len(), 2);
+    assert!(engine.save(own.id).is_err());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_a4_copy_of_several_files_keeps_their_blanks_and_bookmarks() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-a4");
+    let own = engine
+        .open(banded_pdf(&[20]))
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[60, 100]))],
+    );
+    let padded = sections::FileOptions {
+        smart_padding: true,
+        per_file_bookmarks: true,
+    };
+
+    engine
+        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", padded, &HashMap::new())
+        .expect("the file should be added");
+
+    let fitted = engine
+        .fit_to_a4(own.id, |_, _| {})
+        .expect("the pages should fit")
+        .expect("nobody stopped it")
+        .document;
+    let starts: Vec<_> = fitted
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    assert_eq!(fitted.num_pages, 4);
+    assert_eq!(
+        starts,
+        vec![
+            ("own.pdf".to_string(), Some(1)),
+            ("added.pdf".to_string(), Some(3)),
+        ]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+/// `outlined.pdf` (three pages, a "Chapter" bookmark) as the document's own,
+/// and `second.pdf` (two pages) added after it.
+fn own_and_second(engine: &PdfiumEngine, directory: &Path, smart_padding: bool) -> PdfDocumentInfo {
+    let own = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(directory, "second.pdf", two_page_pdf())],
+    );
+    let options = sections::FileOptions {
+        smart_padding,
+        per_file_bookmarks: true,
+    };
+
+    engine
+        .insert_sources(SCOPE, own.id, &ids, 4, "own.pdf", options, &HashMap::new())
+        .expect("the file should be added");
+    own
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_compressed_copy_of_added_files_is_what_a_save_as_writes() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-compress");
+    let own = own_and_second(engine, &directory, true);
+    let compressed = directory.join("compressed.pdf");
+
+    assert!(engine
+        .export_compressed(
+            own.id,
+            &compressed,
+            CompressionOptions { image_dpi: None },
+            |_, _| {}
+        )
+        .expect("the compressed copy should be written"));
+
+    let reopened = engine
+        .open_from_path(compressed)
+        .expect("the compressed copy should open");
+    let titles: Vec<_> = reopened
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    // The second file starts on page 5, past the blank the odd first leaves.
+    assert_eq!(reopened.num_pages, 6);
+    assert_eq!(
+        titles,
+        vec![
+            ("own.pdf".to_string(), Some(1)),
+            ("second.pdf".to_string(), Some(5)),
+        ]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_split_by_bookmarks_of_added_files_makes_a_pdf_of_each() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-split");
+    let own = own_and_second(engine, &directory, false);
+    let destination = directory.join("split.zip");
+
+    assert!(engine
+        .export_archive(own.id, &destination, ArchiveOptions::Bookmarks, |_, _| {})
+        .expect("the split should be written"));
+
+    let mut zip = ZipArchive::new(fs::File::open(destination).unwrap()).unwrap();
+
+    assert_eq!(zip.len(), 2);
+
+    for (name, pages, first) in [
+        ("001-own.pdf", 3, "own.pdf"),
+        ("002-second.pdf", 2, "second.pdf"),
+    ] {
+        let mut bytes = Vec::new();
+
+        zip.by_name(name)
+            .unwrap_or_else(|_| panic!("the split should hold {name}"))
+            .read_to_end(&mut bytes)
+            .unwrap();
+
+        let part = engine.open(bytes).expect("each part should open");
+
+        assert_eq!(part.num_pages, pages);
+        assert_eq!(part.outline[0].title, first);
+        engine.close(part.id).unwrap();
+    }
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn an_a4_copy_leaves_the_blank_between_files_bare_as_a_save_as_does() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-a4-blank");
+    let own = own_and_second(engine, &directory, true);
+
+    assert!(engine
+        .apply_page_numbers(
+            own.id,
+            PageNumbersConfig {
+                mode: PageNumbersMode::Single,
+                position: PageNumbersPosition::BottomCenter,
+                range: None,
+                start: None,
+                smart_color: false,
+                blank_numbered: true,
+                blank_counted: true,
+            },
+        )
+        .expect("the pages should be numbered"));
+
+    let fitted = engine
+        .fit_to_a4(own.id, |_, _| {})
+        .expect("the pages should fit")
+        .expect("nobody stopped it")
+        .document;
+    let text = |page: i32| {
+        let documents = engine.lock_documents().unwrap();
+        let page = documents[&fitted.id].document.pages().get(page).unwrap();
+        let text = page.text().unwrap().all();
+
+        text
+    };
+
+    // The blank after the third page, then the second file's first page,
+    // numbered on from three as the reader saw it.
+    assert_eq!(fitted.num_pages, 6);
+    assert!(text(3).trim().is_empty(), "the blank should stay bare");
+    assert!(text(4).contains('4'), "got {:?}", text(4));
+
+    fs::remove_dir_all(directory).ok();
+}

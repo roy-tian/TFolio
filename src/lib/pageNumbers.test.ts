@@ -9,6 +9,7 @@ import {
   draftWithPlacement,
   defaultPageNumbersPreferences,
   isPageNumbersPreferences,
+  pageNumbersFit,
   pageNumbersLabel,
   pageNumbersPreferences,
   parsePageNumbersDraft,
@@ -116,6 +117,15 @@ describe("parsePageNumbersDraft", () => {
 
     expect(parsed?.blankCounted).toBe(false)
     expect(parsed?.blankNumbered).toBe(false)
+  })
+})
+
+describe("pageNumbersFit", () => {
+  it("holds a whole-document config at any length, a range only while it fits", () => {
+    expect(pageNumbersFit(config(), 1)).toBe(true)
+    expect(pageNumbersFit(config({ range: [2, 5] }), 5)).toBe(true)
+    expect(pageNumbersFit(config({ range: [2, 5] }), 4)).toBe(false)
+    expect(pageNumbersFit(config({ start: 3 }), 2)).toBe(false)
   })
 })
 

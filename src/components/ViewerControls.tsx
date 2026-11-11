@@ -13,7 +13,10 @@ import type { ViewMode } from "@/lib/viewMode"
 
 type ViewerControlsProps = {
   bookApplies: boolean
+  /** The page grid lies over the reading view, which has no scale there. */
+  gridShown: boolean
   onChangeViewMode: (mode: ViewMode) => void
+  onShowGrid: () => void
   onRotate: () => void
   page: {
     count: number
@@ -29,8 +32,10 @@ type ViewerControlsProps = {
     bar to what they edit. */
 export function ViewerControls({
   bookApplies,
+  gridShown,
   onChangeViewMode,
   onRotate,
+  onShowGrid,
   page,
   viewMode,
   zoom,
@@ -51,24 +56,33 @@ export function ViewerControls({
     >
       <ViewModeToggle
         bookApplies={bookApplies}
+        gridShown={gridShown}
         onChange={onChangeViewMode}
+        onShowGrid={onShowGrid}
         value={viewMode}
       />
-      <StatusBarDivider />
-      <ZoomControls zoom={zoom} />
-      <StatusBarDivider />
-      {/* Turns only the way the pages are looked at (D2); the sidebar's
-          previews turn the pages themselves. */}
-      <ToolbarTooltip label={rotateLabel}>
-        <Button
-          aria-label={rotateLabel}
-          onClick={onRotate}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <RotateCw />
-        </Button>
-      </ToolbarTooltip>
+      {/* Absent rather than disabled: disabled is what an unopened document
+          means. The grid turns the pages themselves, from their own controls:
+          a turn of the view beside those would pass for one a save keeps. */}
+      {gridShown ? null : (
+        <>
+          <StatusBarDivider />
+          <ZoomControls zoom={zoom} />
+          <StatusBarDivider />
+          {/* Turns only the way the pages are looked at (D2); the sidebar's
+              previews turn the pages themselves. */}
+          <ToolbarTooltip label={rotateLabel}>
+            <Button
+              aria-label={rotateLabel}
+              onClick={onRotate}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <RotateCw />
+            </Button>
+          </ToolbarTooltip>
+        </>
+      )}
     </StatusBar>
   )
 }

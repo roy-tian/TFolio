@@ -5,6 +5,8 @@ import {
   ChevronDown,
   CopyX,
   ExternalLink,
+  FilePlus2,
+  FileSignature,
   FolderOpen,
   House,
   LoaderCircle,
@@ -16,6 +18,7 @@ import { useTranslation } from "react-i18next"
 import fileTinyIcon from "@/assets/brand/file-tiny.svg"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import { SignatureBadge } from "@/components/SignatureBadge"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import {
   ContextMenu,
@@ -32,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { useListDrag, type ListDragState } from "@/hooks/useListDrag"
+import type { AppendOffer } from "@/hooks/usePageCarry"
 import {
   HOME_TAB_ID,
   panelElementId,
@@ -40,11 +44,15 @@ import {
   type OtherTabs,
   type TabId,
 } from "@/lib/documentTabs"
+import { TAB_SPRING_MS } from "@/lib/pageCarry"
+import { signatureMark, type PdfSignatures } from "@/lib/pdf"
 import { shortcuts } from "@/lib/shortcuts"
 import { cn } from "@/lib/utils"
 
 export type DocumentTabItem = {
   dirty: boolean
+  /** Intact signatures mark a tab still bound to the signed file it opened. */
+  document: { signatures: PdfSignatures }
   id: number
   name: string
 }
@@ -55,6 +63,13 @@ const GHOST_EDGE_MARGIN = 4
 
 type DocumentTabsProps = {
   activeId: TabId
+  /** The tab whose end a release adds carried pages to — see `usePageCarry`. */
+  appendOffer: AppendOffer | null
+  /** The tab carried pages are resting on, which is about to open under them
+      — see `usePageCarry`. The bar beneath counts the rest out. */
+  armedTabId: number | null
+  /** The page count a release on the strip's open space makes a new PDF of. */
+  newDocumentOffer: number | null
   onActivate: (tabId: TabId) => void
   onClose: (documentId: number) => void
   onCloseAll: () => void
@@ -87,6 +102,8 @@ function TabDragGhost({ drag, tab }: {
   drag: ListDragState
   tab: DocumentTabItem
 }) {
+  const mark = signatureMark(tab.document.signatures)
+
   return createPortal(
     <div
       aria-hidden
@@ -110,6 +127,14 @@ function TabDragGhost({ drag, tab }: {
         <span className="size-2 shrink-0 rounded-full bg-primary" />
       ) : null}
       <span className="truncate">{tab.name}</span>
+      {mark ? (
+        <FileSignature
+          className={cn(
+            "ml-auto size-3.5 shrink-0",
+            mark === "broken" ? "text-warning" : "text-muted-foreground",
+          )}
+        />
+      ) : null}
     </div>,
     document.body,
   )
@@ -117,6 +142,9 @@ function TabDragGhost({ drag, tab }: {
 
 export function DocumentTabs({
   activeId,
+  appendOffer,
+  armedTabId,
+  newDocumentOffer,
   onActivate,
   onClose,
   onCloseAll,
@@ -140,7 +168,8 @@ export function DocumentTabs({
     active: reorderable,
     axis: "x",
     listRef: scrollerRef,
-    onReorder,
+    // A tab is never carried with others, so only the pressed one moves.
+    onReorder: (moved, to) => onReorder(moved[0]!, to),
     onDropOutside: onTabDropOutside
       ? (point, index) => {
           const tab = tabs[index]
@@ -240,8 +269,8 @@ export function DocumentTabs({
   const homeSelected = activeId === HOME_TAB_ID
 
   return (
-    // The whole strip is the workspace's, which `data-tab-strip` is what a page
-    // drag hit-tests for: a release on it lands nothing rather than reordering.
+    // A sidebar page drag hit-tests `data-tab-strip` to carry pages off its
+    // column: resting on a tab opens it, and `data-strip-space` makes a new PDF.
     <div
       className="fixed top-(--toolbar-height) right-0 left-(--sidebar-inset) z-40 flex h-(--document-tabs-height) items-end gap-1 border-b bg-muted px-2"
       data-tab-strip
@@ -288,11 +317,15 @@ export function DocumentTabs({
             <HintTooltipGroup>
               {tabs.map((tab, index) => {
                 const selected = tab.id === activeId
+                const armed = tab.id === armedTabId
+                const appendCount =
+                  appendOffer?.tabId === tab.id ? appendOffer.count : null
                 // A selected tab is parted from its neighbours by its own border;
                 // between two unselected ones nothing marks where one ends.
                 const previousId: TabId = tabs[index - 1]?.id ?? HOME_TAB_ID
                 const divided = !selected && previousId !== activeId
                 const wayOffset = drag?.cellOffsets[index] ?? 0
+                const mark = signatureMark(tab.document.signatures)
 
                 return (
                   <ContextMenu key={tab.id}>
@@ -309,6 +342,10 @@ export function DocumentTabs({
                               : "border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground",
                             divided &&
                               "before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-border",
+                            // Held pages are over this tab: it reads as the one they are
+                            // about to be taken to, ahead of it actually opening.
+                            (armed || appendCount !== null) &&
+                              "border-primary bg-background text-foreground",
                             drag &&
                               drag.index !== index &&
                               "transition-transform duration-200 ease-out",
@@ -361,6 +398,34 @@ export function DocumentTabs({
                         <span className="truncate">{tab.name}</span>
                       </button>
                     </HintTooltip>
+                    {/* Beside the tab's button, not in it: its own hint, and
+                        no text added to the name the button reads as. */}
+                    {mark ? (
+                      <SignatureBadge
+                        broken={mark === "broken"}
+                        className="size-6"
+                        count={tab.document.signatures.count}
+                        inDelayGroup
+                        onClick={() => {
+                          if (draggedClickRef.current === tab.id) {
+                            draggedClickRef.current = null
+                            return
+                          }
+
+                          onActivate(tab.id)
+                        }}
+                      />
+                    ) : null}
+                    {/* Runs the length of the wait the tab is about to end: the
+                        dwell itself, so the bar cannot promise a different one. */}
+                    {armed ? (
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-x-1 bottom-1 h-1 origin-left animate-tab-spring rounded-full bg-primary"
+                        data-tab-spring
+                        style={{ animationDuration: `${TAB_SPRING_MS}ms` }}
+                      />
+                    ) : null}
                     <HintTooltip label={t("tabs.close", { name: tab.name })}>
                       <button
                         aria-label={t("tabs.close", { name: tab.name })}
@@ -373,6 +438,17 @@ export function DocumentTabs({
                         <X className="size-3.5" />
                       </button>
                     </HintTooltip>
+                    {/* Over the close button, which no drag can reach, so the
+                        name keeps its width. */}
+                    {appendCount !== null ? (
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute top-1.5 right-1 flex h-4.5 items-center rounded-full bg-primary px-1.5 text-xs leading-none font-medium text-primary-foreground tabular-nums"
+                        data-append-offer
+                      >
+                        +{appendCount}
+                      </span>
+                    ) : null}
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       <ContextMenuItem
@@ -477,6 +553,23 @@ export function DocumentTabs({
               >
                 <img alt="" className="size-4 shrink-0" draggable={false} src={fileTinyIcon} />
                 <span className="min-w-0 flex-1 truncate">{tab.name}</span>
+                {signatureMark(tab.document.signatures) ? (
+                  <FileSignature
+                    aria-label={t(
+                      signatureMark(tab.document.signatures) === "broken"
+                        ? "signatures.brokenCount"
+                        : "signatures.count",
+                      { count: tab.document.signatures.count },
+                    )}
+                    className={cn(
+                      "size-3.5 shrink-0",
+                      signatureMark(tab.document.signatures) === "broken"
+                        ? "text-warning"
+                        : "text-muted-foreground",
+                    )}
+                    role="img"
+                  />
+                ) : null}
                 {tab.dirty ? (
                   <span
                     aria-label={t("tabs.unsaved")}
@@ -490,9 +583,24 @@ export function DocumentTabs({
       ) : null}
 
       <div
-        className="h-full min-w-8 flex-1 self-stretch"
+        className="relative h-full min-w-8 flex-1 self-stretch"
+        data-strip-space
         data-tauri-drag-region="deep"
-      />
+      >
+        {/* Over the space it describes, never beside it: a target that pushed
+            the strip's buttons over would slide out from under the pointer. */}
+        {newDocumentOffer !== null ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-1 bottom-0.5 flex items-center justify-center gap-1.5 overflow-hidden rounded-md border-2 border-dashed border-primary/60 bg-primary/5 px-2 text-sm font-medium text-foreground"
+            data-new-document-offer
+          >
+            <FilePlus2 className="size-4 shrink-0" />
+            <span className="truncate">
+              {t("tabs.newFromPages", { count: newDocumentOffer })}
+            </span>
+          </div>
+        ) : null}
+      </div>
 
       {drag && draggedTab ? <TabDragGhost drag={drag} tab={draggedTab} /> : null}
     </div>

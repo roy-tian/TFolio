@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react"
 
 import { clientPointToFraction, fractionToPagePoint, totalPageRotation } from "@/lib/annotationGeometry"
-import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 import { isMacOS } from "@/lib/platform"
 import { caretInTextRun, type TextCaret } from "@/lib/textCaret"
@@ -11,7 +10,7 @@ import { textPageAtPoint, type MountedTextPage } from "@/lib/textSelectionPage"
 type Options = {
   enabled: boolean
   pages: PdfPageInfo[]
-  rotations: PageRotations
+  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -24,14 +23,14 @@ function scrollStep(position: number, start: number, end: number) {
     keyboard extension, context menus and annotations. Native caret lookup is
     confined to the chosen run, never allowed to redirect us to another row.
     Returns `finish`, which settles a drag at a release point and ends it. */
-export function useTextDragSelection({ enabled, pages, rotations, viewerRef }: Options) {
+export function useTextDragSelection({ enabled, pages, viewRotation, viewerRef }: Options) {
   const finishRef = useRef<(x: number, y: number) => void>(() => {})
-  // Read per event: a new pages array or rotations object must not end a drag.
+  // Read per event: a new pages array or a turned view must not end a drag.
   // Not useEffectEvent: React 19.2 never refreshes one in a forwardRef or memo
   // component, such as DocumentSession, so it would keep the first rotation.
-  const geometry = useRef({ pages, rotations })
+  const geometry = useRef({ pages, viewRotation })
   useLayoutEffect(() => {
-    geometry.current = { pages, rotations }
+    geometry.current = { pages, viewRotation }
   })
 
   useEffect(() => {
@@ -41,9 +40,9 @@ export function useTextDragSelection({ enabled, pages, rotations, viewerRef }: O
     const macOS = isMacOS()
 
     function pageAt(number: number) {
-      const { pages, rotations } = geometry.current
+      const { pages, viewRotation } = geometry.current
       const page = pages[number - 1]
-      return page && { page, rotation: rotationForPage(rotations, number) }
+      return page && { page, rotation: viewRotation }
     }
 
     let anchor: TextCaret | null = null

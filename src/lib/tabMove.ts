@@ -3,7 +3,7 @@ import { getAllWindows } from "@tauri-apps/api/window"
 
 import type { AnnotationHistory } from "@/lib/annotations"
 import { parseRecentPdfView, type RecentPdfView } from "@/lib/recentFiles"
-import type { PdfDocumentInfo } from "@/lib/pdf"
+import { isPdfSignatures, type PdfDocumentInfo } from "@/lib/pdf"
 import { isViewMode, type ViewMode } from "@/lib/viewMode"
 
 /** A window the drag can land on, in physical pixels — the space every
@@ -110,16 +110,21 @@ export async function fetchWindowRects(): Promise<WindowRect[]> {
     it owns are what keep the document's dirty state, its export-only refusals,
     and annotation deletion answering as they did where it came from. */
 export type MovedTabSeed = {
-  hasMergedPages: boolean
+  /** Whether the page grid lay over its reading view: the grid is a tab's
+      own, so it goes where the tab goes. */
+  grid: boolean
   history: AnnotationHistory
   marks: [entryId: number, markIds: number[]][]
-  pageRotations: number[]
   viewMode: ViewMode
+  viewRotation: number
 }
 
 /** Everything a tab is, beyond its document's engine state: what the strip
     shows, what the session rehydrates from, and where it was being read. */
 export type MovedTabPayload = {
+  /** The image or Word file a converted tab came from, which a reload of it
+      in the new window converts again. */
+  convertedFrom?: string
   document: PdfDocumentInfo
   dirty: boolean
   name: string
@@ -151,6 +156,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value)
+}
+
+// Layout swaps a page's sides only at exactly 90 and 270.
+function isQuarterTurn(value: unknown): value is number {
+  return value === 0 || value === 90 || value === 180 || value === 270
 }
 
 function isMarks(value: unknown): value is MovedTabSeed["marks"] {
@@ -185,7 +195,12 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     !isNumber(document.numPages) ||
     !Array.isArray(document.pages) ||
     !Array.isArray(document.outline) ||
-    (typeof document.path !== "string" && document.path !== null)
+    (typeof document.path !== "string" && document.path !== null) ||
+    typeof document.hasMergedPages !== "boolean" ||
+    typeof document.hasForeignPages !== "boolean" ||
+    typeof document.splitsByBookmarks !== "boolean" ||
+    (document.sections !== undefined && !Array.isArray(document.sections)) ||
+    !isPdfSignatures(document.signatures)
   ) {
     return null
   }
@@ -197,11 +212,9 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     !Array.isArray(seed.history.future) ||
     !isNumber(seed.history.nextId) ||
     !isNumber(seed.history.savedId) ||
-    typeof seed.hasMergedPages !== "boolean" ||
     !isMarks(seed.marks) ||
-    !Array.isArray(seed.pageRotations) ||
-    !seed.pageRotations.every(isNumber) ||
-    !isViewMode(seed.viewMode)
+    !isViewMode(seed.viewMode) ||
+    !isQuarterTurn(seed.viewRotation)
   ) {
     return null
   }
@@ -218,12 +231,16 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     saveRequired: value.saveRequired === true,
     savable: value.savable === true,
     seed: {
-      hasMergedPages: seed.hasMergedPages,
+      grid: seed.grid === true,
       history: seed.history as unknown as AnnotationHistory,
       marks: seed.marks,
-      pageRotations: seed.pageRotations,
       viewMode: seed.viewMode,
+      viewRotation: seed.viewRotation,
     },
+  }
+
+  if (typeof value.convertedFrom === "string") {
+    payload.convertedFrom = value.convertedFrom
   }
 
   if (typeof value.recentPath === "string") {

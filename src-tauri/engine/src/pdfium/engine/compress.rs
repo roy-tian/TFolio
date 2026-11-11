@@ -322,6 +322,9 @@ type DrawnDpis = Arc<HashMap<lopdf::ObjectId, f32>>;
 /// the export usually asks for the output the last estimate already made.
 pub(super) struct CompressCache {
     version: u64,
+    /// Whether `rewritten` has the signatures drawn in: the reader's answer
+    /// changes it without a content change, so it is part of the key.
+    flattens: bool,
     rewritten: Arc<Vec<u8>>,
     drawn_dpis: Option<DrawnDpis>,
     latest: Option<(Option<u32>, Arc<Vec<u8>>)>,
@@ -330,6 +333,7 @@ pub(super) struct CompressCache {
 /// What one run takes from the cache before letting go of the PDFium lock.
 struct Basis {
     version: u64,
+    flattens: bool,
     /// The size the dialog measures savings against.
     baseline: u64,
     rewritten: Arc<Vec<u8>>,
@@ -349,23 +353,41 @@ impl Basis {
 /// PDFium's rewrite — where unreferenced objects drop off — is the one step
 /// that needs the PDFium lock, so it happens here, under the caller's guard,
 /// once per content version.
-fn basis(entry: &mut OpenDocument) -> Result<Basis, String> {
+/// A document other files were added to compresses what its Save As writes,
+/// blank pages and file bookmarks with it.
+fn basis(engine: &PdfiumEngine, entry: &mut OpenDocument) -> Result<Basis, String> {
+    // An estimate made before the reader's answer measures the signatures as
+    // they stand.
+    let flattens = entry.output_flattens().unwrap_or(false);
     let cache = match entry.compress_cache.take() {
-        Some(cache) if cache.version == entry.content_version => cache,
-        _ => CompressCache {
-            version: entry.content_version,
-            rewritten: Arc::new(
-                entry
+        Some(cache) if cache.version == entry.content_version && cache.flattens == flattens => {
+            cache
+        }
+        _ => {
+            let mut rewritten = match engine.combined_bytes(entry) {
+                Some(combined) => combined?,
+                None => entry
                     .document
                     .save_to_bytes()
                     .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?,
-            ),
-            drawn_dpis: None,
-            latest: None,
-        },
+            };
+
+            if flattens {
+                rewritten = signatures::flattened_bytes(rewritten)?;
+            }
+
+            CompressCache {
+                version: entry.content_version,
+                flattens,
+                rewritten: Arc::new(rewritten),
+                drawn_dpis: None,
+                latest: None,
+            }
+        }
     };
     let basis = Basis {
         version: cache.version,
+        flattens: cache.flattens,
         baseline: entry.loaded_len.unwrap_or(cache.rewritten.len() as u64),
         rewritten: Arc::clone(&cache.rewritten),
         drawn_dpis: cache.drawn_dpis.clone(),
@@ -444,33 +466,39 @@ fn compressed_output(
     Ok((!operation.is_cancelled()).then_some((compressed, measured)))
 }
 
-/// Like an archive, a compressed copy is a different file by construction: it
-/// cannot replace any open PDF, its own source included, whose edit history
-/// it would silently stop describing.
-fn refuse_open_destination(
-    documents: &HashMap<u64, OpenDocument>,
-    path: &Path,
-) -> Result<(), String> {
-    if io::is_open_document_file(documents, path, None) {
-        return Err("a compressed copy cannot replace an open PDF".into());
+impl PdfiumEngine {
+    /// Like an archive, a compressed copy is a different file by construction:
+    /// it cannot replace any open PDF, its own source included, whose edit
+    /// history it would silently stop describing, nor any signed file.
+    fn refuse_open_destination(
+        &self,
+        documents: &HashMap<u64, OpenDocument>,
+        path: &Path,
+    ) -> Result<(), String> {
+        if io::is_open_document_file(documents, path, None) {
+            return Err("a compressed copy cannot replace an open PDF".into());
+        }
+
+        if self.is_signed_file(documents, path) {
+            return Err(signatures::EXPORT_SIGNED_ERROR.into());
+        }
+
+        Ok(())
     }
 
-    Ok(())
-}
-
-impl PdfiumEngine {
     fn compress_basis(&self, document_id: u64) -> Result<Basis, String> {
         let mut documents = self.lock_documents()?;
 
-        basis(open_entry_mut(&mut documents, document_id)?)
+        basis(self, open_entry_mut(&mut documents, document_id)?)
     }
 
     /// Files a finished run's work for the next one — unless the document
-    /// changed meanwhile, or the dialog released the cache.
+    /// changed meanwhile, the reader's signature answer changed what it
+    /// measures, or the dialog released the cache.
     fn remember_compression(
         &self,
         document_id: u64,
-        version: u64,
+        basis: &Basis,
         measured: Option<DrawnDpis>,
         latest: (Option<u32>, Arc<Vec<u8>>),
     ) -> Result<(), String> {
@@ -478,7 +506,7 @@ impl PdfiumEngine {
         let Some(cache) = documents
             .get_mut(&document_id)
             .and_then(|entry| entry.compress_cache.as_mut())
-            .filter(|cache| cache.version == version)
+            .filter(|cache| cache.version == basis.version && cache.flattens == basis.flattens)
         else {
             return Ok(());
         };
@@ -525,7 +553,7 @@ impl PdfiumEngine {
 
         self.remember_compression(
             document_id,
-            basis.version,
+            &basis,
             measured,
             (options.image_dpi, Arc::new(compressed)),
         )?;
@@ -547,8 +575,10 @@ impl PdfiumEngine {
         let basis = {
             let mut documents = self.lock_documents()?;
 
-            refuse_open_destination(&documents, path)?;
-            basis(open_entry_mut(&mut documents, document_id)?)?
+            self.refuse_open_destination(&documents, path)?;
+            let entry = open_entry_mut(&mut documents, document_id)?;
+            entry.output_flattens()?;
+            basis(self, entry)?
         };
 
         // The estimate for these levels usually already made these very bytes.
@@ -568,7 +598,7 @@ impl PdfiumEngine {
         // Checked again under the lock the write happens under: another
         // window may have opened this very path while the images were done.
         let documents = self.lock_documents()?;
-        refuse_open_destination(&documents, path)?;
+        self.refuse_open_destination(&documents, path)?;
 
         io::write_file_atomically(path, |file| {
             file.write_all(&compressed)

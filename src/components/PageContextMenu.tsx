@@ -1,4 +1,16 @@
-import { ClipboardPaste, Copy, RotateCcw, RotateCw, Scissors, Trash2 } from "lucide-react"
+import {
+  ClipboardPaste,
+  Copy,
+  Eye,
+  Pencil,
+  RotateCcw,
+  RotateCw,
+  Scissors,
+  SquareCheckBig,
+  Trash2,
+  X,
+} from "lucide-react"
+import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 
 import { InsertAfterIcon, InsertBeforeIcon } from "@/components/InsertPageIcon"
@@ -21,11 +33,14 @@ type PageMenuContentProps = {
   onCut: () => void
   onDelete: () => void
   onInsertBlank: (side: PageMenuSide) => void
+  /** In the grid, where a click only chooses: the reading view on the page
+      under the pointer. */
+  onOpen?: () => void
   onPaste: (side: PageMenuSide) => void
   onRotate: (degrees: 90 | 270) => void
 }
 
-/** A page's right-click menu, the same in the sidebar and on the organize board. */
+/** A page's right-click menu in the sidebar, which also acts on a choice. */
 export function PageMenuContent({
   canPaste,
   count,
@@ -34,6 +49,7 @@ export function PageMenuContent({
   onCut,
   onDelete,
   onInsertBlank,
+  onOpen,
   onPaste,
   onRotate,
 }: PageMenuContentProps) {
@@ -41,6 +57,15 @@ export function PageMenuContent({
 
   return (
     <ContextMenuContent>
+      {onOpen ? (
+        <>
+          <ContextMenuItem data-action="open-page" onClick={onOpen}>
+            <Eye />
+            {t("pageEdit.open")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      ) : null}
       <ContextMenuItem data-action="rotate-pages" onClick={() => onRotate(90)}>
         <RotateCw />
         {t("pageEdit.rotate", { count })}
@@ -99,6 +124,83 @@ export function PageMenuContent({
       >
         <Trash2 />
         {t("pageEdit.delete", { count })}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+}
+
+/** Where in a file a paste lands: before its first page, or after its last. */
+export type FileMenuEnd = "start" | "end"
+
+/** A file's right-click menu, by its name in the grid or the sidebar's tree:
+    what its hover buttons do, and pastes that join it at either end. */
+export function FileMenuContent({
+  canPaste,
+  onPaste,
+  onRemove,
+  onRename,
+  onSelect,
+  removeDisabled,
+}: {
+  canPaste: boolean
+  onPaste: (end: FileMenuEnd) => void
+  onRemove: () => void
+  onRename: () => void
+  /** Absent where no pages show to be chosen: beside a reading view, the
+      tree stands in for the sidebar's pages. */
+  onSelect?: () => void
+  /** A document keeps a page; its last file stays. */
+  removeDisabled: boolean
+}) {
+  const { t } = useTranslation()
+  // Never reset: each opening of the menu mounts this anew.
+  const renameAskedRef = useRef(false)
+
+  return (
+    <ContextMenuContent
+      // Renaming puts a field where the name was, the caret in it. A closing
+      // menu hands focus back to what it opened over, which would take the
+      // caret out again and end the edit before a key was typed.
+      finalFocus={() => !renameAskedRef.current}
+    >
+      {onSelect ? (
+        <ContextMenuItem data-action="select-file" onClick={onSelect}>
+          <SquareCheckBig />
+          {t("pageEdit.selectFile")}
+        </ContextMenuItem>
+      ) : null}
+      <ContextMenuItem
+        data-action="rename-file"
+        onClick={() => {
+          renameAskedRef.current = true
+          onRename()
+        }}
+      >
+        <Pencil />
+        {t("pageEdit.renameFile")}
+      </ContextMenuItem>
+      {canPaste ? (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem data-action="paste-file-start" onClick={() => onPaste("start")}>
+            <ClipboardPaste />
+            {t("pageEdit.pasteFileStart")}
+          </ContextMenuItem>
+          <ContextMenuItem data-action="paste-file-end" onClick={() => onPaste("end")}>
+            <ClipboardPaste />
+            {t("pageEdit.pasteFileEnd")}
+          </ContextMenuItem>
+        </>
+      ) : null}
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        data-action="remove-file"
+        disabled={removeDisabled}
+        onClick={onRemove}
+        variant="destructive"
+      >
+        <X />
+        {t("pageEdit.removeFile")}
       </ContextMenuItem>
     </ContextMenuContent>
   )

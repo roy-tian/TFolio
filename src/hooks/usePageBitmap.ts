@@ -10,8 +10,6 @@ type PageBitmapOptions = {
   canvasRef: RefObject<HTMLCanvasElement | null>
   command: string
   documentId: number
-  /** What the command calls the id: an organize source is not a document. */
-  idArgument?: "documentId" | "sourceId"
   isNearViewport: boolean
   /** Backend ceiling for the render width; the backend rejects wider. */
   maxRenderWidth: number
@@ -50,7 +48,6 @@ export function usePageBitmap({
   canvasRef,
   command,
   documentId,
-  idArgument = "documentId",
   isNearViewport,
   maxRenderWidth,
   mimeType,
@@ -154,7 +151,7 @@ export function usePageBitmap({
       const bytes = await pageWork.schedule(
         () =>
           invoke<ArrayBuffer>(command, {
-            [idArgument]: documentId,
+            documentId,
             pageNumber,
             width: renderWidth,
           }),
@@ -212,7 +209,6 @@ export function usePageBitmap({
     canvasRef,
     command,
     documentId,
-    idArgument,
     isNearViewport,
     maxRenderWidth,
     mimeType,

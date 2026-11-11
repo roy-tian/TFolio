@@ -3,16 +3,21 @@ import "@wdio/tauri-service"
 
 import {
   activeSidebar,
+  appMenuItem,
   appMenuItemEnabled,
   bandedPdf,
   clickAppMenuItem,
+  closeAppMenu,
   openPathViaDialog,
   openPdfFromDisk,
   pressRedo,
   refreshApp,
   seedSettings,
   sidebarPageAction,
+  textPdf,
+  tooltipOn,
 } from "./helpers"
+import type { E2eOverrides } from "../../src/lib/e2e"
 
 /** Only the active document's sidebar is laid out, and only it is what a
     gesture means — a hidden tab's column is still in the tree. */
@@ -224,6 +229,75 @@ function dragThumbAway(from: number, over: number) {
     preview(over),
   )
 }
+
+type Point = { x: number; y: number }
+
+/** Presses a preview and carries it past the drag threshold, leaving the
+    pages in hand for the moves that follow. */
+function liftThumb(pageNumber: number) {
+  return browser.execute((selector: string) => {
+    const source = document.querySelector(selector)!
+    const box = source.getBoundingClientRect()
+    const start = { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+
+    source.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: start.x,
+        clientY: start.y,
+        isPrimary: true,
+      }),
+    )
+    document.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, clientX: start.x, clientY: start.y + 12 }),
+    )
+  }, preview(pageNumber))
+}
+
+function pointerAt(type: "pointermove" | "pointerup", point: Point) {
+  return browser.execute(
+    (kind: string, at: Point) => {
+      document.dispatchEvent(
+        new PointerEvent(kind, { bubbles: true, clientX: at.x, clientY: at.y }),
+      )
+    },
+    type,
+    point,
+  )
+}
+
+/** Just inside the top of a preview in the shown sidebar: the gap before it. */
+function abovePreview(pageNumber: number) {
+  return browser.execute((selector: string) => {
+    const box = document.querySelector(selector)!.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + 6 }
+  }, preview(pageNumber))
+}
+
+function tabPoint(name: string) {
+  return browser.execute((tabName: string) => {
+    const tab = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-document-tab]"),
+    ).find((element) => element.textContent?.includes(tabName))!
+    const box = tab.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  }, name)
+}
+
+/** The middle of the strip's open space, past the last tab and its buttons. */
+function stripSpace() {
+  return browser.execute(() => {
+    const box = document.querySelector("[data-strip-space]")!.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  })
+}
+
+const tabButton = (name: string) =>
+  $(`//button[@role='tab'][normalize-space()='${name}']`)
 
 const pageInput = () => $("input[aria-label='Page number']")
 
@@ -472,5 +546,267 @@ describe("TFolio page editing in the sidebar", () => {
     })
     await waitForThumb(1, fourth!)
     await waitForThumb(2, second!)
+  })
+
+  it("turns the pages a paste brings in with the rest of a turned view", async () => {
+    await openPdfFromDisk("turned.pdf", bandedPdf(2))
+    await paintedFingerprints(2)
+    await $("button[aria-label='Rotate the view clockwise']").click()
+    await browser.waitUntil(async () => (await thumbShape(2)) === "landscape", {
+      timeoutMsg: "the view never turned",
+    })
+
+    await clickThumb(2)
+    await browser.keys(["Control", "c"])
+    await clickThumb(1)
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the paste never landed",
+    })
+
+    // The last place is the one an untracked turn would have left upright.
+    for (const pageNumber of [1, 2, 3]) {
+      expect(await thumbShape(pageNumber)).toBe("landscape")
+    }
+  })
+})
+
+describe("TFolio pages carried to other documents", () => {
+  beforeEach(async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+  })
+
+  it("copies pages into another tab's column where they are let go", async () => {
+    await openPdfFromDisk("carry-target.pdf", textPdf(2))
+    const [targetFirst, targetSecond] = await paintedFingerprints(2)
+    await openPdfFromDisk("carry-source.pdf", bandedPdf(4))
+    const [, sourceSecond, sourceThird] = await paintedFingerprints(4)
+
+    await clickThumb(2)
+    await clickThumb(3, { ctrl: true })
+    await liftThumb(3)
+    await pointerAt("pointermove", await tabPoint("carry-target.pdf"))
+    await expect($("[data-append-offer]")).toHaveText("+2")
+    // Resting on the tab opens it under the pages.
+    await expect(tabButton("carry-target.pdf")).toHaveAttribute("aria-selected", "true")
+
+    const gap = await abovePreview(2)
+
+    await pointerAt("pointermove", gap)
+    await $(`${activeSidebar} [data-drag-hole]`).waitForExist({
+      timeoutMsg: "the column never made room for the pages",
+    })
+    await expect($("[data-append-offer]")).not.toBeExisting()
+    await pointerAt("pointerup", gap)
+
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the copies never landed",
+    })
+    await waitForThumb(1, targetFirst!)
+    await waitForThumb(2, sourceSecond!)
+    await waitForThumb(3, sourceThird!)
+    await waitForThumb(4, targetSecond!)
+
+    // One step in the history of the document that took them.
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the undo never took the copies back",
+    })
+
+    // The source gave copies and kept its own.
+    await tabButton("carry-source.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the source lost pages",
+    })
+  })
+
+  it("adds pages let go on another tab to the end of its file", async () => {
+    await openPdfFromDisk("append-target.pdf", textPdf(2))
+    const [targetFirst, targetSecond] = await paintedFingerprints(2)
+    await openPdfFromDisk("append-source.pdf", bandedPdf(4))
+    const [first, , third] = await paintedFingerprints(4)
+
+    await clickThumb(1)
+    await clickThumb(3, { ctrl: true })
+    await liftThumb(3)
+
+    // In one script, so the release lands well before the tab would open.
+    const tab = await tabPoint("append-target.pdf")
+
+    await browser.execute((at: Point) => {
+      for (const kind of ["pointermove", "pointerup"]) {
+        document.dispatchEvent(
+          new PointerEvent(kind, { bubbles: true, clientX: at.x, clientY: at.y }),
+        )
+      }
+    }, tab)
+
+    await $("[data-notice='pagesAppended']").waitForDisplayed({
+      timeoutMsg: "the copies never landed",
+    })
+    await expect($("[data-notice='pagesAppended']")).toHaveText(
+      expect.stringContaining("Added 2 pages to the end of append-target.pdf"),
+    )
+    await expect(tabButton("append-source.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(await thumbCount()).toBe(4)
+
+    await tabButton("append-target.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the target never showed the copies",
+    })
+    await waitForThumb(1, targetFirst!)
+    await waitForThumb(2, targetSecond!)
+    await waitForThumb(3, first!)
+    await waitForThumb(4, third!)
+    await expect(
+      $("button[role='tab'][aria-selected='true'] [aria-label='Unsaved changes']"),
+    ).toBeExisting()
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the undo never took the copies back",
+    })
+  })
+
+  it("refuses pages let go on a tab still at work, and says so", async () => {
+    await openPdfFromDisk("busy-target.pdf", textPdf(2))
+    await paintedFingerprints(2)
+    // A Save As whose dialog is never answered holds the tab's queue.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __finishSaveAs?: () => void
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: () =>
+          new Promise((resolve) => {
+            page.__finishSaveAs = () => resolve(null)
+          }),
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () => typeof (window as Window & { __finishSaveAs?: unknown }).__finishSaveAs === "function",
+        ),
+      { timeoutMsg: "the Save As never started" },
+    )
+
+    await openPdfFromDisk("busy-source.pdf", bandedPdf(4))
+    await paintedFingerprints(4)
+    await clickThumb(1)
+    await liftThumb(1)
+
+    const tab = await tabPoint("busy-target.pdf")
+
+    await pointerAt("pointermove", tab)
+    // The spring and the offer are set by the same move.
+    await $("[data-tab-spring]").waitForExist()
+    await expect($("[data-append-offer]")).not.toBeExisting()
+    await pointerAt("pointerup", tab)
+
+    await $("[data-notice='pagesAppendBusy']").waitForDisplayed()
+    await expect($("[data-notice='pagesAppendBusy']")).toHaveText(
+      expect.stringContaining("busy-target.pdf still has work in progress"),
+    )
+
+    // Once the work is done, the same release adds the page.
+    await browser.execute(() =>
+      (window as Window & { __finishSaveAs?: () => void }).__finishSaveAs?.(),
+    )
+    await tabButton("busy-source.pdf").click()
+    // The refused pages fly home first; a press before then lifts nothing.
+    await $(`${activeSidebar} [data-drag-hole]`).waitForExist({ reverse: true })
+    await clickThumb(1)
+    await liftThumb(1)
+    // The tab is asked on each move, as a held pointer's tremor would.
+    await browser.waitUntil(
+      async () => {
+        await pointerAt("pointermove", tab)
+        return $("[data-append-offer]").isExisting()
+      },
+      { timeoutMsg: "the tab never offered itself once its work was done" },
+    )
+    await expect($("[data-append-offer]")).toHaveText("+1")
+    await pointerAt("pointerup", tab)
+
+    // The same corner slot: the success replaces the refusal.
+    await $("[data-notice='pagesAppended']").waitForDisplayed()
+    await expect($("[data-notice='pagesAppendBusy']")).not.toBeExisting()
+    await tabButton("busy-target.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the page never landed once the tab was free",
+    })
+  })
+
+  it("makes a new PDF of pages let go on the tab strip's open space", async () => {
+    await openPdfFromDisk("extract-source.pdf", bandedPdf(4))
+    const [first, , third] = await paintedFingerprints(4)
+
+    await clickThumb(1)
+    await clickThumb(3, { ctrl: true })
+    await liftThumb(3)
+
+    const space = await stripSpace()
+
+    await pointerAt("pointermove", space)
+    await $("[data-new-document-offer]").waitForDisplayed({
+      timeoutMsg: "the strip never offered a new PDF",
+    })
+    await pointerAt("pointerup", space)
+
+    await expect(tabButton("Pages from extract-source.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the new PDF never showed its pages",
+    })
+    await waitForThumb(1, first!)
+    await waitForThumb(2, third!)
+    // Work that exists nowhere else yet: a close asks first.
+    await expect(
+      $("button[role='tab'][aria-selected='true'] [aria-label='Unsaved changes']"),
+    ).toBeExisting()
+
+    await tabButton("extract-source.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the source lost pages",
+    })
+  })
+
+  it("keeps a new PDF of watermarked pages export-only", async () => {
+    await openPdfFromDisk("stamped-source.pdf", bandedPdf(2))
+    await paintedFingerprints(2)
+    await $("button[aria-label='Watermark']").click()
+    await $("[data-testid='watermark-text']").setValue("ARCHIVE")
+    await $("[data-testid='watermark-apply']").click()
+    await $("[data-testid='watermark-dialog']").waitForDisplayed({
+      reverse: true,
+      timeout: 30_000,
+    })
+
+    await clickThumb(1)
+    await liftThumb(1)
+
+    const space = await stripSpace()
+
+    await pointerAt("pointermove", space)
+    await $("[data-new-document-offer]").waitForDisplayed()
+    await pointerAt("pointerup", space)
+    await expect(tabButton("Pages from stamped-source.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+
+    // The tab knows from its first render, before any edit has said so.
+    const save = await appMenuItem("save")
+    expect(await save.getAttribute("data-disabled")).not.toBe(null)
+    expect(await tooltipOn("[data-action='save']")).toContain("holding copies of pages")
+    await closeAppMenu(save)
   })
 })

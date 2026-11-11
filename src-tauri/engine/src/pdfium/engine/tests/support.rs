@@ -89,8 +89,8 @@ pub(super) fn test_engine() -> &'static PdfiumEngine {
         page_number_font: OnceLock::new(),
         operations: Mutex::new(HashMap::new()),
         next_operation_id: AtomicU64::new(1),
-        organize: Mutex::default(),
-        next_organize_id: AtomicU64::new(1),
+        sources: Mutex::default(),
+        next_source_id: AtomicU64::new(1),
     })
 }
 
@@ -151,6 +151,51 @@ pub(super) fn minimal_pdf() -> Vec<u8> {
             "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
         ];
     build_pdf(&objects)
+}
+
+/// One page carrying a signature field whose widget shows a red seal, and a
+/// link to the page beside it, under one bookmark, signed over the whole file.
+/// The `/Contents` is no real CMS: only the structure is ever checked, which
+/// this frames exactly as a signer's.
+pub(super) fn signed_pdf() -> Vec<u8> {
+    const PLACEHOLDER: &str = "[0 0000000000 0000000000 0000000000]";
+    let seal = "1 0 0 rg 10 10 80 80 re f";
+    let contents: String = (0u8..64)
+        .map(|byte| format!("{byte:02X}"))
+        .chain(std::iter::repeat_n("00".to_string(), 192))
+        .collect();
+    let objects = [
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 9 0 R /AcroForm << /Fields [5 0 R] /SigFlags 3 >> >>\nendobj\n".to_string(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Annots [5 0 R 8 0 R] >>\nendobj\n".to_string(),
+            "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+            "5 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Sig /T (Seal) /Rect [50 50 150 150] /F 4 /P 3 0 R /V 7 0 R /AP << /N 6 0 R >> >>\nendobj\n".to_string(),
+            format!(
+                "6 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length {} >>\nstream\n{seal}\nendstream\nendobj\n",
+                seal.len() + 1
+            ),
+            format!(
+                "7 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached /ByteRange {PLACEHOLDER} /Contents <{contents}> >>\nendobj\n"
+            ),
+            "8 0 obj\n<< /Type /Annot /Subtype /Link /Rect [10 250 90 270] /Border [0 0 0] /Dest [3 0 R /Fit] >>\nendobj\n".to_string(),
+            "9 0 obj\n<< /Type /Outlines /First 10 0 R /Last 10 0 R /Count 1 >>\nendobj\n".to_string(),
+            "10 0 obj\n<< /Title (Seal) /Parent 9 0 R /Dest [3 0 R /Fit] >>\nendobj\n".to_string(),
+        ];
+    let mut pdf = build_pdf(&objects);
+    let start = find(&pdf, b"/Contents <").expect("the fixture has a signature") + 10;
+    let end = start + contents.len() + 2;
+    let byte_range = format!("[0 {start} {end} {}]", pdf.len() - end);
+    let at = find(&pdf, PLACEHOLDER.as_bytes()).expect("the fixture has a byte range");
+
+    pdf[at..at + PLACEHOLDER.len()]
+        .copy_from_slice(format!("{byte_range:<width$}", width = PLACEHOLDER.len()).as_bytes());
+    pdf
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 pub(super) fn two_page_pdf() -> Vec<u8> {
@@ -349,8 +394,8 @@ pub(super) fn font_engine(
         page_number_font: OnceLock::new(),
         operations: Mutex::new(HashMap::new()),
         next_operation_id: AtomicU64::new(1),
-        organize: Mutex::default(),
-        next_organize_id: AtomicU64::new(1),
+        sources: Mutex::default(),
+        next_source_id: AtomicU64::new(1),
     }
 }
 

@@ -1,7 +1,10 @@
 //! The reader's own settings — how the app behaves, never one document's state —
 //! in one TOML file per user and machine, theirs to edit, so revalidated on the way in.
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{
+    de::{DeserializeOwned, IgnoredAny},
+    Deserialize, Deserializer, Serialize,
+};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tfolio_engine::{PageNumbersPreferences, WatermarkConfig};
 
@@ -25,6 +28,19 @@ pub struct Settings {
     watermark: Option<WatermarkConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     page_numbers: Option<PageNumbersPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organize: Option<OrganizePreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signatures: Option<SignaturePreferences>,
+}
+
+/// What a change that would break intact signatures does without asking:
+/// `ask`, `flatten` or `keep`, validated where the frontend reads it.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct SignaturePreferences {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handling: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -40,9 +56,45 @@ struct UiPreferences {
     sidebar: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sidebar_panel: Option<String>,
-    /// The organize thumbnails' long side in CSS pixels.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    organize_thumbnail_size: Option<u32>,
+    /// In CSS pixels; the frontend clamps it to the window it opens in.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    sidebar_width: Option<u32>,
+    /// Whether the sidebar starts each file of a document on a row of its own.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    sidebar_file_rows: Option<bool>,
+}
+
+/// How the next document files are added to lays them out and saves them: the
+/// last choices the reader made. `organize` still, the section's name since an
+/// earlier workspace made the same choices, so a file written then reads now.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct OrganizePreferences {
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    smart_padding: Option<bool>,
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    bookmarks: Option<bool>,
+}
+
+/// A choice this version cannot read costs that choice alone, not its
+/// section: the frontend falls back on each, and a hand-edited file may carry
+/// any value.
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Lenient<T> {
+        Set(T),
+        Unreadable(IgnoredAny),
+    }
+
+    Ok(match Lenient::deserialize(deserializer)? {
+        Lenient::Set(value) => Some(value),
+        Lenient::Unreadable(_) => None,
+    })
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -90,6 +142,8 @@ impl Stored for Settings {
             annotate: section(&table, "annotate"),
             watermark: section(&table, "watermark"),
             page_numbers: section(&table, "pageNumbers"),
+            organize: section(&table, "organize"),
+            signatures: section(&table, "signatures"),
         }
     }
 
@@ -107,6 +161,8 @@ impl Settings {
             annotate: sent_section(document, "annotate"),
             watermark: sent_section(document, "watermark"),
             page_numbers: sent_section(document, "pageNumbers"),
+            organize: sent_section(document, "organize"),
+            signatures: sent_section(document, "signatures"),
         }
     }
 }
@@ -206,7 +262,8 @@ mod tests {
                 view_mode: None,
                 sidebar: Some("hidden".into()),
                 sidebar_panel: Some("bookmarks".into()),
-                organize_thumbnail_size: Some(200),
+                sidebar_width: Some(420),
+                sidebar_file_rows: Some(false),
             }),
             annotate: Some(AnnotatePreferences {
                 highlight_color: Some("#ffd54a".into()),
@@ -219,6 +276,13 @@ mod tests {
             }),
             watermark: None,
             page_numbers: Some(page_numbers()),
+            organize: Some(OrganizePreferences {
+                smart_padding: Some(false),
+                bookmarks: None,
+            }),
+            signatures: Some(SignaturePreferences {
+                handling: Some("flatten".into()),
+            }),
         }
     }
 
@@ -229,7 +293,8 @@ mod tests {
 
         let ui = read.ui.expect("the ui section should read back");
         assert_eq!(ui.theme.as_deref(), Some("dark"));
-        assert_eq!(ui.organize_thumbnail_size, Some(200));
+        assert_eq!(ui.sidebar_width, Some(420));
+        assert_eq!(ui.sidebar_file_rows, Some(false));
         assert_eq!(
             read.annotate
                 .and_then(|annotate| annotate.text_note)
@@ -237,6 +302,18 @@ mod tests {
             Some(12.0)
         );
         assert_eq!(read.page_numbers, Some(page_numbers()));
+
+        let organize = read
+            .organize
+            .expect("the organize section should read back");
+        assert_eq!(organize.smart_padding, Some(false));
+        assert_eq!(organize.bookmarks, None);
+        assert_eq!(
+            read.signatures
+                .and_then(|signatures| signatures.handling)
+                .as_deref(),
+            Some("flatten")
+        );
     }
 
     /// Names the keys rather than trusting the derive, because they are also
@@ -250,7 +327,10 @@ mod tests {
         assert!(rendered.contains("[pageNumbers]"));
         assert!(rendered.contains("fontSize"));
         assert!(rendered.contains("sidebarPanel"));
-        assert!(rendered.contains("organizeThumbnailSize = 200"));
+        assert!(rendered.contains("[organize]"));
+        assert!(rendered.contains("smartPadding = false"));
+        assert!(rendered.contains("[signatures]"));
+        assert!(rendered.contains("handling = \"flatten\""));
         assert!(!rendered.contains("[watermark]"));
     }
 
@@ -293,6 +373,56 @@ mod tests {
             Some("en")
         );
         assert!(settings.page_numbers.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_organize_choice_costs_only_itself() {
+        let read = Settings::parse(
+            r#"
+            [organize]
+            bookmarks = "yes"
+            smartPadding = false
+            "#,
+        )
+        .organize
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(read.bookmarks, None);
+        assert_eq!(read.smart_padding, Some(false));
+
+        let sent = Settings::sent(&serde_json::json!({
+            "organize": { "bookmarks": false, "smartPadding": 1 },
+        }))
+        .organize
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(sent.bookmarks, Some(false));
+        assert_eq!(sent.smart_padding, None);
+    }
+
+    #[test]
+    fn an_unreadable_sidebar_width_costs_only_itself() {
+        let read = Settings::parse(
+            r#"
+            [ui]
+            language = "en"
+            sidebarWidth = "wide"
+            "#,
+        )
+        .ui
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(read.language.as_deref(), Some("en"));
+        assert_eq!(read.sidebar_width, None);
+
+        let sent = Settings::sent(&serde_json::json!({
+            "ui": { "sidebar": "shown", "sidebarWidth": -40 },
+        }))
+        .ui
+        .expect("the readable choices should keep the section");
+
+        assert_eq!(sent.sidebar.as_deref(), Some("shown"));
+        assert_eq!(sent.sidebar_width, None);
     }
 
     #[test]

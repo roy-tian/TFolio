@@ -13,7 +13,6 @@ import type {
   TextNoteCommand,
   TextNoteStyle,
 } from "@/lib/annotations"
-import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import { prepareTextNoteFont, type TextNoteFont } from "@/lib/textNoteFont"
 import type { PdfPageInfo } from "@/lib/pdf"
 import {
@@ -33,8 +32,8 @@ type UseTextNoteToolOptions = {
   /** Temporarily detach document listeners without settling the draft or tool. */
   suspended?: boolean
   pages: PdfPageInfo[]
-  rotations: PageRotations
   style: TextNoteStyle
+  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -70,8 +69,8 @@ export function useTextNoteTool({
   onCommit,
   pages,
   suspended = false,
-  rotations,
   style,
+  viewRotation,
   viewerRef,
 }: UseTextNoteToolOptions): TextNoteTool {
   const [draft, setDraft] = useState<TextNoteDraft | null>(null)
@@ -275,7 +274,7 @@ export function useTextNoteTool({
           ),
         ),
         page,
-        rotationForPage(rotations, pageNumber),
+        viewRotation,
       )
 
       // The open note is written before the new one opens, so two editors are
@@ -310,7 +309,7 @@ export function useTextNoteTool({
       document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("keydown", handleKeyDown)
     }
-  }, [active, cancel, commit, pages, rotations, suspended, viewerRef])
+  }, [active, cancel, commit, pages, suspended, viewRotation, viewerRef])
 
   return { cancel, commit, draft, editorRef, onPagePaint, preparing, previews, setText }
 }

@@ -13,7 +13,7 @@ export async function loadWordConversionAvailability() {
   }
 }
 
-/** Whether the organize workspace may accept Word documents. Settled at boot,
+/** Whether Word documents may be opened or added. Settled at boot,
     before it can be used, because it is the machine's own state. */
 export function wordConversionAvailable() {
   return available

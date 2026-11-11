@@ -1,4 +1,13 @@
-import { ChevronDown, FileImage, Save, Scissors, Search, Shrink, Upload } from "lucide-react"
+import {
+  ChevronDown,
+  FileImage,
+  RectangleVertical,
+  Save,
+  Scissors,
+  Search,
+  Shrink,
+  Upload,
+} from "lucide-react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -7,7 +16,6 @@ import { SidebarToggle } from "@/components/AppSidebar"
 import { HistoryControls } from "@/components/HistoryControls"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WindowControls } from "@/components/WindowControls"
-import { WorkspaceSwitch } from "@/components/WorkspaceSwitch"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -32,6 +40,7 @@ type SessionHeaderProps = {
   canSave: boolean
   macOS: boolean
   onCompress: () => void
+  onSaveA4: () => void
   onExportImages: () => void
   onSave: () => void
   onSaveAs: () => void
@@ -41,9 +50,13 @@ type SessionHeaderProps = {
   onToolChange: (tool: AnnotationTool) => void
   onUndo: () => void
   saveLabel: string
+  /** A document other files were added to saves only to a new file, so its
+      save button is Save As itself, its key with it. */
+  saveAsOnly: boolean
   searchOpen: boolean
   tool: {
     activeTool: AnnotationTool
+    drawingApplies: boolean
     highlightColor: HexColor
     onHighlightColorChange: (color: HexColor) => void
     onPageNumbers: () => void
@@ -64,6 +77,7 @@ export function SessionHeader({
   canSave,
   macOS,
   onCompress,
+  onSaveA4,
   onExportImages,
   onSave,
   onSaveAs,
@@ -72,6 +86,7 @@ export function SessionHeader({
   onSplit,
   onToolChange,
   onUndo,
+  saveAsOnly,
   saveLabel,
   searchOpen,
   tool,
@@ -91,6 +106,7 @@ export function SessionHeader({
           />
           <AnnotationToolbar
             activeTool={tool.activeTool}
+            drawingApplies={tool.drawingApplies}
             highlightColor={tool.highlightColor}
             onHighlightColorChange={tool.onHighlightColorChange}
             onPageNumbers={tool.onPageNumbers}
@@ -122,15 +138,16 @@ export function SessionHeader({
             {/* The outline variant's dark: border outranks a plain border-r override. */}
             <ToolbarTooltip label={saveLabel} shortcut={shortcuts.save}>
               <Button
-                aria-label={t("annotate.save")}
+                aria-label={saveAsOnly ? t("menu.saveAs") : t("annotate.save")}
                 className="border-r-transparent peer/save dark:border-r-transparent"
+                data-save-as-only={saveAsOnly ? "" : undefined}
                 data-slot="pdf-save-trigger"
-                disabled={!canSave}
-                onClick={onSave}
+                disabled={!saveAsOnly && !canSave}
+                onClick={saveAsOnly ? onSaveAs : onSave}
                 size="icon-sm"
                 variant="outline"
               >
-                <Save />
+                {saveAsOnly ? <Upload /> : <Save />}
               </Button>
             </ToolbarTooltip>
             <DropdownMenu>
@@ -159,6 +176,10 @@ export function SessionHeader({
                   <DropdownMenuShortcut>
                     {formatShortcut(shortcuts.saveAs)}
                   </DropdownMenuShortcut>
+                </DropdownMenuItem>
+                <DropdownMenuItem data-action="save-a4" onClick={onSaveA4}>
+                  <RectangleVertical />
+                  {t("a4Export.menuLabel")}
                 </DropdownMenuItem>
                 <DropdownMenuItem data-action="export-images" onClick={onExportImages}>
                   <FileImage />
@@ -194,7 +215,7 @@ type ToolbarFrameProps = {
 
 /** The title bar right of the sidebar, ending in the app menu and the window
     controls. Without a docked sidebar beside it, it takes over the sidebar's
-    first row: the toggle, the workspace switch, the traffic lights. */
+    first row: the toggle and the traffic lights. */
 export function ToolbarFrame({
   active,
   appMenu,
@@ -218,12 +239,7 @@ export function ToolbarFrame({
           !docked && macOS && "pl-[68px]",
         )}
       >
-        {docked ? null : (
-          <>
-            <SidebarToggle />
-            <WorkspaceSwitch />
-          </>
-        )}
+        {docked ? null : <SidebarToggle />}
         {start}
       </div>
       <div className="flex items-center gap-1">

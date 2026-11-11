@@ -4,19 +4,19 @@
  */
 import type { Channel } from "@tauri-apps/api/core"
 
-import type { PdfDocumentInfo, PdfExportOutcome } from "@/lib/pdf"
+import type { A4Saved, PdfExportOutcome } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 
 export type E2eOverrides = {
-  /** Stands in for `save_assembled_pdf`, whose save dialog no driver can answer. */
-  saveAssembledPdf?: (args: {
+  /** Stands in for `save_a4_pdf`, whose save dialog no driver can answer. */
+  saveA4Pdf?: (args: {
+    documentId: number
     filterLabel: string
     onProgress: Channel<PdfProgress>
-    plan: unknown
     suggestedName: string
-  }) => Promise<PdfDocumentInfo | null>
+  }) => Promise<A4Saved | null>
   checkUpdates?: () => Promise<void>
   downloadUpdate?: () => Promise<void>
   installUpdate?: () => Promise<void>

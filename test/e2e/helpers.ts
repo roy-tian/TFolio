@@ -11,7 +11,7 @@ import {
 import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 
-import { $, $$, browser } from "@wdio/globals"
+import { $, $$, browser, expect } from "@wdio/globals"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
 import type { PdfExportOutcome } from "../../src/lib/pdf"
@@ -290,6 +290,75 @@ export function wrappedSearchPdf() {
   ])
 }
 
+/**
+ * One page of text carrying a signature field whose widget shows a red seal,
+ * signed over the whole file. The `/Contents` is no real CMS: the app checks
+ * only that the byte range frames it, which this does exactly as a signer's.
+ */
+export function signedPdf() {
+  const placeholder = "[0 0000000000 0000000000 0000000000]"
+  const text = "BT\n/F1 24 Tf\n40 200 Td\n(Highlight me please 1) Tj\nET\n"
+  const seal = "1 0 0 rg 10 10 80 80 re f"
+  const contents =
+    Array.from({ length: 64 }, (_, byte) => byte.toString(16).padStart(2, "0")).join("") +
+    "00".repeat(192)
+  const pdf = buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R " +
+      "/AcroForm << /Fields [5 0 R] /SigFlags 3 >> >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] " +
+      "/Resources << /Font << /F1 8 0 R >> >> /Contents 4 0 R /Annots [5 0 R] >>\nendobj\n",
+    `4 0 obj\n<< /Length ${text.length} >>\nstream\n${text}endstream\nendobj\n`,
+    "5 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Sig /T (Seal) " +
+      "/Rect [180 20 280 120] /F 4 /P 3 0 R /V 7 0 R /AP << /N 6 0 R >> >>\nendobj\n",
+    "6 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] " +
+      `/Length ${seal.length + 1} >>\nstream\n${seal}\nendstream\nendobj\n`,
+    "7 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached " +
+      `/ByteRange ${placeholder} /Contents <${contents}> >>\nendobj\n`,
+    "8 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  ])
+  const start = pdf.indexOf("/Contents <") + "/Contents ".length
+  const end = start + contents.length + 2
+  const byteRange = `[0 ${start} ${end} ${pdf.length - end}]`.padEnd(placeholder.length)
+
+  pdf.write(byteRange, pdf.indexOf(placeholder), "ascii")
+
+  return pdf
+}
+
+/** Selects the page's one text run and lets go, the way the reader highlights:
+    the press has to land on the text for the release to commit. */
+export async function highlightTheText() {
+  // The tool stays on after a highlight, and a second press would turn it off.
+  const tool = $("button[aria-label='Highlight text']")
+  if ((await tool.getAttribute("aria-pressed")) !== "true") {
+    await tool.click()
+  }
+
+  const selected = await browser.execute(() => {
+    const span = document.querySelector(".pdf-text-layer span")
+
+    if (!span) {
+      return null
+    }
+
+    span.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }))
+
+    const range = document.createRange()
+    range.selectNodeContents(span)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+
+    return span.textContent
+  })
+  expect(selected).toContain("Highlight")
+
+  await browser.execute(() => {
+    document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }))
+  })
+}
+
 function buildPdf(objects: string[]) {
   const chunks = ["%PDF-1.4\n"]
   const offsets: number[] = []
@@ -504,9 +573,15 @@ export const activeSidebar =
 
 /** Opens a page's menu in the shown tab's sidebar, which also chooses the
     page if it was not chosen, and takes the action named by `data-action`. */
-export async function sidebarPageAction(pageNumber: number, action: string) {
-  const selector = `${activeSidebar} button[data-thumbnail-page='${pageNumber}']`
+export function sidebarPageAction(pageNumber: number, action: string) {
+  return contextMenuAction(
+    `${activeSidebar} button[data-thumbnail-page='${pageNumber}']`,
+    action,
+  )
+}
 
+/** A right-click on `selector`'s middle, then its menu's entry `action`. */
+export async function contextMenuAction(selector: string, action: string) {
   await $(selector).waitForExist({ timeout: 30_000 })
   await browser.execute((target: string) => {
     const page = document.querySelector(target)!
@@ -607,7 +682,7 @@ export async function openPathViaDialog(filePath: string) {
 
 /**
  * Writes `contents` to a scratch file and answers its path, unopened — the
- * organize workspace and the grid's insert read files they never open.
+ * files added to a document are read without being opened.
  */
 export function writeScratchPdf(fileName: string, contents: Uint8Array): string {
   const directory = mkdtempSync(path.join(tmpdir(), "tfolio-e2e-"))
@@ -619,7 +694,7 @@ export function writeScratchPdf(fileName: string, contents: Uint8Array): string 
   return filePath
 }
 
-/** The multi-select stand-in the organize workspace's add reads, left beside
+/** The multi-select stand-in adding files reads, left beside
     whatever other override is already in place. */
 export async function pointMultiPickerAt(filePaths: string[]) {
   await browser.execute((mockPaths: string[]) => {
@@ -739,6 +814,27 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
   })
 }
 
+export async function clickOnPage(atX = 0.3, atY = 0.3) {
+  await browser.execute(
+    (at) => {
+      const page = document.querySelector("[data-page-number='1']")!
+      const canvas = page.querySelector("canvas")!
+      const box = page.getBoundingClientRect()
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: box.left + box.width * at.x,
+          clientY: box.top + box.height * at.y,
+          isPrimary: true,
+        }),
+      )
+    },
+    { x: atX, y: atY },
+  )
+}
+
 /**
  * How much ink page 1 carries, read off the canvas pixels — PDFium can accept
  * and store a mark it then declines to draw, so only the canvas can vouch.
@@ -814,11 +910,16 @@ export async function renderedPage(pageSelector = "[data-page-number='1']") {
  * WebDriver cannot start a desktop drag, so the event the window hears through
  * Tauri's event system is emitted directly, in CSS pixels (GTK logical units).
  */
-export function emitDrag(
+export async function emitDrag(
   name: "drag-over" | "drag-drop",
   point: { x: number; y: number },
   paths: string[],
 ) {
+  // The app binds its drop listeners a few IPC turns after it first paints, and
+  // an event emitted before then reaches nobody: straight after a reload, on a
+  // busy machine, that lost the whole drop.
+  await $("html[data-file-drops]").waitForExist()
+
   return browser.execute(
     (event: string, x: number, y: number, files: string[]) => {
       const tauri = (

@@ -6,7 +6,6 @@ import {
   fractionToPagePoint,
   type PagePoint,
 } from "@/lib/annotationGeometry"
-import { rotationForPage, type PageRotations } from "@/lib/pageRotation"
 import type { PdfPageInfo } from "@/lib/pdf"
 
 const CLICK_SLOP = 4
@@ -15,7 +14,7 @@ type UseEraserToolOptions = {
   active: boolean
   onErase: (pageNumber: number, point: PagePoint) => void
   pages: PdfPageInfo[]
-  rotations: PageRotations
+  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -27,7 +26,7 @@ export function useEraserTool({
   active,
   onErase,
   pages,
-  rotations,
+  viewRotation,
   viewerRef,
 }: UseEraserToolOptions) {
   useEffect(() => {
@@ -114,7 +113,7 @@ export function useEraserTool({
             ),
           ),
           current.page,
-          rotationForPage(rotations, current.pageNumber),
+          viewRotation,
         ),
       )
     }
@@ -134,5 +133,5 @@ export function useEraserTool({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, onErase, pages, rotations, viewerRef])
+  }, [active, onErase, pages, viewRotation, viewerRef])
 }

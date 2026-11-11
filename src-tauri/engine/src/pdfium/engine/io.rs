@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use super::*;
 
 // A guided merge holds every source in memory at once under the same MiB
@@ -73,6 +75,17 @@ impl StagedFile {
             .expect("a staged file keeps its handle until it is committed")
     }
 
+    /// Staged already written: bytes another step made of PDFium's.
+    pub(super) fn holding(path: &Path, bytes: &[u8]) -> Result<Self, String> {
+        let mut staged = Self::beside(path)?;
+
+        staged.file().write_all(bytes).map_err(|error| {
+            write_error(&error, format!("could not write the document: {error}"))
+        })?;
+
+        Ok(staged)
+    }
+
     pub(super) fn commit(mut self) -> Result<(), String> {
         let file = self
             .file
@@ -81,8 +94,9 @@ impl StagedFile {
 
         // The rename only orders the replacement; a crash between an unsynced
         // rename and the writeback would leave a hollow file behind the name.
-        file.sync_all()
-            .map_err(|error| format!("could not flush the document: {error}"))?;
+        file.sync_all().map_err(|error| {
+            write_error(&error, format!("could not flush the document: {error}"))
+        })?;
         drop(file);
 
         // The temporary was born with default permissions; the file it replaces may
@@ -108,6 +122,13 @@ impl StagedFile {
 
         Ok(())
     }
+}
+
+/// How an export lands its file: PDFium's write staged at once, or PDFium's
+/// bytes still to be given their outline, off the documents lock.
+enum Staging {
+    Staged(StagedFile),
+    Outlined(Vec<u8>, Vec<OutlineNode>),
 }
 
 impl Drop for StagedFile {
@@ -153,42 +174,21 @@ pub(super) fn bounded_file_name(name: &str) -> &str {
     &name[..end]
 }
 
-/// A path as the filesystem names it. A fresh destination resolves through its
-/// parent; the unresolvable stay literal, erring towards "different".
-fn resolved(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-
-    match (path.parent(), path.file_name()) {
-        (Some(parent), Some(name)) => match parent.canonicalize() {
-            Ok(parent) => parent.join(name),
-            Err(_) => path.to_path_buf(),
-        },
-        _ => path.to_path_buf(),
-    }
-}
-
-/// Whether two paths name one file.
-pub(super) fn same_file(left: &Path, right: &Path) -> bool {
-    resolved(left) == resolved(right)
-}
-
 /// Whether `path` is the file of an open document other than `except`, aliases
-/// included. The destination resolves once: the scan runs under the documents lock.
+/// included. The destination is read once: the scan runs under the documents lock.
 pub(super) fn is_open_document_file(
     documents: &HashMap<u64, OpenDocument>,
     path: &Path,
     except: Option<u64>,
 ) -> bool {
-    let target = resolved(path);
+    let target = FileKey::of(path);
 
     documents.iter().any(|(id, document)| {
         Some(*id) != except
             && document
                 .source_path
                 .as_deref()
-                .is_some_and(|source| resolved(source) == target)
+                .is_some_and(|source| FileKey::of(source).names_same_file(&target))
     })
 }
 
@@ -207,20 +207,64 @@ pub(super) const EXPORT_COPY_ONLY_ERROR: &str = "tfolio:export-copy-only";
 /// `src/lib/pdf.ts`.
 pub(super) const EXPORT_DENIED_ERROR: &str = "tfolio:export-denied";
 
+/// A destination with no room left for the file. Matched as `EXPORT_NO_SPACE`
+/// in `src/lib/pdf.ts`.
+pub(super) const EXPORT_NO_SPACE_ERROR: &str = "tfolio:export-no-space";
+
+/// A destination whose folder is gone since it was chosen: moved, deleted,
+/// or on a drive taken out. Matched as `EXPORT_TARGET_MISSING` in `src/lib/pdf.ts`.
+pub(super) const EXPORT_TARGET_MISSING_ERROR: &str = "tfolio:export-target-missing";
+
+/// A copy built page by page whose document changed under it, so it was not
+/// written. Matched as `EXPORT_DOCUMENT_CHANGED` in `src/lib/pdf.ts`.
+pub(super) const EXPORT_DOCUMENT_CHANGED_ERROR: &str = "tfolio:export-document-changed";
+
 /// A refusal the reader can act on travels as a code the frontend words;
 /// anything else keeps its message for the log.
-fn write_error(error: &std::io::Error, message: String) -> String {
+pub(super) fn write_error(error: &std::io::Error, message: String) -> String {
+    use std::io::ErrorKind;
+
     match error.kind() {
-        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
-            EXPORT_DENIED_ERROR.into()
+        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => EXPORT_DENIED_ERROR.into(),
+        ErrorKind::StorageFull | ErrorKind::QuotaExceeded | ErrorKind::FileTooLarge => {
+            EXPORT_NO_SPACE_ERROR.into()
         }
+        ErrorKind::NotFound | ErrorKind::NotADirectory => EXPORT_TARGET_MISSING_ERROR.into(),
         _ => message,
     }
+}
+
+/// A file as it stood when read: what tells a later look that it changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Fingerprint {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Fingerprint {
+    pub(super) fn of(metadata: &fs::Metadata) -> Self {
+        Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        }
+    }
+}
+
+pub(super) fn fingerprint(path: &Path) -> Option<Fingerprint> {
+    fs::metadata(path)
+        .ok()
+        .map(|metadata| Fingerprint::of(&metadata))
 }
 
 /// A PDF read into memory under the app's ceiling, sized from metadata first so
 /// an oversized file is refused before it is read — and checked again after.
 pub(super) fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    read_pdf_file(path).map(|(bytes, _)| bytes)
+}
+
+/// `read_pdf_bytes` with the fingerprint of the metadata it sized the read by:
+/// taken before the read, so a file changed during it never matches it again.
+pub(super) fn read_pdf_file(path: &Path) -> Result<(Vec<u8>, Fingerprint), String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("could not open {}: {error}", path.display()))?;
 
@@ -243,7 +287,7 @@ pub(super) fn read_pdf_bytes(path: &Path) -> Result<Vec<u8>, String> {
         return Err(size_limit_error());
     }
 
-    Ok(bytes)
+    Ok((bytes, Fingerprint::of(&metadata)))
 }
 
 pub fn is_merge_image(path: &Path) -> bool {
@@ -414,6 +458,14 @@ impl<'a> MergeDraft<'a> {
         })
     }
 
+    /// A document made under the lock the caller holds, closed as a draft's.
+    pub(super) fn holding(engine: &'a PdfiumEngine, document: PdfDocument<'static>) -> Self {
+        Self {
+            engine,
+            document: Some(document),
+        }
+    }
+
     /// Only while the caller holds the lock.
     pub(super) fn document(&mut self) -> &mut PdfDocument<'static> {
         self.document
@@ -504,7 +556,7 @@ pub(super) fn image_limit_error() -> String {
 }
 
 pub(super) fn merge_file_limit_error() -> String {
-    format!("an organize workspace takes at most {MAX_MERGE_FILES} files at once")
+    format!("a document takes at most {MAX_MERGE_FILES} files at once")
 }
 
 impl PdfiumEngine {
@@ -573,6 +625,22 @@ impl PdfiumEngine {
             );
         }
 
+        if entry.bound_to_signed_original() {
+            return Err(
+                "a document opened with intact digital signatures may only be exported as a copy, not saved over its own file"
+                    .into(),
+            );
+        }
+
+        // The reader's choice, kept here so the WebView cannot skip it: the
+        // file stays as it was, and the combined pages go to a new one.
+        if entry.combined() {
+            return Err(
+                "a document with pages added from other files may only be saved as a new file, not over its own"
+                    .into(),
+            );
+        }
+
         let path = entry.source_path.clone().ok_or_else(|| {
             "this document was opened from bytes, so there is no file to save over".to_string()
         })?;
@@ -586,7 +654,49 @@ impl PdfiumEngine {
                     entry.loaded_len = loaded_len;
                 }
             });
-        })
+        })?;
+        self.record_written(document_id, &path);
+
+        Ok(())
+    }
+
+    /// Whether something other than this document has written its file since
+    /// the document last read or wrote it — for a converted one, its image or
+    /// Word file since the conversion. A file gone, or none to compare, has
+    /// nothing newer to offer.
+    pub fn document_file_changed(&self, document_id: u64) -> Result<bool, String> {
+        // A commit in flight would read as someone else's write until it has
+        // recorded its own; saves take this lock first, so this waits it out.
+        let _commits = self.lock_commits()?;
+        let (path, expected) = {
+            let documents = self.lock_documents()?;
+            let entry = open_entry(&documents, document_id)?;
+
+            match (&entry.source_path, &entry.converted_from) {
+                (Some(path), _) => (path.clone(), entry.source_fingerprint),
+                (None, Some(source)) => (source.path.clone(), Some(source.fingerprint)),
+                (None, None) => return Ok(false),
+            }
+        };
+
+        // Off the documents lock: the file may sit on slow storage.
+        Ok(expected
+            .zip(fingerprint(&path))
+            .is_some_and(|(expected, current)| expected != current))
+    }
+
+    /// The file a commit just landed is this document's own write, which an
+    /// open of it again must not take for someone else's. Taken while the
+    /// writer still holds the commits lock, so no check sees the file first.
+    fn record_written(&self, document_id: u64, path: &Path) {
+        let written = fingerprint(path);
+
+        if let Ok(mut documents) = self.lock_documents() {
+            if let Ok(entry) = open_entry_mut(&mut documents, document_id) {
+                entry.source_fingerprint = written;
+                entry.converted_from = None;
+            }
+        }
     }
 
     /// The folder a save-as dialog should open in for this document: its own
@@ -601,6 +711,22 @@ impl PdfiumEngine {
             .and_then(|source| source.parent())
             .filter(|parent| !parent.as_os_str().is_empty())
             .map(|parent| parent.to_path_buf())
+    }
+
+    /// The refusals a new file written to `path` would meet, asked ahead of
+    /// work that could otherwise only end in one.
+    pub fn check_new_file_destination(&self, path: &Path) -> Result<(), String> {
+        let documents = self.lock_documents()?;
+
+        if is_open_document_file(&documents, path, None) {
+            return Err(EXPORT_TARGET_OPEN_ERROR.into());
+        }
+
+        if self.is_signed_file(&documents, path) {
+            return Err(signatures::EXPORT_SIGNED_ERROR.into());
+        }
+
+        Ok(())
     }
 
     /// Writes to `path` and binds the document to it — a true save-as, after
@@ -618,6 +744,11 @@ impl PdfiumEngine {
             return Err(EXPORT_TARGET_OPEN_ERROR.into());
         }
 
+        // Its own signed file included, wherever the document is bound now.
+        if self.is_signed_file(&documents, path) {
+            return Err(signatures::EXPORT_SIGNED_ERROR.into());
+        }
+
         let entry = open_entry_mut(&mut documents, document_id)?;
         let copy_only = entry
             .owned_content
@@ -626,8 +757,9 @@ impl PdfiumEngine {
             || !entry.merged_page_ids.is_empty();
 
         // The same refusal `save` makes, at the other exit. This resolves
-        // aliases: a missed twin would destroy the original.
-        if copy_only
+        // aliases: a missed twin would destroy the original. Added files'
+        // pages go to a new file too, though the document then follows them.
+        if (copy_only || entry.combined())
             && entry
                 .source_path
                 .as_deref()
@@ -636,8 +768,36 @@ impl PdfiumEngine {
             return Err(EXPORT_COPY_ONLY_ERROR.into());
         }
 
+        // Unchanged, the copy is the file itself: PDFium's rewrite would break
+        // every signature. Not rebound, since that copy is a signed original too.
+        if entry.content_version == 0 && entry.bound_to_signed_original() {
+            if let Some(original) = entry.signed_original.clone() {
+                let signatures = entry.signatures();
+
+                drop(documents);
+                signatures::copy_original(&original, path)?;
+
+                return Ok(ExportOutcome {
+                    path: path.to_string_lossy().into_owned(),
+                    saved_to_source: false,
+                    signatures,
+                });
+            }
+        }
+
         let (version, loaded_len) = (entry.content_version, entry.loaded_len);
-        let staged = self.stage_document(entry, path)?;
+        // Several files write their bookmarks afresh, one each, which only
+        // lopdf can: it rereads PDFium's bytes off the lock, then stages them.
+        // So do an added file's pages left alone: PDFium's outline is still
+        // the document's own, aimed at pages that may all be gone.
+        let staging = match entry.save_as_layout() {
+            None => Staging::Staged(self.stage_document(entry, path)?),
+            Some((padding, nodes)) => {
+                let bytes = self.document_bytes(entry)?;
+
+                Staging::Outlined(self.padded(bytes, entry, &padding)?, nodes)
+            }
+        };
 
         // A copy-only document reaching here wrote somewhere other than its file.
         // Bound before the commit, under the lock that checked the destination;
@@ -647,10 +807,18 @@ impl PdfiumEngine {
         if saved_to_source {
             entry.source_path = Some(path.to_path_buf());
         }
+        let signatures = entry.signatures();
 
         drop(documents);
 
-        if let Err(error) = staged.commit() {
+        let written = match staging {
+            Staging::Staged(staged) => Ok(staged),
+            Staging::Outlined(bytes, nodes) => outline::write_outline(bytes, &nodes)
+                .and_then(|bytes| StagedFile::holding(path, &bytes)),
+        }
+        .and_then(StagedFile::commit);
+
+        if let Err(error) = written {
             self.after_failed_commit(document_id, |entry| {
                 if saved_to_source {
                     entry.source_path = previous_source;
@@ -663,9 +831,14 @@ impl PdfiumEngine {
             return Err(error);
         }
 
+        if saved_to_source {
+            self.record_written(document_id, path);
+        }
+
         Ok(ExportOutcome {
             path: path.to_string_lossy().into_owned(),
             saved_to_source,
+            signatures,
         })
     }
 
@@ -731,6 +904,104 @@ impl PdfiumEngine {
         Ok(())
     }
 
+    /// What a Save As of a document other files were added to writes, as
+    /// bytes: its blank pages and its bookmarks a file at a time. `None` for a
+    /// document of its own pages alone, whose bytes are PDFium's as they stand.
+    /// Left as the reader's document is: no orphans collected, nothing bound.
+    pub(super) fn combined_bytes(&self, entry: &OpenDocument) -> Option<Result<Vec<u8>, String>> {
+        let (padding, nodes) = entry.save_as_layout()?;
+
+        Some(
+            entry
+                .document
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not write the document: {error}"))
+                .and_then(|bytes| self.padded(bytes, entry, &padding))
+                .and_then(|bytes| outline::write_outline(bytes, &nodes)),
+        )
+    }
+
+    /// `bytes` with a blank page after each page `padding` names, sized as
+    /// that page shows: a copy's, so the reader's document keeps none.
+    fn padded(
+        &self,
+        bytes: Vec<u8>,
+        entry: &OpenDocument,
+        padding: &[usize],
+    ) -> Result<Vec<u8>, String> {
+        let sheets: Vec<_> = padding
+            .iter()
+            .map(|after| {
+                let shown = entry
+                    .page_ids
+                    .get(*after)
+                    .and_then(|page_id| entry.page_geometry.get(page_id))
+                    .copied()
+                    .unwrap_or(UNMEASURED_PAGE);
+
+                (*after, shown.width, shown.height)
+            })
+            .collect();
+
+        self.with_blank_pages(bytes, &sheets)
+    }
+
+    /// `bytes` with a blank page `width` by `height` after each page index
+    /// `sheets` names, in ascending order. Under the lock.
+    pub(super) fn with_blank_pages(
+        &self,
+        bytes: Vec<u8>,
+        sheets: &[(usize, f32, f32)],
+    ) -> Result<Vec<u8>, String> {
+        if sheets.is_empty() {
+            return Ok(bytes);
+        }
+
+        let mut copy = self
+            .pdfium
+            .load_pdf_from_byte_vec(bytes, None)
+            .map_err(|error| format!("PDFium could not reread the document: {error}"))?;
+
+        // From the end, so each index still names the page it was taken for.
+        for (after, width, height) in sheets.iter().rev() {
+            copy.pages_mut()
+                .create_page_at_index(
+                    PdfPagePaperSize::Custom(PdfPoints::new(*width), PdfPoints::new(*height)),
+                    *after as i32 + 1,
+                )
+                .map_err(|error| format!("PDFium could not add a blank page: {error}"))?;
+        }
+
+        copy.save_to_bytes()
+            .map_err(|error| format!("PDFium could not write the document: {error}"))
+    }
+
+    /// `stage_document`'s bytes, for a caller that rewrites them before they land.
+    fn document_bytes(&self, entry: &mut OpenDocument) -> Result<Vec<u8>, String> {
+        self.written(entry, |document| document.save_to_bytes())
+    }
+
+    /// A save's one step: collected of orphans first, and the file it reads
+    /// from no longer the bytes first opened once PDFium has rewritten them.
+    fn written<T>(
+        &self,
+        entry: &mut OpenDocument,
+        write: impl FnOnce(&PdfDocument<'static>) -> Result<T, PdfiumError>,
+    ) -> Result<T, String> {
+        self.collect_orphans(entry)?;
+
+        let written = write(&entry.document).map_err(|error| match error {
+            PdfiumError::IoError(cause) => write_error(
+                &cause,
+                format!("PDFium could not write the document: {cause}"),
+            ),
+            error => format!("PDFium could not write the document: {error}"),
+        })?;
+        entry.loaded_len = None;
+
+        Ok(written)
+    }
+
     /// The one write path under every save and export, so their files come out
     /// identical — collected of orphans, and landed whole. Staged only: the
     /// caller commits once the documents lock is let go, so the fsync is no
@@ -740,15 +1011,9 @@ impl PdfiumEngine {
         entry: &mut OpenDocument,
         path: &Path,
     ) -> Result<StagedFile, String> {
-        self.collect_orphans(entry)?;
-
         let mut staged = StagedFile::beside(path)?;
-        entry
-            .document
-            .save_to_writer(staged.file())
-            .map_err(|error| format!("PDFium could not write the document: {error}"))?;
-        // The source may now be PDFium's rewrite, not the bytes first opened.
-        entry.loaded_len = None;
+
+        self.written(entry, |document| document.save_to_writer(staged.file()))?;
 
         Ok(staged)
     }

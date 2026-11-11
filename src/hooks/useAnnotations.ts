@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Channel, invoke } from "@tauri-apps/api/core"
 
 import {
@@ -19,8 +19,12 @@ import {
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
   planDuplicatePages,
+  planInsertPages,
   planEraseAnnotation,
   planInsertBlankPage,
+  planFileOptions,
+  planInsertFiles,
+  planRenameSection,
   planPageNumbersChange,
   planReorderPages,
   planRotatePages,
@@ -34,16 +38,21 @@ import {
   type AnnotationHistory,
   type HighlightCommand,
   type PageChange,
+  type ReorderPagesCommand,
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
 import { e2eOverride } from "@/lib/e2e"
+import { isSourceChanged } from "@/lib/fileSources"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
+  A4Saved,
+  FileOptions,
   PdfExportOutcome,
   PdfStructureUpdate,
+  SignatureDecision,
 } from "@/lib/pdf"
 import {
   PdfOperationCancelled,
@@ -69,7 +78,15 @@ type StructureChangeHandler = (
   change?: PageChange,
 ) => void
 
+/** A change to the document itself, or a new file made of its pages. */
+export type SignedChange = "edit" | "export"
+
 type UseAnnotationsOptions = {
+  /** The reader's word on intact signatures, before a change that breaks
+      them; `true` where none is owed, without a turn of the event loop. */
+  beforeSignedChange?: (change: SignedChange) => true | Promise<boolean>
+  /** The same word from another open document whose pages are copied in. */
+  beforeCopyFrom?: (sourceDocumentId: number) => true | Promise<boolean>
   documentId: number
   /** A moved tab's history and marks, replayed as this session's own: undo,
       the dirty flag, and the export-only refusals keep answering as they did
@@ -216,6 +233,7 @@ async function applyCommand(
         await invoke<PdfStructureUpdate>("reorder_pdf_pages", {
           documentId,
           order: command.order,
+          sections: command.sections?.after,
         }),
         commandPageChange(command, false),
       )
@@ -248,11 +266,14 @@ async function applyCommand(
         await invoke<PdfStructureUpdate>("insert_pdf_blank_page", {
           documentId,
           index: command.index,
+          section: command.section,
         }),
         commandPageChange(command, false),
       )
       return []
     case "duplicatePages":
+    case "insertPages":
+    case "insertFiles":
       // Only ever a redo here — the first apply copies the pages below. A redo
       // restores the stash rather than copying again.
       onStructureChange(
@@ -260,6 +281,27 @@ async function applyCommand(
         await invoke<PdfStructureUpdate>("restore_pdf_pages", {
           documentId,
           stashId: command.stashId,
+        }),
+        commandPageChange(command, false),
+      )
+      return []
+    case "renameSection":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rename_pdf_section", {
+          documentId,
+          sectionId: command.sectionId,
+          title: command.title,
+        }),
+        commandPageChange(command, false),
+      )
+      return []
+    case "fileOptions":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("set_pdf_file_options", {
+          documentId,
+          options: command.next,
         }),
         commandPageChange(command, false),
       )
@@ -354,6 +396,7 @@ async function retractCommand(
         await invoke<PdfStructureUpdate>("reorder_pdf_pages", {
           documentId,
           order: command.inverse,
+          sections: command.sections?.before,
         }),
         commandPageChange(command, true),
       )
@@ -393,12 +436,35 @@ async function retractCommand(
       )
       return []
     case "duplicatePages":
+    case "insertPages":
+    case "insertFiles":
       onStructureChange(
         documentId,
         await invoke<PdfStructureUpdate>("delete_pdf_pages", {
           documentId,
           pageNumbers: insertPagesRange(command),
           stashId: command.stashId,
+        }),
+        commandPageChange(command, true),
+      )
+      return []
+    case "renameSection":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("rename_pdf_section", {
+          documentId,
+          sectionId: command.sectionId,
+          title: command.previous,
+        }),
+        commandPageChange(command, true),
+      )
+      return []
+    case "fileOptions":
+      onStructureChange(
+        documentId,
+        await invoke<PdfStructureUpdate>("set_pdf_file_options", {
+          documentId,
+          options: command.previous,
         }),
         commandPageChange(command, true),
       )
@@ -423,6 +489,8 @@ async function retractCommand(
 /** PDFium's document is the truth about what is on a page, so nothing here
     mirrors the annotations, only what it cannot answer about the reader's steps. */
 export function useAnnotations({
+  beforeCopyFrom,
+  beforeSignedChange,
   documentId,
   initial,
   onAnnotateError,
@@ -461,6 +529,20 @@ export function useAnnotations({
   // The one thing kept about the annotations themselves: which marks each
   // applied entry holds, so an undo and the eraser can name them, not count them.
   const marksRef = useRef<MarkStore>(new Map(initial?.marks ?? []))
+  const beforeSignedChangeRef = useRef(beforeSignedChange)
+  const beforeCopyFromRef = useRef(beforeCopyFrom)
+
+  useLayoutEffect(() => {
+    beforeSignedChangeRef.current = beforeSignedChange
+    beforeCopyFromRef.current = beforeCopyFrom
+  }, [beforeCopyFrom, beforeSignedChange])
+
+  // Awaited by callers only where an answer is owed: elsewhere an edit still
+  // enqueues in the same turn, as the drops that need an idle queue rely on.
+  const signedChangeReady = useCallback(
+    (change: SignedChange) => beforeSignedChangeRef.current?.(change) ?? true,
+    [],
+  )
 
   const applyEpochs = useCallback((pageNumbers: number[], textPages: number[]) => {
     const next = { ...renderEpochsRef.current }
@@ -591,6 +673,21 @@ export function useAnnotations({
         return false
       }
 
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true) {
+        if (!(await ready)) {
+          return false
+        }
+
+        // A flatten answered earlier runs here with no modal prompt, so a
+        // page-moving edit may have started meanwhile.
+        if (structurePendingRef.current > 0) {
+          onEditRefused?.()
+          return false
+        }
+      }
+
       let applied = false
       await enqueue(
         (current) => ({
@@ -621,7 +718,14 @@ export function useAnnotations({
       )
       return applied
     },
-    [documentId, enqueue, onAnnotateError, onEditRefused, onStructureChange],
+    [
+      documentId,
+      enqueue,
+      onAnnotateError,
+      onEditRefused,
+      onStructureChange,
+      signedChangeReady,
+    ],
   )
 
   /** Every structure edit's one path: planned inside the queue, which hands the
@@ -632,6 +736,12 @@ export function useAnnotations({
         history: AnnotationHistory,
       ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
     ): Promise<boolean> => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return false
+      }
+
       let landed = false
 
       structurePendingRef.current += 1
@@ -667,11 +777,12 @@ export function useAnnotations({
 
       return landed
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
   const reorderPages = useCallback(
-    (order: number[]) => commitStructure((current) => planReorderPages(current, order)),
+    (order: number[], sections?: ReorderPagesCommand["sections"]) =>
+      commitStructure((current) => planReorderPages(current, order, sections)),
     [commitStructure],
   )
 
@@ -688,15 +799,21 @@ export function useAnnotations({
   )
 
   const insertBlankPage = useCallback(
-    (index: number, pageCount: number) =>
-      commitStructure((current) => planInsertBlankPage(current, index, pageCount)),
+    (index: number, pageCount: number, section?: number) =>
+      commitStructure((current) => planInsertBlankPage(current, index, pageCount, section)),
     [commitStructure],
   )
 
   /** Not through `commitStructure`: the first apply copies the pages, and a
       redo is what restores the undo's stash. */
   const duplicatePages = useCallback(
-    async (sourcePages: number[], index: number, pageCount: number) => {
+    async (sourcePages: number[], index: number, pageCount: number, section?: number) => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return false
+      }
+
       let landed = false
 
       structurePendingRef.current += 1
@@ -708,6 +825,7 @@ export function useAnnotations({
             sourcePages,
             index,
             pageCount,
+            section,
           )
 
           if (!planned) {
@@ -730,6 +848,7 @@ export function useAnnotations({
                   // The plan's own block: sorted and deduplicated, so the range
                   // the undo deletes is the one the backend copied.
                   pageNumbers: planned.command.sourcePages,
+                  section,
                 }),
                 commandPageChange(planned.command, false),
               )
@@ -744,7 +863,252 @@ export function useAnnotations({
 
       return landed
     },
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
+  )
+
+  /** `duplicatePages`' path, with the pages read from another open document. */
+  const insertPages = useCallback(
+    async (
+      sourceDocumentId: number,
+      sourcePages: number[],
+      index: number,
+      pageCount: number,
+      section?: number,
+    ) => {
+      // The source first: its answer changes nothing in place, while this
+      // document's flatten does, and must not happen for a copy then refused.
+      const source = beforeCopyFromRef.current?.(sourceDocumentId) ?? true
+
+      if (source !== true && !(await source)) {
+        return false
+      }
+
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return false
+      }
+
+      let landed = false
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planInsertPages(
+            current,
+            sourceDocumentId,
+            sourcePages,
+            index,
+            pageCount,
+            section,
+          )
+
+          if (!planned) {
+            onAnnotateError()
+            return null
+          }
+
+          return {
+            next: planned.history,
+            pages: commandPages(planned.command),
+            textPages: commandTextPages(planned.command),
+            work: async () => {
+              onStructureChange(
+                documentId,
+                await invoke<PdfStructureUpdate>(
+                  "insert_pdf_pages_from_document",
+                  {
+                    documentId,
+                    index,
+                    pageNumbers: planned.command.sourcePages,
+                    section,
+                    sourceDocumentId,
+                  },
+                ),
+                commandPageChange(planned.command, false),
+              )
+              landed = true
+              return true
+            },
+          }
+        }, onAnnotateError)
+      } finally {
+        structurePendingRef.current -= 1
+      }
+
+      return landed
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
+  )
+
+  /** `insertPages`' path for files read from disk: `sources` are what
+      `read_pdf_sources` read, each a file of its own once added, and one
+      undo takes them all out again. */
+  const insertFiles = useCallback(
+    async (
+      sources: { id: number; pages: number; title: string }[],
+      index: number,
+      pageCount: number,
+      files: {
+        options: FileOptions
+        ownTitle: string
+        /** By source id, for each signed source. */
+        signatures: Record<number, SignatureDecision>
+      },
+    ): Promise<boolean | "changed"> => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return false
+      }
+
+      let landed: boolean | "changed" = false
+
+      structurePendingRef.current += 1
+
+      try {
+        await enqueue((current) => {
+          const planned = planInsertFiles(
+            current,
+            sources.map((source) => source.title),
+            sources.reduce((total, source) => total + source.pages, 0),
+            index,
+            pageCount,
+          )
+
+          if (!planned) {
+            onAnnotateError()
+            return null
+          }
+
+          return {
+            next: planned.history,
+            pages: commandPages(planned.command),
+            textPages: commandTextPages(planned.command),
+            work: async () => {
+              onStructureChange(
+                documentId,
+                await invoke<PdfStructureUpdate>("insert_pdf_files", {
+                  documentId,
+                  index,
+                  options: files.options,
+                  ownTitle: files.ownTitle,
+                  signatures: files.signatures,
+                  sourceIds: sources.map((source) => source.id),
+                }),
+                commandPageChange(planned.command, false),
+              )
+              landed = true
+              return true
+            },
+          }
+        }, (error) => {
+          // Said apart: the reader can add the file again as it now stands.
+          if (isSourceChanged(error)) {
+            landed = "changed"
+          } else {
+            onAnnotateError()
+          }
+        })
+      } finally {
+        structurePendingRef.current -= 1
+      }
+
+      // Set by the queue, which narrowing cannot see.
+      return landed as boolean | "changed"
+    },
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
+  )
+
+  /** Names no page's content, so no signature is asked about; a Save As
+      writes the name as the file's bookmark. A file options change, too. */
+  const commitFileChange = useCallback(
+    async (
+      plan: (
+        current: AnnotationHistory,
+      ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
+    ) => {
+      let landed = false
+
+      await enqueue((current) => {
+        const planned = plan(current)
+
+        if (!planned) {
+          return null
+        }
+
+        return {
+          next: planned.history,
+          pages: [],
+          textPages: [],
+          work: async () => {
+            await applyCommand(
+              documentId,
+              current.nextId,
+              planned.command,
+              onStructureChange,
+              marksRef.current,
+            )
+            landed = true
+            return true
+          },
+        }
+      }, onAnnotateError)
+
+      return landed
+    },
     [documentId, enqueue, onAnnotateError, onStructureChange],
+  )
+
+  const renameSection = useCallback(
+    (sectionId: number, title: string, previous: string) =>
+      commitFileChange((current) => planRenameSection(current, sectionId, title, previous)),
+    [commitFileChange],
+  )
+
+  /** `current` is read when the change takes its turn, so a toggle made while
+      another is in flight builds on that one rather than undoing it. */
+  const setFileOptions = useCallback(
+    (change: Partial<FileOptions>, current: () => FileOptions | undefined) =>
+      commitFileChange((history) => {
+        const previous = current()
+
+        return previous ? planFileOptions(history, { ...previous, ...change }, previous) : null
+      }),
+    [commitFileChange],
+  )
+
+  /** Draws the document's signatures into its pages in place, ahead of the
+      edit that asked for it: no history entry, since the file it came from is
+      never written over and nothing of this session's own is there to undo. */
+  const flattenSignatures = useCallback(
+    async (pageCount: number) => {
+      const pages = Array.from({ length: pageCount }, (_, index) => index + 1)
+      let flattened = false
+
+      await enqueue(
+        (current) => ({
+          next: current,
+          pages,
+          textPages: pages,
+          work: async () => {
+            onStructureChange(
+              documentId,
+              await invoke<PdfStructureUpdate>("flatten_pdf_signatures", { documentId }),
+              { movement: "inPlace" },
+            )
+            flattened = true
+            return true
+          },
+        }),
+        // The session says why: the answer is the reader's to give again.
+        () => undefined,
+      )
+
+      return flattened
+    },
+    [documentId, enqueue, onStructureChange],
   )
 
   /** Rubs out whichever of this session's marks the backend's hit test finds —
@@ -825,6 +1189,12 @@ export function useAnnotations({
       pageCount: number,
       onProgress?: ProgressHandler,
     ): Promise<PdfLayerOutcome> => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
@@ -867,7 +1237,7 @@ export function useAnnotations({
 
       return outcome
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
   const setPageNumbers = useCallback(
@@ -876,6 +1246,12 @@ export function useAnnotations({
       pageCount: number,
       onProgress?: ProgressHandler,
     ): Promise<PdfLayerOutcome> => {
+      const ready = signedChangeReady("edit")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
@@ -916,7 +1292,7 @@ export function useAnnotations({
 
       return outcome
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange],
+    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
   /** The one gesture that reaches a rebuild in flight. `false` is a miss, not a
@@ -1093,6 +1469,14 @@ export function useAnnotations({
 
   const exportArchive = useCallback(
     async (request: ArchiveExportRequest, onProgress: ProgressHandler) => {
+      // Images are pixels; a split PDF carries its pages' signature widgets.
+      const ready =
+        request.options.format === "images" ? true : signedChangeReady("export")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: "saved" | "cancelled" | "failed" = "cancelled"
       await enqueue((current) => ({
         next: current,
@@ -1113,13 +1497,19 @@ export function useAnnotations({
       }), () => { outcome = "failed" })
       return outcome as "saved" | "cancelled" | "failed"
     },
-    [documentId, enqueue],
+    [documentId, enqueue, signedChangeReady],
   )
 
   /** A compressed copy never touches this tab's history: like the archive
       export, it leaves for a destination the backend's own dialog picked. */
   const exportCompressed = useCallback(
     async (request: CompressedExportRequest, onProgress: ProgressHandler) => {
+      const ready = signedChangeReady("export")
+
+      if (ready !== true && !(await ready)) {
+        return "cancelled"
+      }
+
       let outcome: "saved" | "cancelled" | "failed" = "cancelled"
       await enqueue((current) => ({
         next: current,
@@ -1140,7 +1530,49 @@ export function useAnnotations({
       }), () => { outcome = "failed" })
       return outcome as "saved" | "cancelled" | "failed"
     },
-    [documentId, enqueue],
+    [documentId, enqueue, signedChangeReady],
+  )
+
+  /** Queued behind the reader's edits, so the A4 copy holds what the pages
+      show. The copy is a document of its own, bound to the file it was
+      written to; null for a dialog cancelled or a run stopped. */
+  const exportA4 = useCallback(
+    async (
+      request: { filterLabel: string; suggestedName: string },
+      onProgress: ProgressHandler,
+    ): Promise<A4Saved | null | { failed: unknown }> => {
+      const ready = signedChangeReady("export")
+
+      if (ready !== true && !(await ready)) {
+        return null
+      }
+
+      let written: A4Saved | null = null
+      let failed: { failed: unknown } | null = null
+
+      await enqueue(
+        (current) => ({
+          next: current,
+          pages: [],
+          textPages: [],
+          work: async () => {
+            const args = { ...request, documentId, onProgress: progressChannel(onProgress) }
+            const override = e2eOverride("saveA4Pdf")
+
+            written = override
+              ? await override(args)
+              : await invoke<A4Saved | null>("save_a4_pdf", args)
+            return false
+          },
+        }),
+        (error) => {
+          failed = { failed: error }
+        },
+      )
+
+      return failed ?? written
+    },
+    [documentId, enqueue, signedChangeReady],
   )
 
   /** Writes the document back over its own file. A clean history is a no-op —
@@ -1237,24 +1669,32 @@ export function useAnnotations({
       deletePages,
       duplicatePages,
       eraseAt,
+      exportA4,
       exportCopy,
       exportArchive,
       exportCompressed,
+      flattenSignatures,
       hasOwnedContentNow,
       hasPendingWorkNow,
       historyNow,
       insertBlankPage,
+      insertFiles,
+      insertPages,
+      /** An edit is queued or under way; a new one would wait behind it. */
+      isBusy,
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,
       nextUndo: nextUndoCommand(history),
       pageNumbersConfig: currentPageNumbersConfig(history),
       redo: redoCommand,
+      renameSection,
       reorderPages,
       renderEpochs,
       reset,
       rotatePages,
       save,
+      setFileOptions,
       setPageNumbers,
       setWatermark,
       settled,
@@ -1269,23 +1709,29 @@ export function useAnnotations({
       deletePages,
       duplicatePages,
       eraseAt,
+      exportA4,
       exportCopy,
       exportArchive,
       exportCompressed,
+      flattenSignatures,
       hasOwnedContentNow,
       hasPendingWorkNow,
       history,
       historyNow,
       insertBlankPage,
+      insertFiles,
+      insertPages,
       isBusy,
       isDirtyNow,
       isStructureBusyNow,
       redoCommand,
+      renameSection,
       renderEpochs,
       reorderPages,
       reset,
       rotatePages,
       save,
+      setFileOptions,
       setPageNumbers,
       setWatermark,
       settled,

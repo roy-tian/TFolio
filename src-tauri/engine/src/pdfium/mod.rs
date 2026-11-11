@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 pub use archive::{ArchiveOptions, ImageFormat};
 pub use compress::{CompressionEstimate, CompressionOptions};
 pub use engine::{
-    is_merge_image, AssembleOutlineItem, AssemblePlan, AssembleSlot, EnginePaths, OperationTarget,
-    OrganizeSourceInfo, PdfiumEngine, MERGE_IMAGE_EXTENSIONS, ORGANIZE_SOURCE_CHANGED,
+    is_merge_image, A4Copy, EnginePaths, FileKey, FileOptions, FileSourceInfo, OperationTarget,
+    PdfPaddingSheet, PdfSection, PdfiumEngine, MERGE_IMAGE_EXTENSIONS, SOURCE_CHANGED,
 };
 pub use font::{download_fallback_font, CJK_FONT_NAME};
 pub use library::PDFIUM_LIBRARY_NAME;
@@ -42,9 +42,19 @@ pub struct PdfDocumentInfo {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
+    /// As in [`PdfStructureUpdate`].
+    splits_by_bookmarks: bool,
     /// The file this document was opened from. `None` — opened from bytes —
     /// disables saving; only exporting can give it a file.
     path: Option<String>,
+    /// As in [`PdfStructureUpdate`]: a new document of another one's pages can
+    /// open already export-only.
+    has_merged_pages: bool,
+    /// As in [`PdfStructureUpdate`]; a document opens as its file alone.
+    has_foreign_pages: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sections: Vec<PdfSection>,
+    signatures: PdfSignatures,
 }
 
 impl PdfDocumentInfo {
@@ -61,6 +71,31 @@ impl PdfDocumentInfo {
     }
 }
 
+/// The digital signatures a file opened with. `intact` is a check of their
+/// structure in the file on disk, never of who signed, and holds while the
+/// document is bound to that file, which is then never written over.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfSignatures {
+    count: usize,
+    intact: bool,
+    /// What the reader chose for them before the first change that breaks
+    /// them; until then every such change is refused.
+    decision: Option<SignatureDecision>,
+    /// Drawn into the pages in place, as `Flatten` does before the first edit.
+    flattened: bool,
+}
+
+/// What becomes of intact signatures once something would break them.
+/// `Flatten` keeps their look as page content; `Keep` leaves the fields,
+/// which then read as invalid, and an A4 fit drops them.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SignatureDecision {
+    Flatten,
+    Keep,
+}
+
 /// The frontend holds no mirror of the page list to patch, so it replaces its
 /// copy wholesale after every structure change.
 #[derive(Debug, Serialize)]
@@ -69,9 +104,28 @@ pub struct PdfStructureUpdate {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
+    /// Whether a split by bookmarks has a bookmark to cut at: the document's
+    /// own, or once files were added, those a Save As would write.
+    splits_by_bookmarks: bool,
     /// Like a watermark, a copy of a page carrying one or page numbers leaves the
     /// document export-only; the frontend's save key reads this, not its history.
     has_merged_pages: bool,
+    /// Pages an added file brought in remain, or the pages still show as
+    /// several files: a save may not replace the file with them, only a Save
+    /// As write them, as `save` itself enforces.
+    has_foreign_pages: bool,
+    /// The blank pages a Save As will add between files, for the viewer and
+    /// print to show where it will put them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    padding: Vec<PdfPaddingSheet>,
+    /// The files the pages came from once any were added, still said with one
+    /// left: empty for a document that never had any.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sections: Vec<PdfSection>,
+    /// How those files are laid out and saved; absent with one file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_options: Option<FileOptions>,
+    signatures: PdfSignatures,
 }
 
 /// An image is laid on a sheet of its own; a Word document arrives as the PDF
@@ -100,6 +154,9 @@ pub struct ExportOutcome {
     /// Whether the document is now bound to `path` — false only for a copy-only
     /// document's copy. This, not the operation's name, marks the history saved.
     saved_to_source: bool,
+    /// As they stand after the write: an edited copy moves the document off
+    /// the signed file, which the frontend's badge and save key follow.
+    signatures: PdfSignatures,
 }
 
 impl ExportOutcome {
@@ -115,6 +172,13 @@ struct PdfPageInfo {
     width: f32,
     height: f32,
     rotation: f32,
+    /// Shows a signature field's widget: its thumbnail is marked. Left out
+    /// when false, as nearly every page is.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    signed: bool,
+    /// The file the page belongs to, once the document has more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    section: Option<u64>,
 }
 
 /// A text run's bounding box in *unrotated* page points, top-left origin: the

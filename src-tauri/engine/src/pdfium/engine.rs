@@ -41,8 +41,9 @@ use super::{
         WATERMARK_OPACITY, WATERMARK_REFERENCE_FONT_SIZE,
     },
     ExportOutcome, MergeSourceError, MergeSourceKind, PagePoint, PagePointsRect, PdfDocumentInfo,
-    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfStructureUpdate, PdfTextSpan,
-    RectEffect, RectEffectKind, RectStyle, TextNoteStyle, MAX_PDF_BYTES,
+    PdfOutlineItem, PdfPageInfo, PdfSearchMatch, PdfSearchOutcome, PdfSignatures,
+    PdfStructureUpdate, PdfTextSpan, RectEffect, RectEffectKind, RectStyle, SignatureDecision,
+    TextNoteStyle, MAX_PDF_BYTES,
 };
 
 pub(super) const POINTS_PER_INCH: f32 = 72.0;
@@ -156,10 +157,34 @@ struct OpenDocument {
     /// The file a save writes back over; `None` for opened-from-bytes, whose
     /// first export adopts its destination as the source.
     source_path: Option<PathBuf>,
+    /// `source_path` as this document last read or wrote it: what tells an
+    /// open of the file again that something else has written it since.
+    source_fingerprint: Option<Fingerprint>,
+    /// The image or Word file a converted document was made from, as it stood
+    /// when the conversion began; dropped once a Save As binds it to a PDF.
+    converted_from: Option<OpenedFile>,
     /// Set by a deletion: PDFium leaves the removed content's references behind
     /// until a save-and-reload collects them, so the next write takes that route.
     needs_compaction: bool,
     owned_content: Option<OwnedContentState>,
+    /// The file this document opened from, while every signature in it was
+    /// intact: kept past a rebinding, so no write ever lands on it.
+    signed_original: Option<OpenedFile>,
+    /// As PDFium counted them at the open.
+    signature_count: usize,
+    /// Pages showing a signature widget, which their thumbnails mark; they
+    /// follow their pages, and a flatten in place clears them.
+    signed_page_ids: HashSet<u64>,
+    signature_decision: Option<SignatureDecision>,
+    signatures_flattened: bool,
+    /// The files the pages came in with, once one was added to the document.
+    sections: Option<sections::SectionBook>,
+    /// Pages an added file brought in, and copies of them: while any remain,
+    /// the document is no longer its file alone, and a save may not replace it.
+    foreign_page_ids: HashSet<u64>,
+    /// Signed files added here, as `signed_original` is kept: their sources
+    /// are released once read in, and no write may land on them still.
+    signed_added: Vec<PathBuf>,
 }
 
 impl OpenDocument {
@@ -215,6 +240,16 @@ impl OpenDocument {
         self.content_changed();
     }
 
+    /// Bound to the signed file it opened from: saving would rewrite it,
+    /// breaking every signature.
+    fn bound_to_signed_original(&self) -> bool {
+        self.signed_original.as_ref().is_some_and(|original| {
+            self.source_path
+                .as_deref()
+                .is_some_and(|source| same_file(source, &original.path))
+        })
+    }
+
     fn content_changed(&mut self) {
         self.loaded_len = None;
         self.content_version += 1;
@@ -247,7 +282,6 @@ fn open_entry_mut(
 pub enum OperationTarget {
     Document(u64),
     Archive(u64),
-    Merge(String),
     Search(u64),
     /// A compressed copy being written, whose page loop must stop when the
     /// reader walks away from the dialog.
@@ -323,11 +357,11 @@ pub struct PdfiumEngine {
     operations: Mutex<HashMap<u64, RunningOperation>>,
     next_operation_id: AtomicU64,
     word: crate::convert::WordConverter,
-    /// The organize workspaces' sources, every window's. Taken only while
-    /// `documents` is held, or alone without touching a document.
-    organize: Mutex<organize::OrganizeSources>,
+    /// Files read for the pages documents add, every window's. Taken only
+    /// while `documents` is held, or alone without touching a document.
+    sources: Mutex<file_sources::FileSources>,
     /// Apart from the store, so a release can mark its cutoff without a lock.
-    next_organize_id: AtomicU64,
+    next_source_id: AtomicU64,
 }
 
 /// Where the host keeps what the engine loads and writes. The host alone knows
@@ -367,8 +401,8 @@ impl PdfiumEngine {
                 &paths.retired_conversion_roots,
                 word_suites,
             ),
-            organize: Mutex::default(),
-            next_organize_id: AtomicU64::new(1),
+            sources: Mutex::default(),
+            next_source_id: AtomicU64::new(1),
         })
     }
 
@@ -433,10 +467,9 @@ impl PdfiumEngine {
         asked
     }
 
-    /// A scope's merge and conversions have nowhere to land once the host lets
-    /// it go; a Word suite would otherwise run on for minutes.
+    /// A scope's conversions have nowhere to land once the host lets it go;
+    /// a Word suite would otherwise run on for minutes.
     pub fn cancel_scope_work(&self, scope: &str) {
-        self.cancel_operation(OperationTarget::Merge(scope.to_string()));
         self.cancel_operation(OperationTarget::Convert(scope.to_string()));
         self.cancel_operation(OperationTarget::OpenConverted(scope.to_string()));
     }
@@ -481,21 +514,41 @@ impl PdfiumEngine {
     }
 
     pub fn open_from_path(&self, path: PathBuf) -> Result<PdfDocumentInfo, String> {
-        let bytes = read_pdf_bytes(&path)?;
+        let (bytes, fingerprint) = read_pdf_file(&path)?;
 
-        self.open_with_source(bytes, Some(path))
+        self.open_with_source(bytes, Some(OpenedFile { path, fingerprint }))
     }
 
     /// An image or a Word document opened as its converted PDF. Built in
     /// memory with no source binding, like `create_blank`: the file behind it
     /// is only ever read, so there is no destination for approval to guard.
     pub fn open_converted(&self, scope: &str, path: PathBuf) -> Result<PdfDocumentInfo, String> {
-        if is_merge_image(&path) {
+        // Before the read: a change made while converting is one the document
+        // never saw, and an open of the file again must find it changed.
+        let before = fingerprint(&path);
+        let document = self.convert_and_open(scope, &path)?;
+
+        if let Some(fingerprint) = before {
+            if let Some(entry) = self
+                .lock_documents()
+                .ok()
+                .as_deref_mut()
+                .and_then(|documents| documents.get_mut(&document.id()))
+            {
+                entry.converted_from = Some(OpenedFile { path, fingerprint });
+            }
+        }
+
+        Ok(document)
+    }
+
+    fn convert_and_open(&self, scope: &str, path: &Path) -> Result<PdfDocumentInfo, String> {
+        if is_merge_image(path) {
             // Decoded before the lock: a decode is no PDFium work.
-            let image = read_image(&path)?;
+            let image = read_image(path)?;
             let bytes = {
                 let _documents = self.lock_documents()?;
-                let document = image_page_document(self.pdfium, &image, &path)?;
+                let document = image_page_document(self.pdfium, &image, path)?;
 
                 document
                     .save_to_bytes()
@@ -505,7 +558,7 @@ impl PdfiumEngine {
             return self.open_with_source(bytes, None);
         }
 
-        if crate::convert::is_word_document(&path) {
+        if crate::convert::is_word_document(path) {
             // Stoppable like an inspection of the same file: an office suite's
             // startup is seconds the open flow must be able to walk away from.
             let entry = {
@@ -513,14 +566,9 @@ impl PdfiumEngine {
                     self.begin_operation(OperationTarget::OpenConverted(scope.to_string()));
                 let cancelled = || operation.is_cancelled();
 
-                self.resolve_word_documents(
-                    std::slice::from_ref(&path),
-                    true,
-                    &cancelled,
-                    &mut || {},
-                )
-                .into_iter()
-                .next()
+                self.resolve_word_documents(&[path.to_path_buf()], true, &cancelled, &mut || {})
+                    .into_iter()
+                    .next()
             };
 
             return match entry {
@@ -541,7 +589,18 @@ impl PdfiumEngine {
     fn open_with_source(
         &self,
         bytes: Vec<u8>,
-        source_path: Option<PathBuf>,
+        source: Option<OpenedFile>,
+    ) -> Result<PdfDocumentInfo, String> {
+        self.open_marked(bytes, source, &[])
+    }
+
+    /// `copy_only[i]` marks page `i + 1` a copy the document may not be saved
+    /// over a file with, recorded with the open rather than after it.
+    fn open_marked(
+        &self,
+        bytes: Vec<u8>,
+        source: Option<OpenedFile>,
+        copy_only: &[bool],
     ) -> Result<PdfDocumentInfo, String> {
         if bytes.is_empty() {
             return Err("PDF file is empty".into());
@@ -561,20 +620,28 @@ impl PdfiumEngine {
             .map_err(|error| format!("PDFium could not open the document: {error}"))?;
         let DocumentLayout {
             num_pages,
-            pages,
+            mut pages,
             outline,
         } = document_layout(&document);
+        let source_path = source.as_ref().map(|source| source.path.clone());
+        let source_fingerprint = source.as_ref().map(|source| source.fingerprint);
+        let scan = signatures::SignatureScan::of(&document);
+        let signed_pages = signatures::mark_signature_pages(&scan, &document, &mut pages);
         let id = self.next_document_id.fetch_add(1, Ordering::Relaxed);
         let path = source_path
             .as_deref()
             .map(|path| path.to_string_lossy().into_owned());
+        let merged_page_ids: HashSet<u64> = (0..num_pages as u64)
+            .filter(|&page_id| copy_only.get(page_id as usize) == Some(&true))
+            .collect();
+        let has_merged_pages = !merged_page_ids.is_empty();
 
         documents.insert(
             id,
             OpenDocument {
                 document,
                 marks: HashMap::new(),
-                merged_page_ids: HashSet::new(),
+                merged_page_ids,
                 needs_compaction: false,
                 next_mark_id: 1,
                 next_page_id: num_pages as u64,
@@ -584,18 +651,51 @@ impl PdfiumEngine {
                 loaded_len: Some(bytes_len),
                 content_version: 0,
                 compress_cache: None,
+                converted_from: None,
                 revisions: HashMap::new(),
+                signature_count: scan.count(),
+                signed_page_ids: signed_pages.iter().map(|&index| index as u64).collect(),
+                signature_decision: None,
+                signatures_flattened: false,
+                signed_original: None,
+                source_fingerprint,
                 source_path,
                 stashes: HashMap::new(),
+                sections: None,
+                foreign_page_ids: HashSet::new(),
+                signed_added: Vec::new(),
             },
         );
+        drop(documents);
+
+        // Off the lock: the file may sit on slow storage. Until its id is
+        // answered no command names the document, so protection lands in time.
+        let mut intact = false;
+
+        if let Some(file) = source.filter(|file| scan.intact_in(file)) {
+            if let Some(entry) = self
+                .lock_documents()
+                .ok()
+                .as_deref_mut()
+                .and_then(|documents| documents.get_mut(&id))
+            {
+                entry.signed_original = Some(file);
+                intact = true;
+            }
+        }
 
         Ok(PdfDocumentInfo {
             id,
             num_pages,
             pages,
+            // A document opens as its file alone, cut where its own bookmarks go.
+            splits_by_bookmarks: archive_export::splits_at_bookmarks(&outline, num_pages),
             outline,
             path,
+            has_merged_pages,
+            has_foreign_pages: false,
+            sections: Vec::new(),
+            signatures: scan.summary(intact),
         })
     }
 
@@ -996,6 +1096,8 @@ fn measure_page(page: &PdfPage<'_>) -> PdfPageInfo {
         width: page.width().value,
         height: page.height().value,
         rotation: page_rotation_degrees(page),
+        signed: false,
+        section: None,
     }
 }
 
@@ -1017,6 +1119,8 @@ const UNMEASURED_PAGE: PdfPageInfo = PdfPageInfo {
     width: 595.0,
     height: 842.0,
     rotation: 0.0,
+    signed: false,
+    section: None,
 };
 
 /// Measures only pages not measured before, so a reorder or delete touches
@@ -1046,8 +1150,13 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
     entry
         .page_ids
         .iter()
-        .map(|page_id| {
-            entry
+        .map(|page_id| PdfPageInfo {
+            signed: entry.signed_page_ids.contains(page_id),
+            section: entry
+                .sections
+                .as_ref()
+                .and_then(|book| book.section_of(*page_id)),
+            ..entry
                 .page_geometry
                 .get(page_id)
                 .copied()
@@ -1060,12 +1169,34 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
 /// remain — read from the same set `save` refuses on, so the key cannot lie.
 fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
     let pages = page_infos(entry);
+    // Walked once: the own bookmarks are also what a split of them cuts at.
+    let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
+    let splits_by_bookmarks = archive_export::splits_at_bookmarks(
+        entry.files_split_outline().as_deref().unwrap_or(&outline),
+        pages.len() as i32,
+    );
 
     PdfStructureUpdate {
+        splits_by_bookmarks,
         has_merged_pages: !entry.merged_page_ids.is_empty(),
+        has_foreign_pages: entry.combined(),
+        padding: entry.padding_sheets(),
+        // Down to one file, still said: its own bookmarks are what a Save As
+        // writes once none of the document's own pages are left.
+        sections: entry
+            .sections
+            .as_ref()
+            .map(|book| book.infos(&entry.page_ids))
+            .unwrap_or_default(),
+        file_options: entry
+            .sections
+            .as_ref()
+            .filter(|book| book.several(&entry.page_ids))
+            .map(|book| book.options),
         num_pages: pages.len() as i32,
-        outline: collect_bookmark_siblings(entry.document.bookmarks().root()),
+        outline,
         pages,
+        signatures: entry.signatures(),
     }
 }
 
@@ -1090,27 +1221,36 @@ fn collect_bookmark_siblings(mut bookmark: Option<PdfBookmark<'_>>) -> Vec<PdfOu
     items
 }
 
+mod a4_export;
 mod archive_export;
 mod compress;
+mod file_identity;
+mod file_sources;
 mod image_dpi;
 mod io;
 mod marks;
-mod organize;
 mod owned_content;
 mod page_ops;
 mod page_reorder;
 mod raster;
+mod sections;
+mod signature_flatten;
+mod signatures;
 mod text_runs;
 mod watermark_preview;
 
+pub use a4_export::A4Copy;
+pub use file_identity::{same_file, FileKey};
+pub use file_sources::{FileSourceInfo, SOURCE_CHANGED};
 pub use io::is_merge_image;
-use io::{image_page_document, read_image, read_pdf_bytes};
-pub use organize::{
-    AssembleOutlineItem, AssemblePlan, AssembleSlot, OrganizeSourceInfo, ORGANIZE_SOURCE_CHANGED,
+use io::{
+    fingerprint, image_page_document, read_image, read_pdf_bytes, read_pdf_file, Fingerprint,
 };
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;
+pub use sections::{FileOptions, PdfPaddingSheet, PdfSection};
+use signatures::OpenedFile;
 
 #[cfg(test)]
 mod tests;

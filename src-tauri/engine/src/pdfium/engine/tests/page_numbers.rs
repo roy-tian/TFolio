@@ -517,7 +517,7 @@ fn reorder_keeps_owned_layers_removable() {
         vec![decorated[1].clone(), decorated[0].clone()],
     ] {
         engine
-            .reorder_pages(document.id, &[2, 1])
+            .reorder_pages(document.id, &[2, 1], None)
             .expect("sorting and its undo/redo should preserve owned layers");
         assert_eq!(page_fingerprints(engine, document.id, 2), expected);
     }

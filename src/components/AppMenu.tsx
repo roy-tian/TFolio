@@ -2,12 +2,14 @@ import {
   AppWindow,
   FileImage,
   FilePlus2,
+  FileStack,
   FolderOpen,
   History,
   Info,
   LogOut,
   Menu,
   Printer,
+  RectangleVertical,
   Save,
   SaveAll,
   Scissors,
@@ -67,8 +69,11 @@ export type AppMenuActions = {
 
 type AppMenuProps = AppMenuActions & {
   canSave?: boolean
+  /** Other files' pages brought into the document on show. */
+  onAddFiles?: () => void
   onSave?: () => void
   onSaveAs?: () => void
+  onSaveA4?: () => void
   onExportImages?: () => void
   onSplit?: () => void
   onCompress?: () => void
@@ -82,6 +87,7 @@ export function AppMenu({
   canSaveAll,
   onCloseAll,
   onExit,
+  onAddFiles,
   onNew,
   onNewWindow,
   onOpen,
@@ -90,6 +96,7 @@ export function AppMenu({
   onSave,
   onSaveAll,
   onSaveAs,
+  onSaveA4,
   onShowSettings,
   onExportImages,
   onSplit,
@@ -171,6 +178,14 @@ export function AppMenu({
               )}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          <DropdownMenuItem
+            data-action="add-files"
+            disabled={!onAddFiles}
+            onClick={onAddFiles}
+          >
+            <FileStack />
+            {t("menu.addFiles")}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <HintTooltip label={saveHint} side="right">
             <DropdownMenuItem
@@ -209,6 +224,14 @@ export function AppMenu({
             <DropdownMenuShortcut>
               {formatShortcut(shortcuts.saveAs)}
             </DropdownMenuShortcut>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-action="save-a4"
+            disabled={!onSaveA4}
+            onClick={onSaveA4}
+          >
+            <RectangleVertical />
+            {t("a4Export.menuLabel")}
           </DropdownMenuItem>
           <DropdownMenuItem
             data-action="export-images"

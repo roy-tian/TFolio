@@ -10,6 +10,8 @@ import {
 } from "./tabMove"
 
 const document = {
+  hasForeignPages: false,
+  hasMergedPages: true,
   id: 7,
   numPages: 3,
   outline: [],
@@ -19,6 +21,8 @@ const document = {
     { height: 400, rotation: 0, width: 300 },
   ],
   path: "/tmp/moved.pdf",
+  signatures: { count: 1, decision: null, flattened: false, intact: true },
+  splitsByBookmarks: false,
 }
 
 const payload: MovedTabPayload = {
@@ -36,7 +40,7 @@ const payload: MovedTabPayload = {
   savable: false,
   saveRequired: false,
   seed: {
-    hasMergedPages: true,
+    grid: true,
     history: {
       ...emptyHistory,
       past: [
@@ -58,8 +62,8 @@ const payload: MovedTabPayload = {
       savedId: 0,
     },
     marks: [[1, [11, 12, 13]]],
-    pageRotations: [0, 90, 0],
     viewMode: "book",
+    viewRotation: 90,
   },
 }
 
@@ -162,18 +166,39 @@ describe("parseMovedTabPayload", () => {
     expect(parsed).toEqual(payload)
   })
 
+  it("keeps the source a converted tab came from", () => {
+    const converted = { ...payload, convertedFrom: "/tmp/scan.png", path: "" }
+    const parsed = parseMovedTabPayload(JSON.parse(JSON.stringify(converted)))
+
+    expect(parsed?.convertedFrom).toBe("/tmp/scan.png")
+  })
+
   it("drops optional fields it never carried rather than inventing them", () => {
     const parsed = parseMovedTabPayload({
       ...JSON.parse(JSON.stringify(payload)),
+      convertedFrom: 7,
       recentPath: undefined,
       recentView: { position: { pageNumber: 0 } },
       saveAsDefaultName: undefined,
     })
 
+    expect(parsed?.convertedFrom).toBeUndefined()
     expect(parsed?.recentPath).toBeUndefined()
     expect(parsed?.recentView).toBeUndefined()
     expect(parsed?.saveAsDefaultName).toBeUndefined()
     expect(parsed?.seed.marks).toEqual([[1, [11, 12, 13]]])
+  })
+
+  it("reads a tab as off the page grid unless its seed says it was on it", () => {
+    const valid = JSON.parse(JSON.stringify(payload))
+
+    expect(parseMovedTabPayload(valid)?.seed.grid).toBe(true)
+    expect(
+      parseMovedTabPayload({ ...valid, seed: { ...valid.seed, grid: undefined } })?.seed.grid,
+    ).toBe(false)
+    expect(
+      parseMovedTabPayload({ ...valid, seed: { ...valid.seed, grid: "yes" } })?.seed.grid,
+    ).toBe(false)
   })
 
   it("refuses a payload whose document or seed came apart", () => {
@@ -182,6 +207,18 @@ describe("parseMovedTabPayload", () => {
     expect(parseMovedTabPayload(null)).toBeNull()
     expect(parseMovedTabPayload("moved.pdf")).toBeNull()
     expect(parseMovedTabPayload({ ...valid, document: { id: 7 } })).toBeNull()
+    expect(
+      parseMovedTabPayload({
+        ...valid,
+        document: { ...valid.document, hasMergedPages: "yes" },
+      }),
+    ).toBeNull()
+    expect(
+      parseMovedTabPayload({
+        ...valid,
+        document: { ...valid.document, signatures: { count: 1 } },
+      }),
+    ).toBeNull()
     expect(
       parseMovedTabPayload({
         ...valid,
@@ -198,6 +235,18 @@ describe("parseMovedTabPayload", () => {
       parseMovedTabPayload({
         ...valid,
         seed: { ...valid.seed, marks: [[1, ["11"]]] },
+      }),
+    ).toBeNull()
+    expect(
+      parseMovedTabPayload({
+        ...valid,
+        seed: { ...valid.seed, viewRotation: [90] },
+      }),
+    ).toBeNull()
+    expect(
+      parseMovedTabPayload({
+        ...valid,
+        seed: { ...valid.seed, viewRotation: 450 },
       }),
     ).toBeNull()
   })

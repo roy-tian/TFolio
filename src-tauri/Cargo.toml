@@ -69,6 +69,11 @@ tauri-plugin-single-instance = "2"
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 window-vibrancy = "0.8.1"
 
+# Which Windows build runs, to keep its acrylic to builds with a system
+# backdrop. Already in the tree under window-vibrancy, which asks the same.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-version = "0.1.7"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSWindow"] }
 

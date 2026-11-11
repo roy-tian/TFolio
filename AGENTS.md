@@ -29,8 +29,16 @@
   (`test:all` runs both); missing fonts fail them rather than skip.
 - `test:e2e:headless` reruns the GUI suite on the last `test:e2e:build`. Never run Cargo during
   it: debug builds overwrite the `target/debug/tfolio` each spec relaunches.
+- Specs under `test/e2e/extended/` lock frame timing and pointer feel (preview hand-offs, the
+  overlay scrollbar, text hit testing, resize), which a loaded machine jitters: CI runs them, a
+  local run only with `TFOLIO_E2E_EXTENDED=1`. Run them locally after touching what they lock.
+- An e2e test proves what only the GUI can: wiring, dialogs, focus, layout. What the engine or a
+  unit test already proves (pixels after undo, layers not stacking) gets one smoke test per
+  feature, not a GUI copy.
 - e2e cannot drive native dialogs; use `window.__tfolioE2E` in e2e mode and `seedSettings` for
   settings that must survive refresh.
+- An event a spec emits reaches only listeners already bound, and the app binds its own some IPC
+  turns after a reload paints: `emitDrag` waits on the e2e build's `html[data-file-drops]` mark.
 - WebDriver input is not real input: scripted keys ignore `preventDefault`, typing appends over a
   selection, clicks make no `dblclick` or hover. `test/e2e/nativePointer.ts` drives real pointers.
 - GUI tests drive only `main`; check multi-window changes manually, a different file per window.
@@ -64,8 +72,10 @@
 - Every command returning a new document, including an in-memory one, must use `record_document`
   so an open finishing after window destruction releases the document.
 - Close documents on window destruction and page reload; frontend cleanup is insufficient.
-- Check `focus_pdf_path` before opening to prevent independent edit histories. Check the caller's
-  tabs locally because their ownership entries may be awaiting close.
+- Check `find_open_file` before opening to prevent independent edit histories. It matches by file
+  identity (`FileKey`), never spelling, and takes the caller's live tab ids because their
+  ownership entries may be awaiting close. A file opened again after another writer changed it
+  reloads its tab, asking first over unsaved work; saves record their own writes as not changes.
 - Never reuse window labels; delayed events must not target replacement windows. New windows
   inherit `tauri.conf.json`; production capabilities must cover `window-*`.
 - File-manager launches steal OS focus; route them to the last focused app window. Launch files
@@ -82,7 +92,7 @@
   known `style-src-elem` violation; new sources are regressions.
 - Capabilities do not gate custom `generate_handler!` commands: validate arguments in Rust.
   Do not register the transitive `tauri-plugin-fs` plugin.
-- Path-based open and organize sources require `ensure_approved` except in e2e.
+- Path-based opens and file sources require `ensure_approved` except in e2e.
   Approval must come from Rust-observed OS paths, dialogs, or the separate recent-files store.
 - Editable settings must never approve paths: an approved open also binds a later save destination.
 - `export_pdf` reduces suggested names with `Path::file_name()`; `save_pdf` uses only the
@@ -97,6 +107,9 @@
   beside it.
 - Fetch what a copy writes when the selection is made: WebKit refuses a clipboard write that
   awaits IPC long after the keypress.
+- A menu entry that starts an edit in place unmounts its menu content on close (no fade) and
+  answers `finalFocus` false: a Base UI menu still fading holds focus, and takes it back from
+  the field, whose blur ends the edit.
 - Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
   worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
   pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
@@ -105,37 +118,86 @@
 ## PDF editing and cancellation
 
 - Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what PDFium
-  cannot do: writing outlines, relinking bookmarks and split links, recompressing images.
+  cannot do: writing outlines, relinking bookmarks and split links, recompressing images, drawing
+  signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation).
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
   wait on the PDFium lock held by the operation being cancelled.
 - Long loops under the shared PDFium lock need cancellation checks between pages/files and an
-  explicit completion result. Roll back rebuild snapshots on cancellation; publish assembled
-  documents only on completion.
+  explicit completion result. Roll back rebuild snapshots on cancellation; publish built copies
+  (an A4 copy) only on completion.
 - Annotation deletion and hit testing target only this session's mark IDs, never existing
   annotations or positions inferred from undo history.
 - Watermarks and page numbers are session-owned appended content, not redaction; after reopening
   they are input content. Save documents carrying them, or copies of pages that did, only to
   copies, checking symlink-resolved source paths on every write.
+- Every PDFium write breaks every digital signature. A file a document opened, or a file added
+  with intact signatures (byte ranges checked on disk, off the lock, never the CMS) is never
+  written over by any writer, even after Save As rebinds the document; an unchanged document's
+  Save As copies the file's bytes instead. Changes and new files that break intact signatures wait
+  for the reader's flatten-or-keep answer, which the engine records per document (per signed file
+  for added files) and enforces; a document flattens in place only before its first change, and a
+  new file flattens its own copy.
 
-## Organize workspace
+## Save as A4
 
-- Organize sources are read-only and are not documents: no `record_document`, recent files, save
-  binding, or `focus_pdf_path`. Each window's registry releases them on window destruction and on
+- `fit_to_a4` builds a copy of every page fitted onto A4 (with the blank pages and per-file
+  bookmarks a Save As writes); a form XObject leaves annotations, links and fields behind. This
+  session's watermark and page numbers are lifted from a copy first (only where `verify_owned_tail`
+  holds, else they scale along and the reader is told) and stamped again on the sheets as the
+  copy's own content (`stamp_layers`, which keeps no rollback snapshot of a copy it may discard).
+  The stripped copy closes through `MergeDraft`, under the lock, however the run ends.
+  `save_a4_pdf` asks for the destination in Rust first, records the copy with `record_document`,
+  binds it like Save As, and the tab shows it in place of the document it was made from.
+
+## Files added to a document
+
+- A document takes other files as files of its own (engine `SectionBook`): they are read through
+  the window's file sources (`read_pdf_sources`), then imported by `insert_pdf_files`, which
+  releases them; sources never added go by `release_pdf_sources`. One history entry adds them all;
+  its undo deletes the run under its stash.
+- Every insert names the file its pages join, and a reorder passes each position's file after
+  and before: a page let go among another file's pages joins it, but a file moved whole by its
+  name keeps its own. A deleted page keeps its file for the restore an undo brings back.
+- A file let go among another's pages parts it into runs. The grid's headings, the sidebar's
+  tree (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list a file once per
+  run, its own bookmarks under the first; rename, remove, choose and drag act on the file whole.
+- Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
+  and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
+  then the tab reopens the written file, its history gone. A compressed copy compresses what a
+  Save As writes (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which
+  the engine reports as `splitsByBookmarks`.
+- Blank pages between files are never pages of the document: the engine reports where a Save As
+  will put them (`SectionBook::padding`) with every structure change, the viewer, page grid,
+  sidebar and print show them there, and only a Save As writes them. Structure commands never
+  see them. A drag shows them where its drop would leave them by the same rule
+  (`paddingPositions`, kept in step with `SectionBook::padding`).
+- The page grid lies over the reading view, which stays mounted and laid out (`inert`) beneath
+  it: leaving the grid finds the reader's place, and the sidebar meanwhile keeps to the
+  bookmarks, so one `PageThumbnails` shows the pages at a time. With no bookmarks or files to
+  keep to, the sidebar gives the grid its column (`setVacant`) and opens only over it, as in a
+  narrow window. The grid shows pages as a save keeps them: it ignores the view's turn and
+  offers none, since there a turn means the page's own.
+- The grid is a tab's own state, never a stored preference: a document opens on its reading
+  view. Only a tab that comes from one on the grid starts there: moved from another window
+  (`MovedTabSeed.grid`), or written or reloaded from it and put in its place or beside it
+  (`onGrid`) — a Save As of added files, an A4 copy, a file changed elsewhere.
+- A file dragged over the grid is told only that a drop joins the document, and by the tab strip
+  where one would open tabs: the workspace's offer to open, laid over the grid, says the
+  opposite of what the drop does.
+- Pages still showing as several files keep the document Save-As-only even with no foreign page
+  left, so a save never drops the blanks and file bookmarks the reader sees.
+- File sources are read-only and are not documents: no `record_document`, recent files, save
+  binding, or `find_open_file`. Each window's registry releases them on window destruction and on
   page reload up to the id cutoff taken at release, so a reloaded page keeps those added since.
-- A source whose fingerprint (mtime and size) changed blocks assembly until removed or re-added.
-- A viewer tab enters organize as its file on disk, never its document: ask about unsaved changes
-  first. A fill the reader has not touched is not unsaved work and may be replaced without asking.
-- Every assembled PDF goes through `record_document`. Preview leaves it a sourceless in-memory
-  document whose first export adopts the destination. Save as PDF picks the destination in Rust's
-  own dialog before assembling, writes and binds it like Save As, then opens it as that file's
-  tab; a failed write closes it. Writes refuse only open documents' files, so a destination
-  chosen over a source then blocks assembly.
+  A source whose fingerprint (mtime and size) changed since it was read is refused once it must be
+  read again; the e2e build's `unload_pdf_sources` forces that re-read.
 
 ## Word and image import
 
-- Images and Word files open as converted, sourceless in-memory PDFs. `openSources.ts` mirrors
-  the engine's `MERGE_IMAGE_EXTENSIONS`.
+- Images and Word files open as converted, sourceless in-memory PDFs, recorded as
+  `DocumentFile::Converted` so opening the source again finds their tab until Save As binds a PDF.
+  `openSources.ts` mirrors the engine's `MERGE_IMAGE_EXTENSIONS`.
 - Convert only through installed suites (Word, WPS, LibreOffice; Windows stops at WPS), detected
   without starting one; e2e passes `WordSuites::Absent`.
 - Suites read a staged copy, never the reader's file. Kill only processes this run spawned, never

@@ -1,0 +1,269 @@
+use super::support::*;
+use super::*;
+
+fn is_a4(page: &PdfPageInfo) -> bool {
+    let (short, long) = (page.width.min(page.height), page.width.max(page.height));
+
+    (short - A4_SHORT_POINTS).abs() < 0.5 && (long - A4_LONG_POINTS).abs() < 0.5
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn every_page_lands_on_a4_with_its_bookmarks() {
+    let engine = test_engine();
+    let document = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the document");
+    let mut reports = Vec::new();
+
+    let fitted = engine
+        .fit_to_a4(document.id, |done, total| reports.push((done, total)))
+        .expect("the pages should fit")
+        .expect("nobody stopped it")
+        .document;
+
+    assert_eq!(fitted.num_pages, 3);
+    assert!(fitted.pages.iter().all(is_a4));
+    assert_eq!(fitted.outline[0].title, "Chapter");
+    assert_eq!(fitted.outline[0].page_number, Some(3));
+    assert_eq!(reports.last(), Some(&(3, 3)));
+    // A copy: the reader's document is as it was.
+    assert_eq!(
+        engine
+            .rotate_pages(document.id, &[1], 0)
+            .expect("the document should still answer")
+            .pages[0]
+            .width,
+        200.0
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_large_landscape_page_lies_on_its_side_and_a_small_one_stays_upright() {
+    let engine = test_engine();
+    let document = engine
+        .open(build_pdf(&[
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n".to_string(),
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1000 700] /Contents 5 0 R >>\nendobj\n"
+                .to_string(),
+            "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 5 0 R >>\nendobj\n"
+                .to_string(),
+            "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+        ]))
+        .expect("PDFium should open the document");
+
+    let fitted = engine
+        .fit_to_a4(document.id, |_, _| {})
+        .expect("the pages should fit")
+        .expect("nobody stopped it")
+        .document;
+
+    assert!(fitted.pages.iter().all(is_a4));
+    // Shrunk less on its side; one that fits upright is never turned.
+    assert!(fitted.pages[0].width > fitted.pages[0].height);
+    assert!(fitted.pages[1].width < fitted.pages[1].height);
+}
+
+/// The smallest box around every non-white pixel, as fractions of the render:
+/// fractions let an A4 sheet and the page it carries be compared directly.
+fn rendered_ink_box(image: &image::RgbImage) -> (f32, f32, f32, f32) {
+    let mut left = u32::MAX;
+    let mut top = u32::MAX;
+    let mut right = 0u32;
+    let mut bottom = 0u32;
+
+    for (x, y, pixel) in image.enumerate_pixels() {
+        // Only ink well clear of the ground counts, so the box is the mark
+        // rather than its anti-aliased halo.
+        if pixel.0.iter().all(|channel| *channel > 200) {
+            continue;
+        }
+
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x + 1);
+        bottom = bottom.max(y + 1);
+    }
+
+    assert!(left < right && top < bottom, "the page should carry ink");
+
+    let width = image.width() as f32;
+    let height = image.height() as f32;
+
+    (
+        left as f32 / width,
+        top as f32 / height,
+        right as f32 / width,
+        bottom as f32 / height,
+    )
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_rotated_page_lands_on_a4_the_way_it_reads() {
+    let engine = test_engine();
+    let document = engine
+        .open(rotated_text_pdf())
+        .expect("PDFium should open the document");
+    // `/Rotate 90` makes the page read 300x200, and that is the shape the sheet
+    // carries — the rotation cannot survive, since the sheet has one of its own.
+    let (left, top, right, bottom) = rendered_ink_box(&rendered_rgb(engine, document.id));
+
+    let fitted = engine
+        .fit_to_a4(document.id, |_, _| {})
+        .expect("the page should fit")
+        .expect("nobody stopped it")
+        .document;
+    let sheet = rendered_ink_box(&rendered_rgb(engine, fitted.id));
+    let scale_x = 300.0 / A4_SHORT_POINTS;
+    let scale_y = 200.0 / A4_LONG_POINTS;
+    let margin_x = (1.0 - scale_x) / 2.0;
+    let margin_y = (1.0 - scale_y) / 2.0;
+    let expected = (
+        margin_x + left * scale_x,
+        margin_y + top * scale_y,
+        margin_x + right * scale_x,
+        margin_y + bottom * scale_y,
+    );
+
+    for (found, want) in [
+        (sheet.0, expected.0),
+        (sheet.1, expected.1),
+        (sheet.2, expected.2),
+        (sheet.3, expected.3),
+    ] {
+        assert!(
+            (found - want).abs() < 0.02,
+            "the rotated text should land at {want}, not {found} (whole box {sheet:?})"
+        );
+    }
+}
+
+/// A page `width` by `height` points with nothing on it.
+fn sized_page_pdf(width: u32, height: u32) -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        format!(
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents 4 0 R >>\nendobj\n"
+        ),
+        "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+    ])
+}
+
+/// How tall the first page's `1` stands, in points, as PDFium extracts it.
+fn label_height(engine: &PdfiumEngine, document_id: u64) -> f32 {
+    let documents = engine.lock_documents().unwrap();
+    let page = documents[&document_id].document.pages().get(0).unwrap();
+    let text = page.text().unwrap();
+    let chars = text.chars();
+    let label = chars
+        .iter()
+        .find(|char| char.unicode_char() == Some('1'))
+        .expect("the page should carry its number");
+    let bounds = label.tight_bounds().unwrap();
+
+    bounds.top().value - bounds.bottom().value
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn page_numbers_are_stamped_again_at_the_sheet_s_own_size() {
+    let engine = test_engine();
+    // Twice A4 each way: fitted with the page, its number would shrink by half.
+    let large = engine.open(sized_page_pdf(1190, 1684)).unwrap();
+    let a4 = engine.open(sized_page_pdf(595, 842)).unwrap();
+    let config = PageNumbersConfig {
+        mode: PageNumbersMode::Single,
+        position: PageNumbersPosition::BottomCenter,
+        range: None,
+        start: None,
+        smart_color: false,
+        blank_numbered: true,
+        blank_counted: true,
+    };
+
+    for id in [large.id, a4.id] {
+        assert!(engine.apply_page_numbers(id, config.clone()).unwrap());
+    }
+
+    let mut reports = Vec::new();
+    let copy = engine
+        .fit_to_a4(large.id, |done, total| reports.push((done, total)))
+        .expect("the page should fit")
+        .expect("nobody stopped it");
+    let fitted = copy.document;
+    let expected = label_height(engine, a4.id);
+    let stamped = label_height(engine, fitted.id);
+
+    assert!(!copy.layers_scaled);
+    // The page fitted, then both passes of the stamping, all on one count.
+    assert_eq!(reports.first(), Some(&(1, 3)));
+    assert_eq!(reports.last(), Some(&(3, 3)));
+    assert!(reports.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+
+    assert!(
+        (stamped - expected).abs() < 0.5,
+        "the number should be the sheet's own size: {stamped} against {expected}"
+    );
+    // Its own content now, with no layer left for this session to take off;
+    // the document fitted keeps its own.
+    assert!(engine.lock_documents().unwrap()[&fitted.id]
+        .owned_content
+        .is_none());
+    assert!(engine.lock_documents().unwrap()[&large.id]
+        .owned_content
+        .is_some());
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn layers_that_no_longer_end_the_pages_go_along_and_say_so() {
+    let engine = test_engine();
+    let large = engine.open(sized_page_pdf(1190, 1684)).unwrap();
+    let a4 = engine.open(sized_page_pdf(595, 842)).unwrap();
+    let config = PageNumbersConfig {
+        mode: PageNumbersMode::Single,
+        position: PageNumbersPosition::BottomCenter,
+        range: None,
+        start: None,
+        smart_color: false,
+        blank_numbered: true,
+        blank_counted: true,
+    };
+
+    for id in [large.id, a4.id] {
+        assert!(engine.apply_page_numbers(id, config.clone()).unwrap());
+    }
+
+    // Something laid over the number: the tail no longer ends the page.
+    {
+        let mut documents = engine.lock_documents().unwrap();
+        let entry = documents.get_mut(&large.id).unwrap();
+        let mut page = entry.document.pages().get(0).unwrap();
+
+        page.objects_mut()
+            .create_path_object_rect(
+                PdfRect::new_from_values(0.0, 0.0, 10.0, 10.0),
+                None,
+                None,
+                Some(PdfColor::BLACK),
+            )
+            .unwrap();
+    }
+
+    let copy = engine
+        .fit_to_a4(large.id, |_, _| {})
+        .expect("the page should fit")
+        .expect("nobody stopped it");
+    let expected = label_height(engine, a4.id);
+    let scaled = label_height(engine, copy.document.id);
+
+    assert!(copy.layers_scaled);
+    assert!(
+        (scaled - expected / 2.0).abs() < 0.5,
+        "the number should shrink with its page: {scaled} against {expected}"
+    );
+}
