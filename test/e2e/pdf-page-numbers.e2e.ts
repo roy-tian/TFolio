@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
@@ -53,7 +53,7 @@ describe("TFolio page numbers", () => {
     await renderedPage()
   })
 
-  it("numbers the page, and undo and redo restore exact pixels", async () => {
+  it("numbers the page, saved only as a copy, and undo, redo and removal restore exact pixels", async () => {
     const clean = await pagePixelFingerprint()
 
     await applyPageNumbers()
@@ -73,6 +73,13 @@ describe("TFolio page numbers", () => {
       { timeout: 20_000, timeoutMsg: "the text layer never picked up the number" },
     )
 
+    // Numbers alone leave the document export-only, and the reason is on the
+    // menu's disabled save item.
+    const save = await appMenuItem("save")
+    expect(await save.getAttribute("data-disabled")).not.toBe(null)
+    expect(await tooltipOn("[data-action='save']")).toContain("exported as a copy")
+    await closeAppMenu(save)
+
     await $("button[aria-label^='Undo']").click()
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
       timeout: 30_000,
@@ -83,6 +90,13 @@ describe("TFolio page numbers", () => {
     await browser.waitUntil(async () => (await pagePixelFingerprint()) === drawn, {
       timeout: 30_000,
       timeoutMsg: "redo did not restore the same page number",
+    })
+
+    await openPageNumbersDialog()
+    await $("//button[normalize-space()='Remove page numbers']").click()
+    await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
+      timeout: 30_000,
+      timeoutMsg: "explicit removal did not restore the clean page",
     })
   })
 
@@ -218,45 +232,6 @@ describe("TFolio page numbers", () => {
     )
   })
 
-  it("replaces and explicitly removes as single history steps", async () => {
-    const clean = await pagePixelFingerprint()
-
-    // The default, automatic, puts the fixture's one (odd) page at the right.
-    await applyPageNumbers()
-    await browser.waitUntil(async () => (await pagePixelFingerprint()) !== clean, {
-      timeout: 30_000,
-    })
-    const automatic = await pagePixelFingerprint()
-
-    // Replace the position; the page changes but stays one owned object.
-    await openPageNumbersDialog()
-    await $("//button[normalize-space()='Fixed center']").click()
-    await $("[data-testid='page-numbers-apply']").click()
-    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
-      reverse: true,
-      timeout: 30_000,
-    })
-    await browser.waitUntil(
-      async () => (await pagePixelFingerprint()) !== automatic,
-      { timeout: 30_000, timeoutMsg: "the replacement never moved the number" },
-    )
-
-    // One undo returns to the automatic numbers rather than removing them.
-    await $("button[aria-label^='Undo']").click()
-    await browser.waitUntil(async () => (await pagePixelFingerprint()) === automatic, {
-      timeout: 30_000,
-      timeoutMsg: "undo did not restore the replaced position",
-    })
-
-    // Explicit removal is its own step, restoring the clean page.
-    await openPageNumbersDialog()
-    await $("//button[normalize-space()='Remove page numbers']").click()
-    await browser.waitUntil(async () => (await pagePixelFingerprint()) === clean, {
-      timeout: 30_000,
-      timeoutMsg: "explicit removal did not restore the clean page",
-    })
-  })
-
   it("stops a long run, rolling the document back and freeing the app", async () => {
     await refreshApp()
     await dropZoneButton().waitForExist({ timeout: 30_000 })
@@ -293,77 +268,5 @@ describe("TFolio page numbers", () => {
     await $(
       "//button[@role='tab'][normalize-space()='page-numbers-after-stop.pdf']",
     ).waitForExist({ timeout: 15_000 })
-  })
-
-  it("coexists with a watermark, disables save, and leaves the file alone", async () => {
-    await refreshApp()
-    await dropZoneButton().waitForExist({ timeout: 30_000 })
-    const sourcePath = await openPdfFromDisk(
-      "page-numbers-save.pdf",
-      minimalPdf(1, "0 0 300 400"),
-    )
-    await renderedPage()
-    const original = readFileSync(sourcePath)
-
-    // A watermark below, page numbers above — both are session page content.
-    await $("button[aria-label='Watermark']").click()
-    await $("[data-testid='watermark-dialog']").waitForDisplayed({ timeout: 15_000 })
-    await $("[data-testid='watermark-text']").setValue("DRAFT")
-    await $("[data-testid='watermark-apply']").click()
-    await $("[data-testid='watermark-dialog']").waitForDisplayed({
-      reverse: true,
-      timeout: 30_000,
-    })
-
-    await applyPageNumbers()
-    await browser.waitUntil(
-      async () => {
-        const text = await extractedText()
-        return text.includes("DRAFT") && text.includes("—")
-      },
-      { timeout: 20_000, timeoutMsg: "both layers should reach the text layer" },
-    )
-
-    // Capture both layers with the whole page in view — the number sits at the
-    // bottom, out of frame at the zoom a document opens at.
-    mkdirSync("artifacts/e2e", { recursive: true })
-    const pageCanvas = $("[data-page-number='1'] canvas")
-    const beforeFit = Number(await pageCanvas.getAttribute("width"))
-    await $("button[aria-label='Fit page']").click()
-    // The canvas is resized and painted in the same turn, so the width moving
-    // is the repaint itself.
-    await browser.waitUntil(
-      async () =>
-        Number(await pageCanvas.getAttribute("width")) !== beforeFit,
-      { timeout: 10_000, timeoutMsg: "fit page never repainted the page" },
-    )
-    await browser.saveScreenshot("artifacts/e2e/page-numbers-both.png")
-
-    // Owned page content leaves the document export-only, and the reason is on
-    // the menu's disabled save item.
-    const save = await appMenuItem("save")
-    expect(await save.getAttribute("data-disabled")).not.toBe(null)
-    expect(await tooltipOn("[data-action='save']")).toContain(
-      "exported as a copy",
-    )
-    await closeAppMenu(save)
-    expect(readFileSync(sourcePath).equals(original)).toBe(true)
-
-    await openPageNumbersDialog()
-    await $("//button[normalize-space()='Remove page numbers']").click()
-    await $("[data-testid='page-numbers-dialog']").waitForDisplayed({
-      reverse: true,
-      timeout: 30_000,
-    })
-    await browser.waitUntil(
-      async () => {
-        const text = await extractedText()
-        return text.includes("DRAFT") && !text.includes("—")
-      },
-      { timeout: 20_000, timeoutMsg: "the watermark should survive the removal" },
-    )
-
-    mkdirSync("artifacts/e2e", { recursive: true })
-    await browser.saveScreenshot("artifacts/e2e/page-numbers.png")
   })
 })

@@ -7,9 +7,9 @@ import {
   refreshApp,
   renderedPage,
   seedSettings,
-} from "./helpers"
+} from "../helpers"
 
-import { calibratePointer, pointer } from "./nativePointer"
+import { calibratePointer, pointer } from "../nativePointer"
 
 describe("TFolio native text dragging", () => {
   it("extends and retracts a continuous selection across fragmented lines", async () => {

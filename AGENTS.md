@@ -29,6 +29,12 @@
   (`test:all` runs both); missing fonts fail them rather than skip.
 - `test:e2e:headless` reruns the GUI suite on the last `test:e2e:build`. Never run Cargo during
   it: debug builds overwrite the `target/debug/tfolio` each spec relaunches.
+- Specs under `test/e2e/extended/` lock frame timing and pointer feel (preview hand-offs, the
+  overlay scrollbar, text hit testing, resize), which a loaded machine jitters: CI runs them, a
+  local run only with `TFOLIO_E2E_EXTENDED=1`. Run them locally after touching what they lock.
+- An e2e test proves what only the GUI can: wiring, dialogs, focus, layout. What the engine or a
+  unit test already proves (pixels after undo, layers not stacking) gets one smoke test per
+  feature, not a GUI copy.
 - e2e cannot drive native dialogs; use `window.__tfolioE2E` in e2e mode and `seedSettings` for
   settings that must survive refresh.
 - WebDriver input is not real input: scripted keys ignore `preventDefault`, typing appends over a

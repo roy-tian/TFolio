@@ -1,7 +1,7 @@
 import { $, $$, browser, expect } from "@wdio/globals"
 
-import { dropZoneButton, fragmentedTextPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings, shortLastLinePdf, textPdf } from "./helpers"
-import { calibratePointer, pointer } from "./nativePointer"
+import { dropZoneButton, fragmentedTextPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings, shortLastLinePdf, textPdf } from "../helpers"
+import { calibratePointer, pointer } from "../nativePointer"
 
 type ProbeWindow = Window & { __selectionSettled?: boolean }
 

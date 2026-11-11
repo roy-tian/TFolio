@@ -1,7 +1,7 @@
 import { $, browser, expect } from "@wdio/globals"
 
-import { MIN_PAGE_OUTPUT_SCALE } from "../../src/lib/pdf"
-import { minimalPdf, openPdfFromDisk, refreshApp, seedSettings, textPdf } from "./helpers"
+import { MIN_PAGE_OUTPUT_SCALE } from "../../../src/lib/pdf"
+import { minimalPdf, openPdfFromDisk, refreshApp, seedSettings, textPdf } from "../helpers"
 
 type ResizeSample = {
   compositorHint: string

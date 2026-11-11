@@ -814,6 +814,27 @@ export async function openPdfFromBytes(fileName: string, contents: Uint8Array) {
   })
 }
 
+export async function clickOnPage(atX = 0.3, atY = 0.3) {
+  await browser.execute(
+    (at) => {
+      const page = document.querySelector("[data-page-number='1']")!
+      const canvas = page.querySelector("canvas")!
+      const box = page.getBoundingClientRect()
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: box.left + box.width * at.x,
+          clientY: box.top + box.height * at.y,
+          isPrimary: true,
+        }),
+      )
+    },
+    { x: atX, y: atY },
+  )
+}
+
 /**
  * How much ink page 1 carries, read off the canvas pixels — PDFium can accept
  * and store a mark it then declines to draw, so only the canvas can vouch.

@@ -1,8 +1,8 @@
 import { $, browser, expect } from "@wdio/globals"
 
-import { dropZoneButton, fragmentedColumnsPdf, fragmentedTextPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings } from "./helpers"
+import { dropZoneButton, fragmentedColumnsPdf, fragmentedTextPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings } from "../helpers"
 
-import { calibratePointer, pointer } from "./nativePointer"
+import { calibratePointer, pointer } from "../nativePointer"
 
 type SelectionWindow = Window & {
   __dragSamples?: { anchor: number; focus: number; length: number }[]

@@ -22,9 +22,20 @@ const laneDisplays = (process.env.TFOLIO_E2E_DISPLAYS ?? "")
   .split(/\s+/)
   .filter(Boolean)
 
-const specFiles = readdirSync(specDirectory)
-  .filter((name) => name.endsWith(".e2e.ts"))
-  .map((name) => path.join(specDirectory, name))
+// The specs under `extended` lock frame timing and pointer feel, which a loaded
+// machine jitters: CI asks for them, a local run only when told to. Any value
+// but an off one asks, so a misspelt "on" cannot quietly skip them in CI.
+const specDirectories = ["", "0", "false"].includes(
+  process.env.TFOLIO_E2E_EXTENDED ?? "",
+)
+  ? [specDirectory]
+  : [specDirectory, path.join(specDirectory, "extended")]
+
+const specFiles = specDirectories.flatMap((directory) =>
+  readdirSync(directory)
+    .filter((name) => name.endsWith(".e2e.ts"))
+    .map((name) => path.join(directory, name)),
+)
 
 function safeArtifactName(value: string) {
   return value
