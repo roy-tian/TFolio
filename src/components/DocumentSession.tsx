@@ -32,6 +32,7 @@ import {
   spreadPagesOf,
   spreadTurnTarget,
 } from "@/lib/padding"
+import type { FileMenuEnd } from "@/components/PageContextMenu"
 import { PageThumbnails, type PageThumbnailsHandle } from "@/components/PageThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
@@ -88,10 +89,10 @@ import { panelElementId, tabElementId } from "@/lib/documentTabs"
 import { documentPlainText } from "@/lib/documentText"
 import type { CarriedPages } from "@/lib/pageCarry"
 import { forgetDocumentText } from "@/lib/pageText"
-import { transientDocumentRefusals } from "@/lib/notices"
+import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
-import { fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
+import { fileEndIndex, fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
 import { readFileSources } from "@/lib/fileSources"
 import {
   storedFilePreferences,
@@ -133,7 +134,9 @@ import {
   effectiveViewMode,
   hasBookSpread,
   pageTurnTarget,
+  readStoredPageGrid,
   readStoredViewMode,
+  storePageGrid,
   storeViewMode,
   type ViewMode,
 } from "@/lib/viewMode"
@@ -418,21 +421,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         ? sections[0]!.outline
         : pdfDocument.outline
     const bookmarksApply = outline.length > 0 || severalFiles
-    // What a split by bookmarks cuts at once files were added: a bookmark per
-    // file where a Save As writes one, else each file's own.
-    const splitOutline = !pdfDocument.hasForeignPages
-      ? pdfDocument.outline
-      : severalFiles && pdfDocument.fileOptions?.perFileBookmarks
-        ? sections.map((section) => ({
-            items: section.outline,
-            pageNumber: pagesOfSection(pdfDocument.pages, section.id)[0] ?? null,
-            title: section.title,
-          }))
-        : sections.flatMap((section) => section.outline)
     const sidebar = useSidebar()
     // The page grid lies over the reading view, which stays laid out beneath
     // it, so leaving the grid finds the reader's place where it was.
-    const [gridShown, setGridShown] = useState(false)
+    const [gridShown, setGridShown] = useState(readStoredPageGrid)
     const thumbnailsRef = useRef<PageThumbnailsHandle>(null)
     // While the grid shows the pages, the sidebar keeps to the bookmarks.
     const sidebarPanel = gridShown ? "bookmarks" : shownSidebarPanel(sidebar.panel, bookmarksApply)
@@ -640,11 +632,13 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         askAfterFailedFlattenRef.current = false
         const answer =
           remembered === "ask"
-            ? await askSignaturesRef.current({
-                context: change,
-                count: current.signatures.count,
-                name: fileName,
-              })
+            ? ((
+                await askSignaturesRef.current({
+                  context: change,
+                  count: current.signatures.count,
+                  name: fileName,
+                })
+              )?.decision ?? null)
             : remembered
 
         if (!answer) {
@@ -865,6 +859,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             hasMergedPages: update.hasMergedPages,
             numPages: update.numPages,
             outline: update.outline,
+            splitsByBookmarks: update.splitsByBookmarks,
             fileOptions: update.fileOptions,
             padding: update.padding,
             pages: update.pages,
@@ -1046,18 +1041,37 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          const signed = read.filter((info) => info.signatures.intact).length
-          const remembered = signed > 0 ? storedSignatureHandling() : "ask"
-          let signatures: SignatureDecision | null = null
+          // Each signed file answered for itself, unless the reader gives the
+          // rest the same answer, or Settings gives every one of them.
+          const signed = read.filter((info) => info.id !== undefined && info.signatures.intact)
+          const signatures: Record<number, SignatureDecision> = {}
+          const fromSettings = new Set<SignatureDecision>()
+          let asked = false
+          let forRest: SignatureDecision | null = null
 
-          if (signed > 0) {
-            signatures =
-              remembered === "ask"
-                ? await askSignaturesRef.current({ context: "insert", count: signed, name: "" })
-                : remembered
+          for (const [index, info] of signed.entries()) {
+            const remembered = storedSignatureHandling()
 
-            if (!signatures) {
-              return
+            if (forRest) {
+              signatures[info.id!] = forRest
+            } else if (remembered !== "ask") {
+              signatures[info.id!] = remembered
+              fromSettings.add(remembered)
+            } else {
+              asked = true
+              const answer = await askSignaturesRef.current({
+                context: "insert",
+                count: 1,
+                name: fileNameFromPath(info.path),
+                rest: signed.length - index - 1,
+              })
+
+              if (!answer) {
+                return
+              }
+
+              signatures[info.id!] = answer.decision
+              forRest = answer.forRest ? answer.decision : null
             }
           }
 
@@ -1096,10 +1110,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }
 
           // As every remembered answer is: nothing else shows it was given.
-          if (landed === true && signatures && remembered !== "ask") {
-            notice.raise(
-              signatures === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet",
-            )
+          const asSet = !asked && fromSettings.size === 1 ? [...fromSettings][0] : undefined
+
+          if (landed === true && asSet) {
+            notice.raise(asSet === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet")
           }
         } finally {
           addingFilesRef.current = false
@@ -1219,6 +1233,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
       if (order) {
         void reorderPages(order, pagesOfSection(pages, sectionId))
+      }
+    }
+
+    // From the file's name in the sidebar's tree, as from its heading in the grid.
+    const pasteIntoFile = (sectionId: number, end: FileMenuEnd) => {
+      const index = fileEndIndex(documentRef.current?.pages ?? [], sectionId, end)
+
+      if (index !== null) {
+        pastePages(index, sectionId)
       }
     }
 
@@ -1503,6 +1526,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
       storeViewMode(preferredViewMode)
     }, [preferredViewMode])
+
+    // As the reading view's mode is: what this tab opened on is no choice.
+    const gridChosen = useRef(false)
+
+    useEffect(() => {
+      if (!gridChosen.current) {
+        gridChosen.current = true
+        return
+      }
+
+      storePageGrid(gridShown)
+    }, [gridShown])
 
     // Undo and redo can move a note's anchored page out from under it and cannot
     // take the note as their target, so the uncommitted draft goes before a step.
@@ -2096,6 +2131,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onMenuPage: menuThumbnailPage,
       onNavigate: navigateFromSidebar,
       onPastePages: pastePages,
+      onPasteIntoFile: pasteIntoFile,
       onReorderPages: reorderPages,
       onRotatePage: rotateOnePage,
       onRotatePages: rotateThumbnailPages,
@@ -2198,8 +2234,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
+              canPaste={clipboard !== null}
               onMove={moveFile}
               onNavigate={navigateFromSidebar}
+              onPaste={pasteIntoFile}
               onRemove={removeSection}
               onRename={renameSection}
               pages={pdfDocument.pages}
@@ -2231,7 +2269,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           <SplitPdfDialog
             document={pdfDocument}
             hidden={!active}
-            outline={splitOutline}
             suggestedName={exportBaseName}
             onExport={annotations.exportArchive}
             onClose={() => setSplitOpen(false)}
@@ -2245,9 +2282,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             keepsOriginal={annotations.isDirty || saveRequired}
             onClose={() => setA4Open(false)}
             onExport={annotations.exportA4}
-            onSaved={(written) => {
+            onSaved={(saved) => {
               setA4Open(false)
-              onReplacedByFile(openedDocument.id, written)
+
+              // The corner's, not this tab's: the copy takes the tab's place.
+              if (saved.layersScaled) {
+                notices.raise({ kind: "a4LayersScaled", owner: workspaceOwner })
+              }
+
+              onReplacedByFile(openedDocument.id, saved.document)
             }}
             suggestedName={exportBaseName}
           />

@@ -138,6 +138,9 @@ const zhCN = {
     keepsOriginal: "这个文档有未保存的修改，A4 文件会在新标签中打开，当前标签保持不变。",
     suffix: "A4",
     preparing: "正在把页面放到 A4 上…",
+    finishing: "正在完成文件…",
+    layersScaled:
+      "水印和页码无法在 A4 页面上重新排布，已随页面一起缩小。",
     failed: "无法保存 A4 版本。",
     cancel: "取消",
     stop: "停止",
@@ -314,6 +317,12 @@ const zhCN = {
     exportCopyOnly: "此文档只能导出为副本，不能覆盖它已保存到的文件，请换一个文件名。",
     exportDenied:
       "无法写入该位置——文件或文件夹可能是只读的，或文件正被其他程序占用，请另选位置。",
+    exportNoSpace:
+      "空间不足，无法写入该文件。请释放一些空间，或换个位置保存。",
+    exportTargetMissing:
+      "该文件夹已不存在，可能已被移动，或所在的磁盘已移除。请换个位置。",
+    exportDocumentChanged:
+      "生成副本期间文档有改动，副本未保存。请再试一次。",
     exportSigned:
       "该文件含有效的数字签名，保存覆盖会使签名失效。请换一个文件名。",
     exportSignedChanged:
@@ -471,6 +480,8 @@ const zhCN = {
     delete_other: "删除 {{count}} 页",
     pasteBefore: "粘贴到前面",
     pasteAfter: "粘贴到后面",
+    pasteFileStart: "粘贴到此文件开头",
+    pasteFileEnd: "粘贴到此文件末尾",
     cutNotice_one: "已剪切 {{count}} 页（第 {{pages}} 页）",
     cutNotice_other: "已剪切 {{count}} 页（第 {{pages}} 页）",
     copiedNotice_one: "已复制 {{count}} 页（第 {{pages}} 页）",
@@ -536,10 +547,8 @@ const zhCN = {
     promptEdit_other: "“{{name}}”含 {{count}} 个数字签名。修改后签名将失效，可能存在合规风险。",
     promptExport_one: "用“{{name}}”的页面生成的新文件无法保留其数字签名，可能存在合规风险。",
     promptExport_other: "用“{{name}}”的页面生成的新文件无法保留其 {{count}} 个数字签名，可能存在合规风险。",
-    promptInsert_one:
-      "添加的文件已签名，它的页面加入后无法保留数字签名，可能存在合规风险。",
-    promptInsert_other:
-      "添加的 {{count}} 个文件已签名，它们的页面加入后无法保留数字签名，可能存在合规风险。",
+    promptInsert:
+      "添加的“{{name}}”已签名，它的页面加入后无法保留数字签名，可能存在合规风险。",
     promptOriginal: "已签名的原文件不会被覆盖。",
     flattenHint: "扁平化：保留外观，签名的图样并入页面内容，签名本身被移除。",
     keepHint: "保留签名域：签名域留在文件中，但会显示为无效；A4 适配会丢失它们。",
@@ -549,6 +558,8 @@ const zhCN = {
     flattenFailed:
       "签名无法扁平化，文件未做任何修改。请重试，或改为保留签名域。",
     remember: "记住我的选择（可在设置中更改）",
+    forRest_one: "另 {{count}} 个已签名的文件也这样处理",
+    forRest_other: "另 {{count}} 个已签名的文件也这样处理",
     appliedFlatten: "已按设置将数字签名扁平化。已签名的原文件保持不变。",
     appliedKeep: "已按设置保留签名域，它们将显示为无效。已签名的原文件保持不变。",
     brokenCount_one: "含 {{count}} 个已损坏的数字签名",

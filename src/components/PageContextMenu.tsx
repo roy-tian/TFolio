@@ -103,3 +103,38 @@ export function PageMenuContent({
     </ContextMenuContent>
   )
 }
+
+/** Where in a file a paste lands: before its first page, or after its last. */
+export type FileMenuEnd = "start" | "end"
+
+/** A file's right-click menu, by its name: pastes that join it at either end. */
+export function FileMenuContent({
+  canPaste,
+  onPaste,
+}: {
+  canPaste: boolean
+  onPaste: (end: FileMenuEnd) => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <ContextMenuContent>
+      <ContextMenuItem
+        data-action="paste-file-start"
+        disabled={!canPaste}
+        onClick={() => onPaste("start")}
+      >
+        <ClipboardPaste />
+        {t("pageEdit.pasteFileStart")}
+      </ContextMenuItem>
+      <ContextMenuItem
+        data-action="paste-file-end"
+        disabled={!canPaste}
+        onClick={() => onPaste("end")}
+      >
+        <ClipboardPaste />
+        {t("pageEdit.pasteFileEnd")}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+}

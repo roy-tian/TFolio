@@ -22,6 +22,22 @@ export function pagesOfSection(pages: readonly PdfPageInfo[], section: number): 
   return pages.flatMap((page, index) => (page.section === section ? [index + 1] : []))
 }
 
+/** Where a paste at one end of file `section` goes, 1-based: before its first
+    page, or after its last; null for a file with no page. */
+export function fileEndIndex(
+  pages: readonly PdfPageInfo[],
+  section: number,
+  end: "start" | "end",
+): number | null {
+  const own = pagesOfSection(pages, section)
+
+  if (own.length === 0) {
+    return null
+  }
+
+  return end === "start" ? own[0]! : own[own.length - 1]! + 1
+}
+
 /** Whether `moving` holds every page some file has: joined to another file
     where they stand, that file would be left with no page at all. */
 export function emptiesItsFile(

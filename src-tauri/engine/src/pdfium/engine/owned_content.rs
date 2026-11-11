@@ -235,6 +235,15 @@ pub(super) fn place_text_object(
     Ok(object)
 }
 
+/// What a stopped or failed rebuild leaves behind.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RebuildFailure {
+    /// The document as it was, from a snapshot taken first.
+    RollBack,
+    /// Whatever it reached: a copy its caller throws away needs no snapshot.
+    Discard,
+}
+
 impl PdfiumEngine {
     /// Whole-document preflight, run before anything is touched: every page
     /// must still end with exactly the objects this session recorded. It holds
@@ -332,11 +341,14 @@ impl PdfiumEngine {
     /// Stamps layers on a document nobody holds yet, as content of its own
     /// rather than this session's: the file written from it reads as an open
     /// of that file would, saved over without refusal. `false` is a stopped run.
+    /// Such a document is the caller's to throw away on a failure or a stop,
+    /// so nothing is kept to roll it back.
     pub(super) fn stamp_layers(
         &self,
         document_id: u64,
         watermark: Option<WatermarkResources>,
         page_numbers: Option<PageNumbersResources>,
+        on_progress: &mut dyn FnMut(usize, usize),
         operation: &OperationGuard<'_>,
     ) -> Result<bool, String> {
         let mut documents = self.lock_documents()?;
@@ -347,7 +359,14 @@ impl PdfiumEngine {
 
         let entry = open_entry_mut(&mut documents, document_id)?;
 
-        if !self.rebuild_owned_content(entry, watermark, page_numbers, &mut |_, _| {}, operation)? {
+        if !self.rebuild_owned_content(
+            entry,
+            watermark,
+            page_numbers,
+            on_progress,
+            operation,
+            RebuildFailure::Discard,
+        )? {
             return Ok(false);
         }
 
@@ -495,6 +514,7 @@ impl PdfiumEngine {
             page_numbers,
             &mut |done, total| on_progress(checked + done, checked + total),
             operation,
+            RebuildFailure::RollBack,
         )
     }
 
@@ -899,6 +919,7 @@ impl PdfiumEngine {
         page_numbers: Option<PageNumbersResources>,
         on_progress: &mut dyn FnMut(usize, usize),
         operation: &OperationGuard<'_>,
+        on_failure: RebuildFailure,
     ) -> Result<bool, String> {
         let page_count = entry.document.pages().len() as usize;
         let total = page_count * 2;
@@ -911,10 +932,15 @@ impl PdfiumEngine {
         }
 
         let previous = entry.owned_content.clone();
-        let snapshot = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+        let snapshot = match on_failure {
+            RebuildFailure::RollBack => Some(
+                entry
+                    .document
+                    .save_to_bytes()
+                    .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?,
+            ),
+            RebuildFailure::Discard => None,
+        };
 
         // `None` is the reader's stop: the rollback below is the same one a
         // failure takes, so a stopped run leaves the document it started on.
@@ -1223,11 +1249,11 @@ impl PdfiumEngine {
             }))
         })();
 
-        let state = match rebuilt {
-            Ok(Some(state)) => state,
+        let state = match (rebuilt, snapshot) {
+            (Ok(Some(state)), _) => state,
             // A stop is a failure only when the rollback itself fails — the one
             // case leaving a document neither reader nor session asked for.
-            Ok(None) => {
+            (Ok(None), Some(snapshot)) => {
                 return match self.load_document_snapshot(entry, snapshot) {
                     Ok(()) => Ok(false),
                     Err(error) => Err(format!(
@@ -1235,9 +1261,11 @@ impl PdfiumEngine {
                     )),
                 };
             }
-            Err(error) => {
+            (Ok(None), None) => return Ok(false),
+            (Err(error), Some(snapshot)) => {
                 return Err(self.restore_document_snapshot(entry, snapshot, error));
             }
+            (Err(error), None) => return Err(error),
         };
 
         // A rebuild that had something to pop leaves orphaned fonts and content

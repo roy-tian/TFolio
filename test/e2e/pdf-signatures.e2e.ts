@@ -163,6 +163,42 @@ describe("TFolio signed documents", () => {
     expect(readFileSync(signed).equals(original)).toBe(true)
   })
 
+  it("asks about each signed file added, unless the rest are given the same answer", async () => {
+    const first = writeScratchPdf("first-signed.pdf", signedPdf())
+    const plain = writeScratchPdf("plain.pdf", textPdf())
+    const second = writeScratchPdf("second-signed.pdf", signedPdf())
+    const forRest = `${prompt} [data-slot='signature-prompt-for-rest']`
+    const pageCell = (pageNumber: number) =>
+      $(`[data-active='true'] button[data-thumbnail-page='${pageNumber}']`)
+
+    await openPdfFromDisk("own.pdf", textPdf())
+    await renderedPage()
+    await pointMultiPickerAt([first, plain, second])
+    await $("[data-active='true'] [data-slot='pages-add-files']").click()
+
+    // Named one at a time; the file with no signature is never asked about.
+    await $(prompt).waitForDisplayed()
+    await expect($(prompt)).toHaveText(expect.stringContaining("first-signed.pdf"))
+    await expect($(forRest)).toBeDisplayed()
+    await $(`${prompt} [data-action='signatures-flatten']`).click()
+    await browser.waitUntil(
+      async () => (await $(prompt).getText()).includes("second-signed.pdf"),
+      { timeoutMsg: "the second signed file was not asked about" },
+    )
+    await expect($(forRest)).not.toBeExisting()
+    await answerPrompt("signatures-keep")
+    await pageCell(4).waitForExist({ timeout: 15_000 })
+
+    // The rest given the first's answer: one prompt for both.
+    await pointMultiPickerAt([first, second])
+    await $("[data-active='true'] [data-slot='pages-add-files']").click()
+    await $(prompt).waitForDisplayed()
+    await $(forRest).click()
+    await answerPrompt("signatures-keep")
+    await pageCell(6).waitForExist({ timeout: 15_000 })
+    await expect($(prompt)).not.toBeDisplayed()
+  })
+
   it("asks before the first edit, and a flatten keeps the seal as page content", async () => {
     const sourcePath = await openPdfFromDisk("signed.pdf", signedPdf())
     const original = readFileSync(sourcePath)

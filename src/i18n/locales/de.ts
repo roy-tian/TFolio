@@ -147,6 +147,9 @@ const de = {
     keepsOriginal: "Dieses Dokument hat ungespeicherte Änderungen; die A4-Datei öffnet sich daher in einem neuen Tab, und dieser bleibt unverändert.",
     suffix: "A4",
     preparing: "Seiten werden auf A4 gesetzt…",
+    finishing: "Datei wird fertiggestellt…",
+    layersScaled:
+      "Wasserzeichen und Seitenzahlen ließen sich auf den A4-Blättern nicht neu setzen und wurden mit ihren Seiten verkleinert.",
     failed: "Die A4-Kopie konnte nicht gespeichert werden.",
     cancel: "Abbrechen",
     stop: "Stoppen",
@@ -329,6 +332,12 @@ const de = {
       "Dieses Dokument kann nur als Kopie exportiert werden und darf daher nicht die Datei überschreiben, in der es gespeichert wurde. Wählen Sie einen anderen Namen.",
     exportDenied:
       "In diesen Speicherort kann nicht geschrieben werden – die Datei oder der Ordner ist möglicherweise schreibgeschützt, oder die Datei ist in einem anderen Programm geöffnet. Wählen Sie einen anderen Ort.",
+    exportNoSpace:
+      "Für diese Datei ist nicht genug Speicherplatz frei. Geben Sie Speicher frei oder wählen Sie einen anderen Ort.",
+    exportTargetMissing:
+      "Dieser Ordner existiert nicht mehr – er wurde vielleicht verschoben oder sein Laufwerk entfernt. Wählen Sie einen anderen Ort.",
+    exportDocumentChanged:
+      "Das Dokument hat sich geändert, während die Kopie entstand, daher wurde sie nicht gespeichert. Versuchen Sie es erneut.",
     exportSigned:
       "Diese Datei enthält intakte digitale Signaturen, die ein Speichern darüber zerstören würde. Wählen Sie einen anderen Namen.",
     exportSignedChanged:
@@ -493,6 +502,8 @@ const de = {
     delete_other: "{{count}} Seiten löschen",
     pasteBefore: "Davor einfügen",
     pasteAfter: "Danach einfügen",
+    pasteFileStart: "Am Anfang dieser Datei einfügen",
+    pasteFileEnd: "Am Ende dieser Datei einfügen",
     cutNotice_one: "Seite {{pages}} ausgeschnitten",
     cutNotice_other: "{{count}} Seiten ausgeschnitten ({{pages}})",
     copiedNotice_one: "Seite {{pages}} kopiert",
@@ -562,10 +573,8 @@ const de = {
       "Eine neue Datei aus Seiten von „{{name}}“ kann deren digitale Signatur nicht behalten, was ein Compliance-Risiko sein kann.",
     promptExport_other:
       "Eine neue Datei aus Seiten von „{{name}}“ kann deren {{count}} digitale Signaturen nicht behalten, was ein Compliance-Risiko sein kann.",
-    promptInsert_one:
-      "Die hinzugefügte Datei ist signiert; ihre Seiten können hier die digitalen Signaturen nicht behalten, was ein Compliance-Risiko sein kann.",
-    promptInsert_other:
-      "{{count}} hinzugefügte Dateien sind signiert; ihre Seiten können hier die digitalen Signaturen nicht behalten, was ein Compliance-Risiko sein kann.",
+    promptInsert:
+      "„{{name}}“ ist signiert; seine Seiten können hier die digitalen Signaturen nicht behalten, was ein Compliance-Risiko sein kann.",
     promptOriginal: "Die signierte Datei selbst wird nie überschrieben.",
     flattenHint:
       "Reduzieren behält das Aussehen: Das Erscheinungsbild jeder Signatur wird Seiteninhalt, die Signatur selbst wird entfernt.",
@@ -577,6 +586,8 @@ const de = {
     flattenFailed:
       "Die Signaturen konnten nicht reduziert werden, es wurde nichts geändert. Versuchen Sie es erneut oder behalten Sie die Signaturfelder.",
     remember: "Auswahl merken (in den Einstellungen änderbar)",
+    forRest_one: "Ebenso mit der anderen signierten Datei verfahren",
+    forRest_other: "Ebenso mit den anderen {{count}} signierten Dateien verfahren",
     appliedFlatten:
       "Wie in den Einstellungen festgelegt, werden die digitalen Signaturen für diese Änderung reduziert. Die signierte Datei bleibt unverändert.",
     appliedKeep:

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import { noticeCatalogue } from "@/lib/notices"
-import { exportFailureNotice, type PdfDocumentInfo } from "@/lib/pdf"
+import { exportFailureNotice, type A4Saved, type PdfDocumentInfo } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
 type A4ExportDialogProps = {
@@ -26,7 +26,7 @@ type A4ExportDialogProps = {
   onClose: () => void
   onExport: ReturnType<typeof useAnnotations>["exportA4"]
   /** The written copy, which the tab shows from now on. */
-  onSaved: (document: PdfDocumentInfo) => void
+  onSaved: (saved: A4Saved) => void
   suggestedName: string
 }
 
@@ -121,11 +121,21 @@ export function A4ExportDialog({
           </p>
         ) : null}
         {busy ? (
-          <OperationProgress
-            label={t("a4Export.preparing")}
-            progress={progress}
-            testId="a4-progress"
-          />
+          // Every page counted, the file is still being put together and
+          // written: a bar held full would read as stuck.
+          progress && progress.completed >= progress.total ? (
+            <OperationProgress
+              label={t("a4Export.finishing")}
+              progress={null}
+              testId="a4-progress"
+            />
+          ) : (
+            <OperationProgress
+              label={t("a4Export.preparing")}
+              progress={progress}
+              testId="a4-progress"
+            />
+          )
         ) : null}
         <DialogFooter>
           <Button

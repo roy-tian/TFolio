@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub use archive::{ArchiveOptions, ImageFormat};
 pub use compress::{CompressionEstimate, CompressionOptions};
 pub use engine::{
-    is_merge_image, EnginePaths, FileKey, FileOptions, FileSourceInfo, OperationTarget,
+    is_merge_image, A4Copy, EnginePaths, FileKey, FileOptions, FileSourceInfo, OperationTarget,
     PdfPaddingSheet, PdfSection, PdfiumEngine, MERGE_IMAGE_EXTENSIONS, SOURCE_CHANGED,
 };
 pub use font::{download_fallback_font, CJK_FONT_NAME};
@@ -42,6 +42,8 @@ pub struct PdfDocumentInfo {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
+    /// As in [`PdfStructureUpdate`].
+    splits_by_bookmarks: bool,
     /// The file this document was opened from. `None` — opened from bytes —
     /// disables saving; only exporting can give it a file.
     path: Option<String>,
@@ -102,6 +104,9 @@ pub struct PdfStructureUpdate {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
+    /// Whether a split by bookmarks has a bookmark to cut at: the document's
+    /// own, or once files were added, those a Save As would write.
+    splits_by_bookmarks: bool,
     /// Like a watermark, a copy of a page carrying one or page numbers leaves the
     /// document export-only; the frontend's save key reads this, not its history.
     has_merged_pages: bool,

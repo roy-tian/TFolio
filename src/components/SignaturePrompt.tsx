@@ -17,7 +17,9 @@ import type { SignaturePromptRequest } from "@/hooks/useSignaturePrompt"
 import type { SignatureDecision } from "@/lib/pdf"
 
 type SignaturePromptProps = {
+  forRest: boolean
   onAnswer: (answer: SignatureDecision | null) => void
+  onForRestChange: (forRest: boolean) => void
   onRememberChange: (remember: boolean) => void
   open: boolean
   remember: boolean
@@ -28,7 +30,9 @@ type SignaturePromptProps = {
     to flatten them into the pages, keeping their look, or keep the fields,
     which then read as invalid. Either way the signed file stays as it is. */
 export function SignaturePrompt({
+  forRest,
   onAnswer,
+  onForRestChange,
   onRememberChange,
   open,
   remember,
@@ -36,7 +40,9 @@ export function SignaturePrompt({
 }: SignaturePromptProps) {
   const { t } = useTranslation()
   const rememberId = useId()
+  const forRestId = useId()
   const values = { count: request?.count ?? 1, name: request?.name ?? "" }
+  const rest = request?.rest ?? 0
 
   return (
     <AlertDialog
@@ -52,7 +58,7 @@ export function SignaturePrompt({
           <AlertDialogTitle>{t("signatures.promptTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
             {request?.context === "insert"
-              ? t("signatures.promptInsert", values)
+              ? t("signatures.promptInsert", { name: values.name })
               : request?.context === "export"
                 ? t("signatures.promptExport", values)
                 : t("signatures.promptEdit", values)}{" "}
@@ -74,6 +80,19 @@ export function SignaturePrompt({
             {t("signatures.remember")}
           </Label>
         </div>
+        {rest > 0 ? (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={forRest}
+              data-slot="signature-prompt-for-rest"
+              id={forRestId}
+              onCheckedChange={onForRestChange}
+            />
+            <Label className="font-normal" htmlFor={forRestId}>
+              {t("signatures.forRest", { count: rest })}
+            </Label>
+          </div>
+        ) : null}
         {/* Stacked: three choices this long fit no row in every language. */}
         <AlertDialogFooter className="sm:flex-col-reverse">
           <AlertDialogCancel>{t("signatures.cancel")}</AlertDialogCancel>

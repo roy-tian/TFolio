@@ -147,6 +147,9 @@ const fr = {
     keepsOriginal: "Ce document a des modifications non enregistrées : le fichier A4 s’ouvre dans un nouvel onglet et celui-ci reste tel quel.",
     suffix: "A4",
     preparing: "Mise des pages au format A4…",
+    finishing: "Finalisation du fichier…",
+    layersScaled:
+      "Le filigrane et les numéros de page n’ont pas pu être replacés sur les feuilles A4 ; ils ont été réduits avec leurs pages.",
     failed: "Impossible d’enregistrer la copie A4.",
     cancel: "Annuler",
     stop: "Arrêter",
@@ -328,6 +331,12 @@ const fr = {
       "Ce document ne peut être exporté que sous forme de copie : il ne peut pas remplacer le fichier dans lequel il a été enregistré. Choisissez un autre nom.",
     exportDenied:
       "Impossible d’écrire à cet emplacement — le fichier ou le dossier est peut-être en lecture seule, ou le fichier est ouvert dans un autre programme. Choisissez un autre emplacement.",
+    exportNoSpace:
+      "Il n’y a pas assez d’espace pour écrire ce fichier. Libérez de l’espace ou choisissez un autre emplacement.",
+    exportTargetMissing:
+      "Ce dossier n’existe plus — il a peut-être été déplacé, ou son disque retiré. Choisissez un autre emplacement.",
+    exportDocumentChanged:
+      "Le document a changé pendant la création de la copie, qui n’a donc pas été enregistrée. Réessayez.",
     exportSigned:
       "Ce fichier porte des signatures numériques intactes, qu’un enregistrement par-dessus romprait. Choisissez un autre nom.",
     exportSignedChanged:
@@ -492,6 +501,8 @@ const fr = {
     delete_other: "Supprimer {{count}} pages",
     pasteBefore: "Coller avant",
     pasteAfter: "Coller après",
+    pasteFileStart: "Coller au début de ce fichier",
+    pasteFileEnd: "Coller à la fin de ce fichier",
     cutNotice_one: "Page {{pages}} coupée",
     cutNotice_other: "{{count}} pages coupées ({{pages}})",
     copiedNotice_one: "Page {{pages}} copiée",
@@ -562,10 +573,8 @@ const fr = {
       "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder sa signature numérique, ce qui peut présenter un risque de conformité.",
     promptExport_other:
       "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder ses {{count}} signatures numériques, ce qui peut présenter un risque de conformité.",
-    promptInsert_one:
-      "Le fichier ajouté est signé et ses pages ici ne peuvent pas garder ses signatures numériques, ce qui peut présenter un risque de conformité.",
-    promptInsert_other:
-      "{{count}} fichiers ajoutés sont signés et leurs pages ici ne peuvent pas garder leurs signatures numériques, ce qui peut présenter un risque de conformité.",
+    promptInsert:
+      "« {{name}} » est signé et ses pages ici ne peuvent pas garder ses signatures numériques, ce qui peut présenter un risque de conformité.",
     promptOriginal: "Le fichier signé lui-même n’est jamais écrasé.",
     flattenHint:
       "Aplatir garde l’aspect : l’apparence de chaque signature devient du contenu de page, et la signature est retirée.",
@@ -577,6 +586,8 @@ const fr = {
     flattenFailed:
       "Les signatures n’ont pas pu être aplaties, et rien n’a changé. Réessayez, ou gardez les champs de signature.",
     remember: "Mémoriser mon choix (modifiable dans les Réglages)",
+    forRest_one: "Faire de même pour l’autre fichier signé",
+    forRest_other: "Faire de même pour les {{count}} autres fichiers signés",
     appliedFlatten:
       "Comme le veulent les Réglages, les signatures numériques sont aplaties pour cette modification. Le fichier signé reste tel quel.",
     appliedKeep:

@@ -54,6 +54,15 @@ export function storeViewMode(mode: ViewMode) {
   rememberSettings({ ui: { viewMode: mode } })
 }
 
+/** Documents open on the page grid once the reader last left one there. */
+export function readStoredPageGrid(): boolean {
+  return storedSettings().ui?.pageGrid === true
+}
+
+export function storePageGrid(shown: boolean) {
+  rememberSettings({ ui: { pageGrid: shown } })
+}
+
 /** A single-page turn; a book turn goes by spreads (`spreadTurnTarget`).
     Page Up/Down turn pages, not pixels. */
 export function pageTurnTarget(

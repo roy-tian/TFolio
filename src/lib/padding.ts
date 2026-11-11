@@ -9,6 +9,30 @@ export type Sheet = { kind: "page"; pageNumber: number } | ({ kind: "padding" } 
 /** A document of one file has none: shared, so the empty list stays one value. */
 export const NO_PADDING: readonly PaddingSheet[] = []
 
+/** The 0-based positions a blank follows, for pages whose files stand as
+    `files` says, position by position: the engine's `SectionBook::padding`,
+    for a preview it has not laid out. Before a file that would otherwise
+    start on an even page, as the back of the last leaf of the file before. */
+export function paddingPositions(files: readonly (number | undefined)[]): number[] {
+  if (new Set(files).size < 2) {
+    return []
+  }
+
+  const after: number[] = []
+  let written = 0
+
+  files.forEach((file, index) => {
+    if (index > 0 && file !== files[index - 1] && written % 2 === 1) {
+      after.push(index - 1)
+      written += 1
+    }
+
+    written += 1
+  })
+
+  return after
+}
+
 export function samePadding(left: readonly PaddingSheet[], right: readonly PaddingSheet[]) {
   return (
     left.length === right.length &&

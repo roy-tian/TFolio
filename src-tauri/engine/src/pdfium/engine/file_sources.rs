@@ -324,10 +324,9 @@ impl PdfiumEngine {
         work(&mut documents, document, &path)
     }
 
-    /// Lets every parsed source go, as the budget would, so the next use reads
-    /// the disk again.
-    #[cfg(test)]
-    pub(super) fn evict_sources_for_test(&self, scope: &str) {
+    /// Lets every parsed source of `scope`'s window go, keeping their records,
+    /// as the budget would: the next insert reads each file from disk again.
+    pub fn unload_sources(&self, scope: &str) {
         let Ok(_documents) = self.lock_documents() else {
             return;
         };
@@ -377,8 +376,9 @@ impl PdfiumEngine {
     /// Adds files `read_sources` read to an open document, all before
     /// 1-based `index`, each a file of its own and in order; the sources go
     /// once their pages are in. One step: the caller's undo deletes the whole
-    /// run under its stash. A signed source needs `decision`, which a new file
-    /// would ask for: its signatures cannot hold in this document either.
+    /// run under its stash. Each signed source needs its own answer in
+    /// `decisions`, as a new file of it would ask: its signatures cannot hold in
+    /// this document either. A source with none intact is copied as it is.
     /// `own_title` names the document's own pages, should this be the first
     /// file added, and `options` how its files are laid out and saved.
     #[allow(clippy::too_many_arguments)]
@@ -390,7 +390,7 @@ impl PdfiumEngine {
         index: i32,
         own_title: &str,
         options: sections::FileOptions,
-        decision: Option<SignatureDecision>,
+        decisions: &HashMap<u64, SignatureDecision>,
     ) -> Result<PdfStructureUpdate, String> {
         if source_ids.is_empty() {
             return Err("no files to add".into());
@@ -406,25 +406,29 @@ impl PdfiumEngine {
 
         let own_title = sections::section_title(own_title)?;
         let mut signed_paths = Vec::new();
-        let flatten = {
+        let mut flattened_sources = HashSet::new();
+
+        {
             let sources = self.lock_sources();
 
             for id in source_ids {
                 let source = sources.entry(scope, *id)?;
 
-                if source.signed {
-                    signed_paths.push(source.path.clone());
+                if !source.signed {
+                    continue;
                 }
-            }
 
-            match (!signed_paths.is_empty(), decision) {
-                (false, _) => false,
-                (true, Some(decision)) => decision == SignatureDecision::Flatten,
-                (true, None) => {
-                    return Err("an added file's signatures need an answer first".into())
+                match decisions.get(id) {
+                    Some(SignatureDecision::Flatten) => {
+                        flattened_sources.insert(*id);
+                    }
+                    Some(SignatureDecision::Keep) => {}
+                    None => return Err("an added file's signatures need an answer first".into()),
                 }
+
+                signed_paths.push(source.path.clone());
             }
-        };
+        }
         // Closing the document stops it between files, as any long edit stops.
         let operation = self.begin_operation(OperationTarget::Document(document_id));
         let (slot, before) = {
@@ -472,7 +476,7 @@ impl PdfiumEngine {
                     let entry = open_entry_mut(documents, document_id)?;
                     let count = source.pages().len() as usize;
                     let all: Vec<usize> = (0..count).collect();
-                    let flattened = if flatten {
+                    let flattened = if flattened_sources.contains(id) {
                         Some(signatures::flattened_pages(self.pdfium, source, &all)?)
                     } else {
                         None

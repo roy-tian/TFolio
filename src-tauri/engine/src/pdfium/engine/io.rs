@@ -79,10 +79,9 @@ impl StagedFile {
     pub(super) fn holding(path: &Path, bytes: &[u8]) -> Result<Self, String> {
         let mut staged = Self::beside(path)?;
 
-        staged
-            .file()
-            .write_all(bytes)
-            .map_err(|error| format!("could not write the document: {error}"))?;
+        staged.file().write_all(bytes).map_err(|error| {
+            write_error(&error, format!("could not write the document: {error}"))
+        })?;
 
         Ok(staged)
     }
@@ -95,8 +94,9 @@ impl StagedFile {
 
         // The rename only orders the replacement; a crash between an unsynced
         // rename and the writeback would leave a hollow file behind the name.
-        file.sync_all()
-            .map_err(|error| format!("could not flush the document: {error}"))?;
+        file.sync_all().map_err(|error| {
+            write_error(&error, format!("could not flush the document: {error}"))
+        })?;
         drop(file);
 
         // The temporary was born with default permissions; the file it replaces may
@@ -207,13 +207,29 @@ pub(super) const EXPORT_COPY_ONLY_ERROR: &str = "tfolio:export-copy-only";
 /// `src/lib/pdf.ts`.
 pub(super) const EXPORT_DENIED_ERROR: &str = "tfolio:export-denied";
 
+/// A destination with no room left for the file. Matched as `EXPORT_NO_SPACE`
+/// in `src/lib/pdf.ts`.
+pub(super) const EXPORT_NO_SPACE_ERROR: &str = "tfolio:export-no-space";
+
+/// A destination whose folder is gone since it was chosen: moved, deleted,
+/// or on a drive taken out. Matched as `EXPORT_TARGET_MISSING` in `src/lib/pdf.ts`.
+pub(super) const EXPORT_TARGET_MISSING_ERROR: &str = "tfolio:export-target-missing";
+
+/// A copy built page by page whose document changed under it, so it was not
+/// written. Matched as `EXPORT_DOCUMENT_CHANGED` in `src/lib/pdf.ts`.
+pub(super) const EXPORT_DOCUMENT_CHANGED_ERROR: &str = "tfolio:export-document-changed";
+
 /// A refusal the reader can act on travels as a code the frontend words;
 /// anything else keeps its message for the log.
-fn write_error(error: &std::io::Error, message: String) -> String {
+pub(super) fn write_error(error: &std::io::Error, message: String) -> String {
+    use std::io::ErrorKind;
+
     match error.kind() {
-        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => {
-            EXPORT_DENIED_ERROR.into()
+        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => EXPORT_DENIED_ERROR.into(),
+        ErrorKind::StorageFull | ErrorKind::QuotaExceeded | ErrorKind::FileTooLarge => {
+            EXPORT_NO_SPACE_ERROR.into()
         }
+        ErrorKind::NotFound | ErrorKind::NotADirectory => EXPORT_TARGET_MISSING_ERROR.into(),
         _ => message,
     }
 }
@@ -974,8 +990,13 @@ impl PdfiumEngine {
     ) -> Result<T, String> {
         self.collect_orphans(entry)?;
 
-        let written = write(&entry.document)
-            .map_err(|error| format!("PDFium could not write the document: {error}"))?;
+        let written = write(&entry.document).map_err(|error| match error {
+            PdfiumError::IoError(cause) => write_error(
+                &cause,
+                format!("PDFium could not write the document: {cause}"),
+            ),
+            error => format!("PDFium could not write the document: {error}"),
+        })?;
         entry.loaded_len = None;
 
         Ok(written)

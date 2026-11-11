@@ -15,7 +15,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { useAnnotations } from "@/hooks/useAnnotations"
-import type { PdfDocumentInfo, PdfOutlineItem } from "@/lib/pdf"
+import type { PdfDocumentInfo } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
 type SplitMode = "bookmarks" | "pages"
@@ -24,9 +24,6 @@ type SplitPdfDialogProps = {
   document: PdfDocumentInfo
   /** Its tab is not the one showing: out of sight, with its state kept. */
   hidden?: boolean
-  /** The bookmarks a split by bookmarks cuts at: for files added to the
-      document, those a Save As writes. */
-  outline: PdfOutlineItem[]
   suggestedName: string
   onExport: ReturnType<typeof useAnnotations>["exportArchive"]
   onClose: () => void
@@ -35,15 +32,12 @@ type SplitPdfDialogProps = {
 export function SplitPdfDialog({
   document,
   hidden = false,
-  outline,
   suggestedName,
   onExport,
   onClose,
 }: SplitPdfDialogProps) {
   const { t } = useTranslation()
-  const hasBookmarks = outline.some((item) =>
-    item.pageNumber !== null && item.pageNumber >= 1 && item.pageNumber <= document.numPages,
-  )
+  const hasBookmarks = document.splitsByBookmarks
   const [mode, setMode] = useState<SplitMode>(hasBookmarks ? "bookmarks" : "pages")
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)

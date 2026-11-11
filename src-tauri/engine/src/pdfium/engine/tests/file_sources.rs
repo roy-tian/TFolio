@@ -37,7 +37,15 @@ fn insert(engine: &PdfiumEngine, scope: &str, ids: &[u64]) -> Result<PdfStructur
         .open(banded_pdf(&[100]))
         .expect("PDFium should open the document");
 
-    engine.insert_sources(scope, document.id, ids, 2, "own.pdf", PLAIN, None)
+    engine.insert_sources(
+        scope,
+        document.id,
+        ids,
+        2,
+        "own.pdf",
+        PLAIN,
+        &HashMap::new(),
+    )
 }
 
 #[test]
@@ -68,7 +76,7 @@ fn a_source_changed_on_disk_is_refused_once_it_must_be_read_again() {
     let path = write_source(&directory, "source.pdf", banded_pdf(&[20]));
     let ids = added(engine, "changed", vec![path.clone()]);
 
-    engine.evict_sources_for_test("changed");
+    engine.unload_sources("changed");
     fs::write(&path, banded_pdf(&[20, 60])).expect("the file should change");
 
     let refused = insert(engine, "changed", &ids).expect_err("a changed file is refused");
@@ -89,7 +97,7 @@ fn a_source_let_go_is_read_again_while_its_file_stands() {
         vec![write_source(&directory, "source.pdf", banded_pdf(&[20]))],
     );
 
-    engine.evict_sources_for_test("reread");
+    engine.unload_sources("reread");
     let added = insert(engine, "reread", &ids).expect("an unchanged file is read again");
     assert_eq!(added.num_pages, 2);
 

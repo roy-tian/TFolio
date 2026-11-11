@@ -80,7 +80,15 @@ fn added_files_land_before_the_index_each_a_file_of_its_own() {
     );
 
     let update = engine
-        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            2,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the files should be added");
 
     assert_eq!(update.num_pages, 8);
@@ -113,7 +121,15 @@ fn added_files_land_before_the_index_each_a_file_of_its_own() {
     assert_eq!(page_fingerprints(engine, own.id, 8)[1..3], added_prints[..]);
     // Consumed: the pages are the document's own copies now.
     assert!(engine
-        .insert_sources(SCOPE, own.id, &ids[..1], 1, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids[..1],
+            1,
+            "own.pdf",
+            options(true),
+            &HashMap::new()
+        )
         .is_err());
 
     fs::remove_dir_all(directory).ok();
@@ -135,7 +151,15 @@ fn a_document_with_added_files_saves_only_as_a_new_file_with_a_bookmark_each() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 4, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            4,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
 
     let refused = engine
@@ -191,7 +215,15 @@ fn writing_the_files_bookmarks_leaves_the_pages_as_pdfium_saved_them() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            2,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
 
     // The bookmarks go in through lopdf's reparse and rewrite of PDFium's
@@ -233,7 +265,15 @@ fn without_a_bookmark_per_file_the_files_bookmarks_follow_one_another() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 4, "own.pdf", options(false), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            4,
+            "own.pdf",
+            options(false),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
 
     let combined = directory.join("flat.pdf");
@@ -280,7 +320,15 @@ fn an_undone_insert_lets_the_file_save_again_and_a_redo_brings_its_files_back() 
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
 
     // The undo of an insert deletes its run under the entry's stash.
@@ -323,7 +371,15 @@ fn pages_move_between_files_by_the_layout_and_new_ones_join_the_file_named() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
 
     // Page 1 dropped between the added file's two pages joins that file.
@@ -371,7 +427,15 @@ fn a_copy_of_an_added_page_is_still_another_file_s() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
     engine
         .duplicate_pages(own.id, &[3], 1, Some(0))
@@ -401,7 +465,15 @@ fn a_file_takes_a_new_name_but_never_an_empty_one() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
 
     let renamed = engine
@@ -427,7 +499,15 @@ fn a_signed_file_is_added_only_once_its_signatures_are_answered_for() {
     let ids = read_files(engine, vec![signed_path.clone()]);
 
     assert!(engine
-        .insert_sources(SCOPE, own.id, &ids, 1, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            1,
+            "own.pdf",
+            options(true),
+            &HashMap::new()
+        )
         .is_err());
 
     let added = engine
@@ -438,7 +518,7 @@ fn a_signed_file_is_added_only_once_its_signatures_are_answered_for() {
             1,
             "own.pdf",
             options(true),
-            Some(SignatureDecision::Flatten),
+            &HashMap::from([(ids[0], SignatureDecision::Flatten)]),
         )
         .expect("the answered file should be added");
     assert_eq!(added.num_pages, 3);
@@ -448,6 +528,110 @@ fn a_signed_file_is_added_only_once_its_signatures_are_answered_for() {
         .export_to(own.id, &signed_path)
         .expect_err("a Save As over the signed file should be refused");
     assert_eq!(refused, super::super::signatures::EXPORT_SIGNED_ERROR);
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_split_by_bookmarks_is_offered_where_the_split_would_cut() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-split-offer");
+    let outlined = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the document");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+
+    assert!(outlined.splits_by_bookmarks);
+    assert!(!own.splits_by_bookmarks);
+
+    // Files of no bookmarks of their own split by their names, once a Save As
+    // would write one each, and not otherwise.
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "added.pdf", banded_pdf(&[20]))],
+    );
+    let added = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+    assert!(added.splits_by_bookmarks);
+
+    let flat = engine
+        .set_file_options(own.id, options(false))
+        .expect("the options should change");
+    assert!(!flat.splits_by_bookmarks);
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn each_signed_file_of_a_batch_takes_its_own_answer() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-signed-each");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let paths = vec![
+        write_file(&directory, "flattened.pdf", signed_pdf()),
+        write_file(&directory, "plain.pdf", banded_pdf(&[100])),
+        write_file(&directory, "kept.pdf", signed_pdf()),
+    ];
+    let ids = read_files(engine, paths);
+
+    // One answer does not stand for another signed file, and a file with no
+    // signature needs none.
+    assert!(engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::from([(ids[0], SignatureDecision::Flatten)]),
+        )
+        .is_err());
+
+    let added = engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::from([
+                (ids[0], SignatureDecision::Flatten),
+                (ids[2], SignatureDecision::Keep),
+            ]),
+        )
+        .expect("every signed file is answered");
+    assert_eq!(added.num_pages, 5);
+
+    let widgets = |page_number| {
+        with_page(engine, own.id, page_number, |page| {
+            page.annotations()
+                .iter()
+                .filter(|annotation| annotation.annotation_type() == PdfPageAnnotationType::Widget)
+                .count()
+        })
+    };
+
+    assert_eq!(widgets(3), 0, "the flattened file's seal is page content");
+    assert_eq!(widgets(5), 1, "the kept file keeps its signature field");
 
     fs::remove_dir_all(directory).ok();
 }
@@ -480,7 +664,15 @@ fn left_alone_saves_its_own_bookmarks(per_file: bool) {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(per_file), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(per_file),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
 
     let left = engine
@@ -529,11 +721,19 @@ fn a_file_that_cannot_be_added_leaves_the_document_as_it_was() {
     );
 
     // Let the second go from memory, then change it on disk.
-    engine.evict_sources_for_test(SCOPE);
+    engine.unload_sources(SCOPE);
     fs::write(&changing, banded_pdf(&[20, 60])).expect("the file should change");
 
     let refused = engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect_err("a changed file should be refused");
     assert_eq!(refused, SOURCE_CHANGED);
 
@@ -563,7 +763,15 @@ fn a_document_back_to_one_file_adds_the_next_under_the_name_it_has_now() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &first, 3, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &first,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
     engine
         .delete_pages(own.id, &[3], 5)
@@ -581,7 +789,7 @@ fn a_document_back_to_one_file_adds_the_next_under_the_name_it_has_now() {
             3,
             "renamed.pdf",
             options(true),
-            None,
+            &HashMap::new(),
         )
         .expect("the next file should be added");
 
@@ -615,7 +823,7 @@ fn a_save_as_pads_a_file_that_would_leave_the_next_on_an_even_page() {
     };
 
     let added = engine
-        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", padded, None)
+        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", padded, &HashMap::new())
         .expect("the file should be added");
     // The document itself takes no blank page; only what a Save As writes does,
     // which the viewer is told of to show it.
@@ -695,7 +903,15 @@ fn pages_still_shown_as_several_files_save_only_as_a_new_file() {
     );
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 3, "own.pdf", options(true), None)
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            3,
+            "own.pdf",
+            options(true),
+            &HashMap::new(),
+        )
         .expect("the file should be added");
     // The own file's second page joins the added file, whose own page then goes.
     engine
@@ -731,13 +947,14 @@ fn an_a4_copy_of_several_files_keeps_their_blanks_and_bookmarks() {
     };
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", padded, None)
+        .insert_sources(SCOPE, own.id, &ids, 2, "own.pdf", padded, &HashMap::new())
         .expect("the file should be added");
 
     let fitted = engine
         .fit_to_a4(own.id, |_, _| {})
         .expect("the pages should fit")
-        .expect("nobody stopped it");
+        .expect("nobody stopped it")
+        .document;
     let starts: Vec<_> = fitted
         .outline
         .iter()
@@ -772,7 +989,7 @@ fn own_and_second(engine: &PdfiumEngine, directory: &Path, smart_padding: bool) 
     };
 
     engine
-        .insert_sources(SCOPE, own.id, &ids, 4, "own.pdf", options, None)
+        .insert_sources(SCOPE, own.id, &ids, 4, "own.pdf", options, &HashMap::new())
         .expect("the file should be added");
     own
 }
@@ -881,7 +1098,8 @@ fn an_a4_copy_leaves_the_blank_between_files_bare_as_a_save_as_does() {
     let fitted = engine
         .fit_to_a4(own.id, |_, _| {})
         .expect("the pages should fit")
-        .expect("nobody stopped it");
+        .expect("nobody stopped it")
+        .document;
     let text = |page: i32| {
         let documents = engine.lock_documents().unwrap();
         let page = documents[&fitted.id].document.pages().get(page).unwrap();

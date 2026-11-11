@@ -456,7 +456,7 @@ fn an_a4_copy_of_a_signed_file_waits_for_the_answer_and_keeps_the_seal_if_drawn_
     assert_eq!(
         engine
             .fit_to_a4(kept.id, |_, _| {})
-            .map(|document| document.map(|info| info.id)),
+            .map(|copy| copy.map(|copy| copy.document.id)),
         Err(SIGNATURES_UNDECIDED_ERROR.to_string())
     );
 
@@ -466,7 +466,8 @@ fn an_a4_copy_of_a_signed_file_waits_for_the_answer_and_keeps_the_seal_if_drawn_
     let copy = engine
         .fit_to_a4(kept.id, |_, _| {})
         .expect("PDFium should fit the page")
-        .expect("nobody stopped it");
+        .expect("nobody stopped it")
+        .document;
     assert_eq!(
         seal_pixels(engine, copy.id),
         0,
@@ -482,7 +483,8 @@ fn an_a4_copy_of_a_signed_file_waits_for_the_answer_and_keeps_the_seal_if_drawn_
     let copy = engine
         .fit_to_a4(flattened.id, |_, _| {})
         .expect("PDFium should fit the page")
-        .expect("nobody stopped it");
+        .expect("nobody stopped it")
+        .document;
     assert!(seal_pixels(engine, copy.id) > 0);
     assert_eq!(copy.signatures.count, 0);
 

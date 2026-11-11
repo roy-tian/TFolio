@@ -20,7 +20,7 @@ import {
   type PageDragGhostHandle,
   type PageDragGhostState,
 } from "@/components/PageDragGhost"
-import { PageMenuContent } from "@/components/PageContextMenu"
+import { FileMenuContent, PageMenuContent, type FileMenuEnd } from "@/components/PageContextMenu"
 import {
   CarriedHoles,
   fileDropSlot,
@@ -50,7 +50,7 @@ import {
   pointInColumn,
 } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
-import type { PaddingSheet } from "@/lib/padding"
+import { paddingPositions, type PaddingSheet } from "@/lib/padding"
 import { emptiesItsFile, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
@@ -75,6 +75,9 @@ type ColumnDrag = {
   /** Where among the pages that stay the block lands, or null while the
       pointer is away and every page stands where it was. */
   at: number | null
+  /** The file the block joins, let go where it is: that of the page nearest
+      the pointer. Undefined for a file carried whole, which keeps its own. */
+  joins?: number
   moving: number[]
 }
 
@@ -129,6 +132,8 @@ type PageThumbnailsProps = {
   onOpen: (pageNumber: number) => void
   layout: PageThumbnailsLayout
   onPastePages: (index: number, section?: number) => void
+  /** From a file's name: the clipboard's pages pasted into it, at either end. */
+  onPasteIntoFile: (section: number, end: FileMenuEnd) => void
   /** Settles once the reorder has landed or been refused: the column holds
       the dropped order until then, rather than flash the old one. `moving`
       joins `section`, the file it was let go among. */
@@ -180,6 +185,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   onNavigate,
   onOpen,
   onPastePages,
+  onPasteIntoFile,
   onReorderPages,
   onRotatePage,
   onRotatePages,
@@ -204,9 +210,14 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     pageNumber: number
     pages: PdfPageInfo[]
   } | null>(null)
+  // A file's name has a menu of its own, for pastes into that file.
+  const [fileMenu, setFileMenu] = useState<{ pages: PdfPageInfo[]; section: number } | null>(
+    null,
+  )
   // An edit can land under the open menu and renumber the pages; the menu then
   // closes rather than act on whatever holds its number now.
   const menuPage = menu?.pages === pages ? menu.pageNumber : null
+  const menuFile = fileMenu?.pages === pages ? fileMenu.section : null
   const [drag, setDrag] = useState<ColumnDrag | null>(null)
   // Thumbnail keys, not page numbers: a hole outlives the reorder's commit
   // until the ghost has settled into it.
@@ -229,6 +240,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // drop between two files' pages joins the one it was let go beside.
   const sectionNear = useCallback(
     (point: { x: number; y: number }, moving: (key: string) => boolean) => {
+      // Read at every move of a drag: a document of one file has none to join.
+      if (!severalFilesRef.current) {
+        return undefined
+      }
+
       const cells = Array.from(
         columnRef.current?.querySelectorAll<HTMLElement>(":scope > [data-flip-key]") ?? [],
       ).filter((cell) => !moving(cell.dataset.flipKey!))
@@ -239,19 +255,15 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     },
     [],
   )
-  const insertCarried = useCallback(
-    (carried: CarriedPages, index: number, point: { x: number; y: number }) =>
-      onInsertCarriedPages(
-        carried,
-        index,
-        sectionNear(point, (key) => key.startsWith(CARRY_KEY)),
-      ),
-    [onInsertCarriedPages, sectionNear],
+  const carriedJoin = useCallback(
+    (point: { x: number; y: number }) => sectionNear(point, (key) => key.startsWith(CARRY_KEY)),
+    [sectionNear],
   )
   const incoming = useIncomingPages({
     columnRef,
     documentId,
-    onInsert: insertCarried,
+    joinsAt: carriedJoin,
+    onInsert: onInsertCarriedPages,
     pages,
     prime: primeIncoming,
     viewRef: listRef,
@@ -262,6 +274,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   const draggedAtRef = useRef(0)
   const selectionRef = useRef(selectedPages)
   const pagesRef = useRef(pages)
+  const severalFilesRef = useRef(sections.length > 1)
   const keysRef = useRef(thumbnailKeys)
   const isEditingRef = useRef(isEditingNow)
   // A column gone before its ghost is down still lets the taker's holes close.
@@ -294,6 +307,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
   selectionRef.current = selectedPages
   pagesRef.current = pages
+  severalFilesRef.current = sections.length > 1
   keysRef.current = thumbnailKeys
   isEditingRef.current = isEditingNow
 
@@ -512,7 +526,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     // Out over the tab strip or another tab's column, where the window answers.
     let carrying = false
     let at: number | null = null
+    let joins: number | undefined
     let point = start
+    // Where the landing was last read: the blanks it shows can move the rows
+    // under a still pointer, and a release there keeps what is on screen.
+    let targeted: { x: number; y: number } | null = null
     let frame = 0
 
     // Hidden once the drag has opened another tab: its box is then all zeros.
@@ -525,6 +543,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       if (!moving) {
         return
       }
+
+      targeted = point
 
       // The strip runs past the column's edge, and is the way to other tabs.
       const home = beside() && !stripSpotAt(point)
@@ -547,9 +567,17 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
             )
           : null
 
-      if (next !== at) {
+      // Read off the cells as a release reads them, so the blanks shown in
+      // the meantime are the ones the drop lays out.
+      const nextJoins =
+        next !== null && wholeFile === undefined
+          ? sectionNear(point, (key) => movingKeys.has(key))
+          : undefined
+
+      if (next !== at || nextJoins !== joins) {
         at = next
-        setDrag({ at, basis, moving })
+        joins = nextJoins
+        setDrag({ at, basis, joins, moving })
       }
     }
     const edgeScroll = () => {
@@ -624,7 +652,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
       draggedAtRef.current = performance.now()
 
-      if (commit) {
+      if (commit && (targeted?.x !== point.x || targeted.y !== point.y)) {
         retarget()
       }
 
@@ -659,11 +687,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           ? orderWithBlockAt(moving, at, basis.length)
           : null
       const moved = reorder?.some((pageNumber, index) => pageNumber !== index + 1) ?? false
-      // A whole file stays its own file wherever it lands.
-      const nearest =
-        reorder && wholeFile === undefined
-          ? sectionNear(point, (key) => movingKeys.has(key))
-          : undefined
+      // A whole file stays its own file wherever it lands; pages join the file
+      // the release's own retarget found them beside.
+      const nearest = reorder ? joins : undefined
       // Let go where they stand but beside the next file's first page, they
       // join it — unless that would leave their own file with no page at all:
       // a one-page file's page let go in place stays its file's.
@@ -679,7 +705,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       }
 
       settlingRef.current = true
-      setDrag({ at, basis, moving })
+      setDrag({ at, basis, joins: section, moving })
       setLanding({
         leadKey,
         settled: changes ? onReorderPages(reorder!, moving, section) : Promise.resolve(),
@@ -727,10 +753,17 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   const byFile = fileRows && sections.length > 1
   const titles = new Map(sections.map((section) => [section.id, section.title]))
   const moving = new Set(drag?.basis === pages ? drag.moving : [])
-  // Stood down while pages are in hand: a drop lays the blanks out afresh.
-  const blanks = new Map(
-    drag || incoming ? [] : padding.map((sheet) => [sheet.after, sheet] as const),
-  )
+  const { blanks, blankAfterCarried } = previewBlanks({
+    drag: drag?.basis === pages && drag.at !== null ? drag : null,
+    incoming:
+      incomingAt !== null && incoming
+        ? { at: incomingAt, joins: incoming.joins, sizes: incoming.carried.sizes }
+        : null,
+    order,
+    padding,
+    pages,
+    smartPadding: fileOptions?.smartPadding === true,
+  })
   let headed: number | undefined
 
   return (
@@ -814,11 +847,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           onOpenChange={(open) => {
             if (!open) {
               setMenu(null)
+              setFileMenu(null)
             }
           }}
-          // Opened by a press on a page alone: elsewhere in the column there is
-          // nothing for the entries to act on.
-          open={menuPage !== null}
+          // Opened by a press on a page or a file's name alone: elsewhere in
+          // the column there is nothing for the entries to act on.
+          open={menuPage !== null || menuFile !== null}
         >
           <ContextMenuTrigger
             render={
@@ -836,6 +870,16 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   }
                 }}
                 onContextMenu={(event) => {
+                  const heading = (event.target as Element).closest<HTMLElement>(
+                    "[data-section-header]",
+                  )
+
+                  if (heading) {
+                    setMenu(null)
+                    setFileMenu({ pages, section: Number(heading.dataset.sectionHeader) })
+                    return
+                  }
+
                   // A press on a page's own controls means that page too.
                   const paper = (event.target as Element)
                     .closest("[data-flip-key]")
@@ -850,6 +894,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   const pageNumber = Number(paper.dataset.thumbnailPage)
 
                   onMenuPage(pageNumber)
+                  setFileMenu(null)
                   setMenu({ pageNumber, pages })
                 }}
                 onFocus={() => onFocusChange(true)}
@@ -918,9 +963,19 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                       sizes={incoming!.carried.sizes}
                     />
                   ) : null
+                const blankAfterHoles =
+                  index === incomingAt && blankAfterCarried ? (
+                    <PaddingCell
+                      frame={frame}
+                      key={`padding-${CARRY_KEY}`}
+                      label={t("sidebar.paddingPage")}
+                      rotation={viewRotation}
+                      sheet={blankAfterCarried}
+                    />
+                  ) : null
 
                 if (pageNumber === null) {
-                  return [holesHere]
+                  return [holesHere, blankAfterHoles]
                 }
 
                 const page = pages[pageNumber - 1]!
@@ -938,6 +993,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
                 return [
                   holesHere,
+                  blankAfterHoles,
                   heads === undefined ? null : (
                     // No flip key: a heading is no page, and a drop counts none.
                     // A press chooses the file's pages; a drag carries them.
@@ -1026,6 +1082,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
               }
               onRotate={onRotatePages}
             />
+          ) : menuFile !== null ? (
+            <FileMenuContent canPaste={canPaste} onPaste={(end) => onPasteIntoFile(menuFile, end)} />
           ) : null}
           {ghost ? (
             <PageDragGhost
@@ -1044,3 +1102,80 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     </div>
   )
 })
+
+/**
+ * The blank pages a Save As will add, by the page each follows: the engine's
+ * own while the pages stand still, and while some are in hand, where a drop
+ * there would leave them — laid out by the engine's rule over the order shown.
+ * Pages another tab is carrying in are no pages yet: a blank after them is
+ * said apart.
+ */
+function previewBlanks({
+  drag,
+  incoming,
+  order,
+  padding,
+  pages,
+  smartPadding,
+}: {
+  drag: ColumnDrag | null
+  incoming: { at: number; joins?: number; sizes: CarriedPages["sizes"] } | null
+  order: number[]
+  padding: readonly PaddingSheet[]
+  pages: PdfPageInfo[]
+  smartPadding: boolean
+}): { blankAfterCarried: PaddingSheet | null; blanks: Map<number, PaddingSheet> } {
+  const sheetAfter = (pageNumber: number): [number, PaddingSheet] => {
+    const { height, width } = pages[pageNumber - 1]!
+
+    return [pageNumber, { after: pageNumber, height, width }]
+  }
+
+  if (drag) {
+    const moved = order.some((pageNumber, index) => pageNumber !== index + 1)
+    // As the release decides it: in place, a file's last pages keep their file.
+    const joins = !moved && emptiesItsFile(pages, drag.moving) ? undefined : drag.joins
+    const held = new Set(drag.moving)
+    const files = order.map((pageNumber) =>
+      joins !== undefined && held.has(pageNumber) ? joins : pages[pageNumber - 1]!.section,
+    )
+
+    return {
+      blankAfterCarried: null,
+      blanks: new Map(
+        smartPadding ? paddingPositions(files).map((index) => sheetAfter(order[index]!)) : [],
+      ),
+    }
+  }
+
+  if (incoming) {
+    const carried = incoming.sizes.length
+    const files = [
+      ...pages.slice(0, incoming.at).map((page) => page.section),
+      ...incoming.sizes.map(() => incoming.joins),
+      ...pages.slice(incoming.at).map((page) => page.section),
+    ]
+    const blanks = new Map<number, PaddingSheet>()
+    let blankAfterCarried: PaddingSheet | null = null
+
+    for (const index of smartPadding ? paddingPositions(files) : []) {
+      if (index < incoming.at) {
+        blanks.set(...sheetAfter(index + 1))
+      } else if (index >= incoming.at + carried) {
+        blanks.set(...sheetAfter(index - carried + 1))
+      } else {
+        // The block is one file's throughout: only its last page can close it.
+        const { height, width } = incoming.sizes[carried - 1]!
+
+        blankAfterCarried = { after: incoming.at, height, width }
+      }
+    }
+
+    return { blankAfterCarried, blanks }
+  }
+
+  return {
+    blankAfterCarried: null,
+    blanks: new Map(padding.map((sheet) => [sheet.after, sheet] as const)),
+  }
+}

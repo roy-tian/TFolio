@@ -2448,7 +2448,9 @@ export default function App() {
         open={reopenPrompt.open}
       />
       <SignaturePrompt
+        forRest={signaturePrompt.forRest}
         onAnswer={signaturePrompt.answer}
+        onForRestChange={signaturePrompt.changeForRest}
         onRememberChange={signaturePrompt.changeRemember}
         open={signaturePrompt.open}
         remember={signaturePrompt.remember}

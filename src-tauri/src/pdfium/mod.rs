@@ -39,6 +39,8 @@ pub use compress::{
     cancel_pdf_compression, cancel_pdf_compression_estimate, estimate_pdf_compression,
     export_compressed_pdf, release_pdf_compression,
 };
+#[cfg(feature = "e2e")]
+pub use files::unload_pdf_sources;
 pub use files::{
     insert_pdf_files, read_pdf_sources, release_pdf_sources, rename_pdf_section,
     set_pdf_file_options,

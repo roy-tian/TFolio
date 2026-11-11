@@ -145,6 +145,9 @@ const en = {
     keepsOriginal: "This document has unsaved changes, so the A4 file opens in a new tab and this one stays as it is.",
     suffix: "A4",
     preparing: "Fitting pages onto A4…",
+    finishing: "Finishing the file…",
+    layersScaled:
+      "The watermark and page numbers could not be laid out afresh on the A4 sheets, so they were scaled down with their pages.",
     failed: "The A4 copy could not be saved.",
     cancel: "Cancel",
     stop: "Stop",
@@ -326,6 +329,12 @@ const en = {
       "This document can only be exported as a copy, so it cannot go over the file it was saved to. Choose another name.",
     exportDenied:
       "That location cannot be written — the file or folder may be read-only, or the file open in another program. Choose another.",
+    exportNoSpace:
+      "There is not enough space to write that file. Free some space, or choose another location.",
+    exportTargetMissing:
+      "That folder is no longer there — it may have been moved, or its drive removed. Choose another location.",
+    exportDocumentChanged:
+      "The document changed while the copy was being made, so the copy was not saved. Try again.",
     exportSigned:
       "That file carries intact digital signatures, which saving over it would break. Choose another name.",
     exportSignedChanged:
@@ -490,6 +499,8 @@ const en = {
     delete_other: "Delete {{count}} pages",
     pasteBefore: "Paste before",
     pasteAfter: "Paste after",
+    pasteFileStart: "Paste at the start of this file",
+    pasteFileEnd: "Paste at the end of this file",
     cutNotice_one: "Page {{pages}} cut",
     cutNotice_other: "{{count}} pages cut ({{pages}})",
     copiedNotice_one: "Page {{pages}} copied",
@@ -559,10 +570,8 @@ const en = {
       "A new file of pages from “{{name}}” cannot keep its digital signature, which may carry compliance risk.",
     promptExport_other:
       "A new file of pages from “{{name}}” cannot keep its {{count}} digital signatures, which may carry compliance risk.",
-    promptInsert_one:
-      "The added file is signed, and its pages here cannot keep its digital signatures, which may carry compliance risk.",
-    promptInsert_other:
-      "{{count}} added files are signed, and their pages here cannot keep their digital signatures, which may carry compliance risk.",
+    promptInsert:
+      "“{{name}}” is signed, and its pages here cannot keep its digital signatures, which may carry compliance risk.",
     promptOriginal: "The signed file itself is never overwritten.",
     flattenHint:
       "Flatten keeps the look: each signature's appearance becomes page content, and the signature itself is removed.",
@@ -574,6 +583,8 @@ const en = {
     flattenFailed:
       "The signatures could not be flattened, and nothing was changed. Try again, or keep the signature fields.",
     remember: "Remember my choice (change it in Settings)",
+    forRest_one: "Do the same for the other signed file being added",
+    forRest_other: "Do the same for the other {{count}} signed files being added",
     appliedFlatten:
       "As set in Settings, the digital signatures are flattened for this change. The signed file stays as it is.",
     appliedKeep:

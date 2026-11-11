@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs"
 import path from "node:path"
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
@@ -6,6 +7,7 @@ import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   activeSidebar,
   clickAppMenuItem,
+  contextMenuAction,
   emitDrag,
   minimalPdf,
   openPdfFromDisk,
@@ -15,6 +17,7 @@ import {
   refreshApp,
   seedSettings,
   sidebarPageAction,
+  signedPdf,
   writeScratchPdf,
 } from "./helpers"
 
@@ -188,6 +191,33 @@ describe("TFolio files added to an open document", () => {
     await expect($(saveTrigger)).not.toHaveAttribute("data-save-as-only")
   })
 
+  it("says a file changed on disk since it was read, so it must be added again", async () => {
+    const signed = writeScratchPdf("signed.pdf", signedPdf())
+    const prompt = "[data-slot='signature-prompt']"
+
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await waitForPages(1)
+    await pointMultiPickerAt([signed])
+    await $(`${activeSidebar} [data-slot='pages-add-files']`).click()
+
+    // The signature question holds the file between its read and its add:
+    // meanwhile it leaves memory, as the parsed budget would let it go, and
+    // changes on disk, so the add reads another file than the one shown.
+    await $(prompt).waitForDisplayed()
+    await browser.execute(() =>
+      (
+        window as unknown as Window & {
+          __TAURI_INTERNALS__: { invoke: (command: string) => Promise<unknown> }
+        }
+      ).__TAURI_INTERNALS__.invoke("unload_pdf_sources"),
+    )
+    writeFileSync(signed, minimalPdf(3))
+    await $(`${prompt} [data-action='signatures-flatten']`).click()
+
+    await $("[data-notice='filesChanged']").waitForDisplayed({ timeout: 15_000 })
+    expect(await pageCount()).toBe(1)
+  })
+
   it("runs the files together when the reader turns their rows off", async () => {
     await openPdfFromDisk("own.pdf", minimalPdf(1))
     await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(1))])
@@ -338,6 +368,33 @@ describe("TFolio files added to an open document", () => {
     )
   })
 
+  it("pastes cut pages at either end of a file, from its name", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(4)
+
+    // From the name heading the file's pages: after its last page, its own.
+    await sidebarPageAction(1, "cut-pages")
+    await contextMenuAction(`${activeSidebar} [data-section-header='1'] button`, "paste-file-end")
+    await browser.waitUntil(
+      async () => (await pageFiles()).join() === "own.pdf,added.pdf,added.pdf,added.pdf",
+      { timeout: 15_000, timeoutMsg: "the pasted page never closed the added file" },
+    )
+
+    // From the name in the files' tree: before the file's first page.
+    await sidebarPageAction(4, "cut-pages")
+    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await contextMenuAction(
+      `${activeSidebar} [data-section-id='0'] [data-slot='file-section-row']`,
+      "paste-file-start",
+    )
+    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await browser.waitUntil(
+      async () => (await pageFiles()).join() === "own.pdf,own.pdf,added.pdf,added.pdf",
+      { timeout: 15_000, timeoutMsg: "the pasted page never opened the document's own file" },
+    )
+  })
+
   it("shows the bookmarks of the one file left", async () => {
     await openPdfFromDisk("own.pdf", minimalPdf(1))
     await addFilesFromPicker([writeScratchPdf("added.pdf", outlinedPdf())])
@@ -393,6 +450,49 @@ function blanksIn(scope: string) {
   )
 }
 
+/** Presses page `from` of `scope` and holds it over page `over`, past its
+    middle, without letting go: `letGoOfPage` releases it there. */
+function holdPageAfter(scope: string, from: number, over: number) {
+  return browser.execute(
+    (fromSelector: string, overSelector: string) => {
+      const source = document.querySelector(fromSelector)!
+      const fromBox = source.getBoundingClientRect()
+      const overBox = document.querySelector(overSelector)!.getBoundingClientRect()
+      const start = { x: fromBox.left + fromBox.width / 2, y: fromBox.top + fromBox.height / 2 }
+      const held = { x: overBox.left + overBox.width * 0.8, y: overBox.top + overBox.height * 0.8 }
+
+      ;(window as unknown as Window & { __heldAt?: typeof held }).__heldAt = held
+      source.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: start.x,
+          clientY: start.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", { bubbles: true, clientX: start.x, clientY: start.y + 12 }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", { bubbles: true, clientX: held.x, clientY: held.y }),
+      )
+    },
+    `${scope} button[data-thumbnail-page='${from}']`,
+    `${scope} button[data-thumbnail-page='${over}']`,
+  )
+}
+
+function letGoOfPage() {
+  return browser.execute(() => {
+    const held = (window as unknown as Window & { __heldAt: { x: number; y: number } }).__heldAt
+
+    document.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, clientX: held.x, clientY: held.y }),
+    )
+  })
+}
+
 describe("TFolio blank pages between files", () => {
   beforeEach(async () => {
     await seedSettings({
@@ -400,6 +500,34 @@ describe("TFolio blank pages between files", () => {
       ui: { language: "en", viewMode: "single" },
     })
     await refreshApp()
+  })
+
+  it("lays the blanks out where pages in hand would leave them, and lets go there", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(4)
+    await $(`${session} button[aria-label='Thumbnails']`).click()
+    const grid = `${session} [data-page-thumbnails='grid']`
+    await waitForPages(4, grid)
+    expect(await blanksIn(grid)).toEqual([])
+
+    // The document's first page held past the added file's last: its own
+    // file would be left one page, which a blank then backs.
+    await holdPageAfter(grid, 1, 4)
+    await browser.waitUntil(async () => (await blanksIn(grid)).join() === "2", {
+      timeoutMsg: "the held page never showed the blank its drop would add",
+    })
+
+    await letGoOfPage()
+    await browser.waitUntil(async () => (await blanksIn(grid)).join() === "1", {
+      timeout: 15_000,
+      timeoutMsg: "the drop never laid the blank out after the one page left",
+    })
+    await $(`${session} button[aria-label='Single page']`).click()
+    await browser.waitUntil(
+      async () => (await pageFiles()).join() === "own.pdf,added.pdf,added.pdf,added.pdf",
+      { timeoutMsg: "the held page never joined the added file at its end" },
+    )
   })
 
   it("shows the blank a Save As adds, in the sidebar and the pages, until turned off", async () => {

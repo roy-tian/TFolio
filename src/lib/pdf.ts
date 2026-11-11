@@ -92,6 +92,8 @@ export type PdfDocumentInfo = {
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  /** As in a structure update. */
+  splitsByBookmarks: boolean
   /** The file this document was opened from; null when opened from bytes,
       which leaves nothing to save over. */
   path: string | null
@@ -144,6 +146,14 @@ export type PdfExportOutcome = {
   signatures: PdfSignatures
 }
 
+/** A written A4 copy, bound to its file. */
+export type A4Saved = {
+  document: PdfDocumentInfo
+  /** The session's watermark or page numbers went along at the page's scale:
+      they could not be lifted to be laid out again on the sheets. */
+  layersScaled: boolean
+}
+
 /** The backend's refusal to write over a file another tab holds, kept in step
     with `EXPORT_TARGET_OPEN_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
 export const EXPORT_TARGET_OPEN = "tfolio:export-target-open"
@@ -155,6 +165,18 @@ export const EXPORT_COPY_ONLY = "tfolio:export-copy-only"
 /** A destination the OS would not let the app write, kept in step with
     `EXPORT_DENIED_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
 export const EXPORT_DENIED = "tfolio:export-denied"
+
+/** A destination with no room left for the file, kept in step with
+    `EXPORT_NO_SPACE_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
+export const EXPORT_NO_SPACE = "tfolio:export-no-space"
+
+/** A destination whose folder is gone since it was chosen, kept in step with
+    `EXPORT_TARGET_MISSING_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
+export const EXPORT_TARGET_MISSING = "tfolio:export-target-missing"
+
+/** A copy whose document changed while it was built, kept in step with
+    `EXPORT_DOCUMENT_CHANGED_ERROR` in `src-tauri/engine/src/pdfium/engine/io.rs`. */
+export const EXPORT_DOCUMENT_CHANGED = "tfolio:export-document-changed"
 
 /** A write over a file whose intact signatures it would break, kept in step
     with `EXPORT_SIGNED_ERROR` in `src-tauri/engine/src/pdfium/engine/signatures.rs`. */
@@ -175,12 +197,27 @@ export function exportFailureNotice(
 ):
   | "exportCopyOnly"
   | "exportDenied"
+  | "exportDocumentChanged"
   | "exportFailed"
+  | "exportNoSpace"
   | "exportSigned"
   | "exportSignedChanged"
+  | "exportTargetMissing"
   | "exportTargetOpen" {
   if (isRefusal(error, EXPORT_TARGET_OPEN)) {
     return "exportTargetOpen"
+  }
+
+  if (isRefusal(error, EXPORT_NO_SPACE)) {
+    return "exportNoSpace"
+  }
+
+  if (isRefusal(error, EXPORT_TARGET_MISSING)) {
+    return "exportTargetMissing"
+  }
+
+  if (isRefusal(error, EXPORT_DOCUMENT_CHANGED)) {
+    return "exportDocumentChanged"
   }
 
   if (isRefusal(error, EXPORT_COPY_ONLY)) {
@@ -210,6 +247,9 @@ export type PdfStructureUpdate = {
   numPages: number
   outline: PdfOutlineItem[]
   pages: PdfPageInfo[]
+  /** Whether a split by bookmarks has a bookmark to cut at: the document's
+      own, or once files were added, those a Save As would write. */
+  splitsByBookmarks: boolean
   /** How those files are laid out and saved; absent with one file. */
   fileOptions?: FileOptions
   /** The blank pages a Save As will add between files, shown where it puts

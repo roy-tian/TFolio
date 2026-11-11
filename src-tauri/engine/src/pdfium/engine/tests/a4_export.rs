@@ -19,7 +19,8 @@ fn every_page_lands_on_a4_with_its_bookmarks() {
     let fitted = engine
         .fit_to_a4(document.id, |done, total| reports.push((done, total)))
         .expect("the pages should fit")
-        .expect("nobody stopped it");
+        .expect("nobody stopped it")
+        .document;
 
     assert_eq!(fitted.num_pages, 3);
     assert!(fitted.pages.iter().all(is_a4));
@@ -56,7 +57,8 @@ fn a_large_landscape_page_lies_on_its_side_and_a_small_one_stays_upright() {
     let fitted = engine
         .fit_to_a4(document.id, |_, _| {})
         .expect("the pages should fit")
-        .expect("nobody stopped it");
+        .expect("nobody stopped it")
+        .document;
 
     assert!(fitted.pages.iter().all(is_a4));
     // Shrunk less on its side; one that fits upright is never turned.
@@ -112,7 +114,8 @@ fn a_rotated_page_lands_on_a4_the_way_it_reads() {
     let fitted = engine
         .fit_to_a4(document.id, |_, _| {})
         .expect("the page should fit")
-        .expect("nobody stopped it");
+        .expect("nobody stopped it")
+        .document;
     let sheet = rendered_ink_box(&rendered_rgb(engine, fitted.id));
     let scale_x = 300.0 / A4_SHORT_POINTS;
     let scale_y = 200.0 / A4_LONG_POINTS;
@@ -186,12 +189,20 @@ fn page_numbers_are_stamped_again_at_the_sheet_s_own_size() {
         assert!(engine.apply_page_numbers(id, config.clone()).unwrap());
     }
 
-    let fitted = engine
-        .fit_to_a4(large.id, |_, _| {})
+    let mut reports = Vec::new();
+    let copy = engine
+        .fit_to_a4(large.id, |done, total| reports.push((done, total)))
         .expect("the page should fit")
         .expect("nobody stopped it");
+    let fitted = copy.document;
     let expected = label_height(engine, a4.id);
     let stamped = label_height(engine, fitted.id);
+
+    assert!(!copy.layers_scaled);
+    // The page fitted, then both passes of the stamping, all on one count.
+    assert_eq!(reports.first(), Some(&(1, 3)));
+    assert_eq!(reports.last(), Some(&(3, 3)));
+    assert!(reports.windows(2).all(|pair| pair[0].0 <= pair[1].0));
 
     assert!(
         (stamped - expected).abs() < 0.5,
@@ -205,4 +216,54 @@ fn page_numbers_are_stamped_again_at_the_sheet_s_own_size() {
     assert!(engine.lock_documents().unwrap()[&large.id]
         .owned_content
         .is_some());
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn layers_that_no_longer_end_the_pages_go_along_and_say_so() {
+    let engine = test_engine();
+    let large = engine.open(sized_page_pdf(1190, 1684)).unwrap();
+    let a4 = engine.open(sized_page_pdf(595, 842)).unwrap();
+    let config = PageNumbersConfig {
+        mode: PageNumbersMode::Single,
+        position: PageNumbersPosition::BottomCenter,
+        range: None,
+        start: None,
+        smart_color: false,
+        blank_numbered: true,
+        blank_counted: true,
+    };
+
+    for id in [large.id, a4.id] {
+        assert!(engine.apply_page_numbers(id, config.clone()).unwrap());
+    }
+
+    // Something laid over the number: the tail no longer ends the page.
+    {
+        let mut documents = engine.lock_documents().unwrap();
+        let entry = documents.get_mut(&large.id).unwrap();
+        let mut page = entry.document.pages().get(0).unwrap();
+
+        page.objects_mut()
+            .create_path_object_rect(
+                PdfRect::new_from_values(0.0, 0.0, 10.0, 10.0),
+                None,
+                None,
+                Some(PdfColor::BLACK),
+            )
+            .unwrap();
+    }
+
+    let copy = engine
+        .fit_to_a4(large.id, |_, _| {})
+        .expect("the page should fit")
+        .expect("nobody stopped it");
+    let expected = label_height(engine, a4.id);
+    let scaled = label_height(engine, copy.document.id);
+
+    assert!(copy.layers_scaled);
+    assert!(
+        (scaled - expected / 2.0).abs() < 0.5,
+        "the number should shrink with its page: {scaled} against {expected}"
+    );
 }

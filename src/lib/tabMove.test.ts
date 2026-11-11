@@ -22,6 +22,7 @@ const document = {
   ],
   path: "/tmp/moved.pdf",
   signatures: { count: 1, decision: null, flattened: false, intact: true },
+  splitsByBookmarks: false,
 }
 
 const payload: MovedTabPayload = {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   emptiesItsFile,
+  fileEndIndex,
   fileMoveOrder,
   reorderSections,
   sectionAt,
@@ -65,6 +66,20 @@ describe("fileMoveOrder", () => {
     expect(fileMoveOrder(filed(0, 1, 2), 1, 2)).toBeNull()
     expect(fileMoveOrder(filed(0, 1, 2), 2, null)).toBeNull()
     expect(fileMoveOrder(filed(0, 1), 5, null)).toBeNull()
+  })
+})
+
+describe("fileEndIndex", () => {
+  const pages = [page(0), page(1), page(0), page(1)]
+
+  test("goes before a file's first page or after its last, wherever its pages stand", () => {
+    expect(fileEndIndex(pages, 1, "start")).toBe(2)
+    expect(fileEndIndex(pages, 1, "end")).toBe(5)
+    expect(fileEndIndex(pages, 0, "end")).toBe(4)
+  })
+
+  test("has nowhere to go in a file with no page", () => {
+    expect(fileEndIndex(pages, 2, "start")).toBeNull()
   })
 })
 

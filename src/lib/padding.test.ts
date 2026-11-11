@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  paddingPositions,
   samePadding,
   sheetSpreads,
   sheetsOf,
@@ -51,5 +52,25 @@ describe("samePadding", () => {
     expect(samePadding([blank], [{ ...blank, after: 4 }])).toBe(false)
     expect(samePadding([blank], [{ ...blank, width: 400 }])).toBe(false)
     expect(samePadding([blank], [])).toBe(false)
+  })
+})
+
+describe("paddingPositions", () => {
+  test("backs a file that would leave the next on an even page", () => {
+    // One page of the first file, two of the next: a blank after page 1.
+    expect(paddingPositions([0, 1, 1])).toEqual([0])
+    expect(paddingPositions([0, 0, 1, 1])).toEqual([])
+    expect(paddingPositions([0, 1, 2, 2])).toEqual([0, 1])
+  })
+
+  test("counts a file's every run, as its pages stand among another's", () => {
+    // The blank after the first run turns the count even again for the next.
+    expect(paddingPositions([0, 1, 1, 0])).toEqual([0])
+    expect(paddingPositions([0, 1, 0])).toEqual([0, 1])
+  })
+
+  test("pads nothing for a file alone", () => {
+    expect(paddingPositions([0, 0, 0])).toEqual([])
+    expect(paddingPositions([])).toEqual([])
   })
 })

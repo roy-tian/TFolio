@@ -5,7 +5,9 @@ import { useTranslation } from "react-i18next"
 import { BookmarkItems } from "@/components/BookmarkList"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import { FileMenuContent, type FileMenuEnd } from "@/components/PageContextMenu"
 import { Button } from "@/components/ui/button"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
 import { useListDrag } from "@/hooks/useListDrag"
 import { DRAG_CLICK_WINDOW } from "@/lib/pageDrag"
@@ -13,10 +15,13 @@ import type { PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
 type FileSectionsTreeProps = {
+  canPaste: boolean
   /** A file dragged among the others: its pages go, whole, in front of file
       `before`, or to the end. */
   onMove: (sectionId: number, before: number | null) => void
   onNavigate: (pageNumber: number) => void
+  /** The pages on the clipboard pasted into a file, at either end. */
+  onPaste: (sectionId: number, end: FileMenuEnd) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
   pages: PdfPageInfo[]
@@ -30,8 +35,10 @@ type FileSectionsTreeProps = {
  * or dragged among the others, every file folded to its name meanwhile.
  */
 export function FileSectionsTree({
+  canPaste,
   onMove,
   onNavigate,
+  onPaste,
   onRemove,
   onRename,
   pages,
@@ -105,89 +112,104 @@ export function FileSectionsTree({
                 key={section.id}
                 style={offset ? { transform: `translateY(${offset}px)` } : undefined}
               >
-                <div className="group/file flex items-center gap-1 rounded-md pr-1 hover:bg-sidebar-accent">
-                  <button
-                    aria-expanded={section.outline.length > 0 ? open : undefined}
-                    aria-label={section.title}
-                    className={cn(
-                      "grid size-6 shrink-0 place-items-center rounded text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-                      section.outline.length === 0 && "invisible",
-                    )}
-                    onClick={() => toggle(section.id)}
-                    tabIndex={section.outline.length === 0 ? -1 : 0}
-                    type="button"
+                {/* Off while the name is typed: the field keeps the WebView's
+                    own cut, copy and paste menu. */}
+                <ContextMenu disabled={editing === section.id}>
+                  <ContextMenuTrigger
+                    render={
+                      <div
+                        className="group/file flex items-center gap-1 rounded-md pr-1 hover:bg-sidebar-accent"
+                        data-slot="file-section-row"
+                      />
+                    }
                   >
-                    <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-                  </button>
-                  {editing === section.id ? (
-                    <TitleEditor
-                      label={t("sidebar.fileName")}
-                      onDone={(title) => {
-                        setEditing(null)
+                    <button
+                      aria-expanded={section.outline.length > 0 ? open : undefined}
+                      aria-label={section.title}
+                      className={cn(
+                        "grid size-6 shrink-0 place-items-center rounded text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                        section.outline.length === 0 && "invisible",
+                      )}
+                      onClick={() => toggle(section.id)}
+                      tabIndex={section.outline.length === 0 ? -1 : 0}
+                      type="button"
+                    >
+                      <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+                    </button>
+                    {editing === section.id ? (
+                      <TitleEditor
+                        label={t("sidebar.fileName")}
+                        onDone={(title) => {
+                          setEditing(null)
 
-                        if (title !== null) {
-                          onRename(section.id, title)
-                        }
-                      }}
-                      title={section.title}
-                    />
-                  ) : (
-                    <HintTooltip label={section.title} side="right">
-                      <button
-                        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                        data-slot="file-section-title"
-                        onClick={() => {
-                          const first = firstPage.get(section.id)
-
-                          if (
-                            first !== undefined &&
-                            performance.now() - draggedAtRef.current >= DRAG_CLICK_WINDOW
-                          ) {
-                            onNavigate(first)
+                          if (title !== null) {
+                            onRename(section.id, title)
                           }
                         }}
-                        onDoubleClick={() => setEditing(section.id)}
-                        type="button"
-                      >
-                        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-                        <span className="truncate">{section.title}</span>
-                        <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground tabular-nums">
-                          {t("sidebar.filePages", { count })}
-                        </span>
-                      </button>
-                    </HintTooltip>
-                  )}
-                  {editing === section.id ? null : (
-                    <>
-                      <HintTooltip label={t("sidebar.renameFile", { name: section.title })}>
-                        <Button
-                          aria-label={t("sidebar.renameFile", { name: section.title })}
-                          className="opacity-0 group-hover/file:opacity-100 focus-visible:opacity-100"
-                          data-slot="file-section-rename"
-                          onClick={() => setEditing(section.id)}
-                          size="icon-xs"
-                          variant="ghost"
+                        title={section.title}
+                      />
+                    ) : (
+                      <HintTooltip label={section.title} side="right">
+                        <button
+                          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                          data-slot="file-section-title"
+                          onClick={() => {
+                            const first = firstPage.get(section.id)
+
+                            if (
+                              first !== undefined &&
+                              performance.now() - draggedAtRef.current >= DRAG_CLICK_WINDOW
+                            ) {
+                              onNavigate(first)
+                            }
+                          }}
+                          onDoubleClick={() => setEditing(section.id)}
+                          type="button"
                         >
-                          <Pencil />
-                        </Button>
+                          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{section.title}</span>
+                          <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground tabular-nums">
+                            {t("sidebar.filePages", { count })}
+                          </span>
+                        </button>
                       </HintTooltip>
-                      <HintTooltip label={t("sidebar.removeFile", { name: section.title })}>
-                        <Button
-                          aria-label={t("sidebar.removeFile", { name: section.title })}
-                          className="opacity-0 group-hover/file:opacity-100 hover:text-destructive focus-visible:opacity-100"
-                          data-slot="file-section-remove"
-                          // A document keeps a page; the last file's go no further.
-                          disabled={count >= pages.length}
-                          onClick={() => onRemove(section.id)}
-                          size="icon-xs"
-                          variant="ghost"
-                        >
-                          <X />
-                        </Button>
-                      </HintTooltip>
-                    </>
-                  )}
-                </div>
+                    )}
+                    {editing === section.id ? null : (
+                      <>
+                        <HintTooltip label={t("sidebar.renameFile", { name: section.title })}>
+                          <Button
+                            aria-label={t("sidebar.renameFile", { name: section.title })}
+                            className="opacity-0 group-hover/file:opacity-100 focus-visible:opacity-100"
+                            data-slot="file-section-rename"
+                            onClick={() => setEditing(section.id)}
+                            size="icon-xs"
+                            variant="ghost"
+                          >
+                            <Pencil />
+                          </Button>
+                        </HintTooltip>
+                        <HintTooltip label={t("sidebar.removeFile", { name: section.title })}>
+                          <Button
+                            aria-label={t("sidebar.removeFile", { name: section.title })}
+                            className="opacity-0 group-hover/file:opacity-100 hover:text-destructive focus-visible:opacity-100"
+                            data-slot="file-section-remove"
+                            // A document keeps a page; the last file's go no further.
+                            disabled={count >= pages.length}
+                            onClick={() => onRemove(section.id)}
+                            size="icon-xs"
+                            variant="ghost"
+                          >
+                            <X />
+                          </Button>
+                        </HintTooltip>
+                      </>
+                    )}
+                  </ContextMenuTrigger>
+                  <FileMenuContent
+                    canPaste={canPaste}
+                    onPaste={(end) => onPaste(section.id, end)}
+                  />
+                </ContextMenu>
                 {open ? (
                   <ul className="pl-5">
                     <BookmarkItems

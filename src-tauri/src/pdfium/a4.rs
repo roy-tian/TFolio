@@ -3,6 +3,7 @@
 
 use std::{path::PathBuf, sync::Arc};
 
+use serde::Serialize;
 use tauri::{ipc::Channel, AppHandle, Manager, State, WebviewWindow};
 use tfolio_engine::PdfDocumentInfo;
 
@@ -11,6 +12,15 @@ use super::{
     PdfProgress, PdfiumState,
 };
 use crate::windows::{page_generation, DocumentOwners, PageGeneration};
+
+/// A written A4 copy, bound to its file.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct A4Saved {
+    document: PdfDocumentInfo,
+    /// The session's watermark or page numbers went along at the page's scale.
+    layers_scaled: bool,
+}
 
 /// Asks where the A4 copy goes before building it, as a Save As does. Only
 /// this window's document.
@@ -23,7 +33,7 @@ pub async fn save_a4_pdf(
     app: AppHandle,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
-) -> Result<Option<PdfDocumentInfo>, String> {
+) -> Result<Option<A4Saved>, String> {
     if !owners.owns(document_id, window.label()) {
         return Err("this window does not hold that document".into());
     }
@@ -61,7 +71,7 @@ pub async fn save_a4_pdf_to(
     on_progress: Channel<PdfProgress>,
     app: AppHandle,
     window: WebviewWindow,
-) -> Result<Option<PdfDocumentInfo>, String> {
+) -> Result<Option<A4Saved>, String> {
     let page = page_generation(&window);
 
     fit_into(
@@ -84,7 +94,7 @@ async fn fit_into(
     app: AppHandle,
     window: WebviewWindow,
     page: PageGeneration,
-) -> Result<Option<PdfDocumentInfo>, String> {
+) -> Result<Option<A4Saved>, String> {
     let engine = Arc::clone(&app.state::<PdfiumState>().engine);
     let fitted = tauri::async_runtime::spawn_blocking({
         let path = path.clone();
@@ -98,9 +108,15 @@ async fn fit_into(
     })
     .await
     .map_err(|error| format!("PDFium A4 task failed: {error}"))??;
-    let Some(document) = fitted else {
+    let Some(copy) = fitted else {
         return Ok(None);
     };
+    let layers_scaled = copy.layers_scaled;
 
-    bind_new_document(document, path, app, &window, page).await
+    Ok(bind_new_document(copy.document, path, app, &window, page)
+        .await?
+        .map(|document| A4Saved {
+            document,
+            layers_scaled,
+        }))
 }

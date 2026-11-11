@@ -48,8 +48,8 @@ import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type {
+  A4Saved,
   FileOptions,
-  PdfDocumentInfo,
   PdfExportOutcome,
   PdfStructureUpdate,
   SignatureDecision,
@@ -953,7 +953,8 @@ export function useAnnotations({
       files: {
         options: FileOptions
         ownTitle: string
-        signatures: SignatureDecision | null
+        /** By source id, for each signed source. */
+        signatures: Record<number, SignatureDecision>
       },
     ): Promise<boolean | "changed"> => {
       const ready = signedChangeReady("edit")
@@ -1539,14 +1540,14 @@ export function useAnnotations({
     async (
       request: { filterLabel: string; suggestedName: string },
       onProgress: ProgressHandler,
-    ): Promise<PdfDocumentInfo | null | { failed: unknown }> => {
+    ): Promise<A4Saved | null | { failed: unknown }> => {
       const ready = signedChangeReady("export")
 
       if (ready !== true && !(await ready)) {
         return null
       }
 
-      let written: PdfDocumentInfo | null = null
+      let written: A4Saved | null = null
       let failed: { failed: unknown } | null = null
 
       await enqueue(
@@ -1560,7 +1561,7 @@ export function useAnnotations({
 
             written = override
               ? await override(args)
-              : await invoke<PdfDocumentInfo | null>("save_a4_pdf", args)
+              : await invoke<A4Saved | null>("save_a4_pdf", args)
             return false
           },
         }),

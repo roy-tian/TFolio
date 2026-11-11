@@ -688,6 +688,8 @@ impl PdfiumEngine {
             id,
             num_pages,
             pages,
+            // A document opens as its file alone, cut where its own bookmarks go.
+            splits_by_bookmarks: archive_export::splits_at_bookmarks(&outline, num_pages),
             outline,
             path,
             has_merged_pages,
@@ -1167,8 +1169,15 @@ fn page_infos(entry: &mut OpenDocument) -> Vec<PdfPageInfo> {
 /// remain — read from the same set `save` refuses on, so the key cannot lie.
 fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
     let pages = page_infos(entry);
+    // Walked once: the own bookmarks are also what a split of them cuts at.
+    let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
+    let splits_by_bookmarks = archive_export::splits_at_bookmarks(
+        entry.files_split_outline().as_deref().unwrap_or(&outline),
+        pages.len() as i32,
+    );
 
     PdfStructureUpdate {
+        splits_by_bookmarks,
         has_merged_pages: !entry.merged_page_ids.is_empty(),
         has_foreign_pages: entry.combined(),
         padding: entry.padding_sheets(),
@@ -1185,7 +1194,7 @@ fn structure_update(entry: &mut OpenDocument) -> PdfStructureUpdate {
             .filter(|book| book.several(&entry.page_ids))
             .map(|book| book.options),
         num_pages: pages.len() as i32,
-        outline: collect_bookmark_siblings(entry.document.bookmarks().root()),
+        outline,
         pages,
         signatures: entry.signatures(),
     }
@@ -1230,6 +1239,7 @@ mod signatures;
 mod text_runs;
 mod watermark_preview;
 
+pub use a4_export::A4Copy;
 pub use file_identity::{same_file, FileKey};
 pub use file_sources::{FileSourceInfo, SOURCE_CHANGED};
 pub use io::is_merge_image;

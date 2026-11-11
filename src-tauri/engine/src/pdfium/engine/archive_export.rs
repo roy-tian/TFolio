@@ -10,6 +10,34 @@ struct Section {
     end: i32,
 }
 
+/// Whether a split by bookmarks has anywhere to cut: a top-level bookmark
+/// with one of the `pages` for its destination.
+pub(super) fn splits_at_bookmarks(outline: &[PdfOutlineItem], pages: i32) -> bool {
+    outline.iter().any(|item| {
+        item.page_number
+            .is_some_and(|page| (1..=pages).contains(&page))
+    })
+}
+
+impl OpenDocument {
+    /// The top-level bookmarks a split by bookmarks cuts at. Files added to the
+    /// document split as a Save As would bookmark them, a part per file where
+    /// it writes a bookmark per file.
+    pub(super) fn split_outline(&self) -> Vec<PdfOutlineItem> {
+        self.files_split_outline()
+            .unwrap_or_else(|| collect_bookmark_siblings(self.document.bookmarks().root()))
+    }
+
+    /// `split_outline` while files added to the document still show; `None`
+    /// where the split cuts at the document's own bookmarks.
+    pub(super) fn files_split_outline(&self) -> Option<Vec<PdfOutlineItem>> {
+        self.sections
+            .as_ref()
+            .filter(|_| self.combined())
+            .map(|book| outline_items(&book.outline(&self.page_ids, &[])))
+    }
+}
+
 fn sections(outline: &[PdfOutlineItem], pages: i32) -> Result<Vec<Section>, String> {
     let mut starts: Vec<_> = outline
         .iter()
@@ -150,7 +178,7 @@ impl PdfiumEngine {
         let entry = open_entry(&documents, document_id)?;
 
         if entry.content_version != version {
-            return Err("the document changed while it was being exported".into());
+            return Err(io::EXPORT_DOCUMENT_CHANGED_ERROR.into());
         }
 
         work(&entry.document)
@@ -180,12 +208,7 @@ impl PdfiumEngine {
                 ArchiveOptions::Images { .. } => false,
                 _ => entry.output_flattens()?,
             };
-            // Files added to the document split as a Save As would bookmark
-            // them, a part per file where it writes a bookmark per file.
-            let outline = match entry.sections.as_ref().filter(|_| entry.combined()) {
-                Some(book) => outline_items(&book.outline(&entry.page_ids, &[])),
-                None => collect_bookmark_siblings(entry.document.bookmarks().root()),
-            };
+            let outline = entry.split_outline();
 
             (
                 entry.content_version,

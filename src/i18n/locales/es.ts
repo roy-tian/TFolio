@@ -147,6 +147,9 @@ const es = {
     keepsOriginal: "Este documento tiene cambios sin guardar, así que el archivo A4 se abre en una pestaña nueva y esta se queda como está.",
     suffix: "A4",
     preparing: "Ajustando las páginas a A4…",
+    finishing: "Terminando el archivo…",
+    layersScaled:
+      "La marca de agua y los números de página no pudieron volver a colocarse en las hojas A4, así que se redujeron con sus páginas.",
     failed: "No se pudo guardar la copia A4.",
     cancel: "Cancelar",
     stop: "Detener",
@@ -328,6 +331,12 @@ const es = {
       "Este documento solo puede exportarse como copia, así que no puede sobrescribir el archivo en el que se guardó. Elige otro nombre.",
     exportDenied:
       "No se puede escribir en esa ubicación: el archivo o la carpeta pueden ser de solo lectura, o el archivo puede estar abierto en otro programa. Elige otra.",
+    exportNoSpace:
+      "No hay espacio suficiente para escribir ese archivo. Libera espacio o elige otra ubicación.",
+    exportTargetMissing:
+      "Esa carpeta ya no existe: puede que se haya movido o que se haya quitado su unidad. Elige otra ubicación.",
+    exportDocumentChanged:
+      "El documento cambió mientras se creaba la copia, así que no se guardó. Inténtalo de nuevo.",
     exportSigned:
       "Ese archivo tiene firmas digitales intactas, que guardar encima rompería. Elija otro nombre.",
     exportSignedChanged:
@@ -492,6 +501,8 @@ const es = {
     delete_other: "Eliminar {{count}} páginas",
     pasteBefore: "Pegar antes",
     pasteAfter: "Pegar después",
+    pasteFileStart: "Pegar al principio de este archivo",
+    pasteFileEnd: "Pegar al final de este archivo",
     cutNotice_one: "Página {{pages}} cortada",
     cutNotice_other: "{{count}} páginas cortadas ({{pages}})",
     copiedNotice_one: "Página {{pages}} copiada",
@@ -561,10 +572,8 @@ const es = {
       "Un archivo nuevo con páginas de «{{name}}» no puede conservar su firma digital, lo que puede suponer un riesgo de cumplimiento.",
     promptExport_other:
       "Un archivo nuevo con páginas de «{{name}}» no puede conservar sus {{count}} firmas digitales, lo que puede suponer un riesgo de cumplimiento.",
-    promptInsert_one:
-      "El archivo añadido está firmado y sus páginas aquí no pueden conservar sus firmas digitales, lo que puede suponer un riesgo de cumplimiento.",
-    promptInsert_other:
-      "{{count}} archivos añadidos están firmados y sus páginas aquí no pueden conservar sus firmas digitales, lo que puede suponer un riesgo de cumplimiento.",
+    promptInsert:
+      "«{{name}}» está firmado y sus páginas aquí no pueden conservar sus firmas digitales, lo que puede suponer un riesgo de cumplimiento.",
     promptOriginal: "El archivo firmado nunca se sobrescribe.",
     flattenHint:
       "Aplanar conserva el aspecto: la apariencia de cada firma pasa a ser contenido de la página y la firma se elimina.",
@@ -576,6 +585,8 @@ const es = {
     flattenFailed:
       "No se pudieron aplanar las firmas y no se cambió nada. Inténtelo de nuevo o conserve los campos de firma.",
     remember: "Recordar mi elección (se cambia en Ajustes)",
+    forRest_one: "Hacer lo mismo con el otro archivo firmado",
+    forRest_other: "Hacer lo mismo con los otros {{count}} archivos firmados",
     appliedFlatten:
       "Según los ajustes, las firmas digitales se aplanan en este cambio. El archivo firmado queda como está.",
     appliedKeep:

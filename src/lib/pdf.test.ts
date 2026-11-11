@@ -4,7 +4,10 @@ import {
   dimensionsForRotation,
   EXPORT_COPY_ONLY,
   EXPORT_DENIED,
+  EXPORT_DOCUMENT_CHANGED,
+  EXPORT_NO_SPACE,
   EXPORT_SIGNED,
+  EXPORT_TARGET_MISSING,
   EXPORT_TARGET_OPEN,
   exportFailureNotice,
   fileNameFromPath,
@@ -39,6 +42,9 @@ describe("exportFailureNotice", () => {
     expect(exportFailureNotice(new Error(SIGNED_ORIGINAL_CHANGED))).toBe(
       "exportSignedChanged",
     )
+    expect(exportFailureNotice(EXPORT_NO_SPACE)).toBe("exportNoSpace")
+    expect(exportFailureNotice(new Error(EXPORT_TARGET_MISSING))).toBe("exportTargetMissing")
+    expect(exportFailureNotice(EXPORT_DOCUMENT_CHANGED)).toBe("exportDocumentChanged")
   })
 
   test("leaves any other failure to the generic notice", () => {

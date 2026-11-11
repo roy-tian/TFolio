@@ -450,6 +450,46 @@ fn an_export_to_a_folder_it_cannot_write_says_so() {
 }
 
 #[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_export_into_a_folder_gone_since_it_was_chosen_says_so() {
+    let engine = test_engine();
+    let directory = scratch_directory("export-missing");
+    let document = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+    let result = engine.export_to(document.id, &directory.join("gone").join("copy.pdf"));
+
+    engine.close(document.id).ok();
+    fs::remove_dir_all(&directory).ok();
+
+    assert_eq!(
+        result.map(|_| ()),
+        Err(io::EXPORT_TARGET_MISSING_ERROR.into())
+    );
+}
+
+#[test]
+fn a_full_disk_is_said_as_such_and_other_failures_keep_their_words() {
+    use std::io::{Error, ErrorKind};
+
+    for kind in [
+        ErrorKind::StorageFull,
+        ErrorKind::QuotaExceeded,
+        ErrorKind::FileTooLarge,
+    ] {
+        assert_eq!(
+            io::write_error(&Error::from(kind), "unused".into()),
+            io::EXPORT_NO_SPACE_ERROR
+        );
+    }
+
+    assert_eq!(
+        io::write_error(&Error::from(ErrorKind::Interrupted), "said".into()),
+        "said"
+    );
+}
+
+#[test]
 fn a_staged_file_lands_only_when_committed() {
     let directory = scratch_directory("staged-file");
     let destination = directory.join("staged.pdf");

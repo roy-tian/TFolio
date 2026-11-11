@@ -573,9 +573,15 @@ export const activeSidebar =
 
 /** Opens a page's menu in the shown tab's sidebar, which also chooses the
     page if it was not chosen, and takes the action named by `data-action`. */
-export async function sidebarPageAction(pageNumber: number, action: string) {
-  const selector = `${activeSidebar} button[data-thumbnail-page='${pageNumber}']`
+export function sidebarPageAction(pageNumber: number, action: string) {
+  return contextMenuAction(
+    `${activeSidebar} button[data-thumbnail-page='${pageNumber}']`,
+    action,
+  )
+}
 
+/** A right-click on `selector`'s middle, then its menu's entry `action`. */
+export async function contextMenuAction(selector: string, action: string) {
   await $(selector).waitForExist({ timeout: 30_000 })
   await browser.execute((target: string) => {
     const page = document.querySelector(target)!

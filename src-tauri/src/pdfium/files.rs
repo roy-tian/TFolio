@@ -1,7 +1,7 @@
 //! The commands that add files to a document: the files read are the asking
 //! window's, and the engine refuses another window's ids.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use tauri::{State, WebviewWindow};
 use tfolio_engine::{FileOptions, FileSourceInfo, PdfStructureUpdate, SignatureDecision};
@@ -45,7 +45,7 @@ pub async fn insert_pdf_files(
     index: i32,
     own_title: String,
     options: FileOptions,
-    signatures: Option<SignatureDecision>,
+    signatures: HashMap<u64, SignatureDecision>,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
@@ -65,11 +65,27 @@ pub async fn insert_pdf_files(
             index,
             &own_title,
             options,
-            signatures,
+            &signatures,
         )
     })
     .await
     .map_err(|error| format!("PDFium file insertion task failed: {error}"))?
+}
+
+/// This window's sources read back from disk at their next insert, as those
+/// past the parsed budget are: no spec reads 512 MB of files to get there.
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub async fn unload_pdf_sources(
+    state: State<'_, PdfiumState>,
+    window: WebviewWindow,
+) -> Result<(), String> {
+    let engine = Arc::clone(&state.engine);
+    let label = window.label().to_string();
+
+    tauri::async_runtime::spawn_blocking(move || engine.unload_sources(&label))
+        .await
+        .map_err(|error| format!("PDFium unload task failed: {error}"))
 }
 
 /// Sources read for files that were never added after all; only this

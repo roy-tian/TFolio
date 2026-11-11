@@ -30,7 +30,7 @@ use pdfium::{
     PdfiumState,
 };
 #[cfg(feature = "e2e")]
-use pdfium::{export_pdf_to, save_a4_pdf_to};
+use pdfium::{export_pdf_to, save_a4_pdf_to, unload_pdf_sources};
 use quit::quit_app;
 use recent::{
     recent_pdf_view, recent_pdfs, remove_recent_pdf, reveal_recent_pdf, set_recent_pdf_view,
@@ -214,6 +214,8 @@ pub fn run() {
             insert_pdf_files,
             rename_pdf_section,
             release_pdf_sources,
+            #[cfg(feature = "e2e")]
+            unload_pdf_sources,
             set_pdf_file_options,
             extract_pdf_pages,
             save_pdf,

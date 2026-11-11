@@ -147,6 +147,9 @@ const it = {
     keepsOriginal: "Questo documento ha modifiche non salvate: il file A4 si apre in una nuova scheda e questa resta com’è.",
     suffix: "A4",
     preparing: "Adattamento delle pagine ad A4…",
+    finishing: "Completamento del file…",
+    layersScaled:
+      "Non è stato possibile ricollocare filigrana e numeri di pagina sui fogli A4, quindi sono stati ridotti insieme alle pagine.",
     failed: "Impossibile salvare la copia A4.",
     cancel: "Annulla",
     stop: "Interrompi",
@@ -327,6 +330,12 @@ const it = {
       "Questo documento può essere esportato solo come copia, quindi non può sovrascrivere il file in cui è stato salvato. Scegli un altro nome.",
     exportDenied:
       "Impossibile scrivere in quella posizione — il file o la cartella potrebbero essere di sola lettura, o il file aperto in un altro programma. Scegline un’altra.",
+    exportNoSpace:
+      "Non c’è spazio sufficiente per scrivere il file. Libera spazio o scegli un’altra posizione.",
+    exportTargetMissing:
+      "Quella cartella non esiste più — forse è stata spostata o la sua unità rimossa. Scegli un’altra posizione.",
+    exportDocumentChanged:
+      "Il documento è cambiato mentre veniva creata la copia, che quindi non è stata salvata. Riprova.",
     exportSigned:
       "Quel file contiene firme digitali integre, che salvarci sopra romperebbe. Scegli un altro nome.",
     exportSignedChanged:
@@ -491,6 +500,8 @@ const it = {
     delete_other: "Elimina {{count}} pagine",
     pasteBefore: "Incolla prima",
     pasteAfter: "Incolla dopo",
+    pasteFileStart: "Incolla all’inizio di questo file",
+    pasteFileEnd: "Incolla alla fine di questo file",
     cutNotice_one: "Pagina {{pages}} tagliata",
     cutNotice_other: "{{count}} pagine tagliate ({{pages}})",
     copiedNotice_one: "Pagina {{pages}} copiata",
@@ -560,10 +571,8 @@ const it = {
       "Un nuovo file con pagine di «{{name}}» non può conservarne la firma digitale, con un possibile rischio di conformità.",
     promptExport_other:
       "Un nuovo file con pagine di «{{name}}» non può conservarne le {{count}} firme digitali, con un possibile rischio di conformità.",
-    promptInsert_one:
-      "Il file aggiunto è firmato e le sue pagine qui non possono conservarne le firme digitali, con un possibile rischio di conformità.",
-    promptInsert_other:
-      "{{count}} file aggiunti sono firmati e le loro pagine qui non possono conservarne le firme digitali, con un possibile rischio di conformità.",
+    promptInsert:
+      "«{{name}}» è firmato e le sue pagine qui non possono conservarne le firme digitali, con un possibile rischio di conformità.",
     promptOriginal: "Il file firmato non viene mai sovrascritto.",
     flattenHint:
       "Appiattisci mantiene l’aspetto: l’aspetto di ogni firma diventa contenuto della pagina e la firma viene rimossa.",
@@ -575,6 +584,8 @@ const it = {
     flattenFailed:
       "Non è stato possibile appiattire le firme e non è cambiato nulla. Riprova o mantieni i campi firma.",
     remember: "Ricorda la mia scelta (modificabile nelle Impostazioni)",
+    forRest_one: "Fai lo stesso per l’altro file firmato",
+    forRest_other: "Fai lo stesso per gli altri {{count}} file firmati",
     appliedFlatten:
       "Come da Impostazioni, le firme digitali vengono appiattite per questa modifica. Il file firmato resta com’è.",
     appliedKeep:

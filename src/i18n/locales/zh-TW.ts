@@ -145,6 +145,9 @@ const zhTW = {
     keepsOriginal: "這個文件有未儲存的修改，A4 檔案會在新分頁中開啟，目前分頁保持不變。",
     suffix: "A4",
     preparing: "正在把頁面放到 A4 上…",
+    finishing: "正在完成檔案…",
+    layersScaled:
+      "浮水印和頁碼無法在 A4 頁面上重新排版，已隨頁面一起縮小。",
     failed: "無法儲存 A4 版本。",
     cancel: "取消",
     stop: "停止",
@@ -325,6 +328,12 @@ const zhTW = {
       "此文件只能匯出為複本，因此不能覆寫它已儲存的檔案。請選擇其他名稱。",
     exportDenied:
       "無法寫入該位置——檔案或資料夾可能為唯讀，或檔案正由其他程式開啟中。請選擇其他位置。",
+    exportNoSpace:
+      "空間不足，無法寫入該檔案。請釋放一些空間，或換個位置儲存。",
+    exportTargetMissing:
+      "該資料夾已不存在，可能已被移動，或所在的磁碟已移除。請換個位置。",
+    exportDocumentChanged:
+      "建立副本期間文件有變更，副本未儲存。請再試一次。",
     exportSigned:
       "該檔案含有效的數位簽章，儲存覆蓋會使簽章失效。請換一個檔名。",
     exportSignedChanged:
@@ -488,6 +497,8 @@ const zhTW = {
     delete_other: "刪除 {{count}} 頁",
     pasteBefore: "貼到前面",
     pasteAfter: "貼到後面",
+    pasteFileStart: "貼到此檔案開頭",
+    pasteFileEnd: "貼到此檔案結尾",
     cutNotice_one: "已剪下 {{count}} 頁（第 {{pages}} 頁）",
     cutNotice_other: "已剪下 {{count}} 頁（第 {{pages}} 頁）",
     copiedNotice_one: "已複製 {{count}} 頁（第 {{pages}} 頁）",
@@ -553,10 +564,8 @@ const zhTW = {
     promptEdit_other: "「{{name}}」含 {{count}} 個數位簽章。修改後簽章將失效，可能有合規風險。",
     promptExport_one: "以「{{name}}」的頁面產生的新檔案無法保留其數位簽章，可能有合規風險。",
     promptExport_other: "以「{{name}}」的頁面產生的新檔案無法保留其 {{count}} 個數位簽章，可能有合規風險。",
-    promptInsert_one:
-      "加入的檔案已簽署，其頁面加入後無法保留數位簽章，可能有合規風險。",
-    promptInsert_other:
-      "加入的 {{count}} 個檔案已簽署，其頁面加入後無法保留數位簽章，可能有合規風險。",
+    promptInsert:
+      "加入的「{{name}}」已簽署，其頁面加入後無法保留數位簽章，可能有合規風險。",
     promptOriginal: "已簽署的原始檔案不會被覆寫。",
     flattenHint: "平面化：保留外觀，簽章的圖樣併入頁面內容，簽章本身被移除。",
     keepHint: "保留簽章欄位：欄位留在檔案中，但會顯示為無效；A4 調整會遺失它們。",
@@ -566,6 +575,8 @@ const zhTW = {
     flattenFailed:
       "簽章無法平面化，檔案未做任何修改。請重試，或改為保留簽章欄位。",
     remember: "記住我的選擇（可在設定中變更）",
+    forRest_one: "另 {{count}} 個已簽署的檔案也這樣處理",
+    forRest_other: "另 {{count}} 個已簽署的檔案也這樣處理",
     appliedFlatten: "已依設定將數位簽章平面化。已簽署的原始檔案保持不變。",
     appliedKeep: "已依設定保留簽章欄位，它們將顯示為無效。已簽署的原始檔案保持不變。",
     brokenCount_one: "含 {{count}} 個已損壞的數位簽章",

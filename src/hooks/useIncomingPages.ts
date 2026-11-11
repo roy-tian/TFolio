@@ -27,6 +27,8 @@ export type IncomingPages = {
   carried: CarriedPages
   /** Released, and the ghost has settled onto the holes. */
   ghostDown: boolean
+  /** The file the copies would join, let go where the pointer is. */
+  joins?: number
   /** Released: the copies are on their way in. */
   landing: boolean
 }
@@ -36,8 +38,14 @@ type UseIncomingPagesOptions = {
   columnRef: RefObject<HTMLElement | null>
   documentId: number
   /** Null where the document cannot take the pages now; else settles on
-      whether they landed. */
-  onInsert: (carried: CarriedPages, index: number, point: Point) => Promise<boolean> | null
+      whether they landed. The copies join `joins`, the file the preview showed. */
+  onInsert: (
+    carried: CarriedPages,
+    index: number,
+    joins: number | undefined,
+  ) => Promise<boolean> | null
+  /** The file pages let go at `point` would join. */
+  joinsAt: (point: Point) => number | undefined
   pages: PdfPageInfo[]
   /** The layout's places before the holes first open, for the rows to slide. */
   prime: () => void
@@ -50,6 +58,7 @@ type UseIncomingPagesOptions = {
 export function useIncomingPages({
   columnRef,
   documentId,
+  joinsAt,
   onInsert,
   pages,
   prime,
@@ -60,9 +69,11 @@ export function useIncomingPages({
   const incomingRef = useRef(incoming)
   const pagesRef = useRef(pages)
   const insertRef = useRef(onInsert)
+  const joinsAtRef = useRef(joinsAt)
 
   pagesRef.current = pages
   insertRef.current = onInsert
+  joinsAtRef.current = joinsAt
 
   useEffect(() => {
     if (!carry) {
@@ -72,6 +83,9 @@ export function useIncomingPages({
     let frame = 0
     let held: CarriedPages | null = null
     let point: Point | null = null
+    // As the column's own drag keeps it: a release where the landing was last
+    // read keeps what is on screen, though the blanks shown moved the rows.
+    let placedAt: Point | null = null
 
     const setNext = (next: IncomingPages | null) => {
       incomingRef.current = next
@@ -90,6 +104,8 @@ export function useIncomingPages({
         return
       }
 
+      placedAt = point
+
       const at = besideColumn(point.x, view.getBoundingClientRect())
         ? flowLanding(
             pointInColumn(column, point),
@@ -98,7 +114,14 @@ export function useIncomingPages({
           )
         : null
 
-      if (current?.basis === basis && current.at === at && current.carried === held) {
+      const joins = at === null ? undefined : joinsAtRef.current(point)
+
+      if (
+        current?.basis === basis &&
+        current.at === at &&
+        current.carried === held &&
+        current.joins === joins
+      ) {
         return
       }
 
@@ -106,7 +129,7 @@ export function useIncomingPages({
         prime()
       }
 
-      setNext({ at, basis, carried: held, ghostDown: false, landing: false })
+      setNext({ at, basis, carried: held, ghostDown: false, joins, landing: false })
     }
     const edgeScroll = () => {
       const view = viewRef.current
@@ -125,6 +148,7 @@ export function useIncomingPages({
       frame = 0
       held = null
       point = null
+      placedAt = null
     }
 
     const unregister = carry.register({
@@ -136,13 +160,22 @@ export function useIncomingPages({
 
         held = carried
         point = at
-        place()
+
+        // Pages changed under a still pointer are measured afresh.
+        if (
+          placedAt?.x !== at.x ||
+          placedAt.y !== at.y ||
+          incomingRef.current?.basis !== pagesRef.current
+        ) {
+          place()
+        }
+
         letGo()
 
         const current = incomingRef.current
         const settled =
           current && current.at !== null && current.basis === pagesRef.current
-            ? insertRef.current(carried, current.at + 1, at)
+            ? insertRef.current(carried, current.at + 1, current.joins)
             : null
 
         if (!current || !settled) {

@@ -195,6 +195,7 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     (typeof document.path !== "string" && document.path !== null) ||
     typeof document.hasMergedPages !== "boolean" ||
     typeof document.hasForeignPages !== "boolean" ||
+    typeof document.splitsByBookmarks !== "boolean" ||
     (document.sections !== undefined && !Array.isArray(document.sections)) ||
     !isPdfSignatures(document.signatures)
   ) {

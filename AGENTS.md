@@ -124,20 +124,20 @@
   with intact signatures (byte ranges checked on disk, off the lock, never the CMS) is never
   written over by any writer, even after Save As rebinds the document; an unchanged document's
   Save As copies the file's bytes instead. Changes and new files that break intact signatures wait
-  for the reader's flatten-or-keep answer, which the engine records per document (per insert for
-  added files) and enforces; a document flattens in place only before its first change, and a new
-  file flattens its own copy.
+  for the reader's flatten-or-keep answer, which the engine records per document (per signed file
+  for added files) and enforces; a document flattens in place only before its first change, and a
+  new file flattens its own copy.
 
 ## Save as A4
 
 - `fit_to_a4` builds a copy of every page fitted onto A4 (with the blank pages and per-file
   bookmarks a Save As writes); a form XObject leaves annotations, links and fields behind. This
   session's watermark and page numbers are lifted from a copy first (only where `verify_owned_tail`
-  holds, else they scale along) and stamped again on the sheets as the copy's own content
-  (`stamp_layers`). The stripped copy closes through `MergeDraft`, under the lock, however the
-  run ends. `save_a4_pdf` asks for the destination in Rust first, records the copy with
-  `record_document`, binds it like Save As, and the tab shows it in place of the document it was
-  made from.
+  holds, else they scale along and the reader is told) and stamped again on the sheets as the
+  copy's own content (`stamp_layers`, which keeps no rollback snapshot of a copy it may discard).
+  The stripped copy closes through `MergeDraft`, under the lock, however the run ends.
+  `save_a4_pdf` asks for the destination in Rust first, records the copy with `record_document`,
+  binds it like Save As, and the tab shows it in place of the document it was made from.
 
 ## Files added to a document
 
@@ -151,20 +151,24 @@
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
   then the tab reopens the written file, its history gone. A compressed copy compresses what a
-  Save As writes (`combined_bytes`), and a split by bookmarks cuts at the outline it writes.
+  Save As writes (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which
+  the engine reports as `splitsByBookmarks`.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, page grid,
   sidebar and print show them there, and only a Save As writes them. Structure commands never
-  see them.
+  see them. A drag shows them where its drop would leave them by the same rule
+  (`paddingPositions`, kept in step with `SectionBook::padding`).
 - The page grid lies over the reading view, which stays mounted and laid out (`inert`) beneath
   it: leaving the grid finds the reader's place, and the sidebar meanwhile keeps to the
-  bookmarks, so one `PageThumbnails` shows the pages at a time.
+  bookmarks, so one `PageThumbnails` shows the pages at a time. Documents open on the grid while
+  the reader last left one there (`ui.pageGrid`).
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
 - File sources are read-only and are not documents: no `record_document`, recent files, save
   binding, or `find_open_file`. Each window's registry releases them on window destruction and on
   page reload up to the id cutoff taken at release, so a reloaded page keeps those added since.
-  A source whose fingerprint (mtime and size) changed since it was read is refused.
+  A source whose fingerprint (mtime and size) changed since it was read is refused once it must be
+  read again; the e2e build's `unload_pdf_sources` forces that re-read.
 
 ## Word and image import
 
