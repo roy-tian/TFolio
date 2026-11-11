@@ -1,6 +1,7 @@
 import { Fragment, useLayoutEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import { PaddingDismiss } from "@/components/PaddingDismiss"
 import { PdfPage } from "@/components/PdfPage"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import type { CaptureHighlight } from "@/hooks/useHighlightTool"
@@ -60,6 +61,8 @@ type LayoutProps = {
   /** Copies the whole document, and stands for a select-all being in force:
       absent, a page's menu falls back to whatever the reader dragged over. */
   onCopyAllText?: () => void
+  /** Saves without the blank pages, from one of them. */
+  onDismissPadding: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   /** The blank pages a Save As will add, shown where it will put them. */
   padding: readonly PaddingSheet[]
@@ -75,31 +78,46 @@ type LayoutProps = {
   viewRotation: number
 }
 
+// Below these a sheet has no room to say what it is, then none for its button.
+const BLANK_NOTE_MIN = { height: 200, width: 260 }
+const BLANK_BUTTON_MIN = { height: 48, width: 96 }
+
 /** A blank page a Save As will add: white paper with a dashed edge, no page
-    of the document's own, so no `data-page-number` for tracking to count. */
+    of the document's own, so no `data-page-number` for tracking to count. It
+    says why it is there and how to save without it, where it has the room. */
 function BlankSheet({
+  onDismiss,
   rotation,
   scale,
   sheet,
 }: {
+  onDismiss: () => void
   rotation: number
   scale: number
   sheet: PaddingSheet
 }) {
   const { t } = useTranslation()
   const shown = dimensionsForRotation(rotation, sheet.width, sheet.height)
+  const height = shown.height * POINT_TO_PX * scale
+  const width = shown.width * POINT_TO_PX * scale
+  const fits = (room: { height: number; width: number }) =>
+    height >= room.height && width >= room.width
 
   return (
     <div
       aria-label={t("sidebar.paddingPage")}
-      className="shrink-0 border-2 border-dashed border-zinc-300 bg-white shadow-sm"
+      className="flex shrink-0 flex-col items-center justify-center gap-3 overflow-hidden border-2 border-dashed border-zinc-300 bg-white p-4 shadow-sm"
       data-padding-after={sheet.after}
-      role="img"
-      style={{
-        height: shown.height * POINT_TO_PX * scale,
-        width: shown.width * POINT_TO_PX * scale,
-      }}
-    />
+      role="group"
+      style={{ height, width }}
+    >
+      {fits(BLANK_NOTE_MIN) ? (
+        <p className="max-w-64 text-center text-sm text-neutral-500">
+          {t("sidebar.paddingPage")}
+        </p>
+      ) : null}
+      {fits(BLANK_BUTTON_MIN) ? <PaddingDismiss onDismiss={onDismiss} /> : null}
+    </div>
   )
 }
 
@@ -111,6 +129,7 @@ function SingleLayout({
   draftsByPage,
   notesByPage,
   onCopyAllText,
+  onDismissPadding,
   onPagePaint,
   padding,
   pages,
@@ -145,7 +164,12 @@ function SingleLayout({
         textSelectAll={textSelectAll}
       />
       {blanks.has(index + 1) ? (
-        <BlankSheet rotation={viewRotation} scale={scale} sheet={blanks.get(index + 1)!} />
+        <BlankSheet
+          onDismiss={onDismissPadding}
+          rotation={viewRotation}
+          scale={scale}
+          sheet={blanks.get(index + 1)!}
+        />
       ) : null}
     </Fragment>
   ))
@@ -159,6 +183,7 @@ function BookLayout({
   draftsByPage,
   notesByPage,
   onCopyAllText,
+  onDismissPadding,
   onPagePaint,
   padding,
   pages,
@@ -203,6 +228,7 @@ function BookLayout({
           sheet.kind === "padding" ? (
             <BlankSheet
               key={`padding-${sheet.after}`}
+              onDismiss={onDismissPadding}
               rotation={viewRotation}
               scale={scale}
               sheet={sheet}
@@ -242,6 +268,8 @@ type PdfViewerLayoutProps = {
   documentId: number
   drafts: RectDraft[]
   notes: TextNotePreview[]
+  /** Saves without the blank pages, from one of them. */
+  onDismissPadding: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   fileName: string
   padding: readonly PaddingSheet[]
@@ -276,6 +304,7 @@ export function PdfViewerLayout({
   drafts,
   notes,
   onCopyAllText,
+  onDismissPadding,
   onPagePaint,
   fileName,
   padding,
@@ -312,6 +341,7 @@ export function PdfViewerLayout({
     draftsByPage,
     notesByPage,
     onCopyAllText: textSelectAll ? onCopyAllText : undefined,
+    onDismissPadding,
     onPagePaint,
     padding,
     pages,

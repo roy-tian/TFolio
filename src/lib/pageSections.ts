@@ -22,20 +22,46 @@ export function pagesOfSection(pages: readonly PdfPageInfo[], section: number): 
   return pages.flatMap((page, index) => (page.section === section ? [index + 1] : []))
 }
 
-/** Where a paste at one end of file `section` goes, 1-based: before its first
-    page, or after its last; null for a file with no page. */
-export function fileEndIndex(
-  pages: readonly PdfPageInfo[],
-  section: number,
-  end: "start" | "end",
-): number | null {
-  const own = pagesOfSection(pages, section)
+/**
+ * A file's pages standing together. A file let go among another's pages parts
+ * it in two, and each part is a run: what the grid heads with the file's name,
+ * the sidebar's tree lists, and a Save As writes a bookmark for.
+ */
+export type FileRun = {
+  count: number
+  /** The run's first page, 1-based. */
+  first: number
+  /** The first of its file's runs, which the file's own bookmarks go beneath. */
+  leads: boolean
+  /** Which of its file's runs this is, counted from 0: a name for the run
+      that an edit elsewhere in the document leaves alone. */
+  ordinal: number
+  section: number
+}
 
-  if (own.length === 0) {
-    return null
-  }
+export function fileRuns(pages: readonly PdfPageInfo[]): FileRun[] {
+  const runs: FileRun[] = []
+  const counted = new Map<number, number>()
 
-  return end === "start" ? own[0]! : own[own.length - 1]! + 1
+  pages.forEach((page, index) => {
+    if (page.section === undefined) {
+      return
+    }
+
+    const last = runs[runs.length - 1]
+
+    if (last && last.section === page.section && last.first + last.count === index + 1) {
+      last.count += 1
+      return
+    }
+
+    const ordinal = counted.get(page.section) ?? 0
+
+    counted.set(page.section, ordinal + 1)
+    runs.push({ count: 1, first: index + 1, leads: ordinal === 0, ordinal, section: page.section })
+  })
+
+  return runs
 }
 
 /** Whether `moving` holds every page some file has: joined to another file
@@ -83,8 +109,9 @@ export function reorderSections(
 
 /**
  * The page order with every page of file `section` moved, keeping their own
- * order, in front of the first page of file `before`, or to the end: a file
- * dragged among the others lands whole, gathered from every run it had. Null
+ * order, in front of 1-based page `before`, or to the end: a file dragged
+ * among the others lands whole, gathered from every run it had. `before` may
+ * be one of its own pages, which then marks the place among the others. Null
  * where nothing would move.
  */
 export function fileMoveOrder(
@@ -103,15 +130,14 @@ export function fileMoveOrder(
     }
   })
 
-  const at =
-    before === null
-      ? staying.length
-      : staying.findIndex((pageNumber) => pages[pageNumber - 1]?.section === before)
-
-  if (moving.length === 0 || at < 0) {
+  if (moving.length === 0) {
     return null
   }
 
+  const at =
+    before === null
+      ? staying.length
+      : staying.filter((pageNumber) => pageNumber < before).length
   const order = [...staying.slice(0, at), ...moving, ...staying.slice(at)]
 
   return order.every((pageNumber, index) => pageNumber === index + 1) ? null : order

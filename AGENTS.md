@@ -99,6 +99,9 @@
   beside it.
 - Fetch what a copy writes when the selection is made: WebKit refuses a clipboard write that
   awaits IPC long after the keypress.
+- A menu entry that starts an edit in place unmounts its menu content on close (no fade) and
+  answers `finalFocus` false: a Base UI menu still fading holds focus, and takes it back from
+  the field, whose blur ends the edit.
 - Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
   worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
   pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
@@ -148,6 +151,9 @@
 - Every insert names the file its pages join, and a reorder passes each position's file after
   and before: a page let go among another file's pages joins it, but a file moved whole by its
   name keeps its own. A deleted page keeps its file for the restore an undo brings back.
+- A file let go among another's pages parts it into runs. The grid's headings, the sidebar's
+  tree (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list a file once per
+  run, its own bookmarks under the first; rename, remove, choose and drag act on the file whole.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
   then the tab reopens the written file, its history gone. A compressed copy compresses what a
@@ -160,8 +166,14 @@
   (`paddingPositions`, kept in step with `SectionBook::padding`).
 - The page grid lies over the reading view, which stays mounted and laid out (`inert`) beneath
   it: leaving the grid finds the reader's place, and the sidebar meanwhile keeps to the
-  bookmarks, so one `PageThumbnails` shows the pages at a time. Documents open on the grid while
-  the reader last left one there (`ui.pageGrid`).
+  bookmarks, so one `PageThumbnails` shows the pages at a time. With no bookmarks or files to
+  keep to, the sidebar gives the grid its column (`setVacant`) and opens only over it, as in a
+  narrow window. The grid shows pages as a save keeps them: it ignores the view's turn and
+  offers none, since there a turn means the page's own. Documents open on the grid while the
+  reader last left one there (`ui.pageGrid`).
+- A file dragged over the grid is told only that a drop joins the document, and by the tab strip
+  where one would open tabs: the workspace's offer to open, laid over the grid, says the
+  opposite of what the drop does.
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
 - File sources are read-only and are not documents: no `record_document`, recent files, save

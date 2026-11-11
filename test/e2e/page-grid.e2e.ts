@@ -4,6 +4,7 @@ import "@wdio/tauri-service"
 import {
   activeSidebar,
   bandedPdf,
+  contextMenuAction,
   openPdfFromDisk,
   outlinedPdf,
   refreshApp,
@@ -300,6 +301,11 @@ describe("TFolio page grid", () => {
     await expect($(`${activeSidebar} [data-page-thumbnails]`)).not.toExist()
     await expect($(`${session} [data-slot='zoom-controls']`)).not.toExist()
     await expect($(`${session} button[aria-label='Highlight text']`)).toBeDisabled()
+    // A turn of the view would pass here for a turn of the pages, which
+    // their own controls make.
+    await expect($(`${session} button[aria-label='Rotate the view clockwise']`)).not.toExist()
+    // With no bookmarks to keep to, the sidebar gives the grid its column.
+    await expect($("[data-sidebar]")).toHaveAttribute("data-sidebar", "hidden")
 
     // A click chooses, and the grid stays.
     await $(preview(grid, 5)).click()
@@ -315,6 +321,15 @@ describe("TFolio page grid", () => {
     await browser.waitUntil(async () => (await pageStatus()) === "Page 3 of 6", {
       timeoutMsg: "Enter never opened page 3",
     })
+    await expect($("[data-sidebar]")).toHaveAttribute("data-sidebar", "docked")
+    await showGrid()
+
+    // So does the page's menu, for a reader who never tries a double-click.
+    await contextMenuAction(preview(grid, 2), "open-page")
+    await $(grid).waitForExist({ reverse: true })
+    await browser.waitUntil(async () => (await pageStatus()) === "Page 2 of 6", {
+      timeoutMsg: "the menu never opened page 2",
+    })
     await showGrid()
 
     // WebDriver makes no double-click of its own.
@@ -328,6 +343,17 @@ describe("TFolio page grid", () => {
       timeoutMsg: "the reading view never came back on page 5",
     })
     await expect($(`${session} [data-slot='zoom-controls']`)).toExist()
+  })
+
+  it("shows the pages as a save keeps them, whatever turn the reading view has", async () => {
+    await openPdfFromDisk("turned.pdf", bandedPdf(2))
+    await $(`${session} button[aria-label='Rotate the view clockwise']`).click()
+    await expect($(preview(activeSidebar, 1))).toHaveAttribute("data-rotation", "90")
+
+    // The grid turns pages for good and has no turn of the view to undo this
+    // one with: left standing, it would pass for a turn of the pages.
+    await showGrid()
+    await expect($(preview(grid, 1))).toHaveAttribute("data-rotation", "0")
   })
 
   it("opens the next document on the grid while the reader last left one there", async () => {

@@ -8,9 +8,9 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react"
-import { BetweenHorizontalStart, Bookmark, FilePlus2, Rows3 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import type { PageActionHandler } from "@/components/PageCardControls"
 import {
@@ -20,7 +20,7 @@ import {
   type PageDragGhostHandle,
   type PageDragGhostState,
 } from "@/components/PageDragGhost"
-import { FileMenuContent, PageMenuContent, type FileMenuEnd } from "@/components/PageContextMenu"
+import { FileMenuContent, PageMenuContent } from "@/components/PageContextMenu"
 import {
   CarriedHoles,
   fileDropSlot,
@@ -29,15 +29,14 @@ import {
   PagesDropTarget,
   type PageThumbnailsLayout,
 } from "@/components/PageThumbnailCells"
-import { ToolbarTooltip } from "@/components/ToolbarTooltip"
-import { Button } from "@/components/ui/button"
-import { Toggle } from "@/components/ui/toggle"
+import { PagesBar } from "@/components/PagesBar"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { CARRY_KEY, useIncomingPages } from "@/hooks/useIncomingPages"
 import { usePageCarryContext, type CarryLanding } from "@/hooks/usePageCarry"
 import type { RenderEpochs } from "@/lib/annotations"
+import { isTypingTarget } from "@/lib/contextMenu"
 import { stripSpotAt, type CarriedPages } from "@/lib/pageCarry"
 import {
   besideColumn,
@@ -51,7 +50,7 @@ import {
 } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { paddingPositions, type PaddingSheet } from "@/lib/padding"
-import { emptiesItsFile, pagesOfSection } from "@/lib/pageSections"
+import { emptiesItsFile, fileRuns, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -132,8 +131,9 @@ type PageThumbnailsProps = {
   onOpen: (pageNumber: number) => void
   layout: PageThumbnailsLayout
   onPastePages: (index: number, section?: number) => void
-  /** From a file's name: the clipboard's pages pasted into it, at either end. */
-  onPasteIntoFile: (section: number, end: FileMenuEnd) => void
+  /** From a file's name: every page of the file, out of the document. */
+  onRemoveFile: (section: number) => void
+  onRenameFile: (section: number, title: string) => void
   /** Settles once the reorder has landed or been refused: the column holds
       the dropped order until then, rather than flash the old one. `moving`
       joins `section`, the file it was let go among. */
@@ -185,7 +185,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   onNavigate,
   onOpen,
   onPastePages,
-  onPasteIntoFile,
+  onRemoveFile,
+  onRenameFile,
   onReorderPages,
   onRotatePage,
   onRotatePages,
@@ -210,14 +211,24 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     pageNumber: number
     pages: PdfPageInfo[]
   } | null>(null)
-  // A file's name has a menu of its own, for pastes into that file.
-  const [fileMenu, setFileMenu] = useState<{ pages: PdfPageInfo[]; section: number } | null>(
-    null,
-  )
+  // A file's name has a menu of its own; `first` is the page its heading
+  // stands over, which tells one run of a parted file from the other.
+  const [fileMenu, setFileMenu] = useState<{
+    first: number
+    pages: PdfPageInfo[]
+    section: number
+  } | null>(null)
+  // The heading whose name is being typed over, in place.
+  const [renaming, setRenaming] = useState<{
+    first: number
+    pages: PdfPageInfo[]
+    section: number
+  } | null>(null)
   // An edit can land under the open menu and renumber the pages; the menu then
   // closes rather than act on whatever holds its number now.
   const menuPage = menu?.pages === pages ? menu.pageNumber : null
-  const menuFile = fileMenu?.pages === pages ? fileMenu.section : null
+  const menuFile = fileMenu?.pages === pages ? fileMenu : null
+  const renamed = renaming?.pages === pages ? renaming : null
   const [drag, setDrag] = useState<ColumnDrag | null>(null)
   // Thumbnail keys, not page numbers: a hole outlives the reorder's commit
   // until the ghost has settled into it.
@@ -350,6 +361,15 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
   actionsRef.current = { onDeleteOnePage, onInsertBlankPage, onRotatePage, onSelectPage }
 
+  // A control that leaves with what it acted on fires no blur as it goes: the
+  // column takes the focus first, and with it keeps the page keys. A click
+  // focuses the control too, except in WebKit on macOS.
+  const keepFocus = useCallback(() => {
+    if (listRef.current?.contains(document.activeElement)) {
+      listRef.current.focus({ preventScroll: true })
+    }
+  }, [])
+
   const act = useCallback<PageActionHandler>((pageNumber, action) => {
     const actions = actionsRef.current
 
@@ -364,17 +384,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         actions.onRotatePage(pageNumber, 90)
         break
       case "delete":
-        // The control leaves with its page, and a removed element fires no
-        // blur: the column keeps the focus, and with it the page keys. A click
-        // focuses the control too, except in WebKit on macOS.
-        if (listRef.current?.contains(document.activeElement)) {
-          listRef.current?.focus({ preventScroll: true })
-        }
-
+        keepFocus()
         actions.onDeleteOnePage(pageNumber)
         break
     }
-  }, [])
+  }, [keepFocus])
 
   // Before the page, the file it joins is that page's; after the last, the
   // last page's.
@@ -510,7 +524,17 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     const list = listRef.current
     const column = columnRef.current
 
-    if (event.button !== 0 || !paper || !list || !column || settlingRef.current) {
+    if (
+      event.button !== 0 ||
+      !paper ||
+      !list ||
+      !column ||
+      settlingRef.current ||
+      // A press while a name is typed places the caret, or ends the edit by
+      // leaving the field: the rename it settles is about to replace the
+      // pages a drag begun on the same press would be measured against.
+      renamed !== null
+    ) {
       return
     }
 
@@ -765,6 +789,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     smartPadding: fileOptions?.smartPadding === true,
   })
   let headed: number | undefined
+  // The way out stands on the blank itself: the option that puts it there is
+  // a menu away, under a name the reader has yet to connect with this page.
+  const dismissPadding = () => {
+    keepFocus()
+    onFileOptionsChange({ smartPadding: false })
+  }
 
   return (
     <div
@@ -776,72 +806,15 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       data-pages-dragging={drag !== null || ghost !== null || incoming !== null ? "" : undefined}
       data-pages-surface
     >
-      <div
-        className={cn(
-          "flex h-9 shrink-0 items-center gap-1 border-b px-2",
-          grid && "bg-background",
-        )}
-        data-slot="pages-bar"
-      >
-        {sections.length > 1 ? (
-          <ToolbarTooltip label={t("sidebar.fileRows")}>
-            <Toggle
-              aria-label={t("sidebar.fileRows")}
-              className="size-7 min-w-7 p-0"
-              data-slot="pages-file-rows"
-              onPressedChange={onFileRowsChange}
-              pressed={fileRows}
-              size="sm"
-            >
-              <Rows3 />
-            </Toggle>
-          </ToolbarTooltip>
-        ) : null}
-        {fileOptions ? (
-          <>
-            <ToolbarTooltip label={t("sidebar.smartPadding")}>
-              <Toggle
-                aria-label={t("sidebar.smartPadding")}
-                className="size-7 min-w-7 p-0"
-                data-slot="pages-smart-padding"
-                onPressedChange={(smartPadding) =>
-                  onFileOptionsChange({ smartPadding })
-                }
-                pressed={fileOptions.smartPadding}
-                size="sm"
-              >
-                <BetweenHorizontalStart />
-              </Toggle>
-            </ToolbarTooltip>
-            <ToolbarTooltip label={t("sidebar.fileBookmarks")}>
-              <Toggle
-                aria-label={t("sidebar.fileBookmarks")}
-                className="size-7 min-w-7 p-0"
-                data-slot="pages-file-bookmarks"
-                onPressedChange={(perFileBookmarks) =>
-                  onFileOptionsChange({ perFileBookmarks })
-                }
-                pressed={fileOptions.perFileBookmarks}
-                size="sm"
-              >
-                <Bookmark />
-              </Toggle>
-            </ToolbarTooltip>
-          </>
-        ) : null}
-        <ToolbarTooltip label={t("sidebar.addFiles")}>
-          <Button
-            aria-label={t("sidebar.addFiles")}
-            className="ml-auto"
-            data-slot="pages-add-files"
-            onClick={onAddFiles}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <FilePlus2 />
-          </Button>
-        </ToolbarTooltip>
-      </div>
+      <PagesBar
+        fileOptions={fileOptions}
+        fileRows={fileRows}
+        grid={grid}
+        onAddFiles={onAddFiles}
+        onFileOptionsChange={onFileOptionsChange}
+        onFileRowsChange={onFileRowsChange}
+        severalFiles={sections.length > 1}
+      />
       <div className="relative min-h-0 flex-1">
         <ContextMenu
           onOpenChange={(open) => {
@@ -850,6 +823,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
               setFileMenu(null)
             }
           }}
+          // Off while a file's name is typed: the field keeps the WebView's
+          // own cut, copy and paste menu.
+          disabled={renamed !== null}
           // Opened by a press on a page or a file's name alone: elsewhere in
           // the column there is nothing for the entries to act on.
           open={menuPage !== null || menuFile !== null}
@@ -870,13 +846,27 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   }
                 }}
                 onContextMenu={(event) => {
+                  // A name being typed keeps the WebView's own cut, copy and
+                  // paste menu; the pages wait for the name to be settled.
+                  if (renamed) {
+                    if (!isTypingTarget(event.target)) {
+                      event.preventDefault()
+                    }
+
+                    return
+                  }
+
                   const heading = (event.target as Element).closest<HTMLElement>(
                     "[data-section-header]",
                   )
 
                   if (heading) {
                     setMenu(null)
-                    setFileMenu({ pages, section: Number(heading.dataset.sectionHeader) })
+                    setFileMenu({
+                      first: Number(heading.dataset.runFirst),
+                      pages,
+                      section: Number(heading.dataset.sectionHeader),
+                    })
                     return
                   }
 
@@ -899,6 +889,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                 }}
                 onFocus={() => onFocusChange(true)}
                 onKeyDown={(event) => {
+                  // A file's name typed in place: Backspace is its own.
+                  if (isTypingTarget(event.target)) {
+                    return
+                  }
+
                   const first = Math.min(...selectionRef.current)
                   const paper = (event.target as Element).closest<HTMLElement>(
                     "[data-thumbnail-page]",
@@ -969,6 +964,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                       frame={frame}
                       key={`padding-${CARRY_KEY}`}
                       label={t("sidebar.paddingPage")}
+                      onDismiss={dismissPadding}
                       rotation={viewRotation}
                       sheet={blankAfterCarried}
                     />
@@ -999,17 +995,36 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     // A press chooses the file's pages; a drag carries them.
                     <li
                       className="flex w-full basis-full px-1 pt-1"
+                      data-run-first={pageNumber}
                       data-section-header={heads}
                       key={`section-${heads}-${pageNumber}`}
                     >
-                      <button
-                        className="max-w-full cursor-grab truncate rounded px-1 text-left text-xs font-medium text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-                        data-slot="pages-file-heading"
-                        onClick={(event) => selectFile(heads, event)}
-                        type="button"
-                      >
-                        {titles.get(heads)}
-                      </button>
+                      {renamed?.section === heads && renamed.first === pageNumber ? (
+                        <FileTitleEditor
+                          className="h-6 max-w-64 text-xs md:text-xs"
+                          label={t("sidebar.fileName")}
+                          onDone={(title) => {
+                            // Enter and Esc take the field away with the
+                            // caret still in it.
+                            keepFocus()
+                            setRenaming(null)
+
+                            if (title !== null) {
+                              onRenameFile(heads, title)
+                            }
+                          }}
+                          title={titles.get(heads) ?? ""}
+                        />
+                      ) : (
+                        <button
+                          className="max-w-full cursor-grab truncate rounded px-1 text-left text-xs font-medium text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                          data-slot="pages-file-heading"
+                          onClick={(event) => selectFile(heads, event)}
+                          type="button"
+                        >
+                          {titles.get(heads)}
+                        </button>
+                      )}
                     </li>
                   ),
                   <PageCell
@@ -1051,6 +1066,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                       frame={frame}
                       key={`padding-${key}`}
                       label={t("sidebar.paddingPage")}
+                      onDismiss={dismissPadding}
                       rotation={viewRotation}
                       sheet={blanks.get(pageNumber)!}
                     />
@@ -1074,6 +1090,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   pages[(side === "before" ? menuFirst : menuLast) - 1]?.section,
                 )
               }
+              // A click in the grid only chooses; down the sidebar it goes there.
+              onOpen={grid ? () => onOpen(menuPage) : undefined}
               onPaste={(side) =>
                 onPastePages(
                   side === "before" ? menuFirst : menuLast + 1,
@@ -1083,7 +1101,30 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
               onRotate={onRotatePages}
             />
           ) : menuFile !== null ? (
-            <FileMenuContent canPaste={canPaste} onPaste={(end) => onPasteIntoFile(menuFile, end)} />
+            <FileMenuContent
+              canPaste={canPaste}
+              onPaste={(end) => {
+                // The run under the heading pressed, not the file's every page.
+                const run = fileRuns(pages).find((each) => each.first === menuFile.first)
+
+                if (run) {
+                  onPastePages(
+                    end === "start" ? run.first : run.first + run.count,
+                    menuFile.section,
+                  )
+                }
+              }}
+              onRemove={() => onRemoveFile(menuFile.section)}
+              onRename={() => setRenaming(menuFile)}
+              onSelect={() =>
+                onSelectPages(pagesOfSection(pages, menuFile.section), {
+                  range: false,
+                  toggle: false,
+                })
+              }
+              // A document keeps a page; the last file's go no further.
+              removeDisabled={pagesOfSection(pages, menuFile.section).length >= numPages}
+            />
           ) : null}
           {ghost ? (
             <PageDragGhost

@@ -23,3 +23,11 @@ export function pagesShown() {
 export function overPages(point: { x: number; y: number }) {
   return (document.elementFromPoint(point.x, point.y)?.closest(PAGES_SELECTOR) ?? null) !== null
 }
+
+const GRID_SELECTOR = "[data-document-session][data-active='true'] [data-page-thumbnails='grid']"
+
+/** Whether those pages are the page grid, filling the main area: a drop meant
+    to open its files then has only the bars around the grid to land on. */
+export function pagesFillWorkspace() {
+  return (document.querySelector(GRID_SELECTOR)?.getClientRects().length ?? 0) > 0
+}

@@ -42,7 +42,7 @@ import { PagesDropContext, setPagesDropPoint, type PagesDrop } from "@/hooks/use
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
-import { dropPointInCss, overPages, pagesShown } from "@/lib/fileDrop"
+import { dropPointInCss, overPages, pagesFillWorkspace, pagesShown } from "@/lib/fileDrop"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
@@ -225,6 +225,8 @@ export default function App() {
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [pagesDrop, setPagesDrop] = useState<PagesDrop>(null)
+  // The pages a drop joins are the page grid, over the whole main area.
+  const [pagesFill, setPagesFill] = useState(false)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
   // What the prompt keeps showing while it fades out after an answer.
   const [shownClose, setShownClose] = useState<PendingClose | null>(null)
@@ -1947,6 +1949,7 @@ export default function App() {
 
           setIsDragging(true)
           setPagesDrop(drop)
+          setPagesFill(drop !== null && pagesFillWorkspace())
           setPagesDropPoint(drop === "over" ? cssPoint(event.payload.position) : null)
         }
       })
@@ -2415,7 +2418,27 @@ export default function App() {
         </div>
       ) : null}
 
-      {isDragging ? (
+      {isDragging && pagesDrop && pagesFill ? (
+        // The page grid fills the main area and says itself that a drop on it
+        // joins the document: an offer to open laid over it would say the
+        // opposite of what the drop does. Opening keeps the bars, and the tab
+        // strip, where tabs come to be, says so.
+        <div
+          className={cn(
+            "pointer-events-none fixed top-(--toolbar-height) right-0 left-(--sidebar-inset) z-60 flex h-(--document-tabs-height) items-center justify-center gap-2 border-2 border-dashed px-3 text-sm font-medium backdrop-blur-sm",
+            pagesDrop === "over"
+              ? "border-muted-foreground/30 bg-background/75 text-muted-foreground"
+              : "border-primary/60 bg-background/90",
+          )}
+          data-strip=""
+          data-testid="workspace-file-drop"
+        >
+          <FileUp className="size-4 shrink-0" />
+          <span className="truncate">
+            {t(pagesDrop === "over" ? "tabs.dropStripHint" : "tabs.dropStripNow")}
+          </span>
+        </div>
+      ) : isDragging ? (
         <div
           className={cn(
             "pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] right-3 bottom-3 z-60 grid place-items-center rounded-2xl border-2 border-dashed backdrop-blur-sm",

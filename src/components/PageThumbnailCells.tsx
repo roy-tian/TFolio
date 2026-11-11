@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } fr
 import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { PaddingDismiss } from "@/components/PaddingDismiss"
 import { PageControls, type PageActionHandler } from "@/components/PageCardControls"
 import { DragHole } from "@/components/PageDragGhost"
 import { HintTooltip } from "@/components/HintTooltip"
@@ -57,7 +58,14 @@ export function PagesDropTarget({
       data-over={drop === "over" ? "" : undefined}
       data-testid="pages-drop"
     >
-      <p className="mt-2 h-fit rounded-full bg-background/95 px-3 py-1 text-xs font-medium shadow-sm">
+      {/* Across the grid this is all a drag is told about the pages, so it
+          is said at the size of what it lies over. */}
+      <p
+        className={cn(
+          "mt-2 h-fit rounded-full bg-background/95 font-medium shadow-sm",
+          layout === "grid" ? "px-4 py-1.5 text-sm" : "px-3 py-1 text-xs",
+        )}
+      >
         {t("sidebar.dropFiles")}
       </p>
       {drop === "over" ? <DropMarker flowRef={flowRef} layout={layout} /> : null}
@@ -174,16 +182,19 @@ export function CarriedHoles({
 }
 
 /** A blank page a Save As will add, where it will add it: white paper with a
-    dashed edge, no page of the document's own, so nothing to choose or drag.
+    dashed edge, no page of the document's own, so nothing to choose or drag,
+    and on it the way to save without such pages.
     No flip key, so a drop counts it no cell. */
 export function PaddingCell({
   frame,
   label,
+  onDismiss,
   rotation,
   sheet,
 }: {
   frame: number | null
   label: string
+  onDismiss: () => void
   rotation: number
   sheet: PaddingSheet
 }) {
@@ -198,10 +209,12 @@ export function PaddingCell({
         <HintTooltip label={label}>
           <div
             aria-label={label}
-            className="border-2 border-dashed border-muted-foreground/40 bg-white"
-            role="img"
+            className="grid place-items-center border-2 border-dashed border-muted-foreground/40 bg-white p-1"
+            role="group"
             style={{ height: paper.height, width: paper.width }}
-          />
+          >
+            <PaddingDismiss onDismiss={onDismiss} />
+          </div>
         </HintTooltip>
       </div>
       <span style={{ height: THUMBNAIL_CAPTION_HEIGHT }} />

@@ -32,7 +32,6 @@ import {
   spreadPagesOf,
   spreadTurnTarget,
 } from "@/lib/padding"
-import type { FileMenuEnd } from "@/components/PageContextMenu"
 import { PageThumbnails, type PageThumbnailsHandle } from "@/components/PageThumbnails"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
@@ -92,7 +91,7 @@ import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
-import { fileEndIndex, fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
+import { fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
 import { readFileSources } from "@/lib/fileSources"
 import {
   storedFilePreferences,
@@ -428,6 +427,20 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const thumbnailsRef = useRef<PageThumbnailsHandle>(null)
     // While the grid shows the pages, the sidebar keeps to the bookmarks.
     const sidebarPanel = gridShown ? "bookmarks" : shownSidebarPanel(sidebar.panel, bookmarksApply)
+    // With none to keep to, it would stand beside the grid as an empty column.
+    const sidebarVacant = gridShown && !bookmarksApply
+    const setSidebarVacant = sidebar.setVacant
+
+    // Before the paint, so the grid never shows beside the empty column first.
+    useLayoutEffect(() => {
+      if (!active) {
+        return
+      }
+
+      setSidebarVacant(sidebarVacant)
+
+      return () => setSidebarVacant(false)
+    }, [active, setSidebarVacant, sidebarVacant])
 
     const scrollToPage = useCallback(
       (pageNumber: number, behavior: ScrollBehavior = "smooth") => {
@@ -1226,7 +1239,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     } = pageOps
 
     // A file dragged in the sidebar's tree keeps its own pages, wherever it
-    // goes. Not memoised: `reorderPages` is new every render.
+    // goes: in front of 1-based page `before`, or to the end. Not memoised:
+    // `reorderPages` is new every render.
     const moveFile = (sectionId: number, before: number | null) => {
       const pages = documentRef.current?.pages ?? []
       const order = fileMoveOrder(pages, sectionId, before)
@@ -1236,14 +1250,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }
 
-    // From the file's name in the sidebar's tree, as from its heading in the grid.
-    const pasteIntoFile = (sectionId: number, end: FileMenuEnd) => {
-      const index = fileEndIndex(documentRef.current?.pages ?? [], sectionId, end)
+    // From the file's name in the sidebar's tree: in front of 1-based page
+    // `index`, as one of that file's pages.
+    const pasteIntoFile = (sectionId: number, index: number) => pastePages(index, sectionId)
 
-      if (index !== null) {
-        pastePages(index, sectionId)
-      }
-    }
+    // A file's pages chosen as one, from its name's menu.
+    const selectFile = (sectionId: number) =>
+      thumbnailSelection.selectGroup(
+        pagesOfSection(documentRef.current?.pages ?? [], sectionId),
+        { range: false, toggle: false },
+      )
 
     const watermark = useWatermark({
       activeConfig: annotations.watermarkConfig,
@@ -2131,7 +2147,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onMenuPage: menuThumbnailPage,
       onNavigate: navigateFromSidebar,
       onPastePages: pastePages,
-      onPasteIntoFile: pasteIntoFile,
+      onRemoveFile: removeSection,
+      onRenameFile: renameSection,
       onReorderPages: reorderPages,
       onRotatePage: rotateOnePage,
       onRotatePages: rotateThumbnailPages,
@@ -2156,6 +2173,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         canSave={canSave}
         onCompress={() => setCompressOpen(true)}
         onExportImages={() => setImageExportOpen(true)}
+        onAddFiles={() => void chooseFiles()}
         onPrint={print.preparing ? undefined : () => void startPrint()}
         onSave={saveDocument}
         onSaveA4={() => setA4Open(true)}
@@ -2235,11 +2253,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
               canPaste={clipboard !== null}
+              onAddFiles={() => void chooseFiles()}
               onMove={moveFile}
               onNavigate={navigateFromSidebar}
               onPaste={pasteIntoFile}
               onRemove={removeSection}
               onRename={renameSection}
+              // Beside a reading view the tree has taken the pages' place in
+              // the sidebar: there is nowhere for a choice of pages to show.
+              onSelect={gridShown ? selectFile : undefined}
               pages={pdfDocument.pages}
               sections={sections}
             />
@@ -2362,6 +2384,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                     : (search.matches[search.activeIndex]?.pageNumber ?? null)
                 }
                 onCopyAllText={copyDocumentText}
+                onDismissPadding={() => changeFileOptions({ smartPadding: false })}
                 captureHighlight={highlightTool.captureSelection}
                 textEpochs={annotations.textEpochs}
                 textSelectAll={textSelectAll.selectedAll}
@@ -2377,7 +2400,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             <ZoomIndicator flash={zoom.zoomAnnouncement} percent={zoom.zoomPercent} />
             {gridShown ? (
               <div className="absolute inset-0 z-10 bg-background" data-page-grid-layer>
-                <PageThumbnails {...pageThumbnails} layout="grid" onOpen={openFromGrid} />
+                <PageThumbnails
+                  {...pageThumbnails}
+                  layout="grid"
+                  onOpen={openFromGrid}
+                  // The grid is where pages are turned for good, and offers no
+                  // turn of the view: one made over the reading view would
+                  // stand here as a turn of the pages, with no way to undo it.
+                  viewRotation={0}
+                />
               </div>
             ) : null}
             <ViewerControls

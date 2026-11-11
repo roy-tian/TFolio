@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 
 import {
   emptiesItsFile,
-  fileEndIndex,
   fileMoveOrder,
+  fileRuns,
   reorderSections,
   sectionAt,
   sectionsOf,
@@ -53,33 +53,35 @@ describe("fileMoveOrder", () => {
   const filed = (...sections: number[]) =>
     sections.map((section) => ({ height: 1, rotation: 0, section, width: 1 }))
 
-  test("moves a file whole in front of another", () => {
-    expect(fileMoveOrder(filed(0, 0, 1, 2, 2), 2, 1)).toEqual([1, 2, 4, 5, 3])
+  test("moves a file whole in front of a page of another", () => {
+    expect(fileMoveOrder(filed(0, 0, 1, 2, 2), 2, 3)).toEqual([1, 2, 4, 5, 3])
     expect(fileMoveOrder(filed(0, 0, 1, 2, 2), 0, null)).toEqual([3, 4, 5, 1, 2])
   })
 
   test("gathers a file split into runs", () => {
-    expect(fileMoveOrder(filed(0, 1, 0, 2), 0, 2)).toEqual([2, 1, 3, 4])
+    expect(fileMoveOrder(filed(0, 1, 0, 2), 0, 4)).toEqual([2, 1, 3, 4])
+    // In front of its own second run: where that run stands among the others.
+    expect(fileMoveOrder(filed(0, 1, 0, 2), 0, 3)).toEqual([2, 1, 3, 4])
   })
 
   test("moves nothing where the file already stands", () => {
-    expect(fileMoveOrder(filed(0, 1, 2), 1, 2)).toBeNull()
+    expect(fileMoveOrder(filed(0, 1, 2), 1, 3)).toBeNull()
     expect(fileMoveOrder(filed(0, 1, 2), 2, null)).toBeNull()
     expect(fileMoveOrder(filed(0, 1), 5, null)).toBeNull()
   })
 })
 
-describe("fileEndIndex", () => {
-  const pages = [page(0), page(1), page(0), page(1)]
-
-  test("goes before a file's first page or after its last, wherever its pages stand", () => {
-    expect(fileEndIndex(pages, 1, "start")).toBe(2)
-    expect(fileEndIndex(pages, 1, "end")).toBe(5)
-    expect(fileEndIndex(pages, 0, "end")).toBe(4)
+describe("fileRuns", () => {
+  test("lists each stretch of a file's pages, the file's first one leading", () => {
+    expect(fileRuns([page(0), page(1), page(1), page(0)])).toEqual([
+      { count: 1, first: 1, leads: true, ordinal: 0, section: 0 },
+      { count: 2, first: 2, leads: true, ordinal: 0, section: 1 },
+      { count: 1, first: 4, leads: false, ordinal: 1, section: 0 },
+    ])
   })
 
-  test("has nowhere to go in a file with no page", () => {
-    expect(fileEndIndex(pages, 2, "start")).toBeNull()
+  test("has none for a document still its own file alone", () => {
+    expect(fileRuns([page(), page()])).toEqual([])
   })
 })
 

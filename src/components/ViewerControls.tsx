@@ -61,27 +61,28 @@ export function ViewerControls({
         onShowGrid={onShowGrid}
         value={viewMode}
       />
-      <StatusBarDivider />
       {/* Absent rather than disabled: disabled is what an unopened document
-          means. */}
+          means. The grid turns the pages themselves, from their own controls:
+          a turn of the view beside those would pass for one a save keeps. */}
       {gridShown ? null : (
         <>
+          <StatusBarDivider />
           <ZoomControls zoom={zoom} />
           <StatusBarDivider />
+          {/* Turns only the way the pages are looked at (D2); the sidebar's
+              previews turn the pages themselves. */}
+          <ToolbarTooltip label={rotateLabel}>
+            <Button
+              aria-label={rotateLabel}
+              onClick={onRotate}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <RotateCw />
+            </Button>
+          </ToolbarTooltip>
         </>
       )}
-      {/* Turns only the way the pages are looked at (D2); the sidebar's
-          previews turn the pages themselves. */}
-      <ToolbarTooltip label={rotateLabel}>
-        <Button
-          aria-label={rotateLabel}
-          onClick={onRotate}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <RotateCw />
-        </Button>
-      </ToolbarTooltip>
     </StatusBar>
   )
 }
