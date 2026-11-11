@@ -265,7 +265,7 @@ export function FileHeading({
   title: string
 }) {
   const { t } = useTranslation()
-  const foldLabel = t(folded ? "sidebar.unfoldFile" : "sidebar.foldFile", { name: title })
+  const foldLabel = t(folded ? "sidebar.unfoldItem" : "sidebar.foldItem", { name: title })
 
   return (
     <li

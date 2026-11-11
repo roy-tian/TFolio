@@ -147,21 +147,19 @@ function chosen() {
   )
 }
 
-/** Folds every file to its name, or shows their pages again, from the menu
-    over the pages. */
+/** Folds every file to its name, or shows their pages again, by the
+    buttons over the pages: the one pressed has nothing left to do. */
 async function foldAllFiles(folded: boolean) {
-  await $(`${activeSidebar} [data-slot='pages-file-options']`).click()
+  const button = $(`${activeSidebar} [data-slot='sidebar-${folded ? "fold" : "unfold"}-all']`)
 
-  const item = $(`[data-action='${folded ? "fold-files" : "unfold-files"}']`)
-
-  await item.waitForDisplayed({ timeout: 5_000 })
-  await item.click()
-  await item.waitForDisplayed({ reverse: true, timeout: 5_000 })
+  await expect(button).toBeEnabled()
+  await button.click()
+  await expect(button).toBeDisabled()
 }
 
 async function addFilesFromPicker(paths: string[]) {
   await pointMultiPickerAt(paths)
-  await $(`${activeSidebar} [data-slot='pages-add-files']`).click()
+  await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
 }
 
 /** Ticks or unticks one of the files' options, in the menu over the pages. */
@@ -221,11 +219,11 @@ describe("TFolio files added to an open document", () => {
     await expect($(saveTrigger)).toBeEnabled()
 
     // The files, and each one's bookmarks, where the bookmarks would be.
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     const files = $(`${activeSidebar} [data-slot='file-sections']`)
     await expect(files).toHaveText(expect.stringContaining("second.pdf"))
     await expect(files).toHaveText(expect.stringContaining("Second half"))
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
 
     await browser.keys(["Control", "z"])
     await waitForPages(2)
@@ -240,7 +238,7 @@ describe("TFolio files added to an open document", () => {
     await openPdfFromDisk("own.pdf", minimalPdf(1))
     await waitForPages(1)
     await pointMultiPickerAt([signed])
-    await $(`${activeSidebar} [data-slot='pages-add-files']`).click()
+    await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
 
     // The signature question holds the file between its read and its add:
     // meanwhile it leaves memory, as the parsed budget would let it go, and
@@ -270,21 +268,41 @@ describe("TFolio files added to an open document", () => {
     await browser.waitUntil(async () => (await headings()).length === 0)
   })
 
-  it("adds files from the app's menu and from under the tree of files", async () => {
+  it("adds files from under the sidebar, whichever panel shows, and from the app's menu", async () => {
     await openPdfFromDisk("own.pdf", minimalPdf(1))
     await waitForPages(1)
+    const tree = (names: string) =>
+      browser.waitUntil(async () => (await treeFiles()).join() === names, {
+        timeout: 30_000,
+        timeoutMsg: `the tree never listed ${names}`,
+      })
+
+    // In a row of its own, level with the status bar beside it.
+    const offsets = await browser.execute((scope: string) => {
+      const row = document.querySelector(`${scope} [data-slot='sidebar-footer']`)!
+      const bar = document.querySelector(
+        "[data-document-session][data-active='true'] [data-slot='status-bar']",
+      )!
+      const [rowBox, barBox] = [row, bar].map((element) => element.getBoundingClientRect())
+
+      return [rowBox.top - barBox.top, rowBox.bottom - barBox.bottom]
+    }, activeSidebar)
+    expect(offsets).toEqual([0, 0])
+
+    // A document of one file has its bookmarks there, and the same way in.
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await expect($(`${activeSidebar} nav[aria-label='Bookmarks']`)).toBeDisplayed()
+    await pointMultiPickerAt([writeScratchPdf("bookmarks.pdf", minimalPdf(1))])
+    await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
+    await tree("own.pdf,bookmarks.pdf")
 
     await pointMultiPickerAt([writeScratchPdf("menu.pdf", minimalPdf(1))])
     await clickAppMenuItem("add-files")
-    await waitForPages(2)
+    await tree("own.pdf,bookmarks.pdf,menu.pdf")
 
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
     await pointMultiPickerAt([writeScratchPdf("tree.pdf", minimalPdf(1))])
-    await $(`${activeSidebar} [data-slot='files-add']`).click()
-    await browser.waitUntil(
-      async () => (await treeFiles()).join() === "own.pdf,menu.pdf,tree.pdf",
-      { timeout: 30_000, timeoutMsg: "the tree never listed the three files" },
-    )
+    await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
+    await tree("own.pdf,bookmarks.pdf,menu.pdf,tree.pdf")
   })
 
   it("adds files dropped below the sidebar's pages at the end", async () => {
@@ -326,15 +344,15 @@ describe("TFolio files added to an open document", () => {
     await expect($(`${activeSidebar} [data-slot='pages-drop-hint']`)).toHaveText(
       "Drop to add to this document",
     )
-    await expect($(`${activeSidebar} [data-slot='pages-add-files']`)).not.toBeDisplayed()
+    await expect($(`${activeSidebar} [data-slot='sidebar-fold-all']`)).not.toBeDisplayed()
     await emitDrag("drag-drop", point, [dropped])
     await waitForPages(5)
-    await expect($(`${activeSidebar} [data-slot='pages-add-files']`)).toBeDisplayed()
+    await expect($(`${activeSidebar} [data-slot='sidebar-fold-all']`)).toBeDisplayed()
     expect(await headings()).toEqual(["own.pdf", "between.pdf", "own.pdf"])
     // The tree lists the parted file as the pages head it, and a Save As writes it.
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     expect(await treeFiles()).toEqual(["own.pdf", "between.pdf", "own.pdf"])
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
 
     await browser.keys(["Control", "z"])
     await waitForPages(2)
@@ -347,7 +365,7 @@ describe("TFolio files added to an open document", () => {
       writeScratchPdf("second.pdf", minimalPdf(1)),
     ])
     await waitForPages(4)
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
 
     // A row ends on its page count, at its right edge; its two buttons stand
     // in the count's place, never over the name, and take it only while the
@@ -399,13 +417,13 @@ describe("TFolio files added to an open document", () => {
 
     await press(`${activeSidebar} [data-section-id='1'] [data-slot='file-section-remove']`)
     await expect($(`${activeSidebar} [data-section-id='1']`)).not.toBeExisting()
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
     await waitForPages(2)
 
     await browser.keys(["Control", "z"])
     await waitForPages(4)
     await browser.keys(["Control", "z"])
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await expect($(`${activeSidebar} [data-section-id='1']`)).toHaveText(
       expect.stringContaining("first.pdf"),
     )
@@ -435,7 +453,7 @@ describe("TFolio files added to an open document", () => {
     expect(await chosen()).toEqual([2, 3])
 
     // The tree of files renames in place from its own menu too.
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await contextMenuAction(
       `${activeSidebar} [data-section-id='1'] [data-slot='file-section-row']`,
       "rename-file",
@@ -444,7 +462,7 @@ describe("TFolio files added to an open document", () => {
     await treeInput.waitForDisplayed()
     await expect(treeInput).toBeFocused()
     await browser.keys("Escape")
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
 
     await contextMenuAction(fileName(1), "remove-file")
     await waitForPages(1)
@@ -540,14 +558,14 @@ describe("TFolio files added to an open document", () => {
       writeScratchPdf("second.pdf", minimalPdf(1)),
     ])
     await waitForPages(4)
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
 
     await dragOnto(
       `${activeSidebar} [data-section-id='2'] [data-slot='file-section-title']`,
       `${activeSidebar} [data-section-id='0']`,
       "top",
     )
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
     await browser.waitUntil(
       async () => (await headings()).join() === "second.pdf,own.pdf,first.pdf",
       { timeout: 15_000, timeoutMsg: "the tree's file never moved to the front" },
@@ -583,12 +601,12 @@ describe("TFolio files added to an open document", () => {
 
     // From the name in the files' tree: before the file's first page.
     await sidebarPageAction(4, "cut-pages")
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await contextMenuAction(
       `${activeSidebar} [data-section-id='0'] [data-slot='file-section-row']`,
       "paste-file-start",
     )
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
     await browser.waitUntil(
       async () => (await pageFiles()).join() === "own.pdf,own.pdf,added.pdf,added.pdf",
       { timeout: 15_000, timeoutMsg: "the pasted page never opened the document's own file" },
@@ -599,7 +617,7 @@ describe("TFolio files added to an open document", () => {
     await openPdfFromDisk("own.pdf", minimalPdf(1))
     await addFilesFromPicker([writeScratchPdf("added.pdf", outlinedPdf())])
     await waitForPages(3)
-    await $(`${activeSidebar} button[aria-label='Files']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
 
     await press(`${activeSidebar} [data-section-id='0'] [data-slot='file-section-remove']`)
     await expect($(`${activeSidebar} [data-section-id='0']`)).not.toBeExisting()
@@ -633,7 +651,7 @@ describe("TFolio files added to an open document", () => {
     })
     await waitForPages(3)
     await expect($(saveTrigger)).not.toHaveAttribute("data-save-as-only")
-    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     await expect(bookmarks).toHaveText(expect.stringContaining("own.pdf"))
     await expect(bookmarks).toHaveText(expect.stringContaining("added.pdf"))

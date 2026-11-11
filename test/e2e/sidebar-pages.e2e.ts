@@ -1,4 +1,4 @@
-import { $, browser, expect } from "@wdio/globals"
+import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import {
@@ -299,7 +299,7 @@ describe("TFolio sidebar pages", () => {
     // pages alone to switch to.
     await expect($(`${session} [data-slot='zoom-controls']`)).toExist()
     await expect($(`${session} button[aria-label='Highlight text']`)).toBeEnabled()
-    await expect($(`${session} button[aria-label='Thumbnails']`)).not.toExist()
+    await expect($$(`${session} [aria-label='View mode'] button`)).toBeElementsArrayOfSize(2)
   })
 
   it("drags a page across a row of the widened sidebar", async () => {

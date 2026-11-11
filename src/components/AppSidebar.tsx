@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { GalleryVertical, ListTree, PanelLeft } from "lucide-react"
+import { GalleryVertical, ListTree, PanelLeft, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
@@ -46,21 +46,15 @@ export function SidebarToggle() {
 
 const panelOptions = [
   { icon: GalleryVertical, labelKey: "sidebar.thumbnails", value: "thumbnails" },
-  { icon: ListTree, labelKey: "sidebar.bookmarks", value: "bookmarks" },
+  { icon: ListTree, labelKey: "sidebar.outline", value: "bookmarks" },
 ] as const
 
 /** Which of a document's two panels the sidebar shows: both are there for
-    every document, whatever it holds. A document of several files shows
-    them, with their bookmarks, where the bookmarks would be. It stands in
-    the sidebar's one row beside the toggle, so a long language's words give
-    way before the row does: each still says itself whole under the pointer. */
-export function SidebarPanelSwitch({
-  files = false,
-  panel,
-}: {
-  files?: boolean
-  panel: SidebarPanel
-}) {
+    every document, whatever it holds. The outline of a document of several
+    files is its files, each with its bookmarks. The switch stands in the
+    sidebar's one row beside the toggle, so a long language's words give way
+    before the row does: each cut short says itself whole under the pointer. */
+export function SidebarPanelSwitch({ panel }: { panel: SidebarPanel }) {
   const { t } = useTranslation()
   const sidebar = useSidebar()
 
@@ -80,25 +74,40 @@ export function SidebarPanelSwitch({
       value={[panel]}
       variant="outline"
     >
-      {panelOptions.map((option) => {
-        const Icon = option.icon
-        const label =
-          option.value === "bookmarks" && files ? t("sidebar.files") : t(option.labelKey)
-
-        return (
-          <ToolbarTooltip key={option.value} label={label}>
-            <ToggleGroupItem
-              aria-label={label}
-              className="min-w-0 shrink gap-1.5 px-2.5"
-              value={option.value}
-            >
-              <Icon />
-              <span className="truncate">{label}</span>
-            </ToggleGroupItem>
-          </ToolbarTooltip>
-        )
-      })}
+      {panelOptions.map((option) => (
+        <SidebarPanelOption
+          icon={option.icon}
+          key={option.value}
+          label={t(option.labelKey)}
+          value={option.value}
+        />
+      ))}
     </ToggleGroup>
+  )
+}
+
+function SidebarPanelOption({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon
+  label: string
+  value: SidebarPanel
+}) {
+  const labelRef = useRef<HTMLSpanElement>(null)
+
+  // Only words cut short have more to say: a tooltip repeating them would
+  // stand over the panel's own bar for nothing.
+  return (
+    <ToolbarTooltip cutShort={labelRef} label={label}>
+      <ToggleGroupItem aria-label={label} className="min-w-0 shrink gap-1.5 px-2.5" value={value}>
+        <Icon />
+        <span className="truncate" ref={labelRef}>
+          {label}
+        </span>
+      </ToggleGroupItem>
+    </ToolbarTooltip>
   )
 }
 
@@ -251,6 +260,8 @@ function SidebarResizeHandle() {
 
 type AppSidebarProps = {
   children?: ReactNode
+  /** Along the bottom, level with the status bar beside it. */
+  footer?: ReactNode
   macOS: boolean
   /** At the far end of the first row: what the rest of the column shows. */
   switcher?: ReactNode
@@ -258,7 +269,7 @@ type AppSidebarProps = {
 
 /** The window's left column: its first row is the title bar's, the toggle at
     one end and, at the other, the switch for what the rest of it shows. */
-export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
+export function AppSidebar({ children, footer, macOS, switcher }: AppSidebarProps) {
   const sidebar = useSidebar()
   const asideRef = useRef<HTMLElement>(null)
   const overlay = sidebar.mode === "overlay"
@@ -329,6 +340,16 @@ export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
         {switcher ? <div className="ml-auto flex min-w-0 justify-end">{switcher}</div> : null}
       </div>
       <div className="min-h-0 flex-1">{children}</div>
+      {footer ? (
+        // As the status bar: its line over the row, and pb-px to keep the
+        // control at the bar's height.
+        <div
+          className="flex h-(--status-bar-height) shrink-0 items-center border-t px-2 pb-px"
+          data-slot="sidebar-footer"
+        >
+          {footer}
+        </div>
+      ) : null}
       <SidebarResizeHandle />
     </aside>
   )

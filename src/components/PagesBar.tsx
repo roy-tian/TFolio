@@ -1,15 +1,13 @@
-import { useRef } from "react"
-import { ChevronDown, FileStack, SlidersHorizontal } from "lucide-react"
+import { ChevronDown, SlidersHorizontal } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { HintTooltip } from "@/components/HintTooltip"
+import { SidebarPanelTools } from "@/components/SidebarPanelTools"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -25,7 +23,6 @@ type PagesBarProps = {
   fileRows: boolean
   /** How many of the files are folded to their names, of how many. */
   folded: { count: number; of: number }
-  onAddFiles: () => void
   onFileOptionsChange: (change: Partial<FileOptions>) => void
   onFileRowsChange: (fileRows: boolean) => void
   /** Every file's pages folded away under its name, or shown again. */
@@ -34,20 +31,18 @@ type PagesBarProps = {
 }
 
 /** The bar over a document's pages in the sidebar: how its files are laid
-    out and saved, once it has several, and the way to add more. While a file
-    drag offers the pages it says what a drop there does instead. */
+    out and saved, once it has several, then the panel's own tools. While a
+    file drag offers the pages it says what a drop there does instead. */
 export function PagesBar({
   fileOptions,
   fileRows,
   folded,
-  onAddFiles,
   onFileOptionsChange,
   onFileRowsChange,
   onFoldAll,
   severalFiles,
 }: PagesBarProps) {
   const { t } = useTranslation()
-  const addFilesRef = useRef<HTMLSpanElement>(null)
   const drop = usePagesDrop()
 
   return (
@@ -96,25 +91,6 @@ export function PagesBar({
                   >
                     {t("sidebar.fileRows")}
                   </DropdownMenuCheckboxItem>
-                  {/* Only a file under its own name has pages to fold away. */}
-                  {fileRows ? (
-                    <>
-                      <DropdownMenuItem
-                        data-action="fold-files"
-                        disabled={folded.count >= folded.of}
-                        onClick={() => onFoldAll(true)}
-                      >
-                        {t("sidebar.foldAll")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        data-action="unfold-files"
-                        disabled={folded.count === 0}
-                        onClick={() => onFoldAll(false)}
-                      >
-                        {t("sidebar.unfoldAll")}
-                      </DropdownMenuItem>
-                    </>
-                  ) : null}
                 </DropdownMenuGroup>
               ) : null}
               {severalFiles && fileOptions ? <DropdownMenuSeparator /> : null}
@@ -142,22 +118,16 @@ export function PagesBar({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        {/* Down a narrow sidebar a long language's words are cut short: the
-            hint then says them whole. */}
-        <HintTooltip cutShort={addFilesRef} label={t("sidebar.addFiles")}>
-          <Button
-            className="ml-auto min-w-0 shrink"
-            data-slot="pages-add-files"
-            onClick={onAddFiles}
-            size="sm"
-            variant="ghost"
-          >
-            <FileStack />
-            <span className="truncate" ref={addFilesRef}>
-              {t("sidebar.addFiles")}
-            </span>
-          </Button>
-        </HintTooltip>
+        <SidebarPanelTools
+          fold={{
+            // Only a file under its own name has pages to fold away.
+            canFold: severalFiles && fileRows && folded.count < folded.of,
+            canUnfold: severalFiles && fileRows && folded.count > 0,
+            foldLabel: t("sidebar.foldAll"),
+            onFold: onFoldAll,
+            unfoldLabel: t("sidebar.unfoldAll"),
+          }}
+        />
       </div>
     </div>
   )

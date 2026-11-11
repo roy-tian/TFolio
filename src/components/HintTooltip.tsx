@@ -25,6 +25,12 @@ type HintTooltipProps = {
   sideOffset?: ComponentProps<typeof TooltipContent>["sideOffset"]
 }
 
+/** Whether text on screen is cut short, measured as a tooltip repeating it is
+    about to open rather than as the text is laid out. */
+export function isCutShort(text: HTMLElement | null | undefined) {
+  return text !== null && text !== undefined && text.scrollWidth > text.clientWidth
+}
+
 export function HintTooltipGroup({ children }: { children: ReactNode }) {
   return <TooltipProvider delay={HINT_TOOLTIP_DELAY}>{children}</TooltipProvider>
 }
@@ -44,12 +50,7 @@ export function HintTooltip({
     return children
   }
 
-  // Measured as the hint is about to open, not as the text is laid out.
-  const repeatsWhatShows = () => {
-    const text = cutShort?.current
-
-    return cutShort !== undefined && (!text || text.scrollWidth <= text.clientWidth)
-  }
+  const repeatsWhatShows = () => cutShort !== undefined && !isCutShort(cutShort.current)
 
   // The hint stands over its neighbours, and what is under it has to stay
   // clickable, so the popup takes no pointer of its own.

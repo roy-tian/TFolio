@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { ChevronRight, FileStack, FileText, Pencil, X } from "lucide-react"
+import { ChevronRight, FileText, Pencil, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { BookmarkItems } from "@/components/BookmarkList"
@@ -7,9 +7,19 @@ import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { FileMenuContent } from "@/components/PageContextMenu"
+import { OutlineBar } from "@/components/SidebarPanelTools"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useListDrag } from "@/hooks/useListDrag"
+import {
+  fileFoldKey,
+  foldableBookmarks,
+  foldAllOf,
+  nestsBookmarks,
+  sectionOutlineKey,
+  toggledFold,
+  type OutlineFolds,
+} from "@/lib/outlineFolds"
 import { DRAG_CLICK_WINDOW } from "@/lib/pageDrag"
 import { fileRuns, type FileRun } from "@/lib/pageSections"
 import type { PdfPageInfo, PdfSection } from "@/lib/pdf"
@@ -17,7 +27,9 @@ import { cn } from "@/lib/utils"
 
 type FileSectionsTreeProps = {
   canPaste: boolean
-  onAddFiles: () => void
+  /** The files folded to their names, and their bookmarks folded, by key. */
+  folds: OutlineFolds
+  onFoldsChange: (folds: OutlineFolds) => void
   /** A file dragged among the others: its pages go, whole, in front of
       1-based page `before`, or to the end. */
   onMove: (sectionId: number, before: number | null) => void
@@ -41,7 +53,8 @@ type FileSectionsTreeProps = {
  */
 export function FileSectionsTree({
   canPaste,
-  onAddFiles,
+  folds,
+  onFoldsChange,
   onMove,
   onNavigate,
   onPaste,
@@ -52,7 +65,6 @@ export function FileSectionsTree({
 }: FileSectionsTreeProps) {
   const { t } = useTranslation()
   const navRef = useRef<HTMLElement>(null)
-  const [folded, setFolded] = useState<ReadonlySet<number>>(new Set())
   const [editing, setEditing] = useState<string | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const draggedAtRef = useRef(0)
@@ -79,19 +91,28 @@ export function FileSectionsTree({
   })
   const dragged = drag ? files.get(runs[drag.index]?.section ?? -1) : undefined
 
-  const toggle = (sectionId: number) =>
-    setFolded((current) => {
-      const next = new Set(current)
-
-      if (!next.delete(sectionId)) {
-        next.add(sectionId)
-      }
-
-      return next
-    })
+  // A file's bookmarks stand under its first run alone, so it folds once.
+  const foldable = sections.filter((section) => section.outline.length > 0)
+  const foldAll = foldAllOf(
+    folds,
+    foldable.map((section) => fileFoldKey(section.id)),
+    foldable.flatMap((section) => [
+      fileFoldKey(section.id),
+      ...foldableBookmarks(section.outline, sectionOutlineKey(section.id)),
+    ]),
+  )
 
   return (
     <div className="flex h-full flex-col">
+      <OutlineBar
+        fold={{
+          canFold: foldAll.canFold,
+          canUnfold: foldAll.canUnfold,
+          foldLabel: t("sidebar.foldAll"),
+          onFold: (folded) => onFoldsChange(foldAll.fold(folded)),
+          unfoldLabel: t("sidebar.unfoldAll"),
+        }}
+      />
       <div className="relative min-h-0 flex-1">
         <nav
           aria-label={t("sidebar.files")}
@@ -113,7 +134,8 @@ export function FileSectionsTree({
                   canPaste={canPaste}
                   dragging={drag !== null}
                   editing={editing === rowKey}
-                  folded={folded.has(section.id)}
+                  folded={folds.has(fileFoldKey(section.id))}
+                  folds={folds}
                   index={index}
                   key={rowKey}
                   lifted={drag?.index === index}
@@ -124,11 +146,12 @@ export function FileSectionsTree({
                       onNavigate(pageNumber)
                     }
                   }}
+                  onFoldsChange={onFoldsChange}
                   onNavigateBookmark={onNavigate}
                   onPaste={onPaste}
                   onRemove={onRemove}
                   onRename={onRename}
-                  onToggle={toggle}
+                  onToggle={() => onFoldsChange(toggledFold(folds, fileFoldKey(section.id)))}
                   // A document keeps a page; the last file's go no further.
                   removeDisabled={(filePages.get(section.id) ?? 0) >= pages.length}
                   run={run}
@@ -139,18 +162,6 @@ export function FileSectionsTree({
           </ul>
         </nav>
         <OverlayScrollbars viewportRef={navRef} />
-      </div>
-      <div className="shrink-0 border-t p-2">
-        <Button
-          className="w-full justify-start"
-          data-slot="files-add"
-          onClick={onAddFiles}
-          size="sm"
-          variant="ghost"
-        >
-          <FileStack />
-          <span className="truncate">{t("sidebar.addFiles")}</span>
-        </Button>
       </div>
       {drag && dragged ? (
         <div
@@ -175,10 +186,12 @@ function FileRunRow({
   dragging,
   editing,
   folded,
+  folds,
   index,
   lifted,
   offset,
   onEdit,
+  onFoldsChange,
   onNavigate,
   onNavigateBookmark,
   onPaste,
@@ -193,16 +206,18 @@ function FileRunRow({
   dragging: boolean
   editing: boolean
   folded: boolean
+  folds: OutlineFolds
   index: number
   lifted: boolean
   offset: number
   onEdit: (editing: boolean) => void
+  onFoldsChange: (folds: OutlineFolds) => void
   onNavigate: (pageNumber: number) => void
   onNavigateBookmark: (pageNumber: number) => void
   onPaste: (sectionId: number, index: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
-  onToggle: (sectionId: number) => void
+  onToggle: () => void
   removeDisabled: boolean
   run: FileRun
   section: PdfSection
@@ -240,12 +255,15 @@ function FileRunRow({
         >
           <button
             aria-expanded={outline.length > 0 ? open : undefined}
-            aria-label={section.title}
+            // Its own name, not the title the file's name beside it goes by.
+            aria-label={t(folded ? "sidebar.unfoldItem" : "sidebar.foldItem", {
+              name: section.title,
+            })}
             className={cn(
               "grid size-6 shrink-0 place-items-center rounded text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
               outline.length === 0 && "invisible",
             )}
-            onClick={() => onToggle(section.id)}
+            onClick={onToggle}
             tabIndex={outline.length === 0 ? -1 : 0}
             type="button"
           >
@@ -343,9 +361,12 @@ function FileRunRow({
       {open ? (
         <ul className="pl-5">
           <BookmarkItems
+            folds={folds}
             items={outline}
+            onFoldsChange={onFoldsChange}
             onNavigate={onNavigateBookmark}
-            parentKey={`section-${section.id}`}
+            parentKey={sectionOutlineKey(section.id)}
+            tree={nestsBookmarks(outline)}
           />
         </ul>
       ) : null}

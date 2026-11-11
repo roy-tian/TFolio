@@ -109,8 +109,6 @@ type PageThumbnailsProps = {
   /** The files whose pages are folded away under their names. */
   foldedFiles: ReadonlySet<number>
   onFoldFiles: (sections: readonly number[], folded: boolean) => void
-  /** Files chosen from disk, added at the end as files of their own. */
-  onAddFiles: () => void
   /** Whether each file of a document of several starts a row of its own. */
   fileRows: boolean
   onFileRowsChange: (fileRows: boolean) => void
@@ -182,7 +180,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   fileOptions,
   fileRows,
   foldedFiles,
-  onAddFiles,
   onFileOptionsChange,
   onFileRowsChange,
   onFocusChange,
@@ -948,7 +945,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         fileOptions={fileOptions}
         fileRows={fileRows}
         folded={{ count: foldedCount, of: sections.length }}
-        onAddFiles={onAddFiles}
         onFileOptionsChange={onFileOptionsChange}
         onFileRowsChange={onFileRowsChange}
         onFoldAll={(folded) =>

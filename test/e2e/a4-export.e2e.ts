@@ -128,7 +128,7 @@ describe("TFolio save as A4", () => {
   it("keeps the blanks between files and a bookmark for each", async () => {
     const own = await openPdfFromDisk("own.pdf", minimalPdf(1))
     await pointMultiPickerAt([writeScratchPdf("added.pdf", outlinedPdf())])
-    await $(`${activeSidebar} [data-slot='pages-add-files']`).click()
+    await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
     await browser.waitUntil(async () =>
       browser
         .execute(
@@ -143,7 +143,7 @@ describe("TFolio save as A4", () => {
     await browser.waitUntil(async () => (await pageShapes()).length === 4, {
       timeoutMsg: "the blank between the files was not written",
     })
-    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     await expect(bookmarks).toHaveText(expect.stringContaining("own.pdf"))
     await expect(bookmarks).toHaveText(expect.stringContaining("Second half"))

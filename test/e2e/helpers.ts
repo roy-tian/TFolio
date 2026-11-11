@@ -81,6 +81,23 @@ export function outlinedPdf() {
   ])
 }
 
+/** Two pages under two bookmarks, the first with one of its own beneath it. */
+export function nestedOutlinePdf() {
+  const dest = (page: number) => `/Dest [${page} 0 R /XYZ null null null]`
+
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
+    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
+    "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
+    "6 0 obj\n<< /Type /Outlines /First 7 0 R /Last 9 0 R /Count 3 >>\nendobj\n",
+    `7 0 obj\n<< /Title (Part one) /Parent 6 0 R /Next 9 0 R /First 8 0 R /Last 8 0 R /Count 1 ${dest(3)} >>\nendobj\n`,
+    `8 0 obj\n<< /Title (Chapter one) /Parent 7 0 R ${dest(4)} >>\nendobj\n`,
+    `9 0 obj\n<< /Title (Part two) /Parent 6 0 R /Prev 7 0 R ${dest(4)} >>\nendobj\n`,
+  ])
+}
+
 export function bandedPdf(pageCount: number) {
   const kids = Array.from(
     { length: pageCount },

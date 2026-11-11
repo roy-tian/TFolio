@@ -4,10 +4,12 @@ import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import {
+  activeSidebar,
   minimalPdf,
   openPdfFromDisk,
   refreshApp,
   seedSettings,
+  tooltipOpen,
 } from "./helpers"
 
 // WebKitGTK's embedded WebDriver does not emit Base UI's mouseenter sequence
@@ -111,6 +113,36 @@ describe("TFolio toolbar tooltips", () => {
     const highlightOptions = await expectShadcnTooltip("高亮设置")
     await highlightOptions.click()
     await expect($("#highlight-color-label")).toHaveText("高亮颜色")
+  })
+
+  it("names a sidebar panel in a tooltip only once its word is cut short", async () => {
+    const outline = `${activeSidebar} button[aria-label='大纲']`
+    const focus = (maxWidth: string) =>
+      browser.execute(
+        (css: string, width: string) => {
+          const item = document.querySelector<HTMLElement>(css)!
+
+          item.blur()
+          item.style.maxWidth = width
+          item.focus()
+        },
+        outline,
+        maxWidth,
+      )
+
+    // Whole, the word is all a tooltip would say, over the panel's own bar.
+    await focus("")
+    await browser.pause(500)
+    expect(await tooltipOpen(outline)).toBe(false)
+
+    // Narrowed past its word, as a long language's can be at the opening width.
+    await focus("56px")
+    await browser.waitUntil(() => tooltipOpen(outline), {
+      timeout: 5_000,
+      timeoutMsg: "the cut-short panel name never opened its tooltip",
+    })
+    await focus("")
+    await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.blur(), outline)
   })
 
   it("leaves no native tooltip in the workspace", async () => {

@@ -6,6 +6,7 @@ import {
   clickAppMenuItem,
   dropZoneButton,
   minimalPdf,
+  nestedOutlinePdf,
   openPdfFromDisk,
   outlinedPdf,
   pageInk,
@@ -219,11 +220,11 @@ describe("TFolio PDF viewer", () => {
     await expect(pageInput).toHaveValue("1")
 
     // Either panel opens for any document: one with no bookmarks says so.
-    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await expect($(`${activeSidebar} nav[aria-label='Bookmarks']`)).toHaveText(
       "This document has no bookmarks",
     )
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
     await $(`${activeSidebar} [data-slot='sidebar-thumbnails']`).waitForExist()
 
     await clickAppMenuItem("settings")
@@ -321,7 +322,7 @@ describe("TFolio PDF viewer", () => {
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     const pageInput = $("input[aria-label='Page number']")
 
-    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await expect(bookmarks).toHaveText("Second half")
     await bookmarks.$("button").click()
     await expect(pageInput).toHaveValue("2")
@@ -333,7 +334,7 @@ describe("TFolio PDF viewer", () => {
 
     // The other panel previews every page and follows the reader's — which
     // the trip through the views may have moved, both pages being in sight.
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
     await expect(bookmarks).not.toBeExisting()
     const preview = (page: string) =>
       $(`${activeSidebar} button[aria-label='Go to page ${page}']`)
@@ -344,6 +345,41 @@ describe("TFolio PDF viewer", () => {
     await preview(other).click()
     await expect(pageInput).toHaveValue(other)
     await expect(preview(other)).toHaveAttribute("aria-current", "page")
+  })
+
+  it("folds the outline's bookmarks one by one or all at once", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("nested.pdf", nestedOutlinePdf())
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    const foldAll = $(`${activeSidebar} button[aria-label='Collapse all bookmarks']`)
+    const unfoldAll = $(`${activeSidebar} button[aria-label='Expand all bookmarks']`)
+    const chapter = () => bookmarks.$("button=Chapter one")
+    const arrow = bookmarks.$("[data-slot='bookmark-fold']")
+
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await expect(chapter()).toBeDisplayed()
+    await expect(unfoldAll).toBeDisabled()
+    // Named apart from the bookmark beside it, which goes to its page.
+    await expect(arrow).toHaveAttribute("aria-label", "Collapse Part one")
+    await arrow.click()
+    await expect(arrow).toHaveAttribute("aria-expanded", "false")
+    await expect(arrow).toHaveAttribute("aria-label", "Expand Part one")
+    await expect(chapter()).not.toBeExisting()
+    // The one bookmark with others under it is folded: the outline is.
+    await expect(foldAll).toBeDisabled()
+    await unfoldAll.click()
+    await expect(chapter()).toBeDisplayed()
+    await expect(unfoldAll).toBeDisabled()
+
+    // Folds are the tab's, kept while the sidebar shows its pages.
+    await foldAll.click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await expect(bookmarks.$("button=Part two")).toBeDisplayed()
+    await expect(chapter()).not.toBeExisting()
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {

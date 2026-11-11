@@ -33,6 +33,7 @@ import {
   spreadTurnTarget,
 } from "@/lib/padding"
 import { PageThumbnails, type PageThumbnailsHandle } from "@/components/PageThumbnails"
+import { AddFilesButton } from "@/components/SidebarPanelTools"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
@@ -89,6 +90,7 @@ import { documentPlainText } from "@/lib/documentText"
 import type { CarriedPages } from "@/lib/pageCarry"
 import { forgetDocumentText } from "@/lib/pageText"
 import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
+import { NO_FOLDS, sectionOutlineKey, type OutlineFolds } from "@/lib/outlineFolds"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
 import { fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
@@ -414,10 +416,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // Down to one added file, it shows that file's own bookmarks, which a Save
     // As writes, rather than those PDFium keeps for the document's own pages
     // even once none are left; the own pages alone save PDFium's.
-    const outline =
-      sections.length === 1 && pdfDocument.hasForeignPages
-        ? sections[0]!.outline
-        : pdfDocument.outline
+    const outlineFile =
+      sections.length === 1 && pdfDocument.hasForeignPages ? sections[0]! : undefined
+    const outline = outlineFile ? outlineFile.outline : pdfDocument.outline
     const sidebar = useSidebar()
     const thumbnailsRef = useRef<PageThumbnailsHandle>(null)
     // Either panel shows for any document, whatever it holds: which one is
@@ -426,6 +427,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // The files whose pages the sidebar folds away under their names: the
     // tab's own, kept while the sidebar shows something else.
     const [foldedFiles, setFoldedFiles] = useState<ReadonlySet<number>>(NO_FILES)
+    // And what the outline folds, kept the same way.
+    const [outlineFolds, setOutlineFolds] = useState<OutlineFolds>(NO_FOLDS)
 
     const scrollToPage = useCallback(
       (pageNumber: number, behavior: ScrollBehavior = "smooth") => {
@@ -2145,12 +2148,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         <AppSidebar
           macOS={macOS}
-          switcher={<SidebarPanelSwitch files={severalFiles} panel={sidebarPanel} />}
+          footer={<AddFilesButton onClick={() => void chooseFiles()} />}
+          switcher={<SidebarPanelSwitch panel={sidebarPanel} />}
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
               canPaste={clipboard !== null}
-              onAddFiles={() => void chooseFiles()}
+              folds={outlineFolds}
+              onFoldsChange={setOutlineFolds}
               onMove={moveFile}
               onNavigate={navigateFromSidebar}
               onPaste={pasteIntoFile}
@@ -2161,8 +2166,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             />
           ) : sidebarPanel === "bookmarks" ? (
             <BookmarkList
+              folds={outlineFolds}
               items={outline}
+              onFoldsChange={setOutlineFolds}
               onNavigate={navigateFromSidebar}
+              rootKey={outlineFile ? sectionOutlineKey(outlineFile.id) : undefined}
             />
           ) : (
             <PageThumbnails
@@ -2176,7 +2184,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               fileRows={sidebar.fileRows}
               foldedFiles={foldedFiles}
               isEditingNow={annotations.isStructureBusyNow}
-              onAddFiles={() => void chooseFiles()}
               onCopyPages={pageClipboard.copy}
               onCutPages={pageClipboard.cut}
               onDeleteOnePage={deleteOnePage}

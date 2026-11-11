@@ -1,5 +1,6 @@
-import type { ReactElement } from "react"
+import type { ReactElement, RefObject } from "react"
 
+import { isCutShort } from "@/components/HintTooltip"
 import { Kbd } from "@/components/ui/kbd"
 import {
   Tooltip,
@@ -10,6 +11,9 @@ import { formatShortcut, type Shortcut } from "@/lib/shortcuts"
 
 type ToolbarTooltipProps = {
   children: ReactElement
+  /** The text on screen that the label only repeats: the tooltip then opens
+      only while that text is cut short. */
+  cutShort?: RefObject<HTMLElement | null>
   label: string
   /** The chord this control also answers to, named beside its label. Left off
       where the label already explains why the control is unavailable. */
@@ -19,12 +23,19 @@ type ToolbarTooltipProps = {
 
 export function ToolbarTooltip({
   children,
+  cutShort,
   label,
   shortcut,
   side = "bottom",
 }: ToolbarTooltipProps) {
   return (
-    <Tooltip>
+    <Tooltip
+      onOpenChange={(open, details) => {
+        if (open && cutShort && !isCutShort(cutShort.current)) {
+          details.cancel()
+        }
+      }}
+    >
       <TooltipTrigger render={children} />
       <TooltipContent side={side}>
         {label}
