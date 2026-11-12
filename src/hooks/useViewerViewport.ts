@@ -201,6 +201,8 @@ export function useViewerViewport({
     const correction = anchorCorrection(anchor, page.getBoundingClientRect())
     viewer.scrollLeft += correction.left
     viewer.scrollTop += correction.top
+    // The offset a jump landed at belongs to the old layout.
+    currentPage.reland()
   }, [viewerHeight, viewerWidth])
 
   useLayoutEffect(() => {

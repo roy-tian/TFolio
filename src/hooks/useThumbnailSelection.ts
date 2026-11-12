@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CurrentPage } from "@/hooks/useCurrentPage"
 import {
   emptySelection,
-  plainChoiceWatch,
   selectionAfterClick,
   selectionAfterGroupClick,
   selectionOfAllPages,
@@ -11,10 +10,6 @@ import {
   type SelectionModifiers,
   type ThumbnailSelection,
 } from "@/lib/thumbnailSelection"
-
-// How long the page being read stays put before a plain click's jump counts
-// as landed short of its page, or a move the app made as over.
-const JUMP_SETTLE_MS = 300
 
 type UseThumbnailSelectionOptions = {
   active: boolean
@@ -33,21 +28,16 @@ export function useThumbnailSelection({
   numPages,
 }: UseThumbnailSelectionOptions) {
   const [selection, setSelection] = useState<ThumbnailSelection>(emptySelection)
-  // A plain click goes to its page and chooses it only while it is read: what
-  // stays chosen as the reader reads on is what was ticked, ranged or named,
-  // never a page left behind out of sight. Swapped as the click lands, not in
-  // an effect: the next click's own jump would reach the old watch first.
-  const watchRef = useRef<{ resettle: () => void; stop: () => void } | null>(null)
+  // A plain click goes to its page and chooses it only while it is the page
+  // being read, which its jump holds (`pickReadingPage`): what stays chosen as
+  // the reader reads on is what was ticked, ranged or named, never a page left
+  // behind out of sight. Swapped as the click lands, not in an effect: the
+  // next click's own jump would reach the old watch first.
+  const stopWatchRef = useRef<(() => void) | null>(null)
 
   const stopWatch = useCallback(() => {
-    watchRef.current?.stop()
-    watchRef.current = null
-  }, [])
-
-  /** A move of the page being read that the app made itself, as a turn
-      clamping the scroll: the choice lands again where it leaves the reader. */
-  const resettle = useCallback(() => {
-    watchRef.current?.resettle()
+    stopWatchRef.current?.()
+    stopWatchRef.current = null
   }, [])
 
   const clear = useCallback(() => {
@@ -71,33 +61,11 @@ export function useThumbnailSelection({
         return
       }
 
-      const watch = plainChoiceWatch(pageNumber)
-      let timer = 0
-      const settleLater = () => {
-        window.clearTimeout(timer)
-        timer = window.setTimeout(() => watch.settle(currentPage.get()), JUMP_SETTLE_MS)
-      }
-
-      settleLater()
-
-      const unsubscribe = currentPage.subscribe(() => {
-        if (watch.heard(currentPage.get())) {
+      stopWatchRef.current = currentPage.subscribe(() => {
+        if (currentPage.get() !== pageNumber) {
           clear()
-        } else if (!watch.landed) {
-          settleLater()
         }
       })
-
-      watchRef.current = {
-        resettle: () => {
-          watch.unsettle()
-          settleLater()
-        },
-        stop: () => {
-          window.clearTimeout(timer)
-          unsubscribe()
-        },
-      }
     },
     [clear, currentPage, stopWatch],
   )
@@ -135,13 +103,5 @@ export function useThumbnailSelection({
     }
   }, [active, clear])
 
-  return {
-    clear,
-    deselect,
-    resettle,
-    select,
-    selectAll,
-    selectGroup,
-    selectedPages: selection.pages,
-  }
+  return { clear, deselect, select, selectAll, selectGroup, selectedPages: selection.pages }
 }

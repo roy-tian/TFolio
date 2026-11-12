@@ -110,6 +110,11 @@
 - A menu entry that starts an edit in place unmounts its menu content on close (no fade) and
   answers `finalFocus` false: a Base UI menu still fading holds focus, and takes it back from
   the field, whose blur ends the edit.
+- Navigation moves the page being read through `CurrentPage.goTo`, never `set` (the tracker's):
+  the end of a document cannot bring a page to the top, so the page gone to stays the page being
+  read while half of it shows and the view moves under a quarter of its height
+  (`pickReadingPage`). An in-place edit that clamps the scroll, and a zoom's or resize's
+  re-anchoring, call `reland`; an edit that renumbers the pages calls `renumbered`.
 - Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
   worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
   pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
@@ -180,8 +185,8 @@
   step with `SectionBook::padding`).
 - The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
   fixed-size cells once widened (`ui.sidebarWidth`). The bar over them turns and deletes the
-  chosen pages, else the page being read; a plain click's choice lapses as the reader reads on
-  (`plainChoiceWatch`), so nothing is acted on out of sight. The pages and the bookmarks (the
+  chosen pages, else the page being read; a plain click's choice lapses once another page is
+  the page being read, so nothing is acted on out of sight. The pages and the bookmarks (the
   tree of files, for several) are both there for every document: which shows is the window's
   layout, never a matter of what the document holds.
 - A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,

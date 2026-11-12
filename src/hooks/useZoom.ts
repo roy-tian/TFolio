@@ -448,7 +448,9 @@ export function useZoom({
     const correction = anchorCorrection(anchor, page.getBoundingClientRect())
     viewer.scrollLeft += correction.left
     viewer.scrollTop += correction.top
-  }, [clearPreviewTransform, viewerRef, zoomRequest])
+    // The offset a jump landed at belongs to the old scale.
+    currentPage.reland()
+  }, [clearPreviewTransform, currentPage, viewerRef, zoomRequest])
 
   const zoomTo = useCallback(
     (nextScale: number, announce: boolean) => {

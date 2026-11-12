@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react"
 
-import { pickCurrentPage, type PageCandidate } from "@/lib/pdf"
+import type { CurrentPage } from "@/hooks/useCurrentPage"
+import { JUMP_ARRIVAL_MS, pickReadingPage, type PageCandidate } from "@/lib/pdf"
 import type { ViewMode } from "@/lib/viewMode"
 import { viewerReadingBounds } from "@/lib/viewerViewport"
 
@@ -13,21 +14,16 @@ export function useCurrentPageTracker(
   viewerRef: RefObject<HTMLElement | null>,
   documentId: number | undefined,
   viewMode: ViewMode,
-  onPageChange: (pageNumber: number) => void,
+  currentPage: CurrentPage,
   paused = false,
   pages?: unknown,
 ) {
-  const onPageChangeRef = useRef(onPageChange)
   // A zoom preview moves the document on the compositor without changing its
   // layout boxes, so tracking it reports stale geometry: the answer waits for
   // the commit. Read, not depended on — re-observing every page per gesture
   // would cost more than the tracking it pauses.
   const pausedRef = useRef(paused)
   const updateRef = useRef<() => void>(() => undefined)
-
-  useEffect(() => {
-    onPageChangeRef.current = onPageChange
-  })
 
   useEffect(() => {
     pausedRef.current = paused
@@ -45,6 +41,7 @@ export function useCurrentPageTracker(
     }
 
     let animationFrame = 0
+    let recheck = 0
     const visiblePages = new Set<HTMLElement>()
 
     const updateCurrentPage = () => {
@@ -67,14 +64,27 @@ export function useCurrentPageTracker(
           })
         }
 
-        const currentPage = pickCurrentPage(
+        const { jump, page } = pickReadingPage(
           candidates,
-          viewerBounds.top,
-          viewerBounds.bottom,
+          { bottom: viewerBounds.bottom, scrollTop: viewer.scrollTop, top: viewerBounds.top },
+          currentPage.jump,
+          performance.now(),
         )
 
-        if (currentPage !== null) {
-          onPageChangeRef.current(currentPage)
+        currentPage.jump = jump
+
+        if (page !== null) {
+          currentPage.set(page)
+        }
+
+        // An arriving jump names its page whatever shows until its time is
+        // up, and no scroll may come then to look again.
+        window.clearTimeout(recheck)
+
+        const arrivingFor = jump ? jump.since + JUMP_ARRIVAL_MS - performance.now() : 0
+
+        if (arrivingFor > 0) {
+          recheck = window.setTimeout(updateCurrentPage, arrivingFor)
         }
       })
     }
@@ -103,13 +113,20 @@ export function useCurrentPageTracker(
     }
 
     viewer.addEventListener("scroll", updateCurrentPage, { passive: true })
+    const stopFollowingJumps = currentPage.subscribe(() => {
+      if (currentPage.jump?.landedTop === null) {
+        updateCurrentPage()
+      }
+    })
     updateRef.current = updateCurrentPage
 
     return () => {
       cancelAnimationFrame(animationFrame)
+      window.clearTimeout(recheck)
       visibilityObserver.disconnect()
       viewer.removeEventListener("scroll", updateCurrentPage)
+      stopFollowingJumps()
       updateRef.current = () => undefined
     }
-  }, [documentId, pages, viewMode, viewerRef])
+  }, [currentPage, documentId, pages, viewMode, viewerRef])
 }

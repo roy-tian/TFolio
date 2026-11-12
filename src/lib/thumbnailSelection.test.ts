@@ -3,7 +3,6 @@ import { describe, expect, it } from "bun:test"
 import {
   choiceAfterClick,
   emptySelection,
-  plainChoiceWatch,
   selectionAfterClick,
   selectionAfterGroupClick,
   selectionOfAllPages,
@@ -158,53 +157,5 @@ describe("selectionAfterGroupClick", () => {
     const later = selectionAfterClick(emptySelection, 7, plain)
 
     expect(pagesOf(selectionAfterGroupClick(later, [3, 4], range))).toEqual([3, 4, 5, 6, 7])
-  })
-})
-
-describe("plainChoiceWatch", () => {
-  it("keeps the choice through the pages its jump passes, and lets go once the reader reads on", () => {
-    const watch = plainChoiceWatch(5)
-
-    // The jump names its page before it scrolls, then passes the others.
-    expect([5, 1, 2, 3, 4, 5].map(watch.heard)).toEqual([false, false, false, false, false, false])
-    expect(watch.landed).toBe(true)
-    expect(watch.heard(6)).toBe(true)
-  })
-
-  it("keeps it while the reader comes no farther than where the jump fell quiet", () => {
-    // The last page never reaches the top: the jump settles a page short.
-    const watch = plainChoiceWatch(8)
-
-    watch.heard(6)
-    watch.settle(7)
-    expect(watch.heard(8)).toBe(false)
-    expect(watch.heard(7)).toBe(true)
-  })
-
-  it("lets go of the page read when it was clicked once the reader leaves it", () => {
-    const watch = plainChoiceWatch(3)
-
-    watch.settle(3)
-    expect(watch.heard(4)).toBe(true)
-  })
-
-  it("measures a choice out of reach from where reading stood as it settled", () => {
-    const watch = plainChoiceWatch(3)
-
-    watch.settle(10)
-    expect(watch.heard(9)).toBe(false)
-    expect(watch.heard(10)).toBe(true)
-  })
-
-  it("lands again where a move the app made leaves the reader", () => {
-    const watch = plainChoiceWatch(8)
-
-    watch.settle(7)
-    watch.unsettle()
-    // A turn of the last page clamped the scroll back two pages.
-    expect(watch.heard(6)).toBe(false)
-    watch.settle(6)
-    expect(watch.heard(7)).toBe(false)
-    expect(watch.heard(5)).toBe(true)
   })
 })

@@ -387,15 +387,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
     // The blank pages a Save As will add, shown and printed where it puts them.
     const padding = pdfDocument.padding ?? NO_PADDING
-    // Where the page being read stood before blanks above it came or went: an
-    // in-place change moves no page, so the view holds it there.
-    const paddingAnchorRef = useRef<{ pageNumber: number; top: number } | null>(null)
+    // Where the page being read stood before an in-place change: blanks above
+    // it coming or going, or a turn that reshapes a page and with it a fit's
+    // scale. Such a change moves no page, so the view holds it there.
+    const inPlaceAnchorRef = useRef<{ pageNumber: number; top: number } | null>(null)
 
     useLayoutEffect(() => {
-      const anchor = paddingAnchorRef.current
+      const anchor = inPlaceAnchorRef.current
       const viewer = viewerRef.current
 
-      paddingAnchorRef.current = null
+      inPlaceAnchorRef.current = null
 
       if (!anchor || !viewer) {
         return
@@ -408,7 +409,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       if (page) {
         viewer.scrollTop += page.getBoundingClientRect().top - anchor.top
       }
-    }, [padding])
+    }, [padding, pdfDocument.pages])
 
     // An edit replaces the outline wholesale. Deriving what is shown, rather
     // than switching the sidebar, lets the undo that restores bookmarks restore it.
@@ -439,7 +440,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           `[data-page-number="${pageNumber}"]`,
         )
 
-        currentPage.set(pageNumber)
+        currentPage.goTo(pageNumber)
         // A spread centres its pages, so the shorter one's top sits below the
         // row's: seeking it would cut off the top of the taller one.
         const target = page?.closest<HTMLElement>("[data-book-spread]") ?? page
@@ -496,7 +497,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       numPages: pdfDocument.numPages,
     })
     const clearThumbnailSelection = thumbnailSelection.clear
-    const resettleThumbnailSelection = thumbnailSelection.resettle
     const deselectPages = thumbnailSelection.deselect
     const foldFiles = useCallback(
       (sectionIds: readonly number[], folded: boolean) => {
@@ -867,19 +867,20 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          if (
-            change?.movement === "inPlace" &&
-            !samePadding(current.padding ?? NO_PADDING, update.padding ?? NO_PADDING)
-          ) {
-            // The page under the viewer's top edge as laid out now: the page
-            // tracked as current follows scrolling a moment behind.
+          if (change?.movement === "inPlace") {
             const viewer = viewerRef.current
             const edge = viewer?.getBoundingClientRect().top ?? 0
-            const page = Array.from(
-              viewer?.querySelectorAll<HTMLElement>("[data-page-number]") ?? [],
-            ).find((candidate) => candidate.getBoundingClientRect().bottom > edge)
+            const page = samePadding(current.padding ?? NO_PADDING, update.padding ?? NO_PADDING)
+              ? // A turn: the page gone to stays where it stood, though the view
+                // could not bring it to the top.
+                viewer?.querySelector<HTMLElement>(`[data-page-number="${currentPage.get()}"]`)
+              : // The page under the viewer's top edge as laid out now: the page
+                // tracked as current follows scrolling a moment behind.
+                Array.from(
+                  viewer?.querySelectorAll<HTMLElement>("[data-page-number]") ?? [],
+                ).find((candidate) => candidate.getBoundingClientRect().bottom > edge)
 
-            paddingAnchorRef.current = page
+            inPlaceAnchorRef.current = page
               ? {
                   pageNumber: Number(page.dataset.pageNumber),
                   top: page.getBoundingClientRect().top,
@@ -907,7 +908,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           // Turned where it stands, so every position still holds its page — a
           // second press of the rotation must still find the selection it turns.
           if (change?.movement === "inPlace") {
-            resettleThumbnailSelection()
+            currentPage.reland()
             return
           }
 
@@ -928,7 +929,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           parkedPreviews.want(
             change?.stashId === undefined ? [] : (identity.parked.get(change.stashId) ?? []),
           )
-          currentPage.set(
+          currentPage.renumbered(
             Math.min(Math.max(currentPage.get(), 1), Math.max(1, update.numPages)),
           )
           clearThumbnailSelection()
@@ -942,7 +943,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           currentPage,
           pageClipboardStructureChanged,
           parkedPreviews,
-          resettleThumbnailSelection,
         ],
       ),
       onEditRefused: useCallback(
@@ -1549,7 +1549,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       viewerRef,
       active ? pdfDocument.id : undefined,
       viewMode,
-      currentPage.set,
+      currentPage,
       zoom.zoomPreviewing || restoringRecentView,
       pdfDocument.pages,
     )

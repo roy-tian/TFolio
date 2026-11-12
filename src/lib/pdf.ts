@@ -346,6 +346,63 @@ function visibleFraction(
   return Math.max(0, visible) / Math.min(height, viewportHeight)
 }
 
+/** The page a jump went to (`CurrentPage.goTo`). `landedTop` is the view's
+    scroll offset where it came to show the page, null until it has. */
+export type JumpTarget = { landedTop: number | null; page: number; since: number }
+
+// Several times what a smooth jump takes in WebKitGTK (about 0.3 s, however
+// far): until then the jump is still arriving, and one that never showed its
+// page by then was taken elsewhere by the reader.
+export const JUMP_ARRIVAL_MS = 1500
+// How far the view may move from where a jump landed, as a share of its
+// height, before the reader counts as having read on from the page.
+const JUMP_HOLD_SHARE = 0.25
+
+/**
+ * The page being read, given the jump that last went to a page. Near the end
+ * of the document the view cannot bring a page to the top, and the usual rule
+ * (`pickCurrentPage`) names an earlier one: the page gone to stays the page
+ * being read while at least half of it shows and the view has moved less than
+ * a quarter of its height from where the jump left it. While the jump is
+ * arriving (or settling after a move the app made, `reland`) the page is
+ * named whatever the layout shows meanwhile, rather than each page the scroll
+ * passes or a relayout's passing frame, and the place it lands follows it:
+ * zoomed out, the page can show long before the scroll stops.
+ */
+export function pickReadingPage(
+  candidates: PageCandidate[],
+  view: { bottom: number; scrollTop: number; top: number },
+  jump: JumpTarget | null,
+  now: number,
+): { jump: JumpTarget | null; page: number | null } {
+  const usual = () => ({ jump: null, page: pickCurrentPage(candidates, view.top, view.bottom) })
+
+  if (jump === null) {
+    return usual()
+  }
+
+  const target = candidates.find((candidate) => candidate.pageNumber === jump.page)
+  const shows =
+    target !== undefined &&
+    visibleFraction(target, view.top, view.bottom) >= MIN_CURRENT_PAGE_VISIBILITY
+  if (now - jump.since < JUMP_ARRIVAL_MS) {
+    return { jump: shows ? { ...jump, landedTop: view.scrollTop } : jump, page: jump.page }
+  }
+
+  if (!shows) {
+    return usual()
+  }
+
+  // First looked at only now, as when the tracker was paused meanwhile.
+  if (jump.landedTop === null) {
+    return { jump: { ...jump, landedTop: view.scrollTop }, page: jump.page }
+  }
+
+  const moved = Math.abs(view.scrollTop - jump.landedTop)
+
+  return moved < (view.bottom - view.top) * JUMP_HOLD_SHARE ? { jump, page: jump.page } : usual()
+}
+
 /**
  * Not a fixed line down the viewport: a line deep enough to sit inside a
  * full page falls past a short row, handing the reader the row below.

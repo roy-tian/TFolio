@@ -390,24 +390,26 @@ describe("TFolio sidebar pages", () => {
     expect(await selectedThumbs()).toEqual([5])
   })
 
-  it("keeps the last page a click chose through its own turns", async () => {
+  it("keeps the last page a click chose in view and chosen through its own turns", async () => {
     await openPdfFromDisk("last-turns.pdf", bandedPdf(4))
     await settledBands(4)
     const rotate = $(`${activeSidebar} [data-slot='pages-rotate-right']`)
 
-    // The view cannot bring the last page to the top: the jump lands short.
     await $(preview(4)).click()
-    await browser.waitUntil(async () => (await shape(4)) === "portrait")
+    await browser.waitUntil(async () => (await pageStatus()) === "Page 4 of 4")
     await browser.pause(600)
 
-    // Each turn shortens the end of the document, and the scroll clamps back:
-    // a move the app made, not the reader reading on.
+    // Each turn reshapes the end of the document and re-fits the view's
+    // width: the page stays where it stood, a move the app made rather than
+    // the reader reading on, past the time a jump has to arrive.
     await rotate.click()
     await browser.waitUntil(async () => (await shape(4)) === "landscape")
     await browser.pause(600)
     await rotate.click()
     await browser.waitUntil(async () => (await shape(4)) === "portrait")
+    await browser.pause(1800)
     expect(await shape(3)).toBe("portrait")
+    expect(await pageStatus()).toBe("Page 4 of 4")
     expect(await selectedThumbs()).toEqual([4])
   })
 

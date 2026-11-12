@@ -244,7 +244,7 @@ export function useDocumentSearch({
       return
     }
 
-    currentPage.set(match.pageNumber)
+    currentPage.goTo(match.pageNumber)
 
     revealedRef.current = { index: activeIndex, matches }
 
