@@ -59,10 +59,10 @@ function rows() {
   }, activeSidebar)
 }
 
-/** The widest a docked sidebar goes here: the toolbar beside it keeps the room
-    it has in the narrowest docked window. */
+/** The widest a docked sidebar goes here: the pages beside it keep the room
+    they have in the narrowest docked window. */
 function widestDocked() {
-  return browser.execute(() => window.innerWidth - (1100 - 256))
+  return browser.execute(() => window.innerWidth - 640)
 }
 
 /** A reader's drag of the sidebar's edge, sent as the pointer events a press,
@@ -234,8 +234,8 @@ function pageStatus() {
   return $(`${session} [data-slot='page-status']`).getAttribute("aria-label")
 }
 
-/** Wide enough for rows of two in the suite's window, which clamps it to
-    the room the toolbar leaves. */
+/** Wide enough for rows of two, and no wider than the suite's window lets a
+    docked sidebar go. */
 const TWO_COLUMNS = 440
 
 describe("TFolio sidebar pages", () => {
@@ -258,19 +258,16 @@ describe("TFolio sidebar pages", () => {
     await browser.keys("ArrowRight")
     await browser.waitUntil(async () => (await sidebarWidth()) === opening + 16)
 
-    // Dragged far past the window's room, it stops where the toolbar keeps its own.
+    // Dragged far past the window's room, it stops where the pages keep their own.
     const widest = await widestDocked()
     await dragEdge(900)
     await browser.waitUntil(async () => Math.round(await sidebarWidth()) === widest, {
       timeoutMsg: "the sidebar never settled at its widest",
     })
-    await browser.waitUntil(async () => (await columns()) === 2, {
+    await browser.waitUntil(async () => (await columns()) === 3, {
       timeoutMsg: "the widened sidebar never laid its pages out in rows",
     })
-    expect(await rows()).toEqual([
-      [1, 2],
-      [3, 4],
-    ])
+    expect(await rows()).toEqual([[1, 2, 3], [4]])
     await settingsHold([`sidebarWidth = ${widest}`])
 
     // Esc takes a drag back to where it started.
@@ -282,7 +279,7 @@ describe("TFolio sidebar pages", () => {
     await browser.waitUntil(async () => Math.round(await sidebarWidth()) === widest, {
       timeoutMsg: "the stored width did not come back",
     })
-    expect(await columns()).toBe(2)
+    expect(await columns()).toBe(3)
   })
 
   it("goes to the page a click chooses, the pages to read staying beside it", async () => {

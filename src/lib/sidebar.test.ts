@@ -1,10 +1,13 @@
+import { readFileSync } from "node:fs"
+
 import { describe, expect, test } from "bun:test"
 
 import {
   clampSidebarWidth,
+  DOCKED_PAGES_MIN_WIDTH,
   isSidebarPanel,
+  SIDEBAR_DOCK_MIN_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  sidebarDockMinWidth,
   sidebarMode,
   sidebarReservedWidth,
   sidebarWidthOf,
@@ -31,8 +34,16 @@ describe("sidebarMode", () => {
     expect(sidebarMode(false, false, true)).toBe("overlay")
   })
 
-  test("docks wider on platforms whose toolbar carries the window buttons", () => {
-    expect(sidebarDockMinWidth(false)).toBeGreaterThan(sidebarDockMinWidth(true))
+  test("docks only where the pages keep the room the narrowest window gives them", () => {
+    for (const config of ["tauri.conf.json", "tauri.macos.conf.json"]) {
+      const { minWidth } = JSON.parse(
+        readFileSync(new URL(`../../src-tauri/${config}`, import.meta.url), "utf8"),
+      ).app.windows[0] as { minWidth: number }
+
+      expect(minWidth).toBe(DOCKED_PAGES_MIN_WIDTH)
+    }
+
+    expect(SIDEBAR_DOCK_MIN_WIDTH).toBe(SIDEBAR_MIN_WIDTH + DOCKED_PAGES_MIN_WIDTH)
   })
 })
 
@@ -45,23 +56,23 @@ describe("sidebar width", () => {
     expect(sidebarWidthOf(undefined)).toBeNull()
   })
 
-  test("leaves the docked toolbar the room it has in the narrowest docked window", () => {
-    const reserved = sidebarReservedWidth(false, true)
+  test("leaves the docked pages the room they have in the narrowest docked window", () => {
+    const reserved = sidebarReservedWidth(true)
 
-    expect(reserved).toBe(sidebarDockMinWidth(false) - SIDEBAR_MIN_WIDTH)
+    expect(reserved).toBe(SIDEBAR_DOCK_MIN_WIDTH - SIDEBAR_MIN_WIDTH)
     expect(clampSidebarWidth(900, 1280, reserved)).toBe(1280 - reserved)
     expect(clampSidebarWidth(300, 1280, reserved)).toBe(300)
     // At the docking threshold the sidebar can only be as wide as it opens.
-    expect(clampSidebarWidth(600, sidebarDockMinWidth(false), reserved)).toBe(
+    expect(clampSidebarWidth(600, SIDEBAR_DOCK_MIN_WIDTH, reserved)).toBe(
       SIDEBAR_MIN_WIDTH,
     )
   })
 
   test("never narrows below its opening width, however small the window", () => {
-    expect(clampSidebarWidth(100, 500, sidebarReservedWidth(true, false))).toBe(
+    expect(clampSidebarWidth(100, 500, sidebarReservedWidth(false))).toBe(
       SIDEBAR_MIN_WIDTH,
     )
-    expect(clampSidebarWidth(900, 700, sidebarReservedWidth(true, false))).toBe(636)
+    expect(clampSidebarWidth(900, 700, sidebarReservedWidth(false))).toBe(636)
   })
 })
 

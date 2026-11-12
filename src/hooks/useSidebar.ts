@@ -13,7 +13,7 @@ import {
   readStoredSidebarOpen,
   readStoredSidebarPanel,
   readStoredSidebarWidth,
-  sidebarDockMinWidth,
+  SIDEBAR_DOCK_MIN_WIDTH,
   sidebarMode,
   sidebarReservedWidth,
   storeFileRows,
@@ -76,8 +76,8 @@ function useMediaQuery(query: string) {
 
 /** The window's one sidebar state, which every tab's sidebar shows: it is how
     the reader lays the window out, not a property of a document. */
-export function useSidebarState(macOS: boolean): SidebarState {
-  const docked = useMediaQuery(`(min-width: ${sidebarDockMinWidth(macOS)}px)`)
+export function useSidebarState(): SidebarState {
+  const docked = useMediaQuery(`(min-width: ${SIDEBAR_DOCK_MIN_WIDTH}px)`)
   const [open, setOpen] = useState(readStoredSidebarOpen)
   const [panel, setPanelState] = useState(readStoredSidebarPanel)
   const [width, setWidthState] = useState(readStoredSidebarWidth)
@@ -126,7 +126,7 @@ export function useSidebarState(macOS: boolean): SidebarState {
     storeFileRows(next)
   }, [])
 
-  const reserved = sidebarReservedWidth(macOS, docked)
+  const reserved = sidebarReservedWidth(docked)
 
   return useMemo(
     () => ({

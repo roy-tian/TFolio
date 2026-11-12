@@ -218,7 +218,7 @@ function focusWorkspaceTarget(activeId: TabId, force = false) {
 export default function App() {
   const { t } = useTranslation()
   const macOS = isMacOS()
-  const sidebar = useSidebarState(macOS)
+  const sidebar = useSidebarState()
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeId, setActiveId] = useState<TabId>(HOME_TAB_ID)
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])

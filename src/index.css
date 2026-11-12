@@ -213,7 +213,7 @@ body {
 }
 
 /* A width the reader dragged to; the window narrows it as it shrinks, so the
-   toolbar beside a docked sidebar keeps its room. In pixels, as the drag and
+   pages beside a docked sidebar keep their room. In pixels, as the drag and
    `SIDEBAR_MIN_WIDTH` measure it, whatever the root font size. */
 [data-sidebar][data-sidebar-width] {
   --sidebar-width: max(256px, min(var(--sidebar-chosen), 100vw - var(--sidebar-reserved)));
