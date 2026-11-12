@@ -33,6 +33,24 @@ export function paddingPositions(files: readonly (number | undefined)[]): number
   return after
 }
 
+/** No file of the document's own: the one files held over its pages would be. */
+const DROPPED_FILES = -1
+
+/** The 0-based pages a blank would follow once files of their own land in
+    front of page `at` (0-based), for pages whose files stand as `files` says.
+    Their pages are not read yet, so two stand in: they start on an odd page,
+    as each of the files will, and whatever they hold, what follows them then
+    starts on an odd page too. Every blank among the pages shown is known;
+    the files' own, and the one closing the last, are not among them. */
+export function paddingAroundDropped(files: readonly (number | undefined)[], at: number) {
+  return paddingPositions([
+    ...files.slice(0, at),
+    DROPPED_FILES,
+    DROPPED_FILES,
+    ...files.slice(at),
+  ]).flatMap((index) => (index < at ? [index] : index >= at + 2 ? [index - 2] : []))
+}
+
 export function samePadding(left: readonly PaddingSheet[], right: readonly PaddingSheet[]) {
   return (
     left.length === right.length &&

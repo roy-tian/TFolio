@@ -1,4 +1,11 @@
-import { useRef, useState } from "react"
+import {
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+  type RefObject,
+} from "react"
 import { ChevronRight, FileText, Pencil, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -7,11 +14,12 @@ import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { FileMenuContent } from "@/components/PageContextMenu"
-import { SidebarDropEdge } from "@/components/SidebarFileDrop"
+import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useListDrag } from "@/hooks/useListDrag"
+import { useDropEdgeScroll, useSidebarDrop, useSidebarDropPoint } from "@/hooks/useSidebarDrop"
 import {
   fileFoldKey,
   foldableBookmarks,
@@ -21,10 +29,16 @@ import {
   toggledFold,
   type OutlineFolds,
 } from "@/lib/outlineFolds"
-import { DRAG_CLICK_WINDOW } from "@/lib/pageDrag"
+import { DRAG_CLICK_WINDOW, dropGapForRow } from "@/lib/pageDrag"
 import { fileRuns, type FileRun } from "@/lib/pageSections"
 import type { PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
+
+export type FileSectionsTreeHandle = {
+  /** How many pages come before files let go at `point` on screen, between
+      two of the runs listed; null for after the last. */
+  fileDropSlot: (point: { x: number; y: number }) => number | null
+}
 
 type FileSectionsTreeProps = {
   canPaste: boolean
@@ -41,7 +55,28 @@ type FileSectionsTreeProps = {
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
   pages: PdfPageInfo[]
+  ref?: Ref<FileSectionsTreeHandle>
   sections: PdfSection[]
+}
+
+/** The runs down the list, each by its name's row (not its bookmarks below)
+    and the page it starts on, 1-based. */
+function runRows(list: HTMLUListElement) {
+  return Array.from(list.querySelectorAll<HTMLElement>(":scope > li[data-run-first]"), (item) => {
+    const { height, top } = (
+      item.querySelector("[data-slot='file-section-row']") ?? item
+    ).getBoundingClientRect()
+
+    return { first: Number(item.dataset.runFirst), height, item, top }
+  })
+}
+
+/** Which run files let go at `y` go in front of, or null for after the last. */
+function runLanding(list: HTMLUListElement, y: number | null) {
+  const rows = runRows(list)
+  const before = y === null ? rows.length : dropGapForRow(y, rows)
+
+  return { before: rows[before] ?? null, rows }
 }
 
 /**
@@ -62,12 +97,29 @@ export function FileSectionsTree({
   onRemove,
   onRename,
   pages,
+  ref,
   sections,
 }: FileSectionsTreeProps) {
   const { t } = useTranslation()
   const navRef = useRef<HTMLElement>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const drop = useSidebarDrop()
+
+  useDropEdgeScroll(navRef)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      fileDropSlot: (point) => {
+        const list = listRef.current
+        const before = list ? runLanding(list, point.y).before : null
+
+        return before ? before.first - 1 : null
+      },
+    }),
+    [],
+  )
   const draggedAtRef = useRef(0)
   const runs = fileRuns(pages)
   const files = new Map(sections.map((section) => [section.id, section]))
@@ -106,6 +158,7 @@ export function FileSectionsTree({
   return (
     <div className="flex h-full flex-col">
       <OutlineBar
+        dropLabel={t("sidebar.dropFiles")}
         fold={{
           canFold: foldAll.canFold,
           canUnfold: foldAll.canUnfold,
@@ -114,7 +167,7 @@ export function FileSectionsTree({
           unfoldLabel: t("sidebar.unfoldAll"),
         }}
       />
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" data-sidebar-drop-list>
         <nav
           aria-label={t("sidebar.files")}
           className="overlay-scroll-viewport h-full overflow-auto overscroll-contain p-2"
@@ -163,7 +216,9 @@ export function FileSectionsTree({
           </ul>
         </nav>
         <OverlayScrollbars viewportRef={navRef} />
-        <SidebarDropEdge />
+        <SidebarDropEdge>
+          {drop === "over" ? <FilesDropMarker listRef={listRef} /> : null}
+        </SidebarDropEdge>
       </div>
       {drag && dragged ? (
         <div
@@ -373,5 +428,56 @@ function FileRunRow({
         </ul>
       ) : null}
     </li>
+  )
+}
+
+/** The bar between the runs files would go between, drawn over the list in
+    the drop edge's own space: in front of a run's name, or after the last. */
+function FilesDropMarker({ listRef }: { listRef: RefObject<HTMLUListElement | null> }) {
+  const point = useSidebarDropPoint()
+  const markerRef = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState<{ left: number; top: number; width: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const list = listRef.current
+    const host = markerRef.current?.parentElement
+
+    if (!list || !host) {
+      setBox(null)
+      return
+    }
+
+    const { before, rows } = runLanding(list, point?.y ?? null)
+    const last = rows.at(-1)
+
+    if (!last) {
+      setBox(null)
+      return
+    }
+
+    // In the middle of the list's own gap between two runs.
+    const half = parseFloat(getComputedStyle(list).rowGap) / 2 || 0
+    const edge = before
+      ? before.item.getBoundingClientRect().top - half
+      : last.item.getBoundingClientRect().bottom + half
+    // Clear of the dashed line at either side.
+    const origin = dropEdgeOrigin(host)
+    const span = list.getBoundingClientRect()
+
+    setBox({
+      left: span.left - origin.left + 4,
+      top: edge - origin.top - 1.5,
+      width: span.width - 8,
+    })
+  }, [listRef, point])
+
+  return (
+    <div
+      className="absolute h-[3px] rounded-full bg-primary"
+      data-testid="files-drop-marker"
+      hidden={box === null}
+      ref={markerRef}
+      style={box ?? undefined}
+    />
   )
 }

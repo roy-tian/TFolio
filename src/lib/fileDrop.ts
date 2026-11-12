@@ -15,8 +15,10 @@ export function dropPointInCss(
     tab's having no box and a hidden sidebar no element. */
 const SIDEBAR_SELECTOR = "[data-slot='app-sidebar']"
 
-/** Within it, the shown tab's pages, where a drop lands between two of them. */
-const PAGES_SELECTOR = "[data-document-session][data-active='true'] [data-pages-surface]"
+/** Within it, what the shown tab lists for a drop to land between two of:
+    its pages, or the files of its outline, with the overlay scrollbar over
+    their edge. Elsewhere on it, files go last. */
+const BETWEEN_SELECTOR = "[data-document-session][data-active='true'] [data-sidebar-drop-list]"
 
 export function sidebarShown() {
   return [...document.querySelectorAll(SIDEBAR_SELECTOR)].some(
@@ -30,7 +32,7 @@ export function dropHit(point: { x: number; y: number }) {
   const hit = document.elementFromPoint(point.x, point.y)
 
   return {
-    pages: (hit?.closest(PAGES_SELECTOR) ?? null) !== null,
+    between: (hit?.closest(BETWEEN_SELECTOR) ?? null) !== null,
     sidebar: (hit?.closest(SIDEBAR_SELECTOR) ?? null) !== null,
   }
 }

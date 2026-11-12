@@ -35,8 +35,15 @@ import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { CARRY_KEY, useIncomingPages } from "@/hooks/useIncomingPages"
 import { usePageCarryContext, type CarryLanding } from "@/hooks/usePageCarry"
+import {
+  sidebarDropPoint,
+  subscribeSidebarDropPoint,
+  useDropEdgeScroll,
+  useSidebarDrop,
+} from "@/hooks/useSidebarDrop"
 import type { RenderEpochs } from "@/lib/annotations"
 import { isTypingTarget } from "@/lib/contextMenu"
+import { storedFileOptions } from "@/lib/fileSources"
 import { stripSpotAt, type CarriedPages } from "@/lib/pageCarry"
 import {
   besideColumn,
@@ -53,7 +60,7 @@ import {
 } from "@/lib/pageDrag"
 import { flowItems } from "@/lib/pageFlow"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
-import { paddingPositions, type PaddingSheet } from "@/lib/padding"
+import { paddingAroundDropped, paddingPositions, type PaddingSheet } from "@/lib/padding"
 import { emptiesItsFile, fileRuns, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
@@ -279,6 +286,71 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     },
     [],
   )
+
+  // Where files held over the pages would land, worked out once per move of
+  // the point so that the marker, the blanks they would bring and the drop
+  // agree. Over no page the last landing holds: in rows, a blank shown for
+  // it may stand where the page under the point was.
+  const fileDrop = useSidebarDrop()
+  const [fileLanding, setFileLanding] = useState<{ at: number; slot: number } | null>(null)
+  const fileLandingRef = useRef(fileLanding)
+  const landFiles = useCallback(
+    (point: { x: number; y: number } | null) => {
+      const column = columnRef.current
+
+      if (!column) {
+        return null
+      }
+
+      const cells = measure(() => false)
+      const slot =
+        (point &&
+          flowLanding(pointInColumn(column, point), cells, fileLandingRef.current?.slot ?? null)) ??
+        cells.length
+
+      return { at: pagesBeforeSlot(cells, slot), slot }
+    },
+    [measure],
+  )
+
+  // The blanks a landing shows move the pages under a still point: it is
+  // worked out again as they settle, twice at most per report of the point.
+  const fileReflowsRef = useRef(0)
+  const placeFiles = useCallback(() => {
+    const next = landFiles(sidebarDropPoint())
+    const last = fileLandingRef.current
+
+    if (next?.at !== last?.at || next?.slot !== last?.slot) {
+      fileLandingRef.current = next
+      setFileLanding(next)
+    }
+  }, [landFiles])
+
+  useDropEdgeScroll(listRef, active)
+
+  useEffect(() => {
+    if (fileDrop !== "over" || !active) {
+      fileLandingRef.current = null
+      setFileLanding(null)
+      return
+    }
+
+    const moved = () => {
+      fileReflowsRef.current = 0
+      placeFiles()
+    }
+
+    moved()
+
+    return subscribeSidebarDropPoint(moved)
+  }, [active, fileDrop, placeFiles])
+
+  useLayoutEffect(() => {
+    if (fileLanding && fileReflowsRef.current < 2) {
+      fileReflowsRef.current += 1
+      placeFiles()
+    }
+  }, [fileLanding, placeFiles])
   // The file of the cell a drop lands nearest, other than those in hand: a
   // drop between two files' pages joins the one it was let go beside, and one
   // on a folded file's name joins that file.
@@ -364,15 +436,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   useImperativeHandle(
     ref,
     () => ({
-      fileDropSlot: (point) => {
-        const column = columnRef.current
-        const cells = measure(() => false)
-        const slot = column ? flowLanding(pointInColumn(column, point), cells, null) : null
-
-        return slot === null ? null : pagesBeforeSlot(cells, slot)
-      },
+      // Where the marker stands, once one shows: the drop's own point is the
+      // last the drag reported.
+      fileDropSlot: (point) => (fileLandingRef.current ?? landFiles(point))?.at ?? null,
     }),
-    [measure],
+    [landFiles],
   )
 
   // As many columns as the sidebar's width holds, the reader's to widen.
@@ -865,6 +933,14 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       incomingAt !== null && incoming
         ? { at: incomingAt, joins: incoming.joins, sizes: incoming.carried.sizes }
         : null,
+    files: fileLanding
+      ? {
+          at: fileLanding.at,
+          // As the add will lay them out: by the document's choice once it
+          // has files, by the reader's last otherwise.
+          smartPadding: fileOptions?.smartPadding ?? storedFileOptions().smartPadding,
+        }
+      : null,
     order,
     padding,
     pages,
@@ -955,7 +1031,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         }
         severalFiles={sections.length > 1}
       />
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" data-sidebar-drop-list>
         <ContextMenu
           onOpenChange={(open) => {
             if (!open) {
@@ -1226,7 +1302,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           ) : null}
         </ContextMenu>
         <OverlayScrollbars viewportRef={listRef} />
-        <PagesDropTarget flowRef={columnRef} grid={frame !== null} />
+        <PagesDropTarget
+          flowRef={columnRef}
+          grid={frame !== null}
+          slot={fileLanding?.slot ?? null}
+        />
       </div>
     </div>
   )
@@ -1241,6 +1321,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
  */
 function previewBlanks({
   drag,
+  files,
   incoming,
   order,
   padding,
@@ -1248,6 +1329,8 @@ function previewBlanks({
   smartPadding,
 }: {
   drag: ColumnDrag | null
+  /** Files held over the pages, which would land after page `at`. */
+  files: { at: number; smartPadding: boolean } | null
   incoming: { at: number; joins?: number; sizes: CarriedPages["sizes"] } | null
   order: number[]
   padding: readonly PaddingSheet[]
@@ -1301,6 +1384,19 @@ function previewBlanks({
     }
 
     return { blankAfterCarried, blanks }
+  }
+
+  if (files) {
+    const sections = pages.map((page) => page.section)
+
+    return {
+      blankAfterCarried: null,
+      blanks: new Map(
+        files.smartPadding
+          ? paddingAroundDropped(sections, files.at).map((index) => sheetAfter(index + 1))
+          : [],
+      ),
+    }
   }
 
   return {

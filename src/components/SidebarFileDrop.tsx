@@ -27,7 +27,8 @@ export function SidebarDropHint({ label }: { label: string }) {
 }
 
 /** While a file drag offers the sidebar, an edge around what its panel shows,
-    drawn in a `relative` box; it holds what marks where the files would go. */
+    drawn in a `relative` box; it holds, and clips to its own box, what marks
+    where the files would go, which may be scrolled out of view. */
 export function SidebarDropEdge({ children }: { children?: ReactNode }) {
   const drop = useSidebarDrop()
 
@@ -38,7 +39,7 @@ export function SidebarDropEdge({ children }: { children?: ReactNode }) {
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-1 z-10 rounded-xl border-2 border-dashed",
+        "pointer-events-none absolute inset-1 z-10 overflow-hidden rounded-xl border-2 border-dashed",
         drop === "over" ? "border-primary/70" : "border-muted-foreground/40",
       )}
       data-over={drop === "over" ? "" : undefined}
@@ -47,4 +48,12 @@ export function SidebarDropEdge({ children }: { children?: ReactNode }) {
       {children}
     </div>
   )
+}
+
+/** Where a marker inside the edge is placed from, on screen: inside its
+    border, as absolute boxes are. */
+export function dropEdgeOrigin(edge: HTMLElement) {
+  const frame = edge.getBoundingClientRect()
+
+  return { left: frame.left + edge.clientLeft, top: frame.top + edge.clientTop }
 }

@@ -134,7 +134,9 @@ export function BookmarkList({
 
   return (
     <div className="flex h-full flex-col">
+      {/* Files have no place among the bookmarks: they go last. */}
       <OutlineBar
+        dropLabel={t("sidebar.dropFilesAtEnd")}
         fold={{
           canFold: foldAll.canFold,
           canUnfold: foldAll.canUnfold,

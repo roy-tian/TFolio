@@ -928,7 +928,7 @@ export async function renderedPage(pageSelector = "[data-page-number='1']") {
  * Tauri's event system is emitted directly, in CSS pixels (GTK logical units).
  */
 export async function emitDrag(
-  name: "drag-enter" | "drag-over" | "drag-drop",
+  name: "drag-enter" | "drag-over" | "drag-drop" | "drag-leave",
   point: { x: number; y: number },
   paths: string[],
 ) {

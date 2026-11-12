@@ -54,15 +54,17 @@ export function SidebarPanelTools({ fold }: SidebarPanelToolsProps) {
   )
 }
 
-/** The bar over the outline, as `PagesBar` stands over the pages. Files let
-    go over the outline have no place among its rows: they go to the end. */
-export function OutlineBar(props: SidebarPanelToolsProps) {
-  const { t } = useTranslation()
+/** The bar over the outline, as `PagesBar` stands over the pages, saying
+    while a file drag offers the sidebar what a drop there does. */
+export function OutlineBar({
+  dropLabel,
+  ...props
+}: SidebarPanelToolsProps & { dropLabel: string }) {
   const drop = useSidebarDrop()
 
   return (
     <div className="relative flex h-9 shrink-0 items-center border-b px-2" data-slot="outline-bar">
-      <SidebarDropHint label={t("sidebar.dropFilesAtEnd")} />
+      <SidebarDropHint label={dropLabel} />
       {/* Hidden, not unmounted, as the pages bar's are. */}
       <div className={cn("flex min-w-0 flex-1 items-center", drop && "invisible")}>
         <SidebarPanelTools {...props} />

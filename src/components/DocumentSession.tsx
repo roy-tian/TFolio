@@ -23,7 +23,7 @@ import { PdfViewerLayout } from "@/components/PdfViewerLayout"
 import { SessionDialogs } from "@/components/SessionDialogs"
 import { SessionHeader } from "@/components/SessionHeader"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
-import { FileSectionsTree } from "@/components/FileSectionsTree"
+import { FileSectionsTree, type FileSectionsTreeHandle } from "@/components/FileSectionsTree"
 import {
   NO_PADDING,
   samePadding,
@@ -184,7 +184,7 @@ export type DocumentSessionHandle = {
   /** The Stop on a layer undo or redo's notice. */
   stopLayerWork: () => void
   /** Files added as files of their own where they were let go, a point on
-      screen over the sidebar's pages, or at the end. */
+      screen over the sidebar's pages or the outline's files, or at the end. */
   addFiles: (paths: string[], point?: { x: number; y: number }) => void
   redo: () => void
   selectAll: () => void
@@ -423,6 +423,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const outline = outlineFile ? outlineFile.outline : pdfDocument.outline
     const sidebar = useSidebar()
     const thumbnailsRef = useRef<PageThumbnailsHandle>(null)
+    const filesTreeRef = useRef<FileSectionsTreeHandle>(null)
     // Either panel shows for any document, whatever it holds: which one is
     // how the reader laid the window out.
     const sidebarPanel = sidebar.panel
@@ -1948,7 +1949,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     useImperativeHandle(
       ref,
       () => ({
-        addFiles: (paths, point) => void addFiles(paths, point && thumbnailsRef.current?.fileDropSlot(point)),
+        // Whichever of the two lists shows: the pages, or the outline's files.
+        addFiles: (paths, point) =>
+          void addFiles(
+            paths,
+            point &&
+              (thumbnailsRef.current?.fileDropSlot(point) ??
+                filesTreeRef.current?.fileDropSlot(point)),
+          ),
         appendCarriedPages: (carried) => pageOpsRef.current.appendCarriedPages(carried),
         canTakePagesNow: () => pageOpsRef.current.canTakeCarriedPages(),
         dismissNoteFont: clearNoteFontOffer,
@@ -2129,6 +2137,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onRemove={removeSection}
               onRename={renameSection}
               pages={pdfDocument.pages}
+              ref={filesTreeRef}
               sections={sections}
             />
           ) : sidebarPanel === "bookmarks" ? (

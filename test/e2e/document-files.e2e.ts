@@ -372,6 +372,65 @@ describe("TFolio files added to an open document", () => {
     await waitForPages(2)
   })
 
+  it("shows the blanks dropped files would bring before they land", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(3))
+    await waitForPages(3)
+    const blankAfter = (page: number) => $(`${activeSidebar} [data-padding-after='${page}']`)
+    const dropped = writeScratchPdf("dropped.pdf", minimalPdf(2))
+    const beforeSecond = await browser.execute((scope: string) => {
+      const box = document
+        .querySelector(`${scope} button[data-thumbnail-page='2']`)!
+        .getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.top + 8 }
+    }, activeSidebar)
+    const belowPages = await browser.execute((scope: string) => {
+      const box = document
+        .querySelector(`${scope} [data-slot='sidebar-thumbnails']`)!
+        .getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.bottom - 60 }
+    }, activeSidebar)
+
+    // In front of page 2, the one page before them leaves the files on page 2.
+    await emitDrag("drag-over", beforeSecond, [dropped])
+    await expect(blankAfter(1)).toBeDisplayed()
+    await expect(blankAfter(3)).not.toBeExisting()
+    // After three pages, a blank backs the third.
+    await emitDrag("drag-over", belowPages, [dropped])
+    await expect(blankAfter(3)).toBeDisplayed()
+    await expect(blankAfter(1)).not.toBeExisting()
+    await emitDrag("drag-leave", belowPages, [])
+    await expect(blankAfter(3)).not.toBeExisting()
+
+    // The add lays them out as shown.
+    await emitDrag("drag-over", belowPages, [dropped])
+    await emitDrag("drag-drop", belowPages, [dropped])
+    await waitForPages(5)
+    await expect(blankAfter(3)).toBeDisplayed()
+  })
+
+  it("scrolls the pages on while files are held near their edge", async () => {
+    await openPdfFromDisk("long.pdf", minimalPdf(30))
+    await waitForPages(30)
+    const pagesView = `${activeSidebar} [data-slot='sidebar-thumbnails']`
+    const nearBottom = await browser.execute((view: string) => {
+      const box = document.querySelector(view)!.getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.bottom - 10 }
+    }, pagesView)
+
+    // One report and held still: the OS sends no more while nothing moves.
+    await emitDrag("drag-over", nearBottom, [writeScratchPdf("held.pdf", minimalPdf(1))])
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute((view: string) => document.querySelector(view)!.scrollTop, pagesView)) >
+        200,
+      { timeout: 10_000, timeoutMsg: "the pages never scrolled under the held files" },
+    )
+    await emitDrag("drag-leave", nearBottom, [])
+  })
+
   it("adds files dropped on the outline at the end, as its bar says", async () => {
     await openPdfFromDisk("own.pdf", minimalPdf(2))
     await waitForPages(2)
@@ -396,6 +455,37 @@ describe("TFolio files added to an open document", () => {
     expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
     await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
     await waitForPages(5)
+  })
+
+  it("adds files dropped between two files of the outline there", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await addFilesFromPicker([writeScratchPdf("last.pdf", minimalPdf(1))])
+    await waitForPages(3)
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await browser.waitUntil(async () => (await treeFiles()).join() === "own.pdf,last.pdf", {
+      timeout: 30_000,
+      timeoutMsg: "the tree never listed both files",
+    })
+    // Over the top of the second file's row: the gap in front of it.
+    const point = await browser.execute((scope: string) => {
+      const box = document
+        .querySelectorAll(`${scope} [data-slot='file-section-row']`)[1]!
+        .getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.top + 3 }
+    }, activeSidebar)
+    const dropped = writeScratchPdf("middle.pdf", minimalPdf(2))
+
+    await emitDrag("drag-over", point, [dropped])
+    await expect($(`${activeSidebar} [data-testid='files-drop-marker']`)).toBeDisplayed()
+    await expect($(`${activeSidebar} [data-slot='sidebar-drop-hint']`)).toHaveText(
+      "Drop to add to this document",
+    )
+    await emitDrag("drag-drop", point, [dropped])
+    await browser.waitUntil(
+      async () => (await treeFiles()).join() === "own.pdf,middle.pdf,last.pdf",
+      { timeout: 30_000, timeoutMsg: "the dropped file never landed between the two" },
+    )
   })
 
   it("merges files dropped on the home tab's sidebar into a new PDF", async () => {

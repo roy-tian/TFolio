@@ -157,9 +157,10 @@
   releases them; sources never added go by `release_pdf_sources`. One history entry adds them all;
   its undo deletes the run under its stash.
 - A file drop opens a tab per file, except on the sidebar, which takes the files into one document
-  whichever panel shows: the shown tab's (where let go among the pages, else at the end), or on the
-  home tab, for two or more, a new sourceless one (`merge_pdf_sources`: no page of its own, no
-  history). Files no flow takes are named (`filesSkipped`), never dropped silently.
+  whichever panel shows: the shown tab's (where let go among its pages or its outline's files, else
+  at the end), or on the home tab, for two or more, a new sourceless one (`merge_pdf_sources`: no
+  page of its own, no history). Files no flow takes are named (`filesSkipped`), never dropped
+  silently.
 - Every insert names the file its pages join, and a reorder passes each position's file after
   and before: a page let go among another file's pages joins it, but a file moved whole by its
   name keeps its own. A deleted page keeps its file for the restore an undo brings back.

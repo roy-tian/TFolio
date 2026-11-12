@@ -38,7 +38,7 @@ import { useNotices } from "@/hooks/useNotices"
 import { useReopenTab, type Reopened } from "@/hooks/useReopenTab"
 import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
-import { SidebarDropContext, setPagesDropPoint, type SidebarDrop } from "@/hooks/useSidebarDrop"
+import { SidebarDropContext, setSidebarDropPoint, type SidebarDrop } from "@/hooks/useSidebarDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
@@ -1024,7 +1024,8 @@ export default function App() {
   }, [notices])
 
   // Only files a document can take its pages from, never opened as tabs the
-  // reader did not drop them as; with no point among the pages, at the end.
+  // reader did not drop them as; with no point among the pages or the files
+  // of the outline, at the end.
   const addDroppedFiles = useCallback(
     (paths: string[], point?: { x: number; y: number }) => {
       const sources = takeOpenable(paths)
@@ -1988,7 +1989,7 @@ export default function App() {
       severalDragged = true
       setIsDragging(false)
       setSidebarDrop(null)
-      setPagesDropPoint(null)
+      setSidebarDropPoint(null)
     }
 
     void getCurrentWebview()
@@ -2009,15 +2010,18 @@ export default function App() {
           const hit = dropHit(point)
           const target = sidebarDropAt(hit.sidebar, several(paths))
 
-          endDrag()
-
-          // Opened as tabs, unless let go on the sidebar.
-          if (target !== "over") {
-            void openPaths(paths, "first")
-          } else if (activeIdRef.current === HOME_TAB_ID) {
-            void mergeDroppedFiles(paths)
-          } else {
-            addDroppedFiles(paths, hit.pages ? point : undefined)
+          // Opened as tabs, unless let go on the sidebar. Before the drag
+          // ends: its end clears the landing the files go to.
+          try {
+            if (target !== "over") {
+              void openPaths(paths, "first")
+            } else if (activeIdRef.current === HOME_TAB_ID) {
+              void mergeDroppedFiles(paths)
+            } else {
+              addDroppedFiles(paths, hit.between ? point : undefined)
+            }
+          } finally {
+            endDrag()
           }
 
           return
@@ -2035,7 +2039,7 @@ export default function App() {
 
           setIsDragging(true)
           setSidebarDrop(drop)
-          setPagesDropPoint(drop === "over" && hit.pages ? point : null)
+          setSidebarDropPoint(drop === "over" && hit.between ? point : null)
         }
       })
       .then((stop) => {

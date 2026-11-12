@@ -9,11 +9,11 @@ import { DragHole } from "@/components/PageDragGhost"
 import { HintTooltip } from "@/components/HintTooltip"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
 import { PageSignatureMark } from "@/components/SignatureBadge"
-import { SidebarDropEdge } from "@/components/SidebarFileDrop"
+import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { useNearViewport } from "@/hooks/useNearViewport"
-import { useSidebarDrop, usePagesDropPoint } from "@/hooks/useSidebarDrop"
+import { useSidebarDrop, useSidebarDropPoint } from "@/hooks/useSidebarDrop"
 import type { CarriedPages } from "@/lib/pageCarry"
-import { flowCells, flowLanding, pointInColumn } from "@/lib/pageDrag"
+import { flowCells } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import type { PaddingSheet } from "@/lib/padding"
 import { dimensionsForRotation } from "@/lib/pdf"
@@ -44,30 +44,40 @@ export function foldedBarKey(firstKey: number) {
 export function PagesDropTarget({
   flowRef,
   grid,
+  slot,
 }: {
   flowRef: RefObject<HTMLOListElement | null>
   /** Whether the pages stand in rows of several, not down one column. */
   grid: boolean
+  /** The cell of the flow the files would go in front of, as the pages
+      worked it out; the flow's length for after the last. */
+  slot: number | null
 }) {
   const drop = useSidebarDrop()
 
   return (
     <SidebarDropEdge>
-      {drop === "over" ? <DropMarker flowRef={flowRef} grid={grid} /> : null}
+      {drop === "over" && slot !== null ? (
+        <DropMarker flowRef={flowRef} grid={grid} slot={slot} />
+      ) : null}
     </SidebarDropEdge>
   )
 }
 
 /** The bar between the pages the files would go between, drawn over the flow
-    in the drop target's own space. Re-rendered by the pointer alone. */
+    in the drop target's own space. Placed again as the point moves or the
+    flow scrolls under it, re-rendering nothing else. */
 function DropMarker({
   flowRef,
   grid,
+  slot,
 }: {
   flowRef: RefObject<HTMLOListElement | null>
   grid: boolean
+  slot: number
 }) {
-  const point = usePagesDropPoint()
+  // Read for the scroll an edge brings, which moves the cells under it.
+  const point = useSidebarDropPoint()
   const markerRef = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ height: number; left: number; top: number; width: number } | null>(
     null,
@@ -83,11 +93,8 @@ function DropMarker({
     }
 
     // By cells, which the marker stands between: the drop itself counts
-    // pages, a folded file's name being one cell of many. Off the pages the
-    // files go to the end.
+    // pages, a folded file's name being one cell of many.
     const cells = flowCells(flow, () => false)
-    const slot =
-      (point && flowLanding(pointInColumn(flow, point), cells, null)) ?? cells.length
     const landing = cells[Math.min(slot, cells.length - 1)]
 
     if (!landing) {
@@ -101,7 +108,7 @@ function DropMarker({
     const style = getComputedStyle(flow)
     const edge = cell.getBoundingClientRect()
     const paper = (cell.querySelector("[data-thumbnail-page]") ?? cell).getBoundingClientRect()
-    const origin = host.getBoundingClientRect()
+    const origin = dropEdgeOrigin(host)
     const after = slot >= cells.length
 
     // A folded file's name is a row of its own, whatever stands around it.
@@ -124,7 +131,7 @@ function DropMarker({
         width: paper.width,
       })
     }
-  }, [flowRef, grid, point])
+  }, [flowRef, grid, point, slot])
 
   return (
     <div
