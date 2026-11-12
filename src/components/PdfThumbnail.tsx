@@ -20,11 +20,11 @@ const THUMBNAIL_ROOT_MARGIN = "0px"
 // off, they wait for the pages the reader is looking at rather than tie them.
 const SIDEBAR_PRIORITY_BIAS = 2000
 
-/** On the square of a paper that holds controls: they show, through
+/** On a preview that holds controls: they show, through
     `PAPER_CONTROLS_SHOWN`, while it is hovered or one of them has the
-    keyboard's focus. Not the paper's: WebKitGTK can keep a clicked paper
-    `:focus-visible`, and its controls would stay up. A property the square
-    sets, because `group-has-*` on each control costs Chromium a
+    keyboard's focus. Not the paper's focus: WebKitGTK can keep a clicked
+    paper `:focus-visible`, and its controls would stay up. A property the
+    preview sets, because `group-has-*` on each control costs Chromium a
     whole-document restyle for every node added anywhere. */
 export const PAPER_CONTROLS_HOST =
   "[--paper-controls:0] hover:[--paper-controls:1] has-[[data-page-action]:focus-visible]:[--paper-controls:1]"
@@ -57,9 +57,9 @@ type PdfThumbnailProps = {
   /** Controls over the paper, laid out against its box, which follows the
       paper through a turn. */
   overlay?: ReactNode
-  /** Controls laid out against the square the paper stands in, which a turn
-      leaves standing. */
-  cellOverlay?: ReactNode
+  /** Centred in a square as wide as a paper's long side: cells of one size
+      line portrait and landscape pages up in rows of several. */
+  square?: boolean
   /** A sign beside the caption: over the paper it would take the page's
       clicks in its corner, where its checkbox sits. */
   mark?: ReactNode
@@ -88,7 +88,7 @@ export function PdfThumbnail({
   label,
   caption,
   overlay,
-  cellOverlay,
+  square = false,
   mark,
   parked,
   parkKey,
@@ -290,24 +290,21 @@ export function PdfThumbnail({
     <div
       className={cn(
         "group/thumb flex flex-col items-center transition-opacity",
+        overlay && PAPER_CONTROLS_HOST,
         // Faded, the way a file manager marks a cut: the page is still here,
         // and a paste is what moves it.
         isCut && "opacity-45",
       )}
       data-cut={isCut ? "" : undefined}
     >
-      {/* As wide and tall as every paper's long side, which a turn keeps:
-          portrait and landscape pages line up in rows, and a turn moves no
-          other page and none of the square's own controls. */}
+      {/* Always there, boxless outside a square: a sidebar widened into rows
+          gives its previews one, and a new parent would remount the canvas,
+          losing the pixels already painted into it. */}
       <div
-        className={cn(
-          "relative grid place-items-center",
-          (overlay || cellOverlay) && PAPER_CONTROLS_HOST,
-        )}
-        style={{ height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH }}
+        className={square ? "grid place-items-center" : "contents"}
+        style={square ? { height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH } : undefined}
       >
         {paperBox}
-        {cellOverlay}
       </div>
       <span
         className={cn(

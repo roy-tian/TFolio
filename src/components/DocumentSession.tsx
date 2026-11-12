@@ -492,9 +492,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const [pageKeys, setThumbnailsFocused] = useState(false)
     const thumbnailSelection = useThumbnailSelection({
       active: active && thumbnailsShown,
+      currentPage,
       numPages: pdfDocument.numPages,
     })
     const clearThumbnailSelection = thumbnailSelection.clear
+    const resettleThumbnailSelection = thumbnailSelection.resettle
     const deselectPages = thumbnailSelection.deselect
     const foldFiles = useCallback(
       (sectionIds: readonly number[], folded: boolean) => {
@@ -905,6 +907,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           // Turned where it stands, so every position still holds its page — a
           // second press of the rotation must still find the selection it turns.
           if (change?.movement === "inPlace") {
+            resettleThumbnailSelection()
             return
           }
 
@@ -939,6 +942,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           currentPage,
           pageClipboardStructureChanged,
           parkedPreviews,
+          resettleThumbnailSelection,
         ],
       ),
       onEditRefused: useCallback(
@@ -1206,7 +1210,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     })
 
     const {
-      deleteOnePage,
       deleteThumbnailPage,
       insertBlankPage,
       insertCarriedPages,
@@ -2163,7 +2166,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               isEditingNow={annotations.isStructureBusyNow}
               onCopyPages={pageClipboard.copy}
               onCutPages={pageClipboard.cut}
-              onDeleteOnePage={deleteOnePage}
               onDeletePage={deleteThumbnailPage}
               onFileOptionsChange={changeFileOptions}
               onFileRowsChange={sidebar.setFileRows}

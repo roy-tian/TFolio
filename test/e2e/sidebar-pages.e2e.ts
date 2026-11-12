@@ -192,8 +192,8 @@ async function settledBands(count: number) {
   return current
 }
 
-/** A page's own control, pressed as the keyboard would: its bar shows only
-    under a real pointer, which the driver cannot make. */
+/** A page's own control, pressed as the keyboard would: its checkbox shows
+    only under a real pointer, which the driver cannot make. */
 function pressControl(pageNumber: number, control: string) {
   return browser.execute(
     (scope: string, page: number, name: string) => {
@@ -228,6 +228,19 @@ function shape(pageNumber: number) {
 
     return box.width > box.height ? "landscape" : "portrait"
   }, preview(pageNumber))
+}
+
+/** The reader's own scroll of the pages to read, as a wheel or a key would. */
+async function readPage(pageNumber: number) {
+  await browser.execute(
+    (scope: string, page: number) =>
+      document
+        .querySelector(`${scope} [data-page-number='${page}']`)!
+        .scrollIntoView({ behavior: "instant", block: "start" }),
+    session,
+    pageNumber,
+  )
+  await browser.waitUntil(async () => (await pageStatus())?.startsWith(`Page ${pageNumber} of `) === true)
 }
 
 function pageStatus() {
@@ -319,29 +332,83 @@ describe("TFolio sidebar pages", () => {
     )
   })
 
-  it("turns, removes and chooses one page by its own controls", async () => {
-    await openPdfFromDisk("controls.pdf", bandedPdf(4))
+  it("turns and removes the chosen pages from the bar over them, else the page being read", async () => {
+    await openPdfFromDisk("bar.pdf", bandedPdf(4))
     await settledBands(4)
+    const bar = (slot: string) => $(`${activeSidebar} [data-slot='pages-${slot}']`)
+
+    // One file: no file options, greyed rather than gone.
+    await expect(bar("file-options")).toBeDisabled()
+
+    // Nothing chosen: the page being read, named.
+    await expect(bar("rotate-right")).toHaveAttribute("aria-label", "Rotate page 1 clockwise")
+    await bar("rotate-right").click()
+    await browser.waitUntil(async () => (await shape(1)) === "landscape")
+    expect(await shape(2)).toBe("portrait")
 
     await pressControl(2, "[data-page-action='toggle']")
     await pressControl(3, "[data-page-action='toggle']")
     expect(await selectedThumbs()).toEqual([2, 3])
     // A tick only adds to the choice: the reader stays on the page they read.
     expect(await pageStatus()).toBe("Page 1 of 4")
+    await expect(bar("rotate-right")).toHaveAttribute("aria-label", "Rotate 2 pages clockwise")
 
-    // A page's own turn is that page's alone, chosen or not.
-    await pressControl(4, "[data-page-action='rotate-right']")
-    await browser.waitUntil(async () => (await shape(4)) === "landscape")
-    expect(await shape(2)).toBe("portrait")
-    expect(await shape(3)).toBe("portrait")
+    await bar("rotate-right").click()
+    await browser.waitUntil(async () => (await shape(2)) === "landscape" && (await shape(3)) === "landscape")
+    expect(await shape(4)).toBe("portrait")
+    // A turn keeps the choice, so the button turns them on.
+    expect(await selectedThumbs()).toEqual([2, 3])
 
-    await pressControl(1, "[data-page-action='delete']")
-    await browser.waitUntil(async () => (await pageCount()) === 3, {
-      timeoutMsg: "the page's own delete never took it",
+    await bar("delete").click()
+    await browser.waitUntil(async () => (await pageCount()) === 2, {
+      timeoutMsg: "the bar's delete never took the chosen pages",
     })
+    await expect(bar("delete")).toHaveAttribute("aria-label", "Delete page 1")
 
     await browser.keys(["Control", "z"])
     await browser.waitUntil(async () => (await pageCount()) === 4)
+  })
+
+  it("lets a plain click's choice go once the reader reads on, keeping the ticked", async () => {
+    await openPdfFromDisk("read-on.pdf", bandedPdf(6))
+    await $(preview(4)).waitForExist({ timeout: 30_000 })
+    const rotate = $(`${activeSidebar} [data-slot='pages-rotate-right']`)
+
+    // The click's own jump passes pages 2 and 3 and keeps the choice.
+    await $(preview(4)).click()
+    await browser.waitUntil(async () => (await pageStatus()) === "Page 4 of 6")
+    expect(await selectedThumbs()).toEqual([4])
+
+    await readPage(2)
+    await browser.waitUntil(async () => (await selectedThumbs()).length === 0, {
+      timeoutMsg: "the clicked page stayed chosen after the reader left it",
+    })
+    await expect(rotate).toHaveAttribute("aria-label", "Rotate page 2 clockwise")
+
+    await pressControl(5, "[data-page-action='toggle']")
+    await readPage(1)
+    expect(await selectedThumbs()).toEqual([5])
+  })
+
+  it("keeps the last page a click chose through its own turns", async () => {
+    await openPdfFromDisk("last-turns.pdf", bandedPdf(4))
+    await settledBands(4)
+    const rotate = $(`${activeSidebar} [data-slot='pages-rotate-right']`)
+
+    // The view cannot bring the last page to the top: the jump lands short.
+    await $(preview(4)).click()
+    await browser.waitUntil(async () => (await shape(4)) === "portrait")
+    await browser.pause(600)
+
+    // Each turn shortens the end of the document, and the scroll clamps back:
+    // a move the app made, not the reader reading on.
+    await rotate.click()
+    await browser.waitUntil(async () => (await shape(4)) === "landscape")
+    await browser.pause(600)
+    await rotate.click()
+    await browser.waitUntil(async () => (await shape(4)) === "portrait")
+    expect(await shape(3)).toBe("portrait")
+    expect(await selectedThumbs()).toEqual([4])
   })
 
   for (const layout of ["down the column", "across a row"] as const) {

@@ -179,9 +179,11 @@
   drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
   step with `SectionBook::padding`).
 - The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
-  fixed-size cells once widened (`ui.sidebarWidth`), each page with its own controls. The
-  pages and the bookmarks (the tree of files, for several) are both there for every document:
-  which shows is the window's layout, never a matter of what the document holds.
+  fixed-size cells once widened (`ui.sidebarWidth`). The bar over them turns and deletes the
+  chosen pages, else the page being read; a plain click's choice lapses as the reader reads on
+  (`plainChoiceWatch`), so nothing is acted on out of sight. The pages and the bookmarks (the
+  tree of files, for several) are both there for every document: which shows is the window's
+  layout, never a matter of what the document holds.
 - A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,
   `flowItems`): a drop lands above or below it, never inside. `flowLanding` counts cells, so
   every landing goes through `pagesBeforeSlot` before it names a page. Folding is a tab's own

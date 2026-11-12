@@ -60,6 +60,18 @@ export function selectionAfterClick(
   return { anchor: pageNumber, pages: new Set([pageNumber]) }
 }
 
+/** Folded, not spread: a long selection can pass the engine's argument
+    limit. Infinity for none, as `Math.min()` gives. */
+export function lowestPage(pages: Iterable<number>): number {
+  let low = Infinity
+
+  for (const pageNumber of pages) {
+    low = Math.min(low, pageNumber)
+  }
+
+  return low
+}
+
 /** A click on a run of pages as one, a file's name over its pages: plain
     chooses them alone, a toggle adds them or, all chosen, lets them go, and
     a range reaches from the anchor to the run's far end. */
@@ -72,8 +84,7 @@ export function selectionAfterGroupClick(
     return selection
   }
 
-  // Folded, not spread: a long file can pass the engine's argument limit.
-  const first = pages.reduce((low, pageNumber) => Math.min(low, pageNumber))
+  const first = lowestPage(pages)
   const last = pages.reduce((high, pageNumber) => Math.max(high, pageNumber))
 
   if (modifiers.range && selection.anchor !== null) {
@@ -161,4 +172,52 @@ export function choiceAfterClick<T>(
     narrows from there, not from the last single click. */
 export function selectionOfAllPages(numPages: number): ThumbnailSelection {
   return numPages < 1 ? emptySelection : { anchor: 1, pages: range(1, numPages) }
+}
+
+/** Whether a plain click's choice of `chosen` lapses as the page being read
+    moves. Until the click's own jump lands, the pages it passes say nothing:
+    it lands as the reader reaches the page after passing another, since the
+    jump names its page before scrolling a pixel, or where reading goes quiet
+    short of it (`settle`), as at the last page, which the view cannot bring
+    to the top. Then the choice lapses once the reader reads farther from it
+    than they have been since. `unsettle` takes the landing back, for a move
+    the app made itself: a turn that shortens the document clamps the scroll. */
+export function plainChoiceWatch(chosen: number) {
+  let distance: number | null = null
+  let passedAnother = false
+
+  return {
+    /** The page being read moved: true once the choice lapses. */
+    heard(reading: number) {
+      const next = Math.abs(reading - chosen)
+
+      if (distance === null) {
+        if (next !== 0) {
+          passedAnother = true
+        } else if (passedAnother) {
+          distance = 0
+        }
+
+        return false
+      }
+
+      if (next > distance) {
+        return true
+      }
+
+      distance = next
+
+      return false
+    },
+    get landed() {
+      return distance !== null
+    },
+    settle(reading: number) {
+      distance ??= Math.abs(reading - chosen)
+    },
+    unsettle() {
+      distance = null
+      passedAnother = false
+    },
+  }
 }

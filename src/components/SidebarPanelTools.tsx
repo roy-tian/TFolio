@@ -1,4 +1,5 @@
 import { ChevronsDownUp, ChevronsUpDown, Plus } from "lucide-react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { SidebarDropHint } from "@/components/SidebarFileDrop"
@@ -18,14 +19,18 @@ export type FoldAll = {
 }
 
 type SidebarPanelToolsProps = {
+  /** A panel's own tools, before the fold buttons, which then end the bar at
+      the same place over either panel. */
+  children?: ReactNode
   fold: FoldAll
 }
 
 /** The end of each sidebar panel's bar, the same over the pages and the
     outline: folding everything there is to fold, and unfolding it all. */
-export function SidebarPanelTools({ fold }: SidebarPanelToolsProps) {
+export function SidebarPanelTools({ children, fold }: SidebarPanelToolsProps) {
   return (
     <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      {children}
       <ToolbarTooltip label={fold.foldLabel}>
         <Button
           aria-label={fold.foldLabel}

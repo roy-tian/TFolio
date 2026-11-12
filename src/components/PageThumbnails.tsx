@@ -11,7 +11,6 @@ import {
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
-import type { PageActionHandler } from "@/components/PageCardControls"
 import {
   landingBox,
   liftGhost,
@@ -64,7 +63,7 @@ import { paddingAroundDropped, paddingPositions, type PaddingSheet } from "@/lib
 import { emptiesItsFile, fileRuns, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
-import type { SelectionModifiers } from "@/lib/thumbnailSelection"
+import { lowestPage, type SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_WIDTH } from "@/lib/viewMode"
 
@@ -109,8 +108,6 @@ type PageThumbnailsProps = {
   onCutPages: () => void
   /** On a chosen page, the whole choice goes with it. */
   onDeletePage: (pageNumber: number) => void
-  /** A page's own delete control: that page alone, chosen or not. */
-  onDeleteOnePage: (pageNumber: number) => void
   /** Whether focus is in the column: the clipboard keys are its only then. */
   onFocusChange: (focused: boolean) => void
   /** The files whose pages are folded away under their names. */
@@ -150,7 +147,7 @@ type PageThumbnailsProps = {
       the dropped order until then, rather than flash the old one. `moving`
       joins `section`, the file it was let go among. */
   onReorderPages: (order: number[], moving: number[], section?: number) => Promise<unknown>
-  /** A page's own turn control: that page alone, chosen or not. */
+  /** That page alone: the page being read, from the bar with none chosen. */
   onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
   onRotatePages: (degrees: 90 | 270) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
@@ -182,7 +179,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   onCopyPages,
   onCutPages,
   onDeletePage,
-  onDeleteOnePage,
   isEditingNow,
   fileOptions,
   fileRows,
@@ -467,11 +463,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     return () => observer.disconnect()
   }, [active])
 
-  // One page's own controls act on that page alone. Read through a ref, so the
-  // memoised previews keep one handler across the session's every render.
-  const actionsRef = useRef({ onDeleteOnePage, onInsertBlankPage, onRotatePage, onSelectPage })
+  // Read through a ref, so the memoised previews keep one handler across the
+  // session's every render.
+  const actionsRef = useRef({ onInsertBlankPage, onSelectPage })
 
-  actionsRef.current = { onDeleteOnePage, onInsertBlankPage, onRotatePage, onSelectPage }
+  actionsRef.current = { onInsertBlankPage, onSelectPage }
 
   // A control that leaves with what it acted on fires no blur as it goes: the
   // column takes the focus first, and with it keeps the page keys. A click
@@ -482,25 +478,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     }
   }, [])
 
-  const act = useCallback<PageActionHandler>((pageNumber, action) => {
-    const actions = actionsRef.current
-
-    switch (action) {
-      case "toggle":
-        actions.onSelectPage(pageNumber, { range: false, toggle: true })
-        break
-      case "rotate-left":
-        actions.onRotatePage(pageNumber, 270)
-        break
-      case "rotate-right":
-        actions.onRotatePage(pageNumber, 90)
-        break
-      case "delete":
-        keepFocus()
-        actions.onDeleteOnePage(pageNumber)
-        break
-    }
-  }, [keepFocus])
+  const toggle = useCallback((pageNumber: number) => {
+    actionsRef.current.onSelectPage(pageNumber, { range: false, toggle: true })
+  }, [])
 
   // Before the page, the file it joins is that page's; after the last, the
   // last page's.
@@ -1005,6 +985,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     )
   }
 
+  const barTargets =
+    selectedPages.size === 0
+      ? { count: 1, first: current, of: numPages }
+      : { count: selectedPages.size, first: lowestPage(selectedPages), of: numPages }
+
   return (
     <div
       className="flex h-full flex-col"
@@ -1018,6 +1003,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         fileOptions={fileOptions}
         fileRows={fileRows}
         folded={{ count: foldedCount, of: sections.length }}
+        // Not chosen, the page being read goes alone.
+        onDelete={() => onDeletePage(barTargets.first)}
         onFileOptionsChange={onFileOptionsChange}
         onFileRowsChange={onFileRowsChange}
         onFoldAll={(folded) =>
@@ -1026,7 +1013,15 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
             folded,
           )
         }
+        onRotate={(degrees) => {
+          if (selectedPages.size === 0) {
+            onRotatePage(current, degrees)
+          } else {
+            onRotatePages(degrees)
+          }
+        }}
         severalFiles={sections.length > 1}
+        targets={barTargets}
       />
       <div className="relative min-h-0 flex-1" data-sidebar-drop-list>
         <ContextMenu
@@ -1106,7 +1101,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     return
                   }
 
-                  const first = Math.min(...selectionRef.current)
+                  const first = lowestPage(selectionRef.current)
 
                   if (
                     (event.key === "Delete" || event.key === "Backspace") &&
@@ -1154,6 +1149,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   index === incomingAt ? (
                     <CarriedHoles
                       carryKey={CARRY_KEY}
+                      grid={grid}
                       key={CARRY_KEY}
                       rotation={viewRotation}
                       sizes={incoming!.carried.sizes}
@@ -1162,6 +1158,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                 const blankAfterHoles =
                   index === incomingAt && blankAfterCarried ? (
                     <PaddingCell
+                      grid={grid}
                       key={`padding-${CARRY_KEY}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
@@ -1198,8 +1195,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     // Where the page stands in a drag's preview, as it will once
                     // the pages land.
                     caption={index + 1 + carriedAhead}
-                    // A document keeps one page; the backend refuses a delete of them all.
-                    deleteDisabled={numPages <= 1}
                     documentId={documentId}
                     flipKey={key}
                     grid={grid}
@@ -1211,9 +1206,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     isSelected={selectedPages.has(pageNumber)}
                     key={key}
                     label={t("sidebar.thumbnailLabel", { pageNumber })}
-                    onAction={act}
                     onInsertBlank={insertBlank}
                     onSelect={select}
+                    onToggle={toggle}
                     pageHeight={page.height}
                     pageNumber={pageNumber}
                     pageWidth={page.width}
@@ -1224,6 +1219,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   />,
                   blanks.has(pageNumber) ? (
                     <PaddingCell
+                      grid={grid}
                       key={`padding-${key}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}

@@ -40,7 +40,7 @@ export function useThumbnailPageOps({
     }
   }
 
-  // On a selected page the x takes the whole selection with it; on any other
+  // On a chosen page a delete takes the whole choice with it; on any other
   // page, that page alone. No confirmation: the delete is one undo away.
   const deleteThumbnailPage = (pageNumber: number) => {
     if (!pdfDocument || editingBusy()) {
@@ -54,16 +54,7 @@ export function useThumbnailPageOps({
     void annotations.deletePages(pages, pdfDocument.numPages)
   }
 
-  /** A page's own control: that page alone, whatever else is chosen. */
-  const deleteOnePage = (pageNumber: number) => {
-    if (!pdfDocument || editingBusy() || pdfDocument.numPages <= 1) {
-      return
-    }
-
-    void annotations.deletePages([pageNumber], pdfDocument.numPages)
-  }
-
-  /** A page's own control: that page alone, whatever else is chosen. */
+  /** The page being read, from the pages bar with none chosen: that page alone. */
   const rotateOnePage = (pageNumber: number, degrees: 90 | 270) => {
     if (!pdfDocument || editingBusy()) {
       return
@@ -203,7 +194,6 @@ export function useThumbnailPageOps({
   return {
     appendCarriedPages,
     canTakeCarriedPages,
-    deleteOnePage,
     deleteThumbnailPage,
     insertBlankPage,
     insertCarriedPages,
