@@ -54,13 +54,14 @@ import {
   orderWithBlockAt,
   pagesBeforeSlot,
   pointInColumn,
+  rowNeighbour,
   slotOfPages,
   type WeighedFlowCell,
 } from "@/lib/pageDrag"
 import { flowItems } from "@/lib/pageFlow"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { paddingAroundDropped, paddingPositions, type PaddingSheet } from "@/lib/padding"
-import { emptiesItsFile, fileRuns, pagesOfSection } from "@/lib/pageSections"
+import { emptiesItsFile, fileRuns, foldedAway, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import { lowestPage, type SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -71,8 +72,29 @@ import { THUMBNAIL_WIDTH } from "@/lib/viewMode"
 const DRAG_CLICK_GRACE_MS = 300
 const NO_HOLES: ReadonlySet<number> = new Set()
 const NO_PAGES: ReadonlySet<number> = new Set()
+const PLAIN: SelectionModifiers = { range: false, toggle: false }
+const ARROW_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp"])
+// Room kept around a page brought into the column's view.
+const REVEAL_MARGIN = 12
 // What a ghost lands on in its cell: a page's paper, or a folded file's name.
 const LANDING_PAPER = `[data-thumbnail-page], ${FILE_HEADING_NAME}`
+
+/** Where an element's top stands on screen by its place in the flow, which a
+    slide's transform does not move: a cell a reorder has just landed still
+    shows where it left. */
+function restingTop(element: HTMLElement, flow: HTMLElement) {
+  let top = flow.getBoundingClientRect().top
+
+  for (
+    let node: Element | null = element;
+    node instanceof HTMLElement && node !== flow;
+    node = node.offsetParent
+  ) {
+    top += node.offsetTop
+  }
+
+  return top
+}
 
 export type PageThumbnailsHandle = {
   /** Where files let go at a point on screen would go: the count of pages
@@ -104,10 +126,13 @@ type PageThumbnailsProps = {
   /** Pages a cut is standing over: still in the document, empty for a copy. */
   cutPages: ReadonlySet<number>
   documentId: number
-  onCopyPages: () => void
-  onCutPages: () => void
+  /** The menu's pages, by number: the choice may lapse while it is open. */
+  onCopyPages: (pages: Iterable<number>) => void
+  onCutPages: (pages: Iterable<number>) => void
   /** On a chosen page, the whole choice goes with it. */
   onDeletePage: (pageNumber: number) => void
+  /** The pages as a new PDF of their own, in a tab beside this one. */
+  onExtractPages: (pages: number[]) => void
   /** Whether focus is in the column: the clipboard keys are its only then. */
   onFocusChange: (focused: boolean) => void
   /** The files whose pages are folded away under their names. */
@@ -137,8 +162,9 @@ type PageThumbnailsProps = {
   /** A right-click, before its menu opens: a page outside the selection
       becomes the selection, so the menu means what is on screen. */
   onMenuPage: (pageNumber: number) => void
-  /** A plain click on a page, or on a file's name, goes there. */
-  onNavigate: (pageNumber: number) => void
+  /** A plain click on a page, or on a file's name, goes there; so does an
+      arrow key, which says `stay`: the sidebar keeps the keys it is given. */
+  onNavigate: (pageNumber: number, stay?: boolean) => void
   onPastePages: (index: number, section?: number) => void
   /** From a file's name: every page of the file, out of the document. */
   onRemoveFile: (section: number) => void
@@ -159,6 +185,9 @@ type PageThumbnailsProps = {
   /** Where a preview waits while an edit has its page out of the document. */
   parkedPreviews: ParkedPreviews
   renderEpochs: RenderEpochs
+  /** A page an edit has just put in the document, to bring into view where
+      it landed; `serial` tells one asking from the next. */
+  reveal: { pageNumber: number; serial: number } | null
   selectedPages: ReadonlySet<number>
   /** Follow each page through a reorder, so its painted preview moves with it. */
   thumbnailKeys: number[]
@@ -179,6 +208,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   onCopyPages,
   onCutPages,
   onDeletePage,
+  onExtractPages,
   isEditingNow,
   fileOptions,
   fileRows,
@@ -203,6 +233,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   pages,
   parkedPreviews,
   renderEpochs,
+  reveal,
   sections,
   selectedPages,
   thumbnailKeys,
@@ -239,6 +270,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // Thumbnail keys, not page numbers: a hole outlives the reorder's commit
   // until the ghost has settled into it.
   const [holes, setHoles] = useState(NO_HOLES)
+  // Carried out of the column, toward another tab or a new PDF, the pages
+  // are copied and never taken: they show where they stand, not as holes.
+  const [carriedOut, setCarriedOut] = useState(false)
   const [ghost, setGhost] = useState<PageDragGhostState | null>(null)
   const [landing, setLanding] = useState<{
     /** Where the ghost lands instead, outside this column; null fades it. */
@@ -394,6 +428,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   const isEditingRef = useRef(isEditingNow)
   // A column gone before its ghost is down still lets the taker's holes close.
   const pendingLandedRef = useRef<(() => void) | undefined>(undefined)
+  // The page the arrow keys move from while a choice stands: the one last
+  // clicked or reached by a key, among the pages as they then stood.
+  const cursorRef = useRef<{ pageNumber: number; pages: PdfPageInfo[] } | null>(null)
+  // One standing as the column mounts was shown by the column before it:
+  // the sidebar opened again goes to the reader's page, not back there.
+  const revealedRef = useRef(reveal?.serial ?? null)
   const [columns, setColumns] = useState(1)
   // The columns last measured, a render ahead of the ones laid out: the
   // reader's page is looked for only once the pages stand in them.
@@ -479,8 +519,46 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   }, [])
 
   const toggle = useCallback((pageNumber: number) => {
+    cursorRef.current = { pageNumber, pages: pagesRef.current }
     actionsRef.current.onSelectPage(pageNumber, { range: false, toggle: true })
   }, [])
+
+  // Where a page shows in the column: its paper or, folded away, its file's
+  // name.
+  const cellOf = useCallback((pageNumber: number) => {
+    const bar = [...barsRef.current].find(([, run]) => run.includes(pageNumber))?.[0]
+
+    return (
+      listRef.current?.querySelector<HTMLElement>(
+        bar === undefined ? `[data-thumbnail-page="${pageNumber}"]` : `[data-flip-key="${bar}"]`,
+      ) ?? null
+    )
+  }, [])
+
+  // Scrolls no further than shows `cell`, and what stands `over` it. Measured
+  // against the column itself: `scrollIntoView` would also scroll the clipped
+  // panels the column sits in.
+  const bringIntoView = useCallback(
+    (cell: HTMLElement, behavior: ScrollBehavior, over?: HTMLElement | null) => {
+      const list = listRef.current
+      const column = columnRef.current
+
+      if (!list || !column) {
+        return
+      }
+
+      const listBox = list.getBoundingClientRect()
+      const top = restingTop(over ?? cell, column)
+      const bottom = restingTop(cell, column) + cell.offsetHeight
+
+      if (top < listBox.top + REVEAL_MARGIN) {
+        list.scrollBy({ behavior, top: top - listBox.top - REVEAL_MARGIN })
+      } else if (bottom > listBox.bottom - REVEAL_MARGIN) {
+        list.scrollBy({ behavior, top: bottom - listBox.bottom + REVEAL_MARGIN })
+      }
+    },
+    [],
+  )
 
   // Before the page, the file it joins is that page's; after the last, the
   // last page's.
@@ -502,10 +580,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   useLayoutEffect(() => {
     const list = listRef.current
     // Folded away, the page is where its file's name stands.
-    const bar = [...barsRef.current].find(([, run]) => run.includes(current))?.[0]
-    const paper = list?.querySelector<HTMLElement>(
-      bar === undefined ? `[data-thumbnail-page="${current}"]` : `[data-flip-key="${bar}"]`,
-    )
+    const paper = cellOf(current)
 
     if (
       !active ||
@@ -520,27 +595,34 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       return
     }
 
-    // Measured against the column itself: `scrollIntoView` would also scroll
-    // the clipped panels the column sits in.
-    const listBox = list.getBoundingClientRect()
-    const paperBox = paper.getBoundingClientRect()
-    const margin = 12
     const instant = followedRef.current === null
 
     followedRef.current = current
+    bringIntoView(paper, instant ? "instant" : "smooth")
+  }, [active, bringIntoView, cellOf, columns, current])
 
-    if (paperBox.top < listBox.top + margin) {
-      list.scrollBy({
-        behavior: instant ? "instant" : "smooth",
-        top: paperBox.top - listBox.top - margin,
-      })
-    } else if (paperBox.bottom > listBox.bottom - margin) {
-      list.scrollBy({
-        behavior: instant ? "instant" : "smooth",
-        top: paperBox.bottom - listBox.bottom + margin,
-      })
+  // After the reader's page, so a page just put in the document wins the
+  // column where both ask: it shows where it landed, its file's name over it,
+  // and the reader stays where they are.
+  useLayoutEffect(() => {
+    if (!reveal || !active || revealedRef.current === reveal.serial) {
+      return
     }
-  }, [active, columns, current])
+
+    // The whole cell, its number under the paper included.
+    const cell = cellOf(reveal.pageNumber)?.closest("li")
+    const before = cell?.previousElementSibling
+
+    revealedRef.current = reveal.serial
+
+    if (cell) {
+      bringIntoView(
+        cell,
+        "smooth",
+        before instanceof HTMLElement && before.dataset.sectionHeader !== undefined ? before : null,
+      )
+    }
+  }, [active, bringIntoView, cellOf, reveal])
 
   // After the release's render, so the hole is where the pages now stand.
   useLayoutEffect(() => {
@@ -576,6 +658,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         settlingRef.current = false
         setDrag(null)
         setLanding(null)
+        setCarriedOut(false)
       })
   }, [landing])
 
@@ -587,6 +670,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         return
       }
 
+      cursorRef.current = { pageNumber, pages: pagesRef.current }
       onSelectPage(pageNumber, modifiers)
 
       if (!modifiers.range && !modifiers.toggle) {
@@ -595,6 +679,75 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     },
     [onNavigate, onSelectPage],
   )
+
+  // An arrow key takes the choice to the page beside it, or the row above or
+  // below, and the reader with it; with Shift it stretches the choice there
+  // instead, the reader left where they are. From the page last chosen
+  // while a choice stands, else from the page being read.
+  const moveChoice = (key: string, extend: boolean) => {
+    const papers = Array.from(
+      columnRef.current?.querySelectorAll<HTMLElement>("[data-thumbnail-page]") ?? [],
+    )
+
+    if (papers.length === 0 || drag !== null || ghost !== null) {
+      return false
+    }
+
+    const cursor = cursorRef.current
+    const chosen = selectionRef.current
+    // Among other pages it still holds while it is chosen: a turn replaces
+    // the pages and keeps their places, and the choice with them.
+    const from =
+      cursor &&
+      chosen.size > 0 &&
+      (cursor.pages === pagesRef.current || chosen.has(cursor.pageNumber))
+        ? cursor.pageNumber
+        : current
+    const numbers = papers.map((paper) => Number(paper.dataset.thumbnailPage))
+    const at = numbers.indexOf(from)
+    const forward = key === "ArrowDown" || key === "ArrowRight"
+    let next = -1
+
+    if (at < 0) {
+      // Folded away: the nearest page that shows, the way the key points.
+      next = forward
+        ? numbers.findIndex((pageNumber) => pageNumber > from)
+        : numbers.reduce((last, pageNumber, index) => (pageNumber < from ? index : last), -1)
+    } else if (key === "ArrowLeft" || key === "ArrowRight") {
+      next = at + (forward ? 1 : -1)
+    } else {
+      next = rowNeighbour(
+        papers.map((paper) => (paper.closest("li") ?? paper).getBoundingClientRect()),
+        at,
+        forward ? 1 : -1,
+      )
+    }
+
+    const paper = papers[next]
+    const target = numbers[next]
+
+    if (!paper || target === undefined) {
+      return false
+    }
+
+    if (extend) {
+      // A range reaches from where the choice began: with none, from here.
+      if (selectionRef.current.size === 0 && at >= 0) {
+        onSelectPage(from, PLAIN)
+      }
+
+      onSelectPage(target, { range: true, toggle: false })
+      bringIntoView(paper, "smooth")
+    } else {
+      onSelectPage(target, PLAIN)
+      onNavigate(target, true)
+    }
+
+    cursorRef.current = { pageNumber: target, pages: pagesRef.current }
+    paper.focus({ preventScroll: true })
+
+    return true
+  }
 
   // A file's name chooses its every page, and goes to the first under it.
   const selectFile = (
@@ -608,6 +761,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
     const modifiers = { range: event.shiftKey, toggle: event.ctrlKey || event.metaKey }
 
+    cursorRef.current = { pageNumber: first, pages: pagesRef.current }
     onSelectPages(pagesOfSection(pagesRef.current, section), modifiers)
 
     if (!modifiers.range && !modifiers.toggle) {
@@ -691,10 +845,15 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       const home = beside() && !stripSpotAt(point)
 
       if (!home && carry && carried) {
-        carrying = true
+        if (!carrying) {
+          carrying = true
+          setCarriedOut(true)
+        }
+
         carry.move(carried, point)
       } else if (carrying) {
         carrying = false
+        setCarriedOut(false)
         carry?.cancel()
       }
 
@@ -899,13 +1058,25 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     menuLast = Math.max(menuLast, pageNumber)
   }
 
+  // The file the pages in hand would join, let go where they stand: the one
+  // the release itself will name. In place, a file's last pages keep it.
+  const liveDrag = drag?.basis === pages && drag.at !== null ? drag : null
+  const heldJoins =
+    liveDrag &&
+    !(
+      order.every((pageNumber, index) => pageNumber === index + 1) &&
+      emptiesItsFile(pages, liveDrag.moving)
+    )
+      ? liveDrag.joins
+      : undefined
+
   // Each file's name heads its first page, once the document has several and
   // the reader keeps them apart; pages in hand stand among others for now.
   const byFile = fileRows && sections.length > 1
   const titles = new Map(sections.map((section) => [section.id, section.title]))
   const moving = new Set(drag?.basis === pages ? drag.moving : [])
   const { blanks, blankAfterCarried } = previewBlanks({
-    drag: drag?.basis === pages && drag.at !== null ? drag : null,
+    drag: liveDrag ? { joins: heldJoins, moving: liveDrag.moving } : null,
     incoming:
       incomingAt !== null && incoming
         ? { at: incomingAt, joins: incoming.joins, sizes: incoming.carried.sizes }
@@ -928,6 +1099,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     byFile,
     folded: foldedFiles,
     held: moving,
+    joins: heldJoins,
     order,
     pages,
   })
@@ -961,7 +1133,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         flipKey={foldedBarKey(keyOf(first))}
         folded={run !== undefined}
         // In hand whole: pages let go into a folded file leave its name up.
-        hole={run?.every((pageNumber) => holes.has(keyOf(pageNumber))) === true}
+        hole={!carriedOut && run?.every((pageNumber) => holes.has(keyOf(pageNumber))) === true}
         // One key folded or not, so the arrow pressed keeps the focus.
         key={`heading-${keyOf(first)}`}
         onFold={(folded) => onFoldFiles([section], folded)}
@@ -985,9 +1157,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     )
   }
 
+  // None chosen, the bar and the keys take the page being read, unless it is
+  // folded away under its file's name: nothing is turned or removed unseen.
+  const readingUnseen =
+    selectedPages.size === 0 && foldedAway(pages, current, foldedFiles, byFile)
   const barTargets =
     selectedPages.size === 0
-      ? { count: 1, first: current, of: numPages }
+      ? { count: 1, first: current, of: numPages, unseen: readingUnseen }
       : { count: selectedPages.size, first: lowestPage(selectedPages), of: numPages }
 
   return (
@@ -1101,17 +1277,32 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     return
                   }
 
-                  const first = lowestPage(selectionRef.current)
+                  if (event.key === "Delete" || event.key === "Backspace") {
+                    const first = lowestPage(selectionRef.current)
+                    // None chosen, the page being read: what the bar's own
+                    // button takes.
+                    const target = Number.isFinite(first) ? first : readingUnseen ? null : current
+
+                    if (target !== null) {
+                      event.preventDefault()
+                      // A focused preview leaves with its page, and a removed
+                      // element fires no blur: the column keeps the focus instead.
+                      event.currentTarget.focus({ preventScroll: true })
+                      onDeletePage(target)
+                    }
+
+                    return
+                  }
 
                   if (
-                    (event.key === "Delete" || event.key === "Backspace") &&
-                    Number.isFinite(first)
+                    ARROW_KEYS.has(event.key) &&
+                    !event.altKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    moveChoice(event.key, event.shiftKey)
                   ) {
+                    // The column's own scroll would otherwise answer the key too.
                     event.preventDefault()
-                    // A focused preview leaves with its page, and a removed
-                    // element fires no blur: the column keeps the focus instead.
-                    event.currentTarget.focus({ preventScroll: true })
-                    onDeletePage(first)
                   }
                 }}
                 onPointerDown={startDrag}
@@ -1186,11 +1377,18 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                 const key = keyOf(pageNumber)
                 const carriedAhead =
                   incomingAt !== null && index >= incomingAt ? incoming!.carried.pages.length : 0
+                const heading =
+                  item.heads === undefined ? null : fileHeading(item.heads, pageNumber)
+                // Pages carried in that would join this file stand under its
+                // name, as they will once let go, not over it.
+                const under =
+                  heading !== null && holesHere !== null && incoming?.joins === item.heads
 
                 return [
+                  under ? heading : null,
                   holesHere,
                   blankAfterHoles,
-                  item.heads === undefined ? null : fileHeading(item.heads, pageNumber),
+                  under ? null : heading,
                   <PageCell
                     // Where the page stands in a drag's preview, as it will once
                     // the pages land.
@@ -1198,7 +1396,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     documentId={documentId}
                     flipKey={key}
                     grid={grid}
-                    hole={holes.has(key) || arrived.has(key)}
+                    hole={(holes.has(key) && !carriedOut) || arrived.has(key)}
                     intrinsicRotation={page.rotation}
                     isCurrent={current === pageNumber}
                     isCut={cutPages.has(pageNumber)}
@@ -1237,9 +1435,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
               count={menuCount}
               // A document keeps one page; the backend refuses a delete of them all.
               deleteDisabled={menuCount >= numPages}
-              onCopy={onCopyPages}
-              onCut={onCutPages}
+              onCopy={() => onCopyPages(menuPages)}
+              onCut={() => onCutPages(menuPages)}
               onDelete={() => onDeletePage(menuPage)}
+              onExtract={() =>
+                onExtractPages([...menuPages].sort((left, right) => left - right))
+              }
               onInsertBlank={(side) =>
                 onInsertBlankPage(
                   side === "before" ? menuFirst : menuLast + 1,
@@ -1318,7 +1519,8 @@ function previewBlanks({
   pages,
   smartPadding,
 }: {
-  drag: ColumnDrag | null
+  /** The pages in hand, and the file a release where they stand leaves them in. */
+  drag: { joins?: number; moving: number[] } | null
   /** Files held over the pages, which would land after page `at`. */
   files: { at: number; smartPadding: boolean } | null
   incoming: { at: number; joins?: number; sizes: CarriedPages["sizes"] } | null
@@ -1334,9 +1536,7 @@ function previewBlanks({
   }
 
   if (drag) {
-    const moved = order.some((pageNumber, index) => pageNumber !== index + 1)
-    // As the release decides it: in place, a file's last pages keep their file.
-    const joins = !moved && emptiesItsFile(pages, drag.moving) ? undefined : drag.joins
+    const { joins } = drag
     const held = new Set(drag.moving)
     const files = order.map((pageNumber) =>
       joins !== undefined && held.has(pageNumber) ? joins : pages[pageNumber - 1]!.section,

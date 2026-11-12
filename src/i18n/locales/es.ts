@@ -220,6 +220,7 @@ const es = {
     pageStatus: "Página {{current}} de {{total}}",
     pageNumberInput: "Número de página",
     rotateView: "Girar la vista en sentido horario",
+    rotateViewHint: "Girar la vista en sentido horario (no modifica el archivo)",
     viewControls: "Controles de vista",
     zoomOut: "Alejar",
     zoomIn: "Acercar",
@@ -494,8 +495,6 @@ const es = {
     cut_other: "Cortar {{count}} páginas",
     copy_one: "Copiar página",
     copy_other: "Copiar {{count}} páginas",
-    rotate_one: "Girar página",
-    rotate_other: "Girar {{count}} páginas",
     rotateLeft_one: "Girar la página a la izquierda",
     rotateLeft_other: "Girar {{count}} páginas a la izquierda",
     rotateRight_one: "Girar la página a la derecha",
@@ -525,6 +524,9 @@ const es = {
     rotatePageLeft: "Girar la página {{pageNumber}} a la izquierda",
     rotatePageRight: "Girar la página {{pageNumber}} a la derecha",
     deletePage: "Eliminar la página {{pageNumber}}",
+    deleteKeepsOne: "Un documento conserva al menos una página: no se pueden eliminar todas",
+    pageFolded:
+      "La página {{pageNumber}} está contraída bajo el nombre de su archivo. Expanda el archivo para girarla o eliminarla",
   },
   files: {
     sourceFilter: "PDF, imágenes y documentos de Word",
@@ -540,6 +542,10 @@ const es = {
     skipped_other: "Se omitieron {{count}} archivos que no son PDF, imágenes ni documentos de Word: {{names}}.",
     mergeFailed: "No se pudieron combinar estos archivos en un PDF nuevo.",
     changed: "Un archivo cambió en el disco después de leerse. Vuelva a añadirlo para tomarlo tal como está ahora.",
+    added_one: "Se añadió {{count}} archivo, a partir de la página {{at}}",
+    added_other: "Se añadieron {{count}} archivos, a partir de la página {{at}}",
+    combined:
+      "Guardado como un solo PDF. Sus archivos ya no se pueden organizar uno a uno y los cambios anteriores ya no se pueden deshacer.",
   },
   bookmarks: {
     title: "Marcadores",
@@ -554,7 +560,7 @@ const es = {
     dropFilesAtEnd: "Suelta para añadirlos al final de este documento",
     dropMerge: "Suelta para combinarlos en un PDF nuevo",
     files: "Archivos",
-    fileRows: "Empezar cada archivo en una fila nueva",
+    fileRows: "Agrupar las páginas por archivo",
     smartPadding: "Empezar cada archivo en una página impar",
     fileBookmarks: "Añadir un marcador por cada archivo",
     paddingPage: "Una página en blanco que se añade al guardar para que el siguiente archivo empiece en página impar",

@@ -1,4 +1,4 @@
-import { RotateCw } from "lucide-react"
+import { RotateCwSquare } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { PageStatus } from "@/components/PageStatus"
@@ -53,11 +53,18 @@ export function ViewerControls({
       <StatusBarDivider />
       <ZoomControls zoom={zoom} />
       <StatusBarDivider />
-      {/* Turns only the way the pages are looked at (D2); the sidebar's
-          previews turn the pages themselves. */}
-      <ToolbarTooltip label={rotateLabel}>
-        <Button aria-label={rotateLabel} onClick={onRotate} size="icon-sm" variant="ghost">
-          <RotateCw />
+      {/* Turns only the way the pages are looked at (D2); the sidebar's bar
+          turns the pages themselves, under the plain arrow this one must not
+          be taken for: its hint says the file stays as it is. */}
+      <ToolbarTooltip label={t("statusBar.rotateViewHint")}>
+        <Button
+          aria-label={rotateLabel}
+          data-slot="view-rotate"
+          onClick={onRotate}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <RotateCwSquare />
         </Button>
       </ToolbarTooltip>
     </StatusBar>

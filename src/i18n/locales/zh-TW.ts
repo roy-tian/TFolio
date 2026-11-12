@@ -218,6 +218,7 @@ const zhTW = {
     pageStatus: "第 {{current}} 頁，共 {{total}} 頁",
     pageNumberInput: "頁碼",
     rotateView: "順時針旋轉檢視畫面",
+    rotateViewHint: "順時針旋轉檢視畫面（不會變更檔案）",
     viewControls: "檢視控制",
     zoomOut: "縮小",
     zoomIn: "放大",
@@ -490,8 +491,6 @@ const zhTW = {
     cut_other: "剪下 {{count}} 頁",
     copy_one: "複製 {{count}} 頁",
     copy_other: "複製 {{count}} 頁",
-    rotate_one: "旋轉 {{count}} 頁",
-    rotate_other: "旋轉 {{count}} 頁",
     rotateLeft_one: "逆時針旋轉 {{count}} 頁",
     rotateLeft_other: "逆時針旋轉 {{count}} 頁",
     rotateRight_one: "順時針旋轉 {{count}} 頁",
@@ -521,6 +520,9 @@ const zhTW = {
     rotatePageLeft: "逆時針旋轉第 {{pageNumber}} 頁",
     rotatePageRight: "順時針旋轉第 {{pageNumber}} 頁",
     deletePage: "刪除第 {{pageNumber}} 頁",
+    deleteKeepsOne: "文件至少保留一頁，不能全部刪除",
+    pageFolded:
+      "第 {{pageNumber}} 頁收合在檔案名稱下，展開該檔案後才能旋轉或刪除",
   },
   files: {
     sourceFilter: "PDF、圖片和 Word 文件",
@@ -536,6 +538,10 @@ const zhTW = {
     skipped_other: "已略過 {{count}} 個不是 PDF、圖片或 Word 文件的檔案：{{names}}",
     mergeFailed: "無法將這些檔案合併為新的 PDF。",
     changed: "檔案在讀取後已在磁碟上被修改。請重新加入，以使用它現在的內容。",
+    added_one: "已加入 {{count}} 個檔案，從第 {{at}} 頁開始",
+    added_other: "已加入 {{count}} 個檔案，從第 {{at}} 頁開始",
+    combined:
+      "已另存為一個 PDF：各檔案已合併，不能再依檔案調整，先前的變更也不能再復原。",
   },
   bookmarks: {
     title: "書籤",
@@ -550,7 +556,7 @@ const zhTW = {
     dropFilesAtEnd: "放開以加到目前文件末尾",
     dropMerge: "放開以合併為一個新的 PDF",
     files: "檔案",
-    fileRows: "每個檔案另起一行",
+    fileRows: "依檔案分組顯示",
     smartPadding: "每個檔案從奇數頁開始",
     fileBookmarks: "為每個檔案加一個書籤",
     paddingPage: "儲存時補一張空白頁，讓下一個檔案從奇數頁開始",

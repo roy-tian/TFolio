@@ -220,6 +220,7 @@ const de = {
     pageStatus: "Seite {{current}} von {{total}}",
     pageNumberInput: "Seitennummer",
     rotateView: "Ansicht im Uhrzeigersinn drehen",
+    rotateViewHint: "Ansicht im Uhrzeigersinn drehen (Datei bleibt unverändert)",
     viewControls: "Ansichtssteuerung",
     zoomOut: "Verkleinern",
     zoomIn: "Vergrößern",
@@ -495,8 +496,6 @@ const de = {
     cut_other: "{{count}} Seiten ausschneiden",
     copy_one: "Seite kopieren",
     copy_other: "{{count}} Seiten kopieren",
-    rotate_one: "Seite drehen",
-    rotate_other: "{{count}} Seiten drehen",
     rotateLeft_one: "Seite gegen den Uhrzeigersinn drehen",
     rotateLeft_other: "{{count}} Seiten gegen den Uhrzeigersinn drehen",
     rotateRight_one: "Seite im Uhrzeigersinn drehen",
@@ -526,6 +525,9 @@ const de = {
     rotatePageLeft: "Seite {{pageNumber}} gegen den Uhrzeigersinn drehen",
     rotatePageRight: "Seite {{pageNumber}} im Uhrzeigersinn drehen",
     deletePage: "Seite {{pageNumber}} löschen",
+    deleteKeepsOne: "Ein Dokument behält mindestens eine Seite – es lassen sich nicht alle löschen",
+    pageFolded:
+      "Seite {{pageNumber}} ist unter ihrem Dateinamen eingeklappt. Klappen Sie die Datei aus, um sie zu drehen oder zu löschen",
   },
   files: {
     sourceFilter: "PDFs, Bilder und Word-Dokumente",
@@ -541,6 +543,10 @@ const de = {
     skipped_other: "{{count}} Dateien wurden übersprungen, weil sie weder PDFs noch Bilder noch Word-Dokumente sind: {{names}}.",
     mergeFailed: "Diese Dateien konnten nicht zu einem neuen PDF zusammengeführt werden.",
     changed: "Eine Datei hat sich nach dem Einlesen auf dem Datenträger geändert. Fügen Sie sie erneut hinzu, um sie im jetzigen Stand zu übernehmen.",
+    added_one: "{{count}} Datei hinzugefügt, ab Seite {{at}}",
+    added_other: "{{count}} Dateien hinzugefügt, ab Seite {{at}}",
+    combined:
+      "Als eine PDF gespeichert. Ihre Dateien lassen sich nicht mehr einzeln anordnen, und frühere Änderungen lassen sich nicht mehr rückgängig machen.",
   },
   bookmarks: {
     title: "Lesezeichen",
@@ -555,7 +561,7 @@ const de = {
     dropFilesAtEnd: "Ablegen, um sie am Ende dieses Dokuments hinzuzufügen",
     dropMerge: "Ablegen, um sie zu einem neuen PDF zusammenzuführen",
     files: "Dateien",
-    fileRows: "Jede Datei in neuer Zeile beginnen",
+    fileRows: "Seiten nach Datei gruppieren",
     smartPadding: "Jede Datei auf einer ungeraden Seite beginnen",
     fileBookmarks: "Ein Lesezeichen pro Datei anlegen",
     paddingPage: "Eine Leerseite, die beim Speichern eingefügt wird, damit die nächste Datei auf einer ungeraden Seite beginnt",

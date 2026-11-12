@@ -228,6 +228,11 @@ describe("TFolio files added to an open document", () => {
     // Saved only as a new file: the save button is Save As itself.
     await expect($(saveTrigger)).toHaveAttribute("data-save-as-only", "")
     await expect($(saveTrigger)).toBeEnabled()
+    // At the end they may be out of sight: said, and chosen where they landed.
+    await expect($("[data-notice='filesAdded']")).toHaveText(
+      expect.stringContaining("Added 2 files, starting at page 3"),
+    )
+    expect(await chosen()).toEqual([3, 4, 5])
 
     // The files, and each one's bookmarks, where the bookmarks would be.
     await $(`${activeSidebar} button[aria-label='Outline']`).click()
@@ -731,6 +736,15 @@ describe("TFolio files added to an open document", () => {
     await foldAllFiles(true)
     await waitForPages(0)
     expect(await headings()).toEqual(["own.pdf", "first.pdf", "second.pdf"])
+    // None chosen, the bar would take the page being read, the one clicked
+    // above: folded away, it is out of its reach, and the bar says so.
+    const remove = $(`${activeSidebar} [data-slot='pages-delete']`)
+
+    await expect(remove).toBeDisabled()
+    await expect(remove).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("Page 2 is collapsed under its file name"),
+    )
 
     // Folded, the files are a list to put in order.
     await dragOnto(fileName(2), `${activeSidebar} [data-section-header='0']`, "top")
@@ -769,6 +783,27 @@ describe("TFolio files added to an open document", () => {
       async () => (await headings()).join() === "second.pdf,own.pdf,first.pdf",
       { timeout: 15_000, timeoutMsg: "the tree's file never moved to the front" },
     )
+  })
+
+  it("stands a page held between two files under the name of the one it would join", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(4)
+
+    // The document's first page, held at the top of the added file's first:
+    // the name it shows under is the file a release leaves it in.
+    await holdPageBefore(activeSidebar, 1, 3)
+    await browser.waitUntil(
+      async () => (await pageFiles()).join() === "own.pdf,added.pdf,added.pdf,added.pdf",
+      { timeoutMsg: "the held page never showed under the added file's name" },
+    )
+
+    await letGoOfPage()
+    await browser.waitUntil(async () => (await pageCount()) === 4 && !(await holesShow()), {
+      timeout: 15_000,
+      timeoutMsg: "the page never landed",
+    })
+    expect(await pageFiles()).toEqual(["own.pdf", "added.pdf", "added.pdf", "added.pdf"])
   })
 
   it("pastes a cut page in place before the next file's pages into that file", async () => {
@@ -850,6 +885,9 @@ describe("TFolio files added to an open document", () => {
     })
     await waitForPages(3)
     await expect($(saveTrigger)).not.toHaveAttribute("data-save-as-only")
+    // The names over the pages and the undo history went without another
+    // sign: the corner says what the save did.
+    await $("[data-notice='filesCombined']").waitForDisplayed({ timeout: 15_000 })
     await $(`${activeSidebar} button[aria-label='Outline']`).click()
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     await expect(bookmarks).toHaveText(expect.stringContaining("own.pdf"))
@@ -902,6 +940,46 @@ function holdPageAfter(scope: string, from: number, over: number) {
     },
     `${scope} button[data-thumbnail-page='${from}']`,
     `${scope} button[data-thumbnail-page='${over}']`,
+  )
+}
+
+/** As `holdPageAfter`, held at the top of `over`: the gap in front of it. */
+function holdPageBefore(scope: string, from: number, over: number) {
+  return browser.execute(
+    (fromSelector: string, overSelector: string) => {
+      const source = document.querySelector(fromSelector)!
+      const fromBox = source.getBoundingClientRect()
+      const overBox = document.querySelector(overSelector)!.getBoundingClientRect()
+      const start = { x: fromBox.left + fromBox.width / 2, y: fromBox.top + fromBox.height / 2 }
+      const held = { x: overBox.left + overBox.width / 2, y: overBox.top + 6 }
+
+      ;(window as unknown as Window & { __heldAt?: typeof held }).__heldAt = held
+      source.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: start.x,
+          clientY: start.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", { bubbles: true, clientX: start.x, clientY: start.y + 12 }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", { bubbles: true, clientX: held.x, clientY: held.y }),
+      )
+    },
+    `${scope} button[data-thumbnail-page='${from}']`,
+    `${scope} button[data-thumbnail-page='${over}']`,
+  )
+}
+
+/** Whether a page in hand still leaves its place open in the shown sidebar. */
+function holesShow() {
+  return browser.execute(
+    (scope: string) => document.querySelector(`${scope} [data-drag-hole]`) !== null,
+    activeSidebar,
   )
 }
 

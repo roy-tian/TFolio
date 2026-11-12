@@ -22,6 +22,54 @@ export function pageClipboardOf(
   return sorted.length === 0 ? null : { mode, pages: sorted }
 }
 
+/**
+ * The window's one page clipboard: the pages last cut or copied in any of its
+ * documents, by the document they stand in, for another to paste. Page
+ * numbers still, so the document that took them withdraws them as soon as its
+ * pages move. A window is its own WebView, so the module's state is the
+ * window's.
+ */
+export type SharedPages = PageClipboard & {
+  /** A cut pasted into another document: its pages leave the one they were
+      cut in, which is the only one that can take them out. */
+  onMoved: () => void
+  sourceDocumentId: number
+}
+
+let shared: SharedPages | null = null
+const sharedListeners = new Set<() => void>()
+
+export function sharedPages(): SharedPages | null {
+  return shared
+}
+
+export function sharePages(next: SharedPages | null) {
+  if (next === shared) {
+    return
+  }
+
+  shared = next
+
+  for (const listener of [...sharedListeners]) {
+    listener()
+  }
+}
+
+/** A document taking back what it shared, unless another has taken since. */
+export function unsharePages(sourceDocumentId: number) {
+  if (shared?.sourceDocumentId === sourceDocumentId) {
+    sharePages(null)
+  }
+}
+
+export function subscribeSharedPages(listener: () => void) {
+  sharedListeners.add(listener)
+
+  return () => {
+    sharedListeners.delete(listener)
+  }
+}
+
 /** A cut is a move, which the reorder command already makes one undo step
     of; a copy is the document taking its own pages in again. */
 export type PastePlan =

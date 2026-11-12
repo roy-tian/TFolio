@@ -3,10 +3,8 @@ import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { PageTextMenu } from "@/components/PageTextMenu"
 import { RectDraftOverlay } from "@/components/RectDraftOverlay"
 import { TextNotePreview } from "@/components/TextNotePreview"
-import type { CaptureHighlight } from "@/hooks/useHighlightTool"
 import { useNearViewport, ViewportHoldContext } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { useSelectionBands } from "@/hooks/useSelectionBands"
@@ -41,15 +39,11 @@ type IndexedSearchMatch = {
 
 type PdfPageProps = {
   activeSearchIndex: number | null
-  captureHighlight: CaptureHighlight
   documentId: number
   /** Live and released rectangles awaiting this page's pixels: its own only. */
   drafts: RectDraft[]
   /** Written notes awaiting this page's pixels: its own only. */
   notes: HeldNote[]
-  /** Present only while a select-all stands: the page's menu then offers the
-      whole document, which is what is selected, and not this page alone. */
-  onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   page: PdfPageInfo
   pageNumber: number
@@ -66,11 +60,9 @@ type PdfPageProps = {
 
 type PdfPageSurfaceProps = {
   activeSearchIndex: number | null
-  captureHighlight: CaptureHighlight
   documentId: number
   drafts: RectDraft[]
   notes: HeldNote[]
-  onCopyAllText?: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
   footprintHeight: number
   footprintWidth: number
@@ -90,11 +82,9 @@ type PdfPageSurfaceProps = {
     store, extracted text, and annotation preview instead of retaining them. */
 const PdfPageSurface = memo(function PdfPageSurface({
   activeSearchIndex,
-  captureHighlight,
   documentId,
   drafts,
   notes,
-  onCopyAllText,
   onPagePaint,
   footprintHeight,
   footprintWidth,
@@ -336,12 +326,10 @@ const PdfPageSurface = memo(function PdfPageSurface({
           </div>
         ) : null}
         {hasRendered && textSpans.length > 0 ? (
-          <PageTextMenu
-            captureHighlight={captureHighlight}
-            onCopyAll={onCopyAllText}
-            style={pageLayerStyle}
-            textLayerRef={textLayerRef}
-          />
+          // Filled by `buildTextLayer`: React owns none of the spans, so it
+          // never reconciles a fragmented page's thousands. What a press on
+          // them offers is the viewer's own menu (`ViewerMenu`).
+          <div className="pdf-text-layer select-text" ref={textLayerRef} style={pageLayerStyle} />
         ) : null}
       </div>
       {!hasRendered && !renderFailed ? (
@@ -373,11 +361,9 @@ const PdfPageSurface = memo(function PdfPageSurface({
 
 export const PdfPage = memo(function PdfPage({
   activeSearchIndex,
-  captureHighlight,
   documentId,
   drafts,
   notes,
-  onCopyAllText,
   onPagePaint,
   page,
   pageNumber,
@@ -432,11 +418,9 @@ export const PdfPage = memo(function PdfPage({
         >
           <PdfPageSurface
             activeSearchIndex={activeSearchIndex}
-            captureHighlight={captureHighlight}
             documentId={documentId}
             drafts={drafts}
             notes={notes}
-            onCopyAllText={onCopyAllText}
             onPagePaint={onPagePaint}
             footprintHeight={footprintHeight}
             footprintWidth={footprintWidth}

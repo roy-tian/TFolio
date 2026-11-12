@@ -5,6 +5,10 @@ import {
   formatPageRanges,
   pageClipboardOf,
   pastePlan,
+  sharePages,
+  sharedPages,
+  subscribeSharedPages,
+  unsharePages,
 } from "@/lib/pageClipboard"
 
 describe("pageClipboardOf", () => {
@@ -95,5 +99,41 @@ describe("formatPageRanges", () => {
     expect(formatPageRanges([1, 3, 5, 7, 9, 11, 13, 15])).toBe(
       "1, 3, 5, 7, 9, 11…",
     )
+  })
+})
+
+describe("the window's shared pages", () => {
+  const taken = (sourceDocumentId: number) => ({
+    mode: "copy" as const,
+    onMoved: () => {},
+    pages: [2, 3],
+    sourceDocumentId,
+  })
+
+  it("holds the last pages any document took, and says when they change", () => {
+    let told = 0
+    const stop = subscribeSharedPages(() => {
+      told += 1
+    })
+
+    sharePages(taken(1))
+    expect(sharedPages()?.sourceDocumentId).toBe(1)
+    sharePages(taken(2))
+    expect(sharedPages()?.sourceDocumentId).toBe(2)
+    expect(told).toBe(2)
+
+    stop()
+    sharePages(null)
+    expect(told).toBe(2)
+  })
+
+  it("lets a document take back only what is still its own", () => {
+    sharePages(taken(1))
+    sharePages(taken(2))
+
+    unsharePages(1)
+    expect(sharedPages()?.sourceDocumentId).toBe(2)
+    unsharePages(2)
+    expect(sharedPages()).toBeNull()
   })
 })

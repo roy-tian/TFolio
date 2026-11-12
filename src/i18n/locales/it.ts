@@ -220,6 +220,7 @@ const it = {
     pageStatus: "Pagina {{current}} di {{total}}",
     pageNumberInput: "Numero di pagina",
     rotateView: "Ruota la vista in senso orario",
+    rotateViewHint: "Ruota la vista in senso orario (il file non cambia)",
     viewControls: "Controlli di visualizzazione",
     zoomOut: "Zoom indietro",
     zoomIn: "Zoom avanti",
@@ -493,8 +494,6 @@ const it = {
     cut_other: "Taglia {{count}} pagine",
     copy_one: "Copia pagina",
     copy_other: "Copia {{count}} pagine",
-    rotate_one: "Ruota pagina",
-    rotate_other: "Ruota {{count}} pagine",
     rotateLeft_one: "Ruota la pagina in senso antiorario",
     rotateLeft_other: "Ruota {{count}} pagine in senso antiorario",
     rotateRight_one: "Ruota la pagina in senso orario",
@@ -524,6 +523,9 @@ const it = {
     rotatePageLeft: "Ruota la pagina {{pageNumber}} in senso antiorario",
     rotatePageRight: "Ruota la pagina {{pageNumber}} in senso orario",
     deletePage: "Elimina la pagina {{pageNumber}}",
+    deleteKeepsOne: "Un documento conserva almeno una pagina: non si possono eliminare tutte",
+    pageFolded:
+      "La pagina {{pageNumber}} è compressa sotto il nome del suo file. Espandi il file per ruotarla o eliminarla",
   },
   files: {
     sourceFilter: "PDF, immagini e documenti Word",
@@ -539,6 +541,10 @@ const it = {
     skipped_other: "{{count}} file sono stati saltati perché non sono PDF, immagini o documenti Word: {{names}}.",
     mergeFailed: "Impossibile unire questi file in un nuovo PDF.",
     changed: "Un file è cambiato sul disco dopo essere stato letto. Aggiungilo di nuovo per prenderlo com’è ora.",
+    added_one: "{{count}} file aggiunto, a partire da pagina {{at}}",
+    added_other: "{{count}} file aggiunti, a partire da pagina {{at}}",
+    combined:
+      "Salvato come un unico PDF. I suoi file non si possono più disporre uno per uno e le modifiche precedenti non si possono più annullare.",
   },
   bookmarks: {
     title: "Segnalibri",
@@ -553,7 +559,7 @@ const it = {
     dropFilesAtEnd: "Rilascia per aggiungerli alla fine di questo documento",
     dropMerge: "Rilascia per unirli in un nuovo PDF",
     files: "File",
-    fileRows: "Inizia ogni file su una nuova riga",
+    fileRows: "Raggruppa le pagine per file",
     smartPadding: "Inizia ogni file su una pagina dispari",
     fileBookmarks: "Aggiungi un segnalibro per ogni file",
     paddingPage: "Una pagina bianca aggiunta al salvataggio perché il file successivo inizi su una pagina dispari",

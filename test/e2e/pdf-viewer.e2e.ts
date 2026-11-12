@@ -1038,10 +1038,12 @@ describe("TFolio PDF viewer", () => {
       }
     })
 
-    // Nothing selected: the menu would have no entry to show, so the
-    // right-click opens nothing at all rather than an empty popup.
+    // Nothing selected: nothing of the text to offer, only what the page
+    // pressed offers of itself.
     await rightClick(".pdf-text-layer span")
-    await browser.pause(500)
+    await $("[data-action='rotate-pages']").waitForDisplayed({ timeout: 15_000 })
+    await expect($("[data-action='copy-text']")).not.toExist()
+    await browser.keys("Escape")
     await expect($("[data-slot='context-menu-content']")).not.toExist()
 
     const selected = await browser.execute(() => {

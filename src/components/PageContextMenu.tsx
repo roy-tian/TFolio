@@ -1,6 +1,7 @@
 import {
   ClipboardPaste,
   Copy,
+  FilePlus2,
   Pencil,
   RotateCcw,
   RotateCw,
@@ -22,39 +23,53 @@ import {
 /** Before the first of the menu's pages, or after the last. */
 export type PageMenuSide = "before" | "after"
 
-type PageMenuContentProps = {
+export type PageMenuActions = {
   canPaste: boolean
-  /** The pages the menu acts on: the selection, which a right-click outside it
-      has already moved to the page under the pointer. */
+  /** The pages the menu acts on: in the sidebar the selection, which a
+      right-click outside it has already moved to the page under the pointer;
+      in the reading view the page pressed, alone. */
   count: number
   deleteDisabled?: boolean
   onCopy: () => void
   onCut: () => void
   onDelete: () => void
+  /** The pages as a new PDF of their own, in a tab beside this one. */
+  onExtract: () => void
   onInsertBlank: (side: PageMenuSide) => void
   onPaste: (side: PageMenuSide) => void
   onRotate: (degrees: 90 | 270) => void
 }
 
 /** A page's right-click menu in the sidebar, which also acts on a choice. */
-export function PageMenuContent({
+export function PageMenuContent(props: PageMenuActions) {
+  return (
+    <ContextMenuContent>
+      <PageMenuItems {...props} />
+    </ContextMenuContent>
+  )
+}
+
+/** What a page offers, wherever it is pressed: among the sidebar's pages, or
+    in the reading view under what the text there offers. */
+export function PageMenuItems({
   canPaste,
   count,
   deleteDisabled = false,
   onCopy,
   onCut,
   onDelete,
+  onExtract,
   onInsertBlank,
   onPaste,
   onRotate,
-}: PageMenuContentProps) {
+}: PageMenuActions) {
   const { t } = useTranslation()
 
   return (
-    <ContextMenuContent>
+    <>
       <ContextMenuItem data-action="rotate-pages" onClick={() => onRotate(90)}>
         <RotateCw />
-        {t("pageEdit.rotate", { count })}
+        {t("pageEdit.rotateRight", { count })}
       </ContextMenuItem>
       <ContextMenuItem data-action="rotate-pages-left" onClick={() => onRotate(270)}>
         <RotateCcw />
@@ -102,6 +117,11 @@ export function PageMenuContent({
         {t("pageEdit.insertBlankAfter")}
       </ContextMenuItem>
       <ContextMenuSeparator />
+      <ContextMenuItem data-action="extract-pages" onClick={onExtract}>
+        <FilePlus2 />
+        {t("tabs.newFromPages", { count })}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
       <ContextMenuItem
         data-action="delete-pages"
         disabled={deleteDisabled}
@@ -111,7 +131,7 @@ export function PageMenuContent({
         <Trash2 />
         {t("pageEdit.delete", { count })}
       </ContextMenuItem>
-    </ContextMenuContent>
+    </>
   )
 }
 

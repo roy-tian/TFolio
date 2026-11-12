@@ -344,6 +344,19 @@ export const noticeCatalogue = {
     textKey: "files.changed",
     tone: "warning",
   },
+  // Where the files went: at the document's end they land out of sight.
+  filesAdded: {
+    life: "transient",
+    textKey: "files.added",
+    tone: "info",
+  },
+  // A Save As of several files leaves one: said, since the names over the
+  // pages and the undo history go without another sign.
+  filesCombined: {
+    life: "transient",
+    textKey: "files.combined",
+    tone: "info",
+  },
   // Standing for as long as the conversion runs; the open retracts it.
   wordConverting: {
     life: "standing",

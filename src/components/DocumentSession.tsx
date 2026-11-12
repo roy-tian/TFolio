@@ -32,16 +32,19 @@ import {
   spreadPagesOf,
   spreadTurnTarget,
 } from "@/lib/padding"
+import type { PageMenuActions } from "@/components/PageContextMenu"
 import { PageThumbnails, type PageThumbnailsHandle } from "@/components/PageThumbnails"
 import { AddFilesButton } from "@/components/SidebarPanelTools"
 import { TextNoteEditor } from "@/components/TextNoteEditor"
 import { ViewerControls } from "@/components/ViewerControls"
+import { ViewerMenu } from "@/components/ViewerMenu"
 import { ZoomIndicator } from "@/components/ZoomIndicator"
 import type { AnnotationTool } from "@/components/AnnotationToolbar"
 import { useAnnotations, type SignedChange } from "@/hooks/useAnnotations"
 import { createCurrentPage } from "@/hooks/useCurrentPage"
 import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useDocumentNotices, type NoticeChannel } from "@/hooks/useNotices"
+import { usePageCarryContext } from "@/hooks/usePageCarry"
 import { usePageClipboard } from "@/hooks/usePageClipboard"
 import { usePrint } from "@/hooks/usePrint"
 import type { AskSignatures } from "@/hooks/useSignaturePrompt"
@@ -94,7 +97,7 @@ import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import { NO_FOLDS, sectionOutlineKey, type OutlineFolds } from "@/lib/outlineFolds"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
-import { fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
+import { fileMoveOrder, foldedAway, pagesOfSection } from "@/lib/pageSections"
 import {
   answerSourceSignatures,
   readFileSources,
@@ -506,6 +509,42 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     })
     const clearThumbnailSelection = thumbnailSelection.clear
     const deselectPages = thumbnailSelection.deselect
+    const selectPageGroup = thumbnailSelection.selectGroup
+    // A page an edit has just put in the document, for the sidebar's pages to
+    // bring into view where it landed.
+    const [reveal, setReveal] = useState<{ pageNumber: number; serial: number } | null>(null)
+    // Read as an edit lands, which is ahead of the render that shows it.
+    const pagesShownRef = useRef({ fileRows: sidebar.fileRows, foldedFiles, thumbnailsShown })
+
+    pagesShownRef.current = { fileRows: sidebar.fileRows, foldedFiles, thumbnailsShown }
+
+    // Pages a paste or an add has just put in: chosen, as what the reader
+    // acts on next, and shown where they landed, which may be out of sight.
+    // Only where pages are chosen at all, in the sidebar's previews, and not
+    // those landed in a file folded to its name: none is acted on unseen.
+    const showLanded = useCallback(
+      (landed: number[]) => {
+        const first = landed[0]
+        const current = documentRef.current
+        const shown = pagesShownRef.current
+
+        if (first === undefined || !current || !shown.thumbnailsShown) {
+          return
+        }
+
+        const byFile = shown.fileRows && (current.sections?.length ?? 0) > 1
+        const seen = landed.filter(
+          (pageNumber) => !foldedAway(current.pages, pageNumber, shown.foldedFiles, byFile),
+        )
+
+        if (seen.length > 0) {
+          selectPageGroup(seen, { range: false, toggle: false })
+        }
+
+        setReveal((last) => ({ pageNumber: first, serial: (last?.serial ?? 0) + 1 }))
+      },
+      [selectPageGroup],
+    )
     const foldFiles = useCallback(
       (sectionIds: readonly number[], folded: boolean) => {
         setFoldedFiles((current) => {
@@ -538,11 +577,32 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     )
     // The paste's own work needs the history below, which is set up after this;
     // the hook only ever calls it from a keypress, by which time it is here.
-    const pastePagesRef = useRef<(index: number) => void>(() => {})
+    const pasteAfterRef = useRef<(after: number) => void>(() => {})
+    // So does taking out a cut another document pasted.
+    const movedAwayRef = useRef<(pages: number[]) => void>(() => {})
+    // None chosen, the clipboard's keys take the page being read, as the bar
+    // over the pages does — but not one folded away under its file's name.
+    const readingChoice = () => {
+      const pageNumber = currentPage.get()
+
+      return foldedAway(
+        pdfDocument.pages,
+        pageNumber,
+        foldedFiles,
+        sidebar.fileRows && severalFiles,
+      )
+        ? null
+        : pageNumber
+    }
+
     const pageClipboard = usePageClipboard({
       active: active && thumbnailsShown && pageKeys,
+      documentId: pdfDocument.id,
+      // New each render: the hook reads the latest as a key asks.
+      fallbackPage: readingChoice,
       onCutCancelled: useCallback(() => notice.retract(["pagesCut"]), [notice]),
-      onPaste: useCallback((index: number) => pastePagesRef.current(index), []),
+      onMovedAway: useCallback((pages: number[]) => movedAwayRef.current(pages), []),
+      onPaste: useCallback((after: number) => pasteAfterRef.current(after), []),
       onTaken: useCallback(
         (taken: PageClipboard) =>
           notice.raise(taken.mode === "cut" ? "pagesCut" : "pagesCopied", {
@@ -1148,6 +1208,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             notice.raise("filesChanged")
           }
 
+          // At the end, or wherever they were let go, they may be out of
+          // sight: said, chosen, and shown where they landed.
+          if (landed === true) {
+            const first = before < 0 ? current.numPages + 1 : before + 1
+            const added = read.filter((info) => info.id !== undefined)
+            const pages = added.reduce((total, info) => total + info.pages.length, 0)
+
+            notice.raise("filesAdded", { values: { at: first, count: added.length } })
+            showLanded(Array.from({ length: pages }, (_, offset) => first + offset))
+          }
+
           if (landed === true && answers.asSet) {
             notice.raise(
               answers.asSet === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet",
@@ -1161,7 +1232,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           releaseFileSources(read)
         }
       },
-      [annotations, fileName, notice, notices],
+      [annotations, fileName, notice, notices, showLanded],
     )
 
     // The backend's own dialog, which also approves the chosen files for reading.
@@ -1235,6 +1306,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     const pageOps = useThumbnailPageOps({
       annotations,
+      onPagesLanded: showLanded,
       pageClipboard,
       pdfDocument,
       notice,
@@ -1897,9 +1969,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             : hasSourceFile
               ? undefined
               : t("annotate.saveNoSource")
+    // With no file of its own to write back to, or holding other files'
+    // pages, a document has only a new file to go to: its save button is
+    // Save As, as its key is.
+    const saveAsOnly = !hasSourceFile || hasForeignPages
     // The toolbar's button has only its tooltip to carry the reason, so a
-    // disabled save names it there rather than repeating the action's name.
-    const saveLabel = !canSave && saveHint ? saveHint : t("annotate.save")
+    // save that cannot write back names it there rather than repeating the
+    // action's name. A document never written anywhere has none to give.
+    const saveLabel = !hasSourceFile
+      ? t("menu.saveAs")
+      : !canSave && saveHint
+        ? saveHint
+        : t("annotate.save")
 
     // The toolbar's and menu's action, refusal included: a watermarked
     // document, or one holding copies of such pages, may only ever be exported
@@ -1916,7 +1997,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const saveFromKey = useCallback(() => {
       if (canSave) {
         void annotations.save()
-      } else if (!hasSourceFile || hasForeignPages) {
+      } else if (saveAsOnly) {
         // Where the save control itself is Save As, so is its key.
         void exportPdf()
       } else if (hasOwnedContent) {
@@ -1930,11 +2011,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       annotations,
       canSave,
       exportPdf,
-      hasForeignPages,
       hasMergedPages,
       hasOwnedContent,
-      hasSourceFile,
       notice,
+      saveAsOnly,
       signedOriginal,
     ])
 
@@ -1984,8 +2064,28 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     }, [canSave, onSavableChange, openedDocument.id])
 
     // Armed when the paste handler lands, so a keypress ahead of the render
-    // still pastes what the clipboard holds.
-    pastePagesRef.current = pastePages
+    // still pastes what the clipboard holds: after the page, into its file.
+    pasteAfterRef.current = (after) =>
+      pastePages(after + 1, pdfDocument.pages[after - 1]?.section)
+    // A cut made here and pasted into another document: its pages go, one
+    // undo away. Only while nothing is under way: the numbers name the pages
+    // as they stood, and an edit in flight is about to move them.
+    movedAwayRef.current = (pages) => {
+      // What the cut said is no longer so, wherever the pages end up.
+      notice.retract(["pagesCut"])
+
+      if (annotations.isStructureBusyNow() || annotations.hasPendingWorkNow()) {
+        pageClipboard.release()
+        return
+      }
+
+      void annotations.deletePages(pages, pdfDocument.numPages).then((landed) => {
+        // Every page it has, which a document keeps: the cut is let go.
+        if (!landed) {
+          pageClipboard.release()
+        }
+      })
+    }
 
     useImperativeHandle(
       ref,
@@ -2084,13 +2184,51 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       scrollToPage(pageNumber)
     }
 
+    // A press goes to its page and lets an overlay sidebar go; a key stays,
+    // since the sidebar is where its next press is read.
     const navigateFromSidebar = useCallback(
-      (pageNumber: number) => {
+      (pageNumber: number, stay = false) => {
         scrollToPage(pageNumber)
-        sidebar.dismiss()
+
+        if (!stay) {
+          sidebar.dismiss()
+        }
       },
       [scrollToPage, sidebar],
     )
+
+    const carry = usePageCarryContext()
+    // The pages as a new PDF of their own, as letting them go on the tab
+    // strip's open space makes one.
+    const extractPages = (pages: number[]) => {
+      if (pages.length === 0 || annotations.isStructureBusyNow()) {
+        return
+      }
+
+      carry?.newDocument({ pages, sourceDocumentId: pdfDocument.id })
+    }
+
+    const canPastePages = clipboard !== null || pageClipboard.foreign !== null
+    // A page pressed in the reading view: that page alone, whatever the
+    // sidebar has chosen, which may not even show.
+    const viewerPageMenu = (pageNumber: number): PageMenuActions => {
+      const section = pdfDocument.pages[pageNumber - 1]?.section
+      const place = (side: "before" | "after") => (side === "before" ? pageNumber : pageNumber + 1)
+
+      return {
+        canPaste: canPastePages,
+        count: 1,
+        // A document keeps one page; the backend refuses a delete of them all.
+        deleteDisabled: pdfDocument.numPages <= 1,
+        onCopy: () => pageClipboard.copyPages([pageNumber]),
+        onCut: () => pageClipboard.cutPages([pageNumber]),
+        onDelete: () => deleteThumbnailPage(pageNumber, true),
+        onExtract: () => extractPages([pageNumber]),
+        onInsertBlank: (side) => insertBlankPage(place(side), section),
+        onPaste: (side) => pastePages(place(side), section),
+        onRotate: (degrees) => rotateOnePage(pageNumber, degrees),
+      }
+    }
 
     const appMenu = (
       <AppMenu
@@ -2143,7 +2281,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
           onSearchClose={search.closeSearch}
-          saveAsOnly={hasForeignPages}
+          saveAsOnly={saveAsOnly}
           onSearchOpen={openSearch}
           onSplit={() => setSplitOpen(true)}
           onToolChange={chooseTool}
@@ -2170,7 +2308,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
-              canPaste={clipboard !== null}
+              canPaste={canPastePages}
               folds={outlineFolds}
               onFoldsChange={setOutlineFolds}
               onMove={moveFile}
@@ -2194,7 +2332,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             <PageThumbnails
               active={active}
               busy={annotations.isBusy}
-              canPaste={clipboard !== null}
+              canPaste={canPastePages}
               currentPage={currentPage}
               cutPages={cutThumbnailPages}
               documentId={pdfDocument.id}
@@ -2202,9 +2340,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               fileRows={sidebar.fileRows}
               foldedFiles={foldedFiles}
               isEditingNow={annotations.isStructureBusyNow}
-              onCopyPages={pageClipboard.copy}
-              onCutPages={pageClipboard.cut}
+              onCopyPages={pageClipboard.copyPages}
+              onCutPages={pageClipboard.cutPages}
               onDeletePage={deleteThumbnailPage}
+              onExtractPages={extractPages}
               onFileOptionsChange={changeFileOptions}
               onFileRowsChange={sidebar.setFileRows}
               onFocusChange={setThumbnailsFocused}
@@ -2228,6 +2367,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               parkedPreviews={parkedPreviews}
               ref={thumbnailsRef}
               renderEpochs={annotations.renderEpochs}
+              reveal={reveal}
               sections={sections}
               selectedPages={thumbnailSelection.selectedPages}
               thumbnailKeys={thumbnailKeys}
@@ -2313,12 +2453,20 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           <div className="relative min-w-0 flex-1">
             {/* Text drags focus this from script, which can inherit a text
                 field's focus ring; it is never a Tab stop, so it needs none. */}
-            <main
-              className="pdf-scroll-viewport overlay-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
-              data-pdf-scroll-root
-              data-tool-cursor={toolCursor}
-              ref={viewerRef}
-              tabIndex={-1}
+            <ViewerMenu
+              captureHighlight={highlightTool.captureSelection}
+              onCopyAllText={textSelectAll.selectedAll ? copyDocumentText : undefined}
+              pageMenu={viewerPageMenu}
+              pages={pdfDocument.pages}
+              viewer={
+                <main
+                  className="pdf-scroll-viewport overlay-scroll-viewport workspace-background relative w-full overflow-auto outline-none"
+                  data-pdf-scroll-root
+                  data-tool-cursor={toolCursor}
+                  ref={viewerRef}
+                  tabIndex={-1}
+                />
+              }
             >
               <div
                 aria-hidden
@@ -2343,9 +2491,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                     ? null
                     : (search.matches[search.activeIndex]?.pageNumber ?? null)
                 }
-                onCopyAllText={copyDocumentText}
                 onDismissPadding={() => changeFileOptions({ smartPadding: false })}
-                captureHighlight={highlightTool.captureSelection}
                 textEpochs={annotations.textEpochs}
                 textSelectAll={textSelectAll.selectedAll}
                 textSelectionDragging={highlightTool.selectionDragging}
@@ -2355,7 +2501,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 zoomPreviewing={zoom.zoomPreviewing}
                 zoomRequest={zoom.zoomRequest}
               />
-            </main>
+            </ViewerMenu>
             <OverlayScrollbars viewportRef={viewerRef} />
             <ZoomIndicator flash={zoom.zoomAnnouncement} percent={zoom.zoomPercent} />
             <ViewerControls

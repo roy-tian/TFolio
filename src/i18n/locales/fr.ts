@@ -220,6 +220,7 @@ const fr = {
     pageStatus: "Page {{current}} sur {{total}}",
     pageNumberInput: "Numéro de page",
     rotateView: "Faire pivoter l’affichage dans le sens horaire",
+    rotateViewHint: "Faire pivoter l’affichage dans le sens horaire (sans modifier le fichier)",
     viewControls: "Commandes d’affichage",
     zoomOut: "Zoom arrière",
     zoomIn: "Zoom avant",
@@ -494,8 +495,6 @@ const fr = {
     cut_other: "Couper {{count}} pages",
     copy_one: "Copier la page",
     copy_other: "Copier {{count}} pages",
-    rotate_one: "Faire pivoter la page",
-    rotate_other: "Faire pivoter {{count}} pages",
     rotateLeft_one: "Faire pivoter la page vers la gauche",
     rotateLeft_other: "Faire pivoter {{count}} pages vers la gauche",
     rotateRight_one: "Faire pivoter la page vers la droite",
@@ -526,6 +525,9 @@ const fr = {
     rotatePageLeft: "Faire pivoter la page {{pageNumber}} vers la gauche",
     rotatePageRight: "Faire pivoter la page {{pageNumber}} vers la droite",
     deletePage: "Supprimer la page {{pageNumber}}",
+    deleteKeepsOne: "Un document garde au moins une page : impossible de les supprimer toutes",
+    pageFolded:
+      "La page {{pageNumber}} est réduite sous le nom de son fichier. Développez le fichier pour la faire pivoter ou la supprimer",
   },
   files: {
     sourceFilter: "PDF, images et documents Word",
@@ -541,6 +543,10 @@ const fr = {
     skipped_other: "{{count}} fichiers ont été ignorés, car ce ne sont ni des PDF, ni des images, ni des documents Word : {{names}}.",
     mergeFailed: "Impossible de combiner ces fichiers en un nouveau PDF.",
     changed: "Un fichier a changé sur le disque après sa lecture. Ajoutez-le à nouveau pour le prendre tel qu’il est maintenant.",
+    added_one: "{{count}} fichier ajouté, à partir de la page {{at}}",
+    added_other: "{{count}} fichiers ajoutés, à partir de la page {{at}}",
+    combined:
+      "Enregistré en un seul PDF. Ses fichiers ne peuvent plus être organisés un à un et les modifications précédentes ne peuvent plus être annulées.",
   },
   bookmarks: {
     title: "Signets",
@@ -555,7 +561,7 @@ const fr = {
     dropFilesAtEnd: "Déposez pour les ajouter à la fin de ce document",
     dropMerge: "Déposez pour les combiner en un nouveau PDF",
     files: "Fichiers",
-    fileRows: "Commencer chaque fichier sur une nouvelle ligne",
+    fileRows: "Regrouper les pages par fichier",
     smartPadding: "Commencer chaque fichier sur une page impaire",
     fileBookmarks: "Ajouter un signet par fichier",
     paddingPage: "Une page blanche ajoutée à l’enregistrement pour que le fichier suivant commence sur une page impaire",

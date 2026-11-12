@@ -13,6 +13,9 @@ export type CarriedPages = {
   sourceDocumentId: number
 }
 
+/** What a new PDF takes of them: asked for by name, no ghost shows them. */
+export type ExtractedPages = Pick<CarriedPages, "pages" | "sourceDocumentId">
+
 /** Long enough that crossing the strip opens nothing, short enough to read as
     an answer. */
 export const TAB_SPRING_MS = 600

@@ -384,6 +384,17 @@ describe("TFolio sidebar pages", () => {
 
     await browser.keys(["Control", "z"])
     await browser.waitUntil(async () => (await pageCount()) === 4)
+
+    // Every page chosen: a document keeps one, and the button says so.
+    for (const pageNumber of [1, 2, 3, 4]) {
+      await pressControl(pageNumber, "[data-page-action='toggle']")
+    }
+
+    await expect(bar("delete")).toBeDisabled()
+    await expect(bar("delete")).toHaveAttribute(
+      "aria-label",
+      "A document keeps at least one page, so they cannot all be deleted",
+    )
   })
 
   it("lets a plain click's choice go once the reader reads on, keeping the ticked", async () => {

@@ -22,15 +22,18 @@ export type FlowItem =
 /**
  * The pages as their flow shows them: each a cell, a file's name before the
  * first of its run, and a folded file's run as one bar under its name. Pages
- * in hand stand among the others under no name, and folded ones in hand are
- * a bar of their own. A bar ends where `breakAt`, a place in `order`, falls:
- * what lands there stands in front of it, never inside.
+ * in hand stand under the name of the file a release would leave them in,
+ * `joins` or else their own: between two files, the name over the place
+ * they would land says which. Folded ones in hand are a bar of their own. A
+ * bar ends where `breakAt`, a place in `order`, falls: what lands there
+ * stands in front of it, never inside.
  */
 export function flowItems({
   breakAt,
   byFile,
   folded,
   held,
+  joins,
   order,
   pages,
 }: {
@@ -39,6 +42,9 @@ export function flowItems({
   byFile: boolean
   folded: ReadonlySet<number>
   held: ReadonlySet<number>
+  /** The file the pages in hand join, let go where they stand; absent, each
+      keeps its own. */
+  joins?: number
   order: readonly number[]
   pages: readonly PdfPageInfo[]
 }): FlowItem[] {
@@ -47,20 +53,20 @@ export function flowItems({
   let bar: Extract<FlowItem, { kind: "bar" }> | null = null
 
   order.forEach((pageNumber, index) => {
-    const section = pages[pageNumber - 1]?.section
+    const own = pages[pageNumber - 1]?.section
     const inHand = held.has(pageNumber)
 
-    if (byFile && section !== undefined && folded.has(section)) {
-      if (bar && bar.section === section && bar.held === inHand && index !== breakAt) {
+    if (byFile && own !== undefined && folded.has(own)) {
+      if (bar && bar.section === own && bar.held === inHand && index !== breakAt) {
         bar.pages.push(pageNumber)
         return
       }
 
-      bar = { held: inHand, index, kind: "bar", pages: [pageNumber], section }
+      bar = { held: inHand, index, kind: "bar", pages: [pageNumber], section: own }
       items.push(bar)
 
       if (!inHand) {
-        headed = section
+        headed = own
       }
 
       return
@@ -68,7 +74,12 @@ export function flowItems({
 
     bar = null
 
-    const heads = byFile && !inHand && section !== headed ? section : undefined
+    const section = inHand && joins !== undefined ? joins : own
+    // A folded file's name is its bar: a page joining it stands beside that.
+    const heads =
+      byFile && section !== undefined && section !== headed && !folded.has(section)
+        ? section
+        : undefined
 
     if (heads !== undefined) {
       headed = heads

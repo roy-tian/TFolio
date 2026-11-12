@@ -14,6 +14,7 @@ import {
   orderAfterMove,
   orderWithBlockAt,
   pagesBeforeSlot,
+  rowNeighbour,
   slotOfPages,
   wayOffsets,
 } from "@/lib/pageDrag"
@@ -307,5 +308,33 @@ describe("nearestBox", () => {
     expect(nearestBox({ x: 40, y: 135 }, boxes)).toBe(1)
     expect(nearestBox({ x: 300, y: 105 }, boxes)).toBe(0)
     expect(nearestBox({ x: 0, y: 0 }, [])).toBe(-1)
+  })
+})
+
+describe("the cell a row away", () => {
+  const cell = (left: number, top: number) => ({ height: 184, left, top, width: 160 })
+  // Three across, a file's name between the rows, then a short last row.
+  const rows = [cell(0, 0), cell(184, 0), cell(368, 0), cell(0, 240), cell(184, 240), cell(0, 480)]
+
+  it("goes straight down or up where a cell stands there", () => {
+    expect(rowNeighbour(rows, 1, 1)).toBe(4)
+    expect(rowNeighbour(rows, 4, -1)).toBe(1)
+  })
+
+  it("takes the nearest cell of a shorter row", () => {
+    expect(rowNeighbour(rows, 2, 1)).toBe(4)
+    expect(rowNeighbour(rows, 4, 1)).toBe(5)
+  })
+
+  it("stops at the first row and the last", () => {
+    expect(rowNeighbour(rows, 0, -1)).toBe(-1)
+    expect(rowNeighbour(rows, 5, 1)).toBe(-1)
+  })
+
+  it("steps page by page down one column", () => {
+    const column = [cell(0, 0), cell(0, 200), cell(0, 400)]
+
+    expect(rowNeighbour(column, 0, 1)).toBe(1)
+    expect(rowNeighbour(column, 2, -1)).toBe(1)
   })
 })

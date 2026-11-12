@@ -71,7 +71,7 @@ describe("flowItems", () => {
       { heads: 1, index: 0, kind: "page", pageNumber: 3 },
       { heads: undefined, index: 1, kind: "page", pageNumber: 4 },
       { held: true, index: 2, kind: "bar", pages: [1, 2, 6], section: 0 },
-      // Still under its own name: pages in hand head nothing.
+      // Still under its own name: a bar in hand starts no run of its own.
       { heads: undefined, index: 5, kind: "page", pageNumber: 5 },
     ])
   })
@@ -111,6 +111,66 @@ describe("flowItems", () => {
       [3],
       [4, 5],
       6,
+    ])
+  })
+
+  test("stands pages in hand under the name of the file they would join", () => {
+    // File 0's first page held between its second and file 1's first.
+    const at = { breakAt: null, byFile: true, folded: NONE, held: new Set([1]), pages }
+    const order = [2, 1, 3, 4, 5, 6]
+
+    // Joining file 1, its name moves up over the page in hand.
+    expect(flowItems({ ...at, joins: 1, order }).slice(0, 3)).toEqual([
+      { heads: 0, index: 0, kind: "page", pageNumber: 2 },
+      { heads: 1, index: 1, kind: "page", pageNumber: 1 },
+      { heads: undefined, index: 2, kind: "page", pageNumber: 3 },
+    ])
+    // Staying file 0's, it stands over that name.
+    expect(flowItems({ ...at, joins: 0, order }).slice(0, 3)).toEqual([
+      { heads: 0, index: 0, kind: "page", pageNumber: 2 },
+      { heads: undefined, index: 1, kind: "page", pageNumber: 1 },
+      { heads: 1, index: 2, kind: "page", pageNumber: 3 },
+    ])
+  })
+
+  test("keeps a file in hand under its own name, and parts the file it lands in", () => {
+    // File 1 held whole, let go between file 0's first two pages.
+    const items = flowItems({
+      breakAt: null,
+      byFile: true,
+      folded: NONE,
+      held: new Set([3, 4, 5]),
+      order: [1, 3, 4, 5, 2, 6],
+      pages,
+    })
+
+    expect(items.map((item) => (item.kind === "page" ? item.heads : "bar"))).toEqual([
+      0,
+      1,
+      undefined,
+      undefined,
+      0,
+      undefined,
+    ])
+  })
+
+  test("names no folded file over a page that would join it", () => {
+    // File 0's last page held in front of file 1, which is folded.
+    const items = flowItems({
+      breakAt: null,
+      byFile: true,
+      folded: new Set([1]),
+      held: new Set([6]),
+      joins: 1,
+      order: [1, 2, 6, 3, 4, 5],
+      pages,
+    })
+
+    expect(items).toEqual([
+      { heads: 0, index: 0, kind: "page", pageNumber: 1 },
+      { heads: undefined, index: 1, kind: "page", pageNumber: 2 },
+      { heads: undefined, index: 2, kind: "page", pageNumber: 6 },
+      { held: false, index: 3, kind: "bar", pages: [3, 4, 5], section: 1 },
     ])
   })
 })

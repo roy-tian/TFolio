@@ -52,8 +52,9 @@ type SessionHeaderProps = {
   onRedo: () => void
   onUndo: () => void
   saveLabel: string
-  /** A document other files were added to saves only to a new file, so its
-      save button is Save As itself, its key with it. */
+  /** A document with no file of its own, or one other files were added to,
+      saves only to a new file: its save button is Save As itself, its key
+      with it. */
   saveAsOnly: boolean
   searchOpen: boolean
   tool: {

@@ -8,6 +8,7 @@ import {
   bandedPdf,
   clickAppMenuItem,
   closeAppMenu,
+  contextMenuAction,
   openPathViaDialog,
   openPdfFromDisk,
   pressRedo,
@@ -301,6 +302,16 @@ const tabButton = (name: string) =>
 
 const pageInput = () => $("input[aria-label='Page number']")
 
+const saveTrigger = "[data-document-session][data-active='true'] [data-slot='pdf-save-trigger']"
+
+/** Focus in the column with no page pressed: where the keys are the pages'
+    while nothing is chosen. */
+function focusColumn() {
+  return browser.execute((scope: string) => {
+    document.querySelector<HTMLElement>(`${scope} [data-slot='sidebar-thumbnails']`)!.focus()
+  }, activeSidebar)
+}
+
 describe("TFolio page editing in the sidebar", () => {
   beforeEach(async () => {
     await seedSettings({ ui: { language: "en", viewMode: "single" } })
@@ -376,6 +387,73 @@ describe("TFolio page editing in the sidebar", () => {
     await browser.waitUntil(async () => (await thumbCount()) === 2)
   })
 
+  it("takes the page being read with the Delete and clipboard keys while none is chosen", async () => {
+    await openPdfFromDisk("reading-keys.pdf", bandedPdf(3))
+    const [, second, third] = await paintedFingerprints(3)
+
+    // What the bar over the pages names, the keys take too: page 1.
+    await focusColumn()
+    await browser.keys("Delete")
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the Delete key never took the page being read",
+    })
+    await waitForThumb(1, second!)
+
+    await browser.keys(["Control", "c"])
+    await $("[data-notice='pagesCopied']").waitForDisplayed()
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the paste never landed after the page being read",
+    })
+    await waitForThumb(1, second!)
+    await waitForThumb(2, second!)
+    await waitForThumb(3, third!)
+    expect(await selectedThumbs()).toEqual([2])
+  })
+
+  it("moves the choice with the arrow keys, and stretches it with Shift", async () => {
+    await openPdfFromDisk("arrows.pdf", bandedPdf(4))
+    await paintedFingerprints(4)
+
+    await clickThumb(1)
+    await browser.keys("ArrowDown")
+    await browser.waitUntil(async () => (await selectedThumbs()).join() === "2", {
+      timeoutMsg: "the arrow never took the choice to the next page",
+    })
+    // The reader goes with a plain arrow, as with a click.
+    await expect(pageInput()).toHaveValue("2")
+
+    await browser.keys(["Shift", "ArrowDown"])
+    await browser.waitUntil(async () => (await selectedThumbs()).join() === "2,3", {
+      timeoutMsg: "Shift never stretched the choice",
+    })
+    // Stretching the choice leaves the reader where they are.
+    await expect(pageInput()).toHaveValue("2")
+
+    await browser.keys("ArrowUp")
+    await browser.waitUntil(async () => (await selectedThumbs()).join() === "2", {
+      timeoutMsg: "the arrow never left the far end of the choice",
+    })
+  })
+
+  it("offers a page its menu in the reading view, for that page alone", async () => {
+    await openPdfFromDisk("reading-menu.pdf", bandedPdf(3))
+    await paintedFingerprints(3)
+
+    // A choice in the sidebar is no part of it.
+    await clickThumb(2)
+    await clickThumb(3, { ctrl: true })
+    await contextMenuAction(
+      "[data-document-session][data-active='true'] [data-page-number='1']",
+      "rotate-pages",
+    )
+    await browser.waitUntil(async () => (await thumbShape(1)) === "landscape", {
+      timeoutMsg: "the page pressed in the reading view never turned",
+    })
+    expect(await thumbShape(2)).toBe("portrait")
+    expect(await thumbShape(3)).toBe("portrait")
+  })
+
   it("inserts blank pages before and after a page", async () => {
     await openPdfFromDisk("blank.pdf", bandedPdf(2))
     const [first, second] = await paintedFingerprints(2)
@@ -391,7 +469,7 @@ describe("TFolio page editing in the sidebar", () => {
     await waitForThumb(4, 0)
   })
 
-  it("cuts a page and pastes it before another as one move", async () => {
+  it("cuts a page and pastes it after another as one move", async () => {
     await openPdfFromDisk("cut.pdf", bandedPdf(3))
     const [first, second, third] = await paintedFingerprints(3)
 
@@ -401,8 +479,8 @@ describe("TFolio page editing in the sidebar", () => {
     await clickThumb(1)
     await browser.keys(["Control", "v"])
 
-    await waitForThumb(1, third!)
-    await waitForThumb(2, first!)
+    await waitForThumb(1, first!)
+    await waitForThumb(2, third!)
     await waitForThumb(3, second!)
 
     await browser.keys(["Control", "z"])
@@ -410,7 +488,7 @@ describe("TFolio page editing in the sidebar", () => {
     await waitForThumb(3, third!)
   })
 
-  it("copies a page and pastes the copy before another", async () => {
+  it("copies a page and pastes the copy after another, chosen where it landed", async () => {
     await openPdfFromDisk("copy.pdf", bandedPdf(2))
     const [first, second] = await paintedFingerprints(2)
 
@@ -422,13 +500,22 @@ describe("TFolio page editing in the sidebar", () => {
 
     await browser.waitUntil(async () => (await thumbCount()) === 3)
     await waitForThumb(1, first!)
-    await waitForThumb(2, first!)
-    await waitForThumb(3, second!)
-
-    // Pasting after the last page is the one way past the end.
-    await sidebarPageAction(3, "paste-pages-after")
+    await waitForThumb(2, second!)
+    await waitForThumb(3, first!)
+    // The copy is the choice now: the key pastes again after it.
+    await expect($(`${activeSidebar} button[data-thumbnail-page='3']`)).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await browser.keys(["Control", "v"])
     await browser.waitUntil(async () => (await thumbCount()) === 4)
     await waitForThumb(4, first!)
+
+    // The menu's other entry is the one way in front of the first page.
+    await sidebarPageAction(1, "paste-pages-before")
+    await browser.waitUntil(async () => (await thumbCount()) === 5)
+    await waitForThumb(1, first!)
+    await waitForThumb(2, first!)
   })
 
   it("takes a cut back with Esc, wherever the focus is", async () => {
@@ -763,6 +850,8 @@ describe("TFolio pages carried to other documents", () => {
     await $("[data-new-document-offer]").waitForDisplayed({
       timeoutMsg: "the strip never offered a new PDF",
     })
+    // Copied, never taken: carried out, the pages show where they stand.
+    await expect($(`${activeSidebar} [data-drag-hole]`)).not.toBeExisting()
     await pointerAt("pointerup", space)
 
     await expect(tabButton("Pages from extract-source.pdf")).toHaveAttribute(
@@ -778,10 +867,73 @@ describe("TFolio pages carried to other documents", () => {
     await expect(
       $("button[role='tab'][aria-selected='true'] [aria-label='Unsaved changes']"),
     ).toBeExisting()
+    // With no file of its own to write back to, its save button is Save As.
+    await expect($(saveTrigger)).toHaveAttribute("data-save-as-only", "")
+    await expect($(saveTrigger)).toBeEnabled()
 
     await tabButton("extract-source.pdf").click()
     await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the source lost pages",
+    })
+  })
+
+  it("makes a new PDF of the chosen pages from their menu", async () => {
+    await openPdfFromDisk("menu-extract.pdf", bandedPdf(3))
+    const [first, , third] = await paintedFingerprints(3)
+
+    await clickThumb(1)
+    await clickThumb(3, { ctrl: true })
+    await sidebarPageAction(3, "extract-pages")
+
+    await expect(tabButton("Pages from menu-extract.pdf")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the new PDF never showed its pages",
+    })
+    await waitForThumb(1, first!)
+    await waitForThumb(2, third!)
+  })
+
+  it("pastes pages copied in another tab, and takes pages cut there out of it", async () => {
+    await openPdfFromDisk("paste-target.pdf", textPdf(2))
+    await paintedFingerprints(2)
+    await openPdfFromDisk("paste-source.pdf", bandedPdf(3))
+    const [sourceFirst, sourceSecond] = await paintedFingerprints(3)
+
+    await clickThumb(2)
+    await browser.keys(["Control", "c"])
+    await $("[data-notice='pagesCopied']").waitForDisplayed()
+    await tabButton("paste-target.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the other tab never showed",
+    })
+    await clickThumb(1)
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the copy never crossed to the other document",
+    })
+    await waitForThumb(2, sourceSecond!)
+
+    // A cut is a move: pasted there, the page leaves the document it was cut in.
+    await tabButton("paste-source.pdf").click()
+    await expect(tabButton("paste-source.pdf")).toHaveAttribute("aria-selected", "true")
+    await clickThumb(1)
+    await browser.keys(["Control", "x"])
+    await $("[data-notice='pagesCut']").waitForDisplayed()
+    await tabButton("paste-target.pdf").click()
+    await expect(tabButton("paste-target.pdf")).toHaveAttribute("aria-selected", "true")
+    await clickThumb(1)
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the cut page never crossed to the other document",
+    })
+    await waitForThumb(2, sourceFirst!)
+
+    await tabButton("paste-source.pdf").click()
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the cut page never left the document it was cut in",
     })
   })
 

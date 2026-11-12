@@ -13,6 +13,7 @@ import {
   stripSpotAt,
   TAB_SPRING_MS,
   type CarriedPages,
+  type ExtractedPages,
   type Point,
   type StripSpot,
 } from "@/lib/pageCarry"
@@ -44,6 +45,8 @@ export type PageCarry = {
   /** Null where nothing takes the pages: they stay where they were. */
   drop: (carried: CarriedPages, point: Point) => CarryLanding | null
   move: (carried: CarriedPages, point: Point) => void
+  /** The pages as a new PDF, with no drag to the strip: asked for by name. */
+  newDocument: (pages: ExtractedPages) => void
   register: (target: CarryTarget) => () => void
 }
 
@@ -65,7 +68,7 @@ type UsePageCarryOptions = {
       once they have landed at its end, or been refused. */
   onAppend: (tabId: number, carried: CarriedPages) => Promise<unknown> | null
   /** Settles once the pages' new PDF has opened as a tab, or failed to. */
-  onNewDocument: (carried: CarriedPages) => Promise<unknown>
+  onNewDocument: (pages: ExtractedPages) => Promise<unknown>
 }
 
 /** The tab a release would add the held pages to the end of. */
@@ -261,6 +264,7 @@ export function usePageCarry({
         retarget(target)
         target?.over(carried, point)
       },
+      newDocument: (pages) => void actionsRef.current.onNewDocument(pages),
       register: (target) => {
         targetsRef.current.add(target)
 

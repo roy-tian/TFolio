@@ -115,6 +115,9 @@
   read while half of it shows and the view moves under a quarter of its height
   (`pickReadingPage`). An in-place edit that clamps the scroll, and a zoom's or resize's
   re-anchoring, call `reland`; an edit that renumbers the pages calls `renumbered`.
+- The reading view has one right-click menu (`ViewerMenu`), for a page's text and for the page
+  pressed: a Base UI context-menu trigger stops the event where it lands, so a trigger on each
+  page's text would take every press from one around it.
 - Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
   worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
   pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
@@ -173,22 +176,33 @@
   pages, its tree of files (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list
   a file once per run, its own bookmarks under the first; rename, remove, choose, fold and drag
   act on the file whole.
+- Pages in hand show under the name of the file a release would leave them in (`flowItems`'
+  `joins`): between two files, the preview is the result.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
-  then the tab reopens the written file, its history gone. A compressed copy compresses what a
-  Save As writes (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which
-  the engine reports as `splitsByBookmarks`.
+  then the tab reopens the written file, its history gone, which the corner says
+  (`filesCombined`). A compressed copy compresses what a Save As writes (`combined_bytes`), and a
+  split by bookmarks cuts at the outline it writes, which the engine reports as
+  `splitsByBookmarks`.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
   print show them there, and only a Save As writes them. Structure commands never see them. A
   drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
   step with `SectionBook::padding`).
 - The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
-  fixed-size cells once widened (`ui.sidebarWidth`). The bar over them turns and deletes the
-  chosen pages, else the page being read; a plain click's choice lapses once another page is
-  the page being read, so nothing is acted on out of sight. The pages and the bookmarks (the
-  tree of files, for several) are both there for every document: which shows is the window's
-  layout, never a matter of what the document holds.
+  fixed-size cells once widened (`ui.sidebarWidth`). The bar over them, and the Delete and
+  clipboard keys, act on the chosen pages, else the page being read, never on one folded away; a
+  plain click's choice lapses once another page is the page being read, so nothing is acted on out
+  of sight. Pages a paste or an add brings are chosen and shown where they landed (`showLanded`),
+  the reader left where they are. The pages and the bookmarks (the tree of files, for several) are
+  both there for every document: which shows is the window's layout, never a matter of what the
+  document holds.
+- The page clipboard is the window's (`sharePages`): the last pages cut or copied in any of
+  its documents, as that document's page numbers, which it withdraws at its next structure
+  edit. Another document pastes them as copies; a cut pasted there is then deleted by the
+  document it was made in, one undo in each.
+- A document with no file of its own has Save As for its save button and key, as one holding
+  foreign pages has (`saveAsOnly`); the menu's Save stays disabled.
 - A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,
   `flowItems`): a drop lands above or below it, never inside. `flowLanding` counts cells, so
   every landing goes through `pagesBeforeSlot` before it names a page. Folding is a tab's own

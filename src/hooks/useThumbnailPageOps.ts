@@ -10,6 +10,9 @@ import { emptiesItsFile, reorderSections, sectionAt } from "@/lib/pageSections"
 
 type UseThumbnailPageOpsOptions = {
   annotations: ReturnType<typeof useAnnotations>
+  /** Pages a paste has just put in the document, by their numbers now: the
+      owner chooses them and brings them into view. */
+  onPagesLanded: (pages: number[]) => void
   pageClipboard: ReturnType<typeof usePageClipboard>
   pdfDocument: PdfDocumentInfo
   notice: DocumentNotices
@@ -23,6 +26,7 @@ type UseThumbnailPageOpsOptions = {
  */
 export function useThumbnailPageOps({
   annotations,
+  onPagesLanded,
   pageClipboard,
   pdfDocument,
   notice,
@@ -41,15 +45,17 @@ export function useThumbnailPageOps({
   }
 
   // On a chosen page a delete takes the whole choice with it; on any other
-  // page, that page alone. No confirmation: the delete is one undo away.
-  const deleteThumbnailPage = (pageNumber: number) => {
+  // page, or asked for `alone` from the reading view, that page only. No
+  // confirmation: the delete is one undo away.
+  const deleteThumbnailPage = (pageNumber: number, alone = false) => {
     if (!pdfDocument || editingBusy()) {
       return
     }
 
-    const pages = thumbnailSelection.selectedPages.has(pageNumber)
-      ? [...thumbnailSelection.selectedPages]
-      : [pageNumber]
+    const pages =
+      !alone && thumbnailSelection.selectedPages.has(pageNumber)
+        ? [...thumbnailSelection.selectedPages]
+        : [pageNumber]
 
     void annotations.deletePages(pages, pdfDocument.numPages)
   }
@@ -92,9 +98,15 @@ export function useThumbnailPageOps({
     )
   }
 
+  /** Only an idle queue: a copy waiting behind other work would read the
+      source's pages by numbers the reader may have changed meanwhile. */
+  const canTakeCarriedPages = () => !editingBusy() && !annotations.hasPendingWorkNow()
+
   /**
    * A cut is a move, one undo step by way of the reorder command; a copy stays
-   * on the clipboard, following the pages its own insert pushed down.
+   * on the clipboard, following the pages its own insert pushed down. Pages
+   * another of the window's documents holds come in as copies, as a drag from
+   * its tab brings them, and a cut then leaves the document it was made in.
    */
   const pastePages = (index: number, section?: number) => {
     if (!pdfDocument || editingBusy()) {
@@ -102,6 +114,36 @@ export function useThumbnailPageOps({
     }
 
     const joins = section ?? sectionAt(pdfDocument.pages, index)
+    const { foreign } = pageClipboard
+
+    if (foreign) {
+      if (!canTakeCarriedPages() || index < 1 || index > pdfDocument.numPages + 1) {
+        return
+      }
+
+      const count = foreign.pages.length
+      const at = index <= pdfDocument.numPages ? index : undefined
+
+      void annotations
+        .insertPages(foreign.sourceDocumentId, foreign.pages, index, pdfDocument.numPages, joins)
+        .then((landed) => {
+          if (!landed) {
+            return
+          }
+
+          notice.raise(at === undefined ? "pagesPastedToEnd" : "pagesPasted", {
+            values: at === undefined ? { count } : { at, count },
+          })
+          onPagesLanded(Array.from({ length: count }, (_, offset) => index + offset))
+
+          if (foreign.mode === "cut") {
+            foreign.onMoved()
+          }
+        })
+
+      return
+    }
+
     const clipboard = pageClipboard.clipboard
     const pages = pdfDocument.pages
     // A cut let go where it stands, but among another file's pages, moves no
@@ -136,9 +178,14 @@ export function useThumbnailPageOps({
         )
         .then((landed) => {
           if (landed) {
+            const moved = new Set(plan.pages)
+
             notice.raise(
               at === undefined ? "pagesMovedToEnd" : "pagesMoved",
               { values: at === undefined ? { count } : { at, count } },
+            )
+            onPagesLanded(
+              plan.order.flatMap((pageNumber, place) => (moved.has(pageNumber) ? [place + 1] : [])),
             )
           }
         })
@@ -157,6 +204,7 @@ export function useThumbnailPageOps({
             at === undefined ? "pagesPastedToEnd" : "pagesPasted",
             { values: at === undefined ? { count } : { at, count } },
           )
+          onPagesLanded(Array.from({ length: count }, (_, offset) => index + offset))
         } else {
           pageClipboard.disarmPaste()
         }
@@ -171,10 +219,6 @@ export function useThumbnailPageOps({
           order,
           reorderSections(pdfDocument.pages, order, new Set(moving), section),
         )
-
-  /** Only an idle queue: a copy waiting behind other work would read the
-      source's pages by numbers the reader may have changed meanwhile. */
-  const canTakeCarriedPages = () => !editingBusy() && !annotations.hasPendingWorkNow()
 
   /** Another tab's pages dragged in: copies, one undo step like a paste. */
   const insertCarriedPages = (carried: CarriedPages, index: number, section?: number) =>

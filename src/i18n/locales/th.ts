@@ -220,6 +220,7 @@ const th = {
     pageStatus: "หน้า {{current}} จาก {{total}}",
     pageNumberInput: "เลขหน้า",
     rotateView: "หมุนมุมมองตามเข็มนาฬิกา",
+    rotateViewHint: "หมุนมุมมองตามเข็มนาฬิกา (ไม่เปลี่ยนแปลงไฟล์)",
     viewControls: "การควบคุมมุมมอง",
     zoomOut: "ซูมออก",
     zoomIn: "ซูมเข้า",
@@ -493,8 +494,6 @@ const th = {
     cut_other: "ตัด {{count}} หน้า",
     copy_one: "คัดลอก {{count}} หน้า",
     copy_other: "คัดลอก {{count}} หน้า",
-    rotate_one: "หมุน {{count}} หน้า",
-    rotate_other: "หมุน {{count}} หน้า",
     rotateLeft_one: "หมุน {{count}} หน้าทวนเข็มนาฬิกา",
     rotateLeft_other: "หมุน {{count}} หน้าทวนเข็มนาฬิกา",
     rotateRight_one: "หมุน {{count}} หน้าตามเข็มนาฬิกา",
@@ -524,6 +523,9 @@ const th = {
     rotatePageLeft: "หมุนหน้าที่ {{pageNumber}} ทวนเข็มนาฬิกา",
     rotatePageRight: "หมุนหน้าที่ {{pageNumber}} ตามเข็มนาฬิกา",
     deletePage: "ลบหน้าที่ {{pageNumber}}",
+    deleteKeepsOne: "เอกสารต้องมีอย่างน้อยหนึ่งหน้า จึงลบทั้งหมดไม่ได้",
+    pageFolded:
+      "หน้าที่ {{pageNumber}} ถูกยุบอยู่ใต้ชื่อไฟล์ ขยายไฟล์ก่อนจึงจะหมุนหรือลบได้",
   },
   files: {
     sourceFilter: "PDF รูปภาพ และเอกสาร Word",
@@ -539,6 +541,10 @@ const th = {
     skipped_other: "ข้าม {{count}} ไฟล์ที่ไม่ใช่ PDF รูปภาพ หรือเอกสาร Word: {{names}}",
     mergeFailed: "ไม่สามารถรวมไฟล์เหล่านี้เป็น PDF ใหม่ได้",
     changed: "ไฟล์มีการเปลี่ยนแปลงบนดิสก์หลังจากอ่านแล้ว เพิ่มไฟล์อีกครั้งเพื่อใช้ฉบับปัจจุบัน",
+    added_one: "เพิ่ม {{count}} ไฟล์แล้ว เริ่มที่หน้าที่ {{at}}",
+    added_other: "เพิ่ม {{count}} ไฟล์แล้ว เริ่มที่หน้าที่ {{at}}",
+    combined:
+      "บันทึกเป็น PDF ไฟล์เดียวแล้ว จัดเรียงทีละไฟล์ไม่ได้อีก และเลิกทำการแก้ไขก่อนหน้าไม่ได้แล้ว",
   },
   bookmarks: {
     title: "บุ๊กมาร์ก",
@@ -553,7 +559,7 @@ const th = {
     dropFilesAtEnd: "วางเพื่อเพิ่มต่อท้ายเอกสารนี้",
     dropMerge: "วางเพื่อรวมเป็น PDF ใหม่",
     files: "ไฟล์",
-    fileRows: "เริ่มแต่ละไฟล์ในแถวใหม่",
+    fileRows: "จัดกลุ่มหน้าตามไฟล์",
     smartPadding: "เริ่มแต่ละไฟล์ที่หน้าคี่",
     fileBookmarks: "เพิ่มบุ๊กมาร์กสำหรับแต่ละไฟล์",
     paddingPage: "หน้าว่างที่เพิ่มเมื่อบันทึก เพื่อให้ไฟล์ถัดไปเริ่มที่หน้าคี่",

@@ -373,3 +373,43 @@ export function nearestBox(
 
   return nearest
 }
+
+/** The cell a row away from cell `at`, the one nearest it across: where an
+    up or down arrow goes among cells flowing in rows, or down one column.
+    -1 past the first row or the last. */
+export function rowNeighbour(boxes: readonly Box[], at: number, direction: 1 | -1): number {
+  const from = boxes[at]
+
+  if (!from) {
+    return -1
+  }
+
+  // Cells of one row share a top; a name between two rows is no cell here.
+  const sameRow = (left: Box, right: Box) =>
+    Math.abs(left.top - right.top) < Math.min(left.height, right.height) / 2
+  const centre = (box: Box) => box.left + box.width / 2
+  let index = at + direction
+
+  while (boxes[index] && sameRow(boxes[index]!, from)) {
+    index += direction
+  }
+
+  const row = boxes[index]
+
+  if (!row) {
+    return -1
+  }
+
+  let nearest = index
+
+  for (let other = index; boxes[other] && sameRow(boxes[other]!, row); other += direction) {
+    if (
+      Math.abs(centre(boxes[other]!) - centre(from)) <
+      Math.abs(centre(boxes[nearest]!) - centre(from))
+    ) {
+      nearest = other
+    }
+  }
+
+  return nearest
+}

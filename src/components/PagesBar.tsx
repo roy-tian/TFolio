@@ -33,8 +33,10 @@ type PagesBarProps = {
   onRotate: (degrees: 90 | 270) => void
   severalFiles: boolean
   /** The pages its buttons act on, the chosen ones or else the page being
-      read: how many, the first of them, and of how many in the document. */
-  targets: { count: number; first: number; of: number }
+      read: how many, the first of them, and of how many in the document.
+      `unseen` is the page being read folded away under its file's name,
+      where no button may reach it. */
+  targets: { count: number; first: number; of: number; unseen?: boolean }
 }
 
 /** The bar over a document's pages in the sidebar: turning and removing the
@@ -58,6 +60,10 @@ export function PagesBar({
   // being read rather than one chosen in the sidebar.
   const one = targets.count === 1 ? { pageNumber: targets.first } : null
   const { count } = targets
+  // A button that cannot act says why, in place of what it would do.
+  const unseen = targets.unseen ? t("pageEdit.pageFolded", { pageNumber: targets.first }) : null
+  // A document keeps one page; the backend refuses a delete of them all.
+  const keepsOne = count >= targets.of
   // Laid out and saved file by file only once there are several files.
   const fileTools = severalFiles || fileOptions !== undefined
   const filesLabel = fileTools ? t("sidebar.fileOptions") : t("sidebar.fileOptionsOneFile")
@@ -69,22 +75,33 @@ export function PagesBar({
     slot: string
   }[] = [
     {
+      disabled: unseen !== null,
       icon: RotateCcw,
-      label: one ? t("pageEdit.rotatePageLeft", one) : t("pageEdit.rotateLeft", { count }),
+      label:
+        unseen ??
+        (one ? t("pageEdit.rotatePageLeft", one) : t("pageEdit.rotateLeft", { count })),
       onClick: () => onRotate(270),
       slot: "pages-rotate-left",
     },
     {
+      disabled: unseen !== null,
       icon: RotateCw,
-      label: one ? t("pageEdit.rotatePageRight", one) : t("pageEdit.rotateRight", { count }),
+      label:
+        unseen ??
+        (one ? t("pageEdit.rotatePageRight", one) : t("pageEdit.rotateRight", { count })),
       onClick: () => onRotate(90),
       slot: "pages-rotate-right",
     },
     {
-      // A document keeps one page; the backend refuses a delete of them all.
-      disabled: count >= targets.of,
+      disabled: unseen !== null || keepsOne,
       icon: Trash2,
-      label: one ? t("pageEdit.deletePage", one) : t("pageEdit.delete", { count }),
+      label:
+        unseen ??
+        (keepsOne
+          ? t("pageEdit.deleteKeepsOne")
+          : one
+            ? t("pageEdit.deletePage", one)
+            : t("pageEdit.delete", { count })),
       onClick: onDelete,
       slot: "pages-delete",
     },

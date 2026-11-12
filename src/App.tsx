@@ -62,7 +62,7 @@ import {
   type Notice,
   type NoticeKind,
 } from "@/lib/notices"
-import type { CarriedPages } from "@/lib/pageCarry"
+import type { CarriedPages, ExtractedPages } from "@/lib/pageCarry"
 import {
   fileNameFromPath,
   fileStem,
@@ -592,8 +592,15 @@ export default function App() {
           Promise.resolve(tabsRef.current.some((tab) => tab.id === documentId)),
         )
 
-        if (reopened.error && mountedRef.current) {
+        if (!mountedRef.current) {
+          return
+        }
+
+        if (reopened.error) {
           notices.raise({ kind: reopened.error, owner: workspaceOwner })
+        } else if (reopened.id !== null && reopened.id !== documentId) {
+          // The corner's, not the old tab's: the written file has its place.
+          notices.raise({ kind: "filesCombined", owner: workspaceOwner })
         }
       })
     },
@@ -823,7 +830,7 @@ export default function App() {
   // The pages a drag let go of on the strip's open space: the app's own new
   // document, like a blank one, but holding work a close would lose.
   const openPagesAsDocument = useCallback(
-    (carried: CarriedPages) => {
+    (carried: ExtractedPages) => {
       // At the release, not when the open queue reaches it: the page numbers
       // name the source as it stands now, and could be stale by then. A
       // signature prompt in between is modal, so nothing renumbers them.

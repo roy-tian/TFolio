@@ -211,6 +211,7 @@ const zhCN = {
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
     rotateView: "顺时针旋转视图",
+    rotateViewHint: "顺时针旋转视图（不改动文件）",
     viewControls: "视图控制",
     zoomOut: "缩小",
     zoomIn: "放大",
@@ -473,8 +474,6 @@ const zhCN = {
     cut_other: "剪切 {{count}} 页",
     copy_one: "复制 {{count}} 页",
     copy_other: "复制 {{count}} 页",
-    rotate_one: "旋转 {{count}} 页",
-    rotate_other: "旋转 {{count}} 页",
     rotateLeft_one: "逆时针旋转 {{count}} 页",
     rotateLeft_other: "逆时针旋转 {{count}} 页",
     rotateRight_one: "顺时针旋转 {{count}} 页",
@@ -504,6 +503,9 @@ const zhCN = {
     rotatePageLeft: "逆时针旋转第 {{pageNumber}} 页",
     rotatePageRight: "顺时针旋转第 {{pageNumber}} 页",
     deletePage: "删除第 {{pageNumber}} 页",
+    deleteKeepsOne: "文档至少保留一页，不能全部删除",
+    pageFolded:
+      "第 {{pageNumber}} 页折叠在文件名下，展开该文件后才能旋转或删除",
   },
   files: {
     sourceFilter: "PDF、图片和 Word 文档",
@@ -519,6 +521,10 @@ const zhCN = {
     skipped_other: "已跳过 {{count}} 个不是 PDF、图片或 Word 文档的文件：{{names}}",
     mergeFailed: "无法把这些文件合并为新的 PDF。",
     changed: "文件在读取后已在磁盘上被修改。请重新添加，以使用它现在的内容。",
+    added_one: "已添加 {{count}} 个文件，从第 {{at}} 页开始",
+    added_other: "已添加 {{count}} 个文件，从第 {{at}} 页开始",
+    combined:
+      "已另存为一个 PDF：各文件已合并，不能再按文件调整，此前的修改也不能再撤销。",
   },
   bookmarks: {
     title: "书签",
@@ -533,7 +539,7 @@ const zhCN = {
     dropFilesAtEnd: "松开以添加到当前文档末尾",
     dropMerge: "松开以合并为一个新 PDF",
     files: "文件",
-    fileRows: "每个文件另起一行",
+    fileRows: "按文件分组显示",
     smartPadding: "每个文件从奇数页开始",
     fileBookmarks: "为每个文件加一个书签",
     paddingPage: "保存时补一张空白页，让下一个文件从奇数页开始",

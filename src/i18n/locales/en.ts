@@ -218,6 +218,7 @@ const en = {
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
     rotateView: "Rotate the view clockwise",
+    rotateViewHint: "Rotate the view clockwise (does not change the file)",
     viewControls: "View controls",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
@@ -492,8 +493,6 @@ const en = {
     cut_other: "Cut {{count}} pages",
     copy_one: "Copy page",
     copy_other: "Copy {{count}} pages",
-    rotate_one: "Rotate page",
-    rotate_other: "Rotate {{count}} pages",
     rotateLeft_one: "Rotate page counterclockwise",
     rotateLeft_other: "Rotate {{count}} pages counterclockwise",
     rotateRight_one: "Rotate page clockwise",
@@ -523,6 +522,9 @@ const en = {
     rotatePageLeft: "Rotate page {{pageNumber}} counterclockwise",
     rotatePageRight: "Rotate page {{pageNumber}} clockwise",
     deletePage: "Delete page {{pageNumber}}",
+    deleteKeepsOne: "A document keeps at least one page, so they cannot all be deleted",
+    pageFolded:
+      "Page {{pageNumber}} is collapsed under its file name. Expand the file to rotate or delete it",
   },
   files: {
     sourceFilter: "PDFs, images, and Word documents",
@@ -538,6 +540,10 @@ const en = {
     skipped_other: "Skipped {{count}} files that are not PDFs, images, or Word documents: {{names}}.",
     mergeFailed: "These files could not be combined into a new PDF.",
     changed: "A file changed on disk after it was read. Add it again to take it as it is now.",
+    added_one: "Added {{count}} file, starting at page {{at}}",
+    added_other: "Added {{count}} files, starting at page {{at}}",
+    combined:
+      "Saved as one PDF. Its files can no longer be arranged one by one, and earlier changes can no longer be undone.",
   },
   bookmarks: {
     title: "Bookmarks",
@@ -552,7 +558,7 @@ const en = {
     dropFilesAtEnd: "Drop to add at the end of this document",
     dropMerge: "Drop to combine into a new PDF",
     files: "Files",
-    fileRows: "Start each file on a new row",
+    fileRows: "Group pages by file",
     smartPadding: "Start every file on an odd page",
     fileBookmarks: "Add a bookmark for each file",
     paddingPage: "A blank page saved so the next file starts on an odd page",

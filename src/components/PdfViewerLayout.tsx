@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next"
 import { PaddingDismiss } from "@/components/PaddingDismiss"
 import { PdfPage } from "@/components/PdfPage"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import type { CaptureHighlight } from "@/hooks/useHighlightTool"
 import { ViewportHold, ViewportHoldContext } from "@/hooks/useNearViewport"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview } from "@/hooks/useTextNoteTool"
@@ -52,15 +51,11 @@ type LayoutProps = {
   activeSearchIndex: number | null
   /** The page holding the active match, the one page told which it is. */
   activeSearchPage: number | null
-  captureHighlight: CaptureHighlight
   /** Width left for pages once the column's padding is taken out. */
   contentWidth: number
   documentId: number
   draftsByPage: ReadonlyMap<number, RectDraft[]>
   notesByPage: ReadonlyMap<number, TextNotePreview[]>
-  /** Copies the whole document, and stands for a select-all being in force:
-      absent, a page's menu falls back to whatever the reader dragged over. */
-  onCopyAllText?: () => void
   /** Saves without the blank pages, from one of them. */
   onDismissPadding: () => void
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
@@ -124,11 +119,9 @@ function BlankSheet({
 function SingleLayout({
   activeSearchIndex,
   activeSearchPage,
-  captureHighlight,
   documentId,
   draftsByPage,
   notesByPage,
-  onCopyAllText,
   onDismissPadding,
   onPagePaint,
   padding,
@@ -146,11 +139,9 @@ function SingleLayout({
   return pages.map((page, index) => (
     <Fragment key={`${documentId}-${index + 1}`}>
       <PdfPage
-        captureHighlight={captureHighlight}
         documentId={documentId}
         drafts={draftsByPage.get(index + 1) ?? NO_DRAFTS}
         notes={notesByPage.get(index + 1) ?? NO_NOTES}
-        onCopyAllText={onCopyAllText}
         onPagePaint={onPagePaint}
         page={page}
         pageNumber={index + 1}
@@ -178,11 +169,9 @@ function SingleLayout({
 function BookLayout({
   activeSearchIndex,
   activeSearchPage,
-  captureHighlight,
   documentId,
   draftsByPage,
   notesByPage,
-  onCopyAllText,
   onDismissPadding,
   onPagePaint,
   padding,
@@ -235,11 +224,9 @@ function BookLayout({
             />
           ) : (
             <PdfPage
-              captureHighlight={captureHighlight}
               documentId={documentId}
               drafts={draftsByPage.get(sheet.pageNumber) ?? NO_DRAFTS}
               notes={notesByPage.get(sheet.pageNumber) ?? NO_NOTES}
-              onCopyAllText={onCopyAllText}
               onPagePaint={onPagePaint}
               key={`${documentId}-${sheet.pageNumber}`}
               page={pages[sheet.pageNumber - 1]}
@@ -264,7 +251,6 @@ type PdfViewerLayoutProps = {
   activeSearchIndex: number | null
   /** The page holding the active match, the one page told which it is. */
   activeSearchPage: number | null
-  captureHighlight: CaptureHighlight
   documentId: number
   drafts: RectDraft[]
   notes: TextNotePreview[]
@@ -281,7 +267,6 @@ type PdfViewerLayoutProps = {
   /** Whether the whole document's text stands selected; the highlight over the
       runs is drawn from the attribute this sets, not by the WebView. */
   textSelectAll: boolean
-  onCopyAllText: () => void
   viewMode: ViewMode
   viewRotation: number
   viewerWidth: number
@@ -299,11 +284,9 @@ type PdfViewerLayoutProps = {
 export function PdfViewerLayout({
   activeSearchIndex,
   activeSearchPage,
-  captureHighlight,
   documentId,
   drafts,
   notes,
-  onCopyAllText,
   onDismissPadding,
   onPagePaint,
   fileName,
@@ -335,12 +318,10 @@ export function PdfViewerLayout({
   const layoutProps = {
     activeSearchIndex,
     activeSearchPage,
-    captureHighlight,
     contentWidth,
     documentId,
     draftsByPage,
     notesByPage,
-    onCopyAllText: textSelectAll ? onCopyAllText : undefined,
     onDismissPadding,
     onPagePaint,
     padding,
