@@ -58,6 +58,7 @@ const payload: MovedTabPayload = {
           id: 1,
         },
       ],
+      saved: null,
       savedId: 0,
     },
     marks: [[1, [11, 12, 13]]],

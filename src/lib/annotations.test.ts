@@ -12,8 +12,6 @@ import {
   fillErasedPages,
   historyHead,
   inversePermutation,
-  isDirty,
-  markSaved,
   insertPagesRange,
   movesPages,
   nextRedoCommand,
@@ -36,6 +34,7 @@ import {
   type AnnotationHistory,
 } from "@/lib/annotations"
 import { defaultRectStyle } from "@/lib/annotationStyles"
+import { isDirty, markSaved } from "@/lib/documentState"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { defaultWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 

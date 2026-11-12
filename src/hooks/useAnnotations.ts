@@ -12,9 +12,8 @@ import {
   emptyHistory,
   fillErasedPages,
   insertPagesRange,
-  isDirty,
-  markSaved,
   movesPages,
+  nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
@@ -42,6 +41,7 @@ import {
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
+import { isDirty, markSaved } from "@/lib/documentState"
 import { e2eOverride } from "@/lib/e2e"
 import { isSourceChanged } from "@/lib/fileSources"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
@@ -1685,6 +1685,7 @@ export function useAnnotations({
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,
+      nextRedo: nextRedoCommand(history),
       nextUndo: nextUndoCommand(history),
       pageNumbersConfig: currentPageNumbersConfig(history),
       redo: redoCommand,

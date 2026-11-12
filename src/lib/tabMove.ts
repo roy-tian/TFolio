@@ -209,6 +209,7 @@ export function parseMovedTabPayload(value: unknown): MovedTabPayload | null {
     !Array.isArray(seed.history.future) ||
     !isNumber(seed.history.nextId) ||
     !isNumber(seed.history.savedId) ||
+    (seed.history.saved !== null && !isRecord(seed.history.saved)) ||
     !isMarks(seed.marks) ||
     !isViewMode(seed.viewMode) ||
     !isQuarterTurn(seed.viewRotation)
