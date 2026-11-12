@@ -4,7 +4,7 @@ import "@wdio/tauri-service"
 import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   appMenuItemEnabled,
-  clickAppMenuItem,
+  clickAppExportMenuItem,
   minimalPdf,
   openPdfFromDisk,
   refreshApp,
@@ -33,7 +33,7 @@ describe("TFolio compress and save", () => {
   })
 
   it("disables compression on the home tab", async () => {
-    expect(await appMenuItemEnabled("compress")).toBe(false)
+    expect(await appMenuItemEnabled("export")).toBe(false)
   })
 
   it("exports at the chosen image resolution", async () => {
@@ -60,7 +60,7 @@ describe("TFolio compress and save", () => {
       }
     })
 
-    await clickAppMenuItem("compress")
+    await clickAppExportMenuItem("compress")
     await $("[data-testid='compress-dialog']").waitForDisplayed()
 
     // The estimate is the real backend's, not a stub: whatever it says, the
@@ -92,7 +92,7 @@ describe("TFolio compress and save", () => {
         },
       }
     })
-    await clickAppMenuItem("compress")
+    await clickAppExportMenuItem("compress")
     await settleEstimate()
     await $("[data-testid='compress-start']").click()
     await expect($("[data-testid='compress-dialog'] [role='alert']")).toBeDisplayed()

@@ -584,6 +584,20 @@ export async function appMenuItem(action: string) {
   return item
 }
 
+/** An entry of the menu's Export submenu, opened through its trigger. */
+export async function appExportMenuItem(action: string) {
+  await (await appMenuItem("export")).click()
+
+  const item = $(`[data-action='${action}']`)
+  await item.waitForDisplayed({ timeout: 15_000 })
+
+  return item
+}
+
+export async function clickAppExportMenuItem(action: string) {
+  await (await appExportMenuItem(action)).click()
+}
+
 /** The shown tab's sidebar: every tab mounts its own, the others hidden. */
 export const activeSidebar =
   "[data-document-session][data-active='true'] [data-slot='app-sidebar']"

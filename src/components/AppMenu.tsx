@@ -1,6 +1,7 @@
 import {
   AppWindow,
   FileImage,
+  FileOutput,
   FilePlus2,
   FileStack,
   FolderOpen,
@@ -225,38 +226,50 @@ export function AppMenu({
               {formatShortcut(shortcuts.saveAs)}
             </DropdownMenuShortcut>
           </DropdownMenuItem>
-          <DropdownMenuItem
-            data-action="save-a4"
-            disabled={!onSaveA4}
-            onClick={onSaveA4}
-          >
-            <RectangleVertical />
-            {t("a4Export.menuLabel")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            data-action="export-images"
-            disabled={!onExportImages}
-            onClick={onExportImages}
-          >
-            <FileImage />
-            {t("imageExport.menuLabel")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            data-action="split"
-            disabled={!onSplit}
-            onClick={onSplit}
-          >
-            <Scissors />
-            {t("splitExport.menuLabel")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            data-action="compress"
-            disabled={!onCompress}
-            onClick={onCompress}
-          >
-            <Shrink />
-            {t("compressExport.menuLabel")}
-          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger
+              className="data-disabled:opacity-50"
+              data-action="export"
+              disabled={!onSaveA4 && !onExportImages && !onSplit && !onCompress}
+            >
+              <FileOutput />
+              {t("menu.export")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem
+                data-action="save-a4"
+                disabled={!onSaveA4}
+                onClick={onSaveA4}
+              >
+                <RectangleVertical />
+                {t("a4Export.menuLabel")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-action="export-images"
+                disabled={!onExportImages}
+                onClick={onExportImages}
+              >
+                <FileImage />
+                {t("imageExport.menuLabel")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-action="split"
+                disabled={!onSplit}
+                onClick={onSplit}
+              >
+                <Scissors />
+                {t("splitExport.menuLabel")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-action="compress"
+                disabled={!onCompress}
+                onClick={onCompress}
+              >
+                <Shrink />
+                {t("compressExport.menuLabel")}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuItem
             data-action="print"
             disabled={!onPrint}

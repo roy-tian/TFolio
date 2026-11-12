@@ -193,6 +193,7 @@ const de = {
     recentEmpty: "Keine zuletzt geöffneten Dateien",
     addFiles: "Dateien zum Dokument hinzufügen…",
     saveAs: "Speichern unter…",
+    export: "Exportieren",
     saveAll: "Alle speichern",
     closeAll: "Alle Dateien schließen",
     exit: "Beenden",

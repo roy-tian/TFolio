@@ -191,6 +191,7 @@ const zhTW = {
     recentEmpty: "沒有最近使用的檔案",
     addFiles: "加入檔案到目前文件…",
     saveAs: "另存新檔…",
+    export: "匯出",
     saveAll: "全部儲存",
     closeAll: "關閉所有檔案",
     exit: "結束",

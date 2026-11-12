@@ -191,6 +191,7 @@ const en = {
     recentEmpty: "No recent files",
     addFiles: "Add files to this document…",
     saveAs: "Save as…",
+    export: "Export",
     saveAll: "Save all",
     closeAll: "Close all files",
     exit: "Exit",

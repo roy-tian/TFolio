@@ -193,6 +193,7 @@ const fr = {
     recentEmpty: "Aucun fichier récent",
     addFiles: "Ajouter des fichiers au document…",
     saveAs: "Enregistrer sous…",
+    export: "Exporter",
     saveAll: "Tout enregistrer",
     closeAll: "Fermer tous les fichiers",
     exit: "Quitter",

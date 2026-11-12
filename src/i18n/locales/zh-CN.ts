@@ -184,6 +184,7 @@ const zhCN = {
     recentEmpty: "暂无最近打开的文件",
     addFiles: "添加文件到当前文档…",
     saveAs: "另存为…",
+    export: "导出",
     saveAll: "全部保存",
     closeAll: "关闭所有文件",
     exit: "退出",
