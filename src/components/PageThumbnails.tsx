@@ -402,10 +402,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // The columns last measured, a render ahead of the ones laid out: the
   // reader's page is looked for only once the pages stand in them.
   const fittedColumnsRef = useRef(columns)
-  // Square cells as wide as a paper's long side, once a widened sidebar fits
-  // two: portrait and landscape pages then line up in rows, and a turn moves
-  // no other page. One column keeps each paper its own size.
-  const frame = columns > 1 ? THUMBNAIL_WIDTH : null
+  const grid = columns > 1
   const numPages = pages.length
   const { prime } = useFlipLayout(
     columnRef,
@@ -1136,18 +1133,18 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
             <ol
               className={cn(
                 "relative flex",
-                frame === null ? "flex-col items-center" : "mx-auto flex-wrap",
+                grid ? "mx-auto flex-wrap" : "flex-col items-center",
               )}
               data-thumbnail-columns={columns}
               ref={columnRef}
               style={
-                frame === null
-                  ? { rowGap: THUMBNAIL_COLUMN_GAP }
-                  : {
+                grid
+                  ? {
                       columnGap: THUMBNAIL_GRID_GAP,
                       rowGap: THUMBNAIL_GRID_GAP,
-                      width: columns * frame + (columns - 1) * THUMBNAIL_GRID_GAP,
+                      width: columns * THUMBNAIL_WIDTH + (columns - 1) * THUMBNAIL_GRID_GAP,
                     }
+                  : { rowGap: THUMBNAIL_COLUMN_GAP }
               }
             >
               {/* Flat, so each preview keeps its key among the column's rows. */}
@@ -1157,7 +1154,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   index === incomingAt ? (
                     <CarriedHoles
                       carryKey={CARRY_KEY}
-                      frame={frame}
                       key={CARRY_KEY}
                       rotation={viewRotation}
                       sizes={incoming!.carried.sizes}
@@ -1166,7 +1162,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                 const blankAfterHoles =
                   index === incomingAt && blankAfterCarried ? (
                     <PaddingCell
-                      frame={frame}
                       key={`padding-${CARRY_KEY}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
@@ -1207,7 +1202,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     deleteDisabled={numPages <= 1}
                     documentId={documentId}
                     flipKey={key}
-                    frame={frame}
+                    grid={grid}
                     hole={holes.has(key) || arrived.has(key)}
                     intrinsicRotation={page.rotation}
                     isCurrent={current === pageNumber}
@@ -1229,7 +1224,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   />,
                   blanks.has(pageNumber) ? (
                     <PaddingCell
-                      frame={frame}
                       key={`padding-${key}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
@@ -1304,7 +1298,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         <OverlayScrollbars viewportRef={listRef} />
         <PagesDropTarget
           flowRef={columnRef}
-          grid={frame !== null}
+          grid={grid}
           slot={fileLanding?.slot ?? null}
         />
       </div>

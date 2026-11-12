@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { PaddingDismiss } from "@/components/PaddingDismiss"
-import { PageControls, type PageActionHandler } from "@/components/PageCardControls"
+import { PageBar, PageCheckbox, type PageActionHandler } from "@/components/PageCardControls"
 import { DragHole } from "@/components/PageDragGhost"
 import { HintTooltip } from "@/components/HintTooltip"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
@@ -20,7 +20,7 @@ import { dimensionsForRotation } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
-import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
+import { THUMBNAIL_CAPTION_HEIGHT, THUMBNAIL_WIDTH, thumbnailPaper } from "@/lib/viewMode"
 
 // A column shows a handful of pages; keeping pixels further out than a few
 // screens would hold a long document's every preview for one scroll through.
@@ -149,12 +149,10 @@ function DropMarker({
     this view turns its pages, which the copies take on, not as the source's. */
 export function CarriedHoles({
   carryKey,
-  frame,
   rotation,
   sizes,
 }: {
   carryKey: string
-  frame: number | null
   rotation: number
   sizes: CarriedPages["sizes"]
 }) {
@@ -165,13 +163,12 @@ export function CarriedHoles({
       <li className="relative" data-flip-key={`${carryKey}${index}`} key={index}>
         <div
           style={{
-            height: `calc(${frame ?? paper.height}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
-            width: frame ?? paper.width,
+            height: `calc(${THUMBNAIL_WIDTH}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
+            width: THUMBNAIL_WIDTH,
           }}
         />
         <DragHole
           height={paper.height}
-          top={frame === null ? 0 : (frame - paper.height) / 2}
           width={paper.width}
         />
       </li>
@@ -184,13 +181,11 @@ export function CarriedHoles({
     and on it the way to save without such pages.
     No flip key, so a drop counts it no cell. */
 export function PaddingCell({
-  frame,
   label,
   onDismiss,
   rotation,
   sheet,
 }: {
-  frame: number | null
   label: string
   onDismiss: () => void
   rotation: number
@@ -202,7 +197,7 @@ export function PaddingCell({
     <li className="flex flex-col items-center" data-padding-after={sheet.after}>
       <div
         className="grid place-items-center"
-        style={frame === null ? undefined : { height: frame, width: frame }}
+        style={{ height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH }}
       >
         <HintTooltip label={label}>
           <div
@@ -336,12 +331,12 @@ export function FileHeading({
     above it down one column: shown under the pointer or the keyboard's focus
     only, since a row of plus signs would crowd the pages. */
 function InsertGap({
-  frame,
+  grid,
   label,
   onInsert,
   side,
 }: {
-  frame: number | null
+  grid: boolean
   label: string
   onInsert: () => void
   side: "before" | "after"
@@ -353,18 +348,18 @@ function InsertGap({
       className="pointer-events-none absolute z-10 grid place-items-center in-data-[pages-dragging]:hidden"
       data-page-control
       style={
-        frame === null
+        grid
           ? {
+              [side === "before" ? "left" : "right"]: -THUMBNAIL_GRID_GAP,
+              height: THUMBNAIL_WIDTH,
+              top: 0,
+              width: THUMBNAIL_GRID_GAP,
+            }
+          : {
               [side === "before" ? "top" : "bottom"]: -(THUMBNAIL_COLUMN_GAP + INSERT_SEAM) / 2,
               height: INSERT_SEAM,
               left: 0,
               right: 0,
-            }
-          : {
-              [side === "before" ? "left" : "right"]: -THUMBNAIL_GRID_GAP,
-              height: frame,
-              top: 0,
-              width: THUMBNAIL_GRID_GAP,
             }
       }
     >
@@ -390,7 +385,7 @@ export const PageCell = memo(function PageCell({
   deleteDisabled,
   documentId,
   flipKey,
-  frame,
+  grid,
   hole,
   intrinsicRotation,
   isCurrent,
@@ -413,9 +408,8 @@ export const PageCell = memo(function PageCell({
   deleteDisabled: boolean
   documentId: number
   flipKey: number
-  /** The square cell of a sidebar wide enough for rows of several, or null
-      down its one column. */
-  frame: number | null
+  /** Whether the pages stand in rows of several, not down one column. */
+  grid: boolean
   /** The page is in hand: its place shows where it will land. */
   hole: boolean
   intrinsicRotation: number
@@ -478,8 +472,12 @@ export const PageCell = memo(function PageCell({
       <div className={cn(hole && "opacity-0")}>
         <PdfThumbnail
           caption={caption}
+          cellOverlay={
+            showControls ? (
+              <PageBar deleteDisabled={deleteDisabled} itemKey={pageNumber} onAction={onAction} />
+            ) : null
+          }
           documentId={documentId}
-          frame={frame === null ? undefined : { height: frame, width: frame }}
           intrinsicRotation={intrinsicRotation}
           isCurrent={isCurrent}
           isCut={isCut}
@@ -489,9 +487,8 @@ export const PageCell = memo(function PageCell({
           onSelect={onSelect}
           overlay={
             showControls ? (
-              <PageControls
+              <PageCheckbox
                 caption={caption}
-                deleteDisabled={deleteDisabled}
                 isSelected={isSelected}
                 itemKey={pageNumber}
                 onAction={onAction}
@@ -511,14 +508,14 @@ export const PageCell = memo(function PageCell({
       {showControls ? (
         <>
           <InsertGap
-            frame={frame}
+            grid={grid}
             label={t("pageEdit.insertBefore", { pageNumber: caption })}
             onInsert={() => onInsertBlank(pageNumber, "before")}
             side="before"
           />
           {isLast ? (
             <InsertGap
-              frame={frame}
+              grid={grid}
               label={t("pageEdit.insertAfter", { pageNumber: caption })}
               onInsert={() => onInsertBlank(pageNumber, "after")}
               side="after"
@@ -529,7 +526,6 @@ export const PageCell = memo(function PageCell({
       {hole ? (
         <DragHole
           height={paper.height}
-          top={frame === null ? 0 : (frame - paper.height) / 2}
           width={paper.width}
         />
       ) : null}

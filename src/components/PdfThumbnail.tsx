@@ -10,7 +10,7 @@ import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
-import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
+import { THUMBNAIL_CAPTION_HEIGHT, THUMBNAIL_WIDTH, thumbnailPaper } from "@/lib/viewMode"
 
 // A widened sidebar's row holds many cells; preloading whole rows would queue
 // dozens of PDFium renders at once. Keep the window to what is visible.
@@ -20,12 +20,14 @@ const THUMBNAIL_ROOT_MARGIN = "0px"
 // off, they wait for the pages the reader is looking at rather than tie them.
 const SIDEBAR_PRIORITY_BIAS = 2000
 
-/** On a paper's box that holds controls: they show, through
-    `PAPER_CONTROLS_SHOWN`, while it is hovered. A property the box sets,
-    because `group-has-*` on each control costs Chromium a whole-document
-    restyle for every node added anywhere; the controls' own wrapper sets it
-    again for their keyboard focus. */
-export const PAPER_CONTROLS_HOST = "[--paper-controls:0] hover:[--paper-controls:1]"
+/** On the square of a paper that holds controls: they show, through
+    `PAPER_CONTROLS_SHOWN`, while it is hovered or one of them has the
+    keyboard's focus. Not the paper's: WebKitGTK can keep a clicked paper
+    `:focus-visible`, and its controls would stay up. A property the square
+    sets, because `group-has-*` on each control costs Chromium a
+    whole-document restyle for every node added anywhere. */
+export const PAPER_CONTROLS_HOST =
+  "[--paper-controls:0] hover:[--paper-controls:1] has-[[data-page-action]:focus-visible]:[--paper-controls:1]"
 export const PAPER_CONTROLS_SHOWN = "opacity-(--paper-controls)"
 
 type PdfThumbnailProps = {
@@ -52,12 +54,12 @@ type PdfThumbnailProps = {
   /** The number under the paper, where it is not the page's own: a drag's
       preview shows where the page will stand. */
   caption?: number
-  /** A box the paper stands centred in, the caption beneath it: cells of one
-      size line portrait and landscape pages up in rows of several. */
-  frame?: { height: number; width: number }
   /** Controls over the paper, laid out against its box, which follows the
-      paper through a turn and is a `PAPER_CONTROLS_HOST`. */
+      paper through a turn. */
   overlay?: ReactNode
+  /** Controls laid out against the square the paper stands in, which a turn
+      leaves standing. */
+  cellOverlay?: ReactNode
   /** A sign beside the caption: over the paper it would take the page's
       clicks in its corner, where its checkbox sits. */
   mark?: ReactNode
@@ -85,8 +87,8 @@ export function PdfThumbnail({
   rotation,
   label,
   caption,
-  frame,
   overlay,
+  cellOverlay,
   mark,
   parked,
   parkKey,
@@ -207,7 +209,7 @@ export function PdfThumbnail({
   )
 
   const paperBox = (
-    <div className={cn("relative", overlay && PAPER_CONTROLS_HOST)}>
+    <div className="relative">
       {/* A page that could not be drawn says so instead: the paper is a white
           card with a warning in it, and the reason is what a hover owes it.
           Otherwise the caption speaks: hundreds of tooltips would slow every
@@ -294,14 +296,18 @@ export function PdfThumbnail({
       )}
       data-cut={isCut ? "" : undefined}
     >
-      {/* Always there, boxless without a frame: a sidebar widened into rows
-          of several gives its previews one, and a new parent would remount
-          the canvas, losing the pixels already painted into it. */}
+      {/* As wide and tall as every paper's long side, which a turn keeps:
+          portrait and landscape pages line up in rows, and a turn moves no
+          other page and none of the square's own controls. */}
       <div
-        className={frame ? "grid place-items-center" : "contents"}
-        style={frame ? { height: frame.height, width: frame.width } : undefined}
+        className={cn(
+          "relative grid place-items-center",
+          (overlay || cellOverlay) && PAPER_CONTROLS_HOST,
+        )}
+        style={{ height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH }}
       >
         {paperBox}
+        {cellOverlay}
       </div>
       <span
         className={cn(

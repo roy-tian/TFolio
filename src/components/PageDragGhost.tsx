@@ -2,6 +2,7 @@ import { useImperativeHandle, useLayoutEffect, useRef, type Ref } from "react"
 import { createPortal } from "react-dom"
 
 import { DRAG_MOTION, prefersReducedMotion } from "@/lib/motion"
+import { THUMBNAIL_WIDTH } from "@/lib/viewMode"
 
 export type GhostPaper = {
   /** The pressed preview's pixels, copied once: a bitmap the frontend already
@@ -301,23 +302,15 @@ export function PageDragGhost({
   )
 }
 
-/** Where the pages in hand will stand: the landing page's own paper, dashed. */
-export function DragHole({
-  height,
-  top = 0,
-  width,
-}: {
-  height: number
-  /** Down from the cell's top, where the paper stands lower in its frame. */
-  top?: number
-  width: number
-}) {
+/** Where the pages in hand will stand: the landing page's own paper, dashed,
+    centred in the square every paper stands in. */
+export function DragHole({ height, width }: { height: number; width: number }) {
   return (
     <span
       aria-hidden
       className="pointer-events-none absolute left-1/2 -translate-x-1/2 border-2 border-dashed border-primary/60 bg-primary/5"
       data-drag-hole
-      style={{ height, top, width }}
+      style={{ height, top: (THUMBNAIL_WIDTH - height) / 2, width }}
     />
   )
 }
