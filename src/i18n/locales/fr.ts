@@ -255,9 +255,11 @@ const fr = {
   },
   annotate: {
     undo: "Annuler",
+    redo: "Rétablir",
     // Each action is a noun phrase with its article, so both "Annuler …" and
     // "Rétablir …" read as the system Edit menu does ("Annuler la saisie").
     undoAction: "Annuler {{action}}",
+    redoAction: "Rétablir {{action}}",
     actionHighlight: "le surlignage",
     actionRect: "le tracé d’un rectangle",
     actionTextNote: "l’ajout d’une note",

@@ -255,8 +255,10 @@ const it = {
   },
   annotate: {
     undo: "Annulla",
+    redo: "Ripeti",
     // Noun phrases without article, as in macOS/Office “Annulla digitazione”.
     undoAction: "Annulla {{action}}",
+    redoAction: "Ripeti {{action}}",
     actionHighlight: "evidenziazione",
     actionRect: "disegno rettangolo",
     actionTextNote: "aggiunta nota",

@@ -253,7 +253,9 @@ const zhTW = {
   },
   annotate: {
     undo: "復原",
+    redo: "重做",
     undoAction: "復原{{action}}",
+    redoAction: "重做{{action}}",
     actionHighlight: "醒目提示",
     actionRect: "繪製矩形",
     actionTextNote: "新增註解",

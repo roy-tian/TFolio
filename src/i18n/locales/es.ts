@@ -255,9 +255,11 @@ const es = {
   },
   annotate: {
     undo: "Deshacer",
+    redo: "Rehacer",
     // The action keys are infinitive phrases; the colon keeps "Deshacer"/"Rehacer"
     // from stacking two bare infinitives.
     undoAction: "Deshacer: {{action}}",
+    redoAction: "Rehacer: {{action}}",
     actionHighlight: "resaltar texto",
     actionRect: "dibujar un rectángulo",
     actionTextNote: "añadir una nota",

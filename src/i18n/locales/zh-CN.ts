@@ -246,7 +246,9 @@ const zhCN = {
   },
   annotate: {
     undo: "撤销",
+    redo: "重做",
     undoAction: "撤销{{action}}",
+    redoAction: "重做{{action}}",
     actionHighlight: "高亮",
     actionRect: "绘制方框",
     actionTextNote: "添加注释",

@@ -253,9 +253,11 @@ const en = {
   },
   annotate: {
     undo: "Undo",
+    redo: "Redo",
     /** Named with the step they would take, so a tooltip says what is coming
         back rather than only that something is. */
     undoAction: "Undo {{action}}",
+    redoAction: "Redo {{action}}",
     actionHighlight: "highlighting",
     actionRect: "drawing a rectangle",
     actionTextNote: "adding a note",

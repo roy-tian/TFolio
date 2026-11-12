@@ -255,7 +255,9 @@ const th = {
   },
   annotate: {
     undo: "เลิกทำ",
+    redo: "ทำซ้ำ",
     undoAction: "เลิกทำ {{action}}",
+    redoAction: "ทำซ้ำ {{action}}",
     actionHighlight: "การไฮไลต์",
     actionRect: "การวาดสี่เหลี่ยม",
     actionTextNote: "การเพิ่มโน้ต",

@@ -2106,6 +2106,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           onSearchOpen={openSearch}
           onSplit={() => setSplitOpen(true)}
           onToolChange={chooseTool}
+          onRedo={redoStep}
           onUndo={undoStep}
           saveLabel={saveLabel}
           searchOpen={search.searchOpen}

@@ -149,6 +149,9 @@ describe("TFolio keyboard shortcuts", () => {
     expect(await tooltipOn(`${visible} button[aria-label^='Undo']`)).toContain(
       "Ctrl+Z",
     )
+    expect(await tooltipOn(`${visible} button[aria-label^='Redo']`)).toContain(
+      "Ctrl+Shift+Z",
+    )
 
     const saveAll = await appMenuItem("save-all")
     await expect(saveAll).toHaveText(expect.stringContaining("Ctrl+Alt+S"))

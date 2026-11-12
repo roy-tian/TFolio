@@ -626,7 +626,7 @@ export function deletePageFromSidebar(pageNumber = 1) {
   return sidebarPageAction(pageNumber, "delete-pages")
 }
 
-/** Redo has no toolbar button: it is the keyboard's alone. */
+/** Redo by its key; the toolbar button is a click away too. */
 export async function pressRedo() {
   await browser.keys(["Control", "Shift", "z"])
 }

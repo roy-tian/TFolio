@@ -49,6 +49,7 @@ type SessionHeaderProps = {
   onSearchOpen: () => void
   onSplit: () => void
   onToolChange: (tool: AnnotationTool) => void
+  onRedo: () => void
   onUndo: () => void
   saveLabel: string
   /** A document other files were added to saves only to a new file, so its
@@ -85,6 +86,7 @@ export function SessionHeader({
   onSearchOpen,
   onSplit,
   onToolChange,
+  onRedo,
   onUndo,
   saveAsOnly,
   saveLabel,
@@ -100,8 +102,11 @@ export function SessionHeader({
       end={
         <>
           <HistoryControls
+            canRedo={annotations.canRedo}
             canUndo={annotations.canUndo}
+            nextRedo={annotations.nextRedo}
             nextUndo={annotations.nextUndo}
+            onRedo={onRedo}
             onUndo={onUndo}
           />
           <AnnotationToolbar

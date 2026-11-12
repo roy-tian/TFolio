@@ -339,15 +339,21 @@ describe("TFolio page editing in the sidebar", () => {
     })
     expect(await thumbShape(1)).toBe("portrait")
 
+    const toolbar = "[data-document-session][data-active='true'] [data-slot='toolbar']"
+    const save = $(`${toolbar} [data-slot='pdf-save-trigger']`)
+
     await browser.keys(["Control", "z"])
     await browser.waitUntil(async () => (await thumbShape(2)) === "portrait")
-    await pressRedo()
+    await $(`${toolbar} button[aria-label^='Redo']`).click()
     await browser.waitUntil(async () => (await thumbShape(2)) === "landscape")
+    await expect(save).toBeEnabled()
 
+    // Turned back by hand, not undone: the file already holds this.
     await sidebarPageAction(2, "rotate-pages-left")
     await browser.waitUntil(async () => (await thumbShape(2)) === "portrait", {
       timeoutMsg: "the page never turned back",
     })
+    await expect(save).toBeDisabled()
   })
 
   it("deletes the chosen page with the Delete key, and undo and redo answer", async () => {

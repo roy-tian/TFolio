@@ -255,9 +255,11 @@ const de = {
   },
   annotate: {
     undo: "Rückgängig",
+    redo: "Wiederholen",
     // German UIs name the step after a colon ("Rückgängig: Eingabe"), so every
     // action below is a capitalized infinitive phrase that also stands alone.
     undoAction: "Rückgängig: {{action}}",
+    redoAction: "Wiederholen: {{action}}",
     actionHighlight: "Hervorheben",
     actionRect: "Rechteck zeichnen",
     actionTextNote: "Notiz hinzufügen",
