@@ -9,6 +9,7 @@ import {
 } from "react"
 
 import type { CurrentPage } from "@/hooks/useCurrentPage"
+import { followPage } from "@/lib/annotations"
 import type { PdfPageInfo } from "@/lib/pdf"
 import { sheetSpreads, sheetsOf, spreadPagesOf, type PaddingSheet } from "@/lib/padding"
 import type { ViewMode } from "@/lib/viewMode"
@@ -510,6 +511,16 @@ export function useZoom({
     [cancelPreview, captureCentreAnchor, currentPage, requestZoom, zoomTo],
   )
 
+  /** An edit moved the pages: the fit keeps measuring the page it was asked
+      from, not whichever now holds its number. */
+  const followFitPage = useCallback((movement: (number | null)[]) => {
+    setZoom((current) => {
+      const fitPage = followPage(movement, current.fitPage)
+
+      return fitPage === current.fitPage ? current : { ...current, fitPage }
+    })
+  }, [])
+
   /** For a newly opened document, which has no reading position to keep. */
   const resetToDefault = useCallback(() => {
     cancelPreview()
@@ -583,6 +594,7 @@ export function useZoom({
     canZoomIn: percent < MAX_ZOOM * 100,
     canZoomOut: percent > MIN_ZOOM * 100,
     commitPreview,
+    followFitPage,
     previewScale,
     resetToDefault,
     scale,

@@ -291,6 +291,20 @@ function movedPositions(order: number[]): number[] {
     everything held by page number stays true. */
 export type PageMovement = (number | null)[] | "inPlace"
 
+/** Where `page` stands after an edit that moved the pages: its new number, or,
+    taken out, the page now in its place — the last, when none came after it. */
+export function followPage(movement: (number | null)[], page: number): number {
+  const kept = movement.indexOf(page)
+
+  if (kept >= 0) {
+    return kept + 1
+  }
+
+  const before = movement.filter((from) => from !== null && from < page).length
+
+  return Math.max(1, Math.min(before + 1, movement.length))
+}
+
 /** `pages` taken out of `pageCount`: the rest close up in order. */
 function departures(pages: number[], pageCount: number): number[] {
   const leaving = new Set(pages)

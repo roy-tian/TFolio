@@ -75,6 +75,7 @@ import {
   storeTextNoteStyle,
 } from "@/lib/annotationStyles"
 import {
+  followPage,
   movesPages,
   type AnnotationCommand,
   type HexColor,
@@ -142,7 +143,13 @@ import {
 } from "@/lib/viewMode"
 import { isNoteWorthKeeping } from "@/lib/textNoteDraft"
 import { viewerReadingBounds, viewerSizeCommitted } from "@/lib/viewerViewport"
-import { anchorCorrection, anchorOnPage } from "@/lib/viewportAnchor"
+import {
+  anchorCorrection,
+  anchorOnPage,
+  editAnchor,
+  editAnchorCorrection,
+  type EditAnchor,
+} from "@/lib/viewportAnchor"
 import { CONTENT_PADDING_X, CONTENT_PADDING_Y } from "@/lib/zoom"
 
 export type DocumentSessionHandle = {
@@ -387,16 +394,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
     // The blank pages a Save As will add, shown and printed where it puts them.
     const padding = pdfDocument.padding ?? NO_PADDING
-    // Where the page being read stood before an in-place change: blanks above
-    // it coming or going, or a turn that reshapes a page and with it a fit's
-    // scale. Such a change moves no page, so the view holds it there.
-    const inPlaceAnchorRef = useRef<{ pageNumber: number; top: number } | null>(null)
+    // Where the page being read stood before an edit: blanks above it coming
+    // or going, a turn reshaping it, pages inserted, taken out or moved around
+    // it, any of which can also change a fit's scale. Left alone, the kept
+    // scroll offset would show another page; the view holds it there instead.
+    const editAnchorRef = useRef<EditAnchor | null>(null)
 
     useLayoutEffect(() => {
-      const anchor = inPlaceAnchorRef.current
+      const anchor = editAnchorRef.current
       const viewer = viewerRef.current
 
-      inPlaceAnchorRef.current = null
+      editAnchorRef.current = null
 
       if (!anchor || !viewer) {
         return
@@ -407,7 +415,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       )
 
       if (page) {
-        viewer.scrollTop += page.getBoundingClientRect().top - anchor.top
+        viewer.scrollTop += editAnchorCorrection(anchor, page.getBoundingClientRect())
       }
     }, [padding, pdfDocument.pages])
 
@@ -867,25 +875,52 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          if (change?.movement === "inPlace") {
-            const viewer = viewerRef.current
-            const edge = viewer?.getBoundingClientRect().top ?? 0
+          const movement = change?.movement
+          const viewer = viewerRef.current
+          const bounds = viewer ? viewerReadingBounds(viewer) : null
+          const readingTop = bounds?.top ?? 0
+          // Only a page on screen holds the reader's place: mid-seek, the
+          // tracked page is pages off, and the scroll held to it would stop there.
+          const pageAt = (pageNumber: number) => {
+            const page = viewer?.querySelector<HTMLElement>(`[data-page-number="${pageNumber}"]`)
+            const box = page?.getBoundingClientRect()
+
+            return box && bounds && box.bottom > bounds.top && box.top < bounds.bottom
+              ? page
+              : undefined
+          }
+          // The page being read, or the one taking its place, by its number
+          // after an edit that moved the pages.
+          let reading: number | undefined
+
+          if (movement === "inPlace") {
             const page = samePadding(current.padding ?? NO_PADDING, update.padding ?? NO_PADDING)
               ? // A turn: the page gone to stays where it stood, though the view
                 // could not bring it to the top.
-                viewer?.querySelector<HTMLElement>(`[data-page-number="${currentPage.get()}"]`)
+                pageAt(currentPage.get())
               : // The page under the viewer's top edge as laid out now: the page
                 // tracked as current follows scrolling a moment behind.
                 Array.from(
                   viewer?.querySelectorAll<HTMLElement>("[data-page-number]") ?? [],
-                ).find((candidate) => candidate.getBoundingClientRect().bottom > edge)
+                ).find((candidate) => candidate.getBoundingClientRect().bottom > readingTop)
 
-            inPlaceAnchorRef.current = page
-              ? {
-                  pageNumber: Number(page.dataset.pageNumber),
-                  top: page.getBoundingClientRect().top,
-                }
+            editAnchorRef.current = page
+              ? editAnchor(Number(page.dataset.pageNumber), page.getBoundingClientRect(), readingTop)
               : null
+          } else if (movement) {
+            const page = pageAt(currentPage.get())
+
+            reading = followPage(movement, currentPage.get())
+
+            editAnchorRef.current = page
+              ? editAnchor(
+                  reading,
+                  page.getBoundingClientRect(),
+                  readingTop,
+                  movement[reading - 1] !== currentPage.get(),
+                )
+              : null
+            zoom.followFitPage(movement)
           }
 
           const next = {
@@ -930,7 +965,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             change?.stashId === undefined ? [] : (identity.parked.get(change.stashId) ?? []),
           )
           currentPage.renumbered(
-            Math.min(Math.max(currentPage.get(), 1), Math.max(1, update.numPages)),
+            reading ??
+              Math.min(Math.max(currentPage.get(), 1), Math.max(1, update.numPages)),
+            editAnchorRef.current !== null,
           )
           clearThumbnailSelection()
           // The page numbers on the clipboard now name other pages — unless this
@@ -943,6 +980,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           currentPage,
           pageClipboardStructureChanged,
           parkedPreviews,
+          zoom.followFitPage,
         ],
       ),
       onEditRefused: useCallback(

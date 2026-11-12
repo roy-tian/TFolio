@@ -20,9 +20,11 @@ export type CurrentPage = {
       jump lands again where it leaves its page, rather than read as the
       reader reading on. */
   reland: () => void
-  /** An edit renumbered the pages: the jump's page now names another, so it
-      goes, and the page being read becomes `pageNumber`. */
-  renumbered: (pageNumber: number) => void
+  /** An edit moved the pages, and the page being read, or the one in its
+      place, is now `pageNumber`. Where the view holds that page in place
+      (`held`), a jump on it moves with it and lands again; else the scroll
+      it started now ends on other pages, so it goes. */
+  renumbered: (pageNumber: number, held: boolean) => void
   /** Where the tracker puts the page being read. */
   set: (pageNumber: number) => void
   subscribe: (listener: () => void) => () => void
@@ -61,9 +63,12 @@ export function createCurrentPage(initial: number): CurrentPage {
         notify()
       }
     },
-    renumbered: (next) => {
-      store.jump = null
-      set(next)
+    renumbered: (next, held) => {
+      store.jump =
+        store.jump && held ? { landedTop: null, page: next, since: performance.now() } : null
+
+      pageNumber = next
+      notify()
     },
     set,
     subscribe: (listener) => {

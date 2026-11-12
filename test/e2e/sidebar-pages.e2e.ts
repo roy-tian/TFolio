@@ -4,10 +4,12 @@ import "@wdio/tauri-service"
 import {
   activeSidebar,
   bandedPdf,
+  minimalPdf,
   openPdfFromDisk,
   refreshApp,
   seedSettings,
   settingsHold,
+  sidebarPageAction,
 } from "./helpers"
 
 const session = "[data-document-session][data-active='true']"
@@ -247,6 +249,21 @@ function pageStatus() {
   return $(`${session} [data-slot='page-status']`).getAttribute("aria-label")
 }
 
+/** Where the viewer shows a page, and how wide. */
+function viewerPage(pageNumber: number) {
+  return browser.execute(
+    (scope: string, page: number) => {
+      const box = document
+        .querySelector(`${scope} [data-pdf-scroll-root] [data-page-number='${page}']`)!
+        .getBoundingClientRect()
+
+      return { top: Math.round(box.top), width: Math.round(box.width) }
+    },
+    session,
+    pageNumber,
+  )
+}
+
 /** Wide enough for rows of two, and no wider than the suite's window lets a
     docked sidebar go. */
 const TWO_COLUMNS = 440
@@ -411,6 +428,33 @@ describe("TFolio sidebar pages", () => {
     expect(await shape(3)).toBe("portrait")
     expect(await pageStatus()).toBe("Page 4 of 4")
     expect(await selectedThumbs()).toEqual([4])
+  })
+
+  it("holds the page being read, and the page its fit measures, through edits above it", async () => {
+    // Only page 2 is wide: a fit asked from it is half the scale of one from any other.
+    await openPdfFromDisk(
+      "held.pdf",
+      minimalPdf(6, (index) => (index === 1 ? "0 0 400 300" : "0 0 200 300")),
+    )
+    await $(preview(6)).waitForExist({ timeout: 30_000 })
+    await $(preview(2)).click()
+    await browser.waitUntil(async () => (await pageStatus()) === "Page 2 of 6")
+    await $(`${session} button[aria-label='Fit width']`).click()
+    await browser.pause(600)
+    const held = await viewerPage(2)
+
+    await sidebarPageAction(1, "delete-pages")
+    await browser.waitUntil(async () => (await pageCount()) === 5)
+    await browser.pause(1800)
+    expect(await pageStatus()).toBe("Page 1 of 5")
+    expect(await viewerPage(1)).toEqual(held)
+
+    await sidebarPageAction(3, "copy-pages")
+    await sidebarPageAction(1, "paste-pages-before")
+    await browser.waitUntil(async () => (await pageCount()) === 6)
+    await browser.pause(1800)
+    expect(await pageStatus()).toBe("Page 2 of 6")
+    expect(await viewerPage(2)).toEqual(held)
   })
 
   for (const layout of ["down the column", "across a row"] as const) {
