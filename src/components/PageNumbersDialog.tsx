@@ -59,7 +59,7 @@ export function PageNumbersDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         aria-busy={isApplying}
-        className="flex max-h-[calc(100svh-2rem)] w-[44rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[44rem]"
+        className="flex max-h-[calc(100svh-2rem)] w-[44rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
         data-testid="page-numbers-dialog"
         showCloseButton={!isApplying}
       >

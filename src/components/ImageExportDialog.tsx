@@ -114,7 +114,7 @@ export function ImageExportDialog({
         data-testid="image-export-dialog"
         showCloseButton={!busy}
         aria-busy={busy}
-        className="sm:max-w-2xl"
+        className="sm:max-w-[min(42rem,calc(100%-2rem))]"
       >
         <DialogHeader>
           <DialogTitle>{t("imageExport.title")}</DialogTitle>

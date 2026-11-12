@@ -292,7 +292,7 @@ export function FileHeading({
         </button>
         {renaming ? (
           <FileTitleEditor
-            className="h-6 max-w-64 text-xs md:text-xs"
+            className="h-6 max-w-64 text-xs"
             label={t("sidebar.fileName")}
             onDone={onRenameDone}
             title={title}

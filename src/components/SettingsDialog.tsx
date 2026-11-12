@@ -222,7 +222,7 @@ export function SettingsDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="flex h-[27rem] w-[44rem] gap-0 overflow-hidden p-0 sm:max-w-[44rem]"
+        className="flex h-[27rem] w-[44rem] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
         showCloseButton={false}
       >
         <DialogDescription className="sr-only">
