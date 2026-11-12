@@ -36,12 +36,6 @@ export function isWordPath(path: string) {
   )
 }
 
-/** Word follows the machine's own answer: where no office suite was detected,
-    the extension is not a source this run can accept. */
-export function isSourcePath(path: string, word = true) {
-  return isPdfPath(path) || isImagePath(path) || (word && isWordPath(path))
-}
-
 export type OpenSourceKind = "pdf" | "image" | "word"
 
 export function classifyOpenSource(path: string): OpenSourceKind | null {
@@ -54,6 +48,20 @@ export function classifyOpenSource(path: string): OpenSourceKind | null {
   }
 
   return isWordPath(path) ? "word" : null
+}
+
+/** The files of a drop or a launch that an open or an add can take, and the
+    rest. Word documents are taken whatever this machine has: where no office
+    suite is there, their conversion says so, as it does for an open. */
+export function partitionOpenable(paths: string[]) {
+  const openable: string[] = []
+  const skipped: string[] = []
+
+  for (const path of paths) {
+    (classifyOpenSource(path) === null ? skipped : openable).push(path)
+  }
+
+  return { openable, skipped }
 }
 
 /** What a converted source's first export suggests: the same name, now a

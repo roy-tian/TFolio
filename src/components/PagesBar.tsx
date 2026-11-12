@@ -1,6 +1,7 @@
 import { ChevronDown, SlidersHorizontal } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { SidebarDropHint } from "@/components/SidebarFileDrop"
 import { SidebarPanelTools } from "@/components/SidebarPanelTools"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { usePagesDrop } from "@/hooks/usePagesDrop"
+import { useSidebarDrop } from "@/hooks/useSidebarDrop"
 import type { FileOptions } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
@@ -43,21 +44,11 @@ export function PagesBar({
   severalFiles,
 }: PagesBarProps) {
   const { t } = useTranslation()
-  const drop = usePagesDrop()
+  const drop = useSidebarDrop()
 
   return (
     <div className="relative flex h-9 shrink-0 border-b px-2" data-slot="pages-bar">
-      {drop ? (
-        <p
-          className={cn(
-            "pointer-events-none absolute inset-0 grid place-items-center px-2 text-xs font-medium",
-            drop === "over" ? "text-foreground" : "text-muted-foreground",
-          )}
-          data-slot="pages-drop-hint"
-        >
-          <span className="max-w-full truncate">{t("sidebar.dropFiles")}</span>
-        </p>
-      ) : null}
+      <SidebarDropHint label={t("sidebar.dropFiles")} />
       {/* Hidden, not unmounted, under the drag's words: an open menu would
           lose the trigger it stands by. */}
       <div className={cn("flex min-w-0 flex-1 items-center gap-1", drop && "invisible")}>

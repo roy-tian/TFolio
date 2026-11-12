@@ -13,7 +13,7 @@ import {
   type DocumentSessionHandle,
 } from "@/components/DocumentSession"
 import { DocumentTabs } from "@/components/DocumentTabs"
-import { HomePanel } from "@/components/HomePanel"
+import { HomePanel, HomeSidebar } from "@/components/HomePanel"
 import { NoticeCenter } from "@/components/NoticeCenter"
 import { ReloadPrompt } from "@/components/ReloadPrompt"
 import { SignaturePrompt } from "@/components/SignaturePrompt"
@@ -38,11 +38,12 @@ import { useNotices } from "@/hooks/useNotices"
 import { useReopenTab, type Reopened } from "@/hooks/useReopenTab"
 import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
-import { PagesDropContext, setPagesDropPoint, type PagesDrop } from "@/hooks/usePagesDrop"
+import { SidebarDropContext, setPagesDropPoint, type SidebarDrop } from "@/hooks/useSidebarDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
-import { dropPointInCss, overPages, pagesShown } from "@/lib/fileDrop"
+import { dropHit, dropPointInCss, sidebarShown } from "@/lib/fileDrop"
+import { mergeFiles } from "@/lib/fileSources"
 import {
   activeTabAfterClose,
   HOME_TAB_ID,
@@ -73,7 +74,7 @@ import { cn } from "@/lib/utils"
 import { findOpenFile } from "@/lib/openFiles"
 import {
   classifyOpenSource,
-  isSourcePath,
+  partitionOpenable,
   pdfNameFromSource,
   type OpenSourceKind,
 } from "@/lib/openSources"
@@ -103,7 +104,6 @@ import {
   type WindowRect,
 } from "@/lib/tabMove"
 import { unsavedWorkElsewhere } from "@/lib/unsavedWork"
-import { wordConversionAvailable } from "@/lib/wordConversion"
 
 type OpenTab = {
   /** The image or Word document a converted tab was made from: what a reload
@@ -224,7 +224,7 @@ export default function App() {
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([])
   const [isOpening, setIsOpening] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [pagesDrop, setPagesDrop] = useState<PagesDrop>(null)
+  const [sidebarDrop, setSidebarDrop] = useState<SidebarDrop>(null)
   const [pendingClose, setPendingClose] = useState<PendingClose | null>(null)
   // What the prompt keeps showing while it fades out after an answer.
   const [shownClose, setShownClose] = useState<PendingClose | null>(null)
@@ -662,17 +662,36 @@ export default function App() {
   })
   const reopenTab = reopenPrompt.reopen
 
+  // Files no open or add can take are named, never passed over: all of them
+  // is a wrong choice of file, some a drop that takes the rest.
+  const takeOpenable = useCallback(
+    (paths: string[]) => {
+      const { openable, skipped } = partitionOpenable(paths)
+
+      if (openable.length === 0) {
+        notices.raise({ kind: "invalidFile", owner: workspaceOwner })
+      } else if (skipped.length > 0) {
+        notices.raise({
+          kind: "filesSkipped",
+          owner: workspaceOwner,
+          values: { count: skipped.length, names: skipped.map(fileNameFromPath).join(", ") },
+        })
+      }
+
+      return openable
+    },
+    [notices],
+  )
+
   const openPaths = useCallback(
     (paths: string[], activate: "first" | "last" = "last") => {
-      const sources = paths
-        .map((path) => ({ kind: classifyOpenSource(path), path }))
-        .filter(
-          (source): source is { kind: OpenSourceKind; path: string } =>
-            source.kind !== null,
-        )
+      const sources = takeOpenable(paths).flatMap((path) => {
+        const kind = classifyOpenSource(path)
+
+        return kind ? [{ kind, path }] : []
+      })
 
       if (sources.length === 0) {
-        notices.raise({ kind: "invalidFile", owner: workspaceOwner })
         return Promise.resolve()
       }
 
@@ -755,6 +774,7 @@ export default function App() {
       reopenTab,
       replaceTabs,
       runOpenBatch,
+      takeOpenable,
     ],
   )
 
@@ -872,6 +892,65 @@ export default function App() {
     ],
   )
 
+  // Files let go on the home tab's sidebar: one new document of them all,
+  // holding work a close would lose, as one of pages carried out does. A
+  // single file is only opened: a document of it alone could not save.
+  const mergeDroppedFiles = useCallback(
+    (paths: string[]) => {
+      const sources = takeOpenable(paths)
+
+      if (sources.length < 2) {
+        return sources.length === 0 ? Promise.resolve() : openPaths(sources, "first")
+      }
+
+      return runOpenBatch(async () => {
+        const name = t("menu.untitled")
+        const merged = await mergeFiles(sources, { ask: askSignatures, notices, ownTitle: name })
+
+        if (merged?.kind === "single") {
+          // Queued behind this batch, never awaited inside it.
+          void openPaths([merged.path], "first")
+          return
+        }
+
+        if (!merged) {
+          return
+        }
+
+        const { document } = merged
+
+        if (!mountedRef.current) {
+          void invoke("close_pdf", { documentId: document.id }).catch(() => undefined)
+          return
+        }
+
+        const tab: OpenTab = {
+          dirty: true,
+          document,
+          id: document.id,
+          initialSaveRequired: true,
+          name,
+          path: "",
+          saveAsDefaultName: name,
+          savable: false,
+        }
+
+        replaceTabs((current) => [...current, tab])
+        activateTab(tab.id)
+        notices.retract(workspaceOwner, openRefusals)
+
+        // As every remembered answer is: nothing else shows it was given.
+        if (merged.asSet) {
+          notices.raise({
+            kind: merged.asSet === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet",
+            owner: { documentId: document.id, scope: "document" },
+          })
+        }
+      })
+    },
+    [activateTab, askSignatures, notices, openPaths, replaceTabs, runOpenBatch, t, takeOpenable],
+  )
+
   // The pages are about to land in this tab's column, so its sidebar shows
   // pages, whichever panel the window last chose. The choice is stored, so it
   // is changed only where the tab would show bookmarks instead.
@@ -944,24 +1023,18 @@ export default function App() {
     )
   }, [notices])
 
-  // Only files a document can take its pages from; anything else is said to be
-  // no such file, rather than opened as a tab the reader did not drop it as.
+  // Only files a document can take its pages from, never opened as tabs the
+  // reader did not drop them as; with no point among the pages, at the end.
   const addDroppedFiles = useCallback(
-    (paths: string[], point: { x: number; y: number }) => {
-      const sources = paths.filter((path) => isSourcePath(path, wordConversionAvailable()))
-
-      if (sources.length === 0) {
-        notices.raise({ kind: "invalidFile", owner: workspaceOwner })
-        return
-      }
-
+    (paths: string[], point?: { x: number; y: number }) => {
+      const sources = takeOpenable(paths)
       const shown = activeIdRef.current
 
-      if (shown !== HOME_TAB_ID) {
+      if (sources.length > 0 && shown !== HOME_TAB_ID) {
         sessionRefs.current.get(shown)?.addFiles(sources, point)
       }
     },
-    [notices],
+    [takeOpenable],
   )
   const hasUnsavedWorkNow = useCallback(
     () =>
@@ -1893,17 +1966,29 @@ export default function App() {
     // The OS reports drags of anything at all, and one naming no file has
     // nothing to open: left alone rather than met with a drop target and an error.
     let namesNoFile = false
+    // Only `enter` names the files; `over` carries a position and nothing else.
+    // Files not yet named are taken to be several.
+    let severalDragged = true
     const windows = isWindows()
-    // The viewer's sidebar pages are a target of their own while a document
-    // shows: files let go there are added to it.
     const cssPoint = (position: { x: number; y: number }) =>
       dropPointInCss(position, windows, window.devicePixelRatio)
-    const pagesDropAt = (position: { x: number; y: number }): PagesDrop => {
-      if (activeIdRef.current === HOME_TAB_ID || !pagesShown()) {
+    const several = (paths: string[]) => partitionOpenable(paths).openable.length >= 2
+    // The sidebar on screen takes the files into one document: the shown
+    // tab's, whichever panel shows, or on the home tab a new one, which one
+    // file would only be.
+    const sidebarDropAt = (overSidebar: boolean, severalFiles: boolean): SidebarDrop => {
+      if (!sidebarShown() || (activeIdRef.current === HOME_TAB_ID && !severalFiles)) {
         return null
       }
 
-      return overPages(cssPoint(position)) ? "over" : "offered"
+      return overSidebar ? "over" : "offered"
+    }
+    const endDrag = () => {
+      namesNoFile = false
+      severalDragged = true
+      setIsDragging(false)
+      setSidebarDrop(null)
+      setPagesDropPoint(null)
     }
 
     void getCurrentWebview()
@@ -1914,40 +1999,43 @@ export default function App() {
           event.payload.type === "leave" ||
           (event.payload.type === "drop" && event.payload.paths.length === 0)
         ) {
-          namesNoFile = false
-          setIsDragging(false)
-          setPagesDrop(null)
-          setPagesDropPoint(null)
+          endDrag()
           return
         }
 
         if (event.payload.type === "drop") {
-          namesNoFile = false
-          setIsDragging(false)
-          setPagesDrop(null)
-          setPagesDropPoint(null)
+          const { paths } = event.payload
+          const point = cssPoint(event.payload.position)
+          const hit = dropHit(point)
+          const target = sidebarDropAt(hit.sidebar, several(paths))
 
-          // Opened as tabs, unless let go on the pages, where they join them.
-          if (pagesDropAt(event.payload.position) === "over") {
-            addDroppedFiles(event.payload.paths, cssPoint(event.payload.position))
+          endDrag()
+
+          // Opened as tabs, unless let go on the sidebar.
+          if (target !== "over") {
+            void openPaths(paths, "first")
+          } else if (activeIdRef.current === HOME_TAB_ID) {
+            void mergeDroppedFiles(paths)
           } else {
-            void openPaths(event.payload.paths, "first")
+            addDroppedFiles(paths, hit.pages ? point : undefined)
           }
 
           return
         }
 
-        // Only `enter` names the files; `over` carries a position and nothing else.
         if (event.payload.type === "enter") {
           namesNoFile = event.payload.paths.length === 0
+          severalDragged = several(event.payload.paths)
         }
 
         if (!namesNoFile) {
-          const drop = pagesDropAt(event.payload.position)
+          const point = cssPoint(event.payload.position)
+          const hit = dropHit(point)
+          const drop = sidebarDropAt(hit.sidebar, severalDragged)
 
           setIsDragging(true)
-          setPagesDrop(drop)
-          setPagesDropPoint(drop === "over" ? cssPoint(event.payload.position) : null)
+          setSidebarDrop(drop)
+          setPagesDropPoint(drop === "over" && hit.pages ? point : null)
         }
       })
       .then((stop) => {
@@ -1972,7 +2060,7 @@ export default function App() {
         delete document.documentElement.dataset.fileDrops
       }
     }
-  }, [addDroppedFiles, openPaths])
+  }, [addDroppedFiles, mergeDroppedFiles, openPaths])
 
   // A double-clicked file reaches the app before this workspace exists, so
   // Rust holds it: the event carries no paths, only that a take will find some.
@@ -2331,9 +2419,7 @@ export default function App() {
         // on here, so the home toolbar carries only what still works.
         <>
           <AppSidebar macOS={macOS}>
-            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-              {t("sidebar.noDocument")}
-            </p>
+            <HomeSidebar />
           </AppSidebar>
           <ToolbarFrame
             active
@@ -2428,13 +2514,16 @@ export default function App() {
       {isDragging ? (
         <div
           className={cn(
-            "pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] right-3 bottom-3 z-60 grid place-items-center rounded-2xl border-2 border-dashed backdrop-blur-sm",
-            // Clear of the sidebar, docked or not, while its pages are a
-            // target of their own.
-            pagesDrop
-              ? "left-[calc(var(--sidebar-width)+0.75rem)]"
-              : "left-[calc(var(--sidebar-inset)+0.75rem)]",
-            pagesDrop === "over"
+            "pointer-events-none fixed right-3 bottom-3 z-60 grid place-items-center rounded-2xl border-2 border-dashed backdrop-blur-sm",
+            // Clear of the sidebar, docked or not, while it is a target of
+            // its own; over all of its body otherwise, since a drop there
+            // opens too, whose top row stands higher than the tabs.
+            sidebarDrop
+              ? "top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] left-[calc(var(--sidebar-width)+0.75rem)]"
+              : sidebar.mode === "hidden"
+                ? "top-[calc(var(--toolbar-height)+var(--document-tabs-height)+0.75rem)] left-3"
+                : "top-[calc(var(--toolbar-height)+0.75rem)] left-3",
+            sidebarDrop === "over"
               ? "border-muted-foreground/30 bg-background/75 text-muted-foreground"
               : "border-primary/60 bg-background/90",
           )}
@@ -2548,11 +2637,11 @@ export default function App() {
   return (
     <AppUpdateContext.Provider value={appUpdate}>
       <SidebarContext.Provider value={sidebar}>
-        <PagesDropContext.Provider value={pagesDrop}>
+        <SidebarDropContext.Provider value={sidebarDrop}>
           <PageCarryContext.Provider value={pageCarry.carry}>
             {workspace}
           </PageCarryContext.Provider>
-        </PagesDropContext.Provider>
+        </SidebarDropContext.Provider>
       </SidebarContext.Provider>
     </AppUpdateContext.Provider>
   )

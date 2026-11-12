@@ -1,14 +1,14 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 
-/** What a file drag makes of the shown tab's pages: a target that adds the
-    dragged files to the tab's document ("over" while the pointer is on it),
-    or nothing at all. */
-export type PagesDrop = "offered" | "over" | null
+/** What a file drag makes of the sidebar on screen: a target that takes the
+    dragged files into one document ("over" while the pointer is on it), the
+    shown tab's or a new one, or nothing at all. */
+export type SidebarDrop = "offered" | "over" | null
 
-export const PagesDropContext = createContext<PagesDrop>(null)
+export const SidebarDropContext = createContext<SidebarDrop>(null)
 
-export function usePagesDrop() {
-  return useContext(PagesDropContext)
+export function useSidebarDrop() {
+  return useContext(SidebarDropContext)
 }
 
 // Apart from the context: a drag reports its point many times a second, and
@@ -16,7 +16,8 @@ export function usePagesDrop() {
 let dropPoint: { x: number; y: number } | null = null
 const dropPointListeners = new Set<() => void>()
 
-/** Where a file drag over the pages stands, in CSS pixels; null off them. */
+/** Where a file drag over the sidebar's pages stands, in CSS pixels; null
+    off them, where the files would go to the end. */
 export function setPagesDropPoint(point: { x: number; y: number } | null) {
   if (point?.x === dropPoint?.x && point?.y === dropPoint?.y) {
     return

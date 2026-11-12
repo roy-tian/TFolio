@@ -7,6 +7,7 @@ import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { FileMenuContent } from "@/components/PageContextMenu"
+import { SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -162,6 +163,7 @@ export function FileSectionsTree({
           </ul>
         </nav>
         <OverlayScrollbars viewportRef={navRef} />
+        <SidebarDropEdge />
       </div>
       {drag && dragged ? (
         <div

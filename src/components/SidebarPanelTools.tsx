@@ -1,8 +1,11 @@
 import { ChevronsDownUp, ChevronsUpDown, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { SidebarDropHint } from "@/components/SidebarFileDrop"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
+import { useSidebarDrop } from "@/hooks/useSidebarDrop"
+import { cn } from "@/lib/utils"
 
 export type FoldAll = {
   /** Something shown could be folded away. */
@@ -51,11 +54,19 @@ export function SidebarPanelTools({ fold }: SidebarPanelToolsProps) {
   )
 }
 
-/** The bar over the outline, as `PagesBar` stands over the pages. */
+/** The bar over the outline, as `PagesBar` stands over the pages. Files let
+    go over the outline have no place among its rows: they go to the end. */
 export function OutlineBar(props: SidebarPanelToolsProps) {
+  const { t } = useTranslation()
+  const drop = useSidebarDrop()
+
   return (
-    <div className="flex h-9 shrink-0 items-center border-b px-2" data-slot="outline-bar">
-      <SidebarPanelTools {...props} />
+    <div className="relative flex h-9 shrink-0 items-center border-b px-2" data-slot="outline-bar">
+      <SidebarDropHint label={t("sidebar.dropFilesAtEnd")} />
+      {/* Hidden, not unmounted, as the pages bar's are. */}
+      <div className={cn("flex min-w-0 flex-1 items-center", drop && "invisible")}>
+        <SidebarPanelTools {...props} />
+      </div>
     </div>
   )
 }

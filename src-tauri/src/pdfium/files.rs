@@ -4,12 +4,14 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use tauri::{State, WebviewWindow};
-use tfolio_engine::{FileOptions, FileSourceInfo, PdfStructureUpdate, SignatureDecision};
+use tfolio_engine::{
+    FileOptions, FileSourceInfo, PdfDocumentInfo, PdfStructureUpdate, SignatureDecision,
+};
 
 #[cfg(not(feature = "e2e"))]
 use super::commands::ensure_approved;
 use super::PdfiumState;
-use crate::windows::DocumentOwners;
+use crate::windows::{page_generation, record_document, DocumentFile, DocumentOwners};
 
 /// Files read for their pages and kept by the asking window until a document
 /// takes them. Approved like an open: a source's pages are its contents.
@@ -70,6 +72,33 @@ pub async fn insert_pdf_files(
     })
     .await
     .map_err(|error| format!("PDFium file insertion task failed: {error}"))?
+}
+
+/// Files `read_pdf_sources` read, made into a new document of this window's
+/// with no file, as the files a Save As would write.
+#[tauri::command]
+pub async fn merge_pdf_sources(
+    source_ids: Vec<u64>,
+    own_title: String,
+    options: FileOptions,
+    signatures: HashMap<u64, SignatureDecision>,
+    state: State<'_, PdfiumState>,
+    owners: State<'_, DocumentOwners>,
+    window: WebviewWindow,
+) -> Result<PdfDocumentInfo, String> {
+    let engine = Arc::clone(&state.engine);
+    let label = window.label().to_string();
+    let page = page_generation(&window);
+
+    let merged = tauri::async_runtime::spawn_blocking(move || {
+        engine.merge_sources(&label, &source_ids, &own_title, options, &signatures)
+    })
+    .await
+    .map_err(|error| format!("PDFium merge task failed: {error}"))??;
+
+    record_document(&owners, &window, page, merged.id(), DocumentFile::None);
+
+    Ok(merged)
 }
 
 /// This window's sources read back from disk at their next insert, as those

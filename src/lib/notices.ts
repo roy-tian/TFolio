@@ -328,6 +328,17 @@ export const noticeCatalogue = {
     textKey: "files.unreadable",
     tone: "danger",
   },
+  // Files of a drop or a launch that no flow takes, named beside the rest's.
+  filesSkipped: {
+    life: "transient",
+    textKey: "files.skipped",
+    tone: "warning",
+  },
+  mergeFailed: {
+    life: "transient",
+    textKey: "files.mergeFailed",
+    tone: "danger",
+  },
   filesChanged: {
     life: "transient",
     textKey: "files.changed",

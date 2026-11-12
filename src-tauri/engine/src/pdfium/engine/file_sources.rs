@@ -544,6 +544,42 @@ impl PdfiumEngine {
 
         Ok(structure_update(entry))
     }
+
+    /// A new document of files `read_sources` read, each a file of its own and
+    /// in order, built in memory with no file, like a blank one. It has no
+    /// pages of its own, so it opens as its files alone and with nothing to
+    /// undo; signed sources need answers as an insert's do. Refused whole: a
+    /// file that cannot be added leaves no document behind.
+    pub fn merge_sources(
+        &self,
+        scope: &str,
+        source_ids: &[u64],
+        own_title: &str,
+        options: sections::FileOptions,
+        decisions: &HashMap<u64, SignatureDecision>,
+    ) -> Result<PdfDocumentInfo, String> {
+        let bytes = {
+            // PDFium work like any other, so under the store's lock — given
+            // back before `open_with_source` takes it again.
+            let _documents = self.lock_documents()?;
+
+            self.pdfium
+                .create_new_pdf()
+                .map_err(|error| format!("PDFium could not create a document: {error}"))?
+                .save_to_bytes()
+                .map_err(|error| format!("PDFium could not build the new document: {error}"))?
+        };
+        let id = self.open_with_source(bytes, None)?.id();
+
+        match self.insert_sources(scope, id, source_ids, 1, own_title, options, decisions) {
+            Ok(update) => Ok(PdfDocumentInfo::from_structure(id, update)),
+            Err(error) => {
+                let _ = self.close(id);
+
+                Err(error)
+            }
+        }
+    }
 }
 
 /// The document as an insert of files found it, put back whole if one of them

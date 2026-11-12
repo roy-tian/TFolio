@@ -25,6 +25,17 @@ const saveTrigger = `[data-document-session][data-active='true'] [data-slot='pdf
 
 const session = "[data-document-session][data-active='true']"
 
+/** The sidebar's body while no document is open. */
+const homeSidebar = "[data-slot='home-sidebar']"
+
+function sidebarMiddle(scope: string) {
+  return browser.execute((within: string) => {
+    const box = document.querySelector(within)!.getBoundingClientRect()
+
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  }, scope)
+}
+
 function pageCount() {
   return browser.execute(
     (within: string) => document.querySelectorAll(`${within} button[data-thumbnail-page]`).length,
@@ -316,7 +327,10 @@ describe("TFolio files added to an open document", () => {
     const dropped = writeScratchPdf("dropped.pdf", minimalPdf(3, "0 0 300 200"))
 
     await emitDrag("drag-over", point, [dropped])
-    await expect($("[data-testid='pages-drop']")).toHaveAttribute("data-over", "")
+    await expect($(`${activeSidebar} [data-testid='sidebar-drop']`)).toHaveAttribute(
+      "data-over",
+      "",
+    )
     await emitDrag("drag-drop", point, [dropped])
     await waitForPages(5)
     expect(await headings()).toEqual(["own.pdf", "dropped.pdf"])
@@ -341,7 +355,7 @@ describe("TFolio files added to an open document", () => {
     await expect($("[data-testid='pages-drop-marker']")).toBeDisplayed()
     // What the drop does is said in the bar over the pages, where it covers
     // none of them, in place of the bar's own controls.
-    await expect($(`${activeSidebar} [data-slot='pages-drop-hint']`)).toHaveText(
+    await expect($(`${activeSidebar} [data-slot='sidebar-drop-hint']`)).toHaveText(
       "Drop to add to this document",
     )
     await expect($(`${activeSidebar} [data-slot='sidebar-fold-all']`)).not.toBeDisplayed()
@@ -356,6 +370,101 @@ describe("TFolio files added to an open document", () => {
 
     await browser.keys(["Control", "z"])
     await waitForPages(2)
+  })
+
+  it("adds files dropped on the outline at the end, as its bar says", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await waitForPages(2)
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await $(`${activeSidebar} [data-slot='outline-bar']`).waitForDisplayed()
+    const point = await sidebarMiddle(activeSidebar)
+    const dropped = writeScratchPdf("outlined.pdf", minimalPdf(3, "0 0 300 200"))
+
+    await emitDrag("drag-over", point, [dropped])
+    await expect($(`${activeSidebar} [data-testid='sidebar-drop']`)).toHaveAttribute(
+      "data-over",
+      "",
+    )
+    await expect($(`${activeSidebar} [data-slot='sidebar-drop-hint']`)).toHaveText(
+      "Drop to add at the end of this document",
+    )
+    await emitDrag("drag-drop", point, [dropped])
+    await browser.waitUntil(async () => (await treeFiles()).join() === "own.pdf,outlined.pdf", {
+      timeout: 30_000,
+      timeoutMsg: "the tree never listed the dropped file after the document's own",
+    })
+    expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await waitForPages(5)
+  })
+
+  it("merges files dropped on the home tab's sidebar into a new PDF", async () => {
+    const point = await sidebarMiddle(homeSidebar)
+    const files = [
+      writeScratchPdf("first.pdf", minimalPdf(2)),
+      writeScratchPdf("second.pdf", minimalPdf(3, "0 0 300 200")),
+    ]
+
+    await emitDrag("drag-enter", point, files)
+    await expect($(`${homeSidebar} [data-testid='sidebar-drop']`)).toHaveAttribute(
+      "data-over",
+      "",
+    )
+    await expect($(`${homeSidebar} [data-slot='sidebar-drop-hint']`)).toHaveText(
+      "Drop to combine into a new PDF",
+    )
+    await emitDrag("drag-drop", point, files)
+    await waitForPages(5)
+    expect(await headings()).toEqual(["first.pdf", "second.pdf"])
+
+    // One new document, named as a new one is, with unsaved work to save.
+    const tabs = await browser.execute(() =>
+      Array.from(document.querySelectorAll("[data-document-tab]"), (tab) => tab.textContent ?? ""),
+    )
+    expect(tabs).toHaveLength(1)
+    expect(tabs[0]).toContain("Untitled.pdf")
+    await expect($(saveTrigger)).toBeEnabled()
+  })
+
+  it("opens one file dropped on the home tab's sidebar, as anywhere else", async () => {
+    const point = await sidebarMiddle(homeSidebar)
+    const only = writeScratchPdf("only.pdf", minimalPdf(2))
+
+    await emitDrag("drag-enter", point, [only])
+    // No target of its own: the window's covers the sidebar too.
+    await $("[data-testid='workspace-file-drop']").waitForDisplayed()
+    await expect($("[data-testid='sidebar-drop']")).not.toBeExisting()
+    const covers = await browser.execute(
+      (scope: string) =>
+        document.querySelector("[data-testid='workspace-file-drop']")!.getBoundingClientRect()
+          .left < document.querySelector(scope)!.getBoundingClientRect().right,
+      homeSidebar,
+    )
+    expect(covers).toBe(true)
+
+    await emitDrag("drag-drop", point, [only])
+    await waitForPages(2)
+    expect(await headings()).toEqual([])
+    expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
+  })
+
+  it("names the dropped files no flow can take, adding the rest", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(2))
+    await waitForPages(2)
+    const point = await browser.execute((scope: string) => {
+      const box = document.querySelector(`${scope} [data-pages-surface]`)!.getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.bottom - 24 }
+    }, activeSidebar)
+    const taken = writeScratchPdf("taken.pdf", minimalPdf(1))
+    const notes = writeScratchPdf("notes.txt", new Uint8Array(Buffer.from("notes", "utf8")))
+
+    await emitDrag("drag-drop", point, [taken, notes])
+    await expect($("[data-notice='filesSkipped']")).toHaveText(
+      "Skipped notes.txt, which is not a PDF, image, or Word document.",
+    )
+    await waitForPages(3)
+    expect(await headings()).toEqual(["own.pdf", "taken.pdf"])
   })
 
   it("renames a file and removes one, each undoably", async () => {

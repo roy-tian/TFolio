@@ -94,11 +94,13 @@ import { NO_FOLDS, sectionOutlineKey, type OutlineFolds } from "@/lib/outlineFol
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
 import { fileMoveOrder, pagesOfSection } from "@/lib/pageSections"
-import { readFileSources } from "@/lib/fileSources"
 import {
-  storedFilePreferences,
-  storeFilePreferences,
-} from "@/lib/filePreferences"
+  answerSourceSignatures,
+  readFileSources,
+  releaseFileSources,
+  storedFileOptions,
+} from "@/lib/fileSources"
+import { storeFilePreferences } from "@/lib/filePreferences"
 import { wordConversionAvailable } from "@/lib/wordConversion"
 import {
   formatPageRanges,
@@ -1065,38 +1067,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          // Each signed file answered for itself, unless the reader gives the
-          // rest the same answer, or Settings gives every one of them.
-          const signed = read.filter((info) => info.id !== undefined && info.signatures.intact)
-          const signatures: Record<number, SignatureDecision> = {}
-          const fromSettings = new Set<SignatureDecision>()
-          let asked = false
-          let forRest: SignatureDecision | null = null
+          const answers = await answerSourceSignatures(read, (request) =>
+            askSignaturesRef.current(request),
+          )
 
-          for (const [index, info] of signed.entries()) {
-            const remembered = storedSignatureHandling()
-
-            if (forRest) {
-              signatures[info.id!] = forRest
-            } else if (remembered !== "ask") {
-              signatures[info.id!] = remembered
-              fromSettings.add(remembered)
-            } else {
-              asked = true
-              const answer = await askSignaturesRef.current({
-                context: "insert",
-                count: 1,
-                name: fileNameFromPath(info.path),
-                rest: signed.length - index - 1,
-              })
-
-              if (!answer) {
-                return
-              }
-
-              signatures[info.id!] = answer.decision
-              forRest = answer.forRest ? answer.decision : null
-            }
+          if (!answers) {
+            return
           }
 
           // The end as it stands once queued edits land: a read may take
@@ -1108,7 +1084,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          const preferences = storedFilePreferences()
           const before =
             beforeKey === undefined ? -1 : thumbnailIdentityRef.current.keys.indexOf(beforeKey)
           const landed = await annotations.insertFiles(
@@ -1120,12 +1095,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             before < 0 ? current.numPages + 1 : before + 1,
             current.numPages,
             {
-              options: {
-                perFileBookmarks: preferences.bookmarks,
-                smartPadding: preferences.smartPadding,
-              },
+              options: storedFileOptions(),
               ownTitle: fileName,
-              signatures,
+              signatures: answers.signatures,
             },
           )
 
@@ -1133,22 +1105,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             notice.raise("filesChanged")
           }
 
-          // As every remembered answer is: nothing else shows it was given.
-          const asSet = !asked && fromSettings.size === 1 ? [...fromSettings][0] : undefined
-
-          if (landed === true && asSet) {
-            notice.raise(asSet === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet")
+          if (landed === true && answers.asSet) {
+            notice.raise(
+              answers.asSet === "flatten" ? "signaturesFlattenedAsSet" : "signaturesKeptAsSet",
+            )
           }
         } finally {
           addingFilesRef.current = false
 
           // An add that landed took its sources with it; any other lets them
           // go, or a signed one would keep its file from every writer.
-          if (read.length > 0) {
-            void invoke("release_pdf_sources", {
-              sourceIds: read.flatMap((info) => (info.id === undefined ? [] : [info.id])),
-            }).catch(() => undefined)
-          }
+          releaseFileSources(read)
         }
       },
       [annotations, fileName, notice, notices],

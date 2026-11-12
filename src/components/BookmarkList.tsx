@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import { SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import {
   bookmarkFoldKey,
@@ -166,6 +167,7 @@ export function BookmarkList({
           )}
         </nav>
         <OverlayScrollbars viewportRef={navRef} />
+        <SidebarDropEdge />
       </div>
     </div>
   )

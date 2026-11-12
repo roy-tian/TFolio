@@ -9,8 +9,9 @@ import { DragHole } from "@/components/PageDragGhost"
 import { HintTooltip } from "@/components/HintTooltip"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
 import { PageSignatureMark } from "@/components/SignatureBadge"
+import { SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { useNearViewport } from "@/hooks/useNearViewport"
-import { usePagesDrop, usePagesDropPoint } from "@/hooks/usePagesDrop"
+import { useSidebarDrop, usePagesDropPoint } from "@/hooks/useSidebarDrop"
 import type { CarriedPages } from "@/lib/pageCarry"
 import { flowCells, flowLanding, pointInColumn } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
@@ -37,9 +38,9 @@ export function foldedBarKey(firstKey: number) {
   return `fold-${firstKey}`
 }
 
-/** While a file drag offers the pages, an edge around them and, under the
-    pointer, a bar where the files would go. What a drop does is said in the
-    bar over the pages, where it covers none of them. */
+/** While a file drag offers the sidebar, an edge around the pages and, once
+    the drag is over the sidebar, a bar where the files would go. What a drop
+    does is said in the bar over the pages, where it covers none of them. */
 export function PagesDropTarget({
   flowRef,
   grid,
@@ -48,23 +49,12 @@ export function PagesDropTarget({
   /** Whether the pages stand in rows of several, not down one column. */
   grid: boolean
 }) {
-  const drop = usePagesDrop()
-
-  if (!drop) {
-    return null
-  }
+  const drop = useSidebarDrop()
 
   return (
-    <div
-      className={cn(
-        "pointer-events-none absolute inset-1 z-10 rounded-xl border-2 border-dashed",
-        drop === "over" ? "border-primary/70" : "border-muted-foreground/40",
-      )}
-      data-over={drop === "over" ? "" : undefined}
-      data-testid="pages-drop"
-    >
+    <SidebarDropEdge>
       {drop === "over" ? <DropMarker flowRef={flowRef} grid={grid} /> : null}
-    </div>
+    </SidebarDropEdge>
   )
 }
 
@@ -87,15 +77,17 @@ function DropMarker({
     const flow = flowRef.current
     const host = markerRef.current?.parentElement
 
-    if (!flow || !host || !point) {
+    if (!flow || !host) {
       setBox(null)
       return
     }
 
     // By cells, which the marker stands between: the drop itself counts
-    // pages, a folded file's name being one cell of many.
+    // pages, a folded file's name being one cell of many. Off the pages the
+    // files go to the end.
     const cells = flowCells(flow, () => false)
-    const slot = flowLanding(pointInColumn(flow, point), cells, null) ?? cells.length
+    const slot =
+      (point && flowLanding(pointInColumn(flow, point), cells, null)) ?? cells.length
     const landing = cells[Math.min(slot, cells.length - 1)]
 
     if (!landing) {

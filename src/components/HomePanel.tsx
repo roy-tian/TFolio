@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from "react"
-import { Clock, FilePlus2, FolderOpen, LoaderCircle, X } from "lucide-react"
+import { Clock, FilePlus2, FileStack, FolderOpen, LoaderCircle, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import fileSmallIcon from "@/assets/brand/file-small.svg"
 import { HintTooltip, HintTooltipGroup } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import { SidebarDropEdge } from "@/components/SidebarFileDrop"
+import { useSidebarDrop } from "@/hooks/useSidebarDrop"
 import {
   HOME_TAB_ID,
   panelElementId,
   tabElementId,
 } from "@/lib/documentTabs"
 import type { RecentFile } from "@/lib/recentFiles"
+import { cn } from "@/lib/utils"
 
 /** Rows rendered before the first scroll, and added per load; the list may
     hold every entry the backend keeps, so it is paged in rather than rendered. */
@@ -18,6 +21,39 @@ const RECENT_PAGE_SIZE = 20
 
 const recentActionClass =
   "grid size-7 cursor-pointer place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-0"
+
+/** The sidebar with no document: where its pages will show, and the one
+    thing it takes meanwhile, several files let go there made one new PDF. */
+export function HomeSidebar() {
+  const { t } = useTranslation()
+  const drop = useSidebarDrop()
+
+  return (
+    <div className="relative h-full" data-slot="home-sidebar">
+      <div
+        className={cn(
+          "flex flex-col gap-2 px-4 py-6 text-center text-sm text-muted-foreground",
+          drop && "invisible",
+        )}
+      >
+        <p>{t("sidebar.noDocument")}</p>
+        <p>{t("sidebar.mergeHint")}</p>
+      </div>
+      <SidebarDropEdge>
+        <div
+          className={cn(
+            "absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center text-sm font-medium",
+            drop === "over" ? "text-foreground" : "text-muted-foreground",
+          )}
+          data-slot="sidebar-drop-hint"
+        >
+          <FileStack className="size-8" />
+          {t("sidebar.dropMerge")}
+        </div>
+      </SidebarDropEdge>
+    </div>
+  )
+}
 
 type HomePanelProps = {
   active: boolean
