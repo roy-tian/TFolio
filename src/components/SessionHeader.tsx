@@ -8,12 +8,13 @@ import {
   Shrink,
   Upload,
 } from "lucide-react"
-import type { ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { AnnotationToolbar, type AnnotationTool } from "@/components/AnnotationToolbar"
 import { SidebarToggle } from "@/components/AppSidebar"
 import { HistoryControls } from "@/components/HistoryControls"
+import { useFoldingLabels } from "@/components/ToolbarLabel"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { WindowControls } from "@/components/WindowControls"
 import { Button } from "@/components/ui/button"
@@ -222,6 +223,9 @@ export function ToolbarFrame({
   start,
 }: ToolbarFrameProps) {
   const docked = useSidebar().mode === "docked"
+  const barRef = useRef<HTMLElement>(null)
+
+  useFoldingLabels(barRef)
 
   return (
     // pb-px keeps the content box even: an odd row centres a 28px control on a
@@ -230,6 +234,7 @@ export function ToolbarFrame({
       className="fixed top-0 right-0 left-(--sidebar-inset) z-40 flex h-(--toolbar-height) items-center justify-between gap-2 border-b bg-background px-2 pb-px"
       data-slot="toolbar"
       data-tauri-drag-region="deep"
+      ref={barRef}
     >
       <div
         className={cn(

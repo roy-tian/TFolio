@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 import { ColorSwatchPicker } from "@/components/ColorSwatchPicker"
 import { RectEffectIcon } from "@/components/RectEffectIcon"
 import { RectStylePopover } from "@/components/RectStylePopover"
+import { ToolbarLabel } from "@/components/ToolbarLabel"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -221,12 +222,13 @@ export function AnnotationToolbar({
         <ToolbarTooltip label={watermarkLabel} shortcut={shortcuts.watermark}>
           <Button
             aria-label={watermarkLabel}
-            className="border-input"
+            className="min-w-7 gap-0 border-input px-[5px]"
             onClick={onWatermark}
-            size="icon-sm"
+            size="sm"
             variant="ghost"
           >
-            <Stamp />
+            <Stamp className="size-4" />
+            <ToolbarLabel>{watermarkLabel}</ToolbarLabel>
           </Button>
         </ToolbarTooltip>
 
@@ -236,12 +238,13 @@ export function AnnotationToolbar({
         >
           <Button
             aria-label={pageNumbersLabel}
-            className="border-input"
+            className="min-w-7 gap-0 border-input px-[5px]"
             onClick={onPageNumbers}
-            size="icon-sm"
+            size="sm"
             variant="ghost"
           >
-            <FileScan />
+            <FileScan className="size-4" />
+            <ToolbarLabel>{pageNumbersLabel}</ToolbarLabel>
           </Button>
         </ToolbarTooltip>
       </ButtonGroup>

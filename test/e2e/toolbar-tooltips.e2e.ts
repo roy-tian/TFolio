@@ -145,6 +145,55 @@ describe("TFolio toolbar tooltips", () => {
     await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.blur(), outline)
   })
 
+  it("folds the layer buttons' words while the title bar cannot hold them", async () => {
+    const watermark = $("[data-slot='toolbar'] button[aria-label='水印']")
+    // What the bar's parts take as they stand, against the room it has.
+    const room = () =>
+      browser.execute(() => {
+        const bar = document.querySelector<HTMLElement>("[data-slot='toolbar']")!
+        const style = getComputedStyle(bar)
+        const parts = [...bar.children] as HTMLElement[]
+
+        return {
+          have: bar.clientWidth,
+          need:
+            parseFloat(style.paddingLeft) +
+            parseFloat(style.paddingRight) +
+            parseFloat(style.columnGap) * (parts.length - 1) +
+            parts.reduce((sum, part) => sum + part.scrollWidth, 0),
+        }
+      })
+    // The window itself cannot be resized from here, so the bar's right edge
+    // comes in instead, or goes back.
+    const pullRightEdge = (by: number | null) =>
+      browser.execute((px: number | null) => {
+        document.querySelector<HTMLElement>("[data-slot='toolbar']")!.style.right =
+          px === null ? "" : `${px}px`
+      }, by)
+
+    const labelled = await watermark.getSize("width")
+    expect(labelled).toBeGreaterThan(28)
+
+    // Ten pixels short of what every word needs.
+    const unfolded = await room()
+    await pullRightEdge(unfolded.have - unfolded.need + 10)
+    try {
+      await browser.waitUntil(async () => (await watermark.getSize("width")) === 28, {
+        timeout: 5_000,
+        timeoutMsg: "the words never folded in a bar too narrow for them",
+      })
+      const folded = await room()
+      expect(folded.need).toBeLessThanOrEqual(folded.have)
+    } finally {
+      // A failure here must not leave later tests a narrowed bar.
+      await pullRightEdge(null)
+    }
+    await browser.waitUntil(async () => (await watermark.getSize("width")) === labelled, {
+      timeout: 5_000,
+      timeoutMsg: "the words never came back once the bar had room",
+    })
+  })
+
   it("leaves no native tooltip in the workspace", async () => {
     // Every hint the app shows is a shadcn tooltip, so nothing on screen may
     // still carry the attribute the WebView would draw its own from.
