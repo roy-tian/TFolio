@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import type { TOptions } from "i18next"
+import type { ParseKeys, TOptions } from "i18next"
 import {
   CircleAlert,
   CircleCheck,
@@ -136,7 +136,9 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
 
   // The catalogue is what pairs a message with the values that fill it, which
   // is past what the typed `t` can check; `notices.test.ts` walks the pairs.
-  const message = t(entry.textKey, notice.values as TOptions)
+  const message = (
+    t as (key: ParseKeys, options: TOptions | undefined) => string
+  )(entry.textKey, notice.values)
   const action = notice.action ? noticeActions[notice.action.kind] : null
   const busy = notice.action?.busy === true
   const running = "running" in entry

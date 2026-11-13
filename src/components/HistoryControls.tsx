@@ -32,7 +32,9 @@ export function HistoryControls({
   function actionName(command: AnnotationCommand) {
     const action = historyAction(command)
 
-    return t(action.key, { count: action.count })
+    return "count" in action
+      ? t(action.key, { count: action.count })
+      : t(action.key)
   }
 
   const undoLabel = nextUndo
