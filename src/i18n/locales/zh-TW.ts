@@ -142,7 +142,7 @@ const zhTW = {
     title: "另存為 A4",
     description: "每頁放到一張 A4 紙上，另存為新檔案：需要時按比例縮小，不會放大，寬的頁面橫放。儲存後這個分頁顯示新檔案。",
     leftBehind: "頁面上的註解、連結和表單不會保留；浮水印和頁碼會以原本的大小重新放到 A4 頁面上。",
-    keepsOriginal: "這個文件有未儲存的修改，A4 檔案會在新分頁中開啟，目前分頁保持不變。",
+    keepsOriginal: "此文件有尚未儲存的變更，A4 檔案會在新分頁中開啟，目前的分頁保持不變。",
     suffix: "A4",
     preparing: "正在把頁面放到 A4 上…",
     finishing: "正在完成檔案…",
@@ -152,7 +152,7 @@ const zhTW = {
     cancel: "取消",
     stop: "停止",
     stopping: "正在停止…",
-    save: "另存為…",
+    save: "另存新檔…",
   },
   compressExport: {
     menuLabel: "縮減檔案大小…",
@@ -286,7 +286,7 @@ const zhTW = {
     actionRenameFile: "重新命名檔案",
     actionSmartPadding: "檔案從奇數頁開始",
     actionFileBookmarks: "每個檔案儲存一個書籤",
-    saveForeign: "已拼入其他檔案的頁面，只能另存為新檔案",
+    saveForeign: "已加入其他檔案的頁面，只能另存新檔",
     highlight: "醒目提示文字",
     highlightOptions: "醒目提示選項",
     highlightColor: "醒目提示色彩",
@@ -339,9 +339,9 @@ const zhTW = {
     exportTargetMissing:
       "該資料夾已不存在，可能已被移動，或所在的磁碟已移除。請換個位置。",
     exportDocumentChanged:
-      "建立副本期間文件有變更，副本未儲存。請再試一次。",
+      "建立複本期間文件有變更，複本未儲存。請再試一次。",
     exportSigned:
-      "該檔案含有效的數位簽章，儲存覆蓋會使簽章失效。請換一個檔名。",
+      "該檔案含有效的數位簽章，覆寫它會使簽章失效。請換一個檔名。",
     exportSignedChanged:
       "已簽署的檔案在開啟後被修改過，這份複本已不是原件。請重新開啟該檔案再複製。",
     markWhileEditing:
@@ -449,9 +449,9 @@ const zhTW = {
     themeDark: "深色",
     language: "語言",
     languageHint: "選擇介面語言。",
-    languageSystem: "自動（與系統一致）",
+    languageSystem: "自動（與系統語言一致）",
     close: "關閉",
-    signatures: "簽署檔案",
+    signatures: "已簽署檔案",
     signatureHandling: "修改含簽章的檔案",
     signatureHandlingHint: "當修改或產生新檔案會使檔案的數位簽章失效時如何處理。已簽署的原始檔案不會被覆寫。",
     signatureAsk: "每次詢問",
@@ -523,7 +523,7 @@ const zhTW = {
     rotatePageRight: "順時針旋轉第 {{pageNumber}} 頁",
     deletePage: "刪除第 {{pageNumber}} 頁",
     deleteKeepsOne: "文件至少保留一頁，不能全部刪除",
-    cutKeptNotice: "已貼上為副本：文件至少保留一頁，{{name}} 的頁面都留在原處",
+    cutKeptNotice: "已貼上為複本：文件至少保留一頁，{{name}} 的頁面都留在原處",
     pageFolded:
       "第 {{pageNumber}} 頁收合在檔案名稱下，展開該檔案後才能旋轉或刪除",
   },
@@ -556,7 +556,7 @@ const zhTW = {
     resize: "調整側欄寬度",
     addFiles: "加入檔案…",
     dropFiles: "放開以加入目前文件",
-    dropFilesAtEnd: "放開以加到目前文件末尾",
+    dropFilesAtEnd: "放開以加到目前文件結尾",
     dropMerge: "放開以合併為一個新的 PDF",
     files: "檔案",
     fileRows: "依檔案分組顯示",
@@ -599,7 +599,7 @@ const zhTW = {
       "加入的「{{name}}」已簽署，其頁面加入後無法保留數位簽章，可能有合規風險。",
     promptOriginal: "已簽署的原始檔案不會被覆寫。",
     flattenHint: "平面化：保留外觀，簽章的圖樣併入頁面內容，簽章本身被移除。",
-    keepHint: "保留簽章欄位：欄位留在檔案中，但會顯示為無效；A4 調整會遺失它們。",
+    keepHint: "保留簽章欄位：欄位留在檔案中，但會顯示為無效；另存為 A4 時會遺失它們。",
     flatten: "平面化",
     keep: "保留簽章欄位",
     cancel: "取消",

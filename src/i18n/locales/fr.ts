@@ -47,7 +47,7 @@ const fr = {
     appendedNotice_one: "{{count}} page ajoutée à la fin de {{name}}",
     appendedNotice_other: "{{count}} pages ajoutées à la fin de {{name}}",
     appendBusy:
-      "Les pages n’ont pas été ajoutées : une opération est encore en cours sur {{name}}. Réessayez une fois qu’elle est terminée.",
+      "Les pages n’ont pas été ajoutées : une opération est encore en cours sur {{name}}. Réessayez une fois qu’elle est terminée.",
     unsavedTabDescription:
       "Ce document contient des modifications non enregistrées. Si vous fermez son onglet, elles seront perdues.",
     unsavedWindowDescription:
@@ -60,7 +60,7 @@ const fr = {
     discardAndCloseTabs: "Abandonner et fermer les onglets",
     discardAndCloseAll: "Abandonner et tout fermer",
     saveBeforeClose: "Enregistrer",
-    reloadTitle: "« {{name}} » a été modifié ailleurs",
+    reloadTitle: "« {{name}} » a été modifié ailleurs",
     reloadDescription:
       "Un autre programme a modifié ce fichier depuis son ouverture ici, et cet onglet contient des modifications non enregistrées. Le recharger reprend le fichier tel qu’il est maintenant, et ces modifications seront perdues.",
     reloadKeep: "Garder mes modifications",
@@ -70,7 +70,7 @@ const fr = {
     unsavedQuitElsewhereDescription:
       "Une autre fenêtre contient des modifications non enregistrées, ou n’a pas répondu. Si vous quittez, elles seront perdues.",
     unsavedQuitHereAndElsewhereDescription:
-      "Des documents de cette fenêtre contiennent des modifications non enregistrées, et une autre fenêtre aussi, ou n’a pas répondu. Si vous quittez, elles seront toutes perdues.",
+      "Des documents de cette fenêtre contiennent des modifications non enregistrées, et une autre fenêtre en contient aussi ou n’a pas répondu. Si vous quittez, elles seront toutes perdues.",
     discardAndQuit: "Abandonner et quitter",
     busyTitle: "Arrêter l’opération en cours ?",
     busyTabDescription:
@@ -143,13 +143,13 @@ const fr = {
     menuLabel: "Enregistrer en A4…",
     title: "Enregistrer en A4",
     description: "Chaque page est placée sur une feuille A4 dans un nouveau fichier, réduite si besoin mais jamais agrandie, les pages larges à l’horizontale. Cet onglet affiche ensuite le nouveau fichier.",
-    leftBehind: "Les annotations, liens et champs de formulaire ne sont pas conservés ; le filigrane et les numéros de page sont replacés sur les feuilles A4 à leur propre taille.",
-    keepsOriginal: "Ce document a des modifications non enregistrées : le fichier A4 s’ouvre dans un nouvel onglet et celui-ci reste tel quel.",
+    leftBehind: "Les annotations, liens et champs de formulaire ne sont pas conservés ; le filigrane et les numéros de page sont replacés sur les feuilles A4 à leur propre taille.",
+    keepsOriginal: "Ce document a des modifications non enregistrées : le fichier A4 s’ouvre dans un nouvel onglet et celui-ci reste tel quel.",
     suffix: "A4",
     preparing: "Mise des pages au format A4…",
     finishing: "Finalisation du fichier…",
     layersScaled:
-      "Le filigrane et les numéros de page n’ont pas pu être replacés sur les feuilles A4 ; ils ont été réduits avec leurs pages.",
+      "Le filigrane et les numéros de page n’ont pas pu être replacés sur les feuilles A4 ; ils ont été réduits avec leurs pages.",
     failed: "Impossible d’enregistrer la copie A4.",
     cancel: "Annuler",
     stop: "Arrêter",
@@ -219,8 +219,8 @@ const fr = {
     viewModeBook: "Livre",
     pageStatus: "Page {{current}} sur {{total}}",
     pageNumberInput: "Numéro de page",
-    rotateView: "Faire pivoter l’affichage dans le sens horaire",
-    rotateViewHint: "Faire pivoter l’affichage dans le sens horaire (sans modifier le fichier)",
+    rotateView: "Faire pivoter l’affichage vers la droite",
+    rotateViewHint: "Faire pivoter l’affichage vers la droite (sans modifier le fichier)",
     viewControls: "Commandes d’affichage",
     zoomOut: "Zoom arrière",
     zoomIn: "Zoom avant",
@@ -230,7 +230,7 @@ const fr = {
     zoomPresets: "Zooms prédéfinis",
     zoomReset: "Revenir à 100\u00A0%",
     zoomCurrent: "Zoom actuel {{level}}",
-    zoomReadout: "Zoom actuel {{level}}, cliquer pour revenir à 100\u00A0%",
+    zoomReadout: "Zoom actuel {{level}}, cliquez pour revenir à 100\u00A0%",
     zoomFitWidth: "Ajuster à la largeur",
     zoomFitPage: "Ajuster à la page",
   },
@@ -288,8 +288,8 @@ const fr = {
     actionInsertFiles_other: "l’ajout de {{count}} fichiers",
     actionRenameFile: "le renommage d’un fichier",
     actionSmartPadding: "le début des fichiers sur une page impaire",
-    actionFileBookmarks: "un signet par fichier",
-    saveForeign: "Des pages d’autres fichiers ont été ajoutées : enregistrement possible uniquement dans un nouveau fichier",
+    actionFileBookmarks: "l’ajout d’un signet par fichier",
+    saveForeign: "Des pages d’autres fichiers ont été ajoutées : enregistrement possible uniquement dans un nouveau fichier",
     highlight: "Surligner le texte",
     highlightOptions: "Options de surlignage",
     highlightColor: "Couleur de surlignage",
@@ -309,7 +309,7 @@ const fr = {
     effectDisclosure:
       "Ceci n’est pas un caviardage : le texte en dessous peut toujours être recherché et copié. Réservez cet effet visuel à l’impression.",
     noteFontMissing:
-      "Aucune police installée ne peut afficher ce texte. Télécharger Noto Sans SC (17 MB) pour l’ajouter ?",
+      "Aucune police installée ne peut afficher ce texte. Télécharger Noto Sans SC (17 Mo) pour l’ajouter ?",
     noteFontFetch: "Télécharger",
     noteFontFetching: "Téléchargement…",
     noteFontFailed: "La police n’a pas pu être téléchargée. Vérifiez la connexion et réessayez.",
@@ -346,7 +346,7 @@ const fr = {
     exportSigned:
       "Ce fichier porte des signatures numériques intactes, qu’un enregistrement par-dessus romprait. Choisissez un autre nom.",
     exportSignedChanged:
-      "Le fichier signé a changé sur le disque depuis son ouverture : cette copie ne serait plus lui. Rouvrez le fichier pour le copier.",
+      "Le fichier signé a changé sur le disque depuis son ouverture : cette copie ne lui correspondrait plus. Rouvrez le fichier pour le copier.",
     markWhileEditing:
       "Une modification de pages est en cours — cette annotation n’a pas été conservée. Réessayez dans un instant.",
     watermarkRebuilding: "Mise à jour du filigrane…",
@@ -418,12 +418,12 @@ const fr = {
     startPlaceholder: "Position de la page",
     startHint: "Laissez vide pour numéroter chaque page selon sa position dans le document.",
     colorHandling: "Fusion des couleurs",
-    smartColor: "Couleur adaptative des numéros",
+    smartColor: "Couleur adaptative",
     smartColorHint:
       "Les numéros sont noirs et passent en blanc lorsqu’ils tombent sur une zone sombre.",
     blankPages: "Pages vierges",
-    blankCountAndShow: "Compter et afficher le numéro",
-    blankCountAndHide: "Compter sans afficher le numéro",
+    blankCountAndShow: "Compter et numéroter",
+    blankCountAndHide: "Compter sans numéroter",
     blankSkip: "Ne pas compter",
     blankPagesHint:
       "Comptez les pages vierges avec un numéro visible ou masqué, ou ignorez-les pour que les numéros suivants se resserrent. Masquer ou ignorer les numéros oblige à vérifier le contenu de chaque page ; les longs documents peuvent donc prendre plus de temps.",
@@ -452,7 +452,7 @@ const fr = {
     themeDark: "Sombre",
     language: "Langue",
     languageHint: "Choisissez la langue de l’interface.",
-    languageSystem: "Automatique (comme le système)",
+    languageSystem: "Automatique (langue du système)",
     close: "Fermer",
     signatures: "Fichiers signés",
     signatureHandling: "Modifier des fichiers signés",
@@ -460,7 +460,7 @@ const fr = {
       "Ce qui se passe avant qu’une modification ou un nouveau fichier n’invalide les signatures numériques d’un fichier. Le fichier signé lui-même n’est jamais écrasé.",
     signatureAsk: "Demander à chaque fois",
     signatureFlatten: "Aplatir (garder l’aspect)",
-    signatureKeep: "Garder les champs de signature (affichés non valides)",
+    signatureKeep: "Garder les champs de signature (affichés comme non valides)",
   },
   viewer: {
     dropTitle: "PDF/Word/Images",
@@ -491,8 +491,8 @@ const fr = {
   pageEdit: {
     insertBefore: "Insérer une page vierge avant la page {{pageNumber}}",
     insertAfter: "Insérer une page vierge après la page {{pageNumber}}",
-    insertBlankBefore: "Insérer une page blanche avant",
-    insertBlankAfter: "Insérer une page blanche après",
+    insertBlankBefore: "Insérer une page vierge avant",
+    insertBlankAfter: "Insérer une page vierge après",
     cut_one: "Couper la page",
     cut_other: "Couper {{count}} pages",
     copy_one: "Copier la page",
@@ -527,9 +527,9 @@ const fr = {
     rotatePageLeft: "Faire pivoter la page {{pageNumber}} vers la gauche",
     rotatePageRight: "Faire pivoter la page {{pageNumber}} vers la droite",
     deletePage: "Supprimer la page {{pageNumber}}",
-    deleteKeepsOne: "Un document garde au moins une page : impossible de les supprimer toutes",
+    deleteKeepsOne: "Un document garde au moins une page : impossible de les supprimer toutes",
     cutKeptNotice:
-      "Collées en tant que copies : un document garde au moins une page, {{name}} garde donc toutes les siennes",
+      "Collées en tant que copies : un document garde au moins une page, {{name}} garde donc toutes les siennes",
     pageFolded:
       "La page {{pageNumber}} est réduite sous le nom de son fichier. Développez le fichier pour la faire pivoter ou la supprimer",
   },
@@ -540,11 +540,11 @@ const fr = {
     stopping: "Arrêt…",
     adding: "Lecture des fichiers…",
     unreadable_one: "Impossible de lire {{names}}.",
-    unreadable_other: "Impossible de lire {{count}} fichiers : {{names}}.",
+    unreadable_other: "Impossible de lire {{count}} fichiers : {{names}}.",
     converterMissing: "Pour ajouter des documents Word, installez Word, WPS ou LibreOffice.",
     tooManyFiles: "64 fichiers au plus peuvent être ajoutés à la fois.",
-    skipped_one: "{{names}} a été ignoré : ce n’est ni un PDF, ni une image, ni un document Word.",
-    skipped_other: "{{count}} fichiers ont été ignorés, car ce ne sont ni des PDF, ni des images, ni des documents Word : {{names}}.",
+    skipped_one: "{{names}} a été ignoré : ce n’est ni un PDF, ni une image, ni un document Word.",
+    skipped_other: "{{count}} fichiers ont été ignorés, car ce ne sont ni des PDF, ni des images, ni des documents Word : {{names}}.",
     mergeFailed: "Impossible de combiner ces fichiers en un nouveau PDF.",
     changed: "Un fichier a changé sur le disque après sa lecture. Ajoutez-le à nouveau pour le prendre tel qu’il est maintenant.",
     added_one: "{{count}} fichier ajouté, à partir de la page {{at}}",
@@ -568,10 +568,10 @@ const fr = {
     fileRows: "Regrouper les pages par fichier",
     smartPadding: "Commencer chaque fichier sur une page impaire",
     fileBookmarks: "Ajouter un signet par fichier",
-    paddingPage: "Une page blanche ajoutée à l’enregistrement pour que le fichier suivant commence sur une page impaire",
-    noPadding: "Sans pages blanches",
-    fileOptions: "Options",
-    fileOptionsOneFile: "Options : disponibles lorsque le document contient plusieurs fichiers",
+    paddingPage: "Une page vierge ajoutée à l’enregistrement pour que le fichier suivant commence sur une page impaire",
+    noPadding: "Sans pages vierges",
+    fileOptions: "Options des fichiers",
+    fileOptionsOneFile: "Options des fichiers : disponibles lorsque le document contient plusieurs fichiers",
     optionsView: "Affichage",
     optionsSave: "À l’enregistrement",
     removeFile: "Retirer {{name}}",
@@ -596,34 +596,34 @@ const fr = {
   signatures: {
     count_one: "Contient {{count}} signature numérique",
     count_other: "Contient {{count}} signatures numériques",
-    promptTitle: "Modifier un fichier signé numériquement ?",
+    promptTitle: "Modifier un fichier signé numériquement ?",
     promptEdit_one:
-      "« {{name}} » porte une signature numérique. Le modifier l’invalide, ce qui peut présenter un risque de conformité.",
+      "« {{name}} » porte une signature numérique. Le modifier l’invalide, ce qui peut présenter un risque de conformité.",
     promptEdit_other:
-      "« {{name}} » porte {{count}} signatures numériques. Le modifier les invalide, ce qui peut présenter un risque de conformité.",
+      "« {{name}} » porte {{count}} signatures numériques. Le modifier les invalide, ce qui peut présenter un risque de conformité.",
     promptExport_one:
-      "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder sa signature numérique, ce qui peut présenter un risque de conformité.",
+      "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder sa signature numérique, ce qui peut présenter un risque de conformité.",
     promptExport_other:
-      "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder ses {{count}} signatures numériques, ce qui peut présenter un risque de conformité.",
+      "Un nouveau fichier fait de pages de « {{name}} » ne peut pas garder ses {{count}} signatures numériques, ce qui peut présenter un risque de conformité.",
     promptInsert:
-      "« {{name}} » est signé et ses pages ici ne peuvent pas garder ses signatures numériques, ce qui peut présenter un risque de conformité.",
+      "« {{name}} » est signé, et ses pages ajoutées ici ne peuvent pas garder ses signatures numériques, ce qui peut présenter un risque de conformité.",
     promptOriginal: "Le fichier signé lui-même n’est jamais écrasé.",
     flattenHint:
-      "Aplatir garde l’aspect : l’apparence de chaque signature devient du contenu de page, et la signature est retirée.",
+      "Aplatir garde l’aspect : l’apparence de chaque signature devient du contenu de page, et la signature elle-même est retirée.",
     keepHint:
-      "Garder les champs de signature les laisse dans le fichier, où ils apparaissent non valides ; un ajustement A4 les supprime.",
+      "Garder les champs de signature les laisse dans le fichier, où ils apparaissent non valides ; l’enregistrement en A4 les supprime.",
     flatten: "Aplatir",
     keep: "Garder les champs de signature",
     cancel: "Annuler",
     flattenFailed:
       "Les signatures n’ont pas pu être aplaties, et rien n’a changé. Réessayez, ou gardez les champs de signature.",
-    remember: "Mémoriser mon choix (modifiable dans les Réglages)",
+    remember: "Mémoriser mon choix (modifiable dans les Paramètres)",
     forRest_one: "Faire de même pour l’autre fichier signé",
     forRest_other: "Faire de même pour les {{count}} autres fichiers signés",
     appliedFlatten:
-      "Comme le veulent les Réglages, les signatures numériques sont aplaties pour cette modification. Le fichier signé reste tel quel.",
+      "Conformément aux Paramètres, les signatures numériques sont aplaties pour cette modification. Le fichier signé reste tel quel.",
     appliedKeep:
-      "Comme le veulent les Réglages, les champs de signature sont gardés pour cette modification et apparaîtront non valides. Le fichier signé reste tel quel.",
+      "Conformément aux Paramètres, les champs de signature sont gardés pour cette modification et apparaîtront non valides. Le fichier signé reste tel quel.",
     brokenCount_one: "Contient {{count}} signature numérique rompue",
     brokenCount_other: "Contient {{count}} signatures numériques rompues",
     page: "Cette page porte une signature numérique",
