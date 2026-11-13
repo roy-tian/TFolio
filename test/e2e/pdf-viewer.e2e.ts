@@ -509,15 +509,12 @@ describe("TFolio PDF viewer", () => {
 
     expect((await pageBox()).scrollableX).toBe(0)
 
-    // Out until `-` gives up at the 10% floor, then in along the rungs to 100%,
-    // which presses actual size though no preset was chosen.
+    // Out until `-` gives up at the 10% floor, then in along the rungs to 100%.
     const zoomOut = () => $("button[aria-label='Zoom out']")
 
     while (await zoomOut().isEnabled()) {
       await zoomOut().click()
     }
-
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
 
     for (let rung = 0; rung < 6; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
@@ -529,12 +526,10 @@ describe("TFolio PDF viewer", () => {
       Math.round((200 * 96 * percent) / (72 * 100))
 
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
     expect((await pageBox()).width).toBe(actualSize(100))
 
     await $("button[aria-label='Zoom in']").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 110%")
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
     expect((await pageBox()).width).toBe(actualSize(110))
 
     await $("button[aria-label='Zoom out']").click()
@@ -630,9 +625,10 @@ describe("TFolio PDF viewer", () => {
     await expect(preset("Fit width")).toHaveAttribute("aria-pressed", "true")
     await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "false")
 
-    await preset("Actual size").click()
+    // The readout takes a fit back to 100% and lets the fit go.
+    await $("[data-slot='zoom-controls-readout']").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
+    await expect(preset("Fit width")).toHaveAttribute("aria-pressed", "false")
     expect((await pageBox()).width).toBe(actualSize(100))
     const widthBeforePreview = (await pageBox()).width
     const preview = (await browser.executeAsync((done) => {

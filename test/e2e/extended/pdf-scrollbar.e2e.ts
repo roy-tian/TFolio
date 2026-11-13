@@ -113,7 +113,7 @@ describe("PDF overlay scrollbar", () => {
     await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
 
     const session = "[data-document-session][data-active='true']"
-    await $(`${session} button[aria-label='Actual size']`).click()
+    await $(`${session} [data-slot='zoom-controls-readout']`).click()
     for (let rung = 0; rung < 5; rung += 1) {
       await $(`${session} button[aria-label='Zoom in']`).click()
     }

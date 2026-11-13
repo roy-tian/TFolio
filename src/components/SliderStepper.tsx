@@ -22,8 +22,19 @@ type SliderStepperProps = {
   onIncrease: () => void
   /** Every step of a drag, before it is let go. */
   onPreview: (value: number) => void
-  /** Beside the plus button, following the thumb while it is dragged. */
-  readout?: (value: number) => string
+  /** Beside the plus button, following the thumb while it is dragged; pressed,
+      it does what its hint names. */
+  readout?: {
+    hint: string
+    /** Where a press would change nothing: the hint stays shut. */
+    idle: (value: number) => boolean
+    /** Must contain `text(value)`, so a voice command naming what is on screen
+        finds the button. */
+    label: (value: number) => string
+    onPress: () => void
+    shortcut?: Shortcut
+    text: (value: number) => string
+  }
   sliderLabel: string
   slot: string
   value: number
@@ -118,13 +129,23 @@ export function SliderStepper({
         </Button>
       </ToolbarTooltip>
       {readout ? (
-        <span
-          aria-hidden
-          className="w-12 text-center font-mono text-xs tabular-nums text-muted-foreground"
-          data-slot={`${slot}-readout`}
+        <ToolbarTooltip
+          disabled={readout.idle(shown)}
+          label={readout.hint}
+          shortcut={readout.shortcut}
         >
-          {readout(shown)}
-        </span>
+          <Button
+            aria-label={readout.label(shown)}
+            className="w-12 px-0 font-mono text-xs font-normal tabular-nums text-muted-foreground"
+            data-slot={`${slot}-readout`}
+            disabled={disabled}
+            onClick={() => readout.onPress()}
+            size="sm"
+            variant="ghost"
+          >
+            {readout.text(shown)}
+          </Button>
+        </ToolbarTooltip>
       ) : null}
     </div>
   )
