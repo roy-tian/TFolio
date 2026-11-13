@@ -23,13 +23,15 @@ type UsePageClipboardOptions = {
       where it shows no paper to be taken by. */
   fallbackPage: () => number | null
   /** Whether the pages still stand as the clipboard numbers them, with no
-      structure edit in flight: asked as another document pastes them. */
+      structure edit in flight: asked as another document reads them by number. */
   isIdle: () => boolean
   /** Esc took a cut back: what the cut said is no longer so. */
   onCutCancelled: () => void
-  /** A cut made here was pasted into another document: its pages leave this
-      one, which only its owner can do. */
-  onMovedAway: (pages: number[]) => void
+  /** A cut made here is being pasted into another document: its pages leave
+      this one once `copied` says the copies landed, which only its owner can
+      do — queued now, ahead of any edit made here meanwhile. False where they
+      stay. */
+  onMovedAway: (pages: number[], copied: Promise<boolean>) => boolean
   /** Runs a paste after this 1-based page — the owner's, since only it can
       say what the paste costs the document. */
   onPaste: (after: number) => void
@@ -76,12 +78,16 @@ export function usePageClipboard({
   const latestRef = useRef({ documentName, fallbackPage, isIdle, onCutCancelled, onMovedAway })
 
   latestRef.current = { documentName, fallbackPage, isIdle, onCutCancelled, onMovedAway }
+  // Counted as they land, before any render: another document reading these
+  // pages by number asks whether one has landed since it took them.
+  const editsRef = useRef(0)
 
   // What this document answers for the pages it holds; a tab closed with
   // pages on the clipboard takes them with it.
   useEffect(
     () =>
       registerPageSource(documentId, {
+        edits: () => editsRef.current,
         idle: () => latestRef.current.isIdle(),
         name: () => latestRef.current.documentName,
         // A cut still standing here would fade pages no paste will ever move.
@@ -90,7 +96,7 @@ export function usePageClipboard({
             latestRef.current.onCutCancelled()
           }
         },
-        takeOut: (pages) => latestRef.current.onMovedAway(pages),
+        takeOut: (pages, copied) => latestRef.current.onMovedAway(pages, copied),
       }),
     [documentId],
   )
@@ -147,6 +153,7 @@ export function usePageClipboard({
       const held = heldPages()
 
       pendingPasteRef.current = null
+      editsRef.current += 1
 
       if (held?.sourceDocumentId !== documentId) {
         return

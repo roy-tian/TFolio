@@ -504,6 +504,7 @@ const zhCN = {
     rotatePageRight: "顺时针旋转第 {{pageNumber}} 页",
     deletePage: "删除第 {{pageNumber}} 页",
     deleteKeepsOne: "文档至少保留一页，不能全部删除",
+    cutKeptNotice: "已粘贴为副本：文档至少保留一页，{{name}} 的页面都保留在原处",
     pageFolded:
       "第 {{pageNumber}} 页折叠在文件名下，展开该文件后才能旋转或删除",
   },

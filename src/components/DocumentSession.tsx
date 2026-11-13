@@ -579,7 +579,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // the hook only ever calls it from a keypress, by which time it is here.
     const pasteAfterRef = useRef<(after: number) => void>(() => {})
     // So does taking out a cut another document pasted.
-    const movedAwayRef = useRef<(pages: number[]) => void>(() => {})
+    const movedAwayRef = useRef<(pages: number[], copied: Promise<boolean>) => boolean>(
+      () => false,
+    )
     // None chosen, the clipboard's keys take the page being read, as the bar
     // over the pages does — but not one folded away under its file's name.
     const readingChoice = () => {
@@ -601,11 +603,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       documentName: fileName,
       // New each render: the hook reads the latest as a key asks.
       fallbackPage: readingChoice,
-      // Asked only as another document pastes, by which time the history
-      // below is set up.
-      isIdle: () => !annotations.isStructureBusyNow(),
+      // Asked only as another document reads these pages by number, by which
+      // time the history below is set up. A flatten under way moves no page,
+      // but lands as a change to them.
+      isIdle: () => !annotations.isStructureBusyNow() && flattenGateRef.current === null,
       onCutCancelled: useCallback(() => notice.retract(["pagesCut"]), [notice]),
-      onMovedAway: useCallback((pages: number[]) => movedAwayRef.current(pages), []),
+      onMovedAway: useCallback(
+        (pages: number[], copied: Promise<boolean>) => movedAwayRef.current(pages, copied),
+        [],
+      ),
       onPaste: useCallback((after: number) => pasteAfterRef.current(after), []),
       onTaken: useCallback(
         (taken: PageClipboard) =>
@@ -1315,6 +1321,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       pageClipboard,
       pdfDocument,
       notice,
+      notices,
       thumbnailSelection,
     })
     // The handle is not rebuilt per render; an append counts the pages now.
@@ -2072,20 +2079,25 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // still pastes what the clipboard holds: after the page, into its file.
     pasteAfterRef.current = (after) =>
       pastePages(after + 1, pdfDocument.pages[after - 1]?.section)
-    // A cut made here and pasted into another document: its pages go, one
-    // undo away. Only while nothing is under way: the numbers name the pages
-    // as they stood, and an edit in flight is about to move them.
-    movedAwayRef.current = (pages) => {
+    // A cut made here, being pasted into another document: its pages go once
+    // the copies land, one undo away. The paste found no structure edit under
+    // way here, and the delete takes its place in the queue now, so the
+    // numbers name the pages it plans against: whatever is queued ahead of it
+    // moves none, and any edit made meanwhile comes after.
+    movedAwayRef.current = (pages, copied) => {
       // What the cut said is no longer so, wherever the pages end up.
       notice.retract(["pagesCut"])
 
-      if (annotations.isStructureBusyNow() || annotations.hasPendingWorkNow()) {
-        return
+      const pageCount = documentRef.current?.numPages ?? pdfDocument.numPages
+
+      // A document keeps a page: a cut of every one leaves them all here.
+      if (pages.length >= pageCount) {
+        return false
       }
 
-      // Refused, as every page it has would be, they stay: the clipboard let
-      // go of them as the paste landed.
-      void annotations.deletePages(pages, pdfDocument.numPages)
+      void annotations.deletePages(pages, pageCount, copied)
+
+      return true
     }
 
     useImperativeHandle(

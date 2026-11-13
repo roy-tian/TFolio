@@ -526,6 +526,8 @@ const de = {
     rotatePageRight: "Seite {{pageNumber}} im Uhrzeigersinn drehen",
     deletePage: "Seite {{pageNumber}} löschen",
     deleteKeepsOne: "Ein Dokument behält mindestens eine Seite – es lassen sich nicht alle löschen",
+    cutKeptNotice:
+      "Als Kopien eingefügt: Ein Dokument behält mindestens eine Seite, daher bleiben alle Seiten in {{name}}",
     pageFolded:
       "Seite {{pageNumber}} ist unter ihrem Dateinamen eingeklappt. Klappen Sie die Datei aus, um sie zu drehen oder zu löschen",
   },

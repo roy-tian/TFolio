@@ -939,6 +939,93 @@ describe("TFolio pages carried to other documents", () => {
     })
   })
 
+  it("takes a cut pasted elsewhere out of its document once work under way there ends", async () => {
+    await openPdfFromDisk("saved-target.pdf", textPdf(2))
+    await paintedFingerprints(2)
+    await openPdfFromDisk("saving-source.pdf", bandedPdf(3))
+    const [sourceFirst] = await paintedFingerprints(3)
+
+    await clickThumb(1)
+    await browser.keys(["Control", "x"])
+    await $("[data-notice='pagesCut']").waitForDisplayed()
+
+    // A Save As whose dialog is never answered holds the source's queue:
+    // work under way there that moves no page.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __finishSaveAs?: () => void
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: () =>
+          new Promise((resolve) => {
+            page.__finishSaveAs = () => resolve(null)
+          }),
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () => typeof (window as Window & { __finishSaveAs?: unknown }).__finishSaveAs === "function",
+        ),
+      { timeoutMsg: "the Save As never started" },
+    )
+
+    await tabButton("saved-target.pdf").click()
+    await expect(tabButton("saved-target.pdf")).toHaveAttribute("aria-selected", "true")
+    await clickThumb(1)
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+      timeoutMsg: "the cut page never crossed to the other document",
+    })
+    await waitForThumb(2, sourceFirst!)
+    await $("[data-notice='pagesPasted']").waitForDisplayed()
+
+    // Queued behind the save, not dropped for it: the page leaves once it ends.
+    await browser.execute(() =>
+      (window as Window & { __finishSaveAs?: () => void }).__finishSaveAs?.(),
+    )
+    await tabButton("saving-source.pdf").click()
+    await expect(tabButton("saving-source.pdf")).toHaveAttribute("aria-selected", "true")
+    await browser.waitUntil(async () => (await thumbCount()) === 2, {
+      timeoutMsg: "the cut page never left the document it was cut in",
+    })
+  })
+
+  it("pastes a cut of every page its document has as copies, and says they stay", async () => {
+    await openPdfFromDisk("whole-target.pdf", textPdf(2))
+    await paintedFingerprints(2)
+    await openPdfFromDisk("whole-source.pdf", bandedPdf(2))
+    const [sourceFirst, sourceSecond] = await paintedFingerprints(2)
+
+    await clickThumb(1)
+    await clickThumb(2, { shift: true })
+    await browser.keys(["Control", "x"])
+    await $("[data-notice='pagesCut']").waitForDisplayed()
+    await tabButton("whole-target.pdf").click()
+    await expect(tabButton("whole-target.pdf")).toHaveAttribute("aria-selected", "true")
+    await clickThumb(2)
+    await browser.keys(["Control", "v"])
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
+      timeoutMsg: "the cut pages never crossed to the other document",
+    })
+    await waitForThumb(3, sourceFirst!)
+    await waitForThumb(4, sourceSecond!)
+    await $("[data-notice='pagesCutKept']").waitForDisplayed()
+    await expect($("[data-notice='pagesCutKept']")).toHaveText(
+      expect.stringContaining("whole-source.pdf keeps all of its own"),
+    )
+
+    // Spent all the same: nothing there shows as cut any more.
+    await tabButton("whole-source.pdf").click()
+    await expect(tabButton("whole-source.pdf")).toHaveAttribute("aria-selected", "true")
+    expect(await thumbCount()).toBe(2)
+    await expect($(`${activeSidebar} [data-cut]`)).not.toBeExisting()
+  })
+
   it("refuses to paste pages whose own document has an edit in flight, and says so", async () => {
     await openPdfFromDisk("idle-target.pdf", textPdf(2))
     await paintedFingerprints(2)

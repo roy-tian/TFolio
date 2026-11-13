@@ -201,8 +201,10 @@
   which each session reads its half and keeps no copy: the last pages cut or copied in any of
   its documents, as that document's page numbers, which it lets go at its next structure edit.
   Another document pastes them as copies, only while their own has no structure edit in flight
-  (`PageSource.idle`); a cut pasted there is then deleted by the document it was made in, one
-  undo in each.
+  or landed since (`pagesStanding`, asked again after any prompt, as the copy is made, as a drag
+  from another tab and a new PDF of pages ask); a cut pasted there is deleted by the document it
+  was made in, queued there as the copy starts and made once it lands, one undo in each. A cut of
+  every page its document has stays there too, and the corner says so (`pagesCutKept`).
 - A document with no file of its own has Save As for its save button and key, as one holding
   foreign pages has (`saveAsOnly`); the menu's Save stays disabled.
 - A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,

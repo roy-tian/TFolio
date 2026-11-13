@@ -524,6 +524,8 @@ const it = {
     rotatePageRight: "Ruota la pagina {{pageNumber}} in senso orario",
     deletePage: "Elimina la pagina {{pageNumber}}",
     deleteKeepsOne: "Un documento conserva almeno una pagina: non si possono eliminare tutte",
+    cutKeptNotice:
+      "Incollate come copie: un documento conserva almeno una pagina, quindi {{name}} mantiene tutte le sue",
     pageFolded:
       "La pagina {{pageNumber}} è compressa sotto il nome del suo file. Espandi il file per ruotarla o eliminarla",
   },

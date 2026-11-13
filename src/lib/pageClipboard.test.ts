@@ -10,6 +10,7 @@ import {
   letGoOfPages,
   movePagesOut,
   pageSourceOf,
+  pagesStanding,
   registerPageSource,
   subscribeHeldPages,
 } from "@/lib/pageClipboard"
@@ -111,12 +112,17 @@ describe("the window's held pages", () => {
     pages: [2, 3],
     sourceDocumentId,
   })
-  const source = (log: string[], name: string) => ({
-    idle: () => true,
+  const source = (log: string[], name: string, state = { busy: false, edits: 0, keeps: false }) => ({
+    edits: () => state.edits,
+    idle: () => !state.busy,
     name: () => name,
     superseded: () => log.push(`${name} superseded`),
-    takeOut: (pages: number[]) => log.push(`${name} takes out ${pages.join()}`),
+    takeOut: (pages: number[]) => {
+      log.push(`${name} takes out ${pages.join()}`)
+      return !state.keeps
+    },
   })
+  const copied = Promise.resolve(true)
 
   it("holds the last pages any document took, and says when they change", () => {
     let told = 0
@@ -166,20 +172,65 @@ describe("the window's held pages", () => {
 
     holdPages(cut)
     expect(pageSourceOf(cut)?.name()).toBe("one")
-    movePagesOut(cut)
-    movePagesOut(cut)
+    expect(movePagesOut(cut, copied)).toBe(true)
+    expect(movePagesOut(cut, copied)).toBe(false)
     expect(log).toEqual(["one takes out 2,3"])
     expect(heldPages()).toBeNull()
 
-    // Let go by an edit before the paste landed: nothing is taken out.
+    // Let go by an edit before the paste was made: nothing is taken out.
     const stale = taken(1, "cut")
 
     holdPages(stale)
     letGoOfPages(1)
-    movePagesOut(stale)
+    expect(movePagesOut(stale, copied)).toBe(false)
     expect(log).toEqual(["one takes out 2,3"])
 
     unregister()
+  })
+
+  it("spends a cut its document keeps, and says the pages stay", () => {
+    const unregister = registerPageSource(1, source([], "one", { busy: false, edits: 0, keeps: true }))
+    const cut = taken(1, "cut")
+
+    holdPages(cut)
+    expect(movePagesOut(cut, copied)).toBe(false)
+    expect(heldPages()).toBeNull()
+
+    unregister()
+  })
+
+  it("stands until an edit lands in the pages' document, and not while one is under way", () => {
+    const state = { busy: false, edits: 0, keeps: false }
+    const unregister = registerPageSource(1, source([], "one", state))
+    const stands = pagesStanding(1)
+
+    expect(stands()).toBe(true)
+    state.busy = true
+    expect(stands()).toBe(false)
+    // An edit that never landed moved nothing.
+    state.busy = false
+    expect(stands()).toBe(true)
+    state.edits += 1
+    expect(stands()).toBe(false)
+    // Taken under the new count, the numbers stand again.
+    expect(pagesStanding(1)()).toBe(true)
+
+    unregister()
+  })
+
+  it("never stands for a document closed, or opened again, since", () => {
+    const first = registerPageSource(1, source([], "one"))
+    const stands = pagesStanding(1)
+
+    first()
+    expect(stands()).toBe(false)
+
+    const again = registerPageSource(1, source([], "one"))
+
+    expect(stands()).toBe(false)
+    expect(pagesStanding(2)()).toBe(false)
+
+    again()
   })
 
   it("takes a closed document's pages off the clipboard with it", () => {

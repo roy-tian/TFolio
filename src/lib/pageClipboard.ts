@@ -35,14 +35,20 @@ export type HeldPages = PageClipboard & { sourceDocumentId: number }
 /** What a document answers for the pages it holds: only it can say whether
     they still stand as numbered, or take them out. */
 export type PageSource = {
+  /** How many structure edits have landed: pages read by number under one
+      count are the pages the same count names. */
+  edits: () => number
   /** No structure edit in flight: the numbers still name the pages. */
   idle: () => boolean
   /** The document's name, for another to say which is busy. */
   name: () => string
   /** Another document's cut or copy replaced what this one held. */
   superseded: (held: HeldPages) => void
-  /** A cut pasted into another document: its pages leave this one. */
-  takeOut: (pages: number[]) => void
+  /** A cut being pasted into another document: its pages leave this one once
+      `copied` says the copies landed, queued at once so that no edit made
+      here meanwhile comes before it. False where they stay: they are every
+      page it has. */
+  takeOut: (pages: number[], copied: Promise<boolean>) => boolean
 }
 
 let held: HeldPages | null = null
@@ -107,21 +113,41 @@ export function registerPageSource(documentId: number, source: PageSource) {
 
 /** The document `pages` stand in, for whoever is about to read them by
     their numbers. */
-export function pageSourceOf(pages: HeldPages): PageSource | undefined {
+export function pageSourceOf(pages: Pick<HeldPages, "sourceDocumentId">): PageSource | undefined {
   return pageSources.get(pages.sourceDocumentId)
 }
 
-/** A cut pasted into another document leaves the one it was made in — once,
-    and only while it is still what the window holds: a second paste, or one
-    landing after an edit there let go of it, would take out whatever pages
-    then hold those numbers. */
-export function movePagesOut(pages: HeldPages) {
+/**
+ * Whether pages read by number off `sourceDocumentId` from now on still name
+ * the pages they named: until an edit there lands, and not while one is under
+ * way. Asked again as the copy is made, after any prompt it waited on, since
+ * an add of files read meanwhile lands with no reader's hand on the document.
+ */
+export function pagesStanding(sourceDocumentId: number): () => boolean {
+  const source = pageSources.get(sourceDocumentId)
+  const edits = source?.edits()
+
+  return () =>
+    source !== undefined &&
+    pageSources.get(sourceDocumentId) === source &&
+    source.edits() === edits &&
+    source.idle()
+}
+
+/** A cut being pasted into another document leaves the one it was made in,
+    as the copy is made — once, and only while it is still what the window
+    holds: a second paste, or one after an edit there let go of it, would take
+    out whatever pages then hold those numbers. Spent here, whether or not the
+    copies land, so no other paste takes it meanwhile. False where the pages
+    stay. */
+export function movePagesOut(pages: HeldPages, copied: Promise<boolean>): boolean {
   if (held !== pages) {
-    return
+    return false
   }
 
   setHeld(null)
-  pageSources.get(pages.sourceDocumentId)?.takeOut(pages.pages)
+
+  return pageSources.get(pages.sourceDocumentId)?.takeOut(pages.pages, copied) ?? false
 }
 
 /** A cut is a move, which the reorder command already makes one undo step

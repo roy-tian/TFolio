@@ -63,6 +63,7 @@ import {
   type NoticeKind,
 } from "@/lib/notices"
 import type { CarriedPages, ExtractedPages } from "@/lib/pageCarry"
+import { pagesStanding } from "@/lib/pageClipboard"
 import {
   fileNameFromPath,
   fileStem,
@@ -832,21 +833,37 @@ export default function App() {
   const openPagesAsDocument = useCallback(
     (carried: ExtractedPages) => {
       // At the release, not when the open queue reaches it: the page numbers
-      // name the source as it stands now, and could be stale by then. A
-      // signature prompt in between is modal, so nothing renumbers them.
+      // name the source as it stands now, and could be stale by then — as
+      // they could after a signature prompt, which files read into the source
+      // meanwhile may land behind.
+      const stands = pagesStanding(carried.sourceDocumentId)
       const ready = ensureSourceSignatures(carried.sourceDocumentId)
-      const extract = () =>
-        invoke<PdfDocumentInfo>("extract_pdf_pages", {
-          pageNumbers: carried.pages,
-          sourceDocumentId: carried.sourceDocumentId,
-        })
+      const sourceName = tabsRef.current.find(
+        (tab) => tab.id === carried.sourceDocumentId,
+      )?.name
+      const extract = () => {
+        if (stands()) {
+          return invoke<PdfDocumentInfo>("extract_pdf_pages", {
+            pageNumbers: carried.pages,
+            sourceDocumentId: carried.sourceDocumentId,
+          })
+        }
+
+        // A condition, not a failure: said as a copy into another tab says it.
+        if (sourceName) {
+          notices.raise({
+            kind: "pagesAppendBusy",
+            owner: workspaceOwner,
+            values: { name: sourceName },
+          })
+        }
+
+        return Promise.resolve(null)
+      }
       const extracted =
         ready === true
           ? extract()
           : ready.then((allowed) => (allowed ? extract() : null))
-      const sourceName = tabsRef.current.find(
-        (tab) => tab.id === carried.sourceDocumentId,
-      )?.name
 
       // Awaited in the batch; until then a refusal is not an unhandled one.
       void extracted.catch(() => undefined)

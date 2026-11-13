@@ -1,11 +1,12 @@
-import type { DocumentNotices } from "@/hooks/useNotices"
+import type { DocumentNotices, NoticeChannel } from "@/hooks/useNotices"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import type { usePageClipboard } from "@/hooks/usePageClipboard"
 import type { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import type { CarriedPages } from "@/lib/pageCarry"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { pagesToRotate } from "@/lib/pageRotation"
-import { movePagesOut, pageSourceOf, pastePlan } from "@/lib/pageClipboard"
+import { workspaceOwner } from "@/lib/notices"
+import { heldPages, movePagesOut, pageSourceOf, pagesStanding, pastePlan } from "@/lib/pageClipboard"
 import { emptiesItsFile, reorderSections, sectionAt } from "@/lib/pageSections"
 
 type UseThumbnailPageOpsOptions = {
@@ -16,6 +17,9 @@ type UseThumbnailPageOpsOptions = {
   pageClipboard: ReturnType<typeof usePageClipboard>
   pdfDocument: PdfDocumentInfo
   notice: DocumentNotices
+  /** The window's corner, for a refusal about another document: the tab
+      taking the pages may not be the one on show. */
+  notices: NoticeChannel
   thumbnailSelection: ReturnType<typeof useThumbnailSelection>
 }
 
@@ -30,6 +34,7 @@ export function useThumbnailPageOps({
   pageClipboard,
   pdfDocument,
   notice,
+  notices,
   thumbnailSelection,
 }: UseThumbnailPageOpsOptions) {
   // Gestures name pages read off the screen, so they are dropped while a
@@ -102,6 +107,16 @@ export function useThumbnailPageOps({
       source's pages by numbers the reader may have changed meanwhile. */
   const canTakeCarriedPages = () => !editingBusy() && !annotations.hasPendingWorkNow()
 
+  // Pages read by number off another document, whose pages moved, or were
+  // about to, before the copy could be made.
+  const sourceBusy = (sourceDocumentId: number) => {
+    const name = pageSourceOf({ sourceDocumentId })?.name()
+
+    if (name) {
+      notices.raise({ kind: "pagesAppendBusy", owner: workspaceOwner, values: { name } })
+    }
+  }
+
   /**
    * A cut is a move, one undo step by way of the reorder command; a copy stays
    * on the clipboard, following the pages its own insert pushed down. Pages
@@ -121,37 +136,52 @@ export function useThumbnailPageOps({
         return
       }
 
-      const source = pageSourceOf(foreign)
+      // The copy reads its pages by their numbers there, as a drag's release
+      // checks of the column it left; a cut also takes them out, so it holds
+      // only while it is still the window's to paste.
+      const standing = pagesStanding(foreign.sourceDocumentId)
+      const stands = () => standing() && (foreign.mode === "copy" || heldPages() === foreign)
 
-      // The copy reads its pages by their numbers: an edit in flight in their
-      // document is about to move them, as a drag's release checks of the
-      // column it left.
-      if (!source?.idle()) {
-        if (source) {
-          notice.raise("pagesAppendBusy", { values: { name: source.name() } })
-        }
-
+      if (!stands()) {
+        sourceBusy(foreign.sourceDocumentId)
         return
       }
 
       const count = foreign.pages.length
       const at = index <= pdfDocument.numPages ? index : undefined
+      let kept = false
 
       void annotations
-        .insertPages(foreign.sourceDocumentId, foreign.pages, index, pdfDocument.numPages, joins)
+        .insertPages(foreign.sourceDocumentId, foreign.pages, index, pdfDocument.numPages, joins, {
+          stands,
+          taking:
+            foreign.mode === "cut"
+              ? (copied) => {
+                  kept = !movePagesOut(foreign, copied)
+                }
+              : undefined,
+        })
         .then((landed) => {
-          if (!landed) {
+          if (landed === "moved") {
+            sourceBusy(foreign.sourceDocumentId)
+          }
+
+          if (landed !== true) {
             return
           }
 
-          notice.raise(at === undefined ? "pagesPastedToEnd" : "pagesPasted", {
-            values: at === undefined ? { count } : { at, count },
-          })
-          onPagesLanded(Array.from({ length: count }, (_, offset) => index + offset))
+          // A cut of every page its document has leaves them there as well.
+          const name = kept ? pageSourceOf(foreign)?.name() : undefined
 
-          if (foreign.mode === "cut") {
-            movePagesOut(foreign)
+          if (name) {
+            notice.raise("pagesCutKept", { values: { name } })
+          } else {
+            notice.raise(at === undefined ? "pagesPastedToEnd" : "pagesPasted", {
+              values: at === undefined ? { count } : { at, count },
+            })
           }
+
+          onPagesLanded(Array.from({ length: count }, (_, offset) => index + offset))
         })
 
       return
@@ -233,17 +263,27 @@ export function useThumbnailPageOps({
           reorderSections(pdfDocument.pages, order, new Set(moving), section),
         )
 
-  /** Another tab's pages dragged in: copies, one undo step like a paste. */
+  /** Another tab's pages dragged in: copies, one undo step like a paste. The
+      column they left found them standing at the release, this same turn. */
   const insertCarriedPages = (carried: CarriedPages, index: number, section?: number) =>
     !pdfDocument || !canTakeCarriedPages()
       ? null
-      : annotations.insertPages(
-          carried.sourceDocumentId,
-          carried.pages,
-          index,
-          pdfDocument.numPages,
-          section ?? sectionAt(pdfDocument.pages, index),
-        )
+      : annotations
+          .insertPages(
+            carried.sourceDocumentId,
+            carried.pages,
+            index,
+            pdfDocument.numPages,
+            section ?? sectionAt(pdfDocument.pages, index),
+            { stands: pagesStanding(carried.sourceDocumentId) },
+          )
+          .then((landed) => {
+            if (landed === "moved") {
+              sourceBusy(carried.sourceDocumentId)
+            }
+
+            return landed === true
+          })
 
   const appendCarriedPages = (carried: CarriedPages) =>
     insertCarriedPages(carried, pdfDocument.numPages + 1)

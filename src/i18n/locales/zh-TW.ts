@@ -521,6 +521,7 @@ const zhTW = {
     rotatePageRight: "順時針旋轉第 {{pageNumber}} 頁",
     deletePage: "刪除第 {{pageNumber}} 頁",
     deleteKeepsOne: "文件至少保留一頁，不能全部刪除",
+    cutKeptNotice: "已貼上為副本：文件至少保留一頁，{{name}} 的頁面都留在原處",
     pageFolded:
       "第 {{pageNumber}} 頁收合在檔案名稱下，展開該檔案後才能旋轉或刪除",
   },

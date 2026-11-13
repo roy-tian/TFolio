@@ -525,6 +525,8 @@ const es = {
     rotatePageRight: "Girar la página {{pageNumber}} a la derecha",
     deletePage: "Eliminar la página {{pageNumber}}",
     deleteKeepsOne: "Un documento conserva al menos una página: no se pueden eliminar todas",
+    cutKeptNotice:
+      "Pegadas como copias: un documento conserva al menos una página, así que {{name}} conserva todas las suyas",
     pageFolded:
       "La página {{pageNumber}} está contraída bajo el nombre de su archivo. Expanda el archivo para girarla o eliminarla",
   },

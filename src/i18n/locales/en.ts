@@ -523,6 +523,8 @@ const en = {
     rotatePageRight: "Rotate page {{pageNumber}} clockwise",
     deletePage: "Delete page {{pageNumber}}",
     deleteKeepsOne: "A document keeps at least one page, so they cannot all be deleted",
+    cutKeptNotice:
+      "Pasted as copies: a document keeps at least one page, so {{name}} keeps all of its own",
     pageFolded:
       "Page {{pageNumber}} is collapsed under its file name. Expand the file to rotate or delete it",
   },
