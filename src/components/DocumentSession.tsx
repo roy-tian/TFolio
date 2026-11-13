@@ -582,9 +582,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const movedAwayRef = useRef<(pages: number[], copied: Promise<boolean>) => boolean>(
       () => false,
     )
-    // None chosen, the clipboard's keys take the page being read, as the bar
-    // over the pages does — but not one folded away under its file's name.
-    const readingChoice = () => {
+    // None chosen, a paste lands after the page being read — but not one
+    // folded away under its file's name.
+    const pasteAfterReading = () => {
       const pageNumber = currentPage.get()
 
       return foldedAway(
@@ -602,7 +602,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       documentId: pdfDocument.id,
       documentName: fileName,
       // New each render: the hook reads the latest as a key asks.
-      fallbackPage: readingChoice,
+      pasteAfterPage: pasteAfterReading,
       // Asked only as another document reads these pages by number, by which
       // time the history below is set up. A flatten under way moves no page,
       // but lands as a change to them.

@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import type { PageAction } from "@/components/PageCardControls"
 import {
   landingBox,
   liftGhost,
@@ -61,7 +62,7 @@ import {
 import { flowItems } from "@/lib/pageFlow"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { paddingAroundDropped, paddingPositions, type PaddingSheet } from "@/lib/padding"
-import { emptiesItsFile, fileRuns, foldedAway, pagesOfSection } from "@/lib/pageSections"
+import { emptiesItsFile, fileRuns, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import { lowestPage, type SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -129,8 +130,8 @@ type PageThumbnailsProps = {
   /** The menu's pages, by number: the choice may lapse while it is open. */
   onCopyPages: (pages: Iterable<number>) => void
   onCutPages: (pages: Iterable<number>) => void
-  /** On a chosen page, the whole choice goes with it. */
-  onDeletePage: (pageNumber: number) => void
+  /** On a chosen page, the whole choice goes with it, unless `alone`. */
+  onDeletePage: (pageNumber: number, alone?: boolean) => void
   /** The pages as a new PDF of their own, in a tab beside this one. */
   onExtractPages: (pages: number[]) => void
   /** Whether focus is in the column: the clipboard keys are its only then. */
@@ -173,7 +174,7 @@ type PageThumbnailsProps = {
       the dropped order until then, rather than flash the old one. `moving`
       joins `section`, the file it was let go among. */
   onReorderPages: (order: number[], moving: number[], section?: number) => Promise<unknown>
-  /** That page alone: the page being read, from the bar with none chosen. */
+  /** That page alone: a page's own bar. */
   onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
   onRotatePages: (degrees: 90 | 270) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
@@ -241,6 +242,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 }, ref) {
   const { t } = useTranslation()
   const listRef = useRef<HTMLDivElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef<HTMLOListElement>(null)
   const current = useCurrentPage(currentPage)
   const followedRef = useRef<number | null>(null)
@@ -505,18 +507,38 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
   // Read through a ref, so the memoised previews keep one handler across the
   // session's every render.
-  const actionsRef = useRef({ onInsertBlankPage, onSelectPage })
+  const actionsRef = useRef({ onDeletePage, onInsertBlankPage, onRotatePage, onSelectPage })
 
-  actionsRef.current = { onInsertBlankPage, onSelectPage }
+  actionsRef.current = { onDeletePage, onInsertBlankPage, onRotatePage, onSelectPage }
 
-  // A control that leaves with what it acted on fires no blur as it goes: the
-  // column takes the focus first, and with it keeps the page keys. A click
-  // focuses the control too, except in WebKit on macOS.
+  // A control that leaves with what it acted on, or greys as the choice goes
+  // with its pages, fires no blur as it loses the focus: the column takes it
+  // first, and with it keeps the page keys. A click focuses the control too,
+  // except in WebKit on macOS.
   const keepFocus = useCallback(() => {
-    if (listRef.current?.contains(document.activeElement)) {
-      listRef.current.focus({ preventScroll: true })
+    if (surfaceRef.current?.contains(document.activeElement)) {
+      listRef.current?.focus({ preventScroll: true })
     }
   }, [])
+
+  // A page's own bar acts on that page alone, chosen or not: the bar over the
+  // pages is the one that takes the choice.
+  const act = useCallback(
+    (pageNumber: number, action: PageAction) => {
+      const actions = actionsRef.current
+
+      if (action === "delete") {
+        // Refused while an edit runs, and the button keeps its focus.
+        if (!isEditingRef.current()) {
+          keepFocus()
+          actions.onDeletePage(pageNumber, true)
+        }
+      } else {
+        actions.onRotatePage(pageNumber, action === "rotate-left" ? 270 : 90)
+      }
+    },
+    [keepFocus],
+  )
 
   const toggle = useCallback((pageNumber: number) => {
     cursorRef.current = { pageNumber, pages: pagesRef.current }
@@ -1167,14 +1189,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     )
   }
 
-  // None chosen, the bar and the keys take the page being read, unless it is
-  // folded away under its file's name: nothing is turned or removed unseen.
-  const readingUnseen =
-    selectedPages.size === 0 && foldedAway(pages, current, foldedFiles, byFile)
-  const barTargets =
-    selectedPages.size === 0
-      ? { count: 1, first: current, of: numPages, unseen: readingUnseen }
-      : { count: selectedPages.size, first: lowestPage(selectedPages), of: numPages }
 
   return (
     <div
@@ -1184,13 +1198,19 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       // their controls.
       data-pages-dragging={drag !== null || ghost !== null || incoming !== null ? "" : undefined}
       data-pages-surface
+      ref={surfaceRef}
     >
       <PagesBar
         fileOptions={fileOptions}
         fileRows={fileRows}
         folded={{ count: foldedCount, of: sections.length }}
-        // Not chosen, the page being read goes alone.
-        onDelete={() => onDeletePage(barTargets.first)}
+        onDelete={() => {
+          // Refused while an edit runs, and the button keeps its focus.
+          if (selectedPages.size > 0 && !isEditingNow()) {
+            keepFocus()
+            onDeletePage(lowestPage(selectedPages))
+          }
+        }}
         onFileOptionsChange={onFileOptionsChange}
         onFileRowsChange={onFileRowsChange}
         onFoldAll={(folded) =>
@@ -1199,15 +1219,15 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
             folded,
           )
         }
+        // Greyed with none chosen, but guarded too: with none chosen
+        // `onRotatePages` turns every page.
         onRotate={(degrees) => {
-          if (selectedPages.size === 0) {
-            onRotatePage(current, degrees)
-          } else {
+          if (selectedPages.size > 0) {
             onRotatePages(degrees)
           }
         }}
         severalFiles={sections.length > 1}
-        targets={barTargets}
+        targets={{ count: selectedPages.size, first: lowestPage(selectedPages), of: numPages }}
       />
       <div className="relative min-h-0 flex-1" data-sidebar-drop-list>
         <ContextMenu
@@ -1288,17 +1308,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   }
 
                   if (event.key === "Delete" || event.key === "Backspace") {
-                    const first = lowestPage(selectionRef.current)
-                    // None chosen, the page being read: what the bar's own
-                    // button takes.
-                    const target = Number.isFinite(first) ? first : readingUnseen ? null : current
-
-                    if (target !== null) {
+                    // None chosen, nothing: as the bar over the pages is grey.
+                    if (selectionRef.current.size > 0) {
                       event.preventDefault()
                       // A focused preview leaves with its page, and a removed
                       // element fires no blur: the column keeps the focus instead.
                       event.currentTarget.focus({ preventScroll: true })
-                      onDeletePage(target)
+                      onDeletePage(lowestPage(selectionRef.current))
                     }
 
                     return
@@ -1350,7 +1366,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   index === incomingAt ? (
                     <CarriedHoles
                       carryKey={CARRY_KEY}
-                      grid={grid}
                       key={CARRY_KEY}
                       rotation={viewRotation}
                       sizes={incoming!.carried.sizes}
@@ -1359,7 +1374,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                 const blankAfterHoles =
                   index === incomingAt && blankAfterCarried ? (
                     <PaddingCell
-                      grid={grid}
                       key={`padding-${CARRY_KEY}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
@@ -1403,6 +1417,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     // Where the page stands in a drag's preview, as it will once
                     // the pages land.
                     caption={index + 1 + carriedAhead}
+                    // A document keeps one page; the backend refuses a delete of them all.
+                    deleteDisabled={numPages <= 1}
                     documentId={documentId}
                     flipKey={key}
                     grid={grid}
@@ -1414,6 +1430,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     isSelected={selectedPages.has(pageNumber)}
                     key={key}
                     label={t("sidebar.thumbnailLabel", { pageNumber })}
+                    onAction={act}
                     onInsertBlank={insertBlank}
                     onSelect={select}
                     onToggle={toggle}
@@ -1427,7 +1444,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   />,
                   blanks.has(pageNumber) ? (
                     <PaddingCell
-                      grid={grid}
                       key={`padding-${key}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}

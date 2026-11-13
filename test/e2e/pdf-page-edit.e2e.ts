@@ -387,28 +387,42 @@ describe("TFolio page editing in the sidebar", () => {
     await browser.waitUntil(async () => (await thumbCount()) === 2)
   })
 
-  it("takes the page being read with the Delete and clipboard keys while none is chosen", async () => {
+  it("takes no page with the Delete and clipboard keys while none is chosen, and pastes after the page being read", async () => {
     await openPdfFromDisk("reading-keys.pdf", bandedPdf(3))
     const [, second, third] = await paintedFingerprints(3)
 
-    // What the bar over the pages names, the keys take too: page 1.
+    // Grey as the bar over the pages is: nothing chosen, nothing taken.
     await focusColumn()
+    await browser.pause(300)
     await browser.keys("Delete")
-    await browser.waitUntil(async () => (await thumbCount()) === 2, {
-      timeoutMsg: "the Delete key never took the page being read",
-    })
-    await waitForThumb(1, second!)
+    await browser.keys(["Control", "x"])
+    await browser.keys(["Control", "c"])
+    await browser.pause(600)
+    expect(await thumbCount()).toBe(3)
+    await expect($("[data-notice='pagesCut']")).not.toBeExisting()
+    await expect($("[data-notice='pagesCopied']")).not.toBeExisting()
 
+    // The same keys reach the column: an arrow chooses the next page, and a
+    // copy takes it.
+    await browser.keys("ArrowDown")
+    await browser.waitUntil(async () => (await selectedThumbs()).join() === "2", {
+      timeoutMsg: "the column never took the keys",
+    })
     await browser.keys(["Control", "c"])
     await $("[data-notice='pagesCopied']").waitForDisplayed()
+
+    // A paste names a place, not pages: with none chosen, after the page
+    // being read, here the one copied.
+    await browser.keys("Escape")
+    await browser.waitUntil(async () => (await selectedThumbs()).length === 0)
     await browser.keys(["Control", "v"])
-    await browser.waitUntil(async () => (await thumbCount()) === 3, {
+    await browser.waitUntil(async () => (await thumbCount()) === 4, {
       timeoutMsg: "the paste never landed after the page being read",
     })
-    await waitForThumb(1, second!)
     await waitForThumb(2, second!)
-    await waitForThumb(3, third!)
-    expect(await selectedThumbs()).toEqual([2])
+    await waitForThumb(3, second!)
+    await waitForThumb(4, third!)
+    expect(await selectedThumbs()).toEqual([3])
   })
 
   it("moves the choice with the arrow keys, and stretches it with Shift", async () => {

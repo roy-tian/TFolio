@@ -524,8 +524,7 @@ const zhTW = {
     deletePage: "刪除第 {{pageNumber}} 頁",
     deleteKeepsOne: "文件至少保留一頁，不能全部刪除",
     cutKeptNotice: "已貼上為複本：文件至少保留一頁，{{name}} 的頁面都留在原處",
-    pageFolded:
-      "第 {{pageNumber}} 頁收合在檔案名稱下，展開該檔案後才能旋轉或刪除",
+    selectPagesFirst: "選取頁面後才能旋轉或刪除",
   },
   files: {
     sourceFilter: "PDF、圖片和 Word 文件",

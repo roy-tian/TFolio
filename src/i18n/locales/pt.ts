@@ -531,8 +531,7 @@ const pt = {
     deleteKeepsOne: "Um documento mantém pelo menos uma página, então não é possível excluir todas",
     cutKeptNotice:
       "Coladas como cópias: um documento mantém pelo menos uma página, então {{name}} continua com todas as suas",
-    pageFolded:
-      "A página {{pageNumber}} está recolhida sob o nome do arquivo. Expanda o arquivo para girá-la ou excluí-la",
+    selectPagesFirst: "Selecione páginas para girá-las ou excluí-las",
   },
   files: {
     sourceFilter: "PDFs, imagens e documentos do Word",

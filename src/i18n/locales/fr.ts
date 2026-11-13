@@ -530,8 +530,7 @@ const fr = {
     deleteKeepsOne: "Un document garde au moins une page : impossible de les supprimer toutes",
     cutKeptNotice:
       "Collées en tant que copies : un document garde au moins une page, {{name}} garde donc toutes les siennes",
-    pageFolded:
-      "La page {{pageNumber}} est réduite sous le nom de son fichier. Développez le fichier pour la faire pivoter ou la supprimer",
+    selectPagesFirst: "Sélectionnez des pages pour les faire pivoter ou les supprimer",
   },
   files: {
     sourceFilter: "PDF, images et documents Word",

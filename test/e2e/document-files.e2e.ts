@@ -736,14 +736,21 @@ describe("TFolio files added to an open document", () => {
     await foldAllFiles(true)
     await waitForPages(0)
     expect(await headings()).toEqual(["own.pdf", "first.pdf", "second.pdf"])
-    // None chosen, the bar would take the page being read, the one clicked
-    // above: folded away, it is out of its reach, and the bar says so.
-    const remove = $(`${activeSidebar} [data-slot='pages-delete']`)
+    // The fold let the choice go, so Delete has nothing to take.
+    expect(
+      await browser.execute((view: string) => {
+        const column = document.querySelector<HTMLElement>(view)!
 
-    await expect(remove).toBeDisabled()
-    await expect(remove).toHaveAttribute(
+        column.focus()
+
+        return document.activeElement === column
+      }, `${activeSidebar} [data-slot='sidebar-thumbnails']`),
+    ).toBe(true)
+    await browser.keys("Delete")
+    await browser.pause(600)
+    await expect($(`${session} [data-slot='page-status']`)).toHaveAttribute(
       "aria-label",
-      expect.stringContaining("Page 2 is collapsed under its file name"),
+      expect.stringMatching(/ of 4$/),
     )
 
     // Folded, the files are a list to put in order.

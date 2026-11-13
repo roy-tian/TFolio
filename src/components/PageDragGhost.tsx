@@ -303,22 +303,14 @@ export function PageDragGhost({
 }
 
 /** Where the pages in hand will stand: the landing page's own paper, dashed,
-    centred in its square across a row. */
-export function DragHole({
-  height,
-  square,
-  width,
-}: {
-  height: number
-  square: boolean
-  width: number
-}) {
+    centred in the square every paper stands in. */
+export function DragHole({ height, width }: { height: number; width: number }) {
   return (
     <span
       aria-hidden
       className="pointer-events-none absolute left-1/2 -translate-x-1/2 border-2 border-dashed border-primary/60 bg-primary/5"
       data-drag-hole
-      style={{ height, top: square ? (THUMBNAIL_WIDTH - height) / 2 : 0, width }}
+      style={{ height, top: (THUMBNAIL_WIDTH - height) / 2, width }}
     />
   )
 }

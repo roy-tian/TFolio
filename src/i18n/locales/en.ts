@@ -527,8 +527,7 @@ const en = {
     deleteKeepsOne: "A document keeps at least one page, so they cannot all be deleted",
     cutKeptNotice:
       "Pasted as copies: a document keeps at least one page, so {{name}} keeps all of its own",
-    pageFolded:
-      "Page {{pageNumber}} is collapsed under its file name. Expand the file to rotate or delete it",
+    selectPagesFirst: "Select pages to rotate or delete them",
   },
   files: {
     sourceFilter: "PDFs, images, and Word documents",

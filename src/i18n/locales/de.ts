@@ -530,8 +530,7 @@ const de = {
     deleteKeepsOne: "Ein Dokument behält mindestens eine Seite – es lassen sich nicht alle löschen",
     cutKeptNotice:
       "Als Kopien eingefügt: Ein Dokument behält mindestens eine Seite, daher bleiben alle Seiten in {{name}}",
-    pageFolded:
-      "Seite {{pageNumber}} ist unter ihrem Dateinamen eingeklappt. Klappen Sie die Datei aus, um die Seite zu drehen oder zu löschen",
+    selectPagesFirst: "Wählen Sie Seiten aus, um sie zu drehen oder zu löschen",
   },
   files: {
     sourceFilter: "PDFs, Bilder und Word-Dokumente",

@@ -507,8 +507,7 @@ const zhCN = {
     deletePage: "删除第 {{pageNumber}} 页",
     deleteKeepsOne: "文档至少保留一页，不能全部删除",
     cutKeptNotice: "已粘贴为副本：文档至少保留一页，{{name}} 的页面都保留在原处",
-    pageFolded:
-      "第 {{pageNumber}} 页折叠在文件名下，展开该文件后才能旋转或删除",
+    selectPagesFirst: "选择页面后才能旋转或删除",
   },
   files: {
     sourceFilter: "PDF、图片和 Word 文档",

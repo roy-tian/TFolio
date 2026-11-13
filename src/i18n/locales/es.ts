@@ -529,8 +529,7 @@ const es = {
     deleteKeepsOne: "Un documento conserva al menos una página: no se pueden eliminar todas",
     cutKeptNotice:
       "Pegadas como copias: un documento conserva al menos una página, así que {{name}} conserva todas las suyas",
-    pageFolded:
-      "La página {{pageNumber}} está contraída bajo el nombre de su archivo. Expande el archivo para girarla o eliminarla",
+    selectPagesFirst: "Selecciona páginas para girarlas o eliminarlas",
   },
   files: {
     sourceFilter: "PDF, imágenes y documentos de Word",

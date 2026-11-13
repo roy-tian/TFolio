@@ -50,8 +50,8 @@ export function useThumbnailPageOps({
   }
 
   // On a chosen page a delete takes the whole choice with it; on any other
-  // page, or asked for `alone` from the reading view, that page only. No
-  // confirmation: the delete is one undo away.
+  // page, or asked for `alone` from the page's own bar or the reading view,
+  // that page only. No confirmation: the delete is one undo away.
   const deleteThumbnailPage = (pageNumber: number, alone = false) => {
     if (!pdfDocument || editingBusy()) {
       return
@@ -65,7 +65,8 @@ export function useThumbnailPageOps({
     void annotations.deletePages(pages, pdfDocument.numPages)
   }
 
-  /** The page being read, from the pages bar with none chosen: that page alone. */
+  /** That page alone, whatever is chosen: a page's own bar or the reading
+      view's menu. */
   const rotateOnePage = (pageNumber: number, degrees: 90 | 270) => {
     if (!pdfDocument || editingBusy()) {
       return

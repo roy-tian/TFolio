@@ -214,13 +214,16 @@
   drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
   step with `SectionBook::padding`).
 - The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
-  fixed-size cells once widened (`ui.sidebarWidth`). The bar over them, and the Delete and
-  clipboard keys, act on the chosen pages, else the page being read, never on one folded away; a
-  plain click's choice lapses once another page is the page being read, so nothing is acted on out
-  of sight. Pages a paste or an add brings are chosen and shown where they landed (`showLanded`),
-  the reader left where they are. The pages and the bookmarks (the tree of files, for several) are
-  both there for every document: which shows is the window's layout, never a matter of what the
-  document holds.
+  fixed-size cells once widened (`ui.sidebarWidth`), every page in a square as wide as a paper's
+  long side, so a turn moves no other page. Each page's hover bar sits on its square's bottom,
+  where a turn leaves it under the pointer, and turns or deletes that page alone, chosen or not.
+  The bar over the pages, and the Delete, cut and copy keys, act on the chosen pages alone, the
+  bar greyed with none chosen; a paste with none chosen lands after the page being read, never
+  one folded away. A plain click's choice lapses once another page is the page being read, so
+  nothing is acted on out of sight. Pages a paste or an add brings are chosen and shown where
+  they landed (`showLanded`), the reader left where they are. The pages and the bookmarks (the
+  tree of files, for several) are both there for every document: which shows is the window's
+  layout, never a matter of what the document holds.
 - The page clipboard is the window's, one store (`holdPages` in `lib/pageClipboard.ts`) of
   which each session reads its half and keeps no copy: the last pages cut or copied in any of
   its documents, as that document's page numbers, which it lets go at its next structure edit.

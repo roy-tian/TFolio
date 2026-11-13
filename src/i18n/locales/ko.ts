@@ -529,8 +529,7 @@ const ko = {
     deleteKeepsOne: "문서에는 페이지가 하나 이상 있어야 하므로 모두 삭제할 수는 없습니다",
     cutKeptNotice:
       "문서에는 페이지가 하나 이상 있어야 하므로 {{name}}의 페이지는 그대로 두고 사본으로 붙여넣었습니다",
-    pageFolded:
-      "{{pageNumber}}페이지가 파일 이름 아래에 접혀 있어, 회전하거나 삭제하려면 파일을 펼쳐야 합니다",
+    selectPagesFirst: "회전하거나 삭제하려면 페이지를 선택하세요",
   },
   files: {
     sourceFilter: "PDF, 이미지, Word 문서",

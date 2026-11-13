@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { PaddingDismiss } from "@/components/PaddingDismiss"
-import { PageCheckbox } from "@/components/PageCardControls"
+import { PageBar, PageCheckbox, type PageAction } from "@/components/PageCardControls"
 import { DragHole } from "@/components/PageDragGhost"
 import { HintTooltip } from "@/components/HintTooltip"
 import { PdfThumbnail } from "@/components/PdfThumbnail"
@@ -149,13 +149,10 @@ function DropMarker({
     this view turns its pages, which the copies take on, not as the source's. */
 export function CarriedHoles({
   carryKey,
-  grid,
   rotation,
   sizes,
 }: {
   carryKey: string
-  /** Whether the pages stand in rows of several, each in its square. */
-  grid: boolean
   rotation: number
   sizes: CarriedPages["sizes"]
 }) {
@@ -166,11 +163,11 @@ export function CarriedHoles({
       <li className="relative" data-flip-key={`${carryKey}${index}`} key={index}>
         <div
           style={{
-            height: `calc(${grid ? THUMBNAIL_WIDTH : paper.height}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
-            width: grid ? THUMBNAIL_WIDTH : paper.width,
+            height: `calc(${THUMBNAIL_WIDTH}px + ${THUMBNAIL_CAPTION_HEIGHT})`,
+            width: THUMBNAIL_WIDTH,
           }}
         />
-        <DragHole height={paper.height} square={grid} width={paper.width} />
+        <DragHole height={paper.height} width={paper.width} />
       </li>
     )
   })
@@ -181,14 +178,11 @@ export function CarriedHoles({
     and on it the way to save without such pages.
     No flip key, so a drop counts it no cell. */
 export function PaddingCell({
-  grid,
   label,
   onDismiss,
   rotation,
   sheet,
 }: {
-  /** Whether the pages stand in rows of several, each in its square. */
-  grid: boolean
   label: string
   onDismiss: () => void
   rotation: number
@@ -200,7 +194,7 @@ export function PaddingCell({
     <li className="flex flex-col items-center" data-padding-after={sheet.after}>
       <div
         className="grid place-items-center"
-        style={grid ? { height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH } : undefined}
+        style={{ height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH }}
       >
         <HintTooltip label={label}>
           <div
@@ -385,6 +379,7 @@ function InsertGap({
     two previews it moves between, not the flow. */
 export const PageCell = memo(function PageCell({
   caption,
+  deleteDisabled,
   documentId,
   flipKey,
   grid,
@@ -395,6 +390,7 @@ export const PageCell = memo(function PageCell({
   isLast,
   isSelected,
   label,
+  onAction,
   onInsertBlank,
   onSelect,
   onToggle,
@@ -407,6 +403,7 @@ export const PageCell = memo(function PageCell({
   signed,
 }: {
   caption: number
+  deleteDisabled: boolean
   documentId: number
   flipKey: number
   /** Whether the pages stand in rows of several, not down one column. */
@@ -420,6 +417,7 @@ export const PageCell = memo(function PageCell({
   isLast: boolean
   isSelected: boolean
   label: string
+  onAction: (pageNumber: number, action: PageAction) => void
   /** A blank before the page, or after it from the last page's gap. */
   onInsertBlank: (pageNumber: number, side: "before" | "after") => void
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
@@ -474,6 +472,16 @@ export const PageCell = memo(function PageCell({
       <div className={cn(hole && "opacity-0")}>
         <PdfThumbnail
           caption={caption}
+          cellOverlay={
+            showControls ? (
+              <PageBar
+                caption={caption}
+                deleteDisabled={deleteDisabled}
+                itemKey={pageNumber}
+                onAction={onAction}
+              />
+            ) : null
+          }
           documentId={documentId}
           intrinsicRotation={intrinsicRotation}
           isCurrent={isCurrent}
@@ -500,7 +508,6 @@ export const PageCell = memo(function PageCell({
           renderEpoch={renderEpoch}
           retainBitmap={nearView}
           rotation={rotation}
-          square={grid}
         />
       </div>
       {showControls ? (
@@ -521,7 +528,7 @@ export const PageCell = memo(function PageCell({
           ) : null}
         </>
       ) : null}
-      {hole ? <DragHole height={paper.height} square={grid} width={paper.width} /> : null}
+      {hole ? <DragHole height={paper.height} width={paper.width} /> : null}
     </li>
   )
 })

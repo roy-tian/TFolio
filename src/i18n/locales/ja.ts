@@ -529,8 +529,7 @@ const ja = {
     deleteKeepsOne: "文書には少なくとも 1 ページ必要なため、すべてのページは削除できません",
     cutKeptNotice:
       "文書には少なくとも 1 ページ必要なため、{{name}} のページはそのまま残し、コピーとして貼り付けました",
-    pageFolded:
-      "{{pageNumber}} ページ目はファイル名の下に折りたたまれているため、回転や削除を行うにはファイルを展開してください",
+    selectPagesFirst: "回転や削除を行うには、ページを選択してください",
   },
   files: {
     sourceFilter: "PDF、画像、Word 文書",
