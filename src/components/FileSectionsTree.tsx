@@ -288,7 +288,8 @@ function FileRunRow({
 
   return (
     <li
-      className={cn(lifted && "opacity-40")}
+      // Hidden, not faded: the row making way slides onto its place.
+      className={cn(lifted && "opacity-0")}
       data-list-index={index}
       data-run-first={run.first}
       data-section-id={section.id}
