@@ -1232,6 +1232,7 @@ mod image_dpi;
 mod io;
 mod marks;
 mod owned_content;
+mod page_import;
 mod page_ops;
 mod page_reorder;
 mod raster;

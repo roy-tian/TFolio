@@ -880,28 +880,7 @@ impl PdfiumEngine {
             return Ok(());
         }
 
-        let bytes = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?;
-
-        let reloaded = self
-            .pdfium
-            .load_pdf_from_byte_vec(bytes, None)
-            .map_err(|error| format!("PDFium could not reload the document: {error}"))?;
-
-        if let Some(state) = &entry.owned_content {
-            // Part of a save, which has no Stop: checked in one pass.
-            Self::verify_owned_tail(&reloaded, &entry.page_ids, state, None, &mut |_, _| {})
-                .map_err(|error| {
-                    format!("PDFium did not preserve the owned content during compaction: {error}")
-                })?;
-        }
-
-        entry.document = reloaded;
-        entry.needs_compaction = false;
-
-        Ok(())
+        self.reread(entry)
     }
 
     /// What a Save As of a document other files were added to writes, as

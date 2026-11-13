@@ -151,7 +151,12 @@
 
 - Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what PDFium
   cannot do: writing outlines, relinking bookmarks and split links, recompressing images, drawing
-  signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation).
+  signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation),
+  dropping the links a page copy keeps into its source.
+- `FPDF_ImportPages` leaves references into the source (`/Parent`, `/Prev`, `/First`, arrays it
+  half-copied) that a save follows once the source closes, crashing the app: import only from a
+  `detached_pages` copy (`Headed::Home` back into its own document, whose numbers keep a widget's
+  field), and `reread` the document that took the pages before the copy closes.
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
   wait on the PDFium lock held by the operation being cancelled.

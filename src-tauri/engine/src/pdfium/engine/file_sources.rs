@@ -5,8 +5,9 @@ use serde::Serialize;
 
 use super::io::{
     fingerprint, is_merge_image, load_merge_source, merge_file_limit_error, read_merge_source,
-    Fingerprint, SourceFile, MAX_MERGE_FILES,
+    Fingerprint, MergeDraft, SourceFile, MAX_MERGE_FILES,
 };
+use super::page_import::{Headed, ImportRollback};
 use super::page_ops::{page_index, page_range_argument};
 use super::*;
 
@@ -438,17 +439,7 @@ impl PdfiumEngine {
             let Some(slot) = page_index(index, entry.page_ids.len() + 1) else {
                 return Err(format!("a page cannot go to position {index}"));
             };
-            let snapshot = entry
-                .document
-                .save_to_bytes()
-                .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
-            let before = InsertRollback {
-                snapshot,
-                page_ids: entry.page_ids.clone(),
-                owned_content: entry.owned_content.clone(),
-                foreign_page_ids: entry.foreign_page_ids.clone(),
-                started_sections: entry.sections.is_none(),
-            };
+            let before = ImportRollback::of(entry)?;
 
             if entry.sections.is_none() {
                 let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
@@ -467,6 +458,9 @@ impl PdfiumEngine {
         };
         let mut at = slot;
         let mut added = Vec::with_capacity(source_ids.len());
+        // Each file's pages arrive through a copy of them, open until the
+        // document is read back once every file is in (`page_import`).
+        let mut copies = Vec::with_capacity(source_ids.len());
 
         for id in source_ids {
             let inserted = if operation.is_cancelled() {
@@ -476,23 +470,20 @@ impl PdfiumEngine {
                     let entry = open_entry_mut(documents, document_id)?;
                     let count = source.pages().len() as usize;
                     let all: Vec<usize> = (0..count).collect();
-                    let flattened = if flattened_sources.contains(id) {
-                        Some(signatures::flattened_pages(self.pdfium, source, &all)?)
+                    let copy = if flattened_sources.contains(id) {
+                        signatures::flattened_pages(self.pdfium, source, &all)?
                     } else {
-                        None
+                        page_import::detached_pages(self.pdfium, source, &all, Headed::Away)?
                     };
 
                     entry
                         .document
                         .pages_mut()
-                        .copy_pages_from_document(
-                            flattened.as_ref().unwrap_or(source),
-                            &page_range_argument(&all),
-                            at as i32,
-                        )
+                        .copy_pages_from_document(&copy, &page_range_argument(&all), at as i32)
                         .map_err(|error| {
                             format!("PDFium could not add {}: {error}", path.display())
                         })?;
+                    copies.push(MergeDraft::holding(self, copy));
                     Self::record_inserted_pages(entry, at, &vec![false; count])?;
 
                     let ids = entry.page_ids[at..at + count].to_vec();
@@ -530,6 +521,11 @@ impl PdfiumEngine {
 
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if let Err(error) = self.reread(entry) {
+            return Err(before.roll_back(self, entry, error));
+        }
+
         let mut sources = self.lock_sources();
 
         // Their pages are this document's own copies now: an undo's stash, not
@@ -579,30 +575,5 @@ impl PdfiumEngine {
                 Err(error)
             }
         }
-    }
-}
-
-/// The document as an insert of files found it, put back whole if one of them
-/// cannot be added: the bytes, and every page-keyed record the files touched.
-struct InsertRollback {
-    snapshot: Vec<u8>,
-    page_ids: Vec<u64>,
-    owned_content: Option<OwnedContentState>,
-    foreign_page_ids: HashSet<u64>,
-    /// The first file added began the document's files, which go again.
-    started_sections: bool,
-}
-
-impl InsertRollback {
-    fn roll_back(self, engine: &PdfiumEngine, entry: &mut OpenDocument, cause: String) -> String {
-        entry.page_ids = self.page_ids;
-        entry.owned_content = self.owned_content;
-        entry.foreign_page_ids = self.foreign_page_ids;
-
-        if self.started_sections {
-            entry.sections = None;
-        }
-
-        engine.restore_document_snapshot(entry, self.snapshot, cause)
     }
 }

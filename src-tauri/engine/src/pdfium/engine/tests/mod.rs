@@ -25,6 +25,7 @@ mod duplicate_pages;
 mod file_changes;
 mod file_sources;
 mod image_dpi;
+mod page_import;
 mod page_numbers;
 mod page_structure;
 mod rect_effect;

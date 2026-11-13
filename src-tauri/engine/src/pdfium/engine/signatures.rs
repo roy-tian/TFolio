@@ -9,7 +9,7 @@ use std::{
     ptr,
 };
 
-use super::page_ops::page_range_argument;
+use super::page_import::{detached_pages, Headed};
 use super::signature_flatten::flatten_signatures;
 use super::*;
 use super::{
@@ -170,14 +170,7 @@ pub(super) fn flattened_pages(
     source: &PdfDocument<'_>,
     indices: &[usize],
 ) -> Result<PdfDocument<'static>, String> {
-    let mut pages = pdfium
-        .create_new_pdf()
-        .map_err(|error| format!("PDFium could not create a document: {error}"))?;
-
-    pages
-        .pages_mut()
-        .copy_pages_from_document(source, &page_range_argument(indices), 0)
-        .map_err(|error| format!("PDFium could not copy the pages: {error}"))?;
+    let pages = detached_pages(pdfium, source, indices, Headed::Away)?;
 
     Ok(flattened_copy(pdfium, &pages)?.unwrap_or(pages))
 }

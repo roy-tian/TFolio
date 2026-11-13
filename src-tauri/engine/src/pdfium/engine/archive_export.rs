@@ -279,7 +279,7 @@ impl PdfiumEngine {
                         return Ok(false);
                     };
                     let Some(mut bytes) = write_navigation(
-                        bytes,
+                        page_import::without_unrewritten_links(bytes, page_import::Headed::Away)?,
                         &section_outline(&outline, section.start, section.end),
                         &links,
                         section.start,
@@ -318,6 +318,8 @@ impl PdfiumEngine {
                             .map_err(|error| format!("could not save a split PDF: {error}"))
                     })?;
                     // Byte work, so off the lock `with_archive_source` holds.
+                    bytes =
+                        page_import::without_unrewritten_links(bytes, page_import::Headed::Away)?;
                     if flatten {
                         bytes = signatures::flattened_bytes(bytes)?;
                     }
