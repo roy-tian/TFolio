@@ -27,11 +27,19 @@
   else `bun run test` and Cargo `test --locked`.
 - PDFium-dependent Rust tests are `#[ignore]`d and need `pdfium:download` and `fonts:download`
   (`test:all` runs both); missing fonts fail them rather than skip.
+- CI runs only for `master` (pushes and pull requests to it), so nothing checks a push to
+  `develop`, and it lints with the newest stable Rust, whose clippy fails what an older local
+  one passes: run `rustup check` before a release.
 - `test:e2e:headless` reruns the GUI suite on the last `test:e2e:build`. Never run Cargo during
   it: debug builds overwrite the `target/debug/tfolio` each spec relaunches.
+- Run the GUI suite only through `test:e2e:headless`: it puts each of the four lanes
+  (`TFOLIO_E2E_SHARDS`) on an Xvfb of its own, and an app that is not its display's focused
+  window fails focus-driven popups. It takes no spec filter: to run one spec, spread
+  `wdio.conf.ts` in a throwaway `.temp/` config that overrides a lane's `wdio:specs`.
 - Specs under `test/e2e/extended/` lock frame timing and pointer feel (preview hand-offs, the
-  overlay scrollbar, text hit testing, resize), which a loaded machine jitters: CI runs them, a
-  local run only with `TFOLIO_E2E_EXTENDED=1`. Run them locally after touching what they lock.
+  overlay scrollbar, text hit testing, search reveal, resize), which a loaded machine jitters:
+  CI runs them, a local run only with `TFOLIO_E2E_EXTENDED=1`. Run them locally after touching
+  what they lock.
 - An e2e test proves what only the GUI can: wiring, dialogs, focus, layout. What the engine or a
   unit test already proves (pixels after undo, layers not stacking) gets one smoke test per
   feature, not a GUI copy.
@@ -100,9 +108,14 @@
 
 ## WebView UI
 
-- Ship no `group-has-*`, `peer-has-*`, or `group-focus-within-*`, even from registry snippets or
-  class names in comments: each makes WebView2 or WebKit restyle the whole document per DOM
-  change or focus. `toolbar-tooltips.e2e.ts` guards.
+- Ship no `group-has-*`, `peer-has-*`, `group-focus-within-*`, `space-*`, `divide-*` or
+  `*:last:`, even from registry snippets or class names in comments: each makes WebView2 or
+  WebKit restyle the whole document per DOM change or focus. Ship no breakpoint wider than the
+  window's `minWidth` either (`sm:` is the widest; no `md:` and up, no `container`): Chromium
+  restyles everything when a resize flips one. `toolbar-tooltips.e2e.ts` guards.
+- The borderless window keeps its outer 5px for resizing on Linux: no pointer event reaches the
+  WebView there, so a bar or handle at the edge sits clear of it, and a native-pointer move
+  aimed there shows nothing.
 - Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
   beside it.
 - Eleven locales share every layout, and the longest words decide it: a menu or popover takes its
