@@ -197,10 +197,12 @@
   the reader left where they are. The pages and the bookmarks (the tree of files, for several) are
   both there for every document: which shows is the window's layout, never a matter of what the
   document holds.
-- The page clipboard is the window's (`sharePages`): the last pages cut or copied in any of
-  its documents, as that document's page numbers, which it withdraws at its next structure
-  edit. Another document pastes them as copies; a cut pasted there is then deleted by the
-  document it was made in, one undo in each.
+- The page clipboard is the window's, one store (`holdPages` in `lib/pageClipboard.ts`) of
+  which each session reads its half and keeps no copy: the last pages cut or copied in any of
+  its documents, as that document's page numbers, which it lets go at its next structure edit.
+  Another document pastes them as copies, only while their own has no structure edit in flight
+  (`PageSource.idle`); a cut pasted there is then deleted by the document it was made in, one
+  undo in each.
 - A document with no file of its own has Save As for its save button and key, as one holding
   foreign pages has (`saveAsOnly`); the menu's Save stays disabled.
 - A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,

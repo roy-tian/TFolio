@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react"
 
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import {
   clipboardAfterPaste,
+  heldPages,
+  holdPages,
+  letGoOfPages,
   pageClipboardOf,
-  sharePages,
-  sharedPages,
-  subscribeSharedPages,
-  unsharePages,
+  registerPageSource,
+  subscribeHeldPages,
   type PageClipboard,
-  type SharedPages,
 } from "@/lib/pageClipboard"
 
 type UsePageClipboardOptions = {
@@ -17,9 +17,14 @@ type UsePageClipboardOptions = {
       outlives that, so a paste can still happen once the reader comes back. */
   active: boolean
   documentId: number
+  /** The document's name, for another to say it is busy by. */
+  documentName: string
   /** The page the keys take with none chosen: the one being read, or null
       where it shows no paper to be taken by. */
   fallbackPage: () => number | null
+  /** Whether the pages still stand as the clipboard numbers them, with no
+      structure edit in flight: asked as another document pastes them. */
+  isIdle: () => boolean
   /** Esc took a cut back: what the cut said is no longer so. */
   onCutCancelled: () => void
   /** A cut made here was pasted into another document: its pages leave this
@@ -33,78 +38,63 @@ type UsePageClipboardOptions = {
   /** While the previews show, Esc takes back a cut: its faded pages are on
       screen whether or not the column has focus. */
   shown: boolean
+  /** The tab is the one on show. Only it follows what other documents hold,
+      so a cut or copy re-renders no tab behind the one it was made in. */
+  tabShown: boolean
 }
 
 /**
  * Page numbers, voided by every structure edit except the paste's own insert,
  * and never sent to the system clipboard, which cannot carry PDF pages. The
- * window's other documents can paste them: what one takes is shared while it
- * holds it, and replaces what any other held, as one clipboard would.
+ * clipboard is the window's one (`lib/pageClipboard`): this is a document's
+ * half of it, the pages it holds itself and those another holds for it to
+ * paste, with no copy of either kept here to fall out of step.
  */
 export function usePageClipboard({
   active,
   documentId,
+  documentName,
   fallbackPage,
+  isIdle,
   onCutCancelled,
   onMovedAway,
   onPaste,
   onTaken,
   selectedPages,
   shown,
+  tabShown,
 }: UsePageClipboardOptions) {
-  const [clipboard, setClipboard] = useState<PageClipboard | null>(null)
-  const clipboardRef = useRef(clipboard)
+  const followed = useSyncExternalStore(subscribeHeldPages, () => {
+    const held = heldPages()
 
-  clipboardRef.current = clipboard
-
-  const shared = useSyncExternalStore(subscribeSharedPages, sharedPages)
+    return held && (tabShown || held.sourceDocumentId === documentId) ? held : null
+  })
+  const clipboard = followed?.sourceDocumentId === documentId ? followed : null
   // Pages another of the window's documents holds, which a paste here copies in.
-  const foreign = shared && shared.sourceDocumentId !== documentId ? shared : null
+  const foreign = followed && followed.sourceDocumentId !== documentId ? followed : null
   // Read when the keys or another document ask, which is after any render.
-  const latestRef = useRef({ fallbackPage, onMovedAway })
+  const latestRef = useRef({ documentName, fallbackPage, isIdle, onCutCancelled, onMovedAway })
 
-  latestRef.current = { fallbackPage, onMovedAway }
+  latestRef.current = { documentName, fallbackPage, isIdle, onCutCancelled, onMovedAway }
 
-  useEffect(() => {
-    if (!clipboard) {
-      unsharePages(documentId)
-      return
-    }
+  // What this document answers for the pages it holds; a tab closed with
+  // pages on the clipboard takes them with it.
+  useEffect(
+    () =>
+      registerPageSource(documentId, {
+        idle: () => latestRef.current.isIdle(),
+        name: () => latestRef.current.documentName,
+        // A cut still standing here would fade pages no paste will ever move.
+        superseded: (held) => {
+          if (held.mode === "cut") {
+            latestRef.current.onCutCancelled()
+          }
+        },
+        takeOut: (pages) => latestRef.current.onMovedAway(pages),
+      }),
+    [documentId],
+  )
 
-    const { pages } = clipboard
-    const entry: SharedPages = {
-      ...clipboard,
-      // Once, and only while these are still what the window holds: a second
-      // paste, or one landing after an edit here withdrew them, would take
-      // out whatever pages then hold their numbers.
-      onMoved: () => {
-        if (sharedPages() === entry) {
-          unsharePages(documentId)
-          latestRef.current.onMovedAway(pages)
-        }
-      },
-      sourceDocumentId: documentId,
-    }
-
-    sharePages(entry)
-  }, [clipboard, documentId])
-
-  // A tab closed with pages on the clipboard takes them with it.
-  useEffect(() => () => unsharePages(documentId), [documentId])
-
-  // Another document's cut or copy is the clipboard now: a cut still standing
-  // here would fade pages no paste will ever move.
-  useEffect(() => {
-    if (foreign && clipboardRef.current) {
-      const wasCut = clipboardRef.current.mode === "cut"
-
-      setClipboard(null)
-
-      if (wasCut) {
-        onCutCancelled()
-      }
-    }
-  }, [foreign, onCutCancelled])
   // The insert a paste is about to make: only that change may move the pages on
   // the clipboard, so it is consumed by the next one, and only if it fits.
   const pendingPasteRef = useRef<{
@@ -128,11 +118,11 @@ export function usePageClipboard({
       const taken = pageClipboardOf(mode, pages ?? (fallback === null ? chosen : [fallback]))
 
       if (taken) {
-        setClipboard(taken)
+        holdPages({ ...taken, sourceDocumentId: documentId })
         onTaken(taken)
       }
     },
-    [onTaken],
+    [documentId, onTaken],
   )
 
   const armPaste = useCallback(
@@ -150,26 +140,30 @@ export function usePageClipboard({
       which a choice lapsing under it must not swap for the page being read. */
   const copyPages = useCallback((pages: Iterable<number>) => take("copy", pages), [take])
   const cutPages = useCallback((pages: Iterable<number>) => take("cut", pages), [take])
-  /** Lets go of what is held, moving nothing: a cut another document took
-      that could not then leave this one. */
-  const release = useCallback(() => setClipboard(null), [])
 
   const structureChanged = useCallback(
     (numPages: number) => {
       const pending = pendingPasteRef.current
-      const ownPaste = pending !== null && pending.numPages === numPages
+      const held = heldPages()
 
       pendingPasteRef.current = null
 
-      // Withdrawn now, not at the render that follows: a paste landing in
-      // another document meanwhile would act on numbers that name other pages.
-      if (!ownPaste) {
-        unsharePages(documentId)
+      if (held?.sourceDocumentId !== documentId) {
+        return
       }
 
-      setClipboard((current) =>
-        ownPaste ? clipboardAfterPaste(current, pending.index, pending.count) : null,
-      )
+      // In the store at once, not at a render that follows: a paste landing
+      // in another document meanwhile would act on numbers that name other pages.
+      const kept =
+        pending && pending.numPages === numPages
+          ? clipboardAfterPaste(held, pending.index, pending.count)
+          : null
+
+      if (kept) {
+        holdPages({ ...kept, sourceDocumentId: documentId })
+      } else {
+        letGoOfPages(documentId)
+      }
     },
     [documentId],
   )
@@ -247,14 +241,17 @@ export function usePageClipboard({
 
     // As it clears the selection. A copy stays: it shows nothing to take back.
     const cancelCut = (event: KeyboardEvent) => {
+      const held = heldPages()
+
       if (
         event.key === "Escape" &&
         !event.defaultPrevented &&
         !isTypingTarget(event.target) &&
         !hasLayerOverWorkspace() &&
-        clipboardRef.current?.mode === "cut"
+        held?.sourceDocumentId === documentId &&
+        held.mode === "cut"
       ) {
-        setClipboard(null)
+        letGoOfPages(documentId)
         onCutCancelled()
       }
     }
@@ -262,7 +259,7 @@ export function usePageClipboard({
     document.addEventListener("keydown", cancelCut)
 
     return () => document.removeEventListener("keydown", cancelCut)
-  }, [onCutCancelled, shown])
+  }, [documentId, onCutCancelled, shown])
 
   return {
     armPaste,
@@ -271,7 +268,6 @@ export function usePageClipboard({
     cutPages,
     disarmPaste,
     foreign,
-    release,
     structureChanged,
   }
 }

@@ -598,8 +598,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const pageClipboard = usePageClipboard({
       active: active && thumbnailsShown && pageKeys,
       documentId: pdfDocument.id,
+      documentName: fileName,
       // New each render: the hook reads the latest as a key asks.
       fallbackPage: readingChoice,
+      // Asked only as another document pastes, by which time the history
+      // below is set up.
+      isIdle: () => !annotations.isStructureBusyNow(),
       onCutCancelled: useCallback(() => notice.retract(["pagesCut"]), [notice]),
       onMovedAway: useCallback((pages: number[]) => movedAwayRef.current(pages), []),
       onPaste: useCallback((after: number) => pasteAfterRef.current(after), []),
@@ -615,6 +619,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       ),
       selectedPages: thumbnailSelection.selectedPages,
       shown: active && thumbnailsShown,
+      tabShown: active,
     })
     const pageClipboardStructureChanged = pageClipboard.structureChanged
     const { clipboard } = pageClipboard
@@ -2075,16 +2080,12 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       notice.retract(["pagesCut"])
 
       if (annotations.isStructureBusyNow() || annotations.hasPendingWorkNow()) {
-        pageClipboard.release()
         return
       }
 
-      void annotations.deletePages(pages, pdfDocument.numPages).then((landed) => {
-        // Every page it has, which a document keeps: the cut is let go.
-        if (!landed) {
-          pageClipboard.release()
-        }
-      })
+      // Refused, as every page it has would be, they stay: the clipboard let
+      // go of them as the paste landed.
+      void annotations.deletePages(pages, pdfDocument.numPages)
     }
 
     useImperativeHandle(

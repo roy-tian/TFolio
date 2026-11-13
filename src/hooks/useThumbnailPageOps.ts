@@ -5,7 +5,7 @@ import type { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import type { CarriedPages } from "@/lib/pageCarry"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { pagesToRotate } from "@/lib/pageRotation"
-import { pastePlan } from "@/lib/pageClipboard"
+import { movePagesOut, pageSourceOf, pastePlan } from "@/lib/pageClipboard"
 import { emptiesItsFile, reorderSections, sectionAt } from "@/lib/pageSections"
 
 type UseThumbnailPageOpsOptions = {
@@ -121,6 +121,19 @@ export function useThumbnailPageOps({
         return
       }
 
+      const source = pageSourceOf(foreign)
+
+      // The copy reads its pages by their numbers: an edit in flight in their
+      // document is about to move them, as a drag's release checks of the
+      // column it left.
+      if (!source?.idle()) {
+        if (source) {
+          notice.raise("pagesAppendBusy", { values: { name: source.name() } })
+        }
+
+        return
+      }
+
       const count = foreign.pages.length
       const at = index <= pdfDocument.numPages ? index : undefined
 
@@ -137,7 +150,7 @@ export function useThumbnailPageOps({
           onPagesLanded(Array.from({ length: count }, (_, offset) => index + offset))
 
           if (foreign.mode === "cut") {
-            foreign.onMoved()
+            movePagesOut(foreign)
           }
         })
 

@@ -374,40 +374,47 @@ export function nearestBox(
   return nearest
 }
 
-/** The cell a row away from cell `at`, the one nearest it across: where an
-    up or down arrow goes among cells flowing in rows, or down one column.
-    -1 past the first row or the last. */
-export function rowNeighbour(boxes: readonly Box[], at: number, direction: 1 | -1): number {
-  const from = boxes[at]
-
-  if (!from) {
-    return -1
-  }
-
+/** The cell a row away from `from`, the one nearest it across: where an up
+    or down arrow goes among cells flowing in rows, or down one column. Cells
+    are reached one at a time through `next`, the way the key points, so only
+    the rows crossed are measured. Null past the first row or the last. */
+export function rowNeighbour<Cell>(
+  from: Cell,
+  next: (cell: Cell) => Cell | null,
+  box: (cell: Cell) => Box,
+): Cell | null {
+  const start = box(from)
   // Cells of one row share a top; a name between two rows is no cell here.
   const sameRow = (left: Box, right: Box) =>
     Math.abs(left.top - right.top) < Math.min(left.height, right.height) / 2
-  const centre = (box: Box) => box.left + box.width / 2
-  let index = at + direction
+  const across = (other: Box) =>
+    Math.abs(other.left + other.width / 2 - (start.left + start.width / 2))
+  let cell = next(from)
 
-  while (boxes[index] && sameRow(boxes[index]!, from)) {
-    index += direction
+  while (cell !== null && sameRow(box(cell), start)) {
+    cell = next(cell)
   }
 
-  const row = boxes[index]
-
-  if (!row) {
-    return -1
+  if (cell === null) {
+    return null
   }
 
-  let nearest = index
+  const row = box(cell)
+  let nearest = cell
+  let least = across(row)
 
-  for (let other = index; boxes[other] && sameRow(boxes[other]!, row); other += direction) {
-    if (
-      Math.abs(centre(boxes[other]!) - centre(from)) <
-      Math.abs(centre(boxes[nearest]!) - centre(from))
-    ) {
+  for (let other = next(cell); other !== null; other = next(other)) {
+    const place = box(other)
+
+    if (!sameRow(place, row)) {
+      break
+    }
+
+    const distance = across(place)
+
+    if (distance < least) {
       nearest = other
+      least = distance
     }
   }
 

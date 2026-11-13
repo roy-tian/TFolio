@@ -813,7 +813,9 @@ describe("TFolio pages carried to other documents", () => {
     )
     await tabButton("busy-source.pdf").click()
     // The refused pages fly home first; a press before then lifts nothing.
-    await $(`${activeSidebar} [data-drag-hole]`).waitForExist({ reverse: true })
+    // Carried out they left no hole to watch: the column says while it is
+    // still in a drag.
+    await $(`${activeSidebar} [data-pages-dragging]`).waitForExist({ reverse: true })
     await clickThumb(1)
     await liftThumb(1)
     // The tab is asked on each move, as a held pointer's tremor would.
@@ -935,6 +937,60 @@ describe("TFolio pages carried to other documents", () => {
     await browser.waitUntil(async () => (await thumbCount()) === 2, {
       timeoutMsg: "the cut page never left the document it was cut in",
     })
+  })
+
+  it("refuses to paste pages whose own document has an edit in flight, and says so", async () => {
+    await openPdfFromDisk("idle-target.pdf", textPdf(2))
+    await paintedFingerprints(2)
+    await openPdfFromDisk("edited-source.pdf", bandedPdf(4))
+    await paintedFingerprints(4)
+
+    await clickThumb(2)
+    await browser.keys(["Control", "c"])
+    await $("[data-notice='pagesCopied']").waitForDisplayed()
+
+    // A Save As whose dialog is never answered holds the source's queue, and
+    // a delete waits behind it: an edit in flight, about to renumber the
+    // pages the clipboard names.
+    await browser.execute(() => {
+      const page = window as Window & {
+        __finishSaveAs?: () => void
+        __tfolioE2E?: E2eOverrides
+      }
+
+      page.__tfolioE2E = {
+        ...page.__tfolioE2E,
+        exportPdf: () =>
+          new Promise((resolve) => {
+            page.__finishSaveAs = () => resolve(null)
+          }),
+      }
+    })
+    await clickAppMenuItem("save-as")
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () => typeof (window as Window & { __finishSaveAs?: unknown }).__finishSaveAs === "function",
+        ),
+      { timeoutMsg: "the Save As never started" },
+    )
+    await clickThumb(1)
+    await browser.keys("Delete")
+
+    await tabButton("idle-target.pdf").click()
+    await expect(tabButton("idle-target.pdf")).toHaveAttribute("aria-selected", "true")
+    await clickThumb(1)
+    await browser.keys(["Control", "v"])
+
+    await $("[data-notice='pagesAppendBusy']").waitForDisplayed()
+    await expect($("[data-notice='pagesAppendBusy']")).toHaveText(
+      expect.stringContaining("edited-source.pdf still has work in progress"),
+    )
+    expect(await thumbCount()).toBe(2)
+
+    await browser.execute(() =>
+      (window as Window & { __finishSaveAs?: () => void }).__finishSaveAs?.(),
+    )
   })
 
   it("keeps a new PDF of watermarked pages export-only", async () => {

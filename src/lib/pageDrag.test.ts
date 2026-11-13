@@ -315,26 +315,48 @@ describe("the cell a row away", () => {
   const cell = (left: number, top: number) => ({ height: 184, left, top, width: 160 })
   // Three across, a file's name between the rows, then a short last row.
   const rows = [cell(0, 0), cell(184, 0), cell(368, 0), cell(0, 240), cell(184, 240), cell(0, 480)]
+  // Cells by their place, reached one at a time the way the key points.
+  const away = (cells: ReturnType<typeof cell>[], from: number, direction: 1 | -1) => {
+    const measured: number[] = []
+    const reached = rowNeighbour(
+      from,
+      (at) => (cells[at + direction] ? at + direction : null),
+      (at) => {
+        measured.push(at)
+
+        return cells[at]!
+      },
+    )
+
+    return { measured: new Set(measured).size, reached }
+  }
 
   it("goes straight down or up where a cell stands there", () => {
-    expect(rowNeighbour(rows, 1, 1)).toBe(4)
-    expect(rowNeighbour(rows, 4, -1)).toBe(1)
+    expect(away(rows, 1, 1).reached).toBe(4)
+    expect(away(rows, 4, -1).reached).toBe(1)
   })
 
   it("takes the nearest cell of a shorter row", () => {
-    expect(rowNeighbour(rows, 2, 1)).toBe(4)
-    expect(rowNeighbour(rows, 4, 1)).toBe(5)
+    expect(away(rows, 2, 1).reached).toBe(4)
+    expect(away(rows, 4, 1).reached).toBe(5)
   })
 
   it("stops at the first row and the last", () => {
-    expect(rowNeighbour(rows, 0, -1)).toBe(-1)
-    expect(rowNeighbour(rows, 5, 1)).toBe(-1)
+    expect(away(rows, 0, -1).reached).toBeNull()
+    expect(away(rows, 5, 1).reached).toBeNull()
   })
 
   it("steps page by page down one column", () => {
     const column = [cell(0, 0), cell(0, 200), cell(0, 400)]
 
-    expect(rowNeighbour(column, 0, 1)).toBe(1)
-    expect(rowNeighbour(column, 2, -1)).toBe(1)
+    expect(away(column, 0, 1).reached).toBe(1)
+    expect(away(column, 2, -1).reached).toBe(1)
+  })
+
+  it("measures only the rows it crosses, however long the flow", () => {
+    const long = Array.from({ length: 3000 }, (_, at) => cell((at % 3) * 184, Math.floor(at / 3) * 240))
+
+    // The rest of its own row, the row below, and the first cell past that.
+    expect(away(long, 1500, 1)).toEqual({ measured: 7, reached: 1503 })
   })
 })

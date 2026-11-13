@@ -685,11 +685,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // instead, the reader left where they are. From the page last chosen
   // while a choice stands, else from the page being read.
   const moveChoice = (key: string, extend: boolean) => {
-    const papers = Array.from(
-      columnRef.current?.querySelectorAll<HTMLElement>("[data-thumbnail-page]") ?? [],
-    )
-
-    if (papers.length === 0 || drag !== null || ghost !== null) {
+    if (drag !== null || ghost !== null) {
       return false
     }
 
@@ -703,36 +699,50 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       (cursor.pages === pagesRef.current || chosen.has(cursor.pageNumber))
         ? cursor.pageNumber
         : current
-    const numbers = papers.map((paper) => Number(paper.dataset.thumbnailPage))
-    const at = numbers.indexOf(from)
     const forward = key === "ArrowDown" || key === "ArrowRight"
-    let next = -1
+    const start = cellOf(from)?.closest("li")
+    const paperIn = (cell: Element) => cell.querySelector<HTMLElement>("[data-thumbnail-page]")
+    // The next cell that holds a page, the way the key points: names and
+    // blanks between are passed over.
+    const step = (cell: HTMLElement) => {
+      let other = forward ? cell.nextElementSibling : cell.previousElementSibling
 
-    if (at < 0) {
-      // Folded away: the nearest page that shows, the way the key points.
-      next = forward
-        ? numbers.findIndex((pageNumber) => pageNumber > from)
-        : numbers.reduce((last, pageNumber, index) => (pageNumber < from ? index : last), -1)
-    } else if (key === "ArrowLeft" || key === "ArrowRight") {
-      next = at + (forward ? 1 : -1)
-    } else {
-      next = rowNeighbour(
-        papers.map((paper) => (paper.closest("li") ?? paper).getBoundingClientRect()),
-        at,
-        forward ? 1 : -1,
-      )
+      while (other && !paperIn(other)) {
+        other = forward ? other.nextElementSibling : other.previousElementSibling
+      }
+
+      return other instanceof HTMLElement ? other : null
     }
 
-    const paper = papers[next]
-    const target = numbers[next]
-
-    if (!paper || target === undefined) {
+    if (!start) {
       return false
     }
 
+    // Folded away, the page stands in no row: the nearest that shows.
+    const shows = paperIn(start) !== null
+    // Reached cell by cell from where the choice stands, by their places in
+    // the layout, which a slide under way does not move: a long document
+    // measures only the rows the key crosses.
+    const cell =
+      !shows || key === "ArrowLeft" || key === "ArrowRight"
+        ? step(start)
+        : rowNeighbour(start, step, (each) => ({
+            height: each.offsetHeight,
+            left: each.offsetLeft,
+            top: each.offsetTop,
+            width: each.offsetWidth,
+          }))
+    const paper = cell ? paperIn(cell) : null
+
+    if (!paper) {
+      return false
+    }
+
+    const target = Number(paper.dataset.thumbnailPage)
+
     if (extend) {
       // A range reaches from where the choice began: with none, from here.
-      if (selectionRef.current.size === 0 && at >= 0) {
+      if (chosen.size === 0 && shows) {
         onSelectPage(from, PLAIN)
       }
 
