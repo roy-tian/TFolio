@@ -31,8 +31,8 @@ export function OperationProgress({
       data-testid={testId}
       value={percent}
     >
-      <ProgressLabel className="flex items-center gap-2">
-        <LoaderCircle className="size-4 animate-spin text-muted-foreground" />
+      <ProgressLabel className="flex min-w-0 flex-1 items-center gap-2">
+        <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" />
         {label}
       </ProgressLabel>
       <ProgressValue />

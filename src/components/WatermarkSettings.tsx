@@ -159,6 +159,7 @@ export function WatermarkSettings({
                   onDraftChange({ ...draft, direction: value })
                 }
               }}
+              size="sm"
               spacing={0}
               value={[draft.direction]}
               variant="outline"
@@ -186,6 +187,7 @@ export function WatermarkSettings({
                   })
                 }
               }}
+              size="sm"
               spacing={0}
               value={[draft.layout]}
               variant="outline"

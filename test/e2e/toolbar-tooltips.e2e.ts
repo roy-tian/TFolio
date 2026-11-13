@@ -117,26 +117,35 @@ describe("TFolio toolbar tooltips", () => {
 
   it("names a sidebar panel in a tooltip only once its word is cut short", async () => {
     const outline = `${activeSidebar} button[aria-label='大纲']`
-    const focus = (maxWidth: string) =>
-      browser.execute(
+    const focus = async (maxWidth: string) => {
+      await browser.execute(
         (css: string, width: string) => {
           const item = document.querySelector<HTMLElement>(css)!
 
           item.blur()
           item.style.maxWidth = width
-          item.focus()
         },
         outline,
         maxWidth,
       )
+      // The option eases from one width to the next, and what its word has
+      // room for is read as the focus lands.
+      await browser.pause(300)
+      await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.focus(), outline)
+    }
 
     // Whole, the word is all a tooltip would say, over the panel's own bar.
     await focus("")
     await browser.pause(500)
     expect(await tooltipOpen(outline)).toBe(false)
 
-    // Narrowed past its word, as a long language's can be at the opening width.
+    // Narrowed a little, the icon gives way and the word still stands whole.
     await focus("56px")
+    await browser.pause(500)
+    expect(await tooltipOpen(outline)).toBe(false)
+
+    // Narrowed past its word, as a long language's can be at the opening width.
+    await focus("36px")
     await browser.waitUntil(() => tooltipOpen(outline), {
       timeout: 5_000,
       timeoutMsg: "the cut-short panel name never opened its tooltip",

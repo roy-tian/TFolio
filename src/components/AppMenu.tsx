@@ -131,7 +131,12 @@ export function AppMenu({
           <Menu />
         </DropdownMenuTrigger>
       </ToolbarTooltip>
-      <DropdownMenuContent align="end" className="w-56">
+      {/* As wide as its longest entry: no language's words wrap, or run into
+          the keys beside them. */}
+      <DropdownMenuContent
+        align="end"
+        className="w-auto min-w-56 [&_[data-slot=dropdown-menu-shortcut]]:pl-6"
+      >
         <DropdownMenuGroup>
           <DropdownMenuItem data-action="new" onClick={onNew}>
             <FilePlus2 />

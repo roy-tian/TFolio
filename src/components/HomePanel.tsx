@@ -146,10 +146,10 @@ export function HomePanel({
                 bounded box to scroll inside. The row itself is `minmax(0,1fr)`:
                 an auto row would grow to the list's content and push the scroll
                 back out to the page. */}
-            <div className="mt-8 grid w-full min-h-0 flex-1 grid-cols-[2fr_8fr] grid-rows-[minmax(0,1fr)] items-start gap-6">
-              <div className="flex flex-col gap-6">
+            <div className="mt-8 grid w-full min-h-0 flex-1 grid-cols-[minmax(10.5rem,2fr)_8fr] grid-rows-[minmax(0,1fr)] items-start gap-6">
+              <div className="grid auto-rows-fr gap-6">
                 <button
-                  className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+                  className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-4 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
                   data-slot="new-document"
                   disabled={opening}
                   onClick={onNew}
@@ -157,14 +157,14 @@ export function HomePanel({
                 >
                   <FilePlus2 className="mb-4 size-10 transition-transform group-hover:-translate-y-0.5" />
                   <span className="text-lg font-semibold">{t("home.new")}</span>
-                  <span className="mt-2 text-sm text-muted-foreground">
+                  <span className="mt-2 text-sm text-balance text-muted-foreground">
                     {t("home.newHint")}
                   </span>
                 </button>
 
                 <button
                   aria-label={t("viewer.chooseFile")}
-                  className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-6 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
+                  className="group flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border bg-background/75 px-4 py-8 text-center shadow-sm transition-colors hover:border-foreground/40 hover:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-default"
                   data-slot="drop-zone"
                   disabled={opening}
                   onClick={onOpenFile}
@@ -178,7 +178,7 @@ export function HomePanel({
                   <span className="text-lg font-semibold">
                     {opening ? t("viewer.loading") : t("home.open")}
                   </span>
-                  <span className="mt-2 text-sm text-muted-foreground">
+                  <span className="mt-2 text-sm text-balance text-muted-foreground">
                     {t("viewer.dropTitle")}
                   </span>
                 </button>

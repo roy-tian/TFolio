@@ -46,7 +46,8 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
   const usesColor = style.effect === "translucent"
 
   return (
-    <div className="flex w-64 flex-col gap-3">
+    // As wide as the three effects' names, which no language fits in thirds.
+    <div className="flex w-max max-w-[calc(100vw-2rem)] min-w-64 flex-col gap-3">
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
           <p className="text-xs font-medium" id="rect-effect-label">
@@ -95,7 +96,7 @@ export function RectStylePopover({ onChange, style }: RectStylePopoverProps) {
           {rectEffectKinds.map((kind) => (
             <ToggleGroupItem
               aria-label={t(effectLabelKey[kind])}
-              className="flex-1 text-xs"
+              className="flex-auto text-xs"
               key={kind}
               value={kind}
             >

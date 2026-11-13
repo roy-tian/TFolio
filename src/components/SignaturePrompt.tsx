@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import type { SignaturePromptRequest } from "@/hooks/useSignaturePrompt"
 import type { SignatureDecision } from "@/lib/pdf"
+import { joinSentences } from "@/lib/sentences"
 
 type SignaturePromptProps = {
   forRest: boolean
@@ -53,16 +54,18 @@ export function SignaturePrompt({
       }}
       open={open}
     >
-      <AlertDialogContent data-slot="signature-prompt">
+      <AlertDialogContent className="w-full sm:max-w-md" data-slot="signature-prompt">
         <AlertDialogHeader>
           <AlertDialogTitle>{t("signatures.promptTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {request?.context === "insert"
-              ? t("signatures.promptInsert", { name: values.name })
-              : request?.context === "export"
-                ? t("signatures.promptExport", values)
-                : t("signatures.promptEdit", values)}{" "}
-            {t("signatures.promptOriginal")}
+            {joinSentences(
+              request?.context === "insert"
+                ? t("signatures.promptInsert", { name: values.name })
+                : request?.context === "export"
+                  ? t("signatures.promptExport", values)
+                  : t("signatures.promptEdit", values),
+              t("signatures.promptOriginal"),
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <ul className="flex flex-col gap-1 text-sm text-muted-foreground">

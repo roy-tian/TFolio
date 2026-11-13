@@ -174,7 +174,10 @@ export function SessionHeader({
                   <ChevronDown className="size-3" />
                 </DropdownMenuTrigger>
               </ToolbarTooltip>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent
+                align="end"
+                className="w-auto min-w-56 [&_[data-slot=dropdown-menu-shortcut]]:pl-6"
+              >
                 <DropdownMenuItem data-action="save-as" onClick={onSaveAs}>
                   <Upload />
                   {t("menu.saveAs")}

@@ -53,7 +53,8 @@ const panelOptions = [
     every document, whatever it holds. The outline of a document of several
     files is its files, each with its bookmarks. The switch stands in the
     sidebar's one row beside the toggle, so a long language's words give way
-    before the row does: each cut short says itself whole under the pointer. */
+    before the row does: first their icons go, then each word cut short says
+    itself whole under the pointer. */
 export function SidebarPanelSwitch({ panel }: { panel: SidebarPanel }) {
   const { t } = useTranslation()
   const sidebar = useSidebar()
@@ -101,10 +102,16 @@ function SidebarPanelOption({
   // stand over the panel's own bar for nothing.
   return (
     <ToolbarTooltip cutShort={labelRef} label={label}>
-      <ToggleGroupItem aria-label={label} className="min-w-0 shrink gap-1.5 px-2.5" value={value}>
-        <Icon />
-        <span className="truncate" ref={labelRef}>
-          {label}
+      <ToggleGroupItem aria-label={label} className="min-w-0 shrink px-2.5" value={value}>
+        {/* One line tall and laid from the right: an option too narrow for
+            both wraps its icon, not its word, onto a second line out of sight. */}
+        <span className="flex h-5 min-w-0 flex-row-reverse flex-wrap content-start items-center justify-center gap-x-1.5 overflow-hidden">
+          <span className="max-w-full truncate leading-5" ref={labelRef}>
+            {label}
+          </span>
+          <span className="flex h-5 items-center">
+            <Icon />
+          </span>
         </span>
       </ToggleGroupItem>
     </ToolbarTooltip>

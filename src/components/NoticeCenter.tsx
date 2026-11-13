@@ -93,7 +93,7 @@ export function NoticeCenter({
     <div
       aria-live="off"
       // The anchor moves in `index.css` while the find bar shares this band.
-      className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+1rem)] right-4 z-70 flex w-88 flex-col gap-2 transition-[top] duration-150"
+      className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+1rem)] right-4 z-70 flex w-96 max-w-[calc(100%-2rem)] flex-col gap-2 transition-[top] duration-150"
       data-slot="notice-center"
     >
       {shown.map((notice) => (
@@ -168,7 +168,7 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
               entry.tone === "info" && "text-muted-foreground",
             )}
           />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 text-balance">
             <p
               // Fitted to the words, so the shimmer crosses them rather than
               // the row's empty width.
