@@ -1,5 +1,4 @@
-import { Brackets, Maximize } from "lucide-react"
-import type { ComponentType, SVGProps } from "react"
+import { Brackets, Maximize, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { SliderStepper } from "@/components/SliderStepper"
@@ -7,54 +6,24 @@ import { StatusBarDivider } from "@/components/StatusBar"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { useZoom } from "@/hooks/useZoom"
-import { shortcuts, type Shortcut } from "@/lib/shortcuts"
+import { shortcuts } from "@/lib/shortcuts"
 import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 import {
-  activeZoomPreset,
-  isZoomPreset,
+  isZoomFit,
   sliderValueToZoom,
   ZOOM_SLIDER_MAX,
   ZOOM_SLIDER_MIN,
   zoomToPercent,
   zoomToSliderValue,
-  type ZoomPreset,
+  type ZoomFit,
 } from "@/lib/zoom"
 
-/** Lucide has no 1:1, so this draws one in its grid and stroke. */
-function ActualSizeIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-      {...props}
-    >
-      <path d="M6 8l2-2v12" />
-      <path d="M16 8l2-2v12" />
-      <path d="M12 10h.01" />
-      <path d="M12 14h.01" />
-    </svg>
-  )
-}
-
-const presets: Array<{
-  icon: ComponentType<SVGProps<SVGSVGElement>>
-  labelKey: "statusBar.zoomActualSize" | "statusBar.zoomFitWidth" | "statusBar.zoomFitPage"
-  shortcut?: Shortcut
-  value: ZoomPreset
+const fits: Array<{
+  icon: LucideIcon
+  labelKey: "statusBar.zoomFitWidth" | "statusBar.zoomFitPage"
+  value: ZoomFit
 }> = [
-  {
-    icon: ActualSizeIcon,
-    labelKey: "statusBar.zoomActualSize",
-    shortcut: shortcuts.actualSize,
-    value: "actual-size",
-  },
   { icon: Brackets, labelKey: "statusBar.zoomFitWidth", value: "fit-width" },
   { icon: Maximize, labelKey: "statusBar.zoomFitPage", value: "fit-page" },
 ]
@@ -63,13 +32,15 @@ type ZoomControlsProps = {
   zoom: ReturnType<typeof useZoom>
 }
 
-/** The zoom half of the status bar: minus, slider, plus and the level, then
-    the sizings named by the toolbar. */
+/** The zoom half of the status bar: minus, slider, plus and the level, which
+    goes back to 100% when pressed, then the fits. */
 export function ZoomControls({ zoom }: ZoomControlsProps) {
   const { t } = useTranslation()
-  const active = activeZoomPreset(zoom.zoomMode, zoom.zoomPercent)
-  const percentText = (step: number) =>
-    t("statusBar.zoomPercent", { percent: zoomToPercent(sliderValueToZoom(step)) })
+  const active = isZoomFit(zoom.zoomMode) ? zoom.zoomMode : null
+  const percentAt = (step: number) => zoomToPercent(sliderValueToZoom(step))
+  const percentText = (step: number) => t("statusBar.zoomPercent", { percent: percentAt(step) })
+  // Read off the level shown: an opening fit a hair off 100% shows 100% too.
+  const atActualSize = (step: number) => percentAt(step) === 100
 
   return (
     <>
@@ -86,7 +57,17 @@ export function ZoomControls({ zoom }: ZoomControlsProps) {
         onDecrease={zoom.zoomOut}
         onIncrease={zoom.zoomIn}
         onPreview={(step) => zoom.previewScale(sliderValueToZoom(step))}
-        readout={percentText}
+        readout={{
+          hint: t("statusBar.zoomReset"),
+          idle: atActualSize,
+          label: (step) =>
+            t(atActualSize(step) ? "statusBar.zoomCurrent" : "statusBar.zoomReadout", {
+              level: percentText(step),
+            }),
+          onPress: () => zoom.applyPreset("actual-size"),
+          shortcut: shortcuts.actualSize,
+          text: percentText,
+        }}
         sliderLabel={t("statusBar.zoom")}
         slot="zoom-controls"
         value={zoomToSliderValue(zoom.scale)}
@@ -98,28 +79,28 @@ export function ZoomControls({ zoom }: ZoomControlsProps) {
         onValueChange={([next]) => {
           // Base UI empties the group when the pressed item is pressed again;
           // that re-applies it, so a fit re-measures against the page in front.
-          const preset = isZoomPreset(next) ? next : active
+          const fit = isZoomFit(next) ? next : active
 
-          if (preset) {
-            zoom.applyPreset(preset)
+          if (fit) {
+            zoom.applyPreset(fit)
           }
         }}
         spacing={0}
         value={active ? [active] : []}
       >
-        {presets.map((preset) => {
-          const Icon = preset.icon
-          const label = t(preset.labelKey)
+        {fits.map((fit) => {
+          const Icon = fit.icon
+          const label = t(fit.labelKey)
 
           return (
-            <ToolbarTooltip key={preset.value} label={label} shortcut={preset.shortcut}>
+            <ToolbarTooltip key={fit.value} label={label}>
               <ToggleGroupItem
                 aria-label={label}
                 className={cn(
                   toolbarSelectionBarClassName,
                   "h-7 min-w-7 group-data-[spacing=0]/toggle-group:px-1.5",
                 )}
-                value={preset.value}
+                value={fit.value}
               >
                 <Icon />
               </ToggleGroupItem>

@@ -1,4 +1,4 @@
-import { RotateCw } from "lucide-react"
+import { RotateCwSquare } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { PageStatus } from "@/components/PageStatus"
@@ -13,10 +13,7 @@ import type { ViewMode } from "@/lib/viewMode"
 
 type ViewerControlsProps = {
   bookApplies: boolean
-  /** The page grid lies over the reading view, which has no scale there. */
-  gridShown: boolean
   onChangeViewMode: (mode: ViewMode) => void
-  onShowGrid: () => void
   onRotate: () => void
   page: {
     count: number
@@ -32,10 +29,8 @@ type ViewerControlsProps = {
     bar to what they edit. */
 export function ViewerControls({
   bookApplies,
-  gridShown,
   onChangeViewMode,
   onRotate,
-  onShowGrid,
   page,
   viewMode,
   zoom,
@@ -54,35 +49,24 @@ export function ViewerControls({
         />
       }
     >
-      <ViewModeToggle
-        bookApplies={bookApplies}
-        gridShown={gridShown}
-        onChange={onChangeViewMode}
-        onShowGrid={onShowGrid}
-        value={viewMode}
-      />
-      {/* Absent rather than disabled: disabled is what an unopened document
-          means. The grid turns the pages themselves, from their own controls:
-          a turn of the view beside those would pass for one a save keeps. */}
-      {gridShown ? null : (
-        <>
-          <StatusBarDivider />
-          <ZoomControls zoom={zoom} />
-          <StatusBarDivider />
-          {/* Turns only the way the pages are looked at (D2); the sidebar's
-              previews turn the pages themselves. */}
-          <ToolbarTooltip label={rotateLabel}>
-            <Button
-              aria-label={rotateLabel}
-              onClick={onRotate}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <RotateCw />
-            </Button>
-          </ToolbarTooltip>
-        </>
-      )}
+      <ViewModeToggle bookApplies={bookApplies} onChange={onChangeViewMode} value={viewMode} />
+      <StatusBarDivider />
+      <ZoomControls zoom={zoom} />
+      <StatusBarDivider />
+      {/* Turns only the way the pages are looked at (D2); the sidebar's bar
+          turns the pages themselves, under the plain arrow this one must not
+          be taken for: its hint says the file stays as it is. */}
+      <ToolbarTooltip label={t("statusBar.rotateViewHint")}>
+        <Button
+          aria-label={rotateLabel}
+          data-slot="view-rotate"
+          onClick={onRotate}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <RotateCwSquare />
+        </Button>
+      </ToolbarTooltip>
     </StatusBar>
   )
 }

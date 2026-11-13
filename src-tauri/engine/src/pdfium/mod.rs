@@ -54,12 +54,36 @@ pub struct PdfDocumentInfo {
     has_foreign_pages: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sections: Vec<PdfSection>,
+    /// As in [`PdfStructureUpdate`]: only a document made of files has any.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    padding: Vec<PdfPaddingSheet>,
+    /// As in [`PdfStructureUpdate`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_options: Option<FileOptions>,
     signatures: PdfSignatures,
 }
 
 impl PdfDocumentInfo {
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// A document new in memory, opening as a structure change left it.
+    fn from_structure(id: u64, update: PdfStructureUpdate) -> Self {
+        Self {
+            id,
+            num_pages: update.num_pages,
+            pages: update.pages,
+            outline: update.outline,
+            splits_by_bookmarks: update.splits_by_bookmarks,
+            path: None,
+            has_merged_pages: update.has_merged_pages,
+            has_foreign_pages: update.has_foreign_pages,
+            sections: update.sections,
+            padding: update.padding,
+            file_options: update.file_options,
+            signatures: update.signatures,
+        }
     }
 
     /// The same document once a write has bound it to `path`.

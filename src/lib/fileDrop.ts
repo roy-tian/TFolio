@@ -11,23 +11,28 @@ export function dropPointInCss(
     : { x: position.x, y: position.y }
 }
 
-/** On the shown tab's pages, down the sidebar or across the grid, a drop adds
-    the dragged files to that tab's document instead of opening them. */
-const PAGES_SELECTOR = "[data-document-session][data-active='true'] [data-pages-surface]"
+/** The window's sidebar: the home tab's or the shown document's, a hidden
+    tab's having no box and a hidden sidebar no element. */
+const SIDEBAR_SELECTOR = "[data-slot='app-sidebar']"
 
-export function pagesShown() {
-  return (document.querySelector(PAGES_SELECTOR)?.getClientRects().length ?? 0) > 0
+/** Within it, what the shown tab lists for a drop to land between two of:
+    its pages, or the files of its outline, with the overlay scrollbar over
+    their edge. Elsewhere on it, files go last. */
+const BETWEEN_SELECTOR = "[data-document-session][data-active='true'] [data-sidebar-drop-list]"
+
+export function sidebarShown() {
+  return [...document.querySelectorAll(SIDEBAR_SELECTOR)].some(
+    (sidebar) => sidebar.getClientRects().length > 0,
+  )
 }
 
-/** Drop overlays take no pointer events, so the hit lands on what they cover. */
-export function overPages(point: { x: number; y: number }) {
-  return (document.elementFromPoint(point.x, point.y)?.closest(PAGES_SELECTOR) ?? null) !== null
-}
+/** What a file drag stands over, from one hit test per report. Drop overlays
+    take no pointer events, so the hit lands on what they cover. */
+export function dropHit(point: { x: number; y: number }) {
+  const hit = document.elementFromPoint(point.x, point.y)
 
-const GRID_SELECTOR = "[data-document-session][data-active='true'] [data-page-thumbnails='grid']"
-
-/** Whether those pages are the page grid, filling the main area: a drop meant
-    to open its files then has only the bars around the grid to land on. */
-export function pagesFillWorkspace() {
-  return (document.querySelector(GRID_SELECTOR)?.getClientRects().length ?? 0) > 0
+  return {
+    between: (hit?.closest(BETWEEN_SELECTOR) ?? null) !== null,
+    sidebar: (hit?.closest(SIDEBAR_SELECTOR) ?? null) !== null,
+  }
 }

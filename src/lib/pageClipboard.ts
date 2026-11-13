@@ -22,6 +22,134 @@ export function pageClipboardOf(
   return sorted.length === 0 ? null : { mode, pages: sorted }
 }
 
+/**
+ * The window's one page clipboard: the pages last cut or copied in any of its
+ * documents, by the document they stand in. Page numbers still, so that
+ * document lets go of them as soon as its pages move. One store, of which a
+ * document reads its own half: what it holds itself, or what another holds
+ * for it to paste. A window is its own WebView, so the module's state is the
+ * window's.
+ */
+export type HeldPages = PageClipboard & { sourceDocumentId: number }
+
+/** What a document answers for the pages it holds: only it can say whether
+    they still stand as numbered, or take them out. */
+export type PageSource = {
+  /** How many structure edits have landed: pages read by number under one
+      count are the pages the same count names. */
+  edits: () => number
+  /** No structure edit in flight: the numbers still name the pages. */
+  idle: () => boolean
+  /** The document's name, for another to say which is busy. */
+  name: () => string
+  /** Another document's cut or copy replaced what this one held. */
+  superseded: (held: HeldPages) => void
+  /** A cut being pasted into another document: its pages leave this one once
+      `copied` says the copies landed, queued at once so that no edit made
+      here meanwhile comes before it. False where they stay: they are every
+      page it has. */
+  takeOut: (pages: number[], copied: Promise<boolean>) => boolean
+}
+
+let held: HeldPages | null = null
+const heldListeners = new Set<() => void>()
+const pageSources = new Map<number, PageSource>()
+
+function setHeld(next: HeldPages | null) {
+  if (next === held) {
+    return
+  }
+
+  held = next
+
+  for (const listener of [...heldListeners]) {
+    listener()
+  }
+}
+
+export function heldPages(): HeldPages | null {
+  return held
+}
+
+/** Takes the clipboard, over whatever any document held. */
+export function holdPages(next: HeldPages) {
+  const last = held
+
+  setHeld(next)
+
+  if (last && last.sourceDocumentId !== next.sourceDocumentId) {
+    pageSources.get(last.sourceDocumentId)?.superseded(last)
+  }
+}
+
+/** A document letting go of what it holds, unless another has taken since. */
+export function letGoOfPages(sourceDocumentId: number) {
+  if (held?.sourceDocumentId === sourceDocumentId) {
+    setHeld(null)
+  }
+}
+
+export function subscribeHeldPages(listener: () => void) {
+  heldListeners.add(listener)
+
+  return () => {
+    heldListeners.delete(listener)
+  }
+}
+
+/** A document whose pages can be held, until the returned call: a tab closed
+    with pages on the clipboard takes them with it. */
+export function registerPageSource(documentId: number, source: PageSource) {
+  pageSources.set(documentId, source)
+
+  return () => {
+    // Registered again since, the document and its pages are another's to answer for.
+    if (pageSources.get(documentId) === source) {
+      pageSources.delete(documentId)
+      letGoOfPages(documentId)
+    }
+  }
+}
+
+/** The document `pages` stand in, for whoever is about to read them by
+    their numbers. */
+export function pageSourceOf(pages: Pick<HeldPages, "sourceDocumentId">): PageSource | undefined {
+  return pageSources.get(pages.sourceDocumentId)
+}
+
+/**
+ * Whether pages read by number off `sourceDocumentId` from now on still name
+ * the pages they named: until an edit there lands, and not while one is under
+ * way. Asked again as the copy is made, after any prompt it waited on, since
+ * an add of files read meanwhile lands with no reader's hand on the document.
+ */
+export function pagesStanding(sourceDocumentId: number): () => boolean {
+  const source = pageSources.get(sourceDocumentId)
+  const edits = source?.edits()
+
+  return () =>
+    source !== undefined &&
+    pageSources.get(sourceDocumentId) === source &&
+    source.edits() === edits &&
+    source.idle()
+}
+
+/** A cut being pasted into another document leaves the one it was made in,
+    as the copy is made — once, and only while it is still what the window
+    holds: a second paste, or one after an edit there let go of it, would take
+    out whatever pages then hold those numbers. Spent here, whether or not the
+    copies land, so no other paste takes it meanwhile. False where the pages
+    stay. */
+export function movePagesOut(pages: HeldPages, copied: Promise<boolean>): boolean {
+  if (held !== pages) {
+    return false
+  }
+
+  setHeld(null)
+
+  return pageSources.get(pages.sourceDocumentId)?.takeOut(pages.pages, copied) ?? false
+}
+
 /** A cut is a move, which the reorder command already makes one undo step
     of; a copy is the document taking its own pages in again. */
 export type PastePlan =

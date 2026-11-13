@@ -17,6 +17,19 @@ export function sectionAt(
   return (pages[index - 1] ?? pages[pages.length - 1])?.section
 }
 
+/** Whether a page shows no paper in the sidebar: its file's pages are folded
+    away under the file's name, which only names that head their pages can be. */
+export function foldedAway(
+  pages: readonly PdfPageInfo[],
+  pageNumber: number,
+  folded: ReadonlySet<number>,
+  byFile: boolean,
+): boolean {
+  const section = pages[pageNumber - 1]?.section
+
+  return byFile && section !== undefined && folded.has(section)
+}
+
 /** The 1-based numbers of file `section`'s pages, wherever they stand. */
 export function pagesOfSection(pages: readonly PdfPageInfo[], section: number): number[] {
   return pages.flatMap((page, index) => (page.section === section ? [index + 1] : []))
@@ -24,8 +37,8 @@ export function pagesOfSection(pages: readonly PdfPageInfo[], section: number): 
 
 /**
  * A file's pages standing together. A file let go among another's pages parts
- * it in two, and each part is a run: what the grid heads with the file's name,
- * the sidebar's tree lists, and a Save As writes a bookmark for.
+ * it in two, and each part is a run: what the sidebar's pages head with the
+ * file's name, its tree lists, and a Save As writes a bookmark for.
  */
 export type FileRun = {
   count: number

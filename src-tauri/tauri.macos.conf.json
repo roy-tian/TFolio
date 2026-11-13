@@ -7,7 +7,7 @@
         "title": "TFolio",
         "width": 1280,
         "height": 760,
-        "minWidth": 900,
+        "minWidth": 640,
         "minHeight": 560,
         "center": true,
         "resizable": true,

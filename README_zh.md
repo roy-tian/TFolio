@@ -15,7 +15,7 @@
 - **页面组织**：把 PDF、图片和 Word 文档拼成新 PDF，源文件只读不改；每个文件从奇数页开始、统一为 A4，并按文件建书签。
 - **智能添加空白页、水印、页码**：只在双面打印需要处补空白页；水印按页宽等比缩放；“— n —”页码按双面装订奇右偶左，落在深色区域自动变白。
 - **跨行搜索**：被排版拆到两行的词、带着换行粘贴的句子，都能搜到。
-- **好上手，MIT 开源**：每一步都能撤销，8 种界面语言，明暗主题可选。想法请到 [Discussions](https://github.com/roy-tian/TFolio/discussions)，问题请到 [Issues](https://github.com/roy-tian/TFolio/issues)。
+- **好上手，MIT 开源**：每一步都能撤销，11 种界面语言，明暗主题可选。想法请到 [Discussions](https://github.com/roy-tian/TFolio/discussions)，问题请到 [Issues](https://github.com/roy-tian/TFolio/issues)。
 
 ## 下载
 
@@ -24,6 +24,7 @@
 ## 须知
 
 - 导入 Word 文档需本机装有 Microsoft Word、WPS Office（Windows）或 LibreOffice（macOS / Linux）；暂不支持直接导入 `.wps` 文件。
+- TFolio 不会自行设为默认应用；想用它打开 PDF，请在“打开方式”或系统的默认应用设置中选择。
 - 带水印或页码的文档只能导出副本，原文件不会被改动。可打开不超过 512 MiB 的 PDF。
 
 版权所有 © 2026 Roy Tian

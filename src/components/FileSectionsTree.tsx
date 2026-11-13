@@ -1,5 +1,12 @@
-import { useRef, useState } from "react"
-import { ChevronRight, FileStack, FileText, Pencil, X } from "lucide-react"
+import {
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+  type RefObject,
+} from "react"
+import { ChevronRight, FileText, Pencil, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { BookmarkItems } from "@/components/BookmarkList"
@@ -7,21 +14,37 @@ import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { FileMenuContent } from "@/components/PageContextMenu"
+import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
+import { OutlineBar } from "@/components/SidebarPanelTools"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useListDrag } from "@/hooks/useListDrag"
-import { DRAG_CLICK_WINDOW } from "@/lib/pageDrag"
+import { useDropEdgeScroll, useSidebarDrop, useSidebarDropPoint } from "@/hooks/useSidebarDrop"
+import {
+  fileFoldKey,
+  foldableBookmarks,
+  foldAllOf,
+  nestsBookmarks,
+  sectionOutlineKey,
+  toggledFold,
+  type OutlineFolds,
+} from "@/lib/outlineFolds"
+import { DRAG_CLICK_WINDOW, dropGapForRow } from "@/lib/pageDrag"
 import { fileRuns, type FileRun } from "@/lib/pageSections"
 import type { PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
-// A row's two buttons and their gaps: a hint beside a name goes past them,
-// out over the pages, rather than over the buttons its hover brought up.
-const ROW_BUTTONS_WIDTH = 60
+export type FileSectionsTreeHandle = {
+  /** How many pages come before files let go at `point` on screen, between
+      two of the runs listed; null for after the last. */
+  fileDropSlot: (point: { x: number; y: number }) => number | null
+}
 
 type FileSectionsTreeProps = {
   canPaste: boolean
-  onAddFiles: () => void
+  /** The files folded to their names, and their bookmarks folded, by key. */
+  folds: OutlineFolds
+  onFoldsChange: (folds: OutlineFolds) => void
   /** A file dragged among the others: its pages go, whole, in front of
       1-based page `before`, or to the end. */
   onMove: (sectionId: number, before: number | null) => void
@@ -31,10 +54,29 @@ type FileSectionsTreeProps = {
   onPaste: (sectionId: number, index: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
-  /** A file's pages chosen as one; absent while no pages show to be chosen. */
-  onSelect?: (sectionId: number) => void
   pages: PdfPageInfo[]
+  ref?: Ref<FileSectionsTreeHandle>
   sections: PdfSection[]
+}
+
+/** The runs down the list, each by its name's row (not its bookmarks below)
+    and the page it starts on, 1-based. */
+function runRows(list: HTMLUListElement) {
+  return Array.from(list.querySelectorAll<HTMLElement>(":scope > li[data-run-first]"), (item) => {
+    const { height, top } = (
+      item.querySelector("[data-slot='file-section-row']") ?? item
+    ).getBoundingClientRect()
+
+    return { first: Number(item.dataset.runFirst), height, item, top }
+  })
+}
+
+/** Which run files let go at `y` go in front of, or null for after the last. */
+function runLanding(list: HTMLUListElement, y: number | null) {
+  const rows = runRows(list)
+  const before = y === null ? rows.length : dropGapForRow(y, rows)
+
+  return { before: rows[before] ?? null, rows }
 }
 
 /**
@@ -42,25 +84,42 @@ type FileSectionsTreeProps = {
  * the outline a Save As writes, one bookmark per run of a file's pages, the
  * file's own beneath its first. A name is where that run's first page stands;
  * a file can be renamed, removed, or dragged among the others, every file
- * folded to its name meanwhile.
+ * folded to its name meanwhile. A row ends on how many pages it holds, which
+ * give their place to its rename and remove buttons under the pointer.
  */
 export function FileSectionsTree({
   canPaste,
-  onAddFiles,
+  folds,
+  onFoldsChange,
   onMove,
   onNavigate,
   onPaste,
   onRemove,
   onRename,
-  onSelect,
   pages,
+  ref,
   sections,
 }: FileSectionsTreeProps) {
   const { t } = useTranslation()
   const navRef = useRef<HTMLElement>(null)
-  const [folded, setFolded] = useState<ReadonlySet<number>>(new Set())
   const [editing, setEditing] = useState<string | null>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const drop = useSidebarDrop()
+
+  useDropEdgeScroll(navRef)
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      fileDropSlot: (point) => {
+        const list = listRef.current
+        const before = list ? runLanding(list, point.y).before : null
+
+        return before ? before.first - 1 : null
+      },
+    }),
+    [],
+  )
   const draggedAtRef = useRef(0)
   const runs = fileRuns(pages)
   const files = new Map(sections.map((section) => [section.id, section]))
@@ -85,20 +144,30 @@ export function FileSectionsTree({
   })
   const dragged = drag ? files.get(runs[drag.index]?.section ?? -1) : undefined
 
-  const toggle = (sectionId: number) =>
-    setFolded((current) => {
-      const next = new Set(current)
-
-      if (!next.delete(sectionId)) {
-        next.add(sectionId)
-      }
-
-      return next
-    })
+  // A file's bookmarks stand under its first run alone, so it folds once.
+  const foldable = sections.filter((section) => section.outline.length > 0)
+  const foldAll = foldAllOf(
+    folds,
+    foldable.map((section) => fileFoldKey(section.id)),
+    foldable.flatMap((section) => [
+      fileFoldKey(section.id),
+      ...foldableBookmarks(section.outline, sectionOutlineKey(section.id)),
+    ]),
+  )
 
   return (
     <div className="flex h-full flex-col">
-      <div className="relative min-h-0 flex-1">
+      <OutlineBar
+        dropLabel={t("sidebar.dropFiles")}
+        fold={{
+          canFold: foldAll.canFold,
+          canUnfold: foldAll.canUnfold,
+          foldLabel: t("sidebar.foldAll"),
+          onFold: (folded) => onFoldsChange(foldAll.fold(folded)),
+          unfoldLabel: t("sidebar.unfoldAll"),
+        }}
+      />
+      <div className="relative min-h-0 flex-1" data-sidebar-drop-list>
         <nav
           aria-label={t("sidebar.files")}
           className="overlay-scroll-viewport h-full overflow-auto overscroll-contain p-2"
@@ -119,7 +188,8 @@ export function FileSectionsTree({
                   canPaste={canPaste}
                   dragging={drag !== null}
                   editing={editing === rowKey}
-                  folded={folded.has(section.id)}
+                  folded={folds.has(fileFoldKey(section.id))}
+                  folds={folds}
                   index={index}
                   key={rowKey}
                   lifted={drag?.index === index}
@@ -130,12 +200,12 @@ export function FileSectionsTree({
                       onNavigate(pageNumber)
                     }
                   }}
+                  onFoldsChange={onFoldsChange}
                   onNavigateBookmark={onNavigate}
                   onPaste={onPaste}
                   onRemove={onRemove}
                   onRename={onRename}
-                  onSelect={onSelect}
-                  onToggle={toggle}
+                  onToggle={() => onFoldsChange(toggledFold(folds, fileFoldKey(section.id)))}
                   // A document keeps a page; the last file's go no further.
                   removeDisabled={(filePages.get(section.id) ?? 0) >= pages.length}
                   run={run}
@@ -146,18 +216,9 @@ export function FileSectionsTree({
           </ul>
         </nav>
         <OverlayScrollbars viewportRef={navRef} />
-      </div>
-      <div className="shrink-0 border-t p-2">
-        <Button
-          className="w-full justify-start"
-          data-slot="files-add"
-          onClick={onAddFiles}
-          size="sm"
-          variant="ghost"
-        >
-          <FileStack />
-          <span className="truncate">{t("sidebar.addFiles")}</span>
-        </Button>
+        <SidebarDropEdge>
+          {drop === "over" ? <FilesDropMarker listRef={listRef} /> : null}
+        </SidebarDropEdge>
       </div>
       {drag && dragged ? (
         <div
@@ -182,16 +243,17 @@ function FileRunRow({
   dragging,
   editing,
   folded,
+  folds,
   index,
   lifted,
   offset,
   onEdit,
+  onFoldsChange,
   onNavigate,
   onNavigateBookmark,
   onPaste,
   onRemove,
   onRename,
-  onSelect,
   onToggle,
   removeDisabled,
   run,
@@ -201,17 +263,18 @@ function FileRunRow({
   dragging: boolean
   editing: boolean
   folded: boolean
+  folds: OutlineFolds
   index: number
   lifted: boolean
   offset: number
   onEdit: (editing: boolean) => void
+  onFoldsChange: (folds: OutlineFolds) => void
   onNavigate: (pageNumber: number) => void
   onNavigateBookmark: (pageNumber: number) => void
   onPaste: (sectionId: number, index: number) => void
   onRemove: (sectionId: number) => void
   onRename: (sectionId: number, title: string) => void
-  onSelect?: (sectionId: number) => void
-  onToggle: (sectionId: number) => void
+  onToggle: () => void
   removeDisabled: boolean
   run: FileRun
   section: PdfSection
@@ -225,7 +288,8 @@ function FileRunRow({
 
   return (
     <li
-      className={cn(lifted && "opacity-40")}
+      // Hidden, not faded: the row making way slides onto its place.
+      className={cn(lifted && "opacity-0")}
       data-list-index={index}
       data-run-first={run.first}
       data-section-id={section.id}
@@ -237,19 +301,27 @@ function FileRunRow({
         <ContextMenuTrigger
           render={
             <div
-              className="group/file flex items-center gap-1 rounded-md pr-1 hover:bg-sidebar-accent"
+              // A property the row sets, because the count is no child of
+              // the buttons that take its place: see `PAPER_CONTROLS_HOST`.
+              // The keyboard's focus sets it too, from inside the buttons
+              // alone: WebKitGTK can keep a clicked name `:focus-visible`,
+              // and its row would stay lit.
+              className="relative flex items-center gap-1 rounded-md pr-1 [--row-tools:0] hover:bg-sidebar-accent hover:[--row-tools:1] has-[[data-slot=file-section-tools]_:focus-visible]:bg-sidebar-accent has-[[data-slot=file-section-tools]_:focus-visible]:[--row-tools:1]"
               data-slot="file-section-row"
             />
           }
         >
           <button
             aria-expanded={outline.length > 0 ? open : undefined}
-            aria-label={section.title}
+            // Its own name, not the title the file's name beside it goes by.
+            aria-label={t(folded ? "sidebar.unfoldItem" : "sidebar.foldItem", {
+              name: section.title,
+            })}
             className={cn(
               "grid size-6 shrink-0 place-items-center rounded text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
               outline.length === 0 && "invisible",
             )}
-            onClick={() => onToggle(section.id)}
+            onClick={onToggle}
             tabIndex={outline.length === 0 ? -1 : 0}
             type="button"
           >
@@ -271,7 +343,6 @@ function FileRunRow({
             <HintTooltip
               label={section.title}
               side="right"
-              sideOffset={ROW_BUTTONS_WIDTH}
               // Only a name the column cut short has more to say.
               cutShort={nameRef}
             >
@@ -286,18 +357,26 @@ function FileRunRow({
                 <span className="truncate" ref={nameRef}>
                   {section.title}
                 </span>
-                <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground tabular-nums">
+                {/* No narrower than the buttons that stand over it, so they
+                    cover no part of a long name. */}
+                <span
+                  className="ml-auto min-w-13 shrink-0 text-right text-xs font-normal text-muted-foreground tabular-nums opacity-[calc(1_-_var(--row-tools))]"
+                  data-slot="file-section-count"
+                >
                   {t("sidebar.filePages", { count: run.count })}
                 </span>
               </button>
             </HintTooltip>
           )}
           {editing ? null : (
-            <>
+            // Over the count, in its place while the row shows them.
+            <div
+              className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-(--row-tools)"
+              data-slot="file-section-tools"
+            >
               <HintTooltip label={t("sidebar.renameFile", { name: section.title })}>
                 <Button
                   aria-label={t("sidebar.renameFile", { name: section.title })}
-                  className="opacity-0 group-hover/file:opacity-100 focus-visible:opacity-100"
                   data-slot="file-section-rename"
                   onClick={() => onEdit(true)}
                   size="icon-xs"
@@ -309,7 +388,7 @@ function FileRunRow({
               <HintTooltip label={t("sidebar.removeFile", { name: section.title })}>
                 <Button
                   aria-label={t("sidebar.removeFile", { name: section.title })}
-                  className="opacity-0 group-hover/file:opacity-100 hover:text-destructive focus-visible:opacity-100"
+                  className="hover:text-destructive"
                   data-slot="file-section-remove"
                   disabled={removeDisabled}
                   onClick={() => onRemove(section.id)}
@@ -319,7 +398,7 @@ function FileRunRow({
                   <X />
                 </Button>
               </HintTooltip>
-            </>
+            </div>
           )}
         </ContextMenuTrigger>
         {/* Gone with the menu, not faded out after it: a menu still on screen
@@ -333,7 +412,6 @@ function FileRunRow({
             }
             onRemove={() => onRemove(section.id)}
             onRename={() => onEdit(true)}
-            onSelect={onSelect ? () => onSelect(section.id) : undefined}
             removeDisabled={removeDisabled}
           />
         ) : null}
@@ -341,12 +419,66 @@ function FileRunRow({
       {open ? (
         <ul className="pl-5">
           <BookmarkItems
+            folds={folds}
             items={outline}
+            onFoldsChange={onFoldsChange}
             onNavigate={onNavigateBookmark}
-            parentKey={`section-${section.id}`}
+            parentKey={sectionOutlineKey(section.id)}
+            tree={nestsBookmarks(outline)}
           />
         </ul>
       ) : null}
     </li>
+  )
+}
+
+/** The bar between the runs files would go between, drawn over the list in
+    the drop edge's own space: in front of a run's name, or after the last. */
+function FilesDropMarker({ listRef }: { listRef: RefObject<HTMLUListElement | null> }) {
+  const point = useSidebarDropPoint()
+  const markerRef = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState<{ left: number; top: number; width: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const list = listRef.current
+    const host = markerRef.current?.parentElement
+
+    if (!list || !host) {
+      setBox(null)
+      return
+    }
+
+    const { before, rows } = runLanding(list, point?.y ?? null)
+    const last = rows.at(-1)
+
+    if (!last) {
+      setBox(null)
+      return
+    }
+
+    // In the middle of the list's own gap between two runs.
+    const half = parseFloat(getComputedStyle(list).rowGap) / 2 || 0
+    const edge = before
+      ? before.item.getBoundingClientRect().top - half
+      : last.item.getBoundingClientRect().bottom + half
+    // Clear of the dashed line at either side.
+    const origin = dropEdgeOrigin(host)
+    const span = list.getBoundingClientRect()
+
+    setBox({
+      left: span.left - origin.left + 4,
+      top: edge - origin.top - 1.5,
+      width: span.width - 8,
+    })
+  }, [listRef, point])
+
+  return (
+    <div
+      className="absolute h-[3px] rounded-full bg-primary"
+      data-testid="files-drop-marker"
+      hidden={box === null}
+      ref={markerRef}
+      style={box ?? undefined}
+    />
   )
 }

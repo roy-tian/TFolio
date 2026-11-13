@@ -4,10 +4,12 @@ import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import {
+  activeSidebar,
   minimalPdf,
   openPdfFromDisk,
   refreshApp,
   seedSettings,
+  tooltipOpen,
 } from "./helpers"
 
 // WebKitGTK's embedded WebDriver does not emit Base UI's mouseenter sequence
@@ -111,6 +113,94 @@ describe("TFolio toolbar tooltips", () => {
     const highlightOptions = await expectShadcnTooltip("高亮设置")
     await highlightOptions.click()
     await expect($("#highlight-color-label")).toHaveText("高亮颜色")
+  })
+
+  it("names a sidebar panel in a tooltip only once its word is cut short", async () => {
+    const outline = `${activeSidebar} button[aria-label='大纲']`
+    const focus = async (maxWidth: string) => {
+      await browser.execute(
+        (css: string, width: string) => {
+          const item = document.querySelector<HTMLElement>(css)!
+
+          item.blur()
+          item.style.maxWidth = width
+        },
+        outline,
+        maxWidth,
+      )
+      // The option eases from one width to the next, and what its word has
+      // room for is read as the focus lands.
+      await browser.pause(300)
+      await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.focus(), outline)
+    }
+
+    // Whole, the word is all a tooltip would say, over the panel's own bar.
+    await focus("")
+    await browser.pause(500)
+    expect(await tooltipOpen(outline)).toBe(false)
+
+    // Narrowed a little, the icon gives way and the word still stands whole.
+    await focus("56px")
+    await browser.pause(500)
+    expect(await tooltipOpen(outline)).toBe(false)
+
+    // Narrowed past its word, as a long language's can be at the opening width.
+    await focus("36px")
+    await browser.waitUntil(() => tooltipOpen(outline), {
+      timeout: 5_000,
+      timeoutMsg: "the cut-short panel name never opened its tooltip",
+    })
+    await focus("")
+    await browser.execute((css: string) => document.querySelector<HTMLElement>(css)!.blur(), outline)
+  })
+
+  it("folds the layer buttons' words while the title bar cannot hold them", async () => {
+    const watermark = $("[data-slot='toolbar'] button[aria-label='水印']")
+    // What the bar's parts take as they stand, against the room it has.
+    const room = () =>
+      browser.execute(() => {
+        const bar = document.querySelector<HTMLElement>("[data-slot='toolbar']")!
+        const style = getComputedStyle(bar)
+        const parts = [...bar.children] as HTMLElement[]
+
+        return {
+          have: bar.clientWidth,
+          need:
+            parseFloat(style.paddingLeft) +
+            parseFloat(style.paddingRight) +
+            parseFloat(style.columnGap) * (parts.length - 1) +
+            parts.reduce((sum, part) => sum + part.scrollWidth, 0),
+        }
+      })
+    // The window itself cannot be resized from here, so the bar's right edge
+    // comes in instead, or goes back.
+    const pullRightEdge = (by: number | null) =>
+      browser.execute((px: number | null) => {
+        document.querySelector<HTMLElement>("[data-slot='toolbar']")!.style.right =
+          px === null ? "" : `${px}px`
+      }, by)
+
+    const labelled = await watermark.getSize("width")
+    expect(labelled).toBeGreaterThan(28)
+
+    // Ten pixels short of what every word needs.
+    const unfolded = await room()
+    await pullRightEdge(unfolded.have - unfolded.need + 10)
+    try {
+      await browser.waitUntil(async () => (await watermark.getSize("width")) === 28, {
+        timeout: 5_000,
+        timeoutMsg: "the words never folded in a bar too narrow for them",
+      })
+      const folded = await room()
+      expect(folded.need).toBeLessThanOrEqual(folded.have)
+    } finally {
+      // A failure here must not leave later tests a narrowed bar.
+      await pullRightEdge(null)
+    }
+    await browser.waitUntil(async () => (await watermark.getSize("width")) === labelled, {
+      timeout: 5_000,
+      timeoutMsg: "the words never came back once the bar had room",
+    })
   })
 
   it("leaves no native tooltip in the workspace", async () => {

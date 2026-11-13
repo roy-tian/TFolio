@@ -12,9 +12,8 @@ import {
   emptyHistory,
   fillErasedPages,
   insertPagesRange,
-  isDirty,
-  markSaved,
   movesPages,
+  nextRedoCommand,
   nextUndoCommand,
   pageNumbersConfig as currentPageNumbersConfig,
   planDeletePages,
@@ -42,6 +41,7 @@ import {
   type RenderEpochs,
 } from "@/lib/annotations"
 import type { PagePoint } from "@/lib/annotationGeometry"
+import { isDirty, markSaved } from "@/lib/documentState"
 import { e2eOverride } from "@/lib/e2e"
 import { isSourceChanged } from "@/lib/fileSources"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
@@ -729,24 +729,30 @@ export function useAnnotations({
   )
 
   /** Every structure edit's one path: planned inside the queue, which hands the
-      stash its entry id. Resolves false for a no-op plan and failed work alike. */
+      stash its entry id. Resolves false for a no-op plan and failed work alike.
+      With `after`, the edit holds its place in the queue until that answers,
+      and is made only if it answers true. */
   const commitStructure = useCallback(
     async (
       plan: (
         history: AnnotationHistory,
       ) => { command: AnnotationCommand; history: AnnotationHistory } | null,
+      after?: Promise<boolean>,
     ): Promise<boolean> => {
-      const ready = signedChangeReady("edit")
-
-      if (ready !== true && !(await ready)) {
-        return false
-      }
-
       let landed = false
 
+      // Counted from the ask, not the enqueue: an edit waiting on a flatten
+      // still names the pages as they stand, and one asked for meanwhile would
+      // queue behind it with numbers it is about to move.
       structurePendingRef.current += 1
 
       try {
+        const ready = signedChangeReady("edit")
+
+        if (ready !== true && !(await ready)) {
+          return false
+        }
+
         await enqueue((current) => {
           const step = plan(current)
 
@@ -759,6 +765,10 @@ export function useAnnotations({
             pages: commandPages(step.command),
             textPages: commandTextPages(step.command),
             work: async () => {
+              if (after && !(await after)) {
+                return false
+              }
+
               await applyCommand(
                 documentId,
                 current.nextId,
@@ -792,9 +802,11 @@ export function useAnnotations({
     [commitStructure],
   )
 
+  /** With `after`, the pages a cut takes into another document: they go once
+      its copies have landed there. */
   const deletePages = useCallback(
-    (pages: number[], pageCount: number) =>
-      commitStructure((current) => planDeletePages(current, pages, pageCount)),
+    (pages: number[], pageCount: number, after?: Promise<boolean>) =>
+      commitStructure((current) => planDeletePages(current, pages, pageCount), after),
     [commitStructure],
   )
 
@@ -808,17 +820,18 @@ export function useAnnotations({
       redo is what restores the undo's stash. */
   const duplicatePages = useCallback(
     async (sourcePages: number[], index: number, pageCount: number, section?: number) => {
-      const ready = signedChangeReady("edit")
-
-      if (ready !== true && !(await ready)) {
-        return false
-      }
-
       let landed = false
 
+      // From the ask, as `commitStructure` counts.
       structurePendingRef.current += 1
 
       try {
+        const ready = signedChangeReady("edit")
+
+        if (ready !== true && !(await ready)) {
+          return false
+        }
+
         await enqueue((current) => {
           const planned = planDuplicatePages(
             current,
@@ -866,34 +879,48 @@ export function useAnnotations({
     [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
 
-  /** `duplicatePages`' path, with the pages read from another open document. */
+  /**
+   * `duplicatePages`' path, with the pages read from another open document by
+   * their numbers there: `stands` says whether those still name them, asked
+   * once the source's prompt is answered, before this document's flatten, and
+   * again as the copy is made; `"moved"` is the answer where they no longer do.
+   * `taking` hears of the copy as it starts, for a cut to leave its own
+   * document then, ahead of any later edit there.
+   */
   const insertPages = useCallback(
     async (
       sourceDocumentId: number,
       sourcePages: number[],
       index: number,
       pageCount: number,
-      section?: number,
-    ) => {
-      // The source first: its answer changes nothing in place, while this
-      // document's flatten does, and must not happen for a copy then refused.
-      const source = beforeCopyFromRef.current?.(sourceDocumentId) ?? true
-
-      if (source !== true && !(await source)) {
-        return false
-      }
-
-      const ready = signedChangeReady("edit")
-
-      if (ready !== true && !(await ready)) {
-        return false
-      }
-
+      section: number | undefined,
+      from: { stands: () => boolean; taking?: (copied: Promise<boolean>) => void },
+    ): Promise<boolean | "moved"> => {
       let landed = false
+      let moved = false
 
+      // From the ask, as `commitStructure` counts.
       structurePendingRef.current += 1
 
       try {
+        // The source first: its answer changes nothing in place, while this
+        // document's flatten does, and must not happen for a copy then refused.
+        const source = beforeCopyFromRef.current?.(sourceDocumentId) ?? true
+
+        if (source !== true && !(await source)) {
+          return false
+        }
+
+        if (!from.stands()) {
+          return "moved"
+        }
+
+        const ready = signedChangeReady("edit")
+
+        if (ready !== true && !(await ready)) {
+          return false
+        }
+
         await enqueue((current) => {
           const planned = planInsertPages(
             current,
@@ -914,20 +941,43 @@ export function useAnnotations({
             pages: commandPages(planned.command),
             textPages: commandTextPages(planned.command),
             work: async () => {
-              onStructureChange(
-                documentId,
-                await invoke<PdfStructureUpdate>(
-                  "insert_pdf_pages_from_document",
-                  {
-                    documentId,
-                    index,
-                    pageNumbers: planned.command.sourcePages,
-                    section,
-                    sourceDocumentId,
-                  },
-                ),
-                commandPageChange(planned.command, false),
-              )
+              // In the same turn as the read is asked for: nothing there can
+              // move the pages between this answer and the copy.
+              if (!from.stands()) {
+                moved = true
+                return false
+              }
+
+              let copied: (landed: boolean) => void = () => {}
+
+              // Settled however this ends: the source's delete holds its queue
+              // until it is.
+              try {
+                from.taking?.(
+                  new Promise<boolean>((resolve) => {
+                    copied = resolve
+                  }),
+                )
+                onStructureChange(
+                  documentId,
+                  await invoke<PdfStructureUpdate>(
+                    "insert_pdf_pages_from_document",
+                    {
+                      documentId,
+                      index,
+                      pageNumbers: planned.command.sourcePages,
+                      section,
+                      sourceDocumentId,
+                    },
+                  ),
+                  commandPageChange(planned.command, false),
+                )
+              } catch (error) {
+                copied(false)
+                throw error
+              }
+
+              copied(true)
               landed = true
               return true
             },
@@ -937,7 +987,7 @@ export function useAnnotations({
         structurePendingRef.current -= 1
       }
 
-      return landed
+      return moved ? "moved" : landed
     },
     [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
   )
@@ -957,17 +1007,18 @@ export function useAnnotations({
         signatures: Record<number, SignatureDecision>
       },
     ): Promise<boolean | "changed"> => {
-      const ready = signedChangeReady("edit")
-
-      if (ready !== true && !(await ready)) {
-        return false
-      }
-
       let landed: boolean | "changed" = false
 
+      // From the ask, as `commitStructure` counts.
       structurePendingRef.current += 1
 
       try {
+        const ready = signedChangeReady("edit")
+
+        if (ready !== true && !(await ready)) {
+          return false
+        }
+
         await enqueue((current) => {
           const planned = planInsertFiles(
             current,
@@ -1685,6 +1736,7 @@ export function useAnnotations({
       isDirty: isDirty(history),
       isDirtyNow,
       isStructureBusyNow,
+      nextRedo: nextRedoCommand(history),
       nextUndo: nextUndoCommand(history),
       pageNumbersConfig: currentPageNumbersConfig(history),
       redo: redoCommand,

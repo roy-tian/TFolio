@@ -10,22 +10,24 @@ import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
-import { THUMBNAIL_CAPTION_HEIGHT, thumbnailPaper } from "@/lib/viewMode"
+import { THUMBNAIL_CAPTION_HEIGHT, THUMBNAIL_WIDTH, thumbnailPaper } from "@/lib/viewMode"
 
-// A grid row holds many cells; preloading whole rows would queue dozens of
-// PDFium renders at once. Keep the window to what is visible.
+// A widened sidebar's row holds many cells; preloading whole rows would queue
+// dozens of PDFium renders at once. Keep the window to what is visible.
 const THUMBNAIL_ROOT_MARGIN = "0px"
 
 // The sidebar's previews stand in view beside the pages: ranked as this far
 // off, they wait for the pages the reader is looking at rather than tie them.
 const SIDEBAR_PRIORITY_BIAS = 2000
 
-/** On a paper's box that holds controls: they show, through
-    `PAPER_CONTROLS_SHOWN`, while it is hovered. A property the box sets,
-    because `group-has-*` on each control costs Chromium a whole-document
-    restyle for every node added anywhere; the controls' own wrapper sets it
-    again for their keyboard focus. */
-export const PAPER_CONTROLS_HOST = "[--paper-controls:0] hover:[--paper-controls:1]"
+/** On a preview that holds controls: they show, through
+    `PAPER_CONTROLS_SHOWN`, while it is hovered or one of them has the
+    keyboard's focus. Not the paper's focus: WebKitGTK can keep a clicked
+    paper `:focus-visible`, and its controls would stay up. A property the
+    preview sets, because `group-has-*` on each control costs Chromium a
+    whole-document restyle for every node added anywhere. */
+export const PAPER_CONTROLS_HOST =
+  "[--paper-controls:0] hover:[--paper-controls:1] has-[[data-page-action]:focus-visible]:[--paper-controls:1]"
 export const PAPER_CONTROLS_SHOWN = "opacity-(--paper-controls)"
 
 type PdfThumbnailProps = {
@@ -36,7 +38,6 @@ type PdfThumbnailProps = {
       is what would move it. */
   isCut: boolean
   isSelected: boolean
-  onOpen: (pageNumber: number) => void
   onSelect: (pageNumber: number, modifiers: SelectionModifiers) => void
   /** The page's size in points, taken apart rather than as a `PdfPageInfo`:
       every structure edit replaces the page list, and cells must compare equal. */
@@ -48,17 +49,17 @@ type PdfThumbnailProps = {
   retainBitmap: boolean
   /** The view's turn, which turns every page at once and snaps. */
   rotation: number
-  /** What the paper is to a screen reader: where a click goes, or the page. */
+  /** What the paper is to a screen reader: where a click goes. */
   label: string
   /** The number under the paper, where it is not the page's own: a drag's
       preview shows where the page will stand. */
   caption?: number
-  /** A box the paper stands centred in, the caption beneath it: cells of one
-      size line portrait and landscape pages up in rows and columns. */
-  frame?: { height: number; width: number }
   /** Controls over the paper, laid out against its box, which follows the
-      paper through a turn and is a `PAPER_CONTROLS_HOST`. */
+      paper through a turn. */
   overlay?: ReactNode
+  /** Centred in a square as wide as a paper's long side: cells of one size
+      line portrait and landscape pages up in rows of several. */
+  square?: boolean
   /** A sign beside the caption: over the paper it would take the page's
       clicks in its corner, where its checkbox sits. */
   mark?: ReactNode
@@ -77,7 +78,6 @@ export function PdfThumbnail({
   isCurrent,
   isCut,
   isSelected,
-  onOpen,
   onSelect,
   pageHeight,
   pageNumber,
@@ -87,8 +87,8 @@ export function PdfThumbnail({
   rotation,
   label,
   caption,
-  frame,
   overlay,
+  square = false,
   mark,
   parked,
   parkKey,
@@ -209,7 +209,7 @@ export function PdfThumbnail({
   )
 
   const paperBox = (
-    <div className={cn("relative", overlay && PAPER_CONTROLS_HOST)}>
+    <div className="relative">
       {/* A page that could not be drawn says so instead: the paper is a white
           card with a warning in it, and the reason is what a hover owes it.
           Otherwise the caption speaks: hundreds of tooltips would slow every
@@ -241,7 +241,6 @@ export function PdfThumbnail({
               toggle: event.ctrlKey || event.metaKey,
             })
           }
-          onDoubleClick={() => onOpen(pageNumber)}
           ref={wrapperRef}
           style={{ height: paperSize.height, width: paperSize.width }}
           type="button"
@@ -291,17 +290,19 @@ export function PdfThumbnail({
     <div
       className={cn(
         "group/thumb flex flex-col items-center transition-opacity",
+        overlay && PAPER_CONTROLS_HOST,
         // Faded, the way a file manager marks a cut: the page is still here,
         // and a paste is what moves it.
         isCut && "opacity-45",
       )}
       data-cut={isCut ? "" : undefined}
     >
-      {/* Boxless without a frame, down the sidebar's column; the grid's
-          square cells give each paper one. */}
+      {/* Always there, boxless outside a square: a sidebar widened into rows
+          gives its previews one, and a new parent would remount the canvas,
+          losing the pixels already painted into it. */}
       <div
-        className={frame ? "grid place-items-center" : "contents"}
-        style={frame ? { height: frame.height, width: frame.width } : undefined}
+        className={square ? "grid place-items-center" : "contents"}
+        style={square ? { height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH } : undefined}
       >
         {paperBox}
       </div>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Offers TFolio for PDFs in Open with and Default apps without making it the
+     default: Tauri's own file associations set `.pdf`'s default ProgID, so
+     tauri.windows.conf.json empties them and this writes no extension default.
+     Kept in step with installer-hooks.nsh. The command names tfolio.exe (the
+     Cargo binary) rather than [#Path]: ICE69 fails a file reference made from
+     another component. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="PdfOpenWith" Guid="D8280520-6CE9-492A-B6CD-37D3D75B9BCF">
+        <RegistryValue Root="HKLM"
+                       Key="Software\Classes\TFolio.PDF"
+                       Type="string"
+                       Value="PDF Document"
+                       KeyPath="yes" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\Classes\TFolio.PDF\DefaultIcon"
+                       Type="string"
+                       Value="&quot;[INSTALLDIR]icons\pdf.ico&quot;,0" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\Classes\TFolio.PDF\shell\open\command"
+                       Type="string"
+                       Value="&quot;[INSTALLDIR]tfolio.exe&quot; &quot;%1&quot;" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\Classes\.pdf\OpenWithProgids"
+                       Name="TFolio.PDF"
+                       Type="string"
+                       Value="" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\TFolio\Capabilities"
+                       Name="ApplicationName"
+                       Type="string"
+                       Value="TFolio" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\TFolio\Capabilities"
+                       Name="ApplicationDescription"
+                       Type="string"
+                       Value="Read and edit PDF documents." />
+        <RegistryValue Root="HKLM"
+                       Key="Software\TFolio\Capabilities\FileAssociations"
+                       Name=".pdf"
+                       Type="string"
+                       Value="TFolio.PDF" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\RegisteredApplications"
+                       Name="TFolio"
+                       Type="string"
+                       Value="Software\TFolio\Capabilities" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

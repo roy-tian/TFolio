@@ -1116,3 +1116,100 @@ fn an_a4_copy_leaves_the_blank_between_files_bare_as_a_save_as_does() {
 
     fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn merged_files_make_a_new_document_of_their_pages_alone() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-merge");
+    let ids = read_files(
+        engine,
+        vec![
+            write_file(&directory, "added.pdf", banded_pdf(&[20, 60])),
+            write_file(&directory, "outlined.pdf", outlined_three_page_pdf()),
+        ],
+    );
+
+    let merged = engine
+        .merge_sources(SCOPE, &ids, "Untitled.pdf", options(true), &HashMap::new())
+        .expect("the files should merge");
+
+    assert_eq!(merged.num_pages, 5);
+    assert_eq!(merged.path, None);
+    assert!(merged.has_foreign_pages);
+    // No page of its own, so no file of its own is listed.
+    let titles: Vec<_> = merged
+        .sections
+        .iter()
+        .map(|section| section.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["added.pdf", "outlined.pdf"]);
+    assert_eq!(merged.sections[1].outline[0].page_number, Some(5));
+    assert_eq!(merged.file_options, Some(options(true)));
+    // Consumed: the pages are the new document's own copies now.
+    assert!(engine
+        .merge_sources(SCOPE, &ids, "Untitled.pdf", options(true), &HashMap::new())
+        .is_err());
+
+    let written = directory.join("merged.pdf");
+    engine
+        .export_to(merged.id, &written)
+        .expect("a Save As should write the merged document");
+    let reopened = engine
+        .open_from_path(written)
+        .expect("the merged file should open");
+    let bookmarks: Vec<_> = reopened
+        .outline
+        .iter()
+        .map(|item| (item.title.clone(), item.page_number))
+        .collect();
+
+    assert_eq!(
+        bookmarks,
+        vec![
+            ("added.pdf".to_string(), Some(1)),
+            ("outlined.pdf".to_string(), Some(3)),
+        ]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_refused_merge_leaves_no_document_and_keeps_its_files() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-merge-refused");
+    let ids = read_files(
+        engine,
+        vec![
+            write_file(&directory, "plain.pdf", two_page_pdf()),
+            write_file(&directory, "signed.pdf", signed_pdf()),
+        ],
+    );
+
+    assert!(engine
+        .merge_sources(SCOPE, &ids, "Untitled.pdf", options(true), &HashMap::new())
+        .is_err());
+    // Only a merge makes a document of no pages, and the refused one is gone.
+    assert!(engine
+        .lock_documents()
+        .unwrap()
+        .values()
+        .all(|entry| !entry.page_ids.is_empty()));
+
+    let merged = engine
+        .merge_sources(
+            SCOPE,
+            &ids,
+            "Untitled.pdf",
+            options(true),
+            &HashMap::from([(ids[1], SignatureDecision::Keep)]),
+        )
+        .expect("the answered files should merge");
+    assert_eq!(merged.num_pages, 3);
+
+    fs::remove_dir_all(directory).ok();
+}

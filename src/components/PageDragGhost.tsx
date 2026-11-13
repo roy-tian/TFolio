@@ -2,13 +2,15 @@ import { useImperativeHandle, useLayoutEffect, useRef, type Ref } from "react"
 import { createPortal } from "react-dom"
 
 import { DRAG_MOTION, prefersReducedMotion } from "@/lib/motion"
+import { THUMBNAIL_WIDTH } from "@/lib/viewMode"
 
 export type GhostPaper = {
   /** The pressed preview's pixels, copied once: a bitmap the frontend already
       holds, as page bitmaps never become `blob:` URLs. */
   canvas: HTMLCanvasElement | null
   height: number
-  /** A page with no canvas — a blank — shows its name instead. */
+  /** What is lifted with no canvas — a folded file, by its name — shows
+      that name instead. */
   label?: string
   /** The quarter turn the preview shows its upright bitmap at. */
   rotation: number
@@ -281,7 +283,9 @@ export function PageDragGhost({
           {paper.canvas ? (
             <canvas className="absolute inset-0 block size-full" ref={canvasRef} />
           ) : (
-            paper.label
+            <span className="max-w-full truncate px-1 font-medium text-zinc-700">
+              {paper.label}
+            </span>
           )}
         </div>
         {count > 1 ? (
@@ -298,15 +302,15 @@ export function PageDragGhost({
   )
 }
 
-/** Where the pages in hand will stand: the landing page's own paper, dashed. */
+/** Where the pages in hand will stand: the landing page's own paper, dashed,
+    centred in its square across a row. */
 export function DragHole({
   height,
-  top = 0,
+  square,
   width,
 }: {
   height: number
-  /** Down from the cell's top, where the paper stands lower in its frame. */
-  top?: number
+  square: boolean
   width: number
 }) {
   return (
@@ -314,7 +318,7 @@ export function DragHole({
       aria-hidden
       className="pointer-events-none absolute left-1/2 -translate-x-1/2 border-2 border-dashed border-primary/60 bg-primary/5"
       data-drag-hole
-      style={{ height, top, width }}
+      style={{ height, top: square ? (THUMBNAIL_WIDTH - height) / 2 : 0, width }}
     />
   )
 }

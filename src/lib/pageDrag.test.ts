@@ -13,6 +13,9 @@ import {
   nearestBox,
   orderAfterMove,
   orderWithBlockAt,
+  pagesBeforeSlot,
+  rowNeighbour,
+  slotOfPages,
   wayOffsets,
 } from "@/lib/pageDrag"
 
@@ -248,6 +251,50 @@ describe("flowLanding", () => {
     expect(flowLanding({ x: 250, y: 40 }, grid, 2)).toBe(2)
     expect(flowLanding({ x: 250, y: 40 }, grid, null)).toBeNull()
   })
+
+  it("lands above or below a folded file's name, a row of its own among the cells", () => {
+    // A row of two pages, a folded file's bar, then one page more.
+    const grid = [
+      cell(0, 0),
+      cell(184, 0),
+      { bar: true, height: 28, left: 0, moving: false, top: 204, width: 344 },
+      cell(0, 256),
+    ]
+
+    // Across the bar the half is told down it, not across it.
+    expect(flowLanding({ x: 20, y: 210 }, grid, null)).toBe(2)
+    expect(flowLanding({ x: 330, y: 210 }, grid, null)).toBe(2)
+    expect(flowLanding({ x: 20, y: 226 }, grid, null)).toBe(3)
+    expect(flowLanding({ x: 330, y: 226 }, grid, null)).toBe(3)
+  })
+})
+
+describe("places among folded files", () => {
+  // A page, a folded file of three, a page in hand, a folded file with every
+  // page in hand, and a last page.
+  const cells = [
+    { moving: false, pages: 1 },
+    { moving: false, pages: 3 },
+    { moving: true, pages: 1 },
+    { moving: true, pages: 0 },
+    { moving: false, pages: 1 },
+  ]
+
+  it("counts a folded file as the pages under its name", () => {
+    expect(pagesBeforeSlot(cells, 0)).toBe(0)
+    expect(pagesBeforeSlot(cells, 1)).toBe(1)
+    expect(pagesBeforeSlot(cells, 2)).toBe(4)
+    expect(pagesBeforeSlot(cells, 3)).toBe(5)
+  })
+
+  it("finds the place a count of pages stands at, and back again", () => {
+    for (const slot of [0, 1, 2, 3]) {
+      expect(slotOfPages(cells, pagesBeforeSlot(cells, slot))).toBe(slot)
+    }
+
+    // No place stands inside a folded file: the next one after it.
+    expect(slotOfPages(cells, 2)).toBe(2)
+  })
 })
 
 describe("nearestBox", () => {
@@ -261,5 +308,55 @@ describe("nearestBox", () => {
     expect(nearestBox({ x: 40, y: 135 }, boxes)).toBe(1)
     expect(nearestBox({ x: 300, y: 105 }, boxes)).toBe(0)
     expect(nearestBox({ x: 0, y: 0 }, [])).toBe(-1)
+  })
+})
+
+describe("the cell a row away", () => {
+  const cell = (left: number, top: number) => ({ height: 184, left, top, width: 160 })
+  // Three across, a file's name between the rows, then a short last row.
+  const rows = [cell(0, 0), cell(184, 0), cell(368, 0), cell(0, 240), cell(184, 240), cell(0, 480)]
+  // Cells by their place, reached one at a time the way the key points.
+  const away = (cells: ReturnType<typeof cell>[], from: number, direction: 1 | -1) => {
+    const measured: number[] = []
+    const reached = rowNeighbour(
+      from,
+      (at) => (cells[at + direction] ? at + direction : null),
+      (at) => {
+        measured.push(at)
+
+        return cells[at]!
+      },
+    )
+
+    return { measured: new Set(measured).size, reached }
+  }
+
+  it("goes straight down or up where a cell stands there", () => {
+    expect(away(rows, 1, 1).reached).toBe(4)
+    expect(away(rows, 4, -1).reached).toBe(1)
+  })
+
+  it("takes the nearest cell of a shorter row", () => {
+    expect(away(rows, 2, 1).reached).toBe(4)
+    expect(away(rows, 4, 1).reached).toBe(5)
+  })
+
+  it("stops at the first row and the last", () => {
+    expect(away(rows, 0, -1).reached).toBeNull()
+    expect(away(rows, 5, 1).reached).toBeNull()
+  })
+
+  it("steps page by page down one column", () => {
+    const column = [cell(0, 0), cell(0, 200), cell(0, 400)]
+
+    expect(away(column, 0, 1).reached).toBe(1)
+    expect(away(column, 2, -1).reached).toBe(1)
+  })
+
+  it("measures only the rows it crosses, however long the flow", () => {
+    const long = Array.from({ length: 3000 }, (_, at) => cell((at % 3) * 184, Math.floor(at / 3) * 240))
+
+    // The rest of its own row, the row below, and the first cell past that.
+    expect(away(long, 1500, 1)).toEqual({ measured: 7, reached: 1503 })
   })
 })

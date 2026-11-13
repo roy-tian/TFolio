@@ -96,7 +96,7 @@ describe("PDF scrolling", () => {
     await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
 
     const session = "[data-document-session][data-active='true']"
-    await $(`${session} button[aria-label='Actual size']`).click()
+    await $(`${session} [data-slot='zoom-controls-readout']`).click()
     for (let rung = 0; rung < 5; rung += 1) {
       await $(`${session} button[aria-label='Zoom in']`).click()
     }
@@ -200,6 +200,39 @@ describe("PDF scrolling", () => {
     })
     expect(after.scrollTop).toBe(before.scrollTop)
     expect(after.gap).toBeGreaterThan(0)
+  })
+
+  it("names the page gone to at the end, though the view cannot bring it to the top", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("end-jump.pdf", bandedPdf(16))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+    // Zoomed all the way out: many pages show at once, and still overflow.
+    while (await $("button[aria-label='Zoom out']").isEnabled()) {
+      await $("button[aria-label='Zoom out']").click()
+    }
+    const status = $("[data-slot='page-status']")
+    const scrollBy = (by: number) =>
+      browser.execute((distance: number) => {
+        document.querySelector("[data-pdf-scroll-root]")!.scrollBy({ behavior: "instant", top: distance })
+      }, by)
+
+    await $("input[aria-label='Page number']").setValue("15")
+    await browser.keys("Enter")
+    await expect(status).toHaveAttribute("aria-label", "Page 15 of 16")
+    // Past the time a jump has to arrive (a smooth one takes about 0.3 s,
+    // however far), landed short of the top.
+    await browser.pause(1800)
+    await expect(status).toHaveAttribute("aria-label", "Page 15 of 16")
+
+    // A nudge keeps the page gone to; reading on lets it go.
+    await scrollBy(-8)
+    await browser.pause(300)
+    await expect(status).toHaveAttribute("aria-label", "Page 15 of 16")
+    await scrollBy(-400)
+    await browser.waitUntil(async () => (await status.getAttribute("aria-label")) !== "Page 15 of 16", {
+      timeoutMsg: "the page gone to held on after the reader scrolled away",
+    })
   })
 
   // Pressed for real: the bridge's click never let go of the selection the

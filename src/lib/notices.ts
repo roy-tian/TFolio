@@ -49,7 +49,7 @@ type NoticeEntry = {
       stand in for the bar a progress notice draws. */
   running?: true
   /** What this notice replaces, where that is not itself: the page
-      clipboard's six notices are one running report, not six that stand together. */
+      clipboard's notices are one running report, not several that stand together. */
   slot?: string
   textKey: ParseKeys
   tone: NoticeTone
@@ -178,6 +178,14 @@ export const noticeCatalogue = {
     slot: "pageClipboard",
     textKey: "pageEdit.cutNotice",
     tone: "info",
+  },
+  // A cut of every page its document has, pasted into another: copies, as a
+  // document keeps a page.
+  pagesCutKept: {
+    life: "transient",
+    slot: "pageClipboard",
+    textKey: "pageEdit.cutKeptNotice",
+    tone: "warning",
   },
   pagesMoved: {
     life: "transient",
@@ -328,10 +336,34 @@ export const noticeCatalogue = {
     textKey: "files.unreadable",
     tone: "danger",
   },
+  // Files of a drop or a launch that no flow takes, named beside the rest's.
+  filesSkipped: {
+    life: "transient",
+    textKey: "files.skipped",
+    tone: "warning",
+  },
+  mergeFailed: {
+    life: "transient",
+    textKey: "files.mergeFailed",
+    tone: "danger",
+  },
   filesChanged: {
     life: "transient",
     textKey: "files.changed",
     tone: "warning",
+  },
+  // Where the files went: at the document's end they land out of sight.
+  filesAdded: {
+    life: "transient",
+    textKey: "files.added",
+    tone: "info",
+  },
+  // A Save As of several files leaves one: said, since the names over the
+  // pages and the undo history go without another sign.
+  filesCombined: {
+    life: "transient",
+    textKey: "files.combined",
+    tone: "info",
   },
   // Standing for as long as the conversion runs; the open retracts it.
   wordConverting: {

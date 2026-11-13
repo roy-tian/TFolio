@@ -1,6 +1,13 @@
 import type { AnnotationCommand } from "@/lib/annotations"
 
-type HistoryActionKey =
+type CountedActionKey =
+  | "annotate.actionRotatePages"
+  | "annotate.actionDeletePages"
+  | "annotate.actionDuplicatePages"
+  | "annotate.actionInsertPages"
+  | "annotate.actionInsertFiles"
+
+type PlainActionKey =
   | "annotate.actionHighlight"
   | "annotate.actionRect"
   | "annotate.actionTextNote"
@@ -12,22 +19,16 @@ type HistoryActionKey =
   | "annotate.actionPageNumbersChange"
   | "annotate.actionPageNumbersRemove"
   | "annotate.actionReorderPages"
-  | "annotate.actionRotatePages"
-  | "annotate.actionDeletePages"
   | "annotate.actionInsertBlankPage"
-  | "annotate.actionDuplicatePages"
-  | "annotate.actionInsertPages"
-  | "annotate.actionInsertFiles"
   | "annotate.actionRenameFile"
   | "annotate.actionSmartPadding"
   | "annotate.actionFileBookmarks"
 
 /** The name of an edit, for the undo and redo labels: the locale key that
     names it, and the page count where the name counts pages. */
-export type HistoryAction = {
-  count?: number
-  key: HistoryActionKey
-}
+export type HistoryAction =
+  | { count: number; key: CountedActionKey }
+  | { key: PlainActionKey }
 
 /**
  * Named for the reader, not the tool: a watermark command is told apart by

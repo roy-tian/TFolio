@@ -4,8 +4,12 @@ import { dimensionsForRotation, MAX_PAGE_WIDTH, type PdfPageInfo } from "@/lib/p
 // reader never picks it, they only ever leave it.
 export type ZoomMode = "auto" | "custom" | "fit-page" | "fit-width"
 
-/** The sizings the toolbar names. Actual size is a custom scale of 1, not a mode. */
-export type ZoomPreset = "actual-size" | "fit-page" | "fit-width"
+/** The fits the status bar names, each a mode of its own. */
+export type ZoomFit = "fit-page" | "fit-width"
+
+/** Actual size is a custom scale of 1, not a mode: the bar's readout and the
+    key ask for it. */
+export type ZoomPreset = "actual-size" | ZoomFit
 
 export type ZoomState = {
   // Only read in "custom" mode; every way back to it sets a fresh scale.
@@ -304,18 +308,6 @@ export function applyWheelZoom(scale: number, delta: number) {
   return clampZoom(scale * Math.exp(-delta * WHEEL_SENSITIVITY))
 }
 
-export function isZoomPreset(value: unknown): value is ZoomPreset {
-  return value === "actual-size" || value === "fit-page" || value === "fit-width"
-}
-
-/**
- * Read off the percent shown rather than the mode, so stepping or wheeling onto
- * 100% presses actual size too; any other custom level presses nothing.
- */
-export function activeZoomPreset(mode: ZoomMode, percent: number): ZoomPreset | null {
-  if (mode === "fit-page" || mode === "fit-width") {
-    return mode
-  }
-
-  return percent === 100 ? "actual-size" : null
+export function isZoomFit(value: unknown): value is ZoomFit {
+  return value === "fit-page" || value === "fit-width"
 }

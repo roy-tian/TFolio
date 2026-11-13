@@ -83,7 +83,7 @@ function SettingLabel({
   smart = false,
 }: SettingLabelProps) {
   return (
-    <div className="flex h-6 min-w-0 items-center gap-0.5">
+    <div className="flex min-h-6 min-w-0 items-center gap-0.5">
       <FieldLabel className="min-w-0" htmlFor={htmlFor} id={id}>
         {children}
       </FieldLabel>
@@ -274,8 +274,10 @@ export function PageNumbersSettings({
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 items-start gap-4">
-            <Field className="min-w-0">
+          {/* Halves, as the row above, unless the longest choice needs more:
+              then the colour column gives way, and goes under once too narrow. */}
+          <div className="flex flex-wrap items-start gap-4">
+            <Field className="w-auto max-w-full min-w-[calc(50%-0.5rem)]">
               <SettingLabel
                 about={about}
                 hint={t("pageNumbers.blankPagesHint")}
@@ -301,9 +303,22 @@ export function PageNumbersSettings({
                   data-testid="page-numbers-blank-pages"
                   id={blankPagesId}
                 >
-                  <SelectValue />
+                  {/* Every choice lies under the one shown, so the trigger
+                      is as wide as the longest and none is cut when chosen. */}
+                  <span className="grid min-w-0 flex-1 text-left">
+                    {blankPageOptions.map(({ value, label }) => (
+                      <span
+                        aria-hidden="true"
+                        className="invisible col-start-1 row-start-1 h-0"
+                        key={value}
+                      >
+                        {label}
+                      </span>
+                    ))}
+                    <SelectValue className="col-start-1 row-start-1 block truncate" />
+                  </span>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="w-auto min-w-(--anchor-width)">
                   <SelectGroup>
                     {blankPageOptions.map(({ value, label }) => (
                       <SelectItem
@@ -319,7 +334,7 @@ export function PageNumbersSettings({
               </Select>
             </Field>
 
-            <Field aria-labelledby={colorHandlingId} className="min-w-0">
+            <Field aria-labelledby={colorHandlingId} className="w-auto min-w-40 flex-1">
               <SettingLabel
                 about={about}
                 hint={t("pageNumbers.smartColorHint")}
@@ -328,7 +343,7 @@ export function PageNumbersSettings({
               >
                 {t("pageNumbers.colorHandling")}
               </SettingLabel>
-              <div className="flex h-8 items-center gap-2">
+              <div className="flex min-h-8 items-center gap-2">
                 <Checkbox
                   checked={draft.smartColor}
                   data-testid="page-numbers-smart-color"

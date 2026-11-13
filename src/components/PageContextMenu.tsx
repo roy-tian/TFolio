@@ -1,7 +1,7 @@
 import {
   ClipboardPaste,
   Copy,
-  Eye,
+  FilePlus2,
   Pencil,
   RotateCcw,
   RotateCw,
@@ -23,52 +23,53 @@ import {
 /** Before the first of the menu's pages, or after the last. */
 export type PageMenuSide = "before" | "after"
 
-type PageMenuContentProps = {
+export type PageMenuActions = {
   canPaste: boolean
-  /** The pages the menu acts on: the selection, which a right-click outside it
-      has already moved to the page under the pointer. */
+  /** The pages the menu acts on: in the sidebar the selection, which a
+      right-click outside it has already moved to the page under the pointer;
+      in the reading view the page pressed, alone. */
   count: number
   deleteDisabled?: boolean
   onCopy: () => void
   onCut: () => void
   onDelete: () => void
+  /** The pages as a new PDF of their own, in a tab beside this one. */
+  onExtract: () => void
   onInsertBlank: (side: PageMenuSide) => void
-  /** In the grid, where a click only chooses: the reading view on the page
-      under the pointer. */
-  onOpen?: () => void
   onPaste: (side: PageMenuSide) => void
   onRotate: (degrees: 90 | 270) => void
 }
 
 /** A page's right-click menu in the sidebar, which also acts on a choice. */
-export function PageMenuContent({
+export function PageMenuContent(props: PageMenuActions) {
+  return (
+    <ContextMenuContent>
+      <PageMenuItems {...props} />
+    </ContextMenuContent>
+  )
+}
+
+/** What a page offers, wherever it is pressed: among the sidebar's pages, or
+    in the reading view under what the text there offers. */
+export function PageMenuItems({
   canPaste,
   count,
   deleteDisabled = false,
   onCopy,
   onCut,
   onDelete,
+  onExtract,
   onInsertBlank,
-  onOpen,
   onPaste,
   onRotate,
-}: PageMenuContentProps) {
+}: PageMenuActions) {
   const { t } = useTranslation()
 
   return (
-    <ContextMenuContent>
-      {onOpen ? (
-        <>
-          <ContextMenuItem data-action="open-page" onClick={onOpen}>
-            <Eye />
-            {t("pageEdit.open")}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-        </>
-      ) : null}
+    <>
       <ContextMenuItem data-action="rotate-pages" onClick={() => onRotate(90)}>
         <RotateCw />
-        {t("pageEdit.rotate", { count })}
+        {t("pageEdit.rotateRight", { count })}
       </ContextMenuItem>
       <ContextMenuItem data-action="rotate-pages-left" onClick={() => onRotate(270)}>
         <RotateCcw />
@@ -116,6 +117,11 @@ export function PageMenuContent({
         {t("pageEdit.insertBlankAfter")}
       </ContextMenuItem>
       <ContextMenuSeparator />
+      <ContextMenuItem data-action="extract-pages" onClick={onExtract}>
+        <FilePlus2 />
+        {t("tabs.newFromPages", { count })}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
       <ContextMenuItem
         data-action="delete-pages"
         disabled={deleteDisabled}
@@ -125,15 +131,15 @@ export function PageMenuContent({
         <Trash2 />
         {t("pageEdit.delete", { count })}
       </ContextMenuItem>
-    </ContextMenuContent>
+    </>
   )
 }
 
 /** Where in a file a paste lands: before its first page, or after its last. */
 export type FileMenuEnd = "start" | "end"
 
-/** A file's right-click menu, by its name in the grid or the sidebar's tree:
-    what its hover buttons do, and pastes that join it at either end. */
+/** A file's right-click menu, by its name over its pages or in the tree of
+    files: what its hover buttons do, and pastes that join it at either end. */
 export function FileMenuContent({
   canPaste,
   onPaste,
@@ -146,8 +152,8 @@ export function FileMenuContent({
   onPaste: (end: FileMenuEnd) => void
   onRemove: () => void
   onRename: () => void
-  /** Absent where no pages show to be chosen: beside a reading view, the
-      tree stands in for the sidebar's pages. */
+  /** Absent where no pages show to be chosen: the tree of files stands in
+      the sidebar where the pages would. */
   onSelect?: () => void
   /** A document keeps a page; its last file stays. */
   removeDisabled: boolean

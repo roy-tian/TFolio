@@ -27,11 +27,19 @@
   else `bun run test` and Cargo `test --locked`.
 - PDFium-dependent Rust tests are `#[ignore]`d and need `pdfium:download` and `fonts:download`
   (`test:all` runs both); missing fonts fail them rather than skip.
+- CI runs only for `master` (pushes and pull requests to it), so nothing checks a push to
+  `develop`, and it lints with the newest stable Rust, whose clippy fails what an older local
+  one passes: run `rustup check` before a release.
 - `test:e2e:headless` reruns the GUI suite on the last `test:e2e:build`. Never run Cargo during
   it: debug builds overwrite the `target/debug/tfolio` each spec relaunches.
+- Run the GUI suite only through `test:e2e:headless`: it puts each of the four lanes
+  (`TFOLIO_E2E_SHARDS`) on an Xvfb of its own, and an app that is not its display's focused
+  window fails focus-driven popups. It takes no spec filter: to run one spec, spread
+  `wdio.conf.ts` in a throwaway `.temp/` config that overrides a lane's `wdio:specs`.
 - Specs under `test/e2e/extended/` lock frame timing and pointer feel (preview hand-offs, the
-  overlay scrollbar, text hit testing, resize), which a loaded machine jitters: CI runs them, a
-  local run only with `TFOLIO_E2E_EXTENDED=1`. Run them locally after touching what they lock.
+  overlay scrollbar, text hit testing, search reveal, resize), which a loaded machine jitters:
+  CI runs them, a local run only with `TFOLIO_E2E_EXTENDED=1`. Run them locally after touching
+  what they lock.
 - An e2e test proves what only the GUI can: wiring, dialogs, focus, layout. What the engine or a
   unit test already proves (pixels after undo, layers not stacking) gets one smoke test per
   feature, not a GUI copy.
@@ -83,13 +91,19 @@
   events reach only pages already listening.
 - Linux's desktop entry needs `%F` (missing from Tauri's template). Single-instance arguments
   must be absolute; relative paths resolve against the running process's directory.
+- Installers offer TFolio for PDFs alone and never claim a default: which app opens a file is
+  the reader's choice in the OS. Tauri's `fileAssociations` set each extension's default on
+  Windows, so `tauri.windows.conf.json` empties them and `installer-hooks.nsh` and
+  `pdf-association.wxs` register `TFolio.PDF` only in `.pdf`'s `OpenWithProgids` and
+  `RegisteredApplications`; the NSIS hook also undoes what 0.1.6–0.1.28 claimed. macOS ranks
+  PDF `Alternate`, and Linux lists `application/pdf` alone.
 - Settings writes replace the whole document. Sync other windows through `settings://changed`;
   theme and language apply only at boot.
 
 ## Security and path approval
 
-- Keep production CSP restrictive; relax only `devCsp`. The Base UI settings select has a
-  known `style-src-elem` violation; new sources are regressions.
+- Keep production CSP restrictive; relax only `devCsp`. The Base UI select (the page numbers'
+  blank-pages choice) has a known `style-src-elem` violation; new sources are regressions.
 - Capabilities do not gate custom `generate_handler!` commands: validate arguments in Rust.
   Do not register the transitive `tauri-plugin-fs` plugin.
 - Path-based opens and file sources require `ensure_approved` except in e2e.
@@ -100,16 +114,34 @@
 
 ## WebView UI
 
-- Ship no `group-has-*`, `peer-has-*`, or `group-focus-within-*`, even from registry snippets or
-  class names in comments: each makes WebView2 or WebKit restyle the whole document per DOM
-  change or focus. `toolbar-tooltips.e2e.ts` guards.
+- Ship no `group-has-*`, `peer-has-*`, `group-focus-within-*`, `space-*`, `divide-*` or
+  `*:last:`, even from registry snippets or class names in comments: each makes WebView2 or
+  WebKit restyle the whole document per DOM change or focus. Ship no breakpoint wider than the
+  window's `minWidth` either (`sm:` is the widest; no `md:` and up, no `container`): Chromium
+  restyles everything when a resize flips one. `toolbar-tooltips.e2e.ts` guards.
+- The borderless window keeps its outer 5px for resizing on Linux: no pointer event reaches the
+  WebView there, so a bar or handle at the edge sits clear of it, and a native-pointer move
+  aimed there shows nothing.
 - Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
   beside it.
+- Eleven locales share every layout, and the longest words decide it: a menu or popover takes its
+  content's width (`w-auto min-w-*`), never a fixed one, and a row that cannot hold its words
+  wraps, or drops its icons, before it cuts one. Check a new label in every locale at 640 wide.
+- The language picker's order and badges are `languageGroups` and `languageCodes`: a badge names
+  a language, never a country, and each language is named in itself.
 - Fetch what a copy writes when the selection is made: WebKit refuses a clipboard write that
   awaits IPC long after the keypress.
 - A menu entry that starts an edit in place unmounts its menu content on close (no fade) and
   answers `finalFocus` false: a Base UI menu still fading holds focus, and takes it back from
   the field, whose blur ends the edit.
+- Navigation moves the page being read through `CurrentPage.goTo`, never `set` (the tracker's):
+  the end of a document cannot bring a page to the top, so the page gone to stays the page being
+  read while half of it shows and the view moves under a quarter of its height
+  (`pickReadingPage`). An in-place edit that clamps the scroll, and a zoom's or resize's
+  re-anchoring, call `reland`; an edit that renumbers the pages calls `renumbered`.
+- The reading view has one right-click menu (`ViewerMenu`), for a page's text and for the page
+  pressed: a Base UI context-menu trigger stops the event where it lands, so a trigger on each
+  page's text would take every press from one around it.
 - Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
   worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
   pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
@@ -156,35 +188,54 @@
   the window's file sources (`read_pdf_sources`), then imported by `insert_pdf_files`, which
   releases them; sources never added go by `release_pdf_sources`. One history entry adds them all;
   its undo deletes the run under its stash.
+- A file drop opens a tab per file, except on the sidebar, which takes the files into one document
+  whichever panel shows: the shown tab's (where let go among its pages or its outline's files, else
+  at the end), or on the home tab, for two or more, a new sourceless one (`merge_pdf_sources`: no
+  page of its own, no history). Files no flow takes are named (`filesSkipped`), never dropped
+  silently.
 - Every insert names the file its pages join, and a reorder passes each position's file after
   and before: a page let go among another file's pages joins it, but a file moved whole by its
   name keeps its own. A deleted page keeps its file for the restore an undo brings back.
-- A file let go among another's pages parts it into runs. The grid's headings, the sidebar's
-  tree (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list a file once per
-  run, its own bookmarks under the first; rename, remove, choose and drag act on the file whole.
+- A file let go among another's pages parts it into runs. The headings over the sidebar's
+  pages, its tree of files (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list
+  a file once per run, its own bookmarks under the first; rename, remove, choose, fold and drag
+  act on the file whole.
+- Pages in hand show under the name of the file a release would leave them in (`flowItems`'
+  `joins`): between two files, the preview is the result.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
   and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
-  then the tab reopens the written file, its history gone. A compressed copy compresses what a
-  Save As writes (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which
-  the engine reports as `splitsByBookmarks`.
+  then the tab reopens the written file, its history gone, which the corner says
+  (`filesCombined`). A compressed copy compresses what a Save As writes (`combined_bytes`), and a
+  split by bookmarks cuts at the outline it writes, which the engine reports as
+  `splitsByBookmarks`.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
-  will put them (`SectionBook::padding`) with every structure change, the viewer, page grid,
-  sidebar and print show them there, and only a Save As writes them. Structure commands never
-  see them. A drag shows them where its drop would leave them by the same rule
-  (`paddingPositions`, kept in step with `SectionBook::padding`).
-- The page grid lies over the reading view, which stays mounted and laid out (`inert`) beneath
-  it: leaving the grid finds the reader's place, and the sidebar meanwhile keeps to the
-  bookmarks, so one `PageThumbnails` shows the pages at a time. With no bookmarks or files to
-  keep to, the sidebar gives the grid its column (`setVacant`) and opens only over it, as in a
-  narrow window. The grid shows pages as a save keeps them: it ignores the view's turn and
-  offers none, since there a turn means the page's own.
-- The grid is a tab's own state, never a stored preference: a document opens on its reading
-  view. Only a tab that comes from one on the grid starts there: moved from another window
-  (`MovedTabSeed.grid`), or written or reloaded from it and put in its place or beside it
-  (`onGrid`) — a Save As of added files, an A4 copy, a file changed elsewhere.
-- A file dragged over the grid is told only that a drop joins the document, and by the tab strip
-  where one would open tabs: the workspace's offer to open, laid over the grid, says the
-  opposite of what the drop does.
+  will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
+  print show them there, and only a Save As writes them. Structure commands never see them. A
+  drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
+  step with `SectionBook::padding`).
+- The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
+  fixed-size cells once widened (`ui.sidebarWidth`). The bar over them, and the Delete and
+  clipboard keys, act on the chosen pages, else the page being read, never on one folded away; a
+  plain click's choice lapses once another page is the page being read, so nothing is acted on out
+  of sight. Pages a paste or an add brings are chosen and shown where they landed (`showLanded`),
+  the reader left where they are. The pages and the bookmarks (the tree of files, for several) are
+  both there for every document: which shows is the window's layout, never a matter of what the
+  document holds.
+- The page clipboard is the window's, one store (`holdPages` in `lib/pageClipboard.ts`) of
+  which each session reads its half and keeps no copy: the last pages cut or copied in any of
+  its documents, as that document's page numbers, which it lets go at its next structure edit.
+  Another document pastes them as copies, only while their own has no structure edit in flight
+  or landed since (`pagesStanding`, asked again after any prompt, as the copy is made, as a drag
+  from another tab and a new PDF of pages ask); a cut pasted there is deleted by the document it
+  was made in, queued there as the copy starts and made once it lands, one undo in each. A cut of
+  every page its document has stays there too, and the corner says so (`pagesCutKept`).
+- A document with no file of its own has Save As for its save button and key, as one holding
+  foreign pages has (`saveAsOnly`); the menu's Save stays disabled.
+- A file folded to its name is one cell of the flow standing for its pages (`data-flip-bar`,
+  `flowItems`): a drop lands above or below it, never inside. `flowLanding` counts cells, so
+  every landing goes through `pagesBeforeSlot` before it names a page. Folding is a tab's own
+  state, kept while the sidebar shows something else, never a stored preference, and lets go of
+  the pages chosen in the file: none is deleted or cut unseen.
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
 - File sources are read-only and are not documents: no `record_document`, recent files, save

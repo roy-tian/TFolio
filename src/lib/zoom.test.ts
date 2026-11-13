@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 
 import { MAX_PAGE_WIDTH, type PdfPageInfo } from "./pdf"
 import {
-  activeZoomPreset,
   applyWheelZoom,
   autoScale,
   bookColumnWidth,
@@ -11,7 +10,7 @@ import {
   fitDimensions,
   fitPageScale,
   fitWidthScale,
-  isZoomPreset,
+  isZoomFit,
   MAX_ZOOM,
   MIN_ZOOM,
   normalizeWheelDelta,
@@ -299,31 +298,13 @@ describe("applyWheelZoom", () => {
   })
 })
 
-describe("activeZoomPreset", () => {
-  test("presses the fit that is on, whatever level it lands on", () => {
-    expect(activeZoomPreset("fit-width", 100)).toBe("fit-width")
-    expect(activeZoomPreset("fit-page", 87)).toBe("fit-page")
-  })
-
-  // The opening sizing and a stepped zoom both press actual size at 100%.
-  test("presses actual size at 100% outside a fit", () => {
-    expect(activeZoomPreset("custom", 100)).toBe("actual-size")
-    expect(activeZoomPreset("auto", 100)).toBe("actual-size")
-  })
-
-  test("presses nothing at any other level", () => {
-    expect(activeZoomPreset("custom", 125)).toBeNull()
-    expect(activeZoomPreset("auto", 93)).toBeNull()
-  })
-})
-
-describe("isZoomPreset", () => {
-  test("accepts the three presets only", () => {
-    expect(isZoomPreset("actual-size")).toBe(true)
-    expect(isZoomPreset("fit-page")).toBe(true)
-    expect(isZoomPreset("fit-width")).toBe(true)
-    expect(isZoomPreset("custom")).toBe(false)
-    expect(isZoomPreset(undefined)).toBe(false)
+describe("isZoomFit", () => {
+  test("accepts the two fits only", () => {
+    expect(isZoomFit("fit-page")).toBe(true)
+    expect(isZoomFit("fit-width")).toBe(true)
+    expect(isZoomFit("actual-size")).toBe(false)
+    expect(isZoomFit("custom")).toBe(false)
+    expect(isZoomFit(undefined)).toBe(false)
   })
 })
 

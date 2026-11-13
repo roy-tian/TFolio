@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { GalleryVertical, ListTree, PanelLeft } from "lucide-react"
+import { GalleryVertical, ListTree, PanelLeft, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
@@ -46,30 +46,23 @@ export function SidebarToggle() {
 
 const panelOptions = [
   { icon: GalleryVertical, labelKey: "sidebar.thumbnails", value: "thumbnails" },
-  { icon: ListTree, labelKey: "sidebar.bookmarks", value: "bookmarks" },
+  { icon: ListTree, labelKey: "sidebar.outline", value: "bookmarks" },
 ] as const
 
-/** Which of a document's two panels the sidebar shows. A document of several
-    files shows them, with their bookmarks, where the bookmarks would be.
-    While the page grid shows, the pages are there and the sidebar keeps to
-    the bookmarks. */
-export function SidebarPanelSwitch({
-  bookmarksApply,
-  files = false,
-  panel,
-  thumbnailsApply = true,
-}: {
-  bookmarksApply: boolean
-  files?: boolean
-  panel: SidebarPanel
-  thumbnailsApply?: boolean
-}) {
+/** Which of a document's two panels the sidebar shows: both are there for
+    every document, whatever it holds. The outline of a document of several
+    files is its files, each with its bookmarks. The switch stands in the
+    sidebar's one row beside the toggle, so a long language's words give way
+    before the row does: first their icons go, then each word cut short says
+    itself whole under the pointer. */
+export function SidebarPanelSwitch({ panel }: { panel: SidebarPanel }) {
   const { t } = useTranslation()
   const sidebar = useSidebar()
 
   return (
     <ToggleGroup
       aria-label={t("sidebar.panels")}
+      className="max-w-full"
       onValueChange={([next]) => {
         // Pressing the shown panel again would empty the group; one
         // panel always shows.
@@ -82,36 +75,52 @@ export function SidebarPanelSwitch({
       value={[panel]}
       variant="outline"
     >
-      {panelOptions.map((option) => {
-        const Icon = option.icon
-        const label =
-          option.value === "bookmarks" && files ? t("sidebar.files") : t(option.labelKey)
-        const unavailable =
-          option.value === "bookmarks" ? !bookmarksApply : !thumbnailsApply
-        const why =
-          option.value === "bookmarks" ? t("sidebar.noBookmarks") : t("sidebar.pagesInGrid")
-
-        return (
-          <ToolbarTooltip key={option.value} label={unavailable ? why : label}>
-            <ToggleGroupItem
-              aria-label={label}
-              className="gap-1.5 px-3"
-              disabled={unavailable}
-              value={option.value}
-            >
-              <Icon />
-              {label}
-            </ToggleGroupItem>
-          </ToolbarTooltip>
-        )
-      })}
+      {panelOptions.map((option) => (
+        <SidebarPanelOption
+          icon={option.icon}
+          key={option.value}
+          label={t(option.labelKey)}
+          value={option.value}
+        />
+      ))}
     </ToggleGroup>
   )
 }
 
+function SidebarPanelOption({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon
+  label: string
+  value: SidebarPanel
+}) {
+  const labelRef = useRef<HTMLSpanElement>(null)
+
+  // Only words cut short have more to say: a tooltip repeating them would
+  // stand over the panel's own bar for nothing.
+  return (
+    <ToolbarTooltip cutShort={labelRef} label={label}>
+      <ToggleGroupItem aria-label={label} className="min-w-0 shrink px-2.5" value={value}>
+        {/* One line tall and laid from the right: an option too narrow for
+            both wraps its icon, not its word, onto a second line out of sight. */}
+        <span className="flex h-5 min-w-0 flex-row-reverse flex-wrap content-start items-center justify-center gap-x-1.5 overflow-hidden">
+          <span className="max-w-full truncate leading-5" ref={labelRef}>
+            {label}
+          </span>
+          <span className="flex h-5 items-center">
+            <Icon />
+          </span>
+        </span>
+      </ToggleGroupItem>
+    </ToolbarTooltip>
+  )
+}
+
 /**
- * The sidebar's right edge, dragged or arrowed to widen it, for long bookmark
- * titles. Double-click goes back to the opening width. The drag
+ * The sidebar's right edge, dragged or arrowed to widen it: wide, its pages
+ * stand in rows of several. Double-click goes back to the opening width. The drag
  * sets the workspace root's width itself, frame by frame, and settles it in
  * the window's state only on release, so App renders once per drag.
  */
@@ -258,14 +267,16 @@ function SidebarResizeHandle() {
 
 type AppSidebarProps = {
   children?: ReactNode
+  /** Along the bottom, level with the status bar beside it. */
+  footer?: ReactNode
   macOS: boolean
-  /** The second row: what the rest of the column shows. */
+  /** At the far end of the first row: what the rest of the column shows. */
   switcher?: ReactNode
 }
 
-/** The window's left column: its first row is the title bar's, the second
-    switches what the rest of it shows. */
-export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
+/** The window's left column: its first row is the title bar's, the toggle at
+    one end and, at the other, the switch for what the rest of it shows. */
+export function AppSidebar({ children, footer, macOS, switcher }: AppSidebarProps) {
   const sidebar = useSidebar()
   const asideRef = useRef<HTMLElement>(null)
   const overlay = sidebar.mode === "overlay"
@@ -323,18 +334,29 @@ export function AppSidebar({ children, macOS, switcher }: AppSidebarProps) {
     >
       <div
         className={cn(
-          "flex h-(--toolbar-height) shrink-0 items-center gap-1 px-2",
+          // As the toolbar beside it: its line under the row, and pb-px to
+          // keep the content box even, so the toggle stands at one height
+          // whichever of the two rows holds it.
+          "flex h-(--toolbar-height) shrink-0 items-center gap-2 border-b px-2 pb-px",
           // The traffic lights sit over this corner of the window.
           macOS && "pl-[76px]",
         )}
         data-tauri-drag-region="deep"
       >
         <SidebarToggle />
-      </div>
-      <div className="flex h-(--document-tabs-height) shrink-0 items-center justify-center border-b px-2">
-        {switcher}
+        {switcher ? <div className="ml-auto flex min-w-0 justify-end">{switcher}</div> : null}
       </div>
       <div className="min-h-0 flex-1">{children}</div>
+      {footer ? (
+        // As the status bar: its line over the row, and pb-px to keep the
+        // control at the bar's height.
+        <div
+          className="flex h-(--status-bar-height) shrink-0 items-center border-t px-2 pb-px"
+          data-slot="sidebar-footer"
+        >
+          {footer}
+        </div>
+      ) : null}
       <SidebarResizeHandle />
     </aside>
   )

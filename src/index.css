@@ -27,7 +27,7 @@ body,
   margin: 0;
 }
 
-/* Geist has no Han or Thai glyphs; they fall to a face picked by the element's
+/* Geist has no Han, kana, Hangul or Thai glyphs; they fall to a face picked by the element's
    language, the UI's unless an element names its own (the language picker's items).
    Han unification gives Simplified and Traditional one code point per character,
    so only the face decides whether a Taiwanese reader sees their own glyph shapes. */
@@ -38,6 +38,14 @@ body,
 
 :lang(zh-TW) {
   --font-script: "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC";
+}
+
+:lang(ja) {
+  --font-script: "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Noto Sans CJK JP";
+}
+
+:lang(ko) {
+  --font-script: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR";
 }
 
 :lang(th) {
@@ -187,6 +195,12 @@ body {
   * {
     @apply border-border outline-ring/50;
   }
+  /* Korean breaks a line between words, never inside one; a name too long
+     for its line still breaks rather than run out of its box. */
+  html:lang(ko) {
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
   body {
     @apply bg-background text-foreground;
   }
@@ -213,7 +227,7 @@ body {
 }
 
 /* A width the reader dragged to; the window narrows it as it shrinks, so the
-   toolbar beside a docked sidebar keeps its room. In pixels, as the drag and
+   pages beside a docked sidebar keep their room. In pixels, as the drag and
    `SIDEBAR_MIN_WIDTH` measure it, whatever the root font size. */
 [data-sidebar][data-sidebar-width] {
   --sidebar-width: max(256px, min(var(--sidebar-chosen), 100vw - var(--sidebar-reserved)));

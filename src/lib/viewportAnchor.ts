@@ -51,3 +51,36 @@ export function anchorCorrection(anchor: ViewportAnchor, rect: AnchorRect) {
     top: rect.top + anchor.fractionY * rect.height - anchor.clientY,
   }
 }
+
+/** The line down a page an edit holds still on screen. */
+export type EditAnchor = Pick<ViewportAnchor, "clientY" | "fractionY" | "pageNumber">
+
+/**
+ * The page being read is held at the line it is read from: its own top while
+ * that shows, else the viewer's top edge, at the same share of the page however
+ * a fit rescales it. A page taken out (`replaced`) hands its place to
+ * `pageNumber` from that page's top, never from partway down another page.
+ */
+export function editAnchor(
+  pageNumber: number,
+  rect: AnchorRect,
+  readingTop: number,
+  replaced = false,
+): EditAnchor | null {
+  if (rect.height <= 0) {
+    return null
+  }
+
+  const clientY = Math.max(rect.top, readingTop)
+
+  return {
+    clientY,
+    fractionY: replaced ? 0 : (clientY - rect.top) / rect.height,
+    pageNumber,
+  }
+}
+
+/** What to add to the scroll for the anchored line to sit where it did. */
+export function editAnchorCorrection(anchor: EditAnchor, rect: AnchorRect) {
+  return rect.top + anchor.fractionY * rect.height - anchor.clientY
+}

@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import type { TOptions } from "i18next"
+import type { ParseKeys, TOptions } from "i18next"
 import {
   CircleAlert,
   CircleCheck,
@@ -93,7 +93,7 @@ export function NoticeCenter({
     <div
       aria-live="off"
       // The anchor moves in `index.css` while the find bar shares this band.
-      className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+1rem)] right-4 z-70 flex w-88 flex-col gap-2 transition-[top] duration-150"
+      className="pointer-events-none fixed top-[calc(var(--toolbar-height)+var(--document-tabs-height)+1rem)] right-4 z-70 flex w-96 max-w-[calc(100%-2rem)] flex-col gap-2 transition-[top] duration-150"
       data-slot="notice-center"
     >
       {shown.map((notice) => (
@@ -136,7 +136,9 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
 
   // The catalogue is what pairs a message with the values that fill it, which
   // is past what the typed `t` can check; `notices.test.ts` walks the pairs.
-  const message = t(entry.textKey, notice.values as TOptions)
+  const message = (
+    t as (key: ParseKeys, options: TOptions | undefined) => string
+  )(entry.textKey, notice.values)
   const action = notice.action ? noticeActions[notice.action.kind] : null
   const busy = notice.action?.busy === true
   const running = "running" in entry
@@ -166,7 +168,7 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
               entry.tone === "info" && "text-muted-foreground",
             )}
           />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 text-balance">
             <p
               // Fitted to the words, so the shimmer crosses them rather than
               // the row's empty width.

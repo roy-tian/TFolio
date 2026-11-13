@@ -308,7 +308,7 @@ impl PdfiumEngine {
             let mut next = tail.base_objects;
 
             for segment in &tail.segments {
-                for offset in 0..segment.object_count {
+                for (offset, identity) in segment.identities.iter().enumerate() {
                     let object = objects.get(next + offset).map_err(|error| {
                         format!(
                             "PDFium could not inspect owned object {}: {error}",
@@ -322,7 +322,7 @@ impl PdfiumEngine {
                     // follows on one line; apply trimmed its identities the same.
                     let actual = text_page.for_object(text_object).trim().to_owned();
 
-                    if actual != segment.identities[offset] {
+                    if actual != *identity {
                         return Err(format!(
                             "page {page_number}'s owned tail contains different text"
                         ));

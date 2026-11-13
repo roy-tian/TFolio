@@ -146,7 +146,7 @@ describe("TFolio signed documents", () => {
     await openPdfFromDisk("own.pdf", textPdf())
     await renderedPage()
     await pointMultiPickerAt([signed])
-    await $("[data-active='true'] [data-slot='pages-add-files']").click()
+    await $("[data-active='true'] [data-slot='sidebar-add-files']").click()
     await answerPrompt("signatures-flatten")
 
     // The added page, drawn with its seal as page content.
@@ -174,7 +174,7 @@ describe("TFolio signed documents", () => {
     await openPdfFromDisk("own.pdf", textPdf())
     await renderedPage()
     await pointMultiPickerAt([first, plain, second])
-    await $("[data-active='true'] [data-slot='pages-add-files']").click()
+    await $("[data-active='true'] [data-slot='sidebar-add-files']").click()
 
     // Named one at a time; the file with no signature is never asked about.
     await $(prompt).waitForDisplayed()
@@ -191,7 +191,7 @@ describe("TFolio signed documents", () => {
 
     // The rest given the first's answer: one prompt for both.
     await pointMultiPickerAt([first, second])
-    await $("[data-active='true'] [data-slot='pages-add-files']").click()
+    await $("[data-active='true'] [data-slot='sidebar-add-files']").click()
     await $(prompt).waitForDisplayed()
     await $(forRest).click()
     await answerPrompt("signatures-keep")

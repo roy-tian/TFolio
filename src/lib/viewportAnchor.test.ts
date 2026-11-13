@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { anchorCorrection, anchorOnPage } from "./viewportAnchor"
+import { anchorCorrection, anchorOnPage, editAnchor, editAnchorCorrection } from "./viewportAnchor"
 
 const rect = (top: number, left = 100, width = 400, height = 500) => ({
   height,
@@ -68,5 +68,33 @@ describe("anchorCorrection", () => {
     const anchor = anchorOnPage(9, rect(-1000), 300, 0)!
 
     expect(anchorCorrection(anchor, rect(-500)).top).toBe(500)
+  })
+})
+
+describe("editAnchor", () => {
+  test("holds a page's top while it shows", () => {
+    const anchor = editAnchor(5, rect(120), 40)!
+
+    expect(anchor).toEqual({ clientY: 120, fractionY: 0, pageNumber: 5 })
+    // Rescaled and moved down two pages: back to where its top stood.
+    expect(editAnchorCorrection(anchor, rect(1500, 100, 800, 1000))).toBe(1380)
+  })
+
+  test("holds the share of a page read partway down, through a rescale", () => {
+    const anchor = editAnchor(5, rect(-210, 100, 400, 500), 40)!
+
+    expect(anchor.fractionY).toBeCloseTo(0.5)
+    expect(editAnchorCorrection(anchor, rect(-460, 100, 800, 1000))).toBeCloseTo(0)
+  })
+
+  test("hands a page taken out to the next from its top", () => {
+    const anchor = editAnchor(5, rect(-210), 40, true)!
+
+    expect(anchor).toEqual({ clientY: 40, fractionY: 0, pageNumber: 5 })
+    expect(editAnchorCorrection(anchor, rect(-210))).toBe(-250)
+  })
+
+  test("anchors nothing to a page with no box", () => {
+    expect(editAnchor(1, rect(0, 0, 0, 0), 0)).toBeNull()
   })
 })

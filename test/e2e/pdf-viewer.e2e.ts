@@ -6,6 +6,7 @@ import {
   clickAppMenuItem,
   dropZoneButton,
   minimalPdf,
+  nestedOutlinePdf,
   openPdfFromDisk,
   outlinedPdf,
   pageInk,
@@ -13,7 +14,6 @@ import {
   renderedPage,
   seedSettings,
   textPdf,
-  tooltipOn,
 } from "./helpers"
 
 // The zoom listener is bound natively and non-passively, so the wheel goes out
@@ -219,9 +219,13 @@ describe("TFolio PDF viewer", () => {
     await browser.keys("Enter")
     await expect(pageInput).toHaveValue("1")
 
-    const bookmarksPanel = `${activeSidebar} button[aria-label='Bookmarks']`
-    await expect($(bookmarksPanel)).toBeDisabled()
-    expect(await tooltipOn(bookmarksPanel)).toBe("This document has no bookmarks")
+    // Either panel opens for any document: one with no bookmarks says so.
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await expect($(`${activeSidebar} nav[aria-label='Bookmarks']`)).toHaveText(
+      "This document has no bookmarks",
+    )
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await $(`${activeSidebar} [data-slot='sidebar-thumbnails']`).waitForExist()
 
     await clickAppMenuItem("settings")
     await expect($("[role='dialog']")).toBeDisplayed()
@@ -245,9 +249,7 @@ describe("TFolio PDF viewer", () => {
     expect(isDarkAfterDark).toBe(true)
 
     await $("#settings-language").click()
-    await $(
-      "//*[@role='option' and normalize-space()='简体中文']",
-    ).click()
+    await $("[role='option'][data-language='zh-CN']").click()
 
     const documentLanguage = await browser.execute(
       () => document.documentElement.lang,
@@ -318,7 +320,7 @@ describe("TFolio PDF viewer", () => {
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     const pageInput = $("input[aria-label='Page number']")
 
-    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await expect(bookmarks).toHaveText("Second half")
     await bookmarks.$("button").click()
     await expect(pageInput).toHaveValue("2")
@@ -330,7 +332,7 @@ describe("TFolio PDF viewer", () => {
 
     // The other panel previews every page and follows the reader's — which
     // the trip through the views may have moved, both pages being in sight.
-    await $(`${activeSidebar} button[aria-label='Pages']`).click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
     await expect(bookmarks).not.toBeExisting()
     const preview = (page: string) =>
       $(`${activeSidebar} button[aria-label='Go to page ${page}']`)
@@ -341,6 +343,41 @@ describe("TFolio PDF viewer", () => {
     await preview(other).click()
     await expect(pageInput).toHaveValue(other)
     await expect(preview(other)).toHaveAttribute("aria-current", "page")
+  })
+
+  it("folds the outline's bookmarks one by one or all at once", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("nested.pdf", nestedOutlinePdf())
+    await $("[data-page-number='1']").waitForDisplayed()
+
+    const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
+    const foldAll = $(`${activeSidebar} button[aria-label='Collapse all bookmarks']`)
+    const unfoldAll = $(`${activeSidebar} button[aria-label='Expand all bookmarks']`)
+    const chapter = () => bookmarks.$("button=Chapter one")
+    const arrow = bookmarks.$("[data-slot='bookmark-fold']")
+
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await expect(chapter()).toBeDisplayed()
+    await expect(unfoldAll).toBeDisabled()
+    // Named apart from the bookmark beside it, which goes to its page.
+    await expect(arrow).toHaveAttribute("aria-label", "Collapse Part one")
+    await arrow.click()
+    await expect(arrow).toHaveAttribute("aria-expanded", "false")
+    await expect(arrow).toHaveAttribute("aria-label", "Expand Part one")
+    await expect(chapter()).not.toBeExisting()
+    // The one bookmark with others under it is folded: the outline is.
+    await expect(foldAll).toBeDisabled()
+    await unfoldAll.click()
+    await expect(chapter()).toBeDisplayed()
+    await expect(unfoldAll).toBeDisabled()
+
+    // Folds are the tab's, kept while the sidebar shows its pages.
+    await foldAll.click()
+    await $(`${activeSidebar} button[aria-label='Thumbnails']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await expect(bookmarks.$("button=Part two")).toBeDisplayed()
+    await expect(chapter()).not.toBeExisting()
   })
 
   it("turns whole pages and spreads with Page Up and Page Down at any zoom", async () => {
@@ -470,15 +507,12 @@ describe("TFolio PDF viewer", () => {
 
     expect((await pageBox()).scrollableX).toBe(0)
 
-    // Out until `-` gives up at the 10% floor, then in along the rungs to 100%,
-    // which presses actual size though no preset was chosen.
+    // Out until `-` gives up at the 10% floor, then in along the rungs to 100%.
     const zoomOut = () => $("button[aria-label='Zoom out']")
 
     while (await zoomOut().isEnabled()) {
       await zoomOut().click()
     }
-
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
 
     for (let rung = 0; rung < 6; rung += 1) {
       await $("button[aria-label='Zoom in']").click()
@@ -490,12 +524,10 @@ describe("TFolio PDF viewer", () => {
       Math.round((200 * 96 * percent) / (72 * 100))
 
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
     expect((await pageBox()).width).toBe(actualSize(100))
 
     await $("button[aria-label='Zoom in']").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 110%")
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "false")
     expect((await pageBox()).width).toBe(actualSize(110))
 
     await $("button[aria-label='Zoom out']").click()
@@ -591,9 +623,10 @@ describe("TFolio PDF viewer", () => {
     await expect(preset("Fit width")).toHaveAttribute("aria-pressed", "true")
     await expect(preset("Fit page")).toHaveAttribute("aria-pressed", "false")
 
-    await preset("Actual size").click()
+    // The readout takes a fit back to 100% and lets the fit go.
+    await $("[data-slot='zoom-controls-readout']").click()
     await expect(zoomGroup()).toHaveAttribute("aria-label", "Zoom 100%")
-    await expect(preset("Actual size")).toHaveAttribute("aria-pressed", "true")
+    await expect(preset("Fit width")).toHaveAttribute("aria-pressed", "false")
     expect((await pageBox()).width).toBe(actualSize(100))
     const widthBeforePreview = (await pageBox()).width
     const preview = (await browser.executeAsync((done) => {
@@ -999,10 +1032,12 @@ describe("TFolio PDF viewer", () => {
       }
     })
 
-    // Nothing selected: the menu would have no entry to show, so the
-    // right-click opens nothing at all rather than an empty popup.
+    // Nothing selected: nothing of the text to offer, only what the page
+    // pressed offers of itself.
     await rightClick(".pdf-text-layer span")
-    await browser.pause(500)
+    await $("[data-action='rotate-pages']").waitForDisplayed({ timeout: 15_000 })
+    await expect($("[data-action='copy-text']")).not.toExist()
+    await browser.keys("Escape")
     await expect($("[data-slot='context-menu-content']")).not.toExist()
 
     const selected = await browser.execute(() => {

@@ -226,7 +226,8 @@ export function TextNoteEditor({
         {/* Styled as the note will be drawn, so what is typed is what lands. */}
         <Textarea
           aria-label={t("annotate.textNoteInput")}
-          className={cn("min-h-20 resize-none border-0 shadow-none focus-visible:ring-0")}
+          // The hint keeps the interface's size: at the note's, a zoom wraps it.
+          className="min-h-20 resize-none border-0 shadow-none placeholder:font-sans placeholder:text-sm focus-visible:ring-0"
           onChange={(event) => onTextChange(event.target.value)}
           placeholder={t("annotate.textNotePlaceholder")}
           ref={textareaRef}

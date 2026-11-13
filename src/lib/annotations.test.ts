@@ -10,10 +10,9 @@ import {
   droppedStashIds,
   emptyHistory,
   fillErasedPages,
+  followPage,
   historyHead,
   inversePermutation,
-  isDirty,
-  markSaved,
   insertPagesRange,
   movesPages,
   nextRedoCommand,
@@ -36,6 +35,7 @@ import {
   type AnnotationHistory,
 } from "@/lib/annotations"
 import { defaultRectStyle } from "@/lib/annotationStyles"
+import { isDirty, markSaved } from "@/lib/documentState"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import { defaultWatermarkConfig, type WatermarkConfig } from "@/lib/watermark"
 
@@ -521,6 +521,21 @@ describe("commandPageChange", () => {
       commandPageChange(planRotatePages(emptyHistory, [1], 90)!.command, true),
     ).toEqual({ movement: "inPlace" })
     expect(commandPageChange(highlight(1), false)).toBeUndefined()
+  })
+})
+
+describe("followPage", () => {
+  it("follows a page to its new number through inserts, deletes and moves", () => {
+    expect(followPage([1, null, 2, 3], 2)).toBe(3)
+    expect(followPage([1, 3, 5], 5)).toBe(3)
+    expect(followPage([3, 1, 2], 1)).toBe(2)
+  })
+
+  it("hands a page taken out to the page now in its place, else the last", () => {
+    expect(followPage([1, 3, 5], 2)).toBe(2)
+    expect(followPage([1, 5], 3)).toBe(2)
+    expect(followPage([1, 2], 3)).toBe(2)
+    expect(followPage([4], 1)).toBe(1)
   })
 })
 

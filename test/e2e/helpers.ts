@@ -81,6 +81,23 @@ export function outlinedPdf() {
   ])
 }
 
+/** Two pages under two bookmarks, the first with one of its own beneath it. */
+export function nestedOutlinePdf() {
+  const dest = (page: number) => `/Dest [${page} 0 R /XYZ null null null]`
+
+  return buildPdf([
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
+    "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 5 0 R >>\nendobj\n",
+    "5 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
+    "6 0 obj\n<< /Type /Outlines /First 7 0 R /Last 9 0 R /Count 3 >>\nendobj\n",
+    `7 0 obj\n<< /Title (Part one) /Parent 6 0 R /Next 9 0 R /First 8 0 R /Last 8 0 R /Count 1 ${dest(3)} >>\nendobj\n`,
+    `8 0 obj\n<< /Title (Chapter one) /Parent 7 0 R ${dest(4)} >>\nendobj\n`,
+    `9 0 obj\n<< /Title (Part two) /Parent 6 0 R /Prev 7 0 R ${dest(4)} >>\nendobj\n`,
+  ])
+}
+
 export function bandedPdf(pageCount: number) {
   const kids = Array.from(
     { length: pageCount },
@@ -567,6 +584,20 @@ export async function appMenuItem(action: string) {
   return item
 }
 
+/** An entry of the menu's Export submenu, opened through its trigger. */
+export async function appExportMenuItem(action: string) {
+  await (await appMenuItem("export")).click()
+
+  const item = $(`[data-action='${action}']`)
+  await item.waitForDisplayed({ timeout: 15_000 })
+
+  return item
+}
+
+export async function clickAppExportMenuItem(action: string) {
+  await (await appExportMenuItem(action)).click()
+}
+
 /** The shown tab's sidebar: every tab mounts its own, the others hidden. */
 export const activeSidebar =
   "[data-document-session][data-active='true'] [data-slot='app-sidebar']"
@@ -609,7 +640,7 @@ export function deletePageFromSidebar(pageNumber = 1) {
   return sidebarPageAction(pageNumber, "delete-pages")
 }
 
-/** Redo has no toolbar button: it is the keyboard's alone. */
+/** Redo by its key; the toolbar button is a click away too. */
 export async function pressRedo() {
   await browser.keys(["Control", "Shift", "z"])
 }
@@ -911,7 +942,7 @@ export async function renderedPage(pageSelector = "[data-page-number='1']") {
  * Tauri's event system is emitted directly, in CSS pixels (GTK logical units).
  */
 export async function emitDrag(
-  name: "drag-over" | "drag-drop",
+  name: "drag-enter" | "drag-over" | "drag-drop" | "drag-leave",
   point: { x: number; y: number },
   paths: string[],
 ) {

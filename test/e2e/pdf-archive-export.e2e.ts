@@ -3,7 +3,7 @@ import "@wdio/tauri-service"
 
 import type { ArchiveExportRequest, ArchiveOptions } from "../../src/lib/archiveExport"
 import type { E2eOverrides } from "../../src/lib/e2e"
-import { appMenuItemEnabled, clickAppMenuItem, minimalPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings } from "./helpers"
+import { appMenuItemEnabled, clickAppExportMenuItem, minimalPdf, openPdfFromDisk, refreshApp, renderedPage, seedSettings } from "./helpers"
 
 type ArchiveSeam = Window & {
   __tfolioE2E?: E2eOverrides
@@ -16,9 +16,8 @@ describe("TFolio archive export", () => {
     await refreshApp()
   })
 
-  it("disables both exports on the home tab", async () => {
-    expect(await appMenuItemEnabled("export-images")).toBe(false)
-    expect(await appMenuItemEnabled("split")).toBe(false)
+  it("disables the menu's exports on the home tab", async () => {
+    expect(await appMenuItemEnabled("export")).toBe(false)
   })
 
   it("exports the selected pages as the chosen image format", async () => {
@@ -36,7 +35,7 @@ describe("TFolio archive export", () => {
       }
     })
     for (const imageFormat of ["jpg", "png"] as const) {
-      await clickAppMenuItem("export-images")
+      await clickAppExportMenuItem("export-images")
       await $("[data-testid='image-export-dialog']").waitForDisplayed()
       await $(`[data-testid='image-format-${imageFormat}']`).click()
       await $("[data-testid='image-dpi-600']").click()
@@ -54,7 +53,7 @@ describe("TFolio archive export", () => {
   it("refuses a page range the document cannot honour", async () => {
     await openPdfFromDisk("archive.pdf", minimalPdf(2))
     await renderedPage()
-    await clickAppMenuItem("export-images")
+    await clickAppExportMenuItem("export-images")
     const start = $("[data-testid='image-export-start']")
     await $("[data-testid='image-pages-input']").setValue("3")
     await expect(start).toBeDisabled()
@@ -102,7 +101,7 @@ describe("TFolio archive export", () => {
         exportPdfArchive: async () => { throw new Error("disk full") },
       }
     })
-    await clickAppMenuItem("export-images")
+    await clickAppExportMenuItem("export-images")
     await $("[data-testid='image-export-start']").click()
     await expect($("[data-testid='image-export-dialog'] [role='alert']")).toBeDisplayed()
     await expect($("[data-testid='image-export-start']")).toBeEnabled()

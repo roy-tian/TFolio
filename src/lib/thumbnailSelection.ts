@@ -60,6 +60,18 @@ export function selectionAfterClick(
   return { anchor: pageNumber, pages: new Set([pageNumber]) }
 }
 
+/** Folded, not spread: a long selection can pass the engine's argument
+    limit. Infinity for none, as `Math.min()` gives. */
+export function lowestPage(pages: Iterable<number>): number {
+  let low = Infinity
+
+  for (const pageNumber of pages) {
+    low = Math.min(low, pageNumber)
+  }
+
+  return low
+}
+
 /** A click on a run of pages as one, a file's name over its pages: plain
     chooses them alone, a toggle adds them or, all chosen, lets them go, and
     a range reaches from the anchor to the run's far end. */
@@ -72,8 +84,7 @@ export function selectionAfterGroupClick(
     return selection
   }
 
-  // Folded, not spread: a long file can pass the engine's argument limit.
-  const first = pages.reduce((low, pageNumber) => Math.min(low, pageNumber))
+  const first = lowestPage(pages)
   const last = pages.reduce((high, pageNumber) => Math.max(high, pageNumber))
 
   if (modifiers.range && selection.anchor !== null) {
@@ -99,6 +110,29 @@ export function selectionAfterGroupClick(
   }
 
   return { anchor: first, pages: new Set(pages) }
+}
+
+/** The selection with `pages` let go: folded away under their file's name,
+    they would be deleted or cut unseen. An anchor among them goes too, or
+    the next range would start from a page that does not show. */
+export function selectionWithout(
+  selection: ThumbnailSelection,
+  pages: readonly number[],
+): ThumbnailSelection {
+  const gone = new Set(pages)
+  const kept = new Set<number>()
+
+  for (const pageNumber of selection.pages) {
+    if (!gone.has(pageNumber)) {
+      kept.add(pageNumber)
+    }
+  }
+
+  const anchor = selection.anchor !== null && gone.has(selection.anchor) ? null : selection.anchor
+
+  return kept.size === selection.pages.size && anchor === selection.anchor
+    ? selection
+    : { anchor, pages: kept }
 }
 
 /** A click over items listed in `order`, as `selectionAfterClick` takes one;

@@ -13,6 +13,7 @@ import {
   fileNameFromPath,
   isPdfPath,
   pickCurrentPage,
+  pickReadingPage,
   resolveOutputScale,
   SIGNED_ORIGINAL_CHANGED,
   signatureMark,
@@ -133,6 +134,70 @@ describe("pickCurrentPage", () => {
 
     expect(pick(spread)).toBe(3)
     expect(pick([...spread].reverse())).toBe(3)
+  })
+})
+
+describe("pickReadingPage", () => {
+  // 100px pages 10px apart at the end of the document, seen in a 700px viewer:
+  // a quarter of page 2 shows, page 3 is the first whole, page 8 the last.
+  const atEnd = [2, 3, 4, 5, 6, 7, 8].map((pageNumber) => ({
+    bottom: (pageNumber - 2) * 110 + 25,
+    pageNumber,
+    top: (pageNumber - 2) * 110 - 75,
+  }))
+  const view = (scrollTop: number) => ({ bottom: 700, scrollTop, top: 0 })
+  const jumpTo = (page: number, landedTop: number | null = null) => ({ landedTop, page, since: 0 })
+
+  test("names the first page at least half showing with no jump to hold", () => {
+    expect(pickReadingPage(atEnd, view(900), null, 0)).toEqual({ jump: null, page: 3 })
+  })
+
+  test("holds the page a jump went to at the end, though the view cannot bring it to the top", () => {
+    // A jump that scrolled nothing lands on the first look after it.
+    const landed = pickReadingPage(atEnd, view(900), jumpTo(8), 4000)
+
+    expect(landed).toEqual({ jump: jumpTo(8, 900), page: 8 })
+    // A nudge keeps it; a quarter of the view's height lets it go.
+    expect(pickReadingPage(atEnd, view(892), landed.jump, 5000).page).toBe(8)
+    expect(pickReadingPage(atEnd, view(725), landed.jump, 5000)).toEqual({ jump: null, page: 3 })
+  })
+
+  test("lands where the jump's own scroll stops, though the page showed long before", () => {
+    // Zoomed out, page 8 shows a moment into a jump that goes on to the end.
+    const early = pickReadingPage(atEnd, view(30), jumpTo(8), 100)
+    const stopped = pickReadingPage(atEnd, view(900), early.jump, 600)
+
+    expect(stopped).toEqual({ jump: jumpTo(8, 900), page: 8 })
+    expect(pickReadingPage(atEnd, view(892), stopped.jump, 5000).page).toBe(8)
+  })
+
+  test("names the page on the jump's way there, not the pages it passes", () => {
+    const passing = [{ bottom: 600, pageNumber: 2, top: -100 }]
+
+    expect(pickReadingPage(passing, view(100), jumpTo(8), 200)).toEqual({ jump: jumpTo(8), page: 8 })
+  })
+
+  test("lets a jump go once the reader took the view elsewhere before it arrived", () => {
+    const elsewhere = [{ bottom: 600, pageNumber: 2, top: -100 }]
+
+    expect(pickReadingPage(elsewhere, view(100), jumpTo(8), 2000)).toEqual({ jump: null, page: 2 })
+  })
+
+  test("holds the page through a relayout while a move the app made settles", () => {
+    // A turn re-landed the jump at 1000; a passing frame shows the page cut short.
+    const relanded = { landedTop: null, page: 8, since: 1000 }
+    const midRelayout = [{ bottom: 600, pageNumber: 2, top: -100 }]
+
+    expect(pickReadingPage(midRelayout, view(400), relanded, 1200)).toEqual({ jump: relanded, page: 8 })
+  })
+
+  test("lets the page go once less than half of it shows", () => {
+    const scrolledOff = [
+      { bottom: 650, pageNumber: 4, top: 0 },
+      { bottom: 760, pageNumber: 8, top: 660 },
+    ]
+
+    expect(pickReadingPage(scrolledOff, view(900), jumpTo(8, 900), 5000).page).toBe(4)
   })
 })
 

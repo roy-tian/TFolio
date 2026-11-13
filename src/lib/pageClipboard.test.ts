@@ -5,6 +5,14 @@ import {
   formatPageRanges,
   pageClipboardOf,
   pastePlan,
+  heldPages,
+  holdPages,
+  letGoOfPages,
+  movePagesOut,
+  pageSourceOf,
+  pagesStanding,
+  registerPageSource,
+  subscribeHeldPages,
 } from "@/lib/pageClipboard"
 
 describe("pageClipboardOf", () => {
@@ -95,5 +103,143 @@ describe("formatPageRanges", () => {
     expect(formatPageRanges([1, 3, 5, 7, 9, 11, 13, 15])).toBe(
       "1, 3, 5, 7, 9, 11…",
     )
+  })
+})
+
+describe("the window's held pages", () => {
+  const taken = (sourceDocumentId: number, mode: "cut" | "copy" = "copy") => ({
+    mode,
+    pages: [2, 3],
+    sourceDocumentId,
+  })
+  const source = (log: string[], name: string, state = { busy: false, edits: 0, keeps: false }) => ({
+    edits: () => state.edits,
+    idle: () => !state.busy,
+    name: () => name,
+    superseded: () => log.push(`${name} superseded`),
+    takeOut: (pages: number[]) => {
+      log.push(`${name} takes out ${pages.join()}`)
+      return !state.keeps
+    },
+  })
+  const copied = Promise.resolve(true)
+
+  it("holds the last pages any document took, and says when they change", () => {
+    let told = 0
+    const stop = subscribeHeldPages(() => {
+      told += 1
+    })
+
+    holdPages(taken(1))
+    expect(heldPages()?.sourceDocumentId).toBe(1)
+    holdPages(taken(2))
+    expect(heldPages()?.sourceDocumentId).toBe(2)
+    expect(told).toBe(2)
+
+    stop()
+    letGoOfPages(2)
+    expect(told).toBe(2)
+    expect(heldPages()).toBeNull()
+  })
+
+  it("lets a document let go only of what is still its own", () => {
+    holdPages(taken(1))
+    holdPages(taken(2))
+
+    letGoOfPages(1)
+    expect(heldPages()?.sourceDocumentId).toBe(2)
+    letGoOfPages(2)
+    expect(heldPages()).toBeNull()
+  })
+
+  it("tells the document whose pages another's take replaced, not one taking again", () => {
+    const log: string[] = []
+    const stop = [registerPageSource(1, source(log, "one")), registerPageSource(2, source(log, "two"))]
+
+    holdPages(taken(1, "cut"))
+    holdPages(taken(1))
+    expect(log).toEqual([])
+    holdPages(taken(2))
+    expect(log).toEqual(["one superseded"])
+
+    stop.forEach((unregister) => unregister())
+  })
+
+  it("moves a cut out of its document once, and only while it is still held", () => {
+    const log: string[] = []
+    const unregister = registerPageSource(1, source(log, "one"))
+    const cut = taken(1, "cut")
+
+    holdPages(cut)
+    expect(pageSourceOf(cut)?.name()).toBe("one")
+    expect(movePagesOut(cut, copied)).toBe(true)
+    expect(movePagesOut(cut, copied)).toBe(false)
+    expect(log).toEqual(["one takes out 2,3"])
+    expect(heldPages()).toBeNull()
+
+    // Let go by an edit before the paste was made: nothing is taken out.
+    const stale = taken(1, "cut")
+
+    holdPages(stale)
+    letGoOfPages(1)
+    expect(movePagesOut(stale, copied)).toBe(false)
+    expect(log).toEqual(["one takes out 2,3"])
+
+    unregister()
+  })
+
+  it("spends a cut its document keeps, and says the pages stay", () => {
+    const unregister = registerPageSource(1, source([], "one", { busy: false, edits: 0, keeps: true }))
+    const cut = taken(1, "cut")
+
+    holdPages(cut)
+    expect(movePagesOut(cut, copied)).toBe(false)
+    expect(heldPages()).toBeNull()
+
+    unregister()
+  })
+
+  it("stands until an edit lands in the pages' document, and not while one is under way", () => {
+    const state = { busy: false, edits: 0, keeps: false }
+    const unregister = registerPageSource(1, source([], "one", state))
+    const stands = pagesStanding(1)
+
+    expect(stands()).toBe(true)
+    state.busy = true
+    expect(stands()).toBe(false)
+    // An edit that never landed moved nothing.
+    state.busy = false
+    expect(stands()).toBe(true)
+    state.edits += 1
+    expect(stands()).toBe(false)
+    // Taken under the new count, the numbers stand again.
+    expect(pagesStanding(1)()).toBe(true)
+
+    unregister()
+  })
+
+  it("never stands for a document closed, or opened again, since", () => {
+    const first = registerPageSource(1, source([], "one"))
+    const stands = pagesStanding(1)
+
+    first()
+    expect(stands()).toBe(false)
+
+    const again = registerPageSource(1, source([], "one"))
+
+    expect(stands()).toBe(false)
+    expect(pagesStanding(2)()).toBe(false)
+
+    again()
+  })
+
+  it("takes a closed document's pages off the clipboard with it", () => {
+    const unregister = registerPageSource(1, source([], "one"))
+    const held = taken(1)
+
+    holdPages(held)
+    unregister()
+    expect(heldPages()).toBeNull()
+    expect(pageSourceOf(held)).toBeUndefined()
   })
 })

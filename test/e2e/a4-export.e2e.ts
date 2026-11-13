@@ -85,27 +85,6 @@ describe("TFolio save as A4", () => {
     expect((await $$("[data-document-tab]").getElements()).length).toBe(1)
   })
 
-  it("shows the copy on the page grid its document was on", async () => {
-    const own = await openPdfFromDisk("arranged.pdf", minimalPdf(2, "0 0 200 200"))
-    const grid = `${session} [data-page-thumbnails='grid']`
-
-    await renderedPage()
-    await $(`${session} button[aria-label='Thumbnails']`).click()
-    await $(grid).waitForExist()
-
-    await saveAsA4(path.join(path.dirname(own), "arranged-A4.pdf"))
-    await $(grid).waitForExist()
-    await browser.waitUntil(
-      async () =>
-        (await browser.execute(
-          (scope: string) =>
-            document.querySelectorAll(`${scope} button[data-thumbnail-page]`).length,
-          grid,
-        )) === 2,
-      { timeoutMsg: "the copy's pages never showed in the grid" },
-    )
-  })
-
   it("opens the copy beside a document with unsaved changes, which stays", async () => {
     const own = await openPdfFromDisk("edited.pdf", minimalPdf(3))
     await renderedPage()
@@ -149,7 +128,7 @@ describe("TFolio save as A4", () => {
   it("keeps the blanks between files and a bookmark for each", async () => {
     const own = await openPdfFromDisk("own.pdf", minimalPdf(1))
     await pointMultiPickerAt([writeScratchPdf("added.pdf", outlinedPdf())])
-    await $(`${activeSidebar} [data-slot='pages-add-files']`).click()
+    await $(`${activeSidebar} [data-slot='sidebar-add-files']`).click()
     await browser.waitUntil(async () =>
       browser
         .execute(
@@ -164,7 +143,7 @@ describe("TFolio save as A4", () => {
     await browser.waitUntil(async () => (await pageShapes()).length === 4, {
       timeoutMsg: "the blank between the files was not written",
     })
-    await $(`${activeSidebar} button[aria-label='Bookmarks']`).click()
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
     await expect(bookmarks).toHaveText(expect.stringContaining("own.pdf"))
     await expect(bookmarks).toHaveText(expect.stringContaining("Second half"))

@@ -32,18 +32,18 @@ describe("TFolio viewer controls", () => {
 
   it("puts where the reader is and how the pages are looked at in a status bar under the viewer", async () => {
     const titleBar = await labelsIn(`${session} [data-slot='toolbar']`)
+    const level = await $(`${bar} [data-slot='zoom-controls-readout']`).getText()
 
-    // The order reads left to right: the page, then layout, zoom, the named
-    // sizings, the turn.
+    // The order reads left to right: the page, then layout, zoom and its
+    // level (which resets it, named by what it shows), the fits, the turn.
     const viewing = [
       "Page number",
       "Single page",
       "Book",
-      "Thumbnails",
       "Zoom out",
       "Zoom",
       "Zoom in",
-      "Actual size",
+      `Current zoom ${level}, click to reset to 100%`,
       "Fit width",
       "Fit page",
       "Rotate the view clockwise",
@@ -80,9 +80,11 @@ describe("TFolio viewer controls", () => {
   it("zooms as the slider is dragged, laying the pages out once let go", async () => {
     const zoomGroup = $(`${session} [data-slot='zoom-controls']`)
     const readout = $(`${bar} [data-slot='zoom-controls-readout']`)
-    await $(`${bar} button[aria-label='Actual size']`).click()
+    await readout.click()
     await expect(zoomGroup).toHaveAttribute("aria-label", "Zoom 100%")
     await expect(readout).toHaveText("100%")
+    // At 100% a press would change nothing, so the name offers none.
+    await expect(readout).toHaveAttribute("aria-label", "Current zoom 100%")
 
     const pageWidth = () =>
       browser.execute((css: string) =>

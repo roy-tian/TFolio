@@ -1,4 +1,5 @@
 import type { PagePoint, PagePointsRect } from "@/lib/annotationGeometry"
+import type { DocumentState } from "@/lib/documentState"
 import {
   samePageNumbersConfig,
   type PageNumbersConfig,
@@ -243,6 +244,9 @@ export type AnnotationHistory = {
   future: AnnotationEntry[]
   nextId: number
   past: AnnotationEntry[]
+  /** What the file on disk holds, taken at the save; null while it is the
+      file as opened (`savedId` 0). */
+  saved: DocumentState | null
   /** The entry the document on disk ends at; 0 for a file with none of these. */
   savedId: number
 }
@@ -251,6 +255,7 @@ export const emptyHistory: AnnotationHistory = {
   future: [],
   nextId: 1,
   past: [],
+  saved: null,
   savedId: 0,
 }
 
@@ -285,6 +290,20 @@ function movedPositions(order: number[]): number[] {
     null for a page the edit brought in; `"inPlace"` moved nothing, so
     everything held by page number stays true. */
 export type PageMovement = (number | null)[] | "inPlace"
+
+/** Where `page` stands after an edit that moved the pages: its new number, or,
+    taken out, the page now in its place — the last, when none came after it. */
+export function followPage(movement: (number | null)[], page: number): number {
+  const kept = movement.indexOf(page)
+
+  if (kept >= 0) {
+    return kept + 1
+  }
+
+  const before = movement.filter((from) => from !== null && from < page).length
+
+  return Math.max(1, Math.min(before + 1, movement.length))
+}
 
 /** `pages` taken out of `pageCount`: the rest close up in order. */
 function departures(pages: number[], pageCount: number): number[] {
@@ -467,6 +486,7 @@ export function planEraseAnnotation(history: AnnotationHistory, entryId: number)
         ...history.past.slice(index + 1),
         { command, id: history.nextId },
       ],
+      saved: history.saved,
       savedId: history.savedId,
     } satisfies AnnotationHistory,
   }
@@ -852,12 +872,6 @@ export function nextRedoCommand(history: AnnotationHistory) {
   return history.future.at(-1)?.command ?? null
 }
 
-/** Identity of the topmost entry, not a count of edits: undoing back to exactly
-    what was saved leaves nothing to write, which a growing counter would miss. */
-export function isDirty(history: AnnotationHistory) {
-  return historyHead(history) !== history.savedId
-}
-
 /** Anything undone is dropped: the reader has taken a new branch. */
 export function commit(
   history: AnnotationHistory,
@@ -867,6 +881,7 @@ export function commit(
     future: [],
     nextId: history.nextId + 1,
     past: [...history.past, { command, id: history.nextId }],
+    saved: history.saved,
     savedId: history.savedId,
   }
 }
@@ -892,6 +907,7 @@ export function undo(history: AnnotationHistory) {
       future: [...history.future, entry],
       nextId: history.nextId,
       past,
+      saved: history.saved,
       savedId: history.savedId,
     },
   }
@@ -918,6 +934,7 @@ export function redo(history: AnnotationHistory) {
           : history.past.filter((applied) => applied.id !== erased)),
         entry,
       ],
+      saved: history.saved,
       savedId: history.savedId,
     },
   }
@@ -953,8 +970,4 @@ export function droppedStashIds(
         return []
     }
   })
-}
-
-export function markSaved(history: AnnotationHistory): AnnotationHistory {
-  return { ...history, savedId: historyHead(history) }
 }

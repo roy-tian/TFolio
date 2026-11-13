@@ -27,11 +27,15 @@ describe("resolveSupportedLanguage", () => {
     ["it-IT", "it"],
     ["de-AT", "de"],
     ["th-TH-u-nu-thai", "th"],
+    ["ja-JP", "ja"],
+    ["ko_KR", "ko"],
+    ["pt-BR", "pt"],
+    ["pt-PT", "pt"],
   ] as const)("maps %s to %s", (language, expected) => {
     expect(resolveSupportedLanguage(language)).toBe(expected)
   })
 
-  test.each([null, undefined, "", "pt-BR", "eng"])(
+  test.each([null, undefined, "", "nl-NL", "eng"])(
     "does not map unsupported locale %s",
     (language) => {
       expect(resolveSupportedLanguage(language)).toBeNull()
@@ -55,10 +59,10 @@ describe("resolveLanguagePreference", () => {
 
 describe("selectSystemLanguage", () => {
   test("uses the first supported system language", () => {
-    expect(selectSystemLanguage(["pt-BR", "de-CH", "zh-CN"])).toBe("de")
+    expect(selectSystemLanguage(["nl-NL", "de-CH", "zh-CN"])).toBe("de")
   })
 
   test("falls back when no candidate is supported", () => {
-    expect(selectSystemLanguage(["pt-BR"])).toBe(defaultLanguage)
+    expect(selectSystemLanguage(["nl-NL"])).toBe(defaultLanguage)
   })
 })

@@ -4,6 +4,7 @@ import {
   emptiesItsFile,
   fileMoveOrder,
   fileRuns,
+  foldedAway,
   reorderSections,
   sectionAt,
   sectionsOf,
@@ -93,5 +94,17 @@ describe("emptiesItsFile", () => {
     expect(emptiesItsFile(filed(0, 1, 1), [1])).toBe(true)
     expect(emptiesItsFile(filed(0, 0, 1), [2])).toBe(false)
     expect(emptiesItsFile([page(), page()], [1, 2])).toBe(false)
+  })
+})
+
+describe("foldedAway", () => {
+  const pages = [page(0), page(1), page(1)]
+
+  test("holds for a page of a folded file, while names head the files' pages", () => {
+    expect(foldedAway(pages, 2, new Set([1]), true)).toBe(true)
+    expect(foldedAway(pages, 1, new Set([1]), true)).toBe(false)
+    // The files run together: nothing is folded, whatever was before.
+    expect(foldedAway(pages, 2, new Set([1]), false)).toBe(false)
+    expect(foldedAway([page(), page()], 1, new Set([0]), true)).toBe(false)
   })
 })

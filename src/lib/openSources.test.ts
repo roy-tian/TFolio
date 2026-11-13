@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test"
 import {
   classifyOpenSource,
   isImagePath,
-  isSourcePath,
   isWordPath,
+  partitionOpenable,
   pdfNameFromSource,
 } from "./openSources"
 
@@ -34,20 +34,20 @@ describe("isWordPath", () => {
   })
 })
 
-describe("isSourcePath", () => {
-  test("takes Word documents only while a converter is there", () => {
-    expect(isSourcePath("/tmp/letter.docx")).toBe(true)
-    expect(isSourcePath("/tmp/letter.docx", false)).toBe(false)
-    expect(isSourcePath("/tmp/report.pdf", false)).toBe(true)
-    expect(isSourcePath("/tmp/scan.png", false)).toBe(true)
-  })
-
-  test("takes PDFs and the image formats a page can be made of", () => {
-    expect(isSourcePath("/tmp/report.pdf")).toBe(true)
-    expect(isSourcePath("/tmp/scan.JPG")).toBe(true)
-    expect(isSourcePath("C:\\Files\\photo.webp")).toBe(true)
-    expect(isSourcePath("/tmp/notes.txt")).toBe(false)
-    expect(isSourcePath("/tmp/png")).toBe(false)
+describe("partitionOpenable", () => {
+  test("takes PDFs, images and Word documents, in the order given", () => {
+    expect(
+      partitionOpenable([
+        "/tmp/report.pdf",
+        "/tmp/notes.txt",
+        "C:\\Files\\photo.webp",
+        "/tmp/letter.DOCX",
+        "/tmp/png",
+      ]),
+    ).toEqual({
+      openable: ["/tmp/report.pdf", "C:\\Files\\photo.webp", "/tmp/letter.DOCX"],
+      skipped: ["/tmp/notes.txt", "/tmp/png"],
+    })
   })
 
   test("tells an image apart from a PDF", () => {

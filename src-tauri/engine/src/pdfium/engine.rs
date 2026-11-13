@@ -695,6 +695,8 @@ impl PdfiumEngine {
             has_merged_pages,
             has_foreign_pages: false,
             sections: Vec::new(),
+            padding: Vec::new(),
+            file_options: None,
             signatures: scan.summary(intact),
         })
     }

@@ -42,7 +42,7 @@ pub use compress::{
 #[cfg(feature = "e2e")]
 pub use files::unload_pdf_sources;
 pub use files::{
-    insert_pdf_files, read_pdf_sources, release_pdf_sources, rename_pdf_section,
+    insert_pdf_files, merge_pdf_sources, read_pdf_sources, release_pdf_sources, rename_pdf_section,
     set_pdf_file_options,
 };
 

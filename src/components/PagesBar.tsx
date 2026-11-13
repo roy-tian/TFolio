@@ -1,8 +1,9 @@
-import { useRef } from "react"
-import { ChevronDown, FileStack, SlidersHorizontal } from "lucide-react"
+import { RotateCcw, RotateCw, Settings, Trash2, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { HintTooltip } from "@/components/HintTooltip"
+import { SidebarDropHint } from "@/components/SidebarFileDrop"
+import { SidebarPanelTools } from "@/components/SidebarPanelTools"
+import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -13,6 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useSidebarDrop } from "@/hooks/useSidebarDrop"
 import type { FileOptions } from "@/lib/pdf"
 import { cn } from "@/lib/utils"
 
@@ -21,110 +23,181 @@ type PagesBarProps = {
   fileOptions: FileOptions | undefined
   /** Whether each file of a document of several starts a row of its own. */
   fileRows: boolean
-  /** Across the main area, over the workspace's own ground. */
-  grid: boolean
-  onAddFiles: () => void
+  /** How many of the files are folded to their names, of how many. */
+  folded: { count: number; of: number }
+  onDelete: () => void
   onFileOptionsChange: (change: Partial<FileOptions>) => void
   onFileRowsChange: (fileRows: boolean) => void
+  /** Every file's pages folded away under its name, or shown again. */
+  onFoldAll: (folded: boolean) => void
+  onRotate: (degrees: 90 | 270) => void
   severalFiles: boolean
+  /** The pages its buttons act on, the chosen ones or else the page being
+      read: how many, the first of them, and of how many in the document.
+      `unseen` is the page being read folded away under its file's name,
+      where no button may reach it. */
+  targets: { count: number; first: number; of: number; unseen?: boolean }
 }
 
-/** The bar over a document's pages, down the sidebar or across the grid:
-    how its files are laid out and saved, once it has several, and the way
-    to add more. */
+/** The bar over a document's pages in the sidebar: turning and removing the
+    chosen pages, or the page being read, then the files' own tools. While a
+    file drag offers the pages it says what a drop there does instead. */
 export function PagesBar({
   fileOptions,
   fileRows,
-  grid,
-  onAddFiles,
+  folded,
+  onDelete,
   onFileOptionsChange,
   onFileRowsChange,
+  onFoldAll,
+  onRotate,
   severalFiles,
+  targets,
 }: PagesBarProps) {
   const { t } = useTranslation()
-  const addFilesRef = useRef<HTMLSpanElement>(null)
+  const drop = useSidebarDrop()
+  // One page by its number, so the reader knows which: it may be the page
+  // being read rather than one chosen in the sidebar.
+  const one = targets.count === 1 ? { pageNumber: targets.first } : null
+  const { count } = targets
+  // A button that cannot act says why, in place of what it would do.
+  const unseen = targets.unseen ? t("pageEdit.pageFolded", { pageNumber: targets.first }) : null
+  // A document keeps one page; the backend refuses a delete of them all.
+  const keepsOne = count >= targets.of
+  // Laid out and saved file by file only once there are several files.
+  const fileTools = severalFiles || fileOptions !== undefined
+  const filesLabel = fileTools ? t("sidebar.fileOptions") : t("sidebar.fileOptionsOneFile")
+  const pageActions: {
+    disabled?: boolean
+    icon: LucideIcon
+    label: string
+    onClick: () => void
+    slot: string
+  }[] = [
+    {
+      disabled: unseen !== null,
+      icon: RotateCcw,
+      label:
+        unseen ??
+        (one ? t("pageEdit.rotatePageLeft", one) : t("pageEdit.rotateLeft", { count })),
+      onClick: () => onRotate(270),
+      slot: "pages-rotate-left",
+    },
+    {
+      disabled: unseen !== null,
+      icon: RotateCw,
+      label:
+        unseen ??
+        (one ? t("pageEdit.rotatePageRight", one) : t("pageEdit.rotateRight", { count })),
+      onClick: () => onRotate(90),
+      slot: "pages-rotate-right",
+    },
+    {
+      disabled: unseen !== null || keepsOne,
+      icon: Trash2,
+      label:
+        unseen ??
+        (keepsOne
+          ? t("pageEdit.deleteKeepsOne")
+          : one
+            ? t("pageEdit.deletePage", one)
+            : t("pageEdit.delete", { count })),
+      onClick: onDelete,
+      slot: "pages-delete",
+    },
+  ]
 
   return (
-    <div
-      className={cn(
-        "flex h-9 shrink-0 items-center gap-1 border-b px-2",
-        grid && "bg-background",
-      )}
-      data-slot="pages-bar"
-    >
-      {/* In words, not icons: two of these change what a Save As writes,
-          which no glyph says, and they stand apart from the one that only
-          changes how the pages are laid out here. */}
-      {severalFiles || fileOptions ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                className="min-w-0 shrink"
-                data-slot="pages-file-options"
-                size="sm"
-                variant="ghost"
-              />
-            }
-          >
-            <SlidersHorizontal />
-            <span className="truncate">{t("sidebar.fileOptions")}</span>
-            <ChevronDown className="size-3 opacity-60" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-auto max-w-96 min-w-56">
-            {severalFiles ? (
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>{t("sidebar.optionsView")}</DropdownMenuLabel>
-                <DropdownMenuCheckboxItem
-                  checked={fileRows}
-                  data-action="file-rows"
-                  onCheckedChange={onFileRowsChange}
-                >
-                  {t("sidebar.fileRows")}
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuGroup>
-            ) : null}
-            {severalFiles && fileOptions ? <DropdownMenuSeparator /> : null}
-            {fileOptions ? (
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>{t("sidebar.optionsSave")}</DropdownMenuLabel>
-                <DropdownMenuCheckboxItem
-                  checked={fileOptions.smartPadding}
-                  data-action="smart-padding"
-                  onCheckedChange={(smartPadding) => onFileOptionsChange({ smartPadding })}
-                >
-                  {t("sidebar.smartPadding")}
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuCheckboxItem
-                  checked={fileOptions.perFileBookmarks}
-                  data-action="file-bookmarks"
-                  onCheckedChange={(perFileBookmarks) =>
-                    onFileOptionsChange({ perFileBookmarks })
-                  }
-                >
-                  {t("sidebar.fileBookmarks")}
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuGroup>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
-      {/* Down a narrow sidebar a long language's words are cut short: the
-          hint then says them whole. */}
-      <HintTooltip cutShort={addFilesRef} label={t("sidebar.addFiles")}>
-        <Button
-          className="ml-auto min-w-0 shrink"
-          data-slot="pages-add-files"
-          onClick={onAddFiles}
-          size="sm"
-          variant="ghost"
+    <div className="relative flex h-9 shrink-0 border-b px-2" data-slot="pages-bar">
+      <SidebarDropHint label={t("sidebar.dropFiles")} />
+      {/* Hidden, not unmounted, under the drag's words: an open menu would
+          lose the trigger it stands by. */}
+      <div className={cn("flex min-w-0 flex-1 items-center gap-0.5", drop && "invisible")}>
+        {pageActions.map(({ disabled, icon: Icon, label, onClick, slot }) => (
+          <ToolbarTooltip key={slot} label={label}>
+            <Button
+              aria-label={label}
+              // Dimmed, not disabled, while an edit runs, which a press would
+              // only be refused behind: a disabled button gives up its focus.
+              className={cn(
+                "in-data-[pages-busy]:cursor-wait in-data-[pages-busy]:opacity-50",
+                slot === "pages-delete" && "hover:text-destructive",
+              )}
+              data-slot={slot}
+              disabled={disabled}
+              onClick={onClick}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Icon />
+            </Button>
+          </ToolbarTooltip>
+        ))}
+        <SidebarPanelTools
+          fold={{
+            // Only a file under its own name has pages to fold away.
+            canFold: severalFiles && fileRows && folded.count < folded.of,
+            canUnfold: severalFiles && fileRows && folded.count > 0,
+            foldLabel: t("sidebar.foldAll"),
+            onFold: onFoldAll,
+            unfoldLabel: t("sidebar.unfoldAll"),
+          }}
         >
-          <FileStack />
-          <span className="truncate" ref={addFilesRef}>
-            {t("sidebar.addFiles")}
-          </span>
-        </Button>
-      </HintTooltip>
+          <DropdownMenu>
+            <ToolbarTooltip label={filesLabel}>
+              <DropdownMenuTrigger
+                disabled={!fileTools}
+                render={
+                  <Button
+                    aria-label={filesLabel}
+                    data-slot="pages-file-options"
+                    size="icon-sm"
+                    variant="ghost"
+                  />
+                }
+              >
+                <Settings />
+              </DropdownMenuTrigger>
+            </ToolbarTooltip>
+            <DropdownMenuContent align="end" className="w-auto max-w-96 min-w-56">
+              {severalFiles ? (
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{t("sidebar.optionsView")}</DropdownMenuLabel>
+                  <DropdownMenuCheckboxItem
+                    checked={fileRows}
+                    data-action="file-rows"
+                    onCheckedChange={onFileRowsChange}
+                  >
+                    {t("sidebar.fileRows")}
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuGroup>
+              ) : null}
+              {severalFiles && fileOptions ? <DropdownMenuSeparator /> : null}
+              {fileOptions ? (
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{t("sidebar.optionsSave")}</DropdownMenuLabel>
+                  <DropdownMenuCheckboxItem
+                    checked={fileOptions.smartPadding}
+                    data-action="smart-padding"
+                    onCheckedChange={(smartPadding) => onFileOptionsChange({ smartPadding })}
+                  >
+                    {t("sidebar.smartPadding")}
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={fileOptions.perFileBookmarks}
+                    data-action="file-bookmarks"
+                    onCheckedChange={(perFileBookmarks) =>
+                      onFileOptionsChange({ perFileBookmarks })
+                    }
+                  >
+                    {t("sidebar.fileBookmarks")}
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuGroup>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarPanelTools>
+      </div>
     </div>
   )
 }

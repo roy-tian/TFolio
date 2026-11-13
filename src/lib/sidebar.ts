@@ -12,19 +12,17 @@ export type SidebarMode = "docked" | "overlay" | "hidden"
 
 export const defaultSidebarPanel: SidebarPanel = "thumbnails"
 
-/**
- * The narrowest window that docks the sidebar: 16rem plus the toolbar beside
- * it, measured at 804px with the window buttons and a four-digit page count
- * (2026-10-31), and some room for wider system fonts. macOS has no window
- * buttons of its own to fit.
- */
-export function sidebarDockMinWidth(macOS: boolean) {
-  return macOS ? 980 : 1100
-}
-
 /** 16rem at the default font size: the sidebar as it opens, and as narrow as
     it goes. */
 export const SIDEBAR_MIN_WIDTH = 256
+
+/** The narrowest the pages get beside a docked sidebar: the window's own
+    `minWidth` (tauri.conf.json), so docking never leaves them less room than a
+    window can have. The toolbar's words fold where they no longer fit. */
+export const DOCKED_PAGES_MIN_WIDTH = 640
+
+/** The narrowest window that docks the sidebar. */
+export const SIDEBAR_DOCK_MIN_WIDTH = SIDEBAR_MIN_WIDTH + DOCKED_PAGES_MIN_WIDTH
 
 /** One arrow press on the sidebar's edge. */
 export const SIDEBAR_WIDTH_STEP = 16
@@ -32,10 +30,10 @@ export const SIDEBAR_WIDTH_STEP = 16
 // An overlay keeps this much of the pages in view: a press there sends it away.
 const OVERLAY_PAGES_MARGIN = 64
 
-/** How much of the window the sidebar may not take: docked, the toolbar beside
-    it keeps the room it has at the narrowest docked window. */
-export function sidebarReservedWidth(macOS: boolean, docked: boolean) {
-  return docked ? sidebarDockMinWidth(macOS) - SIDEBAR_MIN_WIDTH : OVERLAY_PAGES_MARGIN
+/** How much of the window the sidebar may not take: docked, the pages keep the
+    room they have at the narrowest docked window. */
+export function sidebarReservedWidth(docked: boolean) {
+  return docked ? DOCKED_PAGES_MIN_WIDTH : OVERLAY_PAGES_MARGIN
 }
 
 /** The width a drag or an arrow press settles on in a window this wide. */
@@ -53,10 +51,14 @@ export function sidebarWidthOf(stored: unknown): number | null {
     : null
 }
 
-/** The page grid's gap between cells, which also holds a blank's way in. */
+/** The gap between the previews of a sidebar wide enough for several
+    columns, which also holds a blank's way in. */
 export const THUMBNAIL_GRID_GAP = 24
 
-/** How many fixed-size previews fit across the grid's content box. */
+/** The gap down a sidebar's one column of previews. */
+export const THUMBNAIL_COLUMN_GAP = 12
+
+/** How many fixed-size previews fit across the sidebar's content box. */
 export function thumbnailColumns(contentWidth: number, cell: number) {
   return Math.max(1, Math.floor((contentWidth + THUMBNAIL_GRID_GAP) / (cell + THUMBNAIL_GRID_GAP)))
 }
@@ -114,15 +116,6 @@ export function storeSidebarOpen(open: boolean) {
 
 export function storeSidebarPanel(panel: SidebarPanel) {
   void rememberSettings({ ui: { sidebarPanel: panel } })
-}
-
-/** A document without bookmarks keeps the reader's choice standing, so the
-    next document that has some opens on them again. */
-export function shownSidebarPanel(
-  preferred: SidebarPanel,
-  bookmarksApply: boolean,
-): SidebarPanel {
-  return preferred === "bookmarks" && !bookmarksApply ? "thumbnails" : preferred
 }
 
 export function sidebarMode(open: boolean, docked: boolean, peeking: boolean): SidebarMode {

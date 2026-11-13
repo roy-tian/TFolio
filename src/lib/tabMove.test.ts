@@ -40,7 +40,6 @@ const payload: MovedTabPayload = {
   savable: false,
   saveRequired: false,
   seed: {
-    grid: true,
     history: {
       ...emptyHistory,
       past: [
@@ -59,6 +58,7 @@ const payload: MovedTabPayload = {
           id: 1,
         },
       ],
+      saved: null,
       savedId: 0,
     },
     marks: [[1, [11, 12, 13]]],
@@ -187,18 +187,6 @@ describe("parseMovedTabPayload", () => {
     expect(parsed?.recentView).toBeUndefined()
     expect(parsed?.saveAsDefaultName).toBeUndefined()
     expect(parsed?.seed.marks).toEqual([[1, [11, 12, 13]]])
-  })
-
-  it("reads a tab as off the page grid unless its seed says it was on it", () => {
-    const valid = JSON.parse(JSON.stringify(payload))
-
-    expect(parseMovedTabPayload(valid)?.seed.grid).toBe(true)
-    expect(
-      parseMovedTabPayload({ ...valid, seed: { ...valid.seed, grid: undefined } })?.seed.grid,
-    ).toBe(false)
-    expect(
-      parseMovedTabPayload({ ...valid, seed: { ...valid.seed, grid: "yes" } })?.seed.grid,
-    ).toBe(false)
   })
 
   it("refuses a payload whose document or seed came apart", () => {
