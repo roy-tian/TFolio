@@ -22,6 +22,7 @@
   DeleteRegKey /ifempty SHCTX "Software\Classes\.pdf"
   DeleteRegKey SHCTX "Software\Classes\TFolio.PDF"
   DeleteRegValue SHCTX "Software\RegisteredApplications" "TFolio"
+  DeleteRegKey /ifempty SHCTX "Software\RegisteredApplications"
   DeleteRegKey SHCTX "Software\TFolio\Capabilities"
   DeleteRegKey /ifempty SHCTX "Software\TFolio"
 !macroend
