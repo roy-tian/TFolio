@@ -24,6 +24,7 @@ Get the latest from [Releases](https://github.com/roy-tian/TFolio/releases/lates
 ## Good to know
 
 - Word import needs Microsoft Word, WPS Office (Windows), or LibreOffice (macOS / Linux) installed; `.wps` files cannot be imported directly.
+- TFolio never makes itself the default app: to open PDFs with it, choose it in Open with or in your system's default apps.
 - A document carrying a watermark or page numbers can only be exported as a copy; the original file stays untouched. PDFs up to 512 MiB can be opened.
 
 Copyright © 2026 Roy Tian.

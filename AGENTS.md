@@ -91,6 +91,12 @@
   events reach only pages already listening.
 - Linux's desktop entry needs `%F` (missing from Tauri's template). Single-instance arguments
   must be absolute; relative paths resolve against the running process's directory.
+- Installers offer TFolio for PDFs alone and never claim a default: which app opens a file is
+  the reader's choice in the OS. Tauri's `fileAssociations` set each extension's default on
+  Windows, so `tauri.windows.conf.json` empties them and `installer-hooks.nsh` and
+  `pdf-association.wxs` register `TFolio.PDF` only in `.pdf`'s `OpenWithProgids` and
+  `RegisteredApplications`; the NSIS hook also undoes what 0.1.6–0.1.28 claimed. macOS ranks
+  PDF `Alternate`, and Linux lists `application/pdf` alone.
 - Settings writes replace the whole document. Sync other windows through `settings://changed`;
   theme and language apply only at boot.
 

@@ -24,6 +24,7 @@
 ## 须知
 
 - 导入 Word 文档需本机装有 Microsoft Word、WPS Office（Windows）或 LibreOffice（macOS / Linux）；暂不支持直接导入 `.wps` 文件。
+- TFolio 不会自行设为默认应用；想用它打开 PDF，请在“打开方式”或系统的默认应用设置中选择。
 - 带水印或页码的文档只能导出副本，原文件不会被改动。可打开不超过 512 MiB 的 PDF。
 
 版权所有 © 2026 Roy Tian
