@@ -1,15 +1,12 @@
 import { rememberSettings, storedSettings } from "@/lib/settings"
 
-export const supportedLanguages = [
-  "zh-CN",
-  "zh-TW",
-  "en",
-  "fr",
-  "es",
-  "it",
-  "de",
-  "th",
+/** In the picker's order: its two groups, each laid out in rows of three. */
+export const languageGroups = [
+  ["zh-CN", "zh-TW", "th", "ja", "ko"],
+  ["en", "de", "fr", "es", "pt", "it"],
 ] as const
+
+export const supportedLanguages = languageGroups.flat()
 
 export type SupportedLanguage = (typeof supportedLanguages)[number]
 
@@ -24,12 +21,31 @@ export type LanguagePreference = SupportedLanguage | typeof systemLanguage
 export const languageNames: Record<SupportedLanguage, string> = {
   "zh-CN": "简体中文",
   "zh-TW": "繁體中文",
+  th: "ภาษาไทย",
+  ja: "日本語",
+  ko: "한국어",
   en: "English",
+  de: "Deutsch",
   fr: "Français",
   es: "Español",
+  pt: "Português",
   it: "Italiano",
-  de: "Deutsch",
-  th: "ภาษาไทย",
+}
+
+/** The picker's badges name a language, never a country: a flag or a region
+    code would claim one for languages that several share. */
+export const languageCodes: Record<SupportedLanguage, string> = {
+  "zh-CN": "ZH",
+  "zh-TW": "ZH",
+  th: "TH",
+  ja: "JP",
+  ko: "KO",
+  en: "EN",
+  de: "DE",
+  fr: "FR",
+  es: "ES",
+  pt: "PT",
+  it: "IT",
 }
 
 export const defaultLanguage: SupportedLanguage = "zh-CN"

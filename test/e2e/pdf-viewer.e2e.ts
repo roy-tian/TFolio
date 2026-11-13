@@ -249,9 +249,7 @@ describe("TFolio PDF viewer", () => {
     expect(isDarkAfterDark).toBe(true)
 
     await $("#settings-language").click()
-    await $(
-      "//*[@role='option' and normalize-space()='简体中文']",
-    ).click()
+    await $("[role='option'][data-language='zh-CN']").click()
 
     const documentLanguage = await browser.execute(
       () => document.documentElement.lang,

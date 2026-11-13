@@ -15,7 +15,7 @@ Your PDF work companion, always at hand: light, fast and easy on memory. Two wor
 - **Organize pages**: combine PDFs, images and Word documents into a new PDF without changing the sources; start every file on an odd page, make every page A4, and add a bookmark per file.
 - **Blank pages, watermarks, page numbers, added for you**: blanks only where double-sided printing needs them; watermarks sized to each page's width; “— n —” numbers that mirror for binding and turn white on dark areas.
 - **Search across line breaks**: a phrase split over two lines, or pasted with its line breaks, is still found.
-- **Friendly and MIT-licensed**: every step can be undone; 8 interface languages, light or dark. Bring ideas to [Discussions](https://github.com/roy-tian/TFolio/discussions) and problems to [Issues](https://github.com/roy-tian/TFolio/issues).
+- **Friendly and MIT-licensed**: every step can be undone; 11 interface languages, light or dark. Bring ideas to [Discussions](https://github.com/roy-tian/TFolio/discussions) and problems to [Issues](https://github.com/roy-tian/TFolio/issues).
 
 ## Download
 

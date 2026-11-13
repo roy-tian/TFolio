@@ -15,7 +15,7 @@
 - **页面组织**：把 PDF、图片和 Word 文档拼成新 PDF，源文件只读不改；每个文件从奇数页开始、统一为 A4，并按文件建书签。
 - **智能添加空白页、水印、页码**：只在双面打印需要处补空白页；水印按页宽等比缩放；“— n —”页码按双面装订奇右偶左，落在深色区域自动变白。
 - **跨行搜索**：被排版拆到两行的词、带着换行粘贴的句子，都能搜到。
-- **好上手，MIT 开源**：每一步都能撤销，8 种界面语言，明暗主题可选。想法请到 [Discussions](https://github.com/roy-tian/TFolio/discussions)，问题请到 [Issues](https://github.com/roy-tian/TFolio/issues)。
+- **好上手，MIT 开源**：每一步都能撤销，11 种界面语言，明暗主题可选。想法请到 [Discussions](https://github.com/roy-tian/TFolio/discussions)，问题请到 [Issues](https://github.com/roy-tian/TFolio/issues)。
 
 ## 下载
 

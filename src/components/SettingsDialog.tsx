@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next"
 
 import appLargeIcon from "@/assets/brand/app-large.svg"
 import { AboutUpdate } from "@/components/AboutUpdate"
+import { LanguagePicker } from "@/components/LanguagePicker"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,23 +26,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { changeLanguagePreference, useLanguagePreference } from "@/i18n"
-import {
-  detectSystemLanguage,
-  languageNames,
-  supportedLanguages,
-  systemLanguage,
-} from "@/i18n/config"
-import { translations } from "@/i18n/resources"
 import {
   isSignatureHandling,
   storeSignatureHandling,
@@ -86,11 +70,6 @@ const themeOptions: Array<{
   { value: "system", labelKey: "settings.themeSystem", icon: Monitor },
   { value: "dark", labelKey: "settings.themeDark", icon: Moon },
 ]
-
-const languageItems = supportedLanguages.map((value) => ({
-  label: languageNames[value],
-  value,
-}))
 
 const mockColors: Record<
   ResolvedTheme,
@@ -183,23 +162,11 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { t } = useTranslation()
   const preference = useThemePreference()
-  const languagePreference = useLanguagePreference()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
   const appearanceRef = useRef<HTMLDivElement>(null)
   const signaturesRef = useRef<HTMLDivElement>(null)
   const aboutRef = useRef<HTMLDivElement>(null)
   const signatureHandling = useSignatureHandling()
-
-  // In the language it switches to, like the names beside it, so a reader
-  // stranded in an interface they cannot read still recognises it.
-  const systemLabelLanguage = detectSystemLanguage()
-  const systemLabel = translations[systemLabelLanguage].settings.languageSystem
-  // Base UI resolves the trigger's label from `items`; without it the trigger
-  // would fall back to printing the raw value ("zh-CN").
-  const languageOptions = [
-    { label: systemLabel, value: systemLanguage },
-    ...languageItems,
-  ]
 
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -222,7 +189,7 @@ export function SettingsDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="flex h-[27rem] w-[44rem] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
+        className="flex h-[27rem] w-[47rem] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
         showCloseButton={false}
       >
         <DialogDescription className="sr-only">
@@ -242,7 +209,7 @@ export function SettingsDialog({
           <X />
         </DialogClose>
 
-        <div className="flex h-full w-40 shrink-0 flex-col gap-3 border-r bg-muted/30 p-2.5">
+        <div className="flex h-full max-w-60 min-w-40 shrink-0 flex-col gap-3 border-r bg-muted/30 p-2.5">
           <DialogTitle className="px-2 pt-1.5 text-sm font-medium">
             {t("settings.title")}
           </DialogTitle>
@@ -261,7 +228,7 @@ export function SettingsDialog({
                   aria-controls={`settings-panel-${item.value}`}
                   aria-selected={selected}
                   className={cn(
-                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
                     selected
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -320,12 +287,14 @@ export function SettingsDialog({
                         value={option.value}
                       >
                         <ThemeMock preference={option.value} />
-                        <div className="flex items-center justify-between gap-1 px-0.5">
-                          <span className="flex items-center gap-1.5 text-xs font-medium">
-                            <Icon className="size-3.5" />
+                        {/* From the top, so a name on two lines in a narrow window leaves
+                            its icon and its mark where the other cards have theirs. */}
+                        <div className="flex items-start justify-between gap-1 px-0.5">
+                          <span className="flex min-w-0 items-start gap-1.5 text-xs leading-3.5 font-medium">
+                            <Icon className="size-3.5 shrink-0" />
                             {t(option.labelKey)}
                           </span>
-                          <span className="flex size-3.5 items-center justify-center rounded-full border border-input transition-colors group-data-checked/theme:border-primary group-data-checked/theme:bg-primary">
+                          <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full border border-input transition-colors group-data-checked/theme:border-primary group-data-checked/theme:bg-primary">
                             <Radio.Indicator className="block size-1.5 rounded-full bg-primary-foreground" />
                           </span>
                         </div>
@@ -344,40 +313,7 @@ export function SettingsDialog({
                     {t("settings.languageHint")}
                   </p>
                 </div>
-                <Select
-                  items={languageOptions}
-                  onValueChange={(value) => {
-                    // Base UI types the value as nullable to allow a placeholder
-                    // item; this list has none, so it only ever reports a choice.
-                    if (value !== null) {
-                      void changeLanguagePreference(value)
-                    }
-                  }}
-                  value={languagePreference}
-                >
-                  <SelectTrigger className="w-full max-w-60" id="settings-language">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem lang={systemLabelLanguage} value={systemLanguage}>
-                        {systemLabel}
-                      </SelectItem>
-                    </SelectGroup>
-                    <SelectSeparator />
-                    <SelectGroup>
-                      {languageItems.map((item) => (
-                        <SelectItem
-                          key={item.value}
-                          lang={item.value}
-                          value={item.value}
-                        >
-                          {item.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                <LanguagePicker id="settings-language" />
               </section>
             </div>
           </div>

@@ -88,8 +88,8 @@
 
 ## Security and path approval
 
-- Keep production CSP restrictive; relax only `devCsp`. The Base UI settings select has a
-  known `style-src-elem` violation; new sources are regressions.
+- Keep production CSP restrictive; relax only `devCsp`. The Base UI select (the page numbers'
+  blank-pages choice) has a known `style-src-elem` violation; new sources are regressions.
 - Capabilities do not gate custom `generate_handler!` commands: validate arguments in Rust.
   Do not register the transitive `tauri-plugin-fs` plugin.
 - Path-based opens and file sources require `ensure_approved` except in e2e.
@@ -105,6 +105,11 @@
   change or focus. `toolbar-tooltips.e2e.ts` guards.
 - Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
   beside it.
+- Eleven locales share every layout, and the longest words decide it: a menu or popover takes its
+  content's width (`w-auto min-w-*`), never a fixed one, and a row that cannot hold its words
+  wraps, or drops its icons, before it cuts one. Check a new label in every locale at 640 wide.
+- The language picker's order and badges are `languageGroups` and `languageCodes`: a badge names
+  a language, never a country, and each language is named in itself.
 - Fetch what a copy writes when the selection is made: WebKit refuses a clipboard write that
   awaits IPC long after the keypress.
 - A menu entry that starts an edit in place unmounts its menu content on close (no fade) and
