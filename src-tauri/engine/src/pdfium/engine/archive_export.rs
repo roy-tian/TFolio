@@ -192,7 +192,7 @@ impl PdfiumEngine {
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<bool, String> {
         let operation = self.begin_operation(OperationTarget::Archive(document_id));
-        let (version, total, outline, flatten) = {
+        let (version, total, outline, flatten, dead_links) = {
             let documents = self.lock_documents()?;
             let entry = open_entry(&documents, document_id)?;
             // A ZIP can never replace an open PDF, including one reached through an alias.
@@ -215,6 +215,7 @@ impl PdfiumEngine {
                 entry.document.pages().len() as usize,
                 outline,
                 flatten,
+                entry.linked.dead_links(Headed::Away),
             )
         };
         let dpi = if let ArchiveOptions::Images { dpi, .. } = options {
@@ -279,10 +280,11 @@ impl PdfiumEngine {
                         return Ok(false);
                     };
                     let Some(mut bytes) = write_navigation(
-                        page_import::without_unrewritten_links(bytes, page_import::Headed::Away)?,
+                        bytes,
                         &section_outline(&outline, section.start, section.end),
                         &links,
                         section.start,
+                        dead_links,
                         || operation.is_cancelled(),
                     )?
                     else {
@@ -318,8 +320,9 @@ impl PdfiumEngine {
                             .map_err(|error| format!("could not save a split PDF: {error}"))
                     })?;
                     // Byte work, so off the lock `with_archive_source` holds.
-                    bytes =
-                        page_import::without_unrewritten_links(bytes, page_import::Headed::Away)?;
+                    if dead_links {
+                        bytes = without_unrewritten_links(bytes, Headed::Away)?;
+                    }
                     if flatten {
                         bytes = signatures::flattened_bytes(bytes)?;
                     }

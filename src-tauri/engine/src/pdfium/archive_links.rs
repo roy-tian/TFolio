@@ -1,6 +1,7 @@
 use lopdf::{Document, Object};
 use pdfium_render::prelude::*;
 
+use super::import_links::{drop_unrewritten_links, Headed};
 use super::outline::{install_outline, OutlineNode};
 
 pub(super) struct PageLink {
@@ -81,16 +82,22 @@ pub(super) fn write_navigation(
     outline: &[OutlineNode],
     links: &[Vec<PageLink>],
     start: i32,
+    dead_links: bool,
     cancelled: impl Fn() -> bool,
 ) -> Result<Option<Vec<u8>>, String> {
     if cancelled() {
         return Ok(None);
     }
-    if outline.is_empty() && links.iter().all(Vec::is_empty) {
+    if outline.is_empty() && links.iter().all(Vec::is_empty) && !dead_links {
         return Ok(Some(bytes));
     }
     let mut document = Document::load_mem(&bytes)
         .map_err(|error| format!("could not reread the split PDF: {error}"))?;
+    // In the same pass: a part is PDFium's copy of another document's pages.
+    let dropped = dead_links && drop_unrewritten_links(&mut document, Headed::Away);
+    if !dropped && outline.is_empty() && links.iter().all(Vec::is_empty) {
+        return Ok(Some(bytes));
+    }
     if !restore_links(&mut document, links, start, &cancelled)
         .map_err(|error| format!("could not restore the split PDF's links: {error}"))?
     {

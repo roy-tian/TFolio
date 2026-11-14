@@ -1,5 +1,5 @@
 use super::owned_content::OwnedTailState;
-use super::page_import::{detached_bytes, detached_pages, Headed, ImportRollback};
+use super::page_import::{copied_pages, detached_bytes, detached_pages, lent_copy, ImportRollback};
 use super::*;
 
 /// A deleted page's copy and its session state, held so an undo can put both
@@ -360,8 +360,13 @@ impl PdfiumEngine {
         let stashed = (|| -> Result<PdfDocument<'static>, String> {
             // Detached: a save before the undo reads the document back, closing
             // the one these pages were copied from.
-            let stash_document =
-                detached_pages(self.pdfium, &entry.document, &indices, Headed::Home)?;
+            let stash_document = detached_pages(
+                self.pdfium,
+                &entry.document,
+                &indices,
+                Headed::Home,
+                entry.linked,
+            )?;
 
             // Descending, so each deletion leaves the shallower indices true.
             for index in indices.iter().rev() {
@@ -754,8 +759,20 @@ impl PdfiumEngine {
             return Err(format!("a page cannot go to position {index}"));
         };
 
-        // Open until the document is read back with the copies in.
-        let scratch = detached_pages(self.pdfium, &entry.document, &sources, Headed::Home)?;
+        // PDFium cannot import into the document itself. The scratch stays
+        // open until the document is read back with the copies in, so it
+        // needs detaching only to drop a pop-up's link to the original.
+        let scratch = if entry.linked.dead_links(Headed::Home) {
+            detached_pages(
+                self.pdfium,
+                &entry.document,
+                &sources,
+                Headed::Home,
+                entry.linked,
+            )?
+        } else {
+            copied_pages(self.pdfium, &entry.document, &sources)?
+        };
         // The copy may fail partway; snapshot first so a failure rolls the
         // document back whole, as every multi-page structure change does.
         let before = ImportRollback::of(entry)?;
@@ -835,23 +852,31 @@ impl PdfiumEngine {
         };
         entry.ensure_editable()?;
         entry.check_section(section)?;
-        // The chosen pages alone, flattened if the source's output is, in a
-        // copy detached from the source, which may close before this document.
-        let copy = if source.output_flattens()? {
-            signatures::flattened_pages(self.pdfium, &source.document, &sources)?
-        } else {
-            detached_pages(self.pdfium, &source.document, &sources, Headed::Away)?
-        };
+        let copy = lent_copy(
+            self.pdfium,
+            &source.document,
+            &sources,
+            source.output_flattens()?,
+            source.linked,
+        )?;
         let merged = copy_only_pages(source, &sources);
         // The import may fail partway; snapshot first so a failure rolls the
         // document back whole, as every multi-page structure change does.
         let before = ImportRollback::of(entry)?;
+        let imported = match &copy {
+            Some(copy) => entry.document.pages_mut().copy_page_range_from_document(
+                copy,
+                0..=(sources.len() - 1) as i32,
+                slot as i32,
+            ),
+            None => entry.document.pages_mut().copy_pages_from_document(
+                &source.document,
+                &page_range_argument(&sources),
+                slot as i32,
+            ),
+        };
 
-        if let Err(error) = entry.document.pages_mut().copy_page_range_from_document(
-            &copy,
-            0..=(sources.len() - 1) as i32,
-            slot as i32,
-        ) {
+        if let Err(error) = imported {
             return Err(before.roll_back(
                 self,
                 entry,
@@ -866,6 +891,7 @@ impl PdfiumEngine {
         // Pages carried from another tab are a paste, not a file added: they
         // join a file of this one and leave its save as it was.
         entry.sections_inserted(slot, sources.len(), section);
+        entry.linked = entry.linked.with(source.linked);
 
         if let Err(error) = self.reread(entry) {
             return Err(before.roll_back(self, entry, error));
@@ -892,7 +918,13 @@ impl PdfiumEngine {
             let sources =
                 validate_distinct_pages(page_numbers, source.page_ids.len(), "a new document")?;
             let flatten = source.output_flattens()?;
-            let bytes = detached_bytes(self.pdfium, &source.document, &sources, Headed::Away)?;
+            let bytes = detached_bytes(
+                self.pdfium,
+                &source.document,
+                &sources,
+                Headed::Away,
+                source.linked,
+            )?;
 
             (bytes, copy_only_pages(source, &sources), flatten)
         };

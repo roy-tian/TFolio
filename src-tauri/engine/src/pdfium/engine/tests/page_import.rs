@@ -2,19 +2,54 @@
 //! they came from: once it closes, PDFium's next save of the copy would
 //! follow that pointer into freed memory and take the app down with it.
 
+use std::io::Read;
+
+use zip::ZipArchive;
+
 use super::support::*;
 use super::*;
+use crate::pdfium::archive::ArchiveOptions;
 
 /// A stamp on page 1 whose pop-up names it as `/Parent`, as a reviewer's seal
-/// leaves one: a key FPDF_ImportPages copies without rewriting.
+/// leaves one: a key FPDF_ImportPages copies without rewriting. A bookmark on
+/// page 1 lets it split by bookmarks.
 fn popup_pdf() -> Vec<u8> {
     build_pdf(&[
-        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 7 0 R >>\nendobj\n".to_string(),
         "2 0 obj\n<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>\nendobj\n".to_string(),
         "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Annots [4 0 R 5 0 R] >>\nendobj\n".to_string(),
         "4 0 obj\n<< /Type /Annot /Subtype /Stamp /Rect [10 10 60 60] /Contents (Seal) /Popup 5 0 R /P 3 0 R >>\nendobj\n".to_string(),
         "5 0 obj\n<< /Type /Annot /Subtype /Popup /Rect [70 10 170 60] /Parent 4 0 R /P 3 0 R >>\nendobj\n".to_string(),
         "6 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] >>\nendobj\n".to_string(),
+        "7 0 obj\n<< /Type /Outlines /First 8 0 R /Last 8 0 R /Count 1 >>\nendobj\n".to_string(),
+        "8 0 obj\n<< /Title (Seal) /Parent 7 0 R /Dest [3 0 R /Fit] >>\nendobj\n".to_string(),
+    ])
+}
+
+/// Links an annotation's type would hide: a stamp naming a pop-up that is
+/// missing from `/Annots` and names it back, and a field's kid widget that
+/// lacks its `/Subtype`.
+fn unlisted_links_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Annots [4 0 R 7 0 R] >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Annot /Subtype /Stamp /Rect [10 10 60 60] /Contents (Seal) /Popup 5 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Type /Annot /Subtype /Popup /Rect [70 10 170 60] /Parent 4 0 R >>\nendobj\n".to_string(),
+        "6 0 obj\n<< /FT /Btn /Ff 49152 /T (choice) /Kids [7 0 R] >>\nendobj\n".to_string(),
+        "7 0 obj\n<< /Type /Annot /Parent 6 0 R /Rect [10 80 30 100] >>\nendobj\n".to_string(),
+    ])
+}
+
+/// A `/Parent` under a page's own `/PieceInfo`, on no pop-up or widget: the
+/// check a copy is spared by does not see it, so only the reread keeps it from
+/// aiming into a closed source.
+fn hidden_link_pdf() -> Vec<u8> {
+    build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /PieceInfo << /App << /Parent 4 0 R >> >> >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Private (state) >>\nendobj\n".to_string(),
     ])
 }
 
@@ -330,4 +365,138 @@ fn widgets_carried_to_another_document_name_no_field_there() {
         vec![None, None],
         "the field stayed behind, so the buttons name none",
     );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_link_no_pop_up_or_widget_carries_still_cannot_outlive_its_source() {
+    let engine = test_engine();
+    let source = engine
+        .open(hidden_link_pdf())
+        .expect("PDFium should open the source");
+    let target = engine
+        .open(banded_pdf(&[20]))
+        .expect("PDFium should open the target");
+
+    engine
+        .insert_pages_from_document(target.id, source.id, &[1], 2, None)
+        .expect("the page should come across");
+    engine.close(source.id).expect("the source should close");
+    churn(engine);
+    rotate_order(engine, target.id, 2);
+    saved(engine, target.id, "import-hidden-link");
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn split_parts_drop_a_pop_up_s_link_to_its_markup() {
+    let engine = test_engine();
+    let document = engine
+        .open(popup_pdf())
+        .expect("PDFium should open the document");
+
+    for options in [ArchiveOptions::Pages, ArchiveOptions::Bookmarks] {
+        let directory = scratch_directory("import-split");
+        let destination = directory.join("parts.zip");
+
+        assert!(engine
+            .export_archive(document.id, &destination, options.clone(), |_, _| {})
+            .expect("the split should write"));
+
+        let mut zip = ZipArchive::new(fs::File::open(&destination).expect("the archive opens"))
+            .expect("the archive should read");
+        let mut bytes = Vec::new();
+
+        // The first part holds page 1, the stamp's.
+        zip.by_index(0)
+            .expect("the part should be there")
+            .read_to_end(&mut bytes)
+            .expect("the part should read");
+
+        let saved = lopdf::Document::load_mem(&bytes).expect("the part should parse");
+
+        assert_eq!(
+            annotations(&saved, b"Popup")
+                .map(|dict| dict.has(b"Parent"))
+                .collect::<Vec<_>>(),
+            vec![false],
+            "{options:?}: the pop-up comes along without its way back",
+        );
+
+        fs::remove_dir_all(directory).ok();
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn links_an_annotation_s_type_hides_are_dropped_all_the_same() {
+    let engine = test_engine();
+    let source = engine
+        .open(unlisted_links_pdf())
+        .expect("PDFium should open the source");
+    let target = engine
+        .open(banded_pdf(&[20]))
+        .expect("PDFium should open the target");
+
+    engine
+        .insert_pages_from_document(target.id, source.id, &[1], 2, None)
+        .expect("the page should come across");
+    engine.close(source.id).expect("the source should close");
+
+    let saved = saved(engine, target.id, "import-unlisted-links");
+    let parented: Vec<_> = saved
+        .objects
+        .values()
+        .filter_map(|object| object.as_dict().ok())
+        .filter(|dict| dict.has(b"Parent"))
+        .map(|dict| dict.get(b"Type").and_then(lopdf::Object::as_name).ok())
+        .collect();
+
+    assert_eq!(
+        parented,
+        vec![Some(b"Page".as_slice()); 2],
+        "only the pages keep a parent, their page tree",
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_added_file_s_hidden_link_still_cannot_outlive_it() {
+    let engine = test_engine();
+    let directory = scratch_directory("import-added-hidden");
+    let path = directory.join("hidden.pdf");
+
+    fs::write(&path, hidden_link_pdf()).expect("the source should write");
+
+    let ids: Vec<u64> = engine
+        .read_sources("import-added-hidden", vec![path], false)
+        .expect("the source should be read")
+        .into_iter()
+        .map(|info| info.id.expect("the source should be readable"))
+        .collect();
+    let document = engine
+        .open(banded_pdf(&[100]))
+        .expect("PDFium should open the document");
+    let options = FileOptions {
+        smart_padding: false,
+        per_file_bookmarks: false,
+    };
+
+    // Taken straight from the file, which goes once its pages are in.
+    engine
+        .insert_sources(
+            "import-added-hidden",
+            document.id,
+            &ids,
+            2,
+            "own.pdf",
+            options,
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
+    churn(engine);
+    rotate_order(engine, document.id, 2);
+    saved(engine, document.id, "import-added-hidden-saved");
+
+    fs::remove_dir_all(directory).ok();
 }

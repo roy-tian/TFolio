@@ -27,6 +27,7 @@ use super::{
         MAX_TEXT_NOTE_LINES, MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_TEXT_NOTE_FONT_SIZE,
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
+    import_links::{without_unrewritten_links, Headed, LinkedAnnotations},
     library::bind_pdfium,
     outline::{self, OutlineNode},
     page_numbers::{
@@ -185,6 +186,8 @@ struct OpenDocument {
     /// Signed files added here, as `signed_original` is kept: their sources
     /// are released once read in, and no write may land on them still.
     signed_added: Vec<PathBuf>,
+    /// What a copy of its pages may have to drop (`import_links`).
+    linked: LinkedAnnotations,
 }
 
 impl OpenDocument {
@@ -622,6 +625,7 @@ impl PdfiumEngine {
             num_pages,
             mut pages,
             outline,
+            linked,
         } = document_layout(&document);
         let source_path = source.as_ref().map(|source| source.path.clone());
         let source_fingerprint = source.as_ref().map(|source| source.fingerprint);
@@ -664,6 +668,7 @@ impl PdfiumEngine {
                 sections: None,
                 foreign_page_ids: HashSet::new(),
                 signed_added: Vec::new(),
+                linked,
             },
         );
         drop(documents);
@@ -1089,6 +1094,8 @@ struct DocumentLayout {
     num_pages: i32,
     pages: Vec<PdfPageInfo>,
     outline: Vec<PdfOutlineItem>,
+    /// Noted on the same pass, while every page is loaded anyway.
+    linked: LinkedAnnotations,
 }
 
 /// One page's geometry as the frontend receives it: the displayed size, the
@@ -1107,11 +1114,20 @@ fn measure_page(page: &PdfPage<'_>) -> PdfPageInfo {
 /// commands answer from `page_infos` instead, the same list off a memo.
 fn document_layout(document: &PdfDocument<'static>) -> DocumentLayout {
     let pages = document.pages();
+    let mut linked = LinkedAnnotations::default();
+    let measured = pages
+        .iter()
+        .map(|page| {
+            linked = linked.with(LinkedAnnotations::of(&page));
+            measure_page(&page)
+        })
+        .collect();
 
     DocumentLayout {
         num_pages: pages.len(),
-        pages: pages.iter().map(|page| measure_page(&page)).collect(),
+        pages: measured,
         outline: collect_bookmark_siblings(document.bookmarks().root()),
+        linked,
     }
 }
 

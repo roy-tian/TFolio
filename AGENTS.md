@@ -154,9 +154,10 @@
   signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation),
   dropping the links a page copy keeps into its source.
 - `FPDF_ImportPages` leaves references into the source (`/Parent`, `/Prev`, `/First`, arrays it
-  half-copied) that a save follows once the source closes, crashing the app: import only from a
-  `detached_pages` copy (`Headed::Home` back into its own document, whose numbers keep a widget's
-  field), and `reread` the document that took the pages before the copy closes.
+  half-copied) that a save follows once the source closes, crashing the app: `reread` the document
+  that took pages before what it took them from closes, and copy through `detached_pages` where
+  the copy outlives its source or `LinkedAnnotations` says pop-ups or widgets would bring dead
+  links (`Headed::Home`, back into their own document, keeps a widget's field).
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
   wait on the PDFium lock held by the operation being cancelled.

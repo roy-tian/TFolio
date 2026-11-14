@@ -122,7 +122,8 @@ impl PdfiumEngine {
                 };
 
                 if flatten && signatures::has_widgets(source, at)? {
-                    let page = signatures::flattened_pages(self.pdfium, source, &[index])?;
+                    let page =
+                        signatures::flattened_pages(self.pdfium, source, &[index], entry.linked)?;
 
                     append_page_fitted_to_a4(fitted, &page, 0, &named)?;
                 } else {

@@ -9,7 +9,7 @@ use std::{
     ptr,
 };
 
-use super::page_import::{detached_pages, Headed};
+use super::page_import::detached_pages;
 use super::signature_flatten::flatten_signatures;
 use super::*;
 use super::{
@@ -169,8 +169,9 @@ pub(super) fn flattened_pages(
     pdfium: &'static Pdfium,
     source: &PdfDocument<'_>,
     indices: &[usize],
+    linked: LinkedAnnotations,
 ) -> Result<PdfDocument<'static>, String> {
-    let pages = detached_pages(pdfium, source, indices, Headed::Away)?;
+    let pages = detached_pages(pdfium, source, indices, Headed::Away, linked)?;
 
     Ok(flattened_copy(pdfium, &pages)?.unwrap_or(pages))
 }
