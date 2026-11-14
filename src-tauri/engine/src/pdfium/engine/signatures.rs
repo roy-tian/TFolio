@@ -163,17 +163,85 @@ pub(super) fn flattened_copy(
 }
 
 /// Pages `indices` (0-based, ascending) of `source` alone in a new document,
-/// their signatures drawn in: a copy of just these pages, not of the whole
-/// document, goes through the rewrite. Under the documents lock.
+/// their signatures drawn in: a copy of just these pages goes through the
+/// rewrite, unless `whole_flattened` must take the whole document. Under the
+/// documents lock.
 pub(super) fn flattened_pages(
     pdfium: &'static Pdfium,
     source: &PdfDocument<'_>,
     indices: &[usize],
     linked: LinkedAnnotations,
 ) -> Result<PdfDocument<'static>, String> {
+    if let Some(whole) = whole_flattened(pdfium, source, indices, linked)? {
+        return detached_pages(pdfium, &whole, indices, Headed::Away, linked);
+    }
+
     let pages = detached_pages(pdfium, source, indices, Headed::Away, linked)?;
 
     Ok(flattened_copy(pdfium, &pages)?.unwrap_or(pages))
+}
+
+/// `source` flattened whole, for copies of pages `indices` to be taken from,
+/// where one of those pages shows a signature through a widget under its
+/// field: FPDF_ImportPages copies no field, so a copy of the page alone can
+/// no longer tell that widget for a signature's. `None` where such a copy
+/// draws its signatures in itself. Under the documents lock.
+pub(super) fn whole_flattened(
+    pdfium: &'static Pdfium,
+    source: &PdfDocument<'_>,
+    indices: &[usize],
+    linked: LinkedAnnotations,
+) -> Result<Option<PdfDocument<'static>>, String> {
+    if linked.widgets() && shows_signature_under_field(source, indices)? {
+        flattened_copy(pdfium, source)
+    } else {
+        Ok(None)
+    }
+}
+
+fn shows_signature_under_field(
+    source: &PdfDocument<'_>,
+    indices: &[usize],
+) -> Result<bool, String> {
+    let Some(form) = source.form() else {
+        return Ok(false);
+    };
+    let bindings = source.bindings();
+    let form = bindings.get_handle_from_form(form);
+    let signature = PdfFormFieldType::Signature as c_int;
+
+    for &index in indices {
+        let page = source
+            .pages()
+            .get(index as PdfPageIndex)
+            .map_err(|error| format!("PDFium could not load page {}: {error}", index + 1))?;
+        let handle = bindings.get_handle_from_page(&page);
+
+        // SAFETY: the page stays loaded for this borrow, each annotation is
+        // closed before the next is taken, and the engine serializes PDFium.
+        unsafe {
+            for at in 0..bindings.FPDFPage_GetAnnotCount(handle) {
+                let annotation = bindings.FPDFPage_GetAnnot(handle, at);
+
+                if annotation.is_null() {
+                    continue;
+                }
+
+                // The form's type is the field's, however far up it is set.
+                let under_field = bindings.FPDFAnnot_GetFormFieldType(form, annotation)
+                    == signature
+                    && bindings.is_true(bindings.FPDFAnnot_HasKey(annotation, "Parent"));
+
+                bindings.FPDFPage_CloseAnnot(annotation);
+
+                if under_field {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 /// Whether page `index` carries a widget, which a signature always has: a

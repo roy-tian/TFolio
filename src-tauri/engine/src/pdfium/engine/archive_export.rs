@@ -1,5 +1,6 @@
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
+use super::io::MergeDraft;
 use super::*;
 use crate::pdfium::archive::{ArchiveOptions, ImageFormat};
 use crate::pdfium::archive_links::{collect_links, write_navigation};
@@ -172,6 +173,7 @@ impl PdfiumEngine {
         &self,
         document_id: u64,
         version: u64,
+        whole: Option<&mut MergeDraft<'_>>,
         work: impl FnOnce(&PdfDocument<'static>) -> Result<T, String>,
     ) -> Result<T, String> {
         let documents = self.lock_documents()?;
@@ -181,7 +183,10 @@ impl PdfiumEngine {
             return Err(io::EXPORT_DOCUMENT_CHANGED_ERROR.into());
         }
 
-        work(&entry.document)
+        work(match whole {
+            Some(whole) => whole.document(),
+            None => &entry.document,
+        })
     }
 
     pub fn export_archive(
@@ -192,7 +197,7 @@ impl PdfiumEngine {
         mut on_progress: impl FnMut(usize, usize),
     ) -> Result<bool, String> {
         let operation = self.begin_operation(OperationTarget::Archive(document_id));
-        let (version, total, outline, flatten, dead_links) = {
+        let (version, total, outline, flatten, dead_links, mut whole) = {
             let documents = self.lock_documents()?;
             let entry = open_entry(&documents, document_id)?;
             // A ZIP can never replace an open PDF, including one reached through an alias.
@@ -209,15 +214,29 @@ impl PdfiumEngine {
                 _ => entry.output_flattens()?,
             };
             let outline = entry.split_outline();
+            let total = entry.document.pages().len() as usize;
+            // The last thing here that can fail: once made, the copy closes by
+            // taking the lock this block holds.
+            let whole = if flatten {
+                let pages: Vec<usize> = (0..total).collect();
+
+                signatures::whole_flattened(self.pdfium, &entry.document, &pages, entry.linked)?
+                    .map(|document| MergeDraft::holding(self, document))
+            } else {
+                None
+            };
 
             (
                 entry.content_version,
-                entry.document.pages().len() as usize,
+                total,
                 outline,
                 flatten,
                 entry.linked.dead_links(Headed::Away),
+                whole,
             )
         };
+        // Drawn in already where the document had to be flattened whole.
+        let flatten = flatten && whole.is_none();
         let dpi = if let ArchiveOptions::Images { dpi, .. } = options {
             image_dpi(dpi)?
         } else {
@@ -251,7 +270,7 @@ impl PdfiumEngine {
                         return Ok(false);
                     }
                     let copied =
-                        self.with_archive_source(document_id, version, |source| {
+                        self.with_archive_source(document_id, version, whole.as_mut(), |source| {
                             let mut part = self.pdfium.create_new_pdf().map_err(|error| {
                                 format!("could not create a split PDF: {error}")
                             })?;
@@ -306,19 +325,19 @@ impl PdfiumEngine {
                     if operation.is_cancelled() {
                         return Ok(false);
                     }
-                    let mut bytes = self.with_archive_source(document_id, version, |source| {
-                        let mut part = self
-                            .pdfium
-                            .create_new_pdf()
-                            .map_err(|error| format!("could not create a split PDF: {error}"))?;
-                        part.pages_mut()
-                            .copy_page_from_document(source, page, 0)
-                            .map_err(|error| {
-                                format!("could not copy page {}: {error}", page + 1)
+                    let mut bytes =
+                        self.with_archive_source(document_id, version, whole.as_mut(), |source| {
+                            let mut part = self.pdfium.create_new_pdf().map_err(|error| {
+                                format!("could not create a split PDF: {error}")
                             })?;
-                        part.save_to_bytes()
-                            .map_err(|error| format!("could not save a split PDF: {error}"))
-                    })?;
+                            part.pages_mut()
+                                .copy_page_from_document(source, page, 0)
+                                .map_err(|error| {
+                                    format!("could not copy page {}: {error}", page + 1)
+                                })?;
+                            part.save_to_bytes()
+                                .map_err(|error| format!("could not save a split PDF: {error}"))
+                        })?;
                     // Byte work, so off the lock `with_archive_source` holds.
                     if dead_links {
                         bytes = without_unrewritten_links(bytes, Headed::Away)?;
@@ -342,7 +361,7 @@ impl PdfiumEngine {
                     if operation.is_cancelled() {
                         return Ok(false);
                     }
-                    let raw = self.with_archive_source(document_id, version, |source| {
+                    let raw = self.with_archive_source(document_id, version, None, |source| {
                         let page_handle = source.pages().get(page as i32).map_err(|error| {
                             format!("could not load page {}: {error}", page + 1)
                         })?;
@@ -394,6 +413,8 @@ impl PdfiumEngine {
                 }
             }
         }
+        // Closed once every part is copied, not after the archive is flushed.
+        drop(whole);
         if operation.is_cancelled() {
             return Ok(false);
         }

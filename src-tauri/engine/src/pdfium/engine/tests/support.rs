@@ -158,18 +158,38 @@ pub(super) fn minimal_pdf() -> Vec<u8> {
 /// The `/Contents` is no real CMS: only the structure is ever checked, which
 /// this frames exactly as a signer's.
 pub(super) fn signed_pdf() -> Vec<u8> {
+    sealed_pdf(
+        5,
+        "/Type /Annot /Subtype /Widget /FT /Sig /T (Seal) /Rect [50 50 150 150] /F 4 /P 3 0 R /V 7 0 R /AP << /N 6 0 R >>",
+        None,
+    )
+}
+
+/// `signed_pdf` with its seal on a widget under the field, naming it as its
+/// `/Parent`, as each of a field's widgets is where it shows in several places.
+pub(super) fn kid_signed_pdf() -> Vec<u8> {
+    sealed_pdf(
+        11,
+        "/FT /Sig /T (Seal) /V 7 0 R /Kids [11 0 R]",
+        Some("/Type /Annot /Subtype /Widget /Parent 5 0 R /Rect [50 50 150 150] /F 4 /P 3 0 R /AP << /N 6 0 R >>"),
+    )
+}
+
+/// The signed page with field 5 as `field` and the seal on widget `widget`:
+/// the field itself, or `kid`, object 11.
+fn sealed_pdf(widget: u32, field: &str, kid: Option<&str>) -> Vec<u8> {
     const PLACEHOLDER: &str = "[0 0000000000 0000000000 0000000000]";
     let seal = "1 0 0 rg 10 10 80 80 re f";
     let contents: String = (0u8..64)
         .map(|byte| format!("{byte:02X}"))
         .chain(std::iter::repeat_n("00".to_string(), 192))
         .collect();
-    let objects = [
+    let mut objects = vec![
             "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Outlines 9 0 R /AcroForm << /Fields [5 0 R] /SigFlags 3 >> >>\nendobj\n".to_string(),
             "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
-            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Annots [5 0 R 8 0 R] >>\nendobj\n".to_string(),
+            format!("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R /Annots [{widget} 0 R 8 0 R] >>\nendobj\n"),
             "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
-            "5 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Sig /T (Seal) /Rect [50 50 150 150] /F 4 /P 3 0 R /V 7 0 R /AP << /N 6 0 R >> >>\nendobj\n".to_string(),
+            format!("5 0 obj\n<< {field} >>\nendobj\n"),
             format!(
                 "6 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Length {} >>\nstream\n{seal}\nendstream\nendobj\n",
                 seal.len() + 1
@@ -181,6 +201,9 @@ pub(super) fn signed_pdf() -> Vec<u8> {
             "9 0 obj\n<< /Type /Outlines /First 10 0 R /Last 10 0 R /Count 1 >>\nendobj\n".to_string(),
             "10 0 obj\n<< /Title (Seal) /Parent 9 0 R /Dest [3 0 R /Fit] >>\nendobj\n".to_string(),
         ];
+
+    objects.extend(kid.map(|kid| format!("11 0 obj\n<< {kid} >>\nendobj\n")));
+
     let mut pdf = build_pdf(&objects);
     let start = find(&pdf, b"/Contents <").expect("the fixture has a signature") + 10;
     let end = start + contents.len() + 2;

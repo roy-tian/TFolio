@@ -157,7 +157,9 @@
   half-copied) that a save follows once the source closes, crashing the app: `reread` the document
   that took pages before what it took them from closes, and copy through `detached_pages` where
   the copy outlives its source or `LinkedAnnotations` says pop-ups or widgets would bring dead
-  links (`Headed::Home`, back into their own document, keeps a widget's field).
+  links (`Headed::Home`, back into their own document, keeps a widget's field). It copies no
+  field either: a copy drawing in a signature whose widget hangs under its field is taken from the
+  source flattened whole (`whole_flattened`).
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
   wait on the PDFium lock held by the operation being cancelled.

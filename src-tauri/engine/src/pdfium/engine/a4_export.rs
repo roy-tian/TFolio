@@ -31,7 +31,7 @@ impl PdfiumEngine {
     ) -> Result<Option<A4Copy>, String> {
         let operation = self.begin_operation(OperationTarget::Document(document_id));
         let mut draft = MergeDraft::new(self)?;
-        let (version, flatten, sheets, nodes, named, total, layers, mut layered) = {
+        let (version, flatten, sheets, nodes, named, total, layers, mut layered, mut whole) = {
             let documents = self.lock_documents()?;
             let entry = open_entry(&documents, document_id)?;
             // A new file cannot keep the signatures; drawn in first, if asked.
@@ -59,15 +59,25 @@ impl PdfiumEngine {
                     (*after, sheet.sheet_width, sheet.sheet_height)
                 })
                 .collect();
-            // Taken before the copy, the last thing here that can fail: once
-            // made, the copy closes by taking the lock this block holds.
+            // Taken before the copies, the last things here that can fail: once
+            // made, a copy closes by taking the lock this block holds.
             let layers = (
                 self.existing_watermark(entry)?,
                 self.existing_page_numbers(entry)?,
             );
+            // Never beside a layered copy: a layer is an edit, and an edit
+            // flattens the signatures in place first.
+            let whole = if flatten {
+                let pages: Vec<usize> = (0..entry.page_ids.len()).collect();
+
+                signatures::whole_flattened(self.pdfium, &entry.document, &pages, entry.linked)?
+            } else {
+                None
+            };
             let layered = self
                 .layered_copy(entry, &operation)?
                 .map(|(copy, owned)| (MergeDraft::holding(self, copy), owned));
+            let whole = whole.map(|document| MergeDraft::holding(self, document));
 
             (
                 entry.content_version,
@@ -78,8 +88,11 @@ impl PdfiumEngine {
                 entry.page_ids.len(),
                 layers,
                 layered,
+                whole,
             )
         };
+        // Drawn in already where the document had to be flattened whole.
+        let flatten = flatten && whole.is_none();
         // Lifted layers are stamped again; ones that could not be go along.
         let layers_scaled = layered.is_none() && (layers.0.is_some() || layers.1.is_some());
         let (watermark, page_numbers) = if layered.is_some() {
@@ -111,14 +124,15 @@ impl PdfiumEngine {
 
                 let fitted = draft.document();
                 let at = index as PdfPageIndex;
-                let source = match layered.as_mut() {
-                    Some((copy, owned)) => {
+                let source = match (whole.as_mut(), layered.as_mut()) {
+                    (Some(whole), _) => &*whole.document(),
+                    (None, Some((copy, owned))) => {
                         let copy = copy.document();
 
                         Self::lift_owned_tail(copy, index, owned[index])?;
                         &*copy
                     }
-                    None => &entry.document,
+                    (None, None) => &entry.document,
                 };
 
                 if flatten && signatures::has_widgets(source, at)? {
@@ -145,6 +159,10 @@ impl PdfiumEngine {
 
             if let Some((copy, _)) = layered.as_mut() {
                 copy.close();
+            }
+
+            if let Some(whole) = whole.as_mut() {
+                whole.close();
             }
 
             bytes

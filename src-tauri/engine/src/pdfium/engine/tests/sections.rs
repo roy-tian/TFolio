@@ -532,6 +532,51 @@ fn a_signed_file_is_added_only_once_its_signatures_are_answered_for() {
     fs::remove_dir_all(directory).ok();
 }
 
+// The file's own copy flattens it whole where a widget under its field shows
+// a seal: a copy of its pages alone would hold no field to tell it by.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn an_added_file_s_seal_under_its_field_is_drawn_in() {
+    let _guard = sections_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sections-signed-kid");
+    let own = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "signed.pdf", kid_signed_pdf())],
+    );
+
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            1,
+            "own.pdf",
+            options(true),
+            &HashMap::from([(ids[0], SignatureDecision::Flatten)]),
+        )
+        .expect("the answered file should be added");
+
+    let seal = rendered_rgb(engine, own.id)
+        .pixels()
+        .filter(|pixel| pixel[0] > 200 && pixel[1] < 80 && pixel[2] < 80)
+        .count();
+    assert!(seal > 0);
+    assert_eq!(
+        with_page(engine, own.id, 1, |page| page
+            .annotations()
+            .iter()
+            .map(|annotation| annotation.annotation_type())
+            .collect::<Vec<_>>()),
+        [PdfPageAnnotationType::Link]
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
 fn a_split_by_bookmarks_is_offered_where_the_split_would_cut() {

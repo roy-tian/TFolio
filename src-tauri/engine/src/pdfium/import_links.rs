@@ -70,6 +70,12 @@ impl LinkedAnnotations {
         found
     }
 
+    /// Whether an annotation other than a pop-up names a `/Parent`, as a
+    /// widget under its field does.
+    pub(super) fn widgets(self) -> bool {
+        self.widgets
+    }
+
     pub(super) fn with(self, other: Self) -> Self {
         Self {
             popups: self.popups || other.popups,

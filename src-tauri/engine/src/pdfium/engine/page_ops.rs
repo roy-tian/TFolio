@@ -918,15 +918,25 @@ impl PdfiumEngine {
             let sources =
                 validate_distinct_pages(page_numbers, source.page_ids.len(), "a new document")?;
             let flatten = source.output_flattens()?;
+            let whole = if flatten {
+                signatures::whole_flattened(self.pdfium, &source.document, &sources, source.linked)?
+            } else {
+                None
+            };
             let bytes = detached_bytes(
                 self.pdfium,
-                &source.document,
+                whole.as_ref().unwrap_or(&source.document),
                 &sources,
                 Headed::Away,
                 source.linked,
             )?;
 
-            (bytes, copy_only_pages(source, &sources), flatten)
+            // Drawn in already where the document had to be flattened whole.
+            (
+                bytes,
+                copy_only_pages(source, &sources),
+                flatten && whole.is_none(),
+            )
         };
         // Byte work, so off the lock.
         let bytes = if flatten {

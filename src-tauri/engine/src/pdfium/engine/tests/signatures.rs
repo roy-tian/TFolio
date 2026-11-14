@@ -545,3 +545,72 @@ fn an_answer_may_change_until_it_acts() {
 
     fs::remove_dir_all(&directory).ok();
 }
+
+// A widget under its field names it as `/Parent`, which no copy of its page
+// keeps, so the seal would stay a widget of no field, which nothing draws.
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn a_seal_on_a_widget_under_its_field_is_drawn_into_every_copy_of_its_page() {
+    let engine = test_engine();
+    let directory = scratch_directory("signatures-kid-widget");
+    let source = directory.join("signed.pdf");
+
+    fs::write(&source, kid_signed_pdf()).expect("the fixture should be writable");
+    let signed = engine
+        .open_from_path(source)
+        .expect("PDFium should open the signed PDF");
+    assert_eq!(signed.signatures.count, 1);
+    assert!(seal_pixels(engine, signed.id) > 0);
+    engine
+        .decide_signatures(signed.id, SignatureDecision::Flatten)
+        .expect("the answer should be recorded");
+
+    let drawn_in = |document_id: u64, what: &str| {
+        assert!(seal_pixels(engine, document_id) > 0, "{what} lost the seal");
+        assert_eq!(
+            annotation_types(engine, document_id),
+            [PdfPageAnnotationType::Link],
+            "{what} kept the seal's widget"
+        );
+    };
+
+    let extracted = engine
+        .extract_pages(signed.id, &[1])
+        .expect("the new document should open");
+    drawn_in(extracted.id, "a new PDF of the page");
+
+    let other = engine
+        .open(minimal_pdf())
+        .expect("PDFium should open the PDF");
+    engine
+        .insert_pages_from_document(other.id, signed.id, &[1], 1, None)
+        .expect("the pages should go in");
+    drawn_in(other.id, "the page put in another document");
+
+    for options in [ArchiveOptions::Pages, ArchiveOptions::Bookmarks] {
+        let destination = directory.join(format!("split-{}.zip", options == ArchiveOptions::Pages));
+
+        assert!(engine
+            .export_archive(signed.id, &destination, options.clone(), |_, _| {})
+            .expect("the split should be written"));
+
+        let mut zip = ZipArchive::new(fs::File::open(&destination).unwrap()).unwrap();
+        let mut bytes = Vec::new();
+        zip.by_index(0).unwrap().read_to_end(&mut bytes).unwrap();
+        let part = engine.open(bytes).expect("PDFium should open the part");
+
+        drawn_in(part.id, "a split part");
+    }
+
+    let copy = engine
+        .fit_to_a4(signed.id, |_, _| {})
+        .expect("PDFium should fit the page")
+        .expect("nobody stopped it")
+        .document;
+    assert!(
+        seal_pixels(engine, copy.id) > 0,
+        "the A4 copy lost the seal"
+    );
+
+    fs::remove_dir_all(&directory).ok();
+}
