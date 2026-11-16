@@ -593,8 +593,6 @@ const de = {
     unfoldItem: "{{name}} ausklappen",
     foldAll: "Alle Dateien einklappen",
     nothingToFold: "Hier gibt es nichts einzuklappen",
-    allFolded: "Alles ist schon eingeklappt",
-    nothingFolded: "Nichts ist eingeklappt",
     lastFile: "Ein Dokument behält mindestens eine Datei – die letzte lässt sich nicht entfernen",
     unfoldAll: "Alle Dateien ausklappen",
     foldBookmarks: "Alle Lesezeichen einklappen",

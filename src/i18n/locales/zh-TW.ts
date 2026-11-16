@@ -587,8 +587,6 @@ const zhTW = {
     unfoldItem: "展開 {{name}}",
     foldAll: "收合全部檔案",
     nothingToFold: "沒有可收合的內容",
-    allFolded: "已全部收合",
-    nothingFolded: "沒有收合的內容",
     lastFile: "文件至少保留一個檔案，不能移除最後一個",
     unfoldAll: "展開全部檔案",
     foldBookmarks: "收合全部書籤",

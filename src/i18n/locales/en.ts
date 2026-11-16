@@ -590,8 +590,6 @@ const en = {
     unfoldItem: "Expand {{name}}",
     foldAll: "Collapse all files",
     nothingToFold: "Nothing here to fold",
-    allFolded: "Everything is folded already",
-    nothingFolded: "Nothing is folded",
     lastFile: "A document keeps at least one file, so its last cannot be removed",
     unfoldAll: "Expand all files",
     foldBookmarks: "Collapse all bookmarks",

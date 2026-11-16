@@ -590,8 +590,6 @@ const th = {
     unfoldItem: "ขยาย {{name}}",
     foldAll: "ยุบทุกไฟล์",
     nothingToFold: "ไม่มีสิ่งที่จะยุบ",
-    allFolded: "ยุบทั้งหมดแล้ว",
-    nothingFolded: "ไม่มีสิ่งที่ยุบไว้",
     lastFile: "เอกสารต้องมีอย่างน้อยหนึ่งไฟล์ จึงเอาไฟล์สุดท้ายออกไม่ได้",
     unfoldAll: "ขยายทุกไฟล์",
     foldBookmarks: "ยุบทุกบุ๊กมาร์ก",

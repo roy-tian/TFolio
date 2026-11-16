@@ -592,8 +592,6 @@ const ko = {
     unfoldItem: "{{name}} 펼치기",
     foldAll: "모든 파일 접기",
     nothingToFold: "접을 항목이 없습니다",
-    allFolded: "모두 접혀 있습니다",
-    nothingFolded: "접힌 항목이 없습니다",
     lastFile: "문서에는 파일이 하나 이상 있어야 하므로 마지막 파일은 제거할 수 없습니다",
     unfoldAll: "모든 파일 펼치기",
     foldBookmarks: "모든 책갈피 접기",

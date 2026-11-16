@@ -570,8 +570,6 @@ const zhCN = {
     unfoldItem: "展开 {{name}}",
     foldAll: "折叠全部文件",
     nothingToFold: "没有可折叠的内容",
-    allFolded: "已全部折叠",
-    nothingFolded: "没有折叠的内容",
     lastFile: "文档至少保留一个文件，不能移除最后一个",
     unfoldAll: "展开全部文件",
     foldBookmarks: "折叠全部书签",

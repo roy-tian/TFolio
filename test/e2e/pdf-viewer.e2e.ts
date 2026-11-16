@@ -352,25 +352,25 @@ describe("TFolio PDF viewer", () => {
     await $("[data-page-number='1']").waitForDisplayed()
 
     const bookmarks = $(`${activeSidebar} nav[aria-label='Bookmarks']`)
-    const foldAll = $(`${activeSidebar} button[aria-label='Collapse all bookmarks']`)
-    const unfoldAll = $(`${activeSidebar} button[aria-label='Expand all bookmarks']`)
+    const foldAll = $(`${activeSidebar} [data-slot='sidebar-fold-all']`)
     const chapter = () => bookmarks.$("button=Chapter one")
     const arrow = bookmarks.$("[data-slot='bookmark-fold']")
 
     await $(`${activeSidebar} button[aria-label='Outline']`).click()
     await expect(chapter()).toBeDisplayed()
-    await expect(unfoldAll).toBeDisabled()
+    await expect(foldAll).toHaveAttribute("aria-label", "Collapse all bookmarks")
     // Named apart from the bookmark beside it, which goes to its page.
     await expect(arrow).toHaveAttribute("aria-label", "Collapse Part one")
     await arrow.click()
     await expect(arrow).toHaveAttribute("aria-expanded", "false")
     await expect(arrow).toHaveAttribute("aria-label", "Expand Part one")
     await expect(chapter()).not.toBeExisting()
-    // The one bookmark with others under it is folded: the outline is.
-    await expect(foldAll).toBeDisabled()
-    await unfoldAll.click()
+    // The one bookmark with others under it is folded: the outline is, so
+    // the button unfolds it instead.
+    await expect(foldAll).toHaveAttribute("aria-label", "Expand all bookmarks")
+    await foldAll.click()
     await expect(chapter()).toBeDisplayed()
-    await expect(unfoldAll).toBeDisabled()
+    await expect(foldAll).toHaveAttribute("aria-label", "Collapse all bookmarks")
 
     // Folds are the tab's, kept while the sidebar shows its pages.
     await foldAll.click()

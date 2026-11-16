@@ -158,14 +158,16 @@ function chosen() {
   )
 }
 
-/** Folds every file to its name, or shows their pages again, by the
-    buttons over the pages: the one pressed has nothing left to do. */
+/** Folds every file to its name, or shows their pages again, by the one
+    button over the pages, which then offers the other. */
 async function foldAllFiles(folded: boolean) {
-  const button = $(`${activeSidebar} [data-slot='sidebar-${folded ? "fold" : "unfold"}-all']`)
+  const button = $(`${activeSidebar} [data-slot='sidebar-fold-all']`)
+  const [fold, unfold] = ["Collapse all files", "Expand all files"]
 
   await expect(button).toBeEnabled()
+  await expect(button).toHaveAttribute("aria-label", folded ? fold : unfold)
   await button.click()
-  await expect(button).toBeDisabled()
+  await expect(button).toHaveAttribute("aria-label", folded ? unfold : fold)
 }
 
 async function addFilesFromPicker(paths: string[]) {

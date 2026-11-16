@@ -593,8 +593,6 @@ const fr = {
     unfoldItem: "Développer {{name}}",
     foldAll: "Réduire tous les fichiers",
     nothingToFold: "Rien à réduire ici",
-    allFolded: "Tout est déjà réduit",
-    nothingFolded: "Rien n’est réduit",
     lastFile: "Un document garde au moins un fichier : impossible de retirer le dernier",
     unfoldAll: "Développer tous les fichiers",
     foldBookmarks: "Réduire tous les signets",

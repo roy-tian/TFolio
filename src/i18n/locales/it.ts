@@ -591,8 +591,6 @@ const it = {
     unfoldItem: "Espandi {{name}}",
     foldAll: "Comprimi tutti i file",
     nothingToFold: "Niente da comprimere qui",
-    allFolded: "È già tutto compresso",
-    nothingFolded: "Niente è compresso",
     lastFile: "Un documento conserva almeno un file: l’ultimo non si può rimuovere",
     unfoldAll: "Espandi tutti i file",
     foldBookmarks: "Comprimi tutti i segnalibri",
