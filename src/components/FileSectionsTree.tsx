@@ -6,17 +6,22 @@ import {
   type Ref,
   type RefObject,
 } from "react"
-import { ChevronRight, FileText, Pencil, X } from "lucide-react"
+import { ChevronRight, FileText } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { BookmarkItems } from "@/components/BookmarkList"
+import {
+  FILE_ROW_CLASS,
+  FILE_ROW_NAME_CLASS,
+  FileRowCount,
+  FileRowTools,
+} from "@/components/FileRow"
 import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { HintTooltip } from "@/components/HintTooltip"
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
 import { FileMenuContent } from "@/components/PageContextMenu"
 import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
-import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useListDrag } from "@/hooks/useListDrag"
 import { useDropEdgeScroll, useSidebarDrop, useSidebarDropPoint } from "@/hooks/useSidebarDrop"
@@ -300,15 +305,7 @@ function FileRunRow({
       <ContextMenu disabled={editing} onOpenChange={setMenuOpen}>
         <ContextMenuTrigger
           render={
-            <div
-              // A property the row sets, because the count is no child of
-              // the buttons that take its place: see `PAPER_CONTROLS_HOST`.
-              // The keyboard's focus sets it too, from inside the buttons
-              // alone: WebKitGTK can keep a clicked name `:focus-visible`,
-              // and its row would stay lit.
-              className="relative flex items-center gap-1 rounded-md pr-1 [--row-tools:0] hover:bg-sidebar-accent hover:[--row-tools:1] has-[[data-slot=file-section-tools]_:focus-visible]:bg-sidebar-accent has-[[data-slot=file-section-tools]_:focus-visible]:[--row-tools:1]"
-              data-slot="file-section-row"
-            />
+            <div className={FILE_ROW_CLASS} data-slot="file-section-row" />
           }
         >
           <button
@@ -347,7 +344,7 @@ function FileRunRow({
               cutShort={nameRef}
             >
               <button
-                className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                className={FILE_ROW_NAME_CLASS}
                 data-slot="file-section-title"
                 onClick={() => onNavigate(run.first)}
                 onDoubleClick={() => onEdit(true)}
@@ -357,48 +354,18 @@ function FileRunRow({
                 <span className="truncate" ref={nameRef}>
                   {section.title}
                 </span>
-                {/* No narrower than the buttons that stand over it, so they
-                    cover no part of a long name. */}
-                <span
-                  className="ml-auto min-w-13 shrink-0 text-right text-xs font-normal text-muted-foreground tabular-nums opacity-[calc(1_-_var(--row-tools))]"
-                  data-slot="file-section-count"
-                >
-                  {t("sidebar.filePages", { count: run.count })}
-                </span>
+                <FileRowCount count={run.count} slot="file-section-count" />
               </button>
             </HintTooltip>
           )}
           {editing ? null : (
-            // Over the count, in its place while the row shows them.
-            <div
-              className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-(--row-tools)"
-              data-slot="file-section-tools"
-            >
-              <HintTooltip label={t("sidebar.renameFile", { name: section.title })}>
-                <Button
-                  aria-label={t("sidebar.renameFile", { name: section.title })}
-                  data-slot="file-section-rename"
-                  onClick={() => onEdit(true)}
-                  size="icon-xs"
-                  variant="ghost"
-                >
-                  <Pencil />
-                </Button>
-              </HintTooltip>
-              <HintTooltip label={t("sidebar.removeFile", { name: section.title })}>
-                <Button
-                  aria-label={t("sidebar.removeFile", { name: section.title })}
-                  className="hover:text-destructive"
-                  data-slot="file-section-remove"
-                  disabled={removeDisabled}
-                  onClick={() => onRemove(section.id)}
-                  size="icon-xs"
-                  variant="ghost"
-                >
-                  <X />
-                </Button>
-              </HintTooltip>
-            </div>
+            <FileRowTools
+              name={section.title}
+              onRemove={() => onRemove(section.id)}
+              onRename={() => onEdit(true)}
+              removeDisabled={removeDisabled}
+              slot="file-section"
+            />
           )}
         </ContextMenuTrigger>
         {/* Gone with the menu, not faded out after it: a menu still on screen

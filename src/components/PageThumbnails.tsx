@@ -23,6 +23,7 @@ import { FileMenuContent, PageMenuContent } from "@/components/PageContextMenu"
 import {
   CarriedHoles,
   FILE_HEADING_NAME,
+  FILE_HEADING_TITLE,
   FileHeading,
   foldedBarKey,
   PageCell,
@@ -813,8 +814,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
     if (
       event.button !== 0 ||
-      // Its arrow folds the file and carries nothing.
-      target.closest("[data-fold-toggle]") ||
+      // Its arrow folds the file and its rename and remove act on it: none
+      // carries anything.
+      target.closest("[data-fold-toggle], [data-file-row-tools]") ||
       !paper ||
       !list ||
       !column ||
@@ -969,7 +971,10 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
             moving.length,
             start,
             point,
-            foldedFile ? (paper.textContent ?? undefined) : undefined,
+            // The name alone: its button holds the page count too.
+            foldedFile
+              ? (paper.querySelector(FILE_HEADING_TITLE)?.textContent ?? undefined)
+              : undefined,
           ),
         )
         frame = requestAnimationFrame(edgeScroll)
@@ -1083,6 +1088,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // Each file's name heads its first page, once the document has several.
   const byFile = sections.length > 1
   const titles = new Map(sections.map((section) => [section.id, section.title]))
+  const filePages = new Map<number, number>()
+
+  for (const page of pages) {
+    if (page.section !== undefined) {
+      filePages.set(page.section, (filePages.get(page.section) ?? 0) + 1)
+    }
+  }
   const moving = new Set(drag?.basis === pages ? drag.moving : [])
   const { blanks, blankAfterCarried } = previewBlanks({
     drag: dragging,
@@ -1133,10 +1145,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   }
   const fileHeading = (section: number, first: number, run?: readonly number[]) => {
     const isRenamed = renamed?.section === section && renamed.first === first
+    const count = filePages.get(section) ?? 0
 
     return (
       <FileHeading
-        count={run?.length ?? 0}
+        // Folded, what the bar stands for: pages in hand have left it.
+        count={run?.length ?? count}
         current={run?.includes(current) === true}
         flipKey={foldedBarKey(keyOf(first))}
         folded={run !== undefined}
@@ -1145,6 +1159,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         // One key folded or not, so the arrow pressed keeps the focus.
         key={`heading-${keyOf(first)}`}
         onFold={(folded) => onFoldFiles([section], folded)}
+        onRemove={() => {
+          // The heading goes with its file, and a removed element fires no blur.
+          keepFocus()
+          onRemoveFile(section)
+        }}
         onRename={() => setRenaming({ first, pages, section })}
         onRenameDone={(title) => {
           // Enter and Esc take the field away with the caret still in it.
@@ -1156,6 +1175,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           }
         }}
         onSelect={(event) => selectFile(section, first, event)}
+        // A document keeps a page: its last file's go no further.
+        removeDisabled={count >= pages.length}
         renaming={isRenamed}
         runFirst={first}
         section={section}
@@ -1474,7 +1495,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                 })
               }
               // A document keeps a page; the last file's go no further.
-              removeDisabled={pagesOfSection(pages, menuFile.section).length >= numPages}
+              removeDisabled={(filePages.get(menuFile.section) ?? 0) >= numPages}
             />
           ) : null}
           {ghost ? (

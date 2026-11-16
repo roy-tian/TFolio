@@ -1,7 +1,13 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react"
-import { ChevronRight, Plus } from "lucide-react"
+import { ChevronRight, FileText, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import {
+  FILE_ROW_CLASS,
+  FILE_ROW_NAME_CLASS,
+  FileRowCount,
+  FileRowTools,
+} from "@/components/FileRow"
 import { FileTitleEditor } from "@/components/FileTitleEditor"
 import { PaddingDismiss } from "@/components/PaddingDismiss"
 import { PageBar, PageCheckbox, type PageAction } from "@/components/PageCardControls"
@@ -31,6 +37,7 @@ const INSERT_SEAM = 20
 /** The name of a file's pages under one heading: the handle a press chooses
     the file by, a drag carries it by, and a folded file's ghost lands on. */
 export const FILE_HEADING_NAME = "[data-slot='pages-file-heading']"
+export const FILE_HEADING_TITLE = "[data-slot='pages-file-name']"
 
 /** The flip key of a folded file's bar, by the preview key of its first page. */
 export function foldedBarKey(firstKey: number) {
@@ -207,10 +214,11 @@ export function PaddingCell({
 }
 
 /**
- * The name over a file's pages, in a document of several: a press chooses
- * the file, a drag carries it whole, and its arrow folds the pages away under
- * it. Folded, it is a cell of the flow that stands for them — a bar a drop
- * lands above or below — and says how many it holds.
+ * The name over a file's pages, in a document of several, as the outline's
+ * row for the file: a press chooses the file, a drag carries it whole, its
+ * arrow folds the pages away under it, and its count gives way to rename and
+ * remove under the pointer. Folded, it is a cell of the flow that stands for
+ * the pages — a bar a drop lands above or below.
  */
 export function FileHeading({
   count,
@@ -219,16 +227,18 @@ export function FileHeading({
   folded,
   hole,
   onFold,
+  onRemove,
   onRename,
   onRenameDone,
   onSelect,
+  removeDisabled,
   renaming,
   runFirst,
   section,
   selected,
   title,
 }: {
-  /** The pages under this name, where they stand together. */
+  /** The file's pages. */
   count: number
   /** Folded over the page being read. */
   current: boolean
@@ -237,12 +247,14 @@ export function FileHeading({
   /** Folded and in hand: its place shows where the file will land. */
   hole: boolean
   onFold: (folded: boolean) => void
+  onRemove: () => void
   onRename: () => void
   onRenameDone: (title: string | null) => void
   onSelect: (event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void
+  /** A document keeps a page: its last file's go no further. */
+  removeDisabled: boolean
   renaming: boolean
-  /** The first page under the name, which tells one run of a parted file
-      from the other. */
+  /** The first page under the name. */
   runFirst: number
   section: number
   /** Folded, with every page under the name chosen. */
@@ -250,13 +262,14 @@ export function FileHeading({
   title: string
 }) {
   const { t } = useTranslation()
+  const nameRef = useRef<HTMLSpanElement>(null)
   const foldLabel = t(folded ? "sidebar.unfoldItem" : "sidebar.foldItem", { name: title })
 
   return (
     <li
       // No flip key while its pages show: a heading is no page, and a drop
       // counts none.
-      className={cn("relative flex w-full basis-full items-center gap-0.5 px-1", !folded && "pt-1")}
+      className="relative w-full basis-full"
       data-flip-bar={folded ? "" : undefined}
       data-flip-key={folded ? flipKey : undefined}
       data-run-first={runFirst}
@@ -264,11 +277,17 @@ export function FileHeading({
     >
       {/* Faded rather than hidden, as a page in hand is: a hidden button
           would give up its focus, and the flow's keys with it. */}
-      <div className={cn("flex min-w-0 flex-1 items-center gap-0.5", hole && "opacity-0")}>
+      <div
+        className={cn(
+          FILE_ROW_CLASS,
+          hole && "opacity-0",
+          selected && "bg-primary/10 ring-1 ring-primary hover:bg-primary/15",
+        )}
+      >
         <button
           aria-expanded={!folded}
           aria-label={foldLabel}
-          className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           data-fold-toggle
           onClick={() => onFold(!folded)}
           type="button"
@@ -276,42 +295,50 @@ export function FileHeading({
           <ChevronRight className={cn("size-3.5 transition-transform", !folded && "rotate-90")} />
         </button>
         {renaming ? (
-          <FileTitleEditor
-            className="h-6 max-w-64 text-xs"
-            label={t("sidebar.fileName")}
-            onDone={onRenameDone}
-            title={title}
-          />
+          <FileTitleEditor label={t("sidebar.fileName")} onDone={onRenameDone} title={title} />
         ) : (
-          <button
-            aria-current={current ? "page" : undefined}
-            aria-pressed={folded ? selected : undefined}
-            className={cn(
-              "min-w-0 cursor-grab truncate rounded px-1 text-left text-xs font-medium text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
-              current && "text-foreground",
-              selected && "bg-primary/10 text-foreground ring-1 ring-primary hover:bg-primary/15",
-            )}
-            data-slot="pages-file-heading"
-            onClick={onSelect}
-            onDoubleClick={onRename}
-            type="button"
+          <HintTooltip
+            label={title}
+            side="right"
+            // Only a name the column cut short has more to say.
+            cutShort={nameRef}
           >
-            {title}
-          </button>
+            <button
+              aria-current={current ? "page" : undefined}
+              aria-pressed={folded ? selected : undefined}
+              className={cn(FILE_ROW_NAME_CLASS, "cursor-grab")}
+              data-slot="pages-file-heading"
+              onClick={onSelect}
+              onDoubleClick={onRename}
+              type="button"
+            >
+              <FileText
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground",
+                  current && "text-primary",
+                )}
+              />
+              <span className="truncate" data-slot="pages-file-name" ref={nameRef}>
+                {title}
+              </span>
+              <FileRowCount count={count} slot="pages-file-count" />
+            </button>
+          </HintTooltip>
         )}
-        {folded && !renaming ? (
-          <span
-            className="ml-auto shrink-0 pl-1 text-xs text-muted-foreground tabular-nums"
-            data-slot="pages-file-count"
-          >
-            {t("sidebar.filePages", { count })}
-          </span>
-        ) : null}
+        {renaming ? null : (
+          <FileRowTools
+            name={title}
+            onRemove={onRemove}
+            onRename={onRename}
+            removeDisabled={removeDisabled}
+            slot="pages-file"
+          />
+        )}
       </div>
       {hole ? (
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-x-1 inset-y-0 rounded border-2 border-dashed border-primary/60 bg-primary/5"
+          className="pointer-events-none absolute inset-0 rounded border-2 border-dashed border-primary/60 bg-primary/5"
         />
       ) : null}
     </li>

@@ -58,7 +58,7 @@ function headings() {
   return browser.execute(
     (within: string) =>
       Array.from(
-        document.querySelectorAll<HTMLElement>(`${within} [data-slot='pages-file-heading']`),
+        document.querySelectorAll<HTMLElement>(`${within} [data-slot='pages-file-name']`),
         (heading) => heading.textContent ?? "",
       ),
     activeSidebar,
@@ -76,7 +76,7 @@ function pageFiles() {
       ),
       (element) => {
         if (element.dataset.sectionHeader !== undefined) {
-          file = element.querySelector("[data-slot='pages-file-heading']")?.textContent ?? ""
+          file = element.querySelector("[data-slot='pages-file-name']")?.textContent ?? ""
           return null
         }
 
@@ -615,6 +615,42 @@ describe("TFolio files added to an open document", () => {
     await expect($(`${activeSidebar} [data-section-id='1']`)).toHaveText(
       expect.stringContaining("first.pdf"),
     )
+  })
+
+  it("heads each file's pages with the outline's row: count, rename and remove", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
+    await waitForPages(3)
+
+    // Unfolded too, the row ends on the file's page count, which gives way to
+    // its two buttons only while the pointer or the keyboard is on them.
+    const part = (slot: string) => `${activeSidebar} [data-section-header='1'] [data-slot='${slot}']`
+    await expect($(part("pages-file-count"))).toHaveText("2 pages")
+    const opacity = (slot: string) =>
+      browser.execute((css: string) => getComputedStyle(document.querySelector(css)!).opacity, part(slot))
+    expect(await opacity("pages-file-tools")).toBe("0")
+    await browser.execute((css: string) => {
+      document.querySelector<HTMLElement>(css)!.focus()
+    }, part("pages-file-rename"))
+    await browser.keys(["Shift", "Tab"])
+    await browser.keys("Tab")
+    await browser.waitUntil(async () => (await opacity("pages-file-tools")) === "1", {
+      timeoutMsg: "the keyboard's focus never showed the heading's buttons",
+    })
+    expect(await opacity("pages-file-count")).toBe("0")
+
+    await press(part("pages-file-rename"))
+    await $(`${activeSidebar} [data-slot='file-section-title-input']`).setValue("Appendix")
+    await browser.keys("Enter")
+    await browser.waitUntil(async () => (await headings()).join() === "own.pdf,Appendix", {
+      timeoutMsg: "the heading's rename never took",
+    })
+
+    // The document's own file is not the last; the added file's remove takes it.
+    await press(part("pages-file-remove"))
+    await waitForPages(1)
+    await browser.keys(["Control", "z"])
+    await waitForPages(3)
   })
 
   it("renames, chooses and removes a file from its name's menu", async () => {
