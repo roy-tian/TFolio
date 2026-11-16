@@ -204,7 +204,7 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
         aria-label={t("notification.dismiss")}
         // The row's own colour, so a refusal keeps its red and a plain notice
         // does not borrow one.
-        className="-my-1 -mr-2 text-current hover:bg-current/10 hover:text-current"
+        className="-my-1 -mr-2 text-current not-disabled:hover:bg-current/10 not-disabled:hover:text-current"
         onClick={() => onDismiss(notice)}
         size="icon-sm"
         type="button"

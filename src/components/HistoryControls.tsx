@@ -46,7 +46,14 @@ export function HistoryControls({
 
   return (
     <ButtonGroup>
-      <ToolbarTooltip label={undoLabel} shortcut={shortcuts.undo}>
+      {/* Greyed, each says why, with no chord it would not answer: a step
+          still to take is off only while an edit runs. */}
+      <ToolbarTooltip
+        label={
+          canUndo ? undoLabel : nextUndo ? t("annotate.historyBusy") : t("annotate.nothingToUndo")
+        }
+        shortcut={canUndo ? shortcuts.undo : undefined}
+      >
         <Button
           aria-label={undoLabel}
           disabled={!canUndo}
@@ -57,7 +64,12 @@ export function HistoryControls({
           <Undo2 />
         </Button>
       </ToolbarTooltip>
-      <ToolbarTooltip label={redoLabel} shortcut={shortcuts.redo}>
+      <ToolbarTooltip
+        label={
+          canRedo ? redoLabel : nextRedo ? t("annotate.historyBusy") : t("annotate.nothingToRedo")
+        }
+        shortcut={canRedo ? shortcuts.redo : undefined}
+      >
         <Button
           aria-label={redoLabel}
           disabled={!canRedo}

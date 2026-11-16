@@ -163,7 +163,6 @@ export function FileSectionsTree({
   return (
     <div className="flex h-full flex-col">
       <OutlineBar
-        dropLabel={t("sidebar.dropFiles")}
         fold={{
           canFold: foldAll.canFold,
           canUnfold: foldAll.canUnfold,

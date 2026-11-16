@@ -1982,9 +1982,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // action's name. A document never written anywhere has none to give.
     const saveLabel = !hasSourceFile
       ? t("menu.saveAs")
-      : !canSave && saveHint
-        ? saveHint
-        : t("annotate.save")
+      : canSave
+        ? t("annotate.save")
+        : (saveHint ?? t("annotate.nothingToSave"))
 
     // The toolbar's and menu's action, refusal included: a watermarked
     // document, or one holding copies of such pages, may only ever be exported
@@ -2308,7 +2308,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         <AppSidebar
           macOS={macOS}
-          footer={<AddFilesButton onClick={() => void chooseFiles()} />}
+          footer={
+            <AddFilesButton
+              // Over the outline of a document of one file, its bookmarks
+              // leave no place among them for files: they go last.
+              dropLabel={
+                sidebarPanel === "bookmarks" && !severalFiles
+                  ? t("sidebar.dropFilesAtEnd")
+                  : t("sidebar.dropFiles")
+              }
+              onClick={() => void chooseFiles()}
+            />
+          }
           switcher={<SidebarPanelSwitch panel={sidebarPanel} />}
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (

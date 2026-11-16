@@ -9,6 +9,7 @@ import {
   openPdfFromDisk,
   refreshApp,
   seedSettings,
+  tooltipOn,
   tooltipOpen,
 } from "./helpers"
 
@@ -264,5 +265,75 @@ describe("TFolio toolbar tooltips", () => {
     )
 
     expect(flipping).toEqual([])
+  })
+})
+
+describe("TFolio controls that cannot act", () => {
+  before(async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("greyed.pdf", minimalPdf(1))
+    await $("[data-page-number='1'] canvas[data-rendered='true']").waitForExist()
+  })
+
+  it("show no hover ground, a not-allowed cursor, and a tooltip saying why", async () => {
+    // Scripted moves set no :hover, and a real pointer's leaves the next
+    // spec's app showing no :focus-visible: the rules are read instead, every
+    // one that grounds a hovered element tried on the control without it.
+    const hoverGrounds = (css: string) =>
+      browser.execute((selector: string) => {
+        const element = document.querySelector(selector)!
+        const found: string[] = []
+        const walk = (rules: CSSRuleList) => {
+          for (const rule of Array.from(rules)) {
+            // The pseudo-class, not the escaped `\:hover` in a class's name.
+            const unhovered = /(?<!\\):hover/g
+
+            if (rule instanceof CSSStyleRule && unhovered.test(rule.selectorText)) {
+              const grounds = rule.style.getPropertyValue("background-color") !== ""
+
+              try {
+                if (grounds && element.matches(rule.selectorText.replace(unhovered, ""))) {
+                  found.push(rule.selectorText)
+                }
+              } catch {
+                // A selector this engine cannot match is none of the control's.
+              }
+            }
+
+            if ("cssRules" in rule) {
+              walk((rule as CSSGroupingRule).cssRules)
+            }
+          }
+        }
+
+        for (const sheet of Array.from(document.styleSheets)) {
+          walk(sheet.cssRules)
+        }
+
+        return found
+      }, css)
+
+    // An enabled button is grounded under the pointer, so the reading finds
+    // what it looks for.
+    expect(await hoverGrounds("button[aria-label='Zoom in']")).not.toEqual([])
+
+    for (const [css, why] of [
+      ["button[aria-label='Undo']", "Nothing to undo"],
+      ["button[aria-label='Book']", "Book view needs at least two pages"],
+      [`${activeSidebar} [data-slot='pages-rotate-left']`, "Select pages to rotate or delete them"],
+      [`${activeSidebar} [data-slot='sidebar-fold-all']`, "Nothing here to fold"],
+      [
+        `${activeSidebar} [data-slot='pages-smart-padding']`,
+        "Start every file on an odd page: available once the document has several files",
+      ],
+    ] as const) {
+      await expect($(css)).toBeDisabled()
+      expect(await hoverGrounds(css)).toEqual([])
+      expect(
+        await browser.execute((selector: string) => getComputedStyle(document.querySelector(selector)!).cursor, css),
+      ).toBe("not-allowed")
+      expect(await tooltipOn(css)).toBe(why)
+    }
   })
 })

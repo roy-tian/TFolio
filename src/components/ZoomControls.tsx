@@ -47,9 +47,17 @@ export function ZoomControls({ zoom }: ZoomControlsProps) {
       <SliderStepper
         canDecrease={zoom.canZoomOut}
         canIncrease={zoom.canZoomIn}
-        decrease={{ label: t("statusBar.zoomOut"), shortcut: shortcuts.zoomOut }}
+        decrease={{
+          atLimit: t("statusBar.zoomAtMin"),
+          label: t("statusBar.zoomOut"),
+          shortcut: shortcuts.zoomOut,
+        }}
         groupLabel={t("statusBar.zoomLevel", { percent: zoom.zoomPercent })}
-        increase={{ label: t("statusBar.zoomIn"), shortcut: shortcuts.zoomIn }}
+        increase={{
+          atLimit: t("statusBar.zoomAtMax"),
+          label: t("statusBar.zoomIn"),
+          shortcut: shortcuts.zoomIn,
+        }}
         max={ZOOM_SLIDER_MAX}
         min={ZOOM_SLIDER_MIN}
         // The pages are only laid out again once the drag lets go.

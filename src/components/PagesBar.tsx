@@ -1,12 +1,10 @@
 import { BookDashed, RotateCcw, RotateCw, Trash2, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { SidebarDropHint } from "@/components/SidebarFileDrop"
 import { SidebarPanelTools } from "@/components/SidebarPanelTools"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
-import { useSidebarDrop } from "@/hooks/useSidebarDrop"
 import type { FileOptions } from "@/lib/pdf"
 import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
@@ -41,7 +39,6 @@ export function PagesBar({
   targets,
 }: PagesBarProps) {
   const { t } = useTranslation()
-  const drop = useSidebarDrop()
   // One page by its number, so the reader knows which, however far the
   // sidebar has scrolled from it.
   const one = targets.count === 1 ? { pageNumber: targets.first } : null
@@ -94,11 +91,8 @@ export function PagesBar({
   ]
 
   return (
-    <div className="relative flex h-9 shrink-0 border-b px-2" data-slot="pages-bar">
-      <SidebarDropHint label={t("sidebar.dropFiles")} />
-      {/* Hidden, not unmounted, under the drag's words: an open menu would
-          lose the trigger it stands by. */}
-      <div className={cn("flex min-w-0 flex-1 items-center gap-0.5", drop && "invisible")}>
+    <div className="flex h-9 shrink-0 border-b px-2" data-slot="pages-bar">
+      <div className="flex min-w-0 flex-1 items-center gap-0.5">
         {pageActions.map(({ disabled, icon: Icon, label, onClick, slot }) => (
           <ToolbarTooltip key={slot} label={label}>
             <Button
@@ -107,7 +101,7 @@ export function PagesBar({
               // only be refused behind: a disabled button gives up its focus.
               className={cn(
                 "in-data-[pages-busy]:cursor-wait in-data-[pages-busy]:opacity-50",
-                slot === "pages-delete" && "hover:text-destructive",
+                slot === "pages-delete" && "not-disabled:hover:text-destructive",
               )}
               data-slot={slot}
               disabled={disabled}

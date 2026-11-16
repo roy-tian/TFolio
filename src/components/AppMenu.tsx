@@ -121,7 +121,7 @@ export function AppMenu({
           render={
             <Button
               aria-label={t("menu.title")}
-              className="text-brand hover:text-brand-strong aria-expanded:text-brand-strong"
+              className="text-brand not-disabled:hover:text-brand-strong aria-expanded:text-brand-strong"
               data-slot="app-menu"
               size="icon-sm"
               variant="outline"

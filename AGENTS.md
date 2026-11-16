@@ -124,6 +124,9 @@
   aimed there shows nothing.
 - Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
   beside it.
+- A control that cannot act stays on screen, greyed: no hover ground, the not-allowed cursor, and a
+  tooltip saying why it is off (and naming no shortcut), never the action it would take. A Button's
+  or Toggle's own hover classes take `not-disabled:hover:`: a plain `hover:` loses to the variant's.
 - Eleven locales share every layout, and the longest words decide it: a menu or popover takes its
   content's width (`w-auto min-w-*`), never a fixed one, and a row that cannot hold its words
   wraps, or drops its icons, before it cuts one. Check a new label in every locale at 640 wide.

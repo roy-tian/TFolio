@@ -341,12 +341,13 @@ describe("TFolio files added to an open document", () => {
 
     await emitDrag("drag-over", point, [dropped])
     await expect($("[data-testid='pages-drop-marker']")).toBeDisplayed()
-    // What the drop does is said in the bar over the pages, where it covers
-    // none of them, in place of the bar's own controls.
-    await expect($(`${activeSidebar} [data-slot='sidebar-drop-hint']`)).toHaveText(
+    // What the drop does is said at the sidebar's foot, in place of the add
+    // button: the bars over the pages keep every button showing.
+    await expect($(`${activeSidebar} [data-slot='sidebar-footer'] [data-slot='sidebar-drop-hint']`)).toHaveText(
       "Drop to add to this document",
     )
-    await expect($(`${activeSidebar} [data-slot='sidebar-fold-all']`)).not.toBeDisplayed()
+    await expect($(`${activeSidebar} [data-slot='sidebar-fold-all']`)).toBeDisplayed()
+    await expect($(`${activeSidebar} [data-slot='pages-rotate-left']`)).toBeDisplayed()
     await emitDrag("drag-drop", point, [dropped])
     await waitForPages(6)
     await expect($(`${activeSidebar} [data-slot='sidebar-fold-all']`)).toBeDisplayed()

@@ -141,7 +141,10 @@ export function SessionHeader({
               </Toggle>
             </ToolbarTooltip>
             {/* The outline variant's dark: border outranks a plain border-r override. */}
-            <ToolbarTooltip label={saveLabel} shortcut={shortcuts.save}>
+            <ToolbarTooltip
+              label={saveLabel}
+              shortcut={saveAsOnly || canSave ? shortcuts.save : undefined}
+            >
               <Button
                 aria-label={saveAsOnly ? t("menu.saveAs") : t("annotate.save")}
                 className="border-r-transparent peer/save dark:border-r-transparent"
@@ -163,7 +166,7 @@ export function SessionHeader({
                       aria-label={t("toolbar.saveAsMenu")}
                       className={cn(
                         splitMenuButtonClassName,
-                        "peer-hover/save:before:opacity-100",
+                        "peer-enabled/save:peer-hover/save:before:opacity-100",
                       )}
                       data-slot="pdf-save-menu-trigger"
                       size="icon-sm"

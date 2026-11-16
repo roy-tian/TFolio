@@ -96,7 +96,7 @@ export function PageBar({
               // only be refused behind: a disabled button gives up its focus.
               className={cn(
                 "in-data-[pages-busy]:cursor-wait in-data-[pages-busy]:opacity-50",
-                action === "delete" && "hover:text-destructive",
+                action === "delete" && "not-disabled:hover:text-destructive",
               )}
               data-page-action={action}
               disabled={action === "delete" && deleteDisabled}

@@ -68,10 +68,11 @@ export function FileRowTools({
           <Pencil />
         </Button>
       </HintTooltip>
-      <HintTooltip label={removeLabel}>
+      {/* Greyed, it says why: the file is the document's last. */}
+      <HintTooltip label={removeDisabled ? t("sidebar.lastFile") : removeLabel}>
         <Button
           aria-label={removeLabel}
-          className="hover:text-destructive"
+          className="not-disabled:hover:text-destructive"
           data-slot={`${slot}-remove`}
           disabled={removeDisabled}
           onClick={onRemove}
