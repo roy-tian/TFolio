@@ -336,6 +336,26 @@ function viewerPage(pageNumber: number) {
   )
 }
 
+/** How far right of the viewer's middle a page's middle stands, and whether
+    the viewer scrolls across at all. */
+function acrossViewer(pageNumber: number) {
+  return browser.execute(
+    (scope: string, page: number) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      const box = viewer.querySelector(`[data-page-number='${page}']`)!.getBoundingClientRect()
+      const view = viewer.getBoundingClientRect()
+
+      return {
+        offCentre: Math.round(box.left + box.width / 2 - (view.left + view.width / 2)),
+        overflows: viewer.scrollWidth > viewer.clientWidth,
+        width: Math.round(box.width),
+      }
+    },
+    session,
+    pageNumber,
+  )
+}
+
 /** Wide enough for rows of two, and no wider than the suite's window lets a
     docked sidebar go. */
 const TWO_COLUMNS = 440
@@ -668,6 +688,82 @@ describe("TFolio sidebar pages", () => {
     expect(await shape(3)).toBe("portrait")
     expect(await pageStatus()).toBe("Page 4 of 4")
     expect(await selectedThumbs()).toEqual([4])
+  })
+
+  it("keeps a zoomed page centred across through each of its turns", async () => {
+    // Landscape at 100%: wider than the viewer either way up (1587 or 1123
+    // px), so each turn moves the offset that centres it. Kept as it was, the
+    // offset left every turn off centre, a whole turn's too, once clamped.
+    // Alone, so no other page holds the column at its width.
+    await openPdfFromDisk("centred-turns.pdf", minimalPdf(1, "0 0 1190 842"))
+    await $(preview(1)).waitForExist({ timeout: 30_000 })
+    await $(`${session} [data-slot='zoom-controls-readout']`).click()
+    await expect($(`${session} [data-slot='zoom-controls']`)).toHaveAttribute(
+      "aria-label",
+      "Zoom 100%",
+    )
+    await browser.waitUntil(async () => (await acrossViewer(1)).overflows, {
+      timeoutMsg: "the page never grew wider than the viewer",
+    })
+    await browser.execute(
+      (scope: string, by: number) => {
+        document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!.scrollLeft += by
+      },
+      session,
+      (await acrossViewer(1)).offCentre,
+    )
+    expect(Math.abs((await acrossViewer(1)).offCentre)).toBeLessThanOrEqual(1)
+
+    for (let turn = 1; turn <= 4; turn += 1) {
+      const { width } = await acrossViewer(1)
+
+      await pressControl(1, "[data-page-action='rotate-right']")
+      await browser.waitUntil(async () => (await acrossViewer(1)).width !== width, {
+        timeoutMsg: `turn ${turn} never reshaped the page`,
+      })
+      await browser.pause(300)
+      expect(Math.abs((await acrossViewer(1)).offCentre)).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it("leaves the view where it stands across when a turn keeps the column's width", async () => {
+    // At 100% the wide second page sets the column's width, which the first
+    // page, turned, stays inside.
+    await openPdfFromDisk(
+      "column-held.pdf",
+      minimalPdf(2, (index) => (index === 0 ? "0 0 595 842" : "0 0 1190 842")),
+    )
+    await $(preview(2)).waitForExist({ timeout: 30_000 })
+    await $(`${session} [data-slot='zoom-controls-readout']`).click()
+    await expect($(`${session} [data-slot='zoom-controls']`)).toHaveAttribute(
+      "aria-label",
+      "Zoom 100%",
+    )
+    await browser.waitUntil(async () => (await acrossViewer(1)).overflows, {
+      timeoutMsg: "the second page never grew wider than the viewer",
+    })
+    // Off the axis, where holding a share of the turned page would move it.
+    const scrolled = await browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+
+      viewer.scrollLeft = (viewer.scrollWidth - viewer.clientWidth) / 2 + 100
+
+      return viewer.scrollLeft
+    }, session)
+    const { width } = await acrossViewer(1)
+
+    await pressControl(1, "[data-page-action='rotate-right']")
+    await browser.waitUntil(async () => (await acrossViewer(1)).width !== width, {
+      timeoutMsg: "the turn never reshaped the page",
+    })
+    await browser.pause(300)
+    expect(
+      await browser.execute(
+        (scope: string) =>
+          document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!.scrollLeft,
+        session,
+      ),
+    ).toBe(scrolled)
   })
 
   it("holds the page being read, and the page its fit measures, through edits above it", async () => {

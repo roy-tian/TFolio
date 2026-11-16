@@ -73,28 +73,47 @@ describe("anchorCorrection", () => {
 
 describe("editAnchor", () => {
   test("holds a page's top while it shows", () => {
-    const anchor = editAnchor(5, rect(120), 40)!
+    const anchor = editAnchor(5, rect(120), 40, 300)!
 
-    expect(anchor).toEqual({ clientY: 120, fractionY: 0, pageNumber: 5 })
+    expect(anchor).toEqual({ axisX: 300, clientY: 120, fractionY: 0, pageNumber: 5 })
     // Rescaled and moved down two pages: back to where its top stood.
-    expect(editAnchorCorrection(anchor, rect(1500, 100, 800, 1000))).toBe(1380)
+    expect(editAnchorCorrection(anchor, rect(1500, -100, 800, 1000), 300)).toEqual({
+      left: 0,
+      top: 1380,
+    })
   })
 
   test("holds the share of a page read partway down, through a rescale", () => {
-    const anchor = editAnchor(5, rect(-210, 100, 400, 500), 40)!
+    const anchor = editAnchor(5, rect(-210, 100, 400, 500), 40, 300)!
 
     expect(anchor.fractionY).toBeCloseTo(0.5)
-    expect(editAnchorCorrection(anchor, rect(-460, 100, 800, 1000))).toBeCloseTo(0)
+    expect(editAnchorCorrection(anchor, rect(-460, 100, 800, 1000), 300).top).toBeCloseTo(0)
+  })
+
+  // The bug this exists for: zoomed past the viewer's width and centred, a
+  // turn widened the column under a kept scroll offset, sliding the page aside.
+  test("brings the column's axis back where it stood across", () => {
+    const anchor = editAnchor(1, rect(-100, -200, 1400, 1980), 0, 500)!
+
+    // The page and the column 824px wider, from the same left edge.
+    expect(editAnchorCorrection(anchor, rect(-100, -200, 2224, 1400), 912).left).toBe(412)
+  })
+
+  test("moves nothing across while the column keeps its width", () => {
+    const anchor = editAnchor(1, rect(-100, 300, 400, 560), 0, 500)!
+
+    // A narrow page turned among wider ones: its box changes, the axis stays.
+    expect(editAnchorCorrection(anchor, rect(-100, 220, 560, 400), 500).left).toBe(0)
   })
 
   test("hands a page taken out to the next from its top", () => {
-    const anchor = editAnchor(5, rect(-210), 40, true)!
+    const anchor = editAnchor(5, rect(-210), 40, 300, true)!
 
-    expect(anchor).toEqual({ clientY: 40, fractionY: 0, pageNumber: 5 })
-    expect(editAnchorCorrection(anchor, rect(-210))).toBe(-250)
+    expect(anchor).toEqual({ axisX: 300, clientY: 40, fractionY: 0, pageNumber: 5 })
+    expect(editAnchorCorrection(anchor, rect(-210), 300)).toEqual({ left: 0, top: -250 })
   })
 
   test("anchors nothing to a page with no box", () => {
-    expect(editAnchor(1, rect(0, 0, 0, 0), 0)).toBeNull()
+    expect(editAnchor(1, rect(0, 0, 0, 0), 0, 0)).toBeNull()
   })
 })

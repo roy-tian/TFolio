@@ -147,7 +147,11 @@ import {
   type ViewMode,
 } from "@/lib/viewMode"
 import { isNoteWorthKeeping } from "@/lib/textNoteDraft"
-import { viewerReadingBounds, viewerSizeCommitted } from "@/lib/viewerViewport"
+import {
+  viewerColumnAxis,
+  viewerReadingBounds,
+  viewerSizeCommitted,
+} from "@/lib/viewerViewport"
 import {
   anchorCorrection,
   anchorOnPage,
@@ -401,8 +405,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const padding = pdfDocument.padding ?? NO_PADDING
     // Where the page being read stood before an edit: blanks above it coming
     // or going, a turn reshaping it, pages inserted, taken out or moved around
-    // it, any of which can also change a fit's scale. Left alone, the kept
-    // scroll offset would show another page; the view holds it there instead.
+    // it, any of which can also change a fit's scale or the column's width.
+    // Left alone, the kept scroll offsets would show another page, or slide a
+    // zoomed one off centre; the view holds it there instead.
     const editAnchorRef = useRef<EditAnchor | null>(null)
 
     useLayoutEffect(() => {
@@ -420,7 +425,22 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       )
 
       if (page) {
-        viewer.scrollTop += editAnchorCorrection(anchor, page.getBoundingClientRect())
+        const correction = editAnchorCorrection(
+          anchor,
+          page.getBoundingClientRect(),
+          viewerColumnAxis(viewer),
+        )
+
+        // In whole pixels, none for under half of one: WebKit drops a scroll
+        // offset's fraction, so each edit would carry the view a pixel further
+        // the same way.
+        if (Math.abs(correction.left) >= 0.5) {
+          viewer.scrollLeft = Math.round(viewer.scrollLeft + correction.left)
+        }
+
+        if (Math.abs(correction.top) >= 0.5) {
+          viewer.scrollTop = Math.round(viewer.scrollTop + correction.top)
+        }
       }
     }, [padding, pdfDocument.pages])
 
@@ -976,22 +996,30 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                   viewer?.querySelectorAll<HTMLElement>("[data-page-number]") ?? [],
                 ).find((candidate) => candidate.getBoundingClientRect().bottom > readingTop)
 
-            editAnchorRef.current = page
-              ? editAnchor(Number(page.dataset.pageNumber), page.getBoundingClientRect(), readingTop)
-              : null
+            editAnchorRef.current =
+              page && viewer
+                ? editAnchor(
+                    Number(page.dataset.pageNumber),
+                    page.getBoundingClientRect(),
+                    readingTop,
+                    viewerColumnAxis(viewer),
+                  )
+                : null
           } else if (movement) {
             const page = pageAt(currentPage.get())
 
             reading = followPage(movement, currentPage.get())
 
-            editAnchorRef.current = page
-              ? editAnchor(
-                  reading,
-                  page.getBoundingClientRect(),
-                  readingTop,
-                  movement[reading - 1] !== currentPage.get(),
-                )
-              : null
+            editAnchorRef.current =
+              page && viewer
+                ? editAnchor(
+                    reading,
+                    page.getBoundingClientRect(),
+                    readingTop,
+                    viewerColumnAxis(viewer),
+                    movement[reading - 1] !== currentPage.get(),
+                  )
+                : null
             zoom.followFitPage(movement)
           }
 
