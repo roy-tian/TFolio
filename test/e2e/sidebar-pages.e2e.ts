@@ -378,6 +378,43 @@ describe("TFolio sidebar pages", () => {
     await browser.waitUntil(async () => (await sidebarWidth()) === 256)
   })
 
+  it("gives book view up as the reader widens the sidebar to the pages' width", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "book" } })
+    await refreshApp()
+    await openPdfFromDisk("spreads.pdf", bandedPdf(4))
+    await settledBands(4)
+    const spreads = () =>
+      browser.execute((scope: string) => document.querySelectorAll(`${scope} [data-book-spread]`).length, session)
+    const doubleClick = () =>
+      browser.execute((selector: string) => {
+        document
+          .querySelector(selector)!
+          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+      }, handle)
+
+    await browser.waitUntil(async () => (await spreads()) > 0)
+    // From its narrowest out to the pages' width, which leaves them half.
+    await doubleClick()
+    await browser.waitUntil(async () => (await spreads()) === 0, {
+      timeoutMsg: "book view stayed beside a sidebar half the window wide",
+    })
+
+    // Chosen again, it stays: only the widening gives it up.
+    await $(`${session} [data-slot='status-bar'] button[aria-label='Book']`).click()
+    await browser.waitUntil(async () => (await spreads()) > 0)
+    await browser.pause(500)
+    expect(await spreads()).toBeGreaterThan(0)
+
+    // Narrowed, then widened again: given up again.
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) === 256)
+    expect(await spreads()).toBeGreaterThan(0)
+    await doubleClick()
+    await browser.waitUntil(async () => (await spreads()) === 0, {
+      timeoutMsg: "book view stayed after the second widening",
+    })
+  })
+
   it("goes to the page a click chooses, the pages to read staying beside it", async () => {
     await openPdfFromDisk("read.pdf", bandedPdf(6))
     await $(preview(5)).waitForExist({ timeout: 30_000 })

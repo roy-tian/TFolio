@@ -1749,6 +1749,24 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       setPreferredViewMode(mode)
     }
 
+    // The reader widened the sidebar to half the window or more: what it leaves
+    // the pages is too narrow for a spread. The tab shown gives book view up,
+    // as a choice of the reader's, and only then: chosen again, it stays.
+    const widenedRef = useRef(sidebar.widenedToHalf)
+
+    // Before paint, so no frame shows spreads beside the widened sidebar.
+    useLayoutEffect(() => {
+      if (widenedRef.current === sidebar.widenedToHalf) {
+        return
+      }
+
+      widenedRef.current = sidebar.widenedToHalf
+
+      if (active && viewMode === "book") {
+        changeViewMode("single")
+      }
+    }, [sidebar.widenedToHalf])
+
     const openSearch = search.openSearch
 
     const { queueRecentView, rememberViewNow: flushAndRememberView } = useRecentView({ recentPath })
