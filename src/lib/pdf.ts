@@ -349,9 +349,10 @@ function visibleFraction(
     scroll offset where it came to show the page, null until it has. */
 export type JumpTarget = { landedTop: number | null; page: number; since: number }
 
-// Several times what a smooth jump takes in WebKitGTK (about 0.3 s, however
-// far): until then the jump is still arriving, and one that never showed its
-// page by then was taken elsewhere by the reader.
+// Several times what a smooth jump takes (0.2 s however far: WebKit's cap, and
+// WebView2's through `additionalBrowserArgs`): until then the jump is still
+// arriving, and one that never showed its page by then was taken elsewhere by
+// the reader.
 export const JUMP_ARRIVAL_MS = 1500
 // How far the view may move from where a jump landed, as a share of its
 // height, before the reader counts as having read on from the page.

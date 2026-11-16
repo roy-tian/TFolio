@@ -119,6 +119,9 @@
   WebKit restyle the whole document per DOM change or focus. Ship no breakpoint wider than the
   window's `minWidth` either (`sm:` is the widest; no `md:` and up, no `container`): Chromium
   restyles everything when a resize flips one. `toolbar-tooltips.e2e.ts` guards.
+- Smooth jumps (`scrollIntoView` and the like) take WebKit's 200 ms however far. WebView2's
+  own grows to 1.5 s, so `tauri.conf.json`'s `additionalBrowserArgs` caps it at the same 200 ms.
+  That setting replaces wry's default `--disable-features` list, so it restates that list too.
 - The borderless window keeps its outer 5px for resizing on Linux: no pointer event reaches the
   WebView there, so a bar or handle at the edge sits clear of it, and a native-pointer move
   aimed there shows nothing.
