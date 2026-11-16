@@ -87,6 +87,7 @@ import {
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
+import type { AskBatchLimit } from "@/lib/batchLimits"
 import { copyPlainText } from "@/lib/clipboard"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
@@ -100,6 +101,8 @@ import { e2eOverride } from "@/lib/e2e"
 import { fileMoveOrder, foldedAway, nearestFileEdge } from "@/lib/pageSections"
 import {
   answerSourceSignatures,
+  endFilesProgress,
+  joinProgress,
   readFileSources,
   releaseFileSources,
   storedFileOptions,
@@ -203,6 +206,8 @@ export type DocumentSessionHandle = {
 
 type DocumentSessionProps = {
   active: boolean
+  /** The window's one prompt over files past what one go takes. */
+  askBatchLimit: AskBatchLimit
   /** The window's one signature prompt. */
   askSignatures: AskSignatures
   document: PdfDocumentInfo
@@ -256,6 +261,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
   function DocumentSession(
     {
       active,
+      askBatchLimit,
       askSignatures,
       document: openedDocument,
       ensureSourceSignatures,
@@ -1170,7 +1176,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         let read: Awaited<ReturnType<typeof readFileSources>> = []
 
         try {
-          read = await readFileSources(paths, notices)
+          read = await readFileSources(paths, notices, askBatchLimit)
 
           if (read.length === 0) {
             return
@@ -1213,6 +1219,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             before < 0 ? current.numPages + 1 : before + 1,
             current.numPages,
             {
+              onProgress: joinProgress(notices, read.length),
               options: storedFileOptions(),
               ownTitle: fileName,
               signatures: answers.signatures,
@@ -1241,13 +1248,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }
         } finally {
           addingFilesRef.current = false
+          endFilesProgress(notices)
 
           // An add that landed took its sources with it; any other lets them
           // go, or a signed one would keep its file from every writer.
           releaseFileSources(read)
         }
       },
-      [annotations, fileName, notice, notices, showLanded],
+      [annotations, askBatchLimit, fileName, notice, notices, showLanded],
     )
 
     // The backend's own dialog, which also approves the chosen files for reading.

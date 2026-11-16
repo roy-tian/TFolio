@@ -547,7 +547,20 @@ const ja = {
     unreadable_other: "{{count}} 個のファイルを読み込めませんでした: {{names}}",
     converterMissing:
       "Word 文書を追加するには、Word、WPS、または LibreOffice がインストールされている必要があります。",
-    tooManyFiles: "一度に追加できるファイルは 64 個までです。",
+    tooManyFiles: "一度に追加できるファイルは 256 個、合計 512 MiB までです。",
+    merging: "[{{current}}/{{total}}] {{name}}",
+    limitTitle: "一度に扱える上限を超えています",
+    limitOpen: "一度に開けるファイルは {{limit}} 個までですが、{{total}} 個が選ばれました。",
+    limitMerge: "一度に追加できるファイルは {{limit}} 個までですが、{{total}} 個が選ばれました。",
+    limitBytes: "一度に追加できるファイルは合計 {{limit}} までですが、これらは合計 {{size}} です。",
+    limitChoice_one: "最初の {{count}} 個だけ処理するか、すべてやめて選び直してください。",
+    limitChoice_other: "最初の {{count}} 個だけ処理するか、すべてやめて選び直してください。",
+    limitNone: "最初のファイルだけで上限を超えています。すべてやめて選び直してください。",
+    limitTakeOpen_one: "最初の {{count}} 個を開く",
+    limitTakeOpen_other: "最初の {{count}} 個を開く",
+    limitTakeMerge_one: "最初の {{count}} 個を追加",
+    limitTakeMerge_other: "最初の {{count}} 個を追加",
+    limitGiveUp: "すべてやめる",
     skipped_one:
       "PDF、画像、Word 文書のいずれでもない {{count}} 個のファイルをスキップしました: {{names}}",
     skipped_other:

@@ -204,6 +204,10 @@
   or among its outline's files, else at the end), or on the home tab, for two or more, a new
   sourceless one (`merge_pdf_sources`: no page of its own, no history). Files no flow takes are
   named (`filesSkipped`), never dropped silently.
+- One open takes at most 8 files, and one add or merge at most 256 files of 512 MiB in all
+  (`batchLimits.ts`, the engine's `MAX_MERGE_FILES` and `MAX_MERGE_BYTES` refusing the rest):
+  past either the reader is asked to go on with the first that fit or give them all up. An add or
+  merge of more than 3 files names each in the corner as it is read, then as it goes in.
 - A file is never parted: a drag moves pages only among their own file's (`landingInFile`) and a
   file only whole, between files, as files dropped in land (`nearestFileEdge`); the engine refuses
   a reorder or an added file that would part one. Pastes and pages carried in from another tab

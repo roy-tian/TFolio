@@ -2,9 +2,11 @@ use std::time::SystemTime;
 
 use super::*;
 
-// A guided merge holds every source in memory at once under the same MiB
-// ceiling as an open, so the count is what bounds the whole run.
-pub(super) const MAX_MERGE_FILES: usize = 64;
+// One add or merge reads at most this many files, and at most this many
+// bytes of them on disk: the frontend asks before going past either
+// (`batchLimits.ts`), and these refuse what gets past it.
+pub(super) const MAX_MERGE_FILES: usize = 256;
+pub(super) const MAX_MERGE_BYTES: u64 = 512 * 1024 * 1024;
 
 // An image is read whole before it is decoded, and a photograph is nothing
 // like a document in size, so its ceiling sits well under the PDF one.
@@ -557,6 +559,13 @@ pub(super) fn image_limit_error() -> String {
 
 pub(super) fn merge_file_limit_error() -> String {
     format!("a document takes at most {MAX_MERGE_FILES} files at once")
+}
+
+pub(super) fn merge_bytes_limit_error() -> String {
+    format!(
+        "a document takes at most {} MB of files at once",
+        MAX_MERGE_BYTES / 1024 / 1024
+    )
 }
 
 impl PdfiumEngine {

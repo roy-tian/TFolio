@@ -143,6 +143,17 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
   const busy = notice.action?.busy === true
   const running = "running" in entry
   const MarkIcon = running ? Spinner : toneIcons[entry.tone]
+  const actionButton = action ? (
+    <Button
+      className="shrink-0"
+      disabled={busy}
+      onClick={() => onAction(notice)}
+      size="sm"
+      variant="outline"
+    >
+      {busy && "busyLabelKey" in action ? t(action.busyLabelKey) : t(action.labelKey)}
+    </Button>
+  ) : null
 
   return (
     <div
@@ -179,26 +190,18 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
             </p>
             {"detailKey" in entry ? <p>{t(entry.detailKey)}</p> : null}
           </div>
-          {action ? (
-            <Button
-              className="shrink-0"
-              disabled={busy}
-              onClick={() => onAction(notice)}
-              size="sm"
-              variant="outline"
-            >
-              {busy && "busyLabelKey" in action
-                ? t(action.busyLabelKey)
-                : t(action.labelKey)}
-            </Button>
-          ) : null}
+          {actionButton}
         </div>
       ) : (
-        <OperationProgress
-          className="min-w-0 flex-1"
-          label={message}
-          progress={notice.progress}
-        />
+        <>
+          <OperationProgress
+            barFirst={"barFirst" in entry}
+            className="min-w-0 flex-1"
+            label={message}
+            progress={notice.progress}
+          />
+          {actionButton}
+        </>
       )}
       <Button
         aria-label={t("notification.dismiss")}

@@ -4,8 +4,9 @@
 use serde::Serialize;
 
 use super::io::{
-    fingerprint, is_merge_image, load_merge_source, merge_file_limit_error, read_merge_source,
-    Fingerprint, MergeDraft, SourceFile, MAX_MERGE_FILES,
+    fingerprint, is_merge_image, load_merge_source, merge_bytes_limit_error,
+    merge_file_limit_error, read_merge_source, Fingerprint, MergeDraft, SourceFile,
+    MAX_MERGE_BYTES, MAX_MERGE_FILES,
 };
 use super::page_import::{lent_copy, ImportRollback};
 use super::page_ops::page_index;
@@ -140,22 +141,71 @@ impl PdfiumEngine {
         paths: Vec<PathBuf>,
         word_conversion: bool,
     ) -> Result<Vec<FileSourceInfo>, String> {
+        self.read_sources_reporting(scope, paths, word_conversion, &mut |_, _, _| {})
+    }
+
+    /// `read_sources`, telling `on_file` of each file as it starts: how many
+    /// came before it, of how many. Office conversions come first, all at
+    /// once, so the first file is told of before they start.
+    pub fn read_sources_reporting(
+        &self,
+        scope: &str,
+        paths: Vec<PathBuf>,
+        word_conversion: bool,
+        on_file: &mut dyn FnMut(usize, usize, &Path),
+    ) -> Result<Vec<FileSourceInfo>, String> {
         if paths.len() > MAX_MERGE_FILES {
             return Err(merge_file_limit_error());
         }
 
+        let bytes: u64 = paths
+            .iter()
+            .filter_map(|path| fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .sum();
+
+        if bytes > MAX_MERGE_BYTES {
+            return Err(merge_bytes_limit_error());
+        }
+
+        let total = paths.len();
+
         // Stoppable under the inspection's target: the same Stop asks an
-        // office suite to give up, whichever flow started it.
+        // office suite to give up, whichever flow started it. Begun before
+        // the first file is told of, so a Stop it shows finds the operation.
         let operation = self.begin_operation(OperationTarget::Convert(scope.to_string()));
         let cancelled = || operation.is_cancelled();
-        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
 
-        Ok(paths
+        if let Some(first) = paths.first() {
+            on_file(0, total, first);
+        }
+
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
+        let read: Vec<FileSourceInfo> = paths
             .into_iter()
             .zip(word)
+            .enumerate()
             .take_while(|_| !cancelled())
-            .map_while(|(path, word)| self.read_source(scope, path, word, &cancelled))
-            .collect())
+            .map_while(|(index, (path, word))| {
+                // The first was told of before the conversions.
+                if index > 0 {
+                    on_file(index, total, &path);
+                }
+
+                self.read_source(scope, path, word, &cancelled)
+            })
+            .collect();
+
+        // A stopped read keeps none of what it read: Stop gives the files up,
+        // never adds those that happened to come first.
+        if cancelled() {
+            let ids: Vec<u64> = read.iter().filter_map(|info| info.id).collect();
+
+            self.release_sources(scope, &ids);
+            return Ok(Vec::new());
+        }
+
+        Ok(read)
     }
 
     /// `None` once the scope's work is stopped, keeping nothing.
@@ -401,6 +451,32 @@ impl PdfiumEngine {
         options: sections::FileOptions,
         decisions: &HashMap<u64, SignatureDecision>,
     ) -> Result<PdfStructureUpdate, String> {
+        self.insert_sources_reporting(
+            scope,
+            document_id,
+            source_ids,
+            index,
+            own_title,
+            options,
+            decisions,
+            &mut |_, _, _| {},
+        )
+    }
+
+    /// `insert_sources`, telling `on_file` of each file as its pages start
+    /// going in: how many went before it, of how many.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_sources_reporting(
+        &self,
+        scope: &str,
+        document_id: u64,
+        source_ids: &[u64],
+        index: i32,
+        own_title: &str,
+        options: sections::FileOptions,
+        decisions: &HashMap<u64, SignatureDecision>,
+        on_file: &mut dyn FnMut(usize, usize, &Path),
+    ) -> Result<PdfStructureUpdate, String> {
         if source_ids.is_empty() {
             return Err("no files to add".into());
         }
@@ -474,11 +550,13 @@ impl PdfiumEngine {
         // it, open until the document is read back once every file is in.
         let mut lenders = Vec::with_capacity(source_ids.len());
 
-        for id in source_ids {
+        for (done, id) in source_ids.iter().enumerate() {
             let inserted = if operation.is_cancelled() {
                 Err("the files were not added: the document closed".to_string())
             } else {
                 self.take_source(scope, *id).and_then(|mut source| {
+                    on_file(done, source_ids.len(), &source.path);
+
                     let mut documents = self.lock_documents()?;
                     let entry = open_entry_mut(&mut documents, document_id)?;
                     let file: &PdfDocument<'static> = source.document.document();
@@ -583,6 +661,27 @@ impl PdfiumEngine {
         options: sections::FileOptions,
         decisions: &HashMap<u64, SignatureDecision>,
     ) -> Result<PdfDocumentInfo, String> {
+        self.merge_sources_reporting(
+            scope,
+            source_ids,
+            own_title,
+            options,
+            decisions,
+            &mut |_, _, _| {},
+        )
+    }
+
+    /// `merge_sources`, telling `on_file` of each file as `insert_sources`
+    /// does.
+    pub fn merge_sources_reporting(
+        &self,
+        scope: &str,
+        source_ids: &[u64],
+        own_title: &str,
+        options: sections::FileOptions,
+        decisions: &HashMap<u64, SignatureDecision>,
+        on_file: &mut dyn FnMut(usize, usize, &Path),
+    ) -> Result<PdfDocumentInfo, String> {
         let bytes = {
             // PDFium work like any other, so under the store's lock — given
             // back before `open_with_source` takes it again.
@@ -596,7 +695,9 @@ impl PdfiumEngine {
         };
         let id = self.open_with_source(bytes, None)?.id();
 
-        match self.insert_sources(scope, id, source_ids, 1, own_title, options, decisions) {
+        match self.insert_sources_reporting(
+            scope, id, source_ids, 1, own_title, options, decisions, on_file,
+        ) {
             Ok(update) => Ok(PdfDocumentInfo::from_structure(id, update)),
             Err(error) => {
                 let _ = self.close(id);

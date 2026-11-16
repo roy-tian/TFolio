@@ -49,6 +49,74 @@ fn insert(engine: &PdfiumEngine, scope: &str, ids: &[u64]) -> Result<PdfStructur
 
 #[test]
 #[ignore = "requires `bun run pdfium:download`"]
+fn a_long_add_tells_of_each_file_as_it_starts_within_its_limits() {
+    let _sources = sources_test_guard();
+    let engine = test_engine();
+    let directory = scratch_directory("sources-progress");
+    let names = ["one.pdf", "two.pdf", "three.pdf"];
+    let paths: Vec<PathBuf> = names
+        .iter()
+        .map(|name| write_source(&directory, name, banded_pdf(&[20])))
+        .collect();
+    let told_of = |done: usize, total: usize, path: &Path| {
+        (
+            done,
+            total,
+            path.file_name().unwrap().to_string_lossy().into_owned(),
+        )
+    };
+    let mut told = Vec::new();
+    let ids: Vec<u64> = engine
+        .read_sources_reporting("progress", paths, false, &mut |done, total, path| {
+            told.push(told_of(done, total, path))
+        })
+        .expect("the sources should be read")
+        .into_iter()
+        .map(|info| info.id.expect("every source should be readable"))
+        .collect();
+    let expected: Vec<_> = names
+        .iter()
+        .enumerate()
+        .map(|(done, name)| (done, 3, name.to_string()))
+        .collect();
+
+    assert_eq!(told, expected);
+
+    let mut told = Vec::new();
+    let document = engine
+        .open(banded_pdf(&[100]))
+        .expect("PDFium should open the document");
+    engine
+        .insert_sources_reporting(
+            "progress",
+            document.id,
+            &ids,
+            2,
+            "own.pdf",
+            PLAIN,
+            &HashMap::new(),
+            &mut |done, total, path| told.push(told_of(done, total, path)),
+        )
+        .expect("the files should go in");
+    assert_eq!(told, expected);
+
+    // Past either limit nothing is read: 256 files, or 512 MB of them.
+    let many: Vec<PathBuf> = (0..257)
+        .map(|index| directory.join(format!("{index}.pdf")))
+        .collect();
+    assert!(engine.read_sources("progress", many, false).is_err());
+
+    let large = directory.join("large.pdf");
+    fs::File::create(&large)
+        .and_then(|file| file.set_len(512 * 1024 * 1024 + 1))
+        .expect("a sparse file should stand in for a large one");
+    assert!(engine.read_sources("progress", vec![large], false).is_err());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
 fn a_source_is_another_window_s_to_add_only_while_held() {
     let _sources = sources_test_guard();
     let engine = test_engine();

@@ -43,6 +43,8 @@ export type NoticeAction = {
 }
 
 type NoticeEntry = {
+  /** Its bar over its words, which then name what is under way. */
+  barFirst?: true
   detailKey?: ParseKeys
   life: NoticeLife
   /** Work that reports no measure of its own: a spinner and shimmering words
@@ -319,6 +321,13 @@ export const noticeCatalogue = {
     life: "standing",
     running: true,
     textKey: "files.adding",
+    tone: "info",
+  },
+  // Reading then putting in more than a few files, one named at a time.
+  filesMerging: {
+    barFirst: true,
+    life: "standing",
+    textKey: "files.merging",
     tone: "info",
   },
   filesConverterMissing: {

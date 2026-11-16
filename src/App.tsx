@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next"
 
 import { AppMenu, type AppMenuActions } from "@/components/AppMenu"
 import { AppSidebar } from "@/components/AppSidebar"
+import { BatchLimitPrompt } from "@/components/BatchLimitPrompt"
 import {
   DocumentSession,
   type DocumentSessionHandle,
@@ -36,10 +37,12 @@ import {
 import { AppUpdateContext, useAppUpdate } from "@/hooks/useAppUpdate"
 import { useNotices } from "@/hooks/useNotices"
 import { useReopenTab, type Reopened } from "@/hooks/useReopenTab"
+import { useBatchLimitPrompt } from "@/hooks/useBatchLimitPrompt"
 import { useSignaturePrompt } from "@/hooks/useSignaturePrompt"
 import { PageCarryContext, usePageCarry } from "@/hooks/usePageCarry"
 import { SidebarDropContext, setSidebarDropPoint, type SidebarDrop } from "@/hooks/useSidebarDrop"
 import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
+import { OPEN_FILES_AT_ONCE } from "@/lib/batchLimits"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
 import { dropHit, dropPointInCss, sidebarShown } from "@/lib/fileDrop"
@@ -670,6 +673,9 @@ export default function App() {
   })
   const reopenTab = reopenPrompt.reopen
 
+  const batchLimitPrompt = useBatchLimitPrompt()
+  const askBatchLimit = batchLimitPrompt.ask
+
   // Files no open or add can take are named, never passed over: all of them
   // is a wrong choice of file, some a drop that takes the rest.
   const takeOpenable = useCallback(
@@ -692,16 +698,31 @@ export default function App() {
   )
 
   const openPaths = useCallback(
-    (paths: string[], activate: "first" | "last" = "last") => {
-      const sources = takeOpenable(paths).flatMap((path) => {
+    async (paths: string[], activate: "first" | "last" = "last") => {
+      const openable = takeOpenable(paths).flatMap((path) => {
         const kind = classifyOpenSource(path)
 
         return kind ? [{ kind, path }] : []
       })
 
-      if (sources.length === 0) {
-        return Promise.resolve()
+      if (openable.length === 0) {
+        return
       }
+
+      // More than a go opens: the first that fit, or none, to choose again.
+      if (
+        openable.length > OPEN_FILES_AT_ONCE &&
+        !(await askBatchLimit({
+          by: "count",
+          fit: OPEN_FILES_AT_ONCE,
+          kind: "open",
+          total: openable.length,
+        }))
+      ) {
+        return
+      }
+
+      const sources = openable.slice(0, OPEN_FILES_AT_ONCE)
 
       return runOpenBatch(async () => {
         const openedIds: number[] = []
@@ -777,6 +798,7 @@ export default function App() {
     },
     [
       activateTab,
+      askBatchLimit,
       loadSource,
       notices,
       reopenTab,
@@ -929,7 +951,12 @@ export default function App() {
 
       return runOpenBatch(async () => {
         const name = t("menu.untitled")
-        const merged = await mergeFiles(sources, { ask: askSignatures, notices, ownTitle: name })
+        const merged = await mergeFiles(sources, {
+          ask: askSignatures,
+          askLimit: askBatchLimit,
+          notices,
+          ownTitle: name,
+        })
 
         if (merged?.kind === "single") {
           // Queued behind this batch, never awaited inside it.
@@ -972,7 +999,17 @@ export default function App() {
         }
       })
     },
-    [activateTab, askSignatures, notices, openPaths, replaceTabs, runOpenBatch, t, takeOpenable],
+    [
+      activateTab,
+      askBatchLimit,
+      askSignatures,
+      notices,
+      openPaths,
+      replaceTabs,
+      runOpenBatch,
+      t,
+      takeOpenable,
+    ],
   )
 
   // The pages are about to land in this tab's column, so its sidebar shows
@@ -2471,6 +2508,7 @@ export default function App() {
       {tabs.map((tab) => (
         <DocumentSession
           active={tab.id === activeId}
+          askBatchLimit={askBatchLimit}
           askSignatures={askSignatures}
           document={tab.document}
           ensureSourceSignatures={ensureSourceSignatures}
@@ -2573,6 +2611,11 @@ export default function App() {
         name={reopenPrompt.name}
         onAnswer={reopenPrompt.answer}
         open={reopenPrompt.open}
+      />
+      <BatchLimitPrompt
+        limit={batchLimitPrompt.limit}
+        onAnswer={batchLimitPrompt.answer}
+        open={batchLimitPrompt.open}
       />
       <SignaturePrompt
         forRest={signaturePrompt.forRest}

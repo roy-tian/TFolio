@@ -239,6 +239,78 @@ describe("TFolio files added to an open document", () => {
     await expect($(saveTrigger)).not.toHaveAttribute("data-save-as-only")
   })
 
+  it("shows each file as it goes in, past three, its bar over its name", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await waitForPages(1)
+    // Recorded as it changes: the files may well be in before a poll would look.
+    await browser.execute(() => {
+      const seen: { barFirst: boolean; text: string }[] = []
+      const record = () => {
+        const notice = document.querySelector("[data-notice='filesMerging']")
+        const track = notice?.querySelector("[data-slot='progress-track']")
+        const label = notice?.querySelector("[data-slot='progress-label']")
+
+        if (track && label) {
+          seen.push({
+            barFirst: track.getBoundingClientRect().top < label.getBoundingClientRect().top,
+            text: label.textContent?.trim() ?? "",
+          })
+        }
+      }
+
+      ;(window as unknown as { __mergeSeen: typeof seen }).__mergeSeen = seen
+      new MutationObserver(record).observe(document.body, {
+        characterData: true,
+        childList: true,
+        subtree: true,
+      })
+    })
+
+    await addFilesFromPicker(
+      ["a", "b", "c", "d"].map((name) => writeScratchPdf(`${name}.pdf`, minimalPdf(1))),
+    )
+    await waitForPages(5)
+    await $("[data-notice='filesMerging']").waitForExist({ reverse: true, timeout: 15_000 })
+
+    const seen = await browser.execute(
+      () => (window as unknown as { __mergeSeen: { barFirst: boolean; text: string }[] }).__mergeSeen,
+    )
+
+    expect(seen.length).toBeGreaterThan(0)
+    for (const { barFirst, text } of seen) {
+      expect(text).toMatch(/^\[[1-4]\/4\] [a-d]\.pdf$/)
+      expect(barFirst).toBe(true)
+    }
+  })
+
+  it("asks before adding more than 256 files at once, adding none once given up", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await waitForPages(1)
+    const paths = Array.from({ length: 257 }, (_, index) =>
+      writeScratchPdf(`batch-${index}.pdf`, minimalPdf(1)),
+    )
+    const prompt = $("[data-slot='batch-limit-prompt']")
+    const point = await browser.execute((scope: string) => {
+      const box = document
+        .querySelector(`${scope} [data-slot='sidebar-thumbnails']`)!
+        .getBoundingClientRect()
+
+      return { x: box.left + box.width / 2, y: box.bottom - 40 }
+    }, activeSidebar)
+
+    await emitDrag("drag-over", point, paths)
+    await emitDrag("drag-drop", point, paths)
+    await prompt.waitForDisplayed({ timeout: 15_000 })
+    await expect(prompt).toHaveText(
+      expect.stringContaining("At most 256 files can be added at once, and 257 were chosen."),
+    )
+    await expect($("[data-action='batch-limit-take']")).toHaveText("Add the first 256")
+    await $("[data-action='batch-limit-give-up']").click()
+    await prompt.waitForDisplayed({ reverse: true })
+    await browser.pause(500)
+    expect(await pageCount()).toBe(1)
+  })
+
   it("says a file changed on disk since it was read, so it must be added again", async () => {
     const signed = writeScratchPdf("signed.pdf", signedPdf())
     const prompt = "[data-slot='signature-prompt']"
