@@ -151,7 +151,9 @@
 - Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
   worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
   pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
-  resizing keeps them.
+  resizing keeps them. A turned page takes its new shape before its new render lands: its
+  canvas shows the bitmap it holds turned and fitted, and drops that turn under `flushSync`
+  in the task the replacement lands in.
 
 ## PDF editing and cancellation
 

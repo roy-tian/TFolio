@@ -1,4 +1,5 @@
 import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { invoke } from "@tauri-apps/api/core"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -14,6 +15,7 @@ import { cachedPageText, rememberPageText } from "@/lib/pageText"
 import { distanceFromView, pageWork } from "@/lib/pageWork"
 import {
   dimensionsForRotation,
+  heldPixelsTransform,
   MAX_RENDER_WIDTH,
   MIN_PAGE_OUTPUT_SCALE,
   MIN_PAGE_RENDER_WIDTH,
@@ -100,6 +102,14 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const textSpans = loadedSpans ?? NO_TEXT_SPANS
   const textLayerRef = useRef<HTMLDivElement>(null)
   const [spansRegistered, setSpansRegistered] = useState(0)
+  // The page as the canvas holds it. The surface takes a turned page's size at
+  // once; until the replacement is painted, these pixels are turned and fitted
+  // to it rather than stretched.
+  const [paintedPage, setPaintedPage] = useState(page)
+  const holdsPage =
+    paintedPage.width === page.width &&
+    paintedPage.height === page.height &&
+    paintedPage.rotation === page.rotation
 
   const { bitmapRevision, hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -111,7 +121,16 @@ const PdfPageSurface = memo(function PdfPageSurface({
     maxRenderWidth: MAX_RENDER_WIDTH,
     mimeType: "image/png",
     minOutputScale: MIN_PAGE_OUTPUT_SCALE,
-    onPaint: onPagePaint,
+    onPaint: (paintedNumber, paintedEpoch) => {
+      // The canvas was replaced in this same task, already turned by PDFium:
+      // drop the held turn before the browser can show it turned twice. A
+      // render of an older epoch, landing before its effect is cleaned up,
+      // still holds the old geometry.
+      if (!holdsPage && paintedEpoch === renderEpoch) {
+        flushSync(() => setPaintedPage(page))
+      }
+      onPagePaint(paintedNumber, paintedEpoch)
+    },
     pageHeight: page.height,
     pageNumber,
     pageWidth: page.width,
@@ -219,6 +238,16 @@ const PdfPageSurface = memo(function PdfPageSurface({
     transform: `translate(-50%, -50%) rotate(${page.rotation}deg)`,
     width: `${(layoutWidth / page.width) * 100}%`,
   }
+  const heldCanvasStyle = holdsPage
+    ? undefined
+    : {
+        height: paintedPage.height,
+        left: "50%",
+        position: "absolute" as const,
+        top: "50%",
+        transform: `translate(-50%, -50%) ${heldPixelsTransform(paintedPage.rotation, page.rotation, paintedPage, page)}`,
+        width: paintedPage.width,
+      }
   const positionedSearchRects = useMemo(() => {
     if (!loadedSpans) return []
     const layout = textPageLayout(loadedSpans)
@@ -252,6 +281,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
           data-rendered={hasRendered}
           height={1}
           ref={canvasRef}
+          style={heldCanvasStyle}
           width={1}
         />
         {notes.length > 0 ? (

@@ -11,6 +11,7 @@ import {
   EXPORT_TARGET_OPEN,
   exportFailureNotice,
   fileNameFromPath,
+  heldPixelsTransform,
   isPdfPath,
   pickCurrentPage,
   pickReadingPage,
@@ -79,6 +80,24 @@ describe("dimensionsForRotation", () => {
   test("swaps the axes on a quarter turn", () => {
     expect(dimensionsForRotation(90, 200, 300)).toEqual({ height: 200, width: 300 })
     expect(dimensionsForRotation(270, 200, 300)).toEqual({ height: 200, width: 300 })
+  })
+})
+
+describe("heldPixelsTransform", () => {
+  test("turns a page's pixels on to its new rotation, exactly filling it", () => {
+    const portrait = { height: 300, width: 200 }
+    const landscape = { height: 200, width: 300 }
+
+    expect(heldPixelsTransform(0, 90, portrait, landscape)).toBe("rotate(90deg) scale(1)")
+    // Back the short way round is still a clockwise turn from what was painted.
+    expect(heldPixelsTransform(90, 0, landscape, portrait)).toBe("rotate(270deg) scale(1)")
+    expect(heldPixelsTransform(270, 90, portrait, portrait)).toBe("rotate(180deg) scale(1)")
+  })
+
+  test("letterboxes pixels whose page has since changed size", () => {
+    expect(
+      heldPixelsTransform(0, 0, { height: 300, width: 200 }, { height: 300, width: 100 }),
+    ).toBe("rotate(0deg) scale(0.5)")
   })
 })
 

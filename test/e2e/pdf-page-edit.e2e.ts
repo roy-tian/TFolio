@@ -367,6 +367,64 @@ describe("TFolio page editing in the sidebar", () => {
     await expect(save).toBeDisabled()
   })
 
+  it("turns a page's pixels with it, never stretched, until its new render lands", async () => {
+    await openPdfFromDisk("rotate-held.pdf", bandedPdf(3))
+    await paintedFingerprints(3)
+    const canvases = [
+      "[data-document-session][data-active='true'] [data-page-number='2'] canvas",
+      `${preview(2)} canvas`,
+    ]
+    await $(`${canvases[0]}[data-rendered='true']`).waitForExist({ timeout: 30_000 })
+
+    // Read as each change lands, before the browser can paint it: a canvas's
+    // box keeps its bitmap's shape however its page now measures.
+    await browser.execute((selectors: string[]) => {
+      const seen = window as Window & { __misshapen?: string[] }
+      const misshapen: string[] = []
+
+      seen.__misshapen = misshapen
+      new MutationObserver(() => {
+        for (const selector of selectors) {
+          const canvas = document.querySelector<HTMLCanvasElement>(selector)
+
+          if (!canvas || canvas.width <= 1 || canvas.offsetHeight === 0) continue
+          const box = canvas.offsetWidth / canvas.offsetHeight
+
+          if (Math.abs(box / (canvas.width / canvas.height) - 1) > 0.05) {
+            misshapen.push(
+              `${selector}: ${canvas.offsetWidth}×${canvas.offsetHeight} box, ${canvas.width}×${canvas.height} bitmap`,
+            )
+          }
+        }
+      }).observe(document.body, { attributes: true, childList: true, subtree: true })
+    }, canvases)
+    const bitmapsLandscape = (landscape: boolean) =>
+      browser.execute(
+        (selectors: string[], wide: boolean) =>
+          selectors.every((selector) => {
+            const canvas = document.querySelector<HTMLCanvasElement>(selector)
+
+            return canvas !== null && canvas.width > canvas.height === wide
+          }),
+        canvases,
+        landscape,
+      )
+
+    await clickThumb(2)
+    await sidebarPageAction(2, "rotate-pages")
+    await browser.waitUntil(() => bitmapsLandscape(true), {
+      timeoutMsg: "the turned page never rendered again",
+    })
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(() => bitmapsLandscape(false), {
+      timeoutMsg: "the page turned back never rendered again",
+    })
+
+    expect(
+      await browser.execute(() => (window as Window & { __misshapen?: string[] }).__misshapen),
+    ).toEqual([])
+  })
+
   it("deletes the chosen page with the Delete key, and undo and redo answer", async () => {
     await openPdfFromDisk("delete.pdf", bandedPdf(3))
     const [first, second, third] = await paintedFingerprints(3)

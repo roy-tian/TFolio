@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { flushSync } from "react-dom"
 import { LoaderCircle, TriangleAlert } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -7,7 +8,7 @@ import { useNearViewport } from "@/hooks/useNearViewport"
 import { usePageBitmap } from "@/hooks/usePageBitmap"
 import { isOutOfSight, prefersReducedMotion, TURN_MOTION } from "@/lib/motion"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
-import { dimensionsForRotation, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
+import { heldPixelsTransform, MAX_THUMBNAIL_RENDER_WIDTH } from "@/lib/pdf"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
 import { THUMBNAIL_CAPTION_HEIGHT, THUMBNAIL_WIDTH, thumbnailPaper } from "@/lib/viewMode"
@@ -114,8 +115,15 @@ export function PdfThumbnail({
     isNearViewport,
     maxRenderWidth: MAX_THUMBNAIL_RENDER_WIDTH,
     mimeType: "image/webp",
-    onPaint: () =>
-      setPaintedPage((previous) => (isPage(previous) ? previous : page)),
+    // The canvas was replaced in this same task, already turned by PDFium:
+    // drop the held turn before the browser can show it turned twice. A
+    // render of an older epoch, landing before its effect is cleaned up,
+    // still holds the old geometry.
+    onPaint: (_, paintedEpoch) => {
+      if (!isPage(paintedPage) && paintedEpoch === renderEpoch) {
+        flushSync(() => setPaintedPage(page))
+      }
+    },
     pageHeight,
     pageNumber,
     pageWidth,
@@ -181,13 +189,7 @@ export function PdfThumbnail({
 
   // Pixels painted before an edit turned or resized the page: a turn keeps the
   // scale, so they fit exactly once turned along; a resize letterboxes them.
-  const pendingTurn = (intrinsicRotation - paintedPage.rotation + 360) % 360
   const preview = thumbnailPaper(paintedPage)
-  const previewFootprint = dimensionsForRotation(pendingTurn, preview.width, preview.height)
-  const previewFit = Math.min(
-    paperSize.width / previewFootprint.width,
-    paperSize.height / previewFootprint.height,
-  )
 
   const paperBox = (
     <div className="relative">
@@ -232,7 +234,7 @@ export function PdfThumbnail({
                 height: preview.height,
                 left: "50%",
                 top: "50%",
-                transform: `translate(-50%, -50%) rotate(${pendingTurn}deg) scale(${previewFit})`,
+                transform: `translate(-50%, -50%) ${heldPixelsTransform(paintedPage.rotation, intrinsicRotation, preview, paperSize)}`,
                 width: preview.width,
               }}
             >

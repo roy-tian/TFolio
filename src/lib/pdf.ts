@@ -302,6 +302,22 @@ export function dimensionsForRotation(
     : { height, width }
 }
 
+/** Turns pixels painted at `paintedRotation`, `painted` in size, on to
+    `rotation` and fits them inside `box`, until a render of the page as it
+    now stands replaces them. */
+export function heldPixelsTransform(
+  paintedRotation: number,
+  rotation: number,
+  painted: { height: number; width: number },
+  box: { height: number; width: number },
+) {
+  const turn = (rotation - paintedRotation + 360) % 360
+  const footprint = dimensionsForRotation(turn, painted.width, painted.height)
+  const fit = Math.min(box.width / footprint.width, box.height / footprint.height)
+
+  return `rotate(${turn}deg) scale(${fit})`
+}
+
 /**
  * PDFium's ordinary anti-aliasing reads visibly soft at one backing pixel
  * per CSS pixel, so low-DPI surfaces supersample to this instead of 2x.
