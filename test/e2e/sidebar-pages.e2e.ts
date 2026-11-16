@@ -111,6 +111,44 @@ function dragEdge(by: number, escape = false) {
   )
 }
 
+function doubleClickEdge() {
+  return browser.execute((selector: string) => {
+    document.querySelector(selector)!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+  }, handle)
+}
+
+/** The reader's own scroll of the sidebar's pages, a page's cell brought near
+    the top. */
+function scrollPagesTo(pageNumber: number) {
+  return browser.execute(
+    (scope: string, selector: string) => {
+      const list = document.querySelector<HTMLElement>(`${scope} [data-thumbnail-scroll-root]`)!
+      const cell = document.querySelector(selector)!.closest("li")!
+      const top = cell.getBoundingClientRect().top - list.getBoundingClientRect().top
+
+      list.scrollBy({ behavior: "instant", top: top - 20 })
+    },
+    activeSidebar,
+    preview(pageNumber),
+  )
+}
+
+/** How far below the top of the sidebar's view a page's preview stands. */
+function previewTop(pageNumber: number) {
+  return browser.execute(
+    (scope: string, selector: string) => {
+      const list = document.querySelector(`${scope} [data-thumbnail-scroll-root]`)!
+
+      return Math.round(
+        document.querySelector(selector)!.getBoundingClientRect().top -
+          list.getBoundingClientRect().top,
+      )
+    },
+    activeSidebar,
+    preview(pageNumber),
+  )
+}
+
 /** Over the left edge of the target's cell is the gap before it. */
 function dragThumbBefore(from: number, target: number) {
   return browser.execute(
@@ -349,12 +387,6 @@ describe("TFolio sidebar pages", () => {
   it("goes back to its narrowest on a double-click, and from there out to the pages' width", async () => {
     await openPdfFromDisk("halves.pdf", bandedPdf(4))
     await settledBands(4)
-    const doubleClick = () =>
-      browser.execute((selector: string) => {
-        document
-          .querySelector(selector)!
-          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
-      }, handle)
     const halves = () =>
       browser.execute((scope: string) => {
         const sidebar = document.querySelector(scope)!.getBoundingClientRect().width
@@ -363,19 +395,56 @@ describe("TFolio sidebar pages", () => {
 
     await dragEdge(60)
     await browser.waitUntil(async () => (await sidebarWidth()) > 300)
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256, {
       timeoutMsg: "the sidebar never went back to its narrowest",
     })
 
     // As wide as the pages beside it, where the window leaves them their room.
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) > 256)
     const { pages, sidebar } = await halves()
     expect(Math.abs(pages - sidebar)).toBeLessThanOrEqual(1)
 
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256)
+  })
+
+  it("keeps the pages in view, and the reader's page, where they stood as its columns change", async () => {
+    await openPdfFromDisk("long.pdf", bandedPdf(90))
+    await $(`${preview(1)} canvas[data-rendered='true']`).waitForExist({ timeout: 30_000 })
+
+    // Far down the column, the reader's page left out of view above.
+    await scrollPagesTo(40)
+    await $(`${preview(40)} canvas[data-rendered='true']`).waitForExist({ timeout: 30_000 })
+    const shown = await previewTop(40)
+    await browser.execute((selector: string) => {
+      const canvas = document.querySelector(`${selector} canvas`)!
+      const seen = window as Window & { __released?: boolean }
+
+      seen.__released = false
+      new MutationObserver(() => {
+        seen.__released ||= canvas.getAttribute("data-rendered") !== "true"
+      }).observe(canvas, { attributeFilter: ["data-rendered"] })
+    }, preview(40))
+
+    await doubleClickEdge()
+    await browser.waitUntil(async () => (await columns()) === 3)
+    expect(Math.abs((await previewTop(40)) - shown)).toBeLessThanOrEqual(1)
+    // Still in view, it keeps its pixels: none of it has to render again.
+    await browser.pause(500)
+    expect(
+      await browser.execute(() => (window as Window & { __released?: boolean }).__released),
+    ).toBe(false)
+
+    // The reader's page, chosen lower down, holds its place rather than the first.
+    await $(preview(44)).click()
+    await $(`${preview(44)}[aria-current='page']`).waitForExist()
+    const reading = await previewTop(44)
+
+    await doubleClickEdge()
+    await browser.waitUntil(async () => (await columns()) === 1)
+    expect(Math.abs((await previewTop(44)) - reading)).toBeLessThanOrEqual(1)
   })
 
   it("gives book view up as the reader widens the sidebar to the pages' width", async () => {
@@ -385,16 +454,10 @@ describe("TFolio sidebar pages", () => {
     await settledBands(4)
     const spreads = () =>
       browser.execute((scope: string) => document.querySelectorAll(`${scope} [data-book-spread]`).length, session)
-    const doubleClick = () =>
-      browser.execute((selector: string) => {
-        document
-          .querySelector(selector)!
-          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
-      }, handle)
 
     await browser.waitUntil(async () => (await spreads()) > 0)
     // From its narrowest out to the pages' width, which leaves them half.
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await spreads()) === 0, {
       timeoutMsg: "book view stayed beside a sidebar half the window wide",
     })
@@ -406,10 +469,10 @@ describe("TFolio sidebar pages", () => {
     expect(await spreads()).toBeGreaterThan(0)
 
     // Narrowed, then widened again: given up again.
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256)
     expect(await spreads()).toBeGreaterThan(0)
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await spreads()) === 0, {
       timeoutMsg: "book view stayed after the second widening",
     })

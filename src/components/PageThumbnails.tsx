@@ -36,6 +36,7 @@ import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { CARRY_KEY, useIncomingPages } from "@/hooks/useIncomingPages"
 import { usePageCarryContext, type CarryLanding } from "@/hooks/usePageCarry"
+import { useReflowAnchor } from "@/hooks/useReflowAnchor"
 import {
   sidebarDropPoint,
   subscribeSidebarDropPoint,
@@ -605,6 +606,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     },
     [],
   )
+
+  // New columns put other pages under the same scroll offset, every one of
+  // them to render, and lose the reader's place: the reader's page, else the
+  // first in view, stays where it stood. Before the reader's page is followed,
+  // which wins where both move the column.
+  useReflowAnchor(listRef, columnRef, columns, () => cellOf(current))
 
   // Before the page, the file it joins is that page's; after the last, the
   // last page's.
