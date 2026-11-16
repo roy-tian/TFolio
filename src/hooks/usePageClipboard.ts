@@ -19,9 +19,9 @@ type UsePageClipboardOptions = {
   documentId: number
   /** The document's name, for another to say it is busy by. */
   documentName: string
-  /** The page the keys take with none chosen: the one being read, or null
-      where it shows no paper to be taken by. */
-  fallbackPage: () => number | null
+  /** The page a paste lands after with none chosen: the one being read, or
+      null where it shows no paper to land by. */
+  pasteAfterPage: () => number | null
   /** Whether the pages still stand as the clipboard numbers them, with no
       structure edit in flight: asked as another document reads them by number. */
   isIdle: () => boolean
@@ -56,12 +56,12 @@ export function usePageClipboard({
   active,
   documentId,
   documentName,
-  fallbackPage,
   isIdle,
   onCutCancelled,
   onMovedAway,
   onPaste,
   onTaken,
+  pasteAfterPage,
   selectedPages,
   shown,
   tabShown,
@@ -75,9 +75,9 @@ export function usePageClipboard({
   // Pages another of the window's documents holds, which a paste here copies in.
   const foreign = followed && followed.sourceDocumentId !== documentId ? followed : null
   // Read when the keys or another document ask, which is after any render.
-  const latestRef = useRef({ documentName, fallbackPage, isIdle, onCutCancelled, onMovedAway })
+  const latestRef = useRef({ documentName, isIdle, onCutCancelled, onMovedAway, pasteAfterPage })
 
-  latestRef.current = { documentName, fallbackPage, isIdle, onCutCancelled, onMovedAway }
+  latestRef.current = { documentName, isIdle, onCutCancelled, onMovedAway, pasteAfterPage }
   // Counted as they land, before any render: another document reading these
   // pages by number asks whether one has landed since it took them.
   const editsRef = useRef(0)
@@ -115,13 +115,11 @@ export function usePageClipboard({
 
   selectedPagesRef.current = selectedPages
 
-  // The pages named, else the chosen ones, else the page being read: what
-  // the bar over the pages acts on, so the keys take the same.
+  // The pages named, else the chosen ones: what the bar over the pages acts
+  // on, so the keys take the same, and none with none chosen.
   const take = useCallback(
     (mode: PageClipboard["mode"], pages?: Iterable<number>) => {
-      const chosen = selectedPagesRef.current
-      const fallback = pages || chosen.size > 0 ? null : latestRef.current.fallbackPage()
-      const taken = pageClipboardOf(mode, pages ?? (fallback === null ? chosen : [fallback]))
+      const taken = pageClipboardOf(mode, pages ?? selectedPagesRef.current)
 
       if (taken) {
         holdPages({ ...taken, sourceDocumentId: documentId })
@@ -143,7 +141,7 @@ export function usePageClipboard({
   }, [])
 
   /** Pages by number, whatever is chosen: the ones a menu was opened on,
-      which a choice lapsing under it must not swap for the page being read. */
+      which a choice lapsing under it must not empty. */
   const copyPages = useCallback((pages: Iterable<number>) => take("copy", pages), [take])
   const cutPages = useCallback((pages: Iterable<number>) => take("cut", pages), [take])
 
@@ -222,7 +220,7 @@ export function usePageClipboard({
           }
         }
 
-        last ??= latestRef.current.fallbackPage()
+        last ??= latestRef.current.pasteAfterPage()
 
         if (last !== null) {
           onPaste(last)

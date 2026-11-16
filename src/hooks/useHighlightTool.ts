@@ -15,7 +15,6 @@ type UseHighlightToolOptions = {
   opacity: number
   pages: PdfPageInfo[]
   selectable: boolean
-  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -26,11 +25,10 @@ function quadsOnPage(
   selection: Selection,
   pageElement: Element,
   page: PdfPageInfo,
-  rotation: number,
 ): PagePointsRect[] {
   // A band per line, which is the shape a PDF highlight wants: one per line
   // rather than a box around the lot — and what the drag previewed.
-  return selectedLineRectsOnPage(selection, pageElement, page, rotation).filter(
+  return selectedLineRectsOnPage(selection, pageElement, page).filter(
     (quad) => quad.width > MIN_QUAD_POINTS && quad.height > MIN_QUAD_POINTS,
   )
 }
@@ -39,7 +37,6 @@ function selectionTargets(
   selection: Selection,
   viewer: HTMLElement,
   pages: PdfPageInfo[],
-  viewRotation: number,
 ): HighlightTarget[] {
   if (selection.isCollapsed || selection.rangeCount === 0) {
     return []
@@ -59,7 +56,7 @@ function selectionTargets(
       continue
     }
 
-    const quads = quadsOnPage(selection, pageElement, page, viewRotation)
+    const quads = quadsOnPage(selection, pageElement, page)
 
     if (quads.length > 0) {
       targets.push({ pageNumber, quads })
@@ -85,16 +82,15 @@ export function useHighlightTool({
   opacity,
   pages,
   selectable,
-  viewRotation,
   viewerRef,
 }: UseHighlightToolOptions) {
   const [selectionDragging, setSelectionDragging] = useState(false)
 
   // Read when called, not depended on: every mounted page holds the capture,
   // and a fresh one would re-render them all.
-  const latest = useRef({ color, onCommit, opacity, pages, viewRotation })
+  const latest = useRef({ color, onCommit, opacity, pages })
   useLayoutEffect(() => {
-    latest.current = { color, onCommit, opacity, pages, viewRotation }
+    latest.current = { color, onCommit, opacity, pages }
   })
 
   // Shared by the tool's drag and the page menu, which marks in the tool's
@@ -107,8 +103,8 @@ export function useHighlightTool({
       return null
     }
 
-    const { color, onCommit, opacity, pages, viewRotation } = latest.current
-    const targets = selectionTargets(selection, viewer, pages, viewRotation)
+    const { color, onCommit, opacity, pages } = latest.current
+    const targets = selectionTargets(selection, viewer, pages)
 
     if (targets.length === 0) {
       return null

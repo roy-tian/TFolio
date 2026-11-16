@@ -9,14 +9,14 @@ import {
 } from "react"
 
 import {
-  readStoredFileRows,
+  clampSidebarWidth,
   readStoredSidebarOpen,
   readStoredSidebarPanel,
   readStoredSidebarWidth,
   SIDEBAR_DOCK_MIN_WIDTH,
+  SIDEBAR_MIN_WIDTH,
   sidebarMode,
   sidebarReservedWidth,
-  storeFileRows,
   storeSidebarOpen,
   storeSidebarPanel,
   storeSidebarWidth,
@@ -28,13 +28,10 @@ import { VIEWER_WILL_MOVE_EVENT } from "@/lib/viewerViewport"
 export type SidebarState = {
   /** Lets an overlay go; a docked sidebar stays until the reader hides it. */
   dismiss: () => void
-  /** Whether each file of a document of several starts a row of its own. */
-  fileRows: boolean
   mode: SidebarMode
   panel: SidebarPanel
   /** The room the sidebar leaves the rest of the window, in CSS pixels. */
   reserved: number
-  setFileRows: (fileRows: boolean) => void
   setPanel: (panel: SidebarPanel) => void
   /** Stores the width last set without storing. */
   persistWidth: () => void
@@ -46,6 +43,10 @@ export type SidebarState = {
   /** The reader's width before the window clamps it, or null for the
       opening width. */
   width: number | null
+  /** Counts the reader's widenings of the docked sidebar to half the window or
+      more — a drag let go, an arrow, a double-click — so the pages beside it,
+      left half or less, can give up book view. A window's own resize is none. */
+  widenedToHalf: number
 }
 
 export const SidebarContext = createContext<SidebarState | null>(null)
@@ -81,8 +82,8 @@ export function useSidebarState(): SidebarState {
   const [open, setOpen] = useState(readStoredSidebarOpen)
   const [panel, setPanelState] = useState(readStoredSidebarPanel)
   const [width, setWidthState] = useState(readStoredSidebarWidth)
-  const [fileRows, setFileRowsState] = useState(readStoredFileRows)
   const widthRef = useRef(width)
+  const [widenedToHalf, setWidenedToHalf] = useState(0)
   // Never stored: a narrow window opens the sidebar over the pages only for
   // the moment it takes to pick one.
   const [peeking, setPeeking] = useState(false)
@@ -110,49 +111,56 @@ export function useSidebarState(): SidebarState {
     storeSidebarPanel(next)
   }, [])
 
-  const setWidth = useCallback((next: number | null, persist = true) => {
-    widthRef.current = next
-    setWidthState(next)
+  const reserved = sidebarReservedWidth(docked)
+  const setWidth = useCallback(
+    (next: number | null, persist = true) => {
+      // As the window shows them, each clamped to its room; the opening width
+      // is the narrowest.
+      const shown = (chosen: number | null) =>
+        chosen === null
+          ? SIDEBAR_MIN_WIDTH
+          : clampSidebarWidth(chosen, window.innerWidth, reserved)
+      const half = window.innerWidth / 2
 
-    if (persist) {
-      storeSidebarWidth(next)
-    }
-  }, [])
+      if (docked && shown(widthRef.current) < half && shown(next) >= half) {
+        setWidenedToHalf((count) => count + 1)
+      }
+
+      widthRef.current = next
+      setWidthState(next)
+
+      if (persist) {
+        storeSidebarWidth(next)
+      }
+    },
+    [docked, reserved],
+  )
 
   const persistWidth = useCallback(() => storeSidebarWidth(widthRef.current), [])
-
-  const setFileRows = useCallback((next: boolean) => {
-    setFileRowsState(next)
-    storeFileRows(next)
-  }, [])
-
-  const reserved = sidebarReservedWidth(docked)
 
   return useMemo(
     () => ({
       dismiss,
-      fileRows,
       mode,
       panel,
       persistWidth,
       reserved,
-      setFileRows,
       setPanel,
       setWidth,
       toggle,
+      widenedToHalf,
       width,
     }),
     [
       dismiss,
-      fileRows,
       mode,
       panel,
       persistWidth,
       reserved,
-      setFileRows,
       setPanel,
       setWidth,
       toggle,
+      widenedToHalf,
       width,
     ],
   )

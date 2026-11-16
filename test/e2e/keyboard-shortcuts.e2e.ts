@@ -146,12 +146,18 @@ describe("TFolio keyboard shortcuts", () => {
     expect(await tooltipOn(`${visible} button[aria-label='Watermark']`)).toContain(
       "Ctrl+Alt+W",
     )
-    expect(await tooltipOn(`${visible} button[aria-label^='Undo']`)).toContain(
-      "Ctrl+Z",
-    )
-    expect(await tooltipOn(`${visible} button[aria-label^='Redo']`)).toContain(
-      "Ctrl+Shift+Z",
-    )
+    // Greyed with nothing to take back, they say so and name no chord.
+    expect(await tooltipOn(`${visible} button[aria-label^='Undo']`)).toBe("Nothing to undo")
+    expect(await tooltipOn(`${visible} button[aria-label^='Redo']`)).toBe("Nothing to redo")
+
+    // An edit to take back, and its chord.
+    await $(`${visible} [data-slot='app-sidebar'] button[data-thumbnail-page='1']`).click()
+    await $(`${visible} [data-slot='pages-rotate-right']`).click()
+    await expect($(`${visible} button[aria-label^='Undo']`)).toBeEnabled()
+    expect(await tooltipOn(`${visible} button[aria-label^='Undo']`)).toContain("Ctrl+Z")
+    await $(`${visible} button[aria-label^='Undo']`).click()
+    await expect($(`${visible} button[aria-label^='Redo']`)).toBeEnabled()
+    expect(await tooltipOn(`${visible} button[aria-label^='Redo']`)).toContain("Ctrl+Shift+Z")
 
     const saveAll = await appMenuItem("save-all")
     await expect(saveAll).toHaveText(expect.stringContaining("Ctrl+Alt+S"))

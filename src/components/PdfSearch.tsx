@@ -44,6 +44,8 @@ export function PdfSearch({
   const inputRef = useRef<HTMLInputElement>(null)
   const hasQuery = query.trim().length > 0
   const canNavigate = !searching && matchCount > 0
+  // Greyed, the steps say why: results still coming, or none to go to.
+  const offLabel = searching ? t("search.searching") : t("search.nothingToVisit")
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -124,7 +126,7 @@ export function PdfSearch({
         {searching ? <span className="sr-only">{status}</span> : null}
       </span>
 
-      <ToolbarTooltip label={t("search.previous")}>
+      <ToolbarTooltip label={canNavigate ? t("search.previous") : offLabel}>
         <Button
           aria-label={t("search.previous")}
           disabled={!canNavigate}
@@ -135,7 +137,7 @@ export function PdfSearch({
           <ChevronUp />
         </Button>
       </ToolbarTooltip>
-      <ToolbarTooltip label={t("search.next")}>
+      <ToolbarTooltip label={canNavigate ? t("search.next") : offLabel}>
         <Button
           aria-label={t("search.next")}
           disabled={!canNavigate}

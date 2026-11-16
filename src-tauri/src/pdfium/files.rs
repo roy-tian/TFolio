@@ -1,9 +1,10 @@
 //! The commands that add files to a document: the files read are the asking
 //! window's, and the engine refuses another window's ids.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
 
-use tauri::{State, WebviewWindow};
+use serde::Serialize;
+use tauri::{ipc::Channel, State, WebviewWindow};
 use tfolio_engine::{
     FileOptions, FileSourceInfo, PdfDocumentInfo, PdfStructureUpdate, SignatureDecision,
 };
@@ -13,11 +14,70 @@ use super::commands::ensure_approved;
 use super::PdfiumState;
 use crate::windows::{page_generation, record_document, DocumentFile, DocumentOwners};
 
+/// Which file of a long add or merge is under way: how many went before it,
+/// of how many, and its name.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceProgress {
+    completed: usize,
+    total: usize,
+    name: String,
+}
+
+fn send_progress(
+    on_progress: Channel<SourceProgress>,
+) -> impl FnMut(usize, usize, &std::path::Path) {
+    move |completed, total, path| {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let _ = on_progress.send(SourceProgress {
+            completed,
+            total,
+            name,
+        });
+    }
+}
+
+/// Each file's size on disk, 0 for one that cannot be read, so the reader can
+/// be asked before an add or a merge goes past its limits. Approved like a
+/// read: a size is the file's to tell.
+#[tauri::command]
+pub async fn source_sizes(
+    paths: Vec<String>,
+    state: State<'_, PdfiumState>,
+) -> Result<Vec<u64>, String> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+
+    #[cfg(not(feature = "e2e"))]
+    for path in &paths {
+        ensure_approved(&state, path)?;
+    }
+    #[cfg(feature = "e2e")]
+    let _ = state;
+
+    // Off the async runtime: hundreds of stats, perhaps on a network share.
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .iter()
+            .map(|path| {
+                fs::metadata(path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("source size task failed: {error}"))
+}
+
 /// Files read for their pages and kept by the asking window until a document
 /// takes them. Approved like an open: a source's pages are its contents.
 #[tauri::command]
 pub async fn read_pdf_sources(
     paths: Vec<String>,
+    on_progress: Channel<SourceProgress>,
     state: State<'_, PdfiumState>,
     window: WebviewWindow,
 ) -> Result<Vec<FileSourceInfo>, String> {
@@ -32,9 +92,11 @@ pub async fn read_pdf_sources(
     let word = state.word_available();
     let label = window.label().to_string();
 
-    tauri::async_runtime::spawn_blocking(move || engine.read_sources(&label, paths, word))
-        .await
-        .map_err(|error| format!("PDFium source task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.read_sources_reporting(&label, paths, word, &mut send_progress(on_progress))
+    })
+    .await
+    .map_err(|error| format!("PDFium source task failed: {error}"))?
 }
 
 /// Files `read_pdf_sources` read, added to a document of this window as
@@ -48,6 +110,7 @@ pub async fn insert_pdf_files(
     own_title: String,
     options: FileOptions,
     signatures: HashMap<u64, SignatureDecision>,
+    on_progress: Channel<SourceProgress>,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
@@ -60,7 +123,7 @@ pub async fn insert_pdf_files(
     let label = window.label().to_string();
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.insert_sources(
+        engine.insert_sources_reporting(
             &label,
             document_id,
             &source_ids,
@@ -68,6 +131,7 @@ pub async fn insert_pdf_files(
             &own_title,
             options,
             &signatures,
+            &mut send_progress(on_progress),
         )
     })
     .await
@@ -76,12 +140,14 @@ pub async fn insert_pdf_files(
 
 /// Files `read_pdf_sources` read, made into a new document of this window's
 /// with no file, as the files a Save As would write.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn merge_pdf_sources(
     source_ids: Vec<u64>,
     own_title: String,
     options: FileOptions,
     signatures: HashMap<u64, SignatureDecision>,
+    on_progress: Channel<SourceProgress>,
     state: State<'_, PdfiumState>,
     owners: State<'_, DocumentOwners>,
     window: WebviewWindow,
@@ -91,7 +157,14 @@ pub async fn merge_pdf_sources(
     let page = page_generation(&window);
 
     let merged = tauri::async_runtime::spawn_blocking(move || {
-        engine.merge_sources(&label, &source_ids, &own_title, options, &signatures)
+        engine.merge_sources_reporting(
+            &label,
+            &source_ids,
+            &own_title,
+            options,
+            &signatures,
+            &mut send_progress(on_progress),
+        )
     })
     .await
     .map_err(|error| format!("PDFium merge task failed: {error}"))??;

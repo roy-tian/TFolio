@@ -110,7 +110,8 @@ describe("TFolio annotations", () => {
     })
 
     await $("button[aria-label='Highlight text']").click()
-    await $("button[aria-label='Rotate the view clockwise']").click()
+    // The layout already shown: a press that changes nothing on the page.
+    await $("button[aria-label='Single page']").click()
     await browser.pause(2500)
 
     await expect($("button[aria-label^='Undo']")).toBeDisabled()

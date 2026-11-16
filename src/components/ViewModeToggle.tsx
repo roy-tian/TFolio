@@ -41,16 +41,17 @@ export function ViewModeToggle({ bookApplies, onChange, value }: ViewModeToggleP
       {options.map((option) => {
         const Icon = option.icon
         const label = t(option.labelKey)
+        const off = option.value === "book" && !bookApplies
 
         return (
-          <ToolbarTooltip key={option.value} label={label}>
+          <ToolbarTooltip key={option.value} label={off ? t("statusBar.bookNeedsPages") : label}>
             <ToggleGroupItem
               aria-label={label}
               className={cn(
                 toolbarSelectionBarClassName,
                 "h-7 min-w-7 group-data-[spacing=0]/toggle-group:px-1.5",
               )}
-              disabled={option.value === "book" && !bookApplies}
+              disabled={off}
               value={option.value}
             >
               <Icon />

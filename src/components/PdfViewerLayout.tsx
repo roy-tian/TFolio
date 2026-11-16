@@ -9,7 +9,7 @@ import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview } from "@/hooks/useTextNoteTool"
 import type { RenderEpochs } from "@/lib/annotations"
 import { sheetSpreads, sheetsOf, type PaddingSheet } from "@/lib/padding"
-import { dimensionsForRotation, type PdfPageInfo, type PdfSearchMatch } from "@/lib/pdf"
+import type { PdfPageInfo, PdfSearchMatch } from "@/lib/pdf"
 import type { ViewMode } from "@/lib/viewMode"
 import { BOOK_GAP, CONTENT_PADDING_X, pageDisplayWidth, POINT_TO_PX } from "@/lib/zoom"
 
@@ -70,7 +70,6 @@ type LayoutProps = {
   textEpochs: RenderEpochs
   /** The app's own select-all stands, so every page paints its bands. */
   textSelectAll: boolean
-  viewRotation: number
 }
 
 // Below these a sheet has no room to say what it is, then none for its button.
@@ -82,19 +81,16 @@ const BLANK_BUTTON_MIN = { height: 48, width: 96 }
     says why it is there and how to save without it, where it has the room. */
 function BlankSheet({
   onDismiss,
-  rotation,
   scale,
   sheet,
 }: {
   onDismiss: () => void
-  rotation: number
   scale: number
   sheet: PaddingSheet
 }) {
   const { t } = useTranslation()
-  const shown = dimensionsForRotation(rotation, sheet.width, sheet.height)
-  const height = shown.height * POINT_TO_PX * scale
-  const width = shown.width * POINT_TO_PX * scale
+  const height = sheet.height * POINT_TO_PX * scale
+  const width = sheet.width * POINT_TO_PX * scale
   const fits = (room: { height: number; width: number }) =>
     height >= room.height && width >= room.width
 
@@ -132,7 +128,6 @@ function SingleLayout({
   searchMatchesByPage,
   textEpochs,
   textSelectAll,
-  viewRotation,
 }: LayoutProps) {
   const blanks = new Map(padding.map((sheet) => [sheet.after, sheet]))
 
@@ -147,7 +142,6 @@ function SingleLayout({
         pageNumber={index + 1}
         renderEpoch={renderEpochs[index + 1] ?? 0}
         renderScale={renderScale}
-        rotation={viewRotation}
         scale={scale}
         searchMatches={searchMatchesByPage.get(index + 1) ?? NO_SEARCH_MATCHES}
         activeSearchIndex={activeSearchPage === index + 1 ? activeSearchIndex : null}
@@ -157,7 +151,6 @@ function SingleLayout({
       {blanks.has(index + 1) ? (
         <BlankSheet
           onDismiss={onDismissPadding}
-          rotation={viewRotation}
           scale={scale}
           sheet={blanks.get(index + 1)!}
         />
@@ -182,7 +175,6 @@ function BookLayout({
   searchMatchesByPage,
   textEpochs,
   textSelectAll,
-  viewRotation,
 }: LayoutProps) {
   // Sheets, not pages: a blank a Save As will add takes the right half of the
   // spread, so the next file opens the next spread as it will in print.
@@ -190,13 +182,7 @@ function BookLayout({
     // Each half is as wide as the spread's wider page, keeping every spine on
     // the column's axis; the padding pushes the left page to the spine.
     const widths = row.map((sheet) =>
-      pageDisplayWidth(
-        sheet.kind === "page"
-          ? pages[sheet.pageNumber - 1]!
-          : { height: sheet.height, rotation: 0, width: sheet.width },
-        viewRotation,
-        scale,
-      ),
+      pageDisplayWidth(sheet.kind === "page" ? pages[sheet.pageNumber - 1]! : sheet, scale),
     )
     const halfWidth = Math.max(...widths)
 
@@ -218,7 +204,6 @@ function BookLayout({
             <BlankSheet
               key={`padding-${sheet.after}`}
               onDismiss={onDismissPadding}
-              rotation={viewRotation}
               scale={scale}
               sheet={sheet}
             />
@@ -233,7 +218,6 @@ function BookLayout({
               pageNumber={sheet.pageNumber}
               renderEpoch={renderEpochs[sheet.pageNumber] ?? 0}
               renderScale={renderScale}
-              rotation={viewRotation}
               scale={scale}
               searchMatches={searchMatchesByPage.get(sheet.pageNumber) ?? NO_SEARCH_MATCHES}
               activeSearchIndex={activeSearchPage === sheet.pageNumber ? activeSearchIndex : null}
@@ -268,7 +252,6 @@ type PdfViewerLayoutProps = {
       runs is drawn from the attribute this sets, not by the WebView. */
   textSelectAll: boolean
   viewMode: ViewMode
-  viewRotation: number
   viewerWidth: number
   textSelectionDragging: boolean
   zoomPreviewing: boolean
@@ -298,7 +281,6 @@ export function PdfViewerLayout({
   textEpochs,
   textSelectAll,
   viewMode,
-  viewRotation,
   viewerWidth,
   textSelectionDragging,
   zoomPreviewing,
@@ -332,7 +314,6 @@ export function PdfViewerLayout({
     searchMatchesByPage,
     textEpochs,
     textSelectAll,
-    viewRotation,
   }
 
   return (

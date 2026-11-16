@@ -87,6 +87,7 @@ import {
   type RectStyle,
   type TextNoteStyle,
 } from "@/lib/annotations"
+import type { AskBatchLimit } from "@/lib/batchLimits"
 import { copyPlainText } from "@/lib/clipboard"
 import { hasLayerOverWorkspace } from "@/lib/contextMenu"
 import { panelElementId, tabElementId } from "@/lib/documentTabs"
@@ -97,9 +98,11 @@ import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import { NO_FOLDS, sectionOutlineKey, type OutlineFolds } from "@/lib/outlineFolds"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
-import { fileMoveOrder, foldedAway, pagesOfSection } from "@/lib/pageSections"
+import { fileMoveOrder, foldedAway, nearestFileEdge } from "@/lib/pageSections"
 import {
   answerSourceSignatures,
+  endFilesProgress,
+  joinProgress,
   readFileSources,
   releaseFileSources,
   storedFileOptions,
@@ -120,7 +123,6 @@ import {
   type PdfStructureUpdate,
   type SignatureDecision,
 } from "@/lib/pdf"
-import { turnView } from "@/lib/pageRotation"
 import { ParkedPreviews } from "@/lib/parkedPreviews"
 import { isMacOS } from "@/lib/platform"
 import type {
@@ -204,6 +206,8 @@ export type DocumentSessionHandle = {
 
 type DocumentSessionProps = {
   active: boolean
+  /** The window's one prompt over files past what one go takes. */
+  askBatchLimit: AskBatchLimit
   /** The window's one signature prompt. */
   askSignatures: AskSignatures
   document: PdfDocumentInfo
@@ -257,6 +261,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
   function DocumentSession(
     {
       active,
+      askBatchLimit,
       askSignatures,
       document: openedDocument,
       ensureSourceSignatures,
@@ -314,9 +319,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           Math.max(openedDocument.numPages, 1),
         ),
       ),
-    )
-    const [viewRotation, setViewRotation] = useState(
-      () => movedSeed?.viewRotation ?? 0,
     )
     const [imageExportOpen, setImageExportOpen] = useState(false)
     const [splitOpen, setSplitOpen] = useState(false)
@@ -493,7 +495,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       padding,
       pages: pdfDocument.pages,
       viewMode,
-      viewRotation,
       viewerRef,
     })
     // The previews are where pages are chosen while they show; hiding them
@@ -514,9 +515,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // bring into view where it landed.
     const [reveal, setReveal] = useState<{ pageNumber: number; serial: number } | null>(null)
     // Read as an edit lands, which is ahead of the render that shows it.
-    const pagesShownRef = useRef({ fileRows: sidebar.fileRows, foldedFiles, thumbnailsShown })
+    const pagesShownRef = useRef({ foldedFiles, thumbnailsShown })
 
-    pagesShownRef.current = { fileRows: sidebar.fileRows, foldedFiles, thumbnailsShown }
+    pagesShownRef.current = { foldedFiles, thumbnailsShown }
 
     // Pages a paste or an add has just put in: chosen, as what the reader
     // acts on next, and shown where they landed, which may be out of sight.
@@ -532,7 +533,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           return
         }
 
-        const byFile = shown.fileRows && (current.sections?.length ?? 0) > 1
+        const byFile = (current.sections?.length ?? 0) > 1
         const seen = landed.filter(
           (pageNumber) => !foldedAway(current.pages, pageNumber, shown.foldedFiles, byFile),
         )
@@ -582,16 +583,16 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const movedAwayRef = useRef<(pages: number[], copied: Promise<boolean>) => boolean>(
       () => false,
     )
-    // None chosen, the clipboard's keys take the page being read, as the bar
-    // over the pages does — but not one folded away under its file's name.
-    const readingChoice = () => {
+    // None chosen, a paste lands after the page being read — but not one
+    // folded away under its file's name.
+    const pasteAfterReading = () => {
       const pageNumber = currentPage.get()
 
       return foldedAway(
         pdfDocument.pages,
         pageNumber,
         foldedFiles,
-        sidebar.fileRows && severalFiles,
+        severalFiles,
       )
         ? null
         : pageNumber
@@ -602,7 +603,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       documentId: pdfDocument.id,
       documentName: fileName,
       // New each render: the hook reads the latest as a key asks.
-      fallbackPage: readingChoice,
+      pasteAfterPage: pasteAfterReading,
       // Asked only as another document reads these pages by number, by which
       // time the history below is set up. A flatten under way moves no page,
       // but lands as a change to them.
@@ -1175,7 +1176,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         let read: Awaited<ReturnType<typeof readFileSources>> = []
 
         try {
-          read = await readFileSources(paths, notices)
+          read = await readFileSources(paths, notices, askBatchLimit)
 
           if (read.length === 0) {
             return
@@ -1198,8 +1199,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          const before =
+          const keyed =
             beforeKey === undefined ? -1 : thumbnailIdentityRef.current.keys.indexOf(beforeKey)
+          // A paste in front of that page meanwhile joins its file, which the
+          // files would then part: they go to the nearest edge between files.
+          const before =
+            keyed < 0
+              ? -1
+              : nearestFileEdge(
+                  current.pages.map((page) => page.section),
+                  keyed,
+                )
           const landed = await annotations.insertFiles(
             read.flatMap((info) =>
               info.id === undefined
@@ -1209,6 +1219,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             before < 0 ? current.numPages + 1 : before + 1,
             current.numPages,
             {
+              onProgress: joinProgress(notices, read.length),
               options: storedFileOptions(),
               ownTitle: fileName,
               signatures: answers.signatures,
@@ -1237,13 +1248,14 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }
         } finally {
           addingFilesRef.current = false
+          endFilesProgress(notices)
 
           // An add that landed took its sources with it; any other lets them
           // go, or a signed one would keep its file from every writer.
           releaseFileSources(read)
         }
       },
-      [annotations, fileName, notice, notices, showLanded],
+      [annotations, askBatchLimit, fileName, notice, notices, showLanded],
     )
 
     // The backend's own dialog, which also approves the chosen files for reading.
@@ -1288,11 +1300,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         }
 
         void annotations.setFileOptions(change, () => documentRef.current?.fileOptions)
-        // Only the choice made: another window may have changed the other since.
-        storeFilePreferences({
-          bookmarks: change.perFileBookmarks,
-          smartPadding: change.smartPadding,
-        })
+        storeFilePreferences(change)
       },
       [annotations],
     )
@@ -1350,7 +1358,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       const order = fileMoveOrder(pages, sectionId, before)
 
       if (order) {
-        void reorderPages(order, pagesOfSection(pages, sectionId))
+        void reorderPages(order)
       }
     }
 
@@ -1400,7 +1408,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     const finishTextDrag = useTextDragSelection({
       enabled: textSelectable,
       pages: pdfDocument.pages,
-      viewRotation,
       viewerRef,
     })
 
@@ -1419,7 +1426,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       opacity: HIGHLIGHT_OPACITY,
       pages: pdfDocument.pages,
       selectable: textSelectable,
-      viewRotation,
       viewerRef,
     })
 
@@ -1429,7 +1435,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       onCommit: annotations.commit,
       pages: pdfDocument.pages,
       style: rectStyle,
-      viewRotation,
       viewerRef,
     })
 
@@ -1438,7 +1443,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       active: active && erasing,
       onErase: annotations.eraseAt,
       pages: pdfDocument.pages,
-      viewRotation,
       viewerRef,
     })
 
@@ -1449,7 +1453,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       suspended: !active,
       pages: pdfDocument.pages,
       style: textNoteStyle,
-      viewRotation,
       viewerRef,
     })
 
@@ -1746,6 +1749,24 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       setPreferredViewMode(mode)
     }
 
+    // The reader widened the sidebar to half the window or more: what it leaves
+    // the pages is too narrow for a spread. The tab shown gives book view up,
+    // as a choice of the reader's, and only then: chosen again, it stays.
+    const widenedRef = useRef(sidebar.widenedToHalf)
+
+    // Before paint, so no frame shows spreads beside the widened sidebar.
+    useLayoutEffect(() => {
+      if (widenedRef.current === sidebar.widenedToHalf) {
+        return
+      }
+
+      widenedRef.current = sidebar.widenedToHalf
+
+      if (active && viewMode === "book") {
+        changeViewMode("single")
+      }
+    }, [sidebar.widenedToHalf])
+
     const openSearch = search.openSearch
 
     const { queueRecentView, rememberViewNow: flushAndRememberView } = useRecentView({ recentPath })
@@ -1820,7 +1841,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       restoringRecentView,
       recentPath,
       viewMode,
-      viewRotation,
       viewerHeight,
       viewerWidth,
       zoom.zoomPreviewing,
@@ -1871,7 +1891,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           history: annotationsSeed.history,
           marks: annotationsSeed.marks,
           viewMode: preferredViewMode,
-          viewRotation,
         },
       }
     }, [
@@ -1879,7 +1898,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       preferredViewMode,
       sampleCurrentView,
       textNote.draft?.text,
-      viewRotation,
     ])
 
     useEffect(() => {
@@ -1990,9 +2008,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // action's name. A document never written anywhere has none to give.
     const saveLabel = !hasSourceFile
       ? t("menu.saveAs")
-      : !canSave && saveHint
-        ? saveHint
-        : t("annotate.save")
+      : canSave
+        ? t("annotate.save")
+        : (saveHint ?? t("annotate.nothingToSave"))
 
     // The toolbar's and menu's action, refusal included: a watermarked
     // document, or one holding copies of such pages, may only ever be exported
@@ -2316,7 +2334,18 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
         <AppSidebar
           macOS={macOS}
-          footer={<AddFilesButton onClick={() => void chooseFiles()} />}
+          footer={
+            <AddFilesButton
+              // Over the outline of a document of one file, its bookmarks
+              // leave no place among them for files: they go last.
+              dropLabel={
+                sidebarPanel === "bookmarks" && !severalFiles
+                  ? t("sidebar.dropFilesAtEnd")
+                  : t("sidebar.dropFiles")
+              }
+              onClick={() => void chooseFiles()}
+            />
+          }
           switcher={<SidebarPanelSwitch panel={sidebarPanel} />}
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (
@@ -2350,7 +2379,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               cutPages={cutThumbnailPages}
               documentId={pdfDocument.id}
               fileOptions={pdfDocument.fileOptions}
-              fileRows={sidebar.fileRows}
               foldedFiles={foldedFiles}
               isEditingNow={annotations.isStructureBusyNow}
               onCopyPages={pageClipboard.copyPages}
@@ -2358,7 +2386,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onDeletePage={deleteThumbnailPage}
               onExtractPages={extractPages}
               onFileOptionsChange={changeFileOptions}
-              onFileRowsChange={sidebar.setFileRows}
               onFocusChange={setThumbnailsFocused}
               onFoldFiles={foldFiles}
               onInsertBlankPage={insertBlankPage}
@@ -2384,7 +2411,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               sections={sections}
               selectedPages={thumbnailSelection.selectedPages}
               thumbnailKeys={thumbnailKeys}
-              viewRotation={viewRotation}
             />
           )}
         </AppSidebar>
@@ -2509,7 +2535,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                 textSelectAll={textSelectAll.selectedAll}
                 textSelectionDragging={highlightTool.selectionDragging}
                 viewMode={viewMode}
-                viewRotation={viewRotation}
                 viewerWidth={viewerWidth}
                 zoomPreviewing={zoom.zoomPreviewing}
                 zoomRequest={zoom.zoomRequest}
@@ -2520,7 +2545,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             <ViewerControls
               bookApplies={bookApplies}
               onChangeViewMode={changeViewMode}
-              onRotate={() => setViewRotation(turnView)}
               page={{
                 count: pdfDocument.numPages,
                 current: currentPage,
@@ -2544,7 +2568,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             onTextChange={textNote.setText}
             page={pdfDocument.pages[textNote.draft.pageNumber - 1]!}
             preparing={textNote.preparing}
-            rotation={viewRotation}
             style={textNoteStyle}
             viewerRef={viewerRef}
           />

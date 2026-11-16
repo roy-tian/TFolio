@@ -2,9 +2,11 @@ use std::time::SystemTime;
 
 use super::*;
 
-// A guided merge holds every source in memory at once under the same MiB
-// ceiling as an open, so the count is what bounds the whole run.
-pub(super) const MAX_MERGE_FILES: usize = 64;
+// One add or merge reads at most this many files, and at most this many
+// bytes of them on disk: the frontend asks before going past either
+// (`batchLimits.ts`), and these refuse what gets past it.
+pub(super) const MAX_MERGE_FILES: usize = 256;
+pub(super) const MAX_MERGE_BYTES: u64 = 512 * 1024 * 1024;
 
 // An image is read whole before it is decoded, and a photograph is nothing
 // like a document in size, so its ceiling sits well under the PDF one.
@@ -559,6 +561,13 @@ pub(super) fn merge_file_limit_error() -> String {
     format!("a document takes at most {MAX_MERGE_FILES} files at once")
 }
 
+pub(super) fn merge_bytes_limit_error() -> String {
+    format!(
+        "a document takes at most {} MB of files at once",
+        MAX_MERGE_BYTES / 1024 / 1024
+    )
+}
+
 impl PdfiumEngine {
     /// Every Word document among `paths` as a PDF, or the refusal saying why
     /// not; the stop flag is the caller's, each pipeline under its own operation.
@@ -880,28 +889,7 @@ impl PdfiumEngine {
             return Ok(());
         }
 
-        let bytes = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not rewrite the document: {error}"))?;
-
-        let reloaded = self
-            .pdfium
-            .load_pdf_from_byte_vec(bytes, None)
-            .map_err(|error| format!("PDFium could not reload the document: {error}"))?;
-
-        if let Some(state) = &entry.owned_content {
-            // Part of a save, which has no Stop: checked in one pass.
-            Self::verify_owned_tail(&reloaded, &entry.page_ids, state, None, &mut |_, _| {})
-                .map_err(|error| {
-                    format!("PDFium did not preserve the owned content during compaction: {error}")
-                })?;
-        }
-
-        entry.document = reloaded;
-        entry.needs_compaction = false;
-
-        Ok(())
+        self.reread(entry)
     }
 
     /// What a Save As of a document other files were added to writes, as

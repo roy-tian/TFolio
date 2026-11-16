@@ -10,7 +10,6 @@ type UseSelectionBandsOptions = {
       itself is found from it, wherever the surface's own tree grows. */
   anchorRef: RefObject<HTMLElement | null>
   page: PdfPageInfo
-  rotation: number
   /** The app's own select-all, which no document range stands for. */
   selectAll: boolean
   /** The page's extracted runs, in page points — select-all's whole geometry,
@@ -41,12 +40,11 @@ function sameBands(current: PagePointsRect[], next: PagePointsRect[]) {
  * The selection painted over one page: a band per text line, not the WebView's
  * own per-run tint, so the highlight runs unbroken and level across a line the
  * way a reader expects it — see `mergeRectsByLine`. Bands are page points, so
- * what is painted survives zoom and rotation without recomputing.
+ * what is painted survives zoom without recomputing.
  */
 export function useSelectionBands({
   anchorRef,
   page,
-  rotation,
   selectAll,
   spans,
   spansRegistered,
@@ -76,7 +74,7 @@ export function useSelectionBands({
         return
       }
 
-      const next = selectedLineRectsOnPage(selection, pageElement, page, rotation)
+      const next = selectedLineRectsOnPage(selection, pageElement, page)
 
       setBands((current) => (sameBands(current, next) ? current : next))
     }
@@ -106,7 +104,7 @@ export function useSelectionBands({
         cancelAnimationFrame(frame)
       }
     }
-  }, [anchorRef, page, rotation, selectAll, spans, spansRegistered])
+  }, [anchorRef, page, selectAll, spans, spansRegistered])
 
   // Select-all stands for pages virtualisation never mounted a range over, so
   // its bands come from the extracted geometry, not from any DOM selection.

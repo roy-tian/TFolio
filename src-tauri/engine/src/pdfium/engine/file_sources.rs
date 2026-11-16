@@ -4,10 +4,12 @@
 use serde::Serialize;
 
 use super::io::{
-    fingerprint, is_merge_image, load_merge_source, merge_file_limit_error, read_merge_source,
-    Fingerprint, SourceFile, MAX_MERGE_FILES,
+    fingerprint, is_merge_image, load_merge_source, merge_bytes_limit_error,
+    merge_file_limit_error, read_merge_source, Fingerprint, MergeDraft, SourceFile,
+    MAX_MERGE_BYTES, MAX_MERGE_FILES,
 };
-use super::page_ops::{page_index, page_range_argument};
+use super::page_import::{lent_copy, ImportRollback};
+use super::page_ops::page_index;
 use super::*;
 
 /// Bytes of sources kept parsed at once, every window's together; the rest
@@ -27,6 +29,14 @@ struct FileSource {
     page_count: usize,
     /// Its signatures intact on disk: no write may replace it while added.
     signed: bool,
+    linked: LinkedAnnotations,
+}
+
+/// A source out of those kept open, held while a document takes its pages.
+struct TakenSource<'a> {
+    document: MergeDraft<'a>,
+    path: PathBuf,
+    linked: LinkedAnnotations,
 }
 
 struct OpenSource {
@@ -58,12 +68,10 @@ impl FileSources {
             .ok_or_else(|| format!("source {id} is not one of this window's"))
     }
 
-    fn touch(&mut self, id: u64) -> Option<&PdfDocument<'static>> {
+    fn take_open(&mut self, id: u64) -> Option<PdfDocument<'static>> {
         let position = self.open.iter().position(|open| open.id == id)?;
-        let open = self.open.remove(position);
 
-        self.open.push(open);
-        self.open.last().map(|open| &open.document)
+        Some(self.open.remove(position).document)
     }
 
     /// The newest always stays, however large: a file over the budget alone
@@ -133,22 +141,71 @@ impl PdfiumEngine {
         paths: Vec<PathBuf>,
         word_conversion: bool,
     ) -> Result<Vec<FileSourceInfo>, String> {
+        self.read_sources_reporting(scope, paths, word_conversion, &mut |_, _, _| {})
+    }
+
+    /// `read_sources`, telling `on_file` of each file as it starts: how many
+    /// came before it, of how many. Office conversions come first, all at
+    /// once, so the first file is told of before they start.
+    pub fn read_sources_reporting(
+        &self,
+        scope: &str,
+        paths: Vec<PathBuf>,
+        word_conversion: bool,
+        on_file: &mut dyn FnMut(usize, usize, &Path),
+    ) -> Result<Vec<FileSourceInfo>, String> {
         if paths.len() > MAX_MERGE_FILES {
             return Err(merge_file_limit_error());
         }
 
+        let bytes: u64 = paths
+            .iter()
+            .filter_map(|path| fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .sum();
+
+        if bytes > MAX_MERGE_BYTES {
+            return Err(merge_bytes_limit_error());
+        }
+
+        let total = paths.len();
+
         // Stoppable under the inspection's target: the same Stop asks an
-        // office suite to give up, whichever flow started it.
+        // office suite to give up, whichever flow started it. Begun before
+        // the first file is told of, so a Stop it shows finds the operation.
         let operation = self.begin_operation(OperationTarget::Convert(scope.to_string()));
         let cancelled = || operation.is_cancelled();
-        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
 
-        Ok(paths
+        if let Some(first) = paths.first() {
+            on_file(0, total, first);
+        }
+
+        let word = self.resolve_word_documents(&paths, word_conversion, &cancelled, &mut || {});
+        let read: Vec<FileSourceInfo> = paths
             .into_iter()
             .zip(word)
+            .enumerate()
             .take_while(|_| !cancelled())
-            .map_while(|(path, word)| self.read_source(scope, path, word, &cancelled))
-            .collect())
+            .map_while(|(index, (path, word))| {
+                // The first was told of before the conversions.
+                if index > 0 {
+                    on_file(index, total, &path);
+                }
+
+                self.read_source(scope, path, word, &cancelled)
+            })
+            .collect();
+
+        // A stopped read keeps none of what it read: Stop gives the files up,
+        // never adds those that happened to come first.
+        if cancelled() {
+            let ids: Vec<u64> = read.iter().filter_map(|info| info.id).collect();
+
+            self.release_sources(scope, &ids);
+            return Ok(Vec::new());
+        }
+
+        Ok(read)
     }
 
     /// `None` once the scope's work is stopped, keeping nothing.
@@ -235,6 +292,7 @@ impl PdfiumEngine {
                 fingerprint,
                 page_count: layout.num_pages as usize,
                 signed: false,
+                linked: layout.linked,
             },
         );
         sources.keep_open(id, document, cost);
@@ -265,34 +323,31 @@ impl PdfiumEngine {
         })
     }
 
-    /// Runs `work` under the documents lock with source `id` parsed, reading it
-    /// again — off the lock — if the budget let it go.
-    fn with_source<T>(
-        &self,
-        scope: &str,
-        id: u64,
-        work: impl FnOnce(
-            &mut HashMap<u64, OpenDocument>,
-            &PdfDocument<'static>,
-            &Path,
-        ) -> Result<T, String>,
-    ) -> Result<T, String> {
-        let (path, read_from, recorded, page_count) = {
-            let mut documents = self.lock_documents()?;
+    /// Source `id` parsed and taken out of those kept open, read again — off
+    /// the lock — if the budget let it go: the caller holds it while a
+    /// document takes its pages. A later insert reads it from disk again.
+    fn take_source(&self, scope: &str, id: u64) -> Result<TakenSource<'_>, String> {
+        let (path, read_from, recorded, page_count, linked) = {
+            let _documents = self.lock_documents()?;
             let mut sources = self.lock_sources();
             let entry = sources.entry(scope, id)?;
-            let facts = (
+            let (path, read_from, recorded, page_count, linked) = (
                 entry.path.clone(),
                 entry.read_from.clone(),
                 entry.fingerprint,
                 entry.page_count,
+                entry.linked,
             );
 
-            if let Some(document) = sources.touch(id) {
-                return work(&mut documents, document, &facts.0);
+            if let Some(document) = sources.take_open(id) {
+                return Ok(TakenSource {
+                    document: MergeDraft::holding(self, document),
+                    path,
+                    linked,
+                });
             }
 
-            facts
+            (path, read_from, recorded, page_count, linked)
         };
 
         // Its pages are what the reader was shown: a file that has changed
@@ -302,26 +357,30 @@ impl PdfiumEngine {
         }
 
         let file = read_merge_source(&read_from)?;
-        let cost = source_cost(&file);
-        let mut documents = self.lock_documents()?;
+        let _documents = self.lock_documents()?;
         let mut sources = self.lock_sources();
 
         // Released, or read back by another call, while this one read the disk.
         sources.entry(scope, id)?;
 
-        if sources.touch(id).is_none() {
-            let document = load_merge_source(self.pdfium, file, &read_from)?;
+        let document = match sources.take_open(id) {
+            Some(document) => document,
+            None => {
+                let document = load_merge_source(self.pdfium, file, &read_from)?;
 
-            if document.pages().len() as usize != page_count {
-                return Err(SOURCE_CHANGED.into());
+                if document.pages().len() as usize != page_count {
+                    return Err(SOURCE_CHANGED.into());
+                }
+
+                document
             }
+        };
 
-            sources.keep_open(id, document, cost);
-        }
-
-        let document = sources.touch(id).expect("the source was just kept open");
-
-        work(&mut documents, document, &path)
+        Ok(TakenSource {
+            document: MergeDraft::holding(self, document),
+            path,
+            linked,
+        })
     }
 
     /// Lets every parsed source of `scope`'s window go, keeping their records,
@@ -392,6 +451,32 @@ impl PdfiumEngine {
         options: sections::FileOptions,
         decisions: &HashMap<u64, SignatureDecision>,
     ) -> Result<PdfStructureUpdate, String> {
+        self.insert_sources_reporting(
+            scope,
+            document_id,
+            source_ids,
+            index,
+            own_title,
+            options,
+            decisions,
+            &mut |_, _, _| {},
+        )
+    }
+
+    /// `insert_sources`, telling `on_file` of each file as its pages start
+    /// going in: how many went before it, of how many.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_sources_reporting(
+        &self,
+        scope: &str,
+        document_id: u64,
+        source_ids: &[u64],
+        index: i32,
+        own_title: &str,
+        options: sections::FileOptions,
+        decisions: &HashMap<u64, SignatureDecision>,
+        on_file: &mut dyn FnMut(usize, usize, &Path),
+    ) -> Result<PdfStructureUpdate, String> {
         if source_ids.is_empty() {
             return Err("no files to add".into());
         }
@@ -438,17 +523,11 @@ impl PdfiumEngine {
             let Some(slot) = page_index(index, entry.page_ids.len() + 1) else {
                 return Err(format!("a page cannot go to position {index}"));
             };
-            let snapshot = entry
-                .document
-                .save_to_bytes()
-                .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
-            let before = InsertRollback {
-                snapshot,
-                page_ids: entry.page_ids.clone(),
-                owned_content: entry.owned_content.clone(),
-                foreign_page_ids: entry.foreign_page_ids.clone(),
-                started_sections: entry.sections.is_none(),
-            };
+
+            if !entry.between_files(slot) {
+                return Err(format!("files go between files, not to position {index}"));
+            }
+            let before = ImportRollback::of(entry)?;
 
             if entry.sections.is_none() {
                 let outline = collect_bookmark_siblings(entry.document.bookmarks().root());
@@ -467,32 +546,51 @@ impl PdfiumEngine {
         };
         let mut at = slot;
         let mut added = Vec::with_capacity(source_ids.len());
+        // What each file's pages came in from, the file itself or a copy of
+        // it, open until the document is read back once every file is in.
+        let mut lenders = Vec::with_capacity(source_ids.len());
 
-        for id in source_ids {
+        for (done, id) in source_ids.iter().enumerate() {
             let inserted = if operation.is_cancelled() {
                 Err("the files were not added: the document closed".to_string())
             } else {
-                self.with_source(scope, *id, |documents, source, path| {
-                    let entry = open_entry_mut(documents, document_id)?;
-                    let count = source.pages().len() as usize;
-                    let all: Vec<usize> = (0..count).collect();
-                    let flattened = if flattened_sources.contains(id) {
-                        Some(signatures::flattened_pages(self.pdfium, source, &all)?)
-                    } else {
-                        None
-                    };
+                self.take_source(scope, *id).and_then(|mut source| {
+                    on_file(done, source_ids.len(), &source.path);
 
-                    entry
-                        .document
-                        .pages_mut()
-                        .copy_pages_from_document(
-                            flattened.as_ref().unwrap_or(source),
-                            &page_range_argument(&all),
-                            at as i32,
-                        )
-                        .map_err(|error| {
-                            format!("PDFium could not add {}: {error}", path.display())
-                        })?;
+                    let mut documents = self.lock_documents()?;
+                    let entry = open_entry_mut(&mut documents, document_id)?;
+                    let file: &PdfDocument<'static> = source.document.document();
+                    let count = file.pages().len() as usize;
+                    let all: Vec<usize> = (0..count).collect();
+                    let outline = collect_bookmark_siblings(file.bookmarks().root());
+                    // The file goes once copied.
+                    let copy = lent_copy(
+                        self.pdfium,
+                        file,
+                        &all,
+                        flattened_sources.contains(id),
+                        source.linked,
+                    )?;
+                    let imported = entry.document.pages_mut().copy_page_range_from_document(
+                        copy.as_ref().unwrap_or(file),
+                        0..=(count - 1) as i32,
+                        at as i32,
+                    );
+
+                    // Held from the import on, however much of it went in.
+                    match copy {
+                        Some(copy) => {
+                            source.document.close();
+                            lenders.push(MergeDraft::holding(self, copy));
+                        }
+                        None => lenders.push(source.document),
+                    }
+
+                    let path = &source.path;
+
+                    imported.map_err(|error| {
+                        format!("PDFium could not add {}: {error}", path.display())
+                    })?;
                     Self::record_inserted_pages(entry, at, &vec![false; count])?;
 
                     let ids = entry.page_ids[at..at + count].to_vec();
@@ -501,7 +599,6 @@ impl PdfiumEngine {
                         .map(|name| name.to_string_lossy().into_owned())
                         .and_then(|name| sections::section_title(&name).ok())
                         .unwrap_or_else(|| path.display().to_string());
-                    let outline = collect_bookmark_siblings(source.bookmarks().root());
 
                     entry
                         .sections
@@ -509,6 +606,7 @@ impl PdfiumEngine {
                         .expect("the files began before the first was added")
                         .add(title, &ids, &outline);
                     entry.foreign_page_ids.extend(ids);
+                    entry.linked = entry.linked.with(source.linked);
 
                     Ok(count)
                 })
@@ -530,6 +628,11 @@ impl PdfiumEngine {
 
         let mut documents = self.lock_documents()?;
         let entry = open_entry_mut(&mut documents, document_id)?;
+
+        if let Err(error) = self.reread(entry) {
+            return Err(before.roll_back(self, entry, error));
+        }
+
         let mut sources = self.lock_sources();
 
         // Their pages are this document's own copies now: an undo's stash, not
@@ -558,6 +661,27 @@ impl PdfiumEngine {
         options: sections::FileOptions,
         decisions: &HashMap<u64, SignatureDecision>,
     ) -> Result<PdfDocumentInfo, String> {
+        self.merge_sources_reporting(
+            scope,
+            source_ids,
+            own_title,
+            options,
+            decisions,
+            &mut |_, _, _| {},
+        )
+    }
+
+    /// `merge_sources`, telling `on_file` of each file as `insert_sources`
+    /// does.
+    pub fn merge_sources_reporting(
+        &self,
+        scope: &str,
+        source_ids: &[u64],
+        own_title: &str,
+        options: sections::FileOptions,
+        decisions: &HashMap<u64, SignatureDecision>,
+        on_file: &mut dyn FnMut(usize, usize, &Path),
+    ) -> Result<PdfDocumentInfo, String> {
         let bytes = {
             // PDFium work like any other, so under the store's lock — given
             // back before `open_with_source` takes it again.
@@ -571,7 +695,9 @@ impl PdfiumEngine {
         };
         let id = self.open_with_source(bytes, None)?.id();
 
-        match self.insert_sources(scope, id, source_ids, 1, own_title, options, decisions) {
+        match self.insert_sources_reporting(
+            scope, id, source_ids, 1, own_title, options, decisions, on_file,
+        ) {
             Ok(update) => Ok(PdfDocumentInfo::from_structure(id, update)),
             Err(error) => {
                 let _ = self.close(id);
@@ -579,30 +705,5 @@ impl PdfiumEngine {
                 Err(error)
             }
         }
-    }
-}
-
-/// The document as an insert of files found it, put back whole if one of them
-/// cannot be added: the bytes, and every page-keyed record the files touched.
-struct InsertRollback {
-    snapshot: Vec<u8>,
-    page_ids: Vec<u64>,
-    owned_content: Option<OwnedContentState>,
-    foreign_page_ids: HashSet<u64>,
-    /// The first file added began the document's files, which go again.
-    started_sections: bool,
-}
-
-impl InsertRollback {
-    fn roll_back(self, engine: &PdfiumEngine, entry: &mut OpenDocument, cause: String) -> String {
-        entry.page_ids = self.page_ids;
-        entry.owned_content = self.owned_content;
-        entry.foreign_page_ids = self.foreign_page_ids;
-
-        if self.started_sections {
-            entry.sections = None;
-        }
-
-        engine.restore_document_snapshot(entry, self.snapshot, cause)
     }
 }

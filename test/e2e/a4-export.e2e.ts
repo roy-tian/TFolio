@@ -67,7 +67,7 @@ function pageShapes() {
 describe("TFolio save as A4", () => {
   beforeEach(async () => {
     await seedSettings({
-      organize: { bookmarks: true, smartPadding: true },
+      organize: { smartPadding: true },
       ui: { language: "en", viewMode: "single" },
     })
     await refreshApp()

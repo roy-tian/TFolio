@@ -20,11 +20,11 @@ const THUMBNAIL_ROOT_MARGIN = "0px"
 // off, they wait for the pages the reader is looking at rather than tie them.
 const SIDEBAR_PRIORITY_BIAS = 2000
 
-/** On a preview that holds controls: they show, through
+/** On the square of a paper that holds controls: they show, through
     `PAPER_CONTROLS_SHOWN`, while it is hovered or one of them has the
     keyboard's focus. Not the paper's focus: WebKitGTK can keep a clicked
     paper `:focus-visible`, and its controls would stay up. A property the
-    preview sets, because `group-has-*` on each control costs Chromium a
+    square sets, because `group-has-*` on each control costs Chromium a
     whole-document restyle for every node added anywhere. */
 export const PAPER_CONTROLS_HOST =
   "[--paper-controls:0] hover:[--paper-controls:1] has-[[data-page-action]:focus-visible]:[--paper-controls:1]"
@@ -47,8 +47,6 @@ type PdfThumbnailProps = {
   renderEpoch: number
   /** False once the cell is well away from the view: it gives its pixels back. */
   retainBitmap: boolean
-  /** The view's turn, which turns every page at once and snaps. */
-  rotation: number
   /** What the paper is to a screen reader: where a click goes. */
   label: string
   /** The number under the paper, where it is not the page's own: a drag's
@@ -57,9 +55,9 @@ type PdfThumbnailProps = {
   /** Controls over the paper, laid out against its box, which follows the
       paper through a turn. */
   overlay?: ReactNode
-  /** Centred in a square as wide as a paper's long side: cells of one size
-      line portrait and landscape pages up in rows of several. */
-  square?: boolean
+  /** Controls laid out against the square the paper stands in, which a turn
+      leaves standing. */
+  cellOverlay?: ReactNode
   /** A sign beside the caption: over the paper it would take the page's
       clicks in its corner, where its checkbox sits. */
   mark?: ReactNode
@@ -84,11 +82,10 @@ export function PdfThumbnail({
   pageWidth,
   renderEpoch,
   retainBitmap,
-  rotation,
   label,
   caption,
   overlay,
-  square = false,
+  cellOverlay,
   mark,
   parked,
   parkKey,
@@ -108,6 +105,7 @@ export function PdfThumbnail({
   // these pixels are turned and fitted to it rather than stretched.
   const [paintedPage, setPaintedPage] = useState(page)
   const shownPageRef = useRef(paintedPage)
+  const paperSize = thumbnailPaper(page)
 
   const { hasRendered, renderFailed } = usePageBitmap({
     canvasRef,
@@ -126,11 +124,9 @@ export function PdfThumbnail({
     priorityBias: SIDEBAR_PRIORITY_BIAS,
     renderEpoch,
     retainBitmap,
-    // The bitmap is drawn upright and a turn keeps the thumbnail's scale, so its
-    // upright width serves every rotation and a turn needs no fresh render. The
-    // page as it now measures, not as last painted: this sizes the replacement.
-    rotation: 0,
-    targetWidth: thumbnailPaper({ height: pageHeight, width: pageWidth }).width,
+    // The page as it now measures, not as last painted: this sizes the
+    // replacement.
+    targetWidth: paperSize.width,
   })
 
   // With no bitmap on show no pixels need the old geometry: the next paint
@@ -148,7 +144,6 @@ export function PdfThumbnail({
     }
     const paper = wrapperRef.current
     const spinner = spinRef.current
-    // Only a page's own turn spins; the view's snaps.
     const turn = ((intrinsicRotation - previous.rotation + 540) % 360) - 180
 
     if (
@@ -168,13 +163,8 @@ export function PdfThumbnail({
       [{ transform: `rotate(${-turn}deg)` }, { transform: "rotate(0deg)" }],
       TURN_MOTION,
     )
-    // The view's turn snaps, leaving the old footprint at the turn standing now.
-    const oldPaper = thumbnailPaper(
-      dimensionsForRotation(rotation, previous.width, previous.height),
-    )
-    const newPaper = thumbnailPaper(
-      dimensionsForRotation(rotation, pageWidth, pageHeight),
-    )
+    const oldPaper = thumbnailPaper(previous)
+    const newPaper = thumbnailPaper({ height: pageHeight, width: pageWidth })
     const resize = paper.animate(
       [
         { height: `${oldPaper.height}px`, width: `${oldPaper.width}px` },
@@ -187,22 +177,13 @@ export function PdfThumbnail({
       spin.cancel()
       resize.cancel()
     }
-  }, [hasRendered, intrinsicRotation, pageHeight, pageWidth, rotation])
+  }, [hasRendered, intrinsicRotation, pageHeight, pageWidth])
 
-  // The user rotation spins the preview clockwise, swapping the footprint a
-  // quarter turn leaves behind.
-  const paperSize = thumbnailPaper(
-    dimensionsForRotation(rotation, pageWidth, pageHeight),
-  )
   // Pixels painted before an edit turned or resized the page: a turn keeps the
   // scale, so they fit exactly once turned along; a resize letterboxes them.
   const pendingTurn = (intrinsicRotation - paintedPage.rotation + 360) % 360
   const preview = thumbnailPaper(paintedPage)
-  const previewFootprint = dimensionsForRotation(
-    (rotation + pendingTurn) % 360,
-    preview.width,
-    preview.height,
-  )
+  const previewFootprint = dimensionsForRotation(pendingTurn, preview.width, preview.height)
   const previewFit = Math.min(
     paperSize.width / previewFootprint.width,
     paperSize.height / previewFootprint.height,
@@ -234,7 +215,6 @@ export function PdfThumbnail({
               "ring-2 ring-primary ring-offset-2 ring-offset-zinc-200/70 hover:ring-primary focus-visible:ring-2 focus-visible:ring-primary dark:ring-offset-zinc-950",
           )}
           data-thumbnail-page={pageNumber}
-          data-rotation={rotation}
           onClick={(event) =>
             onSelect(pageNumber, {
               range: event.shiftKey,
@@ -252,7 +232,7 @@ export function PdfThumbnail({
                 height: preview.height,
                 left: "50%",
                 top: "50%",
-                transform: `translate(-50%, -50%) rotate(${rotation + pendingTurn}deg) scale(${previewFit})`,
+                transform: `translate(-50%, -50%) rotate(${pendingTurn}deg) scale(${previewFit})`,
                 width: preview.width,
               }}
             >
@@ -290,21 +270,24 @@ export function PdfThumbnail({
     <div
       className={cn(
         "group/thumb flex flex-col items-center transition-opacity",
-        overlay && PAPER_CONTROLS_HOST,
         // Faded, the way a file manager marks a cut: the page is still here,
         // and a paste is what moves it.
         isCut && "opacity-45",
       )}
       data-cut={isCut ? "" : undefined}
     >
-      {/* Always there, boxless outside a square: a sidebar widened into rows
-          gives its previews one, and a new parent would remount the canvas,
-          losing the pixels already painted into it. */}
+      {/* As wide and tall as every paper's long side, which a turn keeps:
+          portrait and landscape pages line up in rows, and a turn moves no
+          other page and none of the square's own controls. */}
       <div
-        className={square ? "grid place-items-center" : "contents"}
-        style={square ? { height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH } : undefined}
+        className={cn(
+          "relative grid place-items-center",
+          (overlay || cellOverlay) && PAPER_CONTROLS_HOST,
+        )}
+        style={{ height: THUMBNAIL_WIDTH, width: THUMBNAIL_WIDTH }}
       >
         {paperBox}
+        {cellOverlay}
       </div>
       <span
         className={cn(

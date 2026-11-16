@@ -28,10 +28,19 @@ type SidebarPanelToolsProps = {
 /** The end of each sidebar panel's bar, the same over the pages and the
     outline: folding everything there is to fold, and unfolding it all. */
 export function SidebarPanelTools({ children, fold }: SidebarPanelToolsProps) {
+  const { t } = useTranslation()
+  // Greyed, each says why: nothing to fold, all folded, or nothing folded.
+  const foldLabel = fold.canFold
+    ? fold.foldLabel
+    : fold.canUnfold
+      ? t("sidebar.allFolded")
+      : t("sidebar.nothingToFold")
+  const unfoldLabel = fold.canUnfold ? fold.unfoldLabel : t("sidebar.nothingFolded")
+
   return (
     <div className="ml-auto flex shrink-0 items-center gap-0.5">
       {children}
-      <ToolbarTooltip label={fold.foldLabel}>
+      <ToolbarTooltip label={foldLabel}>
         <Button
           aria-label={fold.foldLabel}
           data-slot="sidebar-fold-all"
@@ -43,7 +52,7 @@ export function SidebarPanelTools({ children, fold }: SidebarPanelToolsProps) {
           <ChevronsDownUp />
         </Button>
       </ToolbarTooltip>
-      <ToolbarTooltip label={fold.unfoldLabel}>
+      <ToolbarTooltip label={unfoldLabel}>
         <Button
           aria-label={fold.unfoldLabel}
           data-slot="sidebar-unfold-all"
@@ -59,40 +68,36 @@ export function SidebarPanelTools({ children, fold }: SidebarPanelToolsProps) {
   )
 }
 
-/** The bar over the outline, as `PagesBar` stands over the pages, saying
-    while a file drag offers the sidebar what a drop there does. */
-export function OutlineBar({
-  dropLabel,
-  ...props
-}: SidebarPanelToolsProps & { dropLabel: string }) {
-  const drop = useSidebarDrop()
-
+/** The bar over the outline, as `PagesBar` stands over the pages. */
+export function OutlineBar(props: SidebarPanelToolsProps) {
   return (
-    <div className="relative flex h-9 shrink-0 items-center border-b px-2" data-slot="outline-bar">
-      <SidebarDropHint label={dropLabel} />
-      {/* Hidden, not unmounted, as the pages bar's are. */}
-      <div className={cn("flex min-w-0 flex-1 items-center", drop && "invisible")}>
-        <SidebarPanelTools {...props} />
-      </div>
+    <div className="flex h-9 shrink-0 items-center border-b px-2" data-slot="outline-bar">
+      <SidebarPanelTools {...props} />
     </div>
   )
 }
 
 /** In words, under either panel: an icon among the fold buttons was taken
-    for one of them. */
-export function AddFilesButton({ onClick }: { onClick: () => void }) {
+    for one of them. While a file drag offers the sidebar, the words say what
+    a drop does instead: down here they cover neither the bars' buttons nor
+    the first file's name. */
+export function AddFilesButton({ dropLabel, onClick }: { dropLabel: string; onClick: () => void }) {
   const { t } = useTranslation()
+  const drop = useSidebarDrop()
 
   return (
-    <Button
-      className="min-w-0 shrink"
-      data-slot="sidebar-add-files"
-      onClick={onClick}
-      size="sm"
-      variant="ghost"
-    >
-      <Plus />
-      <span className="truncate">{t("sidebar.addFiles")}</span>
-    </Button>
+    <div className="relative flex min-w-0 flex-1 items-center">
+      <SidebarDropHint label={dropLabel} />
+      <Button
+        className={cn("min-w-0 shrink", drop && "invisible")}
+        data-slot="sidebar-add-files"
+        onClick={onClick}
+        size="sm"
+        variant="ghost"
+      >
+        <Plus />
+        <span className="truncate">{t("sidebar.addFiles")}</span>
+      </Button>
+    </div>
   )
 }

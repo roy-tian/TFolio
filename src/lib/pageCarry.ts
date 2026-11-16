@@ -7,8 +7,8 @@ export type CarriedPages = {
   lead: number
   /** Ascending 1-based page numbers, as the source document stands. */
   pages: number[]
-  /** Each page's size before the source's view rotation: a column opening
-      holes for the pages turns them as it will show the copies. */
+  /** Each page's size: a column opening holes for the pages sizes them as it
+      will show the copies. */
   sizes: { height: number; width: number }[]
   sourceDocumentId: number
 }

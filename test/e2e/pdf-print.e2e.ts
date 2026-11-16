@@ -1,4 +1,4 @@
-import { $, browser, expect } from "@wdio/globals"
+import { browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
 import type { E2eOverrides } from "../../src/lib/e2e"
@@ -104,19 +104,6 @@ describe("TFolio printing", () => {
     )
 
     expect(violations).toEqual([])
-  })
-
-  it("prints the document as saved, however the reading view is turned", async () => {
-    await $("button[aria-label='Rotate the view clockwise']").click()
-
-    const sheet = await printAndReadSheet()
-
-    expect(sheet).toHaveLength(3)
-
-    // The fixture's pages are portrait, and a view rotation is not the page's.
-    for (const page of sheet) {
-      expect(page.naturalHeight).toBeGreaterThan(page.naturalWidth)
-    }
   })
 
   it("lets the sheet go once the print is over and the reader is back", async () => {

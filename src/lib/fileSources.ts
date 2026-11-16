@@ -1,7 +1,8 @@
-import { invoke } from "@tauri-apps/api/core"
+import { Channel, invoke } from "@tauri-apps/api/core"
 
 import type { NoticeChannel } from "@/hooks/useNotices"
 import type { AskSignatures } from "@/hooks/useSignaturePrompt"
+import { mergeLimit, type AskBatchLimit } from "@/lib/batchLimits"
 import { storedFilePreferences } from "@/lib/filePreferences"
 import { workspaceOwner, type NoticeKind } from "@/lib/notices"
 import { isWordPath } from "@/lib/openSources"
@@ -36,19 +37,99 @@ export type FileSourceInfo = {
   signatures: PdfSignatures
 }
 
+/** Which file of an add or a merge is under way: how many went before it, of
+    how many, and its name. */
+export type SourceProgress = { completed: number; name: string; total: number }
+
+/** Past this many files an add or a merge shows its bar. */
+const PROGRESS_FROM = 4
+
+/** The engine's report of each file, put in the corner as the half of the bar
+    `stage` stands for: reading, then putting the files in. Only long runs say
+    so; a few files are done before a bar would mean anything. */
+function filesProgress(
+  notices: NoticeChannel,
+  count: number,
+  stage: "read" | "join",
+): Channel<SourceProgress> {
+  const channel = new Channel<SourceProgress>()
+
+  if (count >= PROGRESS_FROM) {
+    channel.onmessage = (progress) => raiseFilesProgress(notices, stage, progress)
+  }
+
+  return channel
+}
+
+function raiseFilesProgress(
+  notices: NoticeChannel,
+  stage: "read" | "join",
+  { completed, name, total }: SourceProgress,
+) {
+  const half = stage === "read" ? 0 : 50
+
+  notices.raise({
+    // Stop asks the reading to end; the files going in finish together.
+    action: stage === "read" ? { kind: "fileAddStop" } : undefined,
+    kind: "filesMerging",
+    owner: workspaceOwner,
+    progress: { completed: half + Math.round((completed / total) * 50), total: 100 },
+    values: { current: completed + 1, name, total },
+  })
+}
+
+/** The read's bar handed on to the files going in, without the Stop that no
+    longer stops anything, or ended where too few were read to show one. */
+function settleReadProgress(notices: NoticeChannel, read: FileSourceInfo[]) {
+  if (read.length >= PROGRESS_FROM) {
+    raiseFilesProgress(notices, "join", {
+      completed: 0,
+      name: fileNameFromPath(read[0].path),
+      total: read.length,
+    })
+  } else {
+    endFilesProgress(notices)
+  }
+}
+
+/** Puts the files read in, the corner naming each as it goes once there are
+    many: what `insert_pdf_files` and `merge_pdf_sources` take as `onProgress`. */
+export function joinProgress(notices: NoticeChannel, count: number) {
+  return filesProgress(notices, count, "join")
+}
+
+/** The bar's end, however the add or merge ended. */
+export function endFilesProgress(notices: NoticeChannel) {
+  notices.retract(workspaceOwner, ["filesMerging"])
+}
+
 /**
  * Reads files for their pages into the window's source list, which a
- * document's added files take their pages from. An office suite may take
- * minutes, so a conversion offers Stop in the corner; files that could not be
- * read are named there. Resolves to those read.
+ * document's added files take their pages from. Past what one go takes, the
+ * reader is asked first whether to go on with the files that fit. An office
+ * suite may take minutes, so a conversion offers Stop in the corner, as a long
+ * run's bar does; files that could not be read are named there. Resolves to
+ * those read.
  */
 export async function readFileSources(
-  paths: string[],
+  asked: string[],
   notices: NoticeChannel,
+  askLimit: AskBatchLimit,
 ): Promise<FileSourceInfo[]> {
   const raise = (kind: NoticeKind, values: Record<string, string | number>) =>
     notices.raise({ kind, owner: workspaceOwner, values })
-  const converting = paths.some(isWordPath)
+  const sizes = await invoke<number[]>("source_sizes", { paths: asked }).catch(() =>
+    asked.map(() => 0),
+  )
+  const limit = mergeLimit(sizes)
+
+  // Asked even when none fits, which the prompt says: never dropped silently.
+  if (limit && (!(await askLimit(limit)) || limit.fit === 0)) {
+    return []
+  }
+
+  const paths = limit ? asked.slice(0, limit.fit) : asked
+  const converting = paths.some(isWordPath) && paths.length < PROGRESS_FROM
 
   if (converting) {
     notices.raise({
@@ -58,8 +139,13 @@ export async function readFileSources(
     })
   }
 
+  let read: FileSourceInfo[] = []
+
   try {
-    const infos = await invoke<FileSourceInfo[]>("read_pdf_sources", { paths })
+    const infos = await invoke<FileSourceInfo[]>("read_pdf_sources", {
+      onProgress: filesProgress(notices, paths.length, "read"),
+      paths,
+    })
     const refused = infos.filter((info) => info.id === undefined)
 
     if (refused.length > 0) {
@@ -74,7 +160,9 @@ export async function readFileSources(
       )
     }
 
-    return infos.filter((info) => info.id !== undefined && info.pages.length > 0)
+    read = infos.filter((info) => info.id !== undefined && info.pages.length > 0)
+
+    return read
   } catch (error) {
     raise(
       String(error).includes("at most") ? "filesTooMany" : "filesUnreadable",
@@ -83,6 +171,8 @@ export async function readFileSources(
 
     return []
   } finally {
+    settleReadProgress(notices, read)
+
     if (converting) {
       notices.retract(workspaceOwner, ["fileAdding"])
     }
@@ -103,7 +193,7 @@ export function releaseFileSources(read: FileSourceInfo[]) {
 export function storedFileOptions(): FileOptions {
   const preferences = storedFilePreferences()
 
-  return { perFileBookmarks: preferences.bookmarks, smartPadding: preferences.smartPadding }
+  return { smartPadding: preferences.smartPadding }
 }
 
 /** The answers for the signed files among those read, by source id, and the
@@ -174,10 +264,28 @@ export type MergedFiles =
  */
 export async function mergeFiles(
   paths: string[],
+  {
+    ask,
+    askLimit,
+    notices,
+    ownTitle,
+  }: { ask: AskSignatures; askLimit: AskBatchLimit; notices: NoticeChannel; ownTitle: string },
+): Promise<MergedFiles> {
+  try {
+    return await mergeRead(await readFileSources(paths, notices, askLimit), {
+      ask,
+      notices,
+      ownTitle,
+    })
+  } finally {
+    endFilesProgress(notices)
+  }
+}
+
+async function mergeRead(
+  read: FileSourceInfo[],
   { ask, notices, ownTitle }: { ask: AskSignatures; notices: NoticeChannel; ownTitle: string },
 ): Promise<MergedFiles> {
-  const read = await readFileSources(paths, notices)
-
   if (read.length < 2) {
     releaseFileSources(read)
 
@@ -193,6 +301,7 @@ export async function mergeFiles(
 
   try {
     const document = await invoke<PdfDocumentInfo>("merge_pdf_sources", {
+      onProgress: joinProgress(notices, read.length),
       options: storedFileOptions(),
       ownTitle,
       signatures: answers.signatures,

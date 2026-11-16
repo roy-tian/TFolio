@@ -54,7 +54,6 @@ type PdfPageProps = {
   textEpoch: number
   /** The app's own select-all stands: its bands paint here, not per-span. */
   textSelectAll: boolean
-  rotation: number
   scale: number
 }
 
@@ -64,13 +63,10 @@ type PdfPageSurfaceProps = {
   drafts: RectDraft[]
   notes: HeldNote[]
   onPagePaint: (pageNumber: number, renderEpoch: number) => void
-  footprintHeight: number
-  footprintWidth: number
   page: PdfPageInfo
   pageNumber: number
   renderEpoch: number
   renderWidth: number
-  rotation: number
   searchMatches: IndexedSearchMatch[]
   textEpoch: number
   textSelectAll: boolean
@@ -86,13 +82,10 @@ const PdfPageSurface = memo(function PdfPageSurface({
   drafts,
   notes,
   onPagePaint,
-  footprintHeight,
-  footprintWidth,
   page,
   pageNumber,
   renderEpoch,
   renderWidth,
-  rotation,
   searchMatches,
   textEpoch,
   textSelectAll,
@@ -123,7 +116,6 @@ const PdfPageSurface = memo(function PdfPageSurface({
     pageNumber,
     pageWidth: page.width,
     renderEpoch,
-    rotation,
     targetWidth:
       renderWidth > 0
         ? Math.round(Math.max(MIN_PAGE_RENDER_WIDTH, renderWidth))
@@ -244,7 +236,6 @@ const PdfPageSurface = memo(function PdfPageSurface({
   const selectionBands = useSelectionBands({
     anchorRef: surfaceRef,
     page,
-    rotation,
     selectAll: textSelectAll,
     spans: textSpans,
     spansRegistered,
@@ -252,17 +243,7 @@ const PdfPageSurface = memo(function PdfPageSurface({
 
   return (
     <>
-      <div
-        className="absolute"
-        ref={surfaceRef}
-        style={{
-          height: `${(page.height / footprintHeight) * 100}%`,
-          left: "50%",
-          top: "50%",
-          transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-          width: `${(page.width / footprintWidth) * 100}%`,
-        }}
-      >
+      <div className="absolute inset-0" ref={surfaceRef}>
         {/* Constant so React never resizes it: usePageBitmap owns the size,
             and resizing keeps the transferred bitmap while `width` stops
             naming it. */}
@@ -350,7 +331,6 @@ const PdfPageSurface = memo(function PdfPageSurface({
           draft={draft}
           key={draft.id}
           pageWidth={page.width}
-          rotation={rotation}
           sourceCanvasRef={canvasRef}
           sourceRevision={bitmapRevision}
         />
@@ -369,7 +349,6 @@ export const PdfPage = memo(function PdfPage({
   pageNumber,
   renderEpoch,
   renderScale,
-  rotation,
   scale,
   searchMatches,
   textEpoch,
@@ -387,22 +366,17 @@ export const PdfPage = memo(function PdfPage({
     retainSelection: true,
   })
 
-  // User rotation spins the whole page clockwise on top of the bitmap's own
-  // rotation, so a 90°/270° page swaps the footprint it takes in the column.
-  const { height: footprintHeight, width: footprintWidth } =
-    dimensionsForRotation(rotation, page.width, page.height)
-  const displayWidth = pageDisplayWidth(page, rotation, scale)
-  const targetRenderWidth = footprintWidth * POINT_TO_PX * renderScale
-  const surfaceScale = displayWidth / footprintWidth
+  const displayWidth = pageDisplayWidth(page, scale)
+  const targetRenderWidth = page.width * POINT_TO_PX * renderScale
+  const surfaceScale = displayWidth / page.width
 
   return (
     <div
       aria-label={t("viewer.pageLabel", { pageNumber })}
       className="relative shrink-0 scroll-mt-5 overflow-hidden bg-white shadow-md ring-1 ring-black/10"
       data-page-number={pageNumber}
-      data-rotation={rotation}
       ref={wrapperRef}
-      style={{ aspectRatio: footprintWidth / footprintHeight, width: displayWidth }}
+      style={{ aspectRatio: page.width / page.height, width: displayWidth }}
     >
       {isNearViewport ? (
         <div
@@ -411,9 +385,9 @@ export const PdfPage = memo(function PdfPage({
           // Fixed page coordinates avoid laying out every text span on resize.
           // Canvas, selection, search and draft marks share the same transform.
           style={{
-            height: footprintHeight,
+            height: page.height,
             transform: `scale3d(${surfaceScale}, ${surfaceScale}, 1)`,
-            width: footprintWidth,
+            width: page.width,
           }}
         >
           <PdfPageSurface
@@ -422,13 +396,10 @@ export const PdfPage = memo(function PdfPage({
             drafts={drafts}
             notes={notes}
             onPagePaint={onPagePaint}
-            footprintHeight={footprintHeight}
-            footprintWidth={footprintWidth}
             page={page}
             pageNumber={pageNumber}
             renderEpoch={renderEpoch}
             renderWidth={targetRenderWidth}
-            rotation={rotation}
             searchMatches={searchMatches}
             textEpoch={textEpoch}
             textSelectAll={textSelectAll}

@@ -124,6 +124,9 @@
   aimed there shows nothing.
 - Corner messages go through `src/lib/notices.ts`; an error about a control still on screen stays
   beside it.
+- A control that cannot act stays on screen, greyed: no hover ground, the not-allowed cursor, and a
+  tooltip saying why it is off (and naming no shortcut), never the action it would take. A Button's
+  or Toggle's own hover classes take `not-disabled:hover:`: a plain `hover:` loses to the variant's.
 - Eleven locales share every layout, and the longest words decide it: a menu or popover takes its
   content's width (`w-auto min-w-*`), never a fixed one, and a row that cannot hold its words
   wraps, or drops its icons, before it cuts one. Check a new label in every locale at 640 wide.
@@ -151,7 +154,15 @@
 
 - Only PDFium parses opened PDFs. `lopdf` may parse freshly saved PDFium output for what PDFium
   cannot do: writing outlines, relinking bookmarks and split links, recompressing images, drawing
-  signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation).
+  signature widgets into their pages (`FPDFPage_Flatten` burns or drops every annotation),
+  dropping the links a page copy keeps into its source.
+- `FPDF_ImportPages` leaves references into the source (`/Parent`, `/Prev`, `/First`, arrays it
+  half-copied) that a save follows once the source closes, crashing the app: `reread` the document
+  that took pages before what it took them from closes, and copy through `detached_pages` where
+  the copy outlives its source or `LinkedAnnotations` says pop-ups or widgets would bring dead
+  links (`Headed::Home`, back into their own document, keeps a widget's field). It copies no
+  field either: a copy drawing in a signature whose widget hangs under its field is taken from the
+  source flattened whole (`whole_flattened`).
 - Validate insertion bounds in the engine, including e2e builds; reject out-of-range positions.
 - Cancellation commands use only the small operations lock, never `spawn_blocking`, whose pool may
   wait on the PDFium lock held by the operation being cancelled.
@@ -189,38 +200,45 @@
   releases them; sources never added go by `release_pdf_sources`. One history entry adds them all;
   its undo deletes the run under its stash.
 - A file drop opens a tab per file, except on the sidebar, which takes the files into one document
-  whichever panel shows: the shown tab's (where let go among its pages or its outline's files, else
-  at the end), or on the home tab, for two or more, a new sourceless one (`merge_pdf_sources`: no
-  page of its own, no history). Files no flow takes are named (`filesSkipped`), never dropped
-  silently.
-- Every insert names the file its pages join, and a reorder passes each position's file after
-  and before: a page let go among another file's pages joins it, but a file moved whole by its
-  name keeps its own. A deleted page keeps its file for the restore an undo brings back.
-- A file let go among another's pages parts it into runs. The headings over the sidebar's
-  pages, its tree of files (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list
-  a file once per run, its own bookmarks under the first; rename, remove, choose, fold and drag
-  act on the file whole.
-- Pages in hand show under the name of the file a release would leave them in (`flowItems`'
-  `joins`): between two files, the preview is the result.
+  whichever panel shows: the shown tab's (between the files nearest where let go among its pages,
+  or among its outline's files, else at the end), or on the home tab, for two or more, a new
+  sourceless one (`merge_pdf_sources`: no page of its own, no history). Files no flow takes are
+  named (`filesSkipped`), never dropped silently.
+- One open takes at most 8 files, and one add or merge at most 256 files of 512 MiB in all
+  (`batchLimits.ts`, the engine's `MAX_MERGE_FILES` and `MAX_MERGE_BYTES` refusing the rest):
+  past either the reader is asked to go on with the first that fit or give them all up. An add or
+  merge of more than 3 files names each in the corner as it is read, then as it goes in.
+- A file is never parted: a drag moves pages only among their own file's (`landingInFile`) and a
+  file only whole, between files, as files dropped in land (`nearestFileEdge`); the engine refuses
+  a reorder or an added file that would part one. Pastes and pages carried in from another tab
+  join the file they land in, a cut pasted there moving to it, and a reorder that does so passes
+  each position's file after and before. A deleted page keeps its file for the restore an undo
+  brings back.
+- The headings over the sidebar's pages, its tree of files (`fileRuns`) and the Save As outline
+  (`SectionBook::outline`) list each file under its name, its own bookmarks beneath; rename,
+  remove, choose, fold and drag act on the file whole. Pages in hand stay under their file's name.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
-  and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
-  then the tab reopens the written file, its history gone, which the corner says
-  (`filesCombined`). A compressed copy compresses what a Save As writes (`combined_bytes`), and a
-  split by bookmarks cuts at the outline it writes, which the engine reports as
-  `splitsByBookmarks`.
+  and Save As never writes the document's own file. Save As always writes one bookmark per file
+  (lopdf), named as the file is now, then the tab reopens the written file, its history gone,
+  which the corner says (`filesCombined`). A compressed copy compresses what a Save As writes
+  (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which the engine
+  reports as `splitsByBookmarks`.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
   print show them there, and only a Save As writes them. Structure commands never see them. A
   drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
   step with `SectionBook::padding`).
 - The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
-  fixed-size cells once widened (`ui.sidebarWidth`). The bar over them, and the Delete and
-  clipboard keys, act on the chosen pages, else the page being read, never on one folded away; a
-  plain click's choice lapses once another page is the page being read, so nothing is acted on out
-  of sight. Pages a paste or an add brings are chosen and shown where they landed (`showLanded`),
-  the reader left where they are. The pages and the bookmarks (the tree of files, for several) are
-  both there for every document: which shows is the window's layout, never a matter of what the
-  document holds.
+  fixed-size cells once widened (`ui.sidebarWidth`), every page in a square as wide as a paper's
+  long side, so a turn moves no other page. Each page's hover bar sits on its square's bottom,
+  where a turn leaves it under the pointer, and turns or deletes that page alone, chosen or not.
+  The bar over the pages, and the Delete, cut and copy keys, act on the chosen pages alone, the
+  bar greyed with none chosen; a paste with none chosen lands after the page being read, never
+  one folded away. A plain click's choice lapses once another page is the page being read, so
+  nothing is acted on out of sight. Pages a paste or an add brings are chosen and shown where
+  they landed (`showLanded`), the reader left where they are. The pages and the bookmarks (the
+  tree of files, for several) are both there for every document: which shows is the window's
+  layout, never a matter of what the document holds.
 - The page clipboard is the window's, one store (`holdPages` in `lib/pageClipboard.ts`) of
   which each session reads its half and keeps no copy: the last pages cut or copied in any of
   its documents, as that document's page numbers, which it lets go at its next structure edit.

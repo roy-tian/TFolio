@@ -14,7 +14,6 @@ type UseEraserToolOptions = {
   active: boolean
   onErase: (pageNumber: number, point: PagePoint) => void
   pages: PdfPageInfo[]
-  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -26,7 +25,6 @@ export function useEraserTool({
   active,
   onErase,
   pages,
-  viewRotation,
   viewerRef,
 }: UseEraserToolOptions) {
   useEffect(() => {
@@ -113,7 +111,6 @@ export function useEraserTool({
             ),
           ),
           current.page,
-          viewRotation,
         ),
       )
     }
@@ -133,5 +130,5 @@ export function useEraserTool({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, onErase, pages, viewRotation, viewerRef])
+  }, [active, onErase, pages, viewerRef])
 }

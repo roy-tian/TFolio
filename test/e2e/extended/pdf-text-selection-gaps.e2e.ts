@@ -99,11 +99,17 @@ describe("TFolio stable text hit testing", () => {
     expect(await browser.execute(() => window.getSelection()?.toString().replaceAll(/\s/g, ""))).toBe("Selectable")
   })
 
-  it("keeps endpoints aligned after zoom and quarter-turn rotation", async () => {
+  it("keeps endpoints aligned after zoom and a page's quarter turn", async () => {
     const offset = await prepare(fragmentedTextPdf(true))
     await $("button[aria-label='Zoom in']").click()
-    await $("button[aria-label='Rotate the view clockwise']").click()
+    await $("[data-thumbnail-page='1']").click()
+    await $("[data-slot='pages-rotate-right']").click()
+    await browser.waitUntil(() => browser.execute(() => {
+      const box = document.querySelector("[data-page-number='1']")!.getBoundingClientRect()
+      return box.width > box.height
+    }), { timeoutMsg: "the page never turned" })
     await $("button[aria-label='Fit page']").click()
+    await $(".pdf-text-layer span").waitForExist()
     const boxes = await runs()
     const row = boxes.slice(10, 20)
     const x = Math.max(...row.map(b => b.right)) - 2

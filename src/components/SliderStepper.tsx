@@ -9,11 +9,12 @@ import type { Shortcut } from "@/lib/shortcuts"
 type SliderStepperProps = {
   canDecrease: boolean
   canIncrease: boolean
-  decrease: { label: string; shortcut?: Shortcut }
+  /** `atLimit` says why the step is off, at the end of the range. */
+  decrease: { atLimit?: string; label: string; shortcut?: Shortcut }
   disabled?: boolean
   /** Names the whole control; a level put here stays readable at any time. */
   groupLabel: string
-  increase: { label: string; shortcut?: Shortcut }
+  increase: { atLimit?: string; label: string; shortcut?: Shortcut }
   max: number
   min: number
   /** The drag let go, or a key moved the thumb. */
@@ -71,6 +72,9 @@ export function SliderStepper({
   // readout follow the pointer from here meanwhile.
   const [dragValue, setDragValue] = useState<number | null>(null)
   const shown = dragValue ?? value
+  // A step greyed at its end says why, with no chord it would not answer.
+  const decreaseAtLimit = disabled || canDecrease ? undefined : decrease.atLimit
+  const increaseAtLimit = disabled || canIncrease ? undefined : increase.atLimit
 
   return (
     <div
@@ -79,7 +83,10 @@ export function SliderStepper({
       data-slot={slot}
       role="group"
     >
-      <ToolbarTooltip label={decrease.label} shortcut={decrease.shortcut}>
+      <ToolbarTooltip
+        label={decreaseAtLimit ?? decrease.label}
+        shortcut={decreaseAtLimit === undefined ? decrease.shortcut : undefined}
+      >
         <Button
           aria-label={decrease.label}
           disabled={disabled || !canDecrease}
@@ -117,7 +124,10 @@ export function SliderStepper({
         }}
         value={[shown]}
       />
-      <ToolbarTooltip label={increase.label} shortcut={increase.shortcut}>
+      <ToolbarTooltip
+        label={increaseAtLimit ?? increase.label}
+        shortcut={increaseAtLimit === undefined ? increase.shortcut : undefined}
+      >
         <Button
           aria-label={increase.label}
           disabled={disabled || !canIncrease}

@@ -194,7 +194,7 @@ async function settledBands(count: number) {
   return current
 }
 
-/** A page's own control, pressed as the keyboard would: its checkbox shows
+/** A page's own control, pressed as the keyboard would: its controls show
     only under a real pointer, which the driver cannot make. */
 function pressControl(pageNumber: number, control: string) {
   return browser.execute(
@@ -210,6 +210,40 @@ function pressControl(pageNumber: number, control: string) {
     activeSidebar,
     pageNumber,
     control,
+  )
+}
+
+/** A page's own bar button: what it says, and whether it is greyed. */
+function barButton(pageNumber: number, action: string) {
+  return browser.execute(
+    (scope: string, page: number, name: string) => {
+      const button = document
+        .querySelector(`${scope} button[data-thumbnail-page='${page}']`)!
+        .closest("li")!
+        .querySelector<HTMLButtonElement>(`[data-page-action='${name}']`)!
+
+      return { disabled: button.disabled, label: button.getAttribute("aria-label") }
+    },
+    activeSidebar,
+    pageNumber,
+    action,
+  )
+}
+
+/** Where a page's own turn button and the next page's cell stand. */
+function turnLayout(pageNumber: number) {
+  return browser.execute(
+    (scope: string, page: number) => {
+      const cell = (number: number) =>
+        document.querySelector(`${scope} button[data-thumbnail-page='${number}']`)!.closest("li")!
+      const button = cell(page)
+        .querySelector("[data-page-action='rotate-right']")!
+        .getBoundingClientRect()
+
+      return { button: [button.left, button.top], next: cell(page + 1).getBoundingClientRect().top }
+    },
+    activeSidebar,
+    pageNumber,
   )
 }
 
@@ -312,6 +346,75 @@ describe("TFolio sidebar pages", () => {
     expect(await columns()).toBe(3)
   })
 
+  it("goes back to its narrowest on a double-click, and from there out to the pages' width", async () => {
+    await openPdfFromDisk("halves.pdf", bandedPdf(4))
+    await settledBands(4)
+    const doubleClick = () =>
+      browser.execute((selector: string) => {
+        document
+          .querySelector(selector)!
+          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+      }, handle)
+    const halves = () =>
+      browser.execute((scope: string) => {
+        const sidebar = document.querySelector(scope)!.getBoundingClientRect().width
+        return { pages: window.innerWidth - sidebar, sidebar }
+      }, activeSidebar)
+
+    await dragEdge(60)
+    await browser.waitUntil(async () => (await sidebarWidth()) > 300)
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) === 256, {
+      timeoutMsg: "the sidebar never went back to its narrowest",
+    })
+
+    // As wide as the pages beside it, where the window leaves them their room.
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) > 256)
+    const { pages, sidebar } = await halves()
+    expect(Math.abs(pages - sidebar)).toBeLessThanOrEqual(1)
+
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) === 256)
+  })
+
+  it("gives book view up as the reader widens the sidebar to the pages' width", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "book" } })
+    await refreshApp()
+    await openPdfFromDisk("spreads.pdf", bandedPdf(4))
+    await settledBands(4)
+    const spreads = () =>
+      browser.execute((scope: string) => document.querySelectorAll(`${scope} [data-book-spread]`).length, session)
+    const doubleClick = () =>
+      browser.execute((selector: string) => {
+        document
+          .querySelector(selector)!
+          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+      }, handle)
+
+    await browser.waitUntil(async () => (await spreads()) > 0)
+    // From its narrowest out to the pages' width, which leaves them half.
+    await doubleClick()
+    await browser.waitUntil(async () => (await spreads()) === 0, {
+      timeoutMsg: "book view stayed beside a sidebar half the window wide",
+    })
+
+    // Chosen again, it stays: only the widening gives it up.
+    await $(`${session} [data-slot='status-bar'] button[aria-label='Book']`).click()
+    await browser.waitUntil(async () => (await spreads()) > 0)
+    await browser.pause(500)
+    expect(await spreads()).toBeGreaterThan(0)
+
+    // Narrowed, then widened again: given up again.
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) === 256)
+    expect(await spreads()).toBeGreaterThan(0)
+    await doubleClick()
+    await browser.waitUntil(async () => (await spreads()) === 0, {
+      timeoutMsg: "book view stayed after the second widening",
+    })
+  })
+
   it("goes to the page a click chooses, the pages to read staying beside it", async () => {
     await openPdfFromDisk("read.pdf", bandedPdf(6))
     await $(preview(5)).waitForExist({ timeout: 30_000 })
@@ -349,19 +452,32 @@ describe("TFolio sidebar pages", () => {
     )
   })
 
-  it("turns and removes the chosen pages from the bar over them, else the page being read", async () => {
+  it("turns and removes the chosen pages from the bar over them, greyed with none chosen", async () => {
     await openPdfFromDisk("bar.pdf", bandedPdf(4))
     await settledBands(4)
     const bar = (slot: string) => $(`${activeSidebar} [data-slot='pages-${slot}']`)
 
-    // One file: no file options, greyed rather than gone.
-    await expect(bar("file-options")).toBeDisabled()
+    // One file: no blanks between files to add, greyed rather than gone, and
+    // it says why.
+    await expect(bar("smart-padding")).toBeDisabled()
+    await expect(bar("smart-padding")).toHaveAttribute(
+      "aria-label",
+      "Start every file on an odd page: available once the document has several files",
+    )
 
-    // Nothing chosen: the page being read, named.
+    // Nothing chosen, nothing to act on, and each button says so.
+    for (const slot of ["rotate-left", "rotate-right", "delete"]) {
+      await expect(bar(slot)).toBeDisabled()
+      await expect(bar(slot)).toHaveAttribute("aria-label", "Select pages to rotate or delete them")
+    }
+
+    // One page chosen, named.
+    await pressControl(1, "[data-page-action='toggle']")
     await expect(bar("rotate-right")).toHaveAttribute("aria-label", "Rotate page 1 clockwise")
     await bar("rotate-right").click()
     await browser.waitUntil(async () => (await shape(1)) === "landscape")
     expect(await shape(2)).toBe("portrait")
+    await pressControl(1, "[data-page-action='toggle']")
 
     await pressControl(2, "[data-page-action='toggle']")
     await pressControl(3, "[data-page-action='toggle']")
@@ -376,11 +492,21 @@ describe("TFolio sidebar pages", () => {
     // A turn keeps the choice, so the button turns them on.
     expect(await selectedThumbs()).toEqual([2, 3])
 
-    await bar("delete").click()
+    // Pressed from the keyboard: the button greys as the choice goes, and the
+    // column takes its focus.
+    await browser.execute((button: string) => {
+      document.querySelector<HTMLElement>(button)!.focus()
+      document.querySelector<HTMLElement>(button)!.click()
+    }, `${activeSidebar} [data-slot='pages-delete']`)
     await browser.waitUntil(async () => (await pageCount()) === 2, {
       timeoutMsg: "the bar's delete never took the chosen pages",
     })
-    await expect(bar("delete")).toHaveAttribute("aria-label", "Delete page 1")
+    await expect(bar("delete")).toBeDisabled()
+    expect(
+      await browser.execute(
+        () => document.activeElement?.getAttribute("data-slot") ?? null,
+      ),
+    ).toBe("sidebar-thumbnails")
 
     await browser.keys(["Control", "z"])
     await browser.waitUntil(async () => (await pageCount()) === 4)
@@ -397,6 +523,46 @@ describe("TFolio sidebar pages", () => {
     )
   })
 
+  it("turns and removes one page from its own bar, which a turn leaves in place", async () => {
+    await openPdfFromDisk("own-bar.pdf", bandedPdf(4))
+    await settledBands(4)
+
+    // A turn leaves the bar where it was, so the next press finds it again,
+    // and moves no page below.
+    expect(await barButton(1, "rotate-right")).toEqual({
+      disabled: false,
+      label: "Rotate page 1 clockwise",
+    })
+    const before = await turnLayout(1)
+    await pressControl(1, "[data-page-action='rotate-right']")
+    await browser.waitUntil(async () => (await shape(1)) === "landscape")
+    await browser.pause(600)
+    expect(await turnLayout(1)).toEqual(before)
+    expect(await shape(2)).toBe("portrait")
+
+    // Chosen or not, the page alone: the bar over the pages takes the choice.
+    await pressControl(2, "[data-page-action='toggle']")
+    await pressControl(3, "[data-page-action='toggle']")
+    expect(await barButton(2, "rotate-right")).toEqual({
+      disabled: false,
+      label: "Rotate page 2 clockwise",
+    })
+    await pressControl(2, "[data-page-action='rotate-left']")
+    await browser.waitUntil(async () => (await shape(2)) === "landscape")
+    expect(await shape(3)).toBe("portrait")
+    expect(await selectedThumbs()).toEqual([2, 3])
+
+    await pressControl(3, "[data-page-action='delete']")
+    await browser.waitUntil(async () => (await pageCount()) === 3, {
+      timeoutMsg: "a page's own delete never took it",
+    })
+    // Page 2 stays: the delete took page 3 alone.
+    expect(await shape(2)).toBe("landscape")
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(async () => (await pageCount()) === 4)
+  })
+
   it("lets a plain click's choice go once the reader reads on, keeping the ticked", async () => {
     await openPdfFromDisk("read-on.pdf", bandedPdf(6))
     await $(preview(4)).waitForExist({ timeout: 30_000 })
@@ -411,7 +577,7 @@ describe("TFolio sidebar pages", () => {
     await browser.waitUntil(async () => (await selectedThumbs()).length === 0, {
       timeoutMsg: "the clicked page stayed chosen after the reader left it",
     })
-    await expect(rotate).toHaveAttribute("aria-label", "Rotate page 2 clockwise")
+    await expect(rotate).toBeDisabled()
 
     await pressControl(5, "[data-page-action='toggle']")
     await readPage(1)

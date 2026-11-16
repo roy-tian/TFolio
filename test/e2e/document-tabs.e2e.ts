@@ -996,4 +996,32 @@ describe("independent document tabs", () => {
       "true",
     )
   })
+
+  it("asks before opening more than eight files at once: the first eight, or none", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    const paths = Array.from({ length: 9 }, (_, index) => writePdf(`many-${index + 1}.pdf`, 1))
+    // Looked up afresh: the dialog is a new element each time it opens.
+    const prompt = () => $("[data-slot='batch-limit-prompt']")
+
+    // Given up, nothing opens, to choose again.
+    await emitDrag("drag-drop", { x: 400, y: 400 }, paths)
+    await prompt().waitForDisplayed({ timeout: 15_000 })
+    await expect(prompt()).toHaveText(
+      expect.stringContaining("At most 8 files open at once, and 9 were chosen."),
+    )
+    await $("[data-action='batch-limit-give-up']").click()
+    // Gone, not only fading: a drop under a modal is not the workspace's.
+    await prompt().waitForExist({ reverse: true })
+    await expect(tabButtons()).toBeElementsArrayOfSize(1)
+
+    // Taken, the first eight open.
+    await emitDrag("drag-drop", { x: 400, y: 400 }, paths)
+    await prompt().waitForDisplayed({ timeout: 15_000 })
+    await expect($("[data-action='batch-limit-take']")).toHaveText("Open the first 8")
+    await $("[data-action='batch-limit-take']").click()
+    await tabButton("many-8.pdf").waitForExist({ timeout: 30_000 })
+    await expect(tabButtons()).toBeElementsArrayOfSize(9)
+    await expect(tabButton("many-9.pdf")).not.toExist()
+  })
 })

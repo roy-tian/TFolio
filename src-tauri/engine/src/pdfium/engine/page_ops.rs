@@ -1,4 +1,5 @@
 use super::owned_content::OwnedTailState;
+use super::page_import::{copied_pages, detached_bytes, detached_pages, lent_copy, ImportRollback};
 use super::*;
 
 /// A deleted page's copy and its session state, held so an undo can put both
@@ -225,7 +226,8 @@ impl PdfiumEngine {
     /// their new sequence. The identity order changes nothing and bumps nothing.
     ///
     /// `sections`, for a document of several files, names each position's file
-    /// once the pages land: a page dropped among another file's pages joins it.
+    /// once the pages land: pages pasted among another file's pages join it.
+    /// Refused where a file would stand in two places.
     pub fn reorder_pages(
         &self,
         document_id: u64,
@@ -237,6 +239,9 @@ impl PdfiumEngine {
         entry.ensure_editable()?;
         entry.check_layout(sections)?;
         let Some(indices) = validate_page_order(order, entry.page_ids.len())? else {
+            // Standing still, only the layout can part a file.
+            entry.check_files_whole(&[], sections)?;
+
             // The pages stand still, but a move to the edge of the file beside
             // them still changes which file they belong to.
             if let (Some(book), Some(layout)) = (entry.sections.as_mut(), sections) {
@@ -245,6 +250,8 @@ impl PdfiumEngine {
 
             return Ok(structure_update(entry));
         };
+
+        entry.check_files_whole(&indices, sections)?;
 
         // A failed FPDF_MovePages may leave the document in an indeterminate
         // state, so even a pure move takes the M6 snapshot precaution.
@@ -357,20 +364,15 @@ impl PdfiumEngine {
         );
 
         let stashed = (|| -> Result<PdfDocument<'static>, String> {
-            let mut stash_document = self
-                .pdfium
-                .create_new_pdf()
-                .map_err(|error| format!("PDFium could not prepare the page stash: {error}"))?;
-            let range = indices
-                .iter()
-                .map(|index| (index + 1).to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-
-            stash_document
-                .pages_mut()
-                .copy_pages_from_document(&entry.document, &range, 0)
-                .map_err(|error| format!("PDFium could not copy the pages aside: {error}"))?;
+            // Detached: a save before the undo reads the document back, closing
+            // the one these pages were copied from.
+            let stash_document = detached_pages(
+                self.pdfium,
+                &entry.document,
+                &indices,
+                Headed::Home,
+                entry.linked,
+            )?;
 
             // Descending, so each deletion leaves the shallower indices true.
             for index in indices.iter().rev() {
@@ -557,9 +559,7 @@ impl PdfiumEngine {
             next_page_ids.insert(stashed.position as usize - 1, stashed.page_id);
         }
 
-        // The copies came back through FPDF_ImportPages; prove every owned
-        // layer's tail survived the round trip before accepting the document.
-        if let Some(state) = &entry.owned_content {
+        let prospective = entry.owned_content.as_ref().map(|state| {
             let mut prospective = state.clone();
 
             for stashed in &stash.pages {
@@ -568,29 +568,25 @@ impl PdfiumEngine {
                 }
             }
 
-            if let Err(error) =
-                // An undo step, with no Stop to offer: checked in one pass.
-                Self::verify_owned_tail(
-                    &entry.document,
-                    &next_page_ids,
-                    &prospective,
-                    None,
-                    &mut |_, _| {},
-                )
-            {
-                let cause = self.restore_document_snapshot(
-                    entry,
-                    snapshot,
-                    format!("the restored pages no longer carry this session's marks: {error}"),
-                );
+            prospective
+        });
+
+        // Read back before the stash closes with this undo, which also proves
+        // every owned layer's tail came back through FPDF_ImportPages.
+        match self.reread_pages(&entry.document, &next_page_ids, prospective.as_ref()) {
+            Ok(document) => {
+                entry.document = document;
+                entry.needs_compaction = false;
+            }
+            Err(error) => {
+                let cause = self.restore_document_snapshot(entry, snapshot, error);
 
                 entry.stashes.insert(stash_id, stash);
                 return Err(cause);
             }
-
-            entry.owned_content = Some(prospective);
         }
 
+        entry.owned_content = prospective;
         entry.page_ids = next_page_ids;
         for stashed in &stash.pages {
             if !stashed.marks.is_empty() {
@@ -609,10 +605,6 @@ impl PdfiumEngine {
         }
 
         self.relink_restored_bookmarks(entry, &stash.bookmarks);
-
-        // The delete already set this, and the import may leave orphans of its
-        // own; keep the next write on the compacting path either way.
-        entry.needs_compaction = true;
         entry.invalidate_all_page_revisions();
 
         Ok(structure_update(entry))
@@ -773,37 +765,34 @@ impl PdfiumEngine {
             return Err(format!("a page cannot go to position {index}"));
         };
 
+        // PDFium cannot import into the document itself. The scratch stays
+        // open until the document is read back with the copies in, so it
+        // needs detaching only to drop a pop-up's link to the original.
+        let scratch = if entry.linked.dead_links(Headed::Home) {
+            detached_pages(
+                self.pdfium,
+                &entry.document,
+                &sources,
+                Headed::Home,
+                entry.linked,
+            )?
+        } else {
+            copied_pages(self.pdfium, &entry.document, &sources)?
+        };
         // The copy may fail partway; snapshot first so a failure rolls the
         // document back whole, as every multi-page structure change does.
-        let snapshot = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+        let before = ImportRollback::of(entry)?;
 
-        let copied = (|| -> Result<(), String> {
-            let mut scratch = self
-                .pdfium
-                .create_new_pdf()
-                .map_err(|error| format!("PDFium could not prepare the copies: {error}"))?;
-
-            scratch
-                .pages_mut()
-                .copy_pages_from_document(&entry.document, &page_range_argument(&sources), 0)
-                .map_err(|error| format!("PDFium could not copy the pages aside: {error}"))?;
-
-            entry
-                .document
-                .pages_mut()
-                .copy_page_range_from_document(
-                    &scratch,
-                    0..=(sources.len() - 1) as i32,
-                    slot as i32,
-                )
-                .map_err(|error| format!("PDFium could not insert the copies: {error}"))
-        })();
-
-        if let Err(error) = copied {
-            return Err(self.restore_document_snapshot(entry, snapshot, error));
+        if let Err(error) = entry.document.pages_mut().copy_page_range_from_document(
+            &scratch,
+            0..=(sources.len() - 1) as i32,
+            slot as i32,
+        ) {
+            return Err(before.roll_back(
+                self,
+                entry,
+                format!("PDFium could not insert the copies: {error}"),
+            ));
         }
 
         // Read while `page_ids` still stands as the sources were named.
@@ -814,7 +803,7 @@ impl PdfiumEngine {
             .collect();
 
         if let Err(error) = Self::record_inserted_pages(entry, slot, &merged) {
-            return Err(self.restore_document_snapshot(entry, snapshot, error));
+            return Err(before.roll_back(self, entry, error));
         }
 
         // A copy of an added file's page is still that file's content.
@@ -825,6 +814,10 @@ impl PdfiumEngine {
         }
 
         entry.sections_inserted(slot, sources.len(), section);
+
+        if let Err(error) = self.reread(entry) {
+            return Err(before.roll_back(self, entry, error));
+        }
 
         // Every page's content now sits in a longer document, so an M5 effect
         // captured before this must fail its revision check after it.
@@ -865,48 +858,51 @@ impl PdfiumEngine {
         };
         entry.ensure_editable()?;
         entry.check_section(section)?;
-        // Only a copy of the chosen pages is rewritten, then taken whole.
-        let flattened = if source.output_flattens()? {
-            Some(signatures::flattened_pages(
-                self.pdfium,
-                &source.document,
-                &sources,
-            )?)
-        } else {
-            None
-        };
-        let range = match &flattened {
-            Some(_) => page_range_argument(&(0..sources.len()).collect::<Vec<_>>()),
-            None => page_range_argument(&sources),
-        };
+        let copy = lent_copy(
+            self.pdfium,
+            &source.document,
+            &sources,
+            source.output_flattens()?,
+            source.linked,
+        )?;
         let merged = copy_only_pages(source, &sources);
-
         // The import may fail partway; snapshot first so a failure rolls the
         // document back whole, as every multi-page structure change does.
-        let snapshot = entry
-            .document
-            .save_to_bytes()
-            .map_err(|error| format!("PDFium could not snapshot the document: {error}"))?;
+        let before = ImportRollback::of(entry)?;
+        let imported = match &copy {
+            Some(copy) => entry.document.pages_mut().copy_page_range_from_document(
+                copy,
+                0..=(sources.len() - 1) as i32,
+                slot as i32,
+            ),
+            None => entry.document.pages_mut().copy_pages_from_document(
+                &source.document,
+                &page_range_argument(&sources),
+                slot as i32,
+            ),
+        };
 
-        if let Err(error) = entry.document.pages_mut().copy_pages_from_document(
-            flattened.as_ref().unwrap_or(&source.document),
-            &range,
-            slot as i32,
-        ) {
-            return Err(self.restore_document_snapshot(
+        if let Err(error) = imported {
+            return Err(before.roll_back(
+                self,
                 entry,
-                snapshot,
                 format!("PDFium could not insert the pages: {error}"),
             ));
         }
 
         if let Err(error) = Self::record_inserted_pages(entry, slot, &merged) {
-            return Err(self.restore_document_snapshot(entry, snapshot, error));
+            return Err(before.roll_back(self, entry, error));
         }
 
         // Pages carried from another tab are a paste, not a file added: they
         // join a file of this one and leave its save as it was.
         entry.sections_inserted(slot, sources.len(), section);
+        entry.linked = entry.linked.with(source.linked);
+
+        if let Err(error) = self.reread(entry) {
+            return Err(before.roll_back(self, entry, error));
+        }
+
         entry.invalidate_all_page_revisions();
 
         Ok(structure_update(entry))
@@ -928,30 +924,25 @@ impl PdfiumEngine {
             let sources =
                 validate_distinct_pages(page_numbers, source.page_ids.len(), "a new document")?;
             let flatten = source.output_flattens()?;
-            let mut document = self
-                .pdfium
-                .create_new_pdf()
-                .map_err(|error| format!("PDFium could not create a document: {error}"))?;
+            let whole = if flatten {
+                signatures::whole_flattened(self.pdfium, &source.document, &sources, source.linked)?
+            } else {
+                None
+            };
+            let bytes = detached_bytes(
+                self.pdfium,
+                whole.as_ref().unwrap_or(&source.document),
+                &sources,
+                Headed::Away,
+                source.linked,
+            )?;
 
-            document
-                .pages_mut()
-                .copy_pages_from_document(&source.document, &page_range_argument(&sources), 0)
-                .map_err(|error| format!("PDFium could not copy the pages: {error}"))?;
-
-            let copied = document.pages().len() as usize;
-
-            if copied != sources.len() {
-                return Err(format!(
-                    "PDFium copied {copied} pages where {} were asked for",
-                    sources.len()
-                ));
-            }
-
-            let bytes = document
-                .save_to_bytes()
-                .map_err(|error| format!("PDFium could not build the new document: {error}"))?;
-
-            (bytes, copy_only_pages(source, &sources), flatten)
+            // Drawn in already where the document had to be flattened whole.
+            (
+                bytes,
+                copy_only_pages(source, &sources),
+                flatten && whole.is_none(),
+            )
         };
         // Byte work, so off the lock.
         let bytes = if flatten {

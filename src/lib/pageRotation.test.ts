@@ -1,19 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
-import { pagesToRotate, turnView } from "@/lib/pageRotation"
+import { pagesToRotate } from "@/lib/pageRotation"
 
 const selected = (...pages: number[]) => new Set(pages)
-
-describe("turnView", () => {
-  it("turns a reading view a quarter further", () => {
-    expect(turnView(0)).toBe(90)
-    expect(turnView(180)).toBe(270)
-  })
-
-  it("wraps a full turn back to upright", () => {
-    expect(turnView(270)).toBe(0)
-  })
-})
 
 describe("pagesToRotate", () => {
   it("turns only the selected pages", () => {

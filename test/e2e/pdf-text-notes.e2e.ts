@@ -300,7 +300,7 @@ describe("TFolio text notes", () => {
     expect(box.panelTop).toBeGreaterThan(box.textareaTop)
   })
 
-  // Reaching for zoom or rotate is not finishing the note: closing on any press
+  // Reaching for zoom is not finishing the note: closing on any press
   // outside the viewer threw away drafts the moment a reader zoomed to place.
   it("survives a press on the viewer controls", async () => {
     await $("button[aria-label='Add a note']").click()
@@ -308,8 +308,8 @@ describe("TFolio text notes", () => {
     await $("textarea[aria-label='Note text']").waitForDisplayed({ timeout: 15_000 })
     await browser.pause(500)
 
-    // The rotation commits as the page box flipping to the rotated footprint;
-    // the bitmap repaints behind it at an unchanged canvas size.
+    // The zoom commits as the page box taking its new size; the bitmap
+    // repaints behind it.
     const pageBox = () =>
       browser.execute(() => {
         const box = document
@@ -317,11 +317,11 @@ describe("TFolio text notes", () => {
           .getBoundingClientRect()
         return `${Math.round(box.width)}x${Math.round(box.height)}`
       })
-    const beforeRotate = await pageBox()
-    await pressControl("button[aria-label='Rotate the view clockwise']")
+    const beforeZoom = await pageBox()
+    await pressControl("button[aria-label='Zoom in']")
     await browser.waitUntil(
-      async () => (await pageBox()) !== beforeRotate,
-      { timeout: 10_000, timeoutMsg: "the rotation never relaid out the page" },
+      async () => (await pageBox()) !== beforeZoom,
+      { timeout: 10_000, timeoutMsg: "the zoom never relaid out the page" },
     )
 
     await expect($("textarea[aria-label='Note text']")).toBeDisplayed()

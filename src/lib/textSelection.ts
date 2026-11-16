@@ -39,13 +39,12 @@ export function selectedRectOfSpan(selection: Selection, span: Element) {
 /**
  * The selection's footprint on one page, one band per text line: the selected
  * stretch of every run it touches, merged across the line with its run-mates.
- * In unrotated page points, so the bands survive zoom and rotation unchanged.
+ * In unrotated page points, so the bands survive zoom unchanged.
  */
 export function selectedLineRectsOnPage(
   selection: Selection,
   pageElement: Element,
   page: PdfPageInfo,
-  rotation: number,
 ): PagePointsRect[] {
   const mounted = textPage(pageElement)
   const { height, width } = dimensionsForRotation(page.rotation, page.width, page.height)
@@ -78,7 +77,6 @@ export function selectedLineRectsOnPage(
     clampFraction(clientPointToFraction(box, rect.left, rect.top)),
     clampFraction(clientPointToFraction(box, rect.right, rect.bottom)),
     page,
-    rotation,
   )
   for (const [index, span] of spans.entries()) {
     if (!selection.containsNode(span, true)) {

@@ -4,6 +4,7 @@ mod compress;
 mod engine;
 mod font;
 mod geometry;
+mod import_links;
 mod library;
 mod outline;
 mod page_numbers;

@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next"
 
 import { OverlayScrollbars } from "@/components/OverlayScrollbars"
+import type { PageAction } from "@/components/PageCardControls"
 import {
   landingBox,
   liftGhost,
@@ -22,6 +23,7 @@ import { FileMenuContent, PageMenuContent } from "@/components/PageContextMenu"
 import {
   CarriedHoles,
   FILE_HEADING_NAME,
+  FILE_HEADING_TITLE,
   FileHeading,
   foldedBarKey,
   PageCell,
@@ -61,7 +63,7 @@ import {
 import { flowItems } from "@/lib/pageFlow"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { paddingAroundDropped, paddingPositions, type PaddingSheet } from "@/lib/padding"
-import { emptiesItsFile, fileRuns, foldedAway, pagesOfSection } from "@/lib/pageSections"
+import { fileRuns, landingInFile, nearestFileEdge, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import { lowestPage, type SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -76,6 +78,8 @@ const PLAIN: SelectionModifiers = { range: false, toggle: false }
 const ARROW_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp"])
 // Room kept around a page brought into the column's view.
 const REVEAL_MARGIN = 12
+// How long the sidebar's width rests before it takes more columns.
+const COLUMNS_SETTLE_MS = 150
 // What a ghost lands on in its cell: a page's paper, or a folded file's name.
 const LANDING_PAPER = `[data-thumbnail-page], ${FILE_HEADING_NAME}`
 
@@ -109,9 +113,6 @@ type ColumnDrag = {
   /** Where among the pages that stay the block lands, or null while the
       pointer is away and every page stands where it was. */
   at: number | null
-  /** The file the block joins, let go where it is: that of the page nearest
-      the pointer. Undefined for a file carried whole, which keeps its own. */
-  joins?: number
   moving: number[]
 }
 
@@ -129,8 +130,8 @@ type PageThumbnailsProps = {
   /** The menu's pages, by number: the choice may lapse while it is open. */
   onCopyPages: (pages: Iterable<number>) => void
   onCutPages: (pages: Iterable<number>) => void
-  /** On a chosen page, the whole choice goes with it. */
-  onDeletePage: (pageNumber: number) => void
+  /** On a chosen page, the whole choice goes with it, unless `alone`. */
+  onDeletePage: (pageNumber: number, alone?: boolean) => void
   /** The pages as a new PDF of their own, in a tab beside this one. */
   onExtractPages: (pages: number[]) => void
   /** Whether focus is in the column: the clipboard keys are its only then. */
@@ -138,9 +139,6 @@ type PageThumbnailsProps = {
   /** The files whose pages are folded away under their names. */
   foldedFiles: ReadonlySet<number>
   onFoldFiles: (sections: readonly number[], folded: boolean) => void
-  /** Whether each file of a document of several starts a row of its own. */
-  fileRows: boolean
-  onFileRowsChange: (fileRows: boolean) => void
   /** How the document's files are laid out and saved; absent with one file. */
   fileOptions: FileOptions | undefined
   onFileOptionsChange: (change: Partial<FileOptions>) => void
@@ -170,10 +168,10 @@ type PageThumbnailsProps = {
   onRemoveFile: (section: number) => void
   onRenameFile: (section: number, title: string) => void
   /** Settles once the reorder has landed or been refused: the column holds
-      the dropped order until then, rather than flash the old one. `moving`
-      joins `section`, the file it was let go among. */
-  onReorderPages: (order: number[], moving: number[], section?: number) => Promise<unknown>
-  /** That page alone: the page being read, from the bar with none chosen. */
+      the dropped order until then, rather than flash the old one. Every
+      page keeps its file. */
+  onReorderPages: (order: number[]) => Promise<unknown>
+  /** That page alone: a page's own bar. */
   onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
   onRotatePages: (degrees: 90 | 270) => void
   onSelectPage: (pageNumber: number, modifiers: SelectionModifiers) => void
@@ -191,7 +189,6 @@ type PageThumbnailsProps = {
   selectedPages: ReadonlySet<number>
   /** Follow each page through a reorder, so its painted preview moves with it. */
   thumbnailKeys: number[]
-  viewRotation: number
 }
 
 /** The document's pages in the sidebar, down one column or, widened, in rows
@@ -211,10 +208,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   onExtractPages,
   isEditingNow,
   fileOptions,
-  fileRows,
   foldedFiles,
   onFileOptionsChange,
-  onFileRowsChange,
   onFocusChange,
   onFoldFiles,
   onInsertBlankPage,
@@ -237,10 +232,10 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   sections,
   selectedPages,
   thumbnailKeys,
-  viewRotation,
 }, ref) {
   const { t } = useTranslation()
   const listRef = useRef<HTMLDivElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef<HTMLOListElement>(null)
   const current = useCurrentPage(currentPage)
   const followedRef = useRef<number | null>(null)
@@ -337,8 +332,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         (point &&
           flowLanding(pointInColumn(column, point), cells, fileLandingRef.current?.slot ?? null)) ??
         cells.length
+      // Between files only: a file let go among another's pages never parts it.
+      const at = nearestFileEdge(
+        pagesRef.current.map((page) => page.section),
+        pagesBeforeSlot(cells, slot),
+      )
 
-      return { at: pagesBeforeSlot(cells, slot), slot }
+      return { at, slot: slotOfPages(cells, at) }
     },
     [measure],
   )
@@ -435,7 +435,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // the sidebar opened again goes to the reader's page, not back there.
   const revealedRef = useRef(reveal?.serial ?? null)
   const [columns, setColumns] = useState(1)
-  // The columns last measured, a render ahead of the ones laid out: the
+  // The columns last fitted, a render ahead of the ones laid out: the
   // reader's page is looked for only once the pages stand in them.
   const fittedColumnsRef = useRef(columns)
   const grid = columns > 1
@@ -484,11 +484,34 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       return
     }
 
-    const fit = (width: number) => {
+    let widening = 0
+    const settle = (next: number) => {
+      fittedColumnsRef.current = next
+      setColumns(next)
+    }
+    const fit = (width: number, now = false) => {
       // A background tab's column has no box; it keeps the columns it had.
-      if (width > 0) {
-        fittedColumnsRef.current = thumbnailColumns(width, THUMBNAIL_WIDTH)
-        setColumns(fittedColumnsRef.current)
+      if (width <= 0) {
+        return
+      }
+
+      const next = thumbnailColumns(width, THUMBNAIL_WIDTH)
+
+      window.clearTimeout(widening)
+
+      // A drag's widening waits for the width to rest: across several counts
+      // it would otherwise lay every page out, and render those each layout
+      // shows, at every one on the way. A step — a double-click, an arrow —
+      // goes at once, and so do fewer columns: the rows no longer fit.
+      const dragging =
+        list
+          .closest("[data-slot='app-sidebar']")
+          ?.querySelector("[data-slot='sidebar-resize'][data-resizing]") != null
+
+      if (now || !dragging || next <= fittedColumnsRef.current) {
+        settle(next)
+      } else {
+        widening = window.setTimeout(() => settle(next), COLUMNS_SETTLE_MS)
       }
     }
     const observer = new ResizeObserver(([entry]) => fit(entry?.contentRect.width ?? 0))
@@ -497,26 +520,49 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     // Before the paint too, at first and again as the tab comes to show: the
     // observer's report lands a frame late, which would show a wide sidebar
     // as one column first, or as the columns it had before it was widened.
-    fit(list.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight))
+    fit(list.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), true)
     observer.observe(list)
 
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      window.clearTimeout(widening)
+    }
   }, [active])
 
   // Read through a ref, so the memoised previews keep one handler across the
   // session's every render.
-  const actionsRef = useRef({ onInsertBlankPage, onSelectPage })
+  const actionsRef = useRef({ onDeletePage, onInsertBlankPage, onRotatePage, onSelectPage })
 
-  actionsRef.current = { onInsertBlankPage, onSelectPage }
+  actionsRef.current = { onDeletePage, onInsertBlankPage, onRotatePage, onSelectPage }
 
-  // A control that leaves with what it acted on fires no blur as it goes: the
-  // column takes the focus first, and with it keeps the page keys. A click
-  // focuses the control too, except in WebKit on macOS.
+  // A control that leaves with what it acted on, or greys as the choice goes
+  // with its pages, fires no blur as it loses the focus: the column takes it
+  // first, and with it keeps the page keys. A click focuses the control too,
+  // except in WebKit on macOS.
   const keepFocus = useCallback(() => {
-    if (listRef.current?.contains(document.activeElement)) {
-      listRef.current.focus({ preventScroll: true })
+    if (surfaceRef.current?.contains(document.activeElement)) {
+      listRef.current?.focus({ preventScroll: true })
     }
   }, [])
+
+  // A page's own bar acts on that page alone, chosen or not: the bar over the
+  // pages is the one that takes the choice.
+  const act = useCallback(
+    (pageNumber: number, action: PageAction) => {
+      const actions = actionsRef.current
+
+      if (action === "delete") {
+        // Refused while an edit runs, and the button keeps its focus.
+        if (!isEditingRef.current()) {
+          keepFocus()
+          actions.onDeletePage(pageNumber, true)
+        }
+      } else {
+        actions.onRotatePage(pageNumber, action === "rotate-left" ? 270 : 90)
+      }
+    },
+    [keepFocus],
+  )
 
   const toggle = useCallback((pageNumber: number) => {
     cursorRef.current = { pageNumber, pages: pagesRef.current }
@@ -796,8 +842,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
     if (
       event.button !== 0 ||
-      // Its arrow folds the file and carries nothing.
-      target.closest("[data-fold-toggle]") ||
+      // Its arrow folds the file and its rename and remove act on it: none
+      // carries anything.
+      target.closest("[data-fold-toggle], [data-file-row-tools]") ||
       !paper ||
       !list ||
       !column ||
@@ -831,7 +878,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     // `at` as the flow counts it, by cells: a folded file is one, of many
     // pages. What the next landing is read against.
     let slot: number | null = null
-    let joins: number | undefined
     let point = start
     // Where the landing was last read: the blanks it shows can move the rows
     // under a still pointer, and a release there keeps what is on screen.
@@ -873,16 +919,17 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
       slot = cells ? flowLanding(pointInColumn(column, point), cells, slot) : null
 
-      const next = cells && slot !== null ? pagesBeforeSlot(cells, slot) : null
-      // Read off the cells as a release reads them, so the blanks shown in
-      // the meantime are the ones the drop lays out.
-      const nextJoins =
-        cells && next !== null && wholeFile === undefined ? sectionNear(point, cells) : undefined
+      // Pages stay in their file, and a file moves whole between the others.
+      const next =
+        cells && slot !== null
+          ? landingInFile(basis, moving, pagesBeforeSlot(cells, slot))
+          : null
 
-      if (next !== at || nextJoins !== joins) {
+      slot = cells && next !== null ? slotOfPages(cells, next) : null
+
+      if (next !== at) {
         at = next
-        joins = nextJoins
-        setDrag({ at, basis, joins, moving })
+        setDrag({ at, basis, moving })
       }
     }
     const edgeScroll = () => {
@@ -929,9 +976,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           }),
           sourceDocumentId: documentId,
         }
-        // The block gathers where the pressed page stands.
-        at = pressed - 1 - moving.filter((pageNumber) => pageNumber < pressed).length
-        slot = slotOfPages(measure((key) => movingKeys.has(key), held), at)
+        // The block gathers where the pressed page stands, if it may.
+        at = landingInFile(
+          basis,
+          moving,
+          pressed - 1 - moving.filter((pageNumber) => pageNumber < pressed).length,
+        )
+        slot = at === null ? null : slotOfPages(measure((key) => movingKeys.has(key), held), at)
 
         if (wholeFile !== undefined) {
           onSelectPages(moving, { range: false, toggle: false })
@@ -948,7 +999,10 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
             moving.length,
             start,
             point,
-            foldedFile ? (paper.textContent ?? undefined) : undefined,
+            // The name alone: its button holds the page count too.
+            foldedFile
+              ? (paper.querySelector(FILE_HEADING_TITLE)?.textContent ?? undefined)
+              : undefined,
           ),
         )
         frame = requestAnimationFrame(edgeScroll)
@@ -1005,18 +1059,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         commit && at !== null && pagesRef.current === basis
           ? orderWithBlockAt(moving, at, basis.length)
           : null
-      const moved = reorder?.some((pageNumber, index) => pageNumber !== index + 1) ?? false
-      // A whole file stays its own file wherever it lands; pages join the file
-      // the release's own retarget found them beside.
-      const nearest = reorder ? joins : undefined
-      // Let go where they stand but beside the next file's first page, they
-      // join it — unless that would leave their own file with no page at all:
-      // a one-page file's page let go in place stays its file's.
-      const section = !moved && emptiesItsFile(basis, moving) ? undefined : nearest
-      const regrouped =
-        section !== undefined &&
-        moving.some((pageNumber) => basis[pageNumber - 1]?.section !== section)
-      const changes = moved || (reorder !== null && regrouped)
+      const changes = reorder?.some((pageNumber, index) => pageNumber !== index + 1) ?? false
 
       // Otherwise the pages go back where they were and the ghost with them.
       if (!changes) {
@@ -1025,10 +1068,10 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       }
 
       settlingRef.current = true
-      setDrag({ at, basis, joins: section, moving })
+      setDrag({ at, basis, moving })
       setLanding({
         leadKey: changes ? leadKey : homeKey,
-        settled: changes ? onReorderPages(reorder!, moving, section) : Promise.resolve(),
+        settled: changes ? onReorderPages(reorder!) : Promise.resolve(),
       })
     }
     const release = (released: PointerEvent) => {
@@ -1068,25 +1111,21 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     menuLast = Math.max(menuLast, pageNumber)
   }
 
-  // The file the pages in hand would join, let go where they stand: the one
-  // the release itself will name. In place, a file's last pages keep it.
-  const liveDrag = drag?.basis === pages && drag.at !== null ? drag : null
-  const heldJoins =
-    liveDrag &&
-    !(
-      order.every((pageNumber, index) => pageNumber === index + 1) &&
-      emptiesItsFile(pages, liveDrag.moving)
-    )
-      ? liveDrag.joins
-      : undefined
+  const dragging = drag?.basis === pages && drag.at !== null
 
-  // Each file's name heads its first page, once the document has several and
-  // the reader keeps them apart; pages in hand stand among others for now.
-  const byFile = fileRows && sections.length > 1
+  // Each file's name heads its first page, once the document has several.
+  const byFile = sections.length > 1
   const titles = new Map(sections.map((section) => [section.id, section.title]))
+  const filePages = new Map<number, number>()
+
+  for (const page of pages) {
+    if (page.section !== undefined) {
+      filePages.set(page.section, (filePages.get(page.section) ?? 0) + 1)
+    }
+  }
   const moving = new Set(drag?.basis === pages ? drag.moving : [])
   const { blanks, blankAfterCarried } = previewBlanks({
-    drag: liveDrag ? { joins: heldJoins, moving: liveDrag.moving } : null,
+    drag: dragging,
     incoming:
       incomingAt !== null && incoming
         ? { at: incomingAt, joins: incoming.joins, sizes: incoming.carried.sizes }
@@ -1109,7 +1148,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     byFile,
     folded: foldedFiles,
     held: moving,
-    joins: heldJoins,
     order,
     pages,
   })
@@ -1135,10 +1173,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   }
   const fileHeading = (section: number, first: number, run?: readonly number[]) => {
     const isRenamed = renamed?.section === section && renamed.first === first
+    const count = filePages.get(section) ?? 0
 
     return (
       <FileHeading
-        count={run?.length ?? 0}
+        // Folded, what the bar stands for: pages in hand have left it.
+        count={run?.length ?? count}
         current={run?.includes(current) === true}
         flipKey={foldedBarKey(keyOf(first))}
         folded={run !== undefined}
@@ -1147,6 +1187,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         // One key folded or not, so the arrow pressed keeps the focus.
         key={`heading-${keyOf(first)}`}
         onFold={(folded) => onFoldFiles([section], folded)}
+        onRemove={() => {
+          // The heading goes with its file, and a removed element fires no blur.
+          keepFocus()
+          onRemoveFile(section)
+        }}
         onRename={() => setRenaming({ first, pages, section })}
         onRenameDone={(title) => {
           // Enter and Esc take the field away with the caret still in it.
@@ -1158,6 +1203,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           }
         }}
         onSelect={(event) => selectFile(section, first, event)}
+        // A document keeps a page: its last file's go no further.
+        removeDisabled={count >= pages.length}
         renaming={isRenamed}
         runFirst={first}
         section={section}
@@ -1167,14 +1214,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     )
   }
 
-  // None chosen, the bar and the keys take the page being read, unless it is
-  // folded away under its file's name: nothing is turned or removed unseen.
-  const readingUnseen =
-    selectedPages.size === 0 && foldedAway(pages, current, foldedFiles, byFile)
-  const barTargets =
-    selectedPages.size === 0
-      ? { count: 1, first: current, of: numPages, unseen: readingUnseen }
-      : { count: selectedPages.size, first: lowestPage(selectedPages), of: numPages }
 
   return (
     <div
@@ -1184,30 +1223,34 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       // their controls.
       data-pages-dragging={drag !== null || ghost !== null || incoming !== null ? "" : undefined}
       data-pages-surface
+      ref={surfaceRef}
     >
       <PagesBar
         fileOptions={fileOptions}
-        fileRows={fileRows}
         folded={{ count: foldedCount, of: sections.length }}
-        // Not chosen, the page being read goes alone.
-        onDelete={() => onDeletePage(barTargets.first)}
+        onDelete={() => {
+          // Refused while an edit runs, and the button keeps its focus.
+          if (selectedPages.size > 0 && !isEditingNow()) {
+            keepFocus()
+            onDeletePage(lowestPage(selectedPages))
+          }
+        }}
         onFileOptionsChange={onFileOptionsChange}
-        onFileRowsChange={onFileRowsChange}
         onFoldAll={(folded) =>
           onFoldFiles(
             sections.map((section) => section.id),
             folded,
           )
         }
+        // Greyed with none chosen, but guarded too: with none chosen
+        // `onRotatePages` turns every page.
         onRotate={(degrees) => {
-          if (selectedPages.size === 0) {
-            onRotatePage(current, degrees)
-          } else {
+          if (selectedPages.size > 0) {
             onRotatePages(degrees)
           }
         }}
         severalFiles={sections.length > 1}
-        targets={barTargets}
+        targets={{ count: selectedPages.size, first: lowestPage(selectedPages), of: numPages }}
       />
       <div className="relative min-h-0 flex-1" data-sidebar-drop-list>
         <ContextMenu
@@ -1288,17 +1331,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   }
 
                   if (event.key === "Delete" || event.key === "Backspace") {
-                    const first = lowestPage(selectionRef.current)
-                    // None chosen, the page being read: what the bar's own
-                    // button takes.
-                    const target = Number.isFinite(first) ? first : readingUnseen ? null : current
-
-                    if (target !== null) {
+                    // None chosen, nothing: as the bar over the pages is grey.
+                    if (selectionRef.current.size > 0) {
                       event.preventDefault()
                       // A focused preview leaves with its page, and a removed
                       // element fires no blur: the column keeps the focus instead.
                       event.currentTarget.focus({ preventScroll: true })
-                      onDeletePage(target)
+                      onDeletePage(lowestPage(selectionRef.current))
                     }
 
                     return
@@ -1350,20 +1389,16 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                   index === incomingAt ? (
                     <CarriedHoles
                       carryKey={CARRY_KEY}
-                      grid={grid}
                       key={CARRY_KEY}
-                      rotation={viewRotation}
                       sizes={incoming!.carried.sizes}
                     />
                   ) : null
                 const blankAfterHoles =
                   index === incomingAt && blankAfterCarried ? (
                     <PaddingCell
-                      grid={grid}
                       key={`padding-${CARRY_KEY}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
-                      rotation={viewRotation}
                       sheet={blankAfterCarried}
                     />
                   ) : null
@@ -1403,6 +1438,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     // Where the page stands in a drag's preview, as it will once
                     // the pages land.
                     caption={index + 1 + carriedAhead}
+                    // A document keeps one page; the backend refuses a delete of them all.
+                    deleteDisabled={numPages <= 1}
                     documentId={documentId}
                     flipKey={key}
                     grid={grid}
@@ -1414,6 +1451,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     isSelected={selectedPages.has(pageNumber)}
                     key={key}
                     label={t("sidebar.thumbnailLabel", { pageNumber })}
+                    onAction={act}
                     onInsertBlank={insertBlank}
                     onSelect={select}
                     onToggle={toggle}
@@ -1422,16 +1460,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     pageWidth={page.width}
                     parked={parkedPreviews}
                     renderEpoch={renderEpochs[pageNumber] ?? 0}
-                    rotation={viewRotation}
                     signed={page.signed === true}
                   />,
                   blanks.has(pageNumber) ? (
                     <PaddingCell
-                      grid={grid}
                       key={`padding-${key}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
-                      rotation={viewRotation}
                       sheet={blanks.get(pageNumber)!}
                     />
                   ) : null,
@@ -1488,7 +1523,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                 })
               }
               // A document keeps a page; the last file's go no further.
-              removeDisabled={pagesOfSection(pages, menuFile.section).length >= numPages}
+              removeDisabled={(filePages.get(menuFile.section) ?? 0) >= numPages}
             />
           ) : null}
           {ghost ? (
@@ -1529,8 +1564,8 @@ function previewBlanks({
   pages,
   smartPadding,
 }: {
-  /** The pages in hand, and the file a release where they stand leaves them in. */
-  drag: { joins?: number; moving: number[] } | null
+  /** Pages are in hand, each staying in its file. */
+  drag: boolean
   /** Files held over the pages, which would land after page `at`. */
   files: { at: number; smartPadding: boolean } | null
   incoming: { at: number; joins?: number; sizes: CarriedPages["sizes"] } | null
@@ -1546,11 +1581,7 @@ function previewBlanks({
   }
 
   if (drag) {
-    const { joins } = drag
-    const held = new Set(drag.moving)
-    const files = order.map((pageNumber) =>
-      joins !== undefined && held.has(pageNumber) ? joins : pages[pageNumber - 1]!.section,
-    )
+    const files = order.map((pageNumber) => pages[pageNumber - 1]!.section)
 
     return {
       blankAfterCarried: null,

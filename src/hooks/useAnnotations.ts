@@ -43,7 +43,7 @@ import {
 import type { PagePoint } from "@/lib/annotationGeometry"
 import { isDirty, markSaved } from "@/lib/documentState"
 import { e2eOverride } from "@/lib/e2e"
-import { isSourceChanged } from "@/lib/fileSources"
+import { isSourceChanged, type SourceProgress } from "@/lib/fileSources"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
@@ -1001,6 +1001,8 @@ export function useAnnotations({
       index: number,
       pageCount: number,
       files: {
+        /** Told of each file as it goes in. */
+        onProgress: Channel<SourceProgress>
         options: FileOptions
         ownTitle: string
         /** By source id, for each signed source. */
@@ -1043,6 +1045,7 @@ export function useAnnotations({
                 await invoke<PdfStructureUpdate>("insert_pdf_files", {
                   documentId,
                   index,
+                  onProgress: files.onProgress,
                   options: files.options,
                   ownTitle: files.ownTitle,
                   signatures: files.signatures,

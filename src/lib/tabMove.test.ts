@@ -63,7 +63,6 @@ const payload: MovedTabPayload = {
     },
     marks: [[1, [11, 12, 13]]],
     viewMode: "book",
-    viewRotation: 90,
   },
 }
 
@@ -223,18 +222,6 @@ describe("parseMovedTabPayload", () => {
       parseMovedTabPayload({
         ...valid,
         seed: { ...valid.seed, marks: [[1, ["11"]]] },
-      }),
-    ).toBeNull()
-    expect(
-      parseMovedTabPayload({
-        ...valid,
-        seed: { ...valid.seed, viewRotation: [90] },
-      }),
-    ).toBeNull()
-    expect(
-      parseMovedTabPayload({
-        ...valid,
-        seed: { ...valid.seed, viewRotation: 450 },
       }),
     ).toBeNull()
   })

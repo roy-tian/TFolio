@@ -9,6 +9,8 @@ import { progressPercent, type PdfProgress } from "@/lib/progress"
 import { cn } from "@/lib/utils"
 
 type OperationProgressProps = {
+  /** The bar over the words rather than under them. */
+  barFirst?: boolean
   className?: string
   label: string
   /** Null while the work has no announced length: an indeterminate bar says
@@ -18,6 +20,7 @@ type OperationProgressProps = {
 }
 
 export function OperationProgress({
+  barFirst = false,
   className,
   label,
   progress,
@@ -27,7 +30,11 @@ export function OperationProgress({
 
   return (
     <Progress
-      className={cn("w-full gap-2", className)}
+      className={cn(
+        "w-full gap-2",
+        barFirst && "[&>[data-slot=progress-track]]:-order-1",
+        className,
+      )}
       data-testid={testId}
       value={percent}
     >

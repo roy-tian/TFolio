@@ -26,7 +26,7 @@ use pdfium::{
     pick_pdf_path, pick_pdf_paths, read_pdf_sources, release_pdf_compression, release_pdf_sources,
     remove_pdf_page_numbers, remove_pdf_watermark, rename_pdf_section, render_pdf_page,
     render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_a4_pdf, save_pdf, search_pdf_text, set_pdf_file_options,
+    rotate_pdf_pages, save_a4_pdf, save_pdf, search_pdf_text, set_pdf_file_options, source_sizes,
     word_conversion_available, PdfiumState,
 };
 #[cfg(feature = "e2e")]
@@ -156,6 +156,7 @@ pub fn run() {
             pick_pdf_path,
             pick_pdf_paths,
             read_pdf_sources,
+            source_sizes,
             save_a4_pdf,
             #[cfg(feature = "e2e")]
             save_a4_pdf_to,

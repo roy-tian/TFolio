@@ -143,6 +143,17 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
   const busy = notice.action?.busy === true
   const running = "running" in entry
   const MarkIcon = running ? Spinner : toneIcons[entry.tone]
+  const actionButton = action ? (
+    <Button
+      className="shrink-0"
+      disabled={busy}
+      onClick={() => onAction(notice)}
+      size="sm"
+      variant="outline"
+    >
+      {busy && "busyLabelKey" in action ? t(action.busyLabelKey) : t(action.labelKey)}
+    </Button>
+  ) : null
 
   return (
     <div
@@ -179,32 +190,24 @@ function NoticeRow({ notice, onAction, onDismiss, onExpire }: NoticeRowProps) {
             </p>
             {"detailKey" in entry ? <p>{t(entry.detailKey)}</p> : null}
           </div>
-          {action ? (
-            <Button
-              className="shrink-0"
-              disabled={busy}
-              onClick={() => onAction(notice)}
-              size="sm"
-              variant="outline"
-            >
-              {busy && "busyLabelKey" in action
-                ? t(action.busyLabelKey)
-                : t(action.labelKey)}
-            </Button>
-          ) : null}
+          {actionButton}
         </div>
       ) : (
-        <OperationProgress
-          className="min-w-0 flex-1"
-          label={message}
-          progress={notice.progress}
-        />
+        <>
+          <OperationProgress
+            barFirst={"barFirst" in entry}
+            className="min-w-0 flex-1"
+            label={message}
+            progress={notice.progress}
+          />
+          {actionButton}
+        </>
       )}
       <Button
         aria-label={t("notification.dismiss")}
         // The row's own colour, so a refusal keeps its red and a plain notice
         // does not borrow one.
-        className="-my-1 -mr-2 text-current hover:bg-current/10 hover:text-current"
+        className="-my-1 -mr-2 text-current not-disabled:hover:bg-current/10 not-disabled:hover:text-current"
         onClick={() => onDismiss(notice)}
         size="icon-sm"
         type="button"

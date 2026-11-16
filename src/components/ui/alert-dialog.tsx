@@ -5,6 +5,7 @@ import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useModalMark } from "@/hooks/useModalMark"
 
 function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />
@@ -26,6 +27,8 @@ function AlertDialogOverlay({
   className,
   ...props
 }: AlertDialogPrimitive.Backdrop.Props) {
+  useModalMark()
+
   return (
     <AlertDialogPrimitive.Backdrop
       data-slot="alert-dialog-overlay"
