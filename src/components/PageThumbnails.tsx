@@ -78,6 +78,8 @@ const PLAIN: SelectionModifiers = { range: false, toggle: false }
 const ARROW_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp"])
 // Room kept around a page brought into the column's view.
 const REVEAL_MARGIN = 12
+// How long the sidebar's width rests before it takes more columns.
+const COLUMNS_SETTLE_MS = 150
 // What a ghost lands on in its cell: a page's paper, or a folded file's name.
 const LANDING_PAPER = `[data-thumbnail-page], ${FILE_HEADING_NAME}`
 
@@ -433,7 +435,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // the sidebar opened again goes to the reader's page, not back there.
   const revealedRef = useRef(reveal?.serial ?? null)
   const [columns, setColumns] = useState(1)
-  // The columns last measured, a render ahead of the ones laid out: the
+  // The columns last fitted, a render ahead of the ones laid out: the
   // reader's page is looked for only once the pages stand in them.
   const fittedColumnsRef = useRef(columns)
   const grid = columns > 1
@@ -482,11 +484,34 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       return
     }
 
-    const fit = (width: number) => {
+    let widening = 0
+    const settle = (next: number) => {
+      fittedColumnsRef.current = next
+      setColumns(next)
+    }
+    const fit = (width: number, now = false) => {
       // A background tab's column has no box; it keeps the columns it had.
-      if (width > 0) {
-        fittedColumnsRef.current = thumbnailColumns(width, THUMBNAIL_WIDTH)
-        setColumns(fittedColumnsRef.current)
+      if (width <= 0) {
+        return
+      }
+
+      const next = thumbnailColumns(width, THUMBNAIL_WIDTH)
+
+      window.clearTimeout(widening)
+
+      // A drag's widening waits for the width to rest: across several counts
+      // it would otherwise lay every page out, and render those each layout
+      // shows, at every one on the way. A step — a double-click, an arrow —
+      // goes at once, and so do fewer columns: the rows no longer fit.
+      const dragging =
+        list
+          .closest("[data-slot='app-sidebar']")
+          ?.querySelector("[data-slot='sidebar-resize'][data-resizing]") != null
+
+      if (now || !dragging || next <= fittedColumnsRef.current) {
+        settle(next)
+      } else {
+        widening = window.setTimeout(() => settle(next), COLUMNS_SETTLE_MS)
       }
     }
     const observer = new ResizeObserver(([entry]) => fit(entry?.contentRect.width ?? 0))
@@ -495,10 +520,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     // Before the paint too, at first and again as the tab comes to show: the
     // observer's report lands a frame late, which would show a wide sidebar
     // as one column first, or as the columns it had before it was widened.
-    fit(list.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight))
+    fit(list.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), true)
     observer.observe(list)
 
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      window.clearTimeout(widening)
+    }
   }, [active])
 
   // Read through a ref, so the memoised previews keep one handler across the
