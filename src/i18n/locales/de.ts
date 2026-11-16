@@ -219,8 +219,6 @@ const de = {
     viewModeBook: "Buchansicht",
     pageStatus: "Seite {{current}} von {{total}}",
     pageNumberInput: "Seitennummer",
-    rotateView: "Ansicht im Uhrzeigersinn drehen",
-    rotateViewHint: "Ansicht im Uhrzeigersinn drehen (Datei bleibt unverändert)",
     viewControls: "Ansichtssteuerung",
     zoomOut: "Verkleinern",
     zoomIn: "Vergrößern",

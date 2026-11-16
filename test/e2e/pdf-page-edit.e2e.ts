@@ -654,28 +654,6 @@ describe("TFolio page editing in the sidebar", () => {
     await waitForThumb(1, fourth!)
     await waitForThumb(2, second!)
   })
-
-  it("turns the pages a paste brings in with the rest of a turned view", async () => {
-    await openPdfFromDisk("turned.pdf", bandedPdf(2))
-    await paintedFingerprints(2)
-    await $("button[aria-label='Rotate the view clockwise']").click()
-    await browser.waitUntil(async () => (await thumbShape(2)) === "landscape", {
-      timeoutMsg: "the view never turned",
-    })
-
-    await clickThumb(2)
-    await browser.keys(["Control", "c"])
-    await clickThumb(1)
-    await browser.keys(["Control", "v"])
-    await browser.waitUntil(async () => (await thumbCount()) === 3, {
-      timeoutMsg: "the paste never landed",
-    })
-
-    // The last place is the one an untracked turn would have left upright.
-    for (const pageNumber of [1, 2, 3]) {
-      expect(await thumbShape(pageNumber)).toBe("landscape")
-    }
-  })
 })
 
 describe("TFolio pages carried to other documents", () => {

@@ -10,7 +10,6 @@ import {
 type RectDraftOverlayProps = {
   draft: RectDraft
   pageWidth: number
-  rotation: number
   sourceCanvasRef: RefObject<HTMLCanvasElement | null>
   /** Incremented after fresh pixels have actually landed on the source canvas. */
   sourceRevision: number
@@ -21,7 +20,6 @@ type RectDraftOverlayProps = {
 export function RectDraftOverlay({
   draft,
   pageWidth,
-  rotation,
   sourceCanvasRef,
   sourceRevision,
 }: RectDraftOverlayProps) {
@@ -50,7 +48,6 @@ export function RectDraftOverlay({
         source,
         rect,
         { kind: effect, strength: style.strength },
-        rotation,
         source.width / pageWidth,
         buffersRef.current,
       )
@@ -61,7 +58,6 @@ export function RectDraftOverlay({
     effect,
     pageWidth,
     rect,
-    rotation,
     sourceCanvasRef,
     sourceRevision,
     style.strength,

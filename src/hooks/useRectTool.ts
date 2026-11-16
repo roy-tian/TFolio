@@ -23,7 +23,6 @@ type UseRectToolOptions = {
   ) => Promise<boolean>
   pages: PdfPageInfo[]
   style: RectStyle
-  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -45,7 +44,6 @@ export function useRectTool({
   onCommit,
   pages,
   style,
-  viewRotation,
   viewerRef,
 }: UseRectToolOptions) {
   const [draft, setDraft] = useState<RectDraft | null>(null)
@@ -177,7 +175,6 @@ export function useRectTool({
         current.from,
         to,
         current.page,
-        viewRotation,
       )
 
       if (!isRectLargeEnough(bounds)) {
@@ -226,7 +223,7 @@ export function useRectTool({
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerCancel)
     }
-  }, [active, onCommit, pages, release, style, takeId, viewRotation, viewerRef])
+  }, [active, onCommit, pages, release, style, takeId, viewerRef])
 
   return { drafts: draft ? [...previews, draft] : previews, onPagePaint }
 }

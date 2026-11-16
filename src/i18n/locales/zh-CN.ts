@@ -210,8 +210,6 @@ const zhCN = {
     viewModeBook: "书籍视图",
     pageStatus: "第 {{current}} 页，共 {{total}} 页",
     pageNumberInput: "页码",
-    rotateView: "顺时针旋转视图",
-    rotateViewHint: "顺时针旋转视图（不改动文件）",
     viewControls: "视图控制",
     zoomOut: "缩小",
     zoomIn: "放大",

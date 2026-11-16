@@ -37,7 +37,6 @@ function PageThumbnail({
     pageNumber,
     pageWidth: page.width,
     renderEpoch,
-    rotation: 0,
     targetWidth: 224,
   })
 

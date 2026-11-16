@@ -220,8 +220,6 @@ const pt = {
     viewModeBook: "Livro",
     pageStatus: "Página {{current}} de {{total}}",
     pageNumberInput: "Número da página",
-    rotateView: "Girar a visualização no sentido horário",
-    rotateViewHint: "Girar a visualização no sentido horário (não altera o arquivo)",
     viewControls: "Controles de visualização",
     zoomOut: "Reduzir",
     zoomIn: "Ampliar",

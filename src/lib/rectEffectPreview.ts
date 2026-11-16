@@ -7,7 +7,6 @@ type PixelSize = {
 }
 
 export type RectEffectPreviewBuffers = {
-  oriented: HTMLCanvasElement
   padded: HTMLCanvasElement
   reduced: HTMLCanvasElement
   sample: HTMLCanvasElement
@@ -23,50 +22,17 @@ function snapPixel(value: number) {
   return Math.abs(value - integer) < 1e-6 ? integer : value
 }
 
-/** The canvas already includes the PDF's intrinsic rotation; `rotation` is
-    only the extra clockwise turn the reader toolbar applied. */
-export function sourceCropForRotatedRect(
-  rect: FractionRect,
-  source: PixelSize,
-  rotation: number,
-): PixelCrop {
-  const turn = ((rotation % 360) + 360) % 360
-  const outputWidth = turn === 90 || turn === 270 ? source.height : source.width
-  const outputHeight = turn === 90 || turn === 270 ? source.width : source.height
-  const left = Math.floor(snapPixel(rect.left * outputWidth))
-  const top = Math.floor(snapPixel(rect.top * outputHeight))
-  const right = Math.ceil(snapPixel((rect.left + rect.width) * outputWidth))
-  const bottom = Math.ceil(snapPixel((rect.top + rect.height) * outputHeight))
-  const width = Math.max(1, Math.min(outputWidth, right) - Math.max(0, left))
-  const height = Math.max(1, Math.min(outputHeight, bottom) - Math.max(0, top))
-  const safeLeft = Math.max(0, left)
-  const safeTop = Math.max(0, top)
+/** The rect's pixels on the page canvas, which already includes the PDF's
+    intrinsic rotation. */
+export function sourceCropForRect(rect: FractionRect, source: PixelSize): PixelCrop {
+  const left = Math.floor(snapPixel(rect.left * source.width))
+  const top = Math.floor(snapPixel(rect.top * source.height))
+  const right = Math.ceil(snapPixel((rect.left + rect.width) * source.width))
+  const bottom = Math.ceil(snapPixel((rect.top + rect.height) * source.height))
+  const width = Math.max(1, Math.min(source.width, right) - Math.max(0, left))
+  const height = Math.max(1, Math.min(source.height, bottom) - Math.max(0, top))
 
-  switch (turn) {
-    case 90:
-      return {
-        height: width,
-        left: safeTop,
-        top: source.height - (safeLeft + width),
-        width: height,
-      }
-    case 180:
-      return {
-        height,
-        left: source.width - (safeLeft + width),
-        top: source.height - (safeTop + height),
-        width,
-      }
-    case 270:
-      return {
-        height: width,
-        left: source.width - (safeTop + height),
-        top: safeLeft,
-        width: height,
-      }
-    default:
-      return { height, left: safeLeft, top: safeTop, width }
-  }
+  return { height, left: Math.max(0, left), top: Math.max(0, top), width }
 }
 
 function canvasOf(width: number, height: number) {
@@ -79,7 +45,6 @@ function canvasOf(width: number, height: number) {
 /** Scratch surfaces reused across pointer frames instead of allocated per move. */
 export function createRectEffectPreviewBuffers(): RectEffectPreviewBuffers {
   return {
-    oriented: canvasOf(1, 1),
     padded: canvasOf(1, 1),
     reduced: canvasOf(1, 1),
     sample: canvasOf(1, 1),
@@ -136,22 +101,19 @@ export function rectEffectPreviewScale(
   return Math.min(1, Math.sqrt(MAX_RECT_EFFECT_PREVIEW_PIXELS / surfacePixels))
 }
 
-function drawOrientedCrop(
+function drawCrop(
   source: HTMLCanvasElement,
   crop: PixelCrop,
-  rotation: number,
   scale: number,
   buffers: RectEffectPreviewBuffers,
 ) {
-  const turn = ((rotation % 360) + 360) % 360
-  const swapped = turn === 90 || turn === 270
-  const sampleWidth = Math.max(1, Math.round(crop.width * scale))
-  const sampleHeight = Math.max(1, Math.round(crop.height * scale))
   const sample = buffers.sample
-  resizeCanvas(sample, sampleWidth, sampleHeight)
-  const sampleContext = clearedContext(sample)
-
-  sampleContext?.drawImage(
+  resizeCanvas(
+    sample,
+    Math.max(1, Math.round(crop.width * scale)),
+    Math.max(1, Math.round(crop.height * scale)),
+  )
+  clearedContext(sample)?.drawImage(
     source,
     crop.left,
     crop.top,
@@ -163,35 +125,7 @@ function drawOrientedCrop(
     sample.height,
   )
 
-  const oriented = buffers.oriented
-  resizeCanvas(
-    oriented,
-    swapped ? sample.height : sample.width,
-    swapped ? sample.width : sample.height,
-  )
-  const context = clearedContext(oriented)
-
-  if (!context) {
-    return oriented
-  }
-
-  switch (turn) {
-    case 90:
-      context.translate(oriented.width, 0)
-      context.rotate(Math.PI / 2)
-      break
-    case 180:
-      context.translate(oriented.width, oriented.height)
-      context.rotate(Math.PI)
-      break
-    case 270:
-      context.translate(0, oriented.height)
-      context.rotate((Math.PI * 3) / 2)
-      break
-  }
-
-  context.drawImage(sample, 0, 0)
-  return oriented
+  return sample
 }
 
 /**
@@ -283,18 +217,13 @@ export function drawRectEffectPreview(
   source: HTMLCanvasElement,
   rect: FractionRect,
   effect: RectPixelEffect,
-  rotation: number,
   sourcePixelsPerPoint: number,
   buffers: RectEffectPreviewBuffers = createRectEffectPreviewBuffers(),
 ) {
-  const crop = sourceCropForRotatedRect(
-    rect,
-    { height: source.height, width: source.width },
-    rotation,
-  )
+  const crop = sourceCropForRect(rect, { height: source.height, width: source.width })
   const previewScale = rectEffectPreviewScale(crop, effect, sourcePixelsPerPoint)
-  const oriented = drawOrientedCrop(source, crop, rotation, previewScale, buffers)
-  resizeCanvas(target, oriented.width, oriented.height)
+  const cropped = drawCrop(source, crop, previewScale, buffers)
+  resizeCanvas(target, cropped.width, cropped.height)
 
   const context = clearedContext(target)
   if (!context) {
@@ -305,7 +234,7 @@ export function drawRectEffectPreview(
     const previewPixelsPerPoint = sourcePixelsPerPoint * previewScale
     const blur = Math.max(0, effect.strength * previewPixelsPerPoint)
     const padding = Math.ceil(blur * 3)
-    const padded = drawClampedPadding(oriented, padding, buffers.padded)
+    const padded = drawClampedPadding(cropped, padding, buffers.padded)
 
     if (!padded) {
       return
@@ -322,8 +251,8 @@ export function drawRectEffectPreview(
     const reduced = buffers.reduced
     resizeCanvas(
       reduced,
-      Math.max(1, Math.ceil(oriented.width / block)),
-      Math.max(1, Math.ceil(oriented.height / block)),
+      Math.max(1, Math.ceil(cropped.width / block)),
+      Math.max(1, Math.ceil(cropped.height / block)),
     )
     const reducedContext = clearedContext(reduced)
 
@@ -332,11 +261,11 @@ export function drawRectEffectPreview(
     }
 
     reducedContext.imageSmoothingEnabled = false
-    reducedContext.drawImage(oriented, 0, 0, reduced.width, reduced.height)
+    reducedContext.drawImage(cropped, 0, 0, reduced.width, reduced.height)
     context.imageSmoothingEnabled = false
     context.drawImage(reduced, 0, 0, target.width, target.height)
     return
   }
 
-  context.drawImage(oriented, 0, 0)
+  context.drawImage(cropped, 0, 0)
 }

@@ -218,8 +218,6 @@ const ko = {
     viewModeBook: "책 보기",
     pageStatus: "{{total}}페이지 중 {{current}}페이지",
     pageNumberInput: "페이지 번호",
-    rotateView: "보기를 시계 방향으로 회전",
-    rotateViewHint: "보기를 시계 방향으로 회전(파일은 변경되지 않음)",
     viewControls: "보기 컨트롤",
     zoomOut: "축소",
     zoomIn: "확대",

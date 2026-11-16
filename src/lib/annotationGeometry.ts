@@ -21,10 +21,9 @@ export type PagePointsRect = {
   width: number
 }
 
-/** Content turns by the page's `/Rotate`, and that whole box again by the
-    reader's rotation; about a common centre, the two compose into one. */
-export function totalPageRotation(page: PdfPageInfo, rotation: number) {
-  return (((rotation + page.rotation) % 360) + 360) % 360
+/** How far the page's `/Rotate` turns its content, as a quarter turn. */
+export function normalizedPageRotation(page: PdfPageInfo) {
+  return ((page.rotation % 360) + 360) % 360
 }
 
 /** Quarter turns are the whole domain — the toolbar steps by 90°, `/Rotate` is a
@@ -70,9 +69,8 @@ function unrotatedPageSize(page: PdfPageInfo) {
 export function fractionToPagePoint(
   fraction: BoxFraction,
   page: PdfPageInfo,
-  rotation: number,
 ): PagePoint {
-  const unrotated = unrotateFraction(fraction, totalPageRotation(page, rotation))
+  const unrotated = unrotateFraction(fraction, normalizedPageRotation(page))
   const { height, width } = unrotatedPageSize(page)
 
   return { left: unrotated.x * width, top: unrotated.y * height }
@@ -84,10 +82,9 @@ export function fractionsToPageRect(
   from: BoxFraction,
   to: BoxFraction,
   page: PdfPageInfo,
-  rotation: number,
 ): PagePointsRect {
-  const start = fractionToPagePoint(from, page, rotation)
-  const end = fractionToPagePoint(to, page, rotation)
+  const start = fractionToPagePoint(from, page)
+  const end = fractionToPagePoint(to, page)
 
   return {
     height: Math.abs(end.top - start.top),
@@ -102,7 +99,6 @@ export function fractionsToPageRect(
 export function pagePointToFraction(
   point: PagePoint,
   page: PdfPageInfo,
-  rotation: number,
 ): BoxFraction {
   const { height, width } = unrotatedPageSize(page)
   const unrotated = {
@@ -110,7 +106,7 @@ export function pagePointToFraction(
     y: height > 0 ? point.top / height : 0,
   }
 
-  return rotateFraction(unrotated, totalPageRotation(page, rotation))
+  return rotateFraction(unrotated, normalizedPageRotation(page))
 }
 
 export function clientPointToFraction(

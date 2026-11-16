@@ -35,7 +35,7 @@ describe("TFolio viewer controls", () => {
     const level = await $(`${bar} [data-slot='zoom-controls-readout']`).getText()
 
     // The order reads left to right: the page, then layout, zoom and its
-    // level (which resets it, named by what it shows), the fits, the turn.
+    // level (which resets it, named by what it shows), the fits.
     const viewing = [
       "Page number",
       "Single page",
@@ -46,7 +46,6 @@ describe("TFolio viewer controls", () => {
       `Current zoom ${level}, click to reset to 100%`,
       "Fit width",
       "Fit page",
-      "Rotate the view clockwise",
     ]
     expect(await labelsIn(bar)).toEqual(viewing)
     for (const label of viewing) {

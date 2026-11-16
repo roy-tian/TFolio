@@ -20,7 +20,7 @@ import {
   TEXT_NOTE_MIN_OPACITY,
   textNoteSwatches,
 } from "@/lib/annotationStyles"
-import { dimensionsForRotation, type PdfPageInfo } from "@/lib/pdf"
+import type { PdfPageInfo } from "@/lib/pdf"
 import type { TextNoteDraft } from "@/lib/textNoteDraft"
 import {
   noteFontFamily,
@@ -38,7 +38,6 @@ type TextNoteEditorProps = {
   onTextChange: (text: string) => void
   page: PdfPageInfo
   preparing: boolean
-  rotation: number
   style: TextNoteStyle
   viewerRef: RefObject<HTMLElement | null>
 }
@@ -62,7 +61,6 @@ export function TextNoteEditor({
   onTextChange,
   page,
   preparing,
-  rotation,
   style,
   viewerRef,
 }: TextNoteEditorProps) {
@@ -91,11 +89,8 @@ export function TextNoteEditor({
     const box = pageElement.getBoundingClientRect()
     const point = fractionToClientPoint(
       box,
-      pagePointToFraction(draft.origin, page, rotation),
+      pagePointToFraction(draft.origin, page),
     )
-    // The footprint is the page's box after both rotations, so this is the one
-    // scale that holds however the page is turned.
-    const footprint = dimensionsForRotation(rotation, page.width, page.height)
 
     // Held inside the window, only as far as needed. Defensive — no arrangement
     // tried left it off screen — so treat it as a guard, not a bug fix.
@@ -111,11 +106,11 @@ export function TextNoteEditor({
 
     setPlacement({
       left,
-      pxPerPoint: footprint.width > 0 ? box.width / footprint.width : 1,
+      pxPerPoint: page.width > 0 ? box.width / page.width : 1,
       top,
     })
     setOptionsBelow((optionsRef.current?.offsetHeight ?? 0) + OPTIONS_GAP > top)
-  }, [draft.origin, draft.pageNumber, editorRef, page, rotation, viewerRef])
+  }, [draft.origin, draft.pageNumber, editorRef, page, viewerRef])
 
   // Laid out before paint, so the editor never shows for a frame at the wrong
   // place — which at this size would read as a jump.

@@ -192,7 +192,6 @@ type PageThumbnailsProps = {
   selectedPages: ReadonlySet<number>
   /** Follow each page through a reorder, so its painted preview moves with it. */
   thumbnailKeys: number[]
-  viewRotation: number
 }
 
 /** The document's pages in the sidebar, down one column or, widened, in rows
@@ -238,7 +237,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   sections,
   selectedPages,
   thumbnailKeys,
-  viewRotation,
 }, ref) {
   const { t } = useTranslation()
   const listRef = useRef<HTMLDivElement>(null)
@@ -1367,7 +1365,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     <CarriedHoles
                       carryKey={CARRY_KEY}
                       key={CARRY_KEY}
-                      rotation={viewRotation}
                       sizes={incoming!.carried.sizes}
                     />
                   ) : null
@@ -1377,7 +1374,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                       key={`padding-${CARRY_KEY}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
-                      rotation={viewRotation}
                       sheet={blankAfterCarried}
                     />
                   ) : null
@@ -1439,7 +1435,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                     pageWidth={page.width}
                     parked={parkedPreviews}
                     renderEpoch={renderEpochs[pageNumber] ?? 0}
-                    rotation={viewRotation}
                     signed={page.signed === true}
                   />,
                   blanks.has(pageNumber) ? (
@@ -1447,7 +1442,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
                       key={`padding-${key}`}
                       label={t("sidebar.paddingPage")}
                       onDismiss={dismissPadding}
-                      rotation={viewRotation}
                       sheet={blanks.get(pageNumber)!}
                     />
                   ) : null,

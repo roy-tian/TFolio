@@ -217,8 +217,6 @@ const zhTW = {
     viewModeBook: "書本檢視",
     pageStatus: "第 {{current}} 頁，共 {{total}} 頁",
     pageNumberInput: "頁碼",
-    rotateView: "順時針旋轉檢視畫面",
-    rotateViewHint: "順時針旋轉檢視畫面（不會變更檔案）",
     viewControls: "檢視控制",
     zoomOut: "縮小",
     zoomIn: "放大",

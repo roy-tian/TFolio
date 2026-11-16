@@ -219,8 +219,6 @@ const es = {
     viewModeBook: "Libro",
     pageStatus: "Página {{current}} de {{total}}",
     pageNumberInput: "Número de página",
-    rotateView: "Girar la vista a la derecha",
-    rotateViewHint: "Girar la vista a la derecha (no modifica el archivo)",
     viewControls: "Controles de vista",
     zoomOut: "Alejar",
     zoomIn: "Acercar",

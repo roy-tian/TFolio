@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react"
 
-import { clientPointToFraction, fractionToPagePoint, totalPageRotation } from "@/lib/annotationGeometry"
+import { clientPointToFraction, fractionToPagePoint, normalizedPageRotation } from "@/lib/annotationGeometry"
 import type { PdfPageInfo } from "@/lib/pdf"
 import { isMacOS } from "@/lib/platform"
 import { caretInTextRun, type TextCaret } from "@/lib/textCaret"
@@ -10,7 +10,6 @@ import { textPageAtPoint, type MountedTextPage } from "@/lib/textSelectionPage"
 type Options = {
   enabled: boolean
   pages: PdfPageInfo[]
-  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -23,14 +22,14 @@ function scrollStep(position: number, start: number, end: number) {
     keyboard extension, context menus and annotations. Native caret lookup is
     confined to the chosen run, never allowed to redirect us to another row.
     Returns `finish`, which settles a drag at a release point and ends it. */
-export function useTextDragSelection({ enabled, pages, viewRotation, viewerRef }: Options) {
+export function useTextDragSelection({ enabled, pages, viewerRef }: Options) {
   const finishRef = useRef<(x: number, y: number) => void>(() => {})
-  // Read per event: a new pages array or a turned view must not end a drag.
-  // Not useEffectEvent: React 19.2 never refreshes one in a forwardRef or memo
-  // component, such as DocumentSession, so it would keep the first rotation.
-  const geometry = useRef({ pages, viewRotation })
+  // Read per event: a new pages array must not end a drag. Not
+  // useEffectEvent: React 19.2 never refreshes one in a forwardRef or memo
+  // component, such as DocumentSession, so it would keep the first pages.
+  const geometry = useRef({ pages })
   useLayoutEffect(() => {
-    geometry.current = { pages, viewRotation }
+    geometry.current = { pages }
   })
 
   useEffect(() => {
@@ -40,9 +39,7 @@ export function useTextDragSelection({ enabled, pages, viewRotation, viewerRef }
     const macOS = isMacOS()
 
     function pageAt(number: number) {
-      const { pages, viewRotation } = geometry.current
-      const page = pages[number - 1]
-      return page && { page, rotation: viewRotation }
+      return geometry.current.pages[number - 1]
     }
 
     let anchor: TextCaret | null = null
@@ -54,11 +51,10 @@ export function useTextDragSelection({ enabled, pages, viewRotation, viewerRef }
     function caretAt(x: number, y: number): TextCaret | null {
       const mounted = textPageAtPoint(viewer!, x, y)
       if (!mounted) return null
-      const target = pageAt(Number(mounted.element.getAttribute("data-page-number")))
-      if (!target) return null
-      const { page, rotation } = target
+      const page = pageAt(Number(mounted.element.getAttribute("data-page-number")))
+      if (!page) return null
       const box = mounted.element.getBoundingClientRect()
-      const point = fractionToPagePoint(clientPointToFraction(box, x, y), page, rotation)
+      const point = fractionToPagePoint(clientPointToFraction(box, x, y), page)
       const { lines, rects } = mounted.layout
       const line = nearestTextLine(lines, point.left, point.top,
         previous?.mounted === mounted ? previous.line : undefined)
@@ -67,7 +63,7 @@ export function useTextDragSelection({ enabled, pages, viewRotation, viewerRef }
       const index = nearestTextRun(line, rects, point.left)
       const rect = rects[index]
       return caretInTextRun(mounted.spans[index], (point.left - rect.left) / rect.width,
-        totalPageRotation(page, rotation))
+        normalizedPageRotation(page))
     }
 
     function update() {

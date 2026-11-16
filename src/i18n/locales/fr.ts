@@ -219,8 +219,6 @@ const fr = {
     viewModeBook: "Livre",
     pageStatus: "Page {{current}} sur {{total}}",
     pageNumberInput: "Numéro de page",
-    rotateView: "Faire pivoter l’affichage vers la droite",
-    rotateViewHint: "Faire pivoter l’affichage vers la droite (sans modifier le fichier)",
     viewControls: "Commandes d’affichage",
     zoomOut: "Zoom arrière",
     zoomIn: "Zoom avant",

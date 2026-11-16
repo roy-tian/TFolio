@@ -1,8 +1,8 @@
 import { memo } from "react"
 import { createPortal } from "react-dom"
 
-/** The page as the document has it: a view rotation from the reading view is
-    not printed (D2), so the rendered image is the page, turned or not. */
+/** The page as the document has it: the rendered image is the page, turned
+    or not. */
 export type PrintPage = {
   pageNumber: number
   /** Null for a blank page a Save As will add, which prints as one. */

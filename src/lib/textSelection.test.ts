@@ -23,7 +23,7 @@ describe("a page selected whole before its spans are built", () => {
     const element = {} as Element
     const release = registerPageRuns(element, runs)
     try {
-      expect(selectedLineRectsOnPage(selection(true), element, page, 0)).toEqual([
+      expect(selectedLineRectsOnPage(selection(true), element, page)).toEqual([
         { height: 10, left: 10, top: 10, width: 65 },
         { height: 10, left: 90, top: 40, width: 10 },
       ])
@@ -34,11 +34,11 @@ describe("a page selected whole before its spans are built", () => {
 
   it("is nothing while a selection only reaches into it, or its runs are not in", () => {
     const element = {} as Element
-    expect(selectedLineRectsOnPage(selection(true), element, page, 0)).toEqual([])
+    expect(selectedLineRectsOnPage(selection(true), element, page)).toEqual([])
 
     const release = registerPageRuns(element, runs)
     try {
-      expect(selectedLineRectsOnPage(selection(false), element, page, 0)).toEqual([])
+      expect(selectedLineRectsOnPage(selection(false), element, page)).toEqual([])
     } finally {
       release()
     }

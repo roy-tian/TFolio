@@ -80,7 +80,6 @@ type UseZoomOptions = {
   padding: readonly PaddingSheet[]
   pages: PdfPageInfo[]
   viewMode: ViewMode
-  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -93,7 +92,6 @@ export function useZoom({
   padding,
   pages,
   viewMode,
-  viewRotation,
   viewerRef,
 }: UseZoomOptions) {
   const [zoom, setZoom] = useState<ZoomState>(
@@ -115,8 +113,8 @@ export function useZoom({
   const previewDeadlineRef = useRef(0)
 
   const { referenceHeight, referenceWidth, widestWidth } = useMemo(
-    () => referenceDimensions(pages, viewRotation),
-    [pages, viewRotation],
+    () => referenceDimensions(pages),
+    [pages],
   )
 
   // A spread is centred on its spine, so a page in it has half the column.
@@ -132,10 +130,9 @@ export function useZoom({
         viewMode === "book"
           ? spreadPagesOf(sheetSpreads(sheetsOf(pages.length, padding)), zoom.fitPage)
           : [zoom.fitPage],
-        viewRotation,
         { height: referenceHeight, width: referenceWidth },
       ),
-    [padding, pages, referenceHeight, referenceWidth, viewMode, viewRotation, zoom.fitPage],
+    [padding, pages, referenceHeight, referenceWidth, viewMode, zoom.fitPage],
   )
 
   const fits = useMemo(

@@ -219,8 +219,6 @@ const it = {
     viewModeBook: "Libro",
     pageStatus: "Pagina {{current}} di {{total}}",
     pageNumberInput: "Numero di pagina",
-    rotateView: "Ruota la vista in senso orario",
-    rotateViewHint: "Ruota la vista in senso orario (il file non cambia)",
     viewControls: "Controlli di visualizzazione",
     zoomOut: "Zoom indietro",
     zoomIn: "Zoom avanti",

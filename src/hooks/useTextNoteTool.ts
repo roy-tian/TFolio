@@ -33,7 +33,6 @@ type UseTextNoteToolOptions = {
   suspended?: boolean
   pages: PdfPageInfo[]
   style: TextNoteStyle
-  viewRotation: number
   viewerRef: RefObject<HTMLElement | null>
 }
 
@@ -70,7 +69,6 @@ export function useTextNoteTool({
   pages,
   suspended = false,
   style,
-  viewRotation,
   viewerRef,
 }: UseTextNoteToolOptions): TextNoteTool {
   const [draft, setDraft] = useState<TextNoteDraft | null>(null)
@@ -274,7 +272,6 @@ export function useTextNoteTool({
           ),
         ),
         page,
-        viewRotation,
       )
 
       // The open note is written before the new one opens, so two editors are
@@ -309,7 +306,7 @@ export function useTextNoteTool({
       document.removeEventListener("pointerdown", handlePointerDown)
       document.removeEventListener("keydown", handleKeyDown)
     }
-  }, [active, cancel, commit, pages, suspended, viewRotation, viewerRef])
+  }, [active, cancel, commit, pages, suspended, viewerRef])
 
   return { cancel, commit, draft, editorRef, onPagePaint, preparing, previews, setText }
 }

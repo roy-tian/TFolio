@@ -217,8 +217,6 @@ const en = {
     viewModeBook: "Book",
     pageStatus: "Page {{current}} of {{total}}",
     pageNumberInput: "Page number",
-    rotateView: "Rotate the view clockwise",
-    rotateViewHint: "Rotate the view clockwise (does not change the file)",
     viewControls: "View controls",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",

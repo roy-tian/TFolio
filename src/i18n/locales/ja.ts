@@ -219,8 +219,6 @@ const ja = {
     viewModeBook: "見開き",
     pageStatus: "{{total}} ページ中 {{current}} ページ目",
     pageNumberInput: "ページ番号",
-    rotateView: "表示を時計回りに回転",
-    rotateViewHint: "表示を時計回りに回転（ファイルは変更されません）",
     viewControls: "表示コントロール",
     zoomOut: "縮小",
     zoomIn: "拡大",

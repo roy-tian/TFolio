@@ -36,7 +36,6 @@ type PageBitmapOptions = {
   /** False once the page is far enough off screen to give its pixels back:
       a canvas keeps its whole backing store while it stays mounted. */
   retainBitmap?: boolean
-  rotation: number
   targetWidth: number
 }
 
@@ -61,7 +60,6 @@ export function usePageBitmap({
   priorityBias = 0,
   renderEpoch,
   retainBitmap = true,
-  rotation,
   targetWidth,
 }: PageBitmapOptions) {
   const lastRenderRef = useRef<{
@@ -119,12 +117,6 @@ export function usePageBitmap({
       window.devicePixelRatio,
       minOutputScale,
     )
-    // A rotated landscape page spans more CSS pixels and rotation alone does
-    // not re-render; portrait shrinks, so the base target already covers it.
-    const rotationScale =
-      rotation === 90 || rotation === 270
-        ? Math.max(1, pageWidth / pageHeight)
-        : 1
     // The output-scale floor is an intent, not a guarantee: past
     // `maxRenderWidth` the render is clamped and the backing ratio drops below it.
     // The backend also rejects narrower than MIN_RENDER_WIDTH, which a tall,
@@ -132,7 +124,7 @@ export function usePageBitmap({
     const renderWidth = Math.round(
       Math.min(
         maxRenderWidth,
-        Math.max(MIN_RENDER_WIDTH, targetWidth * outputScale * rotationScale),
+        Math.max(MIN_RENDER_WIDTH, targetWidth * outputScale),
       ),
     )
     const lastRender = lastRenderRef.current
@@ -218,7 +210,6 @@ export function usePageBitmap({
     pageWidth,
     priorityBias,
     renderEpoch,
-    rotation,
     targetWidth,
   ])
 

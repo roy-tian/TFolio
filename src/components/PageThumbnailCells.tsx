@@ -16,7 +16,6 @@ import type { CarriedPages } from "@/lib/pageCarry"
 import { flowCells } from "@/lib/pageDrag"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import type { PaddingSheet } from "@/lib/padding"
-import { dimensionsForRotation } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP } from "@/lib/sidebar"
 import type { SelectionModifiers } from "@/lib/thumbnailSelection"
 import { cn } from "@/lib/utils"
@@ -145,19 +144,16 @@ function DropMarker({
 }
 
 /** Where another document's pages will stand, one hole each, keyed apart from
-    every page; a fragment, so each is a cell of the flow's own. Turned as
-    this view turns its pages, which the copies take on, not as the source's. */
+    every page; a fragment, so each is a cell of the flow's own. */
 export function CarriedHoles({
   carryKey,
-  rotation,
   sizes,
 }: {
   carryKey: string
-  rotation: number
   sizes: CarriedPages["sizes"]
 }) {
   return sizes.map((size, index) => {
-    const paper = thumbnailPaper(dimensionsForRotation(rotation, size.width, size.height))
+    const paper = thumbnailPaper(size)
 
     return (
       <li className="relative" data-flip-key={`${carryKey}${index}`} key={index}>
@@ -180,15 +176,13 @@ export function CarriedHoles({
 export function PaddingCell({
   label,
   onDismiss,
-  rotation,
   sheet,
 }: {
   label: string
   onDismiss: () => void
-  rotation: number
   sheet: PaddingSheet
 }) {
-  const paper = thumbnailPaper(dimensionsForRotation(rotation, sheet.width, sheet.height))
+  const paper = thumbnailPaper(sheet)
 
   return (
     <li className="flex flex-col items-center" data-padding-after={sheet.after}>
@@ -399,7 +393,6 @@ export const PageCell = memo(function PageCell({
   pageWidth,
   parked,
   renderEpoch,
-  rotation,
   signed,
 }: {
   caption: number
@@ -428,7 +421,6 @@ export const PageCell = memo(function PageCell({
   pageWidth: number
   parked: ParkedPreviews
   renderEpoch: number
-  rotation: number
   signed: boolean
 }) {
   const { t } = useTranslation()
@@ -437,7 +429,7 @@ export const PageCell = memo(function PageCell({
   // A focused control stays however far the pages scroll from it: unmounting
   // it would drop keyboard focus back to the start of the document.
   const [focusWithin, setFocusWithin] = useState(false)
-  const paper = thumbnailPaper(dimensionsForRotation(rotation, pageWidth, pageHeight))
+  const paper = thumbnailPaper({ height: pageHeight, width: pageWidth })
   // Each control has a tooltip; hundreds would slow every selection, so only
   // the pages near the view have theirs.
   const showControls = nearView || focusWithin
@@ -507,7 +499,6 @@ export const PageCell = memo(function PageCell({
           parked={parked}
           renderEpoch={renderEpoch}
           retainBitmap={nearView}
-          rotation={rotation}
         />
       </div>
       {showControls ? (

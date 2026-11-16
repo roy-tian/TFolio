@@ -12,8 +12,6 @@ export type GhostPaper = {
   /** What is lifted with no canvas — a folded file, by its name — shows
       that name instead. */
   label?: string
-  /** The quarter turn the preview shows its upright bitmap at. */
-  rotation: number
   width: number
 }
 
@@ -62,7 +60,6 @@ export function liftGhost(
       canvas: paper.querySelector("canvas"),
       height: box.height,
       label,
-      rotation: Number(paper.dataset.rotation ?? 0),
       width: box.width,
     },
     point,
@@ -209,22 +206,9 @@ export function PageDragGhost({
 
     // An unpainted preview holds a 1×1 placeholder; the paper stays white.
     if (canvas && context && source && source.width > 1 && source.height > 1) {
-      const scale = devicePixelRatio
-      const turned = paper.rotation % 180 !== 0
-      const uprightWidth = (turned ? paper.height : paper.width) * scale
-      const uprightHeight = (turned ? paper.width : paper.height) * scale
-
-      canvas.width = Math.round(paper.width * scale)
-      canvas.height = Math.round(paper.height * scale)
-      context.translate(canvas.width / 2, canvas.height / 2)
-      context.rotate((paper.rotation * Math.PI) / 180)
-      context.drawImage(
-        source,
-        -uprightWidth / 2,
-        -uprightHeight / 2,
-        uprightWidth,
-        uprightHeight,
-      )
+      canvas.width = Math.round(paper.width * devicePixelRatio)
+      canvas.height = Math.round(paper.height * devicePixelRatio)
+      context.drawImage(source, 0, 0, canvas.width, canvas.height)
     }
 
     if (prefersReducedMotion()) {

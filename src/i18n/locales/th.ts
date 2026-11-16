@@ -219,8 +219,6 @@ const th = {
     viewModeBook: "หนังสือ",
     pageStatus: "หน้า {{current}} จาก {{total}}",
     pageNumberInput: "เลขหน้า",
-    rotateView: "หมุนมุมมองตามเข็มนาฬิกา",
-    rotateViewHint: "หมุนมุมมองตามเข็มนาฬิกา (ไม่เปลี่ยนแปลงไฟล์)",
     viewControls: "ตัวควบคุมมุมมอง",
     zoomOut: "ซูมออก",
     zoomIn: "ซูมเข้า",
