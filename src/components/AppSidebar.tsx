@@ -120,7 +120,9 @@ function SidebarPanelOption({
 
 /**
  * The sidebar's right edge, dragged or arrowed to widen it: wide, its pages
- * stand in rows of several. Double-click goes back to the opening width. The drag
+ * stand in rows of several. Double-click goes back to the opening width, and
+ * from there, docked, out to as wide as the pages beside it, or as wide as the
+ * window lets it. The drag
  * sets the workspace root's width itself, frame by frame, and settles it in
  * the window's state only on release, so App renders once per drag.
  */
@@ -138,6 +140,13 @@ function SidebarResizeHandle() {
   const shownWidth = (handle: HTMLElement) =>
     handle.closest<HTMLElement>("[data-slot=app-sidebar]")?.getBoundingClientRect().width ??
     SIDEBAR_MIN_WIDTH
+
+  // At its narrowest, docked, the sidebar goes out to meet the pages half way
+  // (1:1); an overlay lies over them and has no half to meet.
+  const widthToggled = (shown: number) =>
+    sidebar.mode === "docked" && shown < SIDEBAR_MIN_WIDTH + 1
+      ? clampSidebarWidth(Math.ceil(window.innerWidth / 2), window.innerWidth, reserved)
+      : null
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const handle = event.currentTarget
@@ -251,7 +260,7 @@ function SidebarResizeHandle() {
       className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-primary/50 after:opacity-0 after:transition-opacity hover:after:opacity-100 focus-visible:after:opacity-100 data-resizing:after:opacity-100"
       data-resizing={resizing ? "" : undefined}
       data-slot="sidebar-resize"
-      onDoubleClick={() => setWidth(null)}
+      onDoubleClick={(event) => setWidth(widthToggled(shownWidth(event.currentTarget)))}
       onKeyDown={step}
       onKeyUp={(event) => {
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") {

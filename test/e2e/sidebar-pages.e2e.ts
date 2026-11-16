@@ -346,6 +346,38 @@ describe("TFolio sidebar pages", () => {
     expect(await columns()).toBe(3)
   })
 
+  it("goes back to its narrowest on a double-click, and from there out to the pages' width", async () => {
+    await openPdfFromDisk("halves.pdf", bandedPdf(4))
+    await settledBands(4)
+    const doubleClick = () =>
+      browser.execute((selector: string) => {
+        document
+          .querySelector(selector)!
+          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+      }, handle)
+    const halves = () =>
+      browser.execute((scope: string) => {
+        const sidebar = document.querySelector(scope)!.getBoundingClientRect().width
+        return { pages: window.innerWidth - sidebar, sidebar }
+      }, activeSidebar)
+
+    await dragEdge(60)
+    await browser.waitUntil(async () => (await sidebarWidth()) > 300)
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) === 256, {
+      timeoutMsg: "the sidebar never went back to its narrowest",
+    })
+
+    // As wide as the pages beside it, where the window leaves them their room.
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) > 256)
+    const { pages, sidebar } = await halves()
+    expect(Math.abs(pages - sidebar)).toBeLessThanOrEqual(1)
+
+    await doubleClick()
+    await browser.waitUntil(async () => (await sidebarWidth()) === 256)
+  })
+
   it("goes to the page a click chooses, the pages to read staying beside it", async () => {
     await openPdfFromDisk("read.pdf", bandedPdf(6))
     await $(preview(5)).waitForExist({ timeout: 30_000 })
