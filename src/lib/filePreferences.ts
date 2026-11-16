@@ -4,13 +4,12 @@ import { rememberSettings, storedSettings } from "@/lib/settings"
     the reader's last choices. Kept in the settings file's `organize` section,
     the name it had when another workspace made the same choices. */
 export type FilePreferences = {
-  bookmarks: boolean
   smartPadding: boolean
 }
 
-const defaultFilePreferences: FilePreferences = { bookmarks: true, smartPadding: true }
+const defaultFilePreferences: FilePreferences = { smartPadding: true }
 
-const preferenceNames = ["bookmarks", "smartPadding"] as const
+const preferenceNames = ["smartPadding"] as const
 
 /** The file is the reader's to edit: anything not a boolean is the default. */
 export function filePreferencesOf(stored: unknown): FilePreferences {

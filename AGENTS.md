@@ -197,25 +197,25 @@
   releases them; sources never added go by `release_pdf_sources`. One history entry adds them all;
   its undo deletes the run under its stash.
 - A file drop opens a tab per file, except on the sidebar, which takes the files into one document
-  whichever panel shows: the shown tab's (where let go among its pages or its outline's files, else
-  at the end), or on the home tab, for two or more, a new sourceless one (`merge_pdf_sources`: no
-  page of its own, no history). Files no flow takes are named (`filesSkipped`), never dropped
-  silently.
-- Every insert names the file its pages join, and a reorder passes each position's file after
-  and before: a page let go among another file's pages joins it, but a file moved whole by its
-  name keeps its own. A deleted page keeps its file for the restore an undo brings back.
-- A file let go among another's pages parts it into runs. The headings over the sidebar's
-  pages, its tree of files (`fileRuns`) and the Save As outline (`SectionBook::outline`) all list
-  a file once per run, its own bookmarks under the first; rename, remove, choose, fold and drag
-  act on the file whole.
-- Pages in hand show under the name of the file a release would leave them in (`flowItems`'
-  `joins`): between two files, the preview is the result.
+  whichever panel shows: the shown tab's (between the files nearest where let go among its pages,
+  or among its outline's files, else at the end), or on the home tab, for two or more, a new
+  sourceless one (`merge_pdf_sources`: no page of its own, no history). Files no flow takes are
+  named (`filesSkipped`), never dropped silently.
+- A file is never parted: a drag moves pages only among their own file's (`landingInFile`) and a
+  file only whole, between files, as files dropped in land (`nearestFileEdge`); the engine refuses
+  a reorder or an added file that would part one. Pastes and pages carried in from another tab
+  join the file they land in, a cut pasted there moving to it, and a reorder that does so passes
+  each position's file after and before. A deleted page keeps its file for the restore an undo
+  brings back.
+- The headings over the sidebar's pages, its tree of files (`fileRuns`) and the Save As outline
+  (`SectionBook::outline`) list each file under its name, its own bookmarks beneath; rename,
+  remove, choose, fold and drag act on the file whole. Pages in hand stay under their file's name.
 - Pages an added file brought, and copies of them, are foreign: `save` refuses while any remain,
-  and Save As never writes the document's own file. Save As writes one bookmark per file (lopdf),
-  then the tab reopens the written file, its history gone, which the corner says
-  (`filesCombined`). A compressed copy compresses what a Save As writes (`combined_bytes`), and a
-  split by bookmarks cuts at the outline it writes, which the engine reports as
-  `splitsByBookmarks`.
+  and Save As never writes the document's own file. Save As always writes one bookmark per file
+  (lopdf), named as the file is now, then the tab reopens the written file, its history gone,
+  which the corner says (`filesCombined`). A compressed copy compresses what a Save As writes
+  (`combined_bytes`), and a split by bookmarks cuts at the outline it writes, which the engine
+  reports as `splitsByBookmarks`.
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
   print show them there, and only a Save As writes them. Structure commands never see them. A

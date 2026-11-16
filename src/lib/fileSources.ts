@@ -103,7 +103,7 @@ export function releaseFileSources(read: FileSourceInfo[]) {
 export function storedFileOptions(): FileOptions {
   const preferences = storedFilePreferences()
 
-  return { perFileBookmarks: preferences.bookmarks, smartPadding: preferences.smartPadding }
+  return { smartPadding: preferences.smartPadding }
 }
 
 /** The answers for the signed files among those read, by source id, and the

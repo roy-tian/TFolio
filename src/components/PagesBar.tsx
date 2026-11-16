@@ -1,33 +1,23 @@
-import { RotateCcw, RotateCw, Settings, Trash2, type LucideIcon } from "lucide-react"
+import { BookDashed, RotateCcw, RotateCw, Trash2, type LucideIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { SidebarDropHint } from "@/components/SidebarFileDrop"
 import { SidebarPanelTools } from "@/components/SidebarPanelTools"
 import { ToolbarTooltip } from "@/components/ToolbarTooltip"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Toggle } from "@/components/ui/toggle"
 import { useSidebarDrop } from "@/hooks/useSidebarDrop"
 import type { FileOptions } from "@/lib/pdf"
+import { toolbarSelectionBarClassName } from "@/lib/toolbarStyles"
 import { cn } from "@/lib/utils"
 
 type PagesBarProps = {
   /** How the document's files are laid out and saved; absent with one file. */
   fileOptions: FileOptions | undefined
-  /** Whether each file of a document of several starts a row of its own. */
-  fileRows: boolean
   /** How many of the files are folded to their names, of how many. */
   folded: { count: number; of: number }
   onDelete: () => void
   onFileOptionsChange: (change: Partial<FileOptions>) => void
-  onFileRowsChange: (fileRows: boolean) => void
   /** Every file's pages folded away under its name, or shown again. */
   onFoldAll: (folded: boolean) => void
   onRotate: (degrees: 90 | 270) => void
@@ -42,11 +32,9 @@ type PagesBarProps = {
     file drag offers the pages it says what a drop there does instead. */
 export function PagesBar({
   fileOptions,
-  fileRows,
   folded,
   onDelete,
   onFileOptionsChange,
-  onFileRowsChange,
   onFoldAll,
   onRotate,
   severalFiles,
@@ -62,9 +50,9 @@ export function PagesBar({
   const unchosen = count === 0 ? t("pageEdit.selectPagesFirst") : null
   // A document keeps one page; the backend refuses a delete of them all.
   const keepsOne = count >= targets.of
-  // Laid out and saved file by file only once there are several files.
-  const fileTools = severalFiles || fileOptions !== undefined
-  const filesLabel = fileTools ? t("sidebar.fileOptions") : t("sidebar.fileOptionsOneFile")
+  const paddingLabel = fileOptions
+    ? t("sidebar.smartPadding")
+    : t("sidebar.smartPaddingOneFile")
   const pageActions: {
     disabled?: boolean
     icon: LucideIcon
@@ -134,66 +122,26 @@ export function PagesBar({
         <SidebarPanelTools
           fold={{
             // Only a file under its own name has pages to fold away.
-            canFold: severalFiles && fileRows && folded.count < folded.of,
-            canUnfold: severalFiles && fileRows && folded.count > 0,
+            canFold: severalFiles && folded.count < folded.of,
+            canUnfold: severalFiles && folded.count > 0,
             foldLabel: t("sidebar.foldAll"),
             onFold: onFoldAll,
             unfoldLabel: t("sidebar.unfoldAll"),
           }}
         >
-          <DropdownMenu>
-            <ToolbarTooltip label={filesLabel}>
-              <DropdownMenuTrigger
-                disabled={!fileTools}
-                render={
-                  <Button
-                    aria-label={filesLabel}
-                    data-slot="pages-file-options"
-                    size="icon-sm"
-                    variant="ghost"
-                  />
-                }
-              >
-                <Settings />
-              </DropdownMenuTrigger>
-            </ToolbarTooltip>
-            <DropdownMenuContent align="end" className="w-auto max-w-96 min-w-56">
-              {severalFiles ? (
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>{t("sidebar.optionsView")}</DropdownMenuLabel>
-                  <DropdownMenuCheckboxItem
-                    checked={fileRows}
-                    data-action="file-rows"
-                    onCheckedChange={onFileRowsChange}
-                  >
-                    {t("sidebar.fileRows")}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuGroup>
-              ) : null}
-              {severalFiles && fileOptions ? <DropdownMenuSeparator /> : null}
-              {fileOptions ? (
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>{t("sidebar.optionsSave")}</DropdownMenuLabel>
-                  <DropdownMenuCheckboxItem
-                    checked={fileOptions.smartPadding}
-                    data-action="smart-padding"
-                    onCheckedChange={(smartPadding) => onFileOptionsChange({ smartPadding })}
-                  >
-                    {t("sidebar.smartPadding")}
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuCheckboxItem
-                    checked={fileOptions.perFileBookmarks}
-                    data-action="file-bookmarks"
-                    onCheckedChange={(perFileBookmarks) =>
-                      onFileOptionsChange({ perFileBookmarks })
-                    }
-                  >
-                    {t("sidebar.fileBookmarks")}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuGroup>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Laid out file by file only once there are several files. */}
+          <ToolbarTooltip label={paddingLabel}>
+            <Toggle
+              aria-label={paddingLabel}
+              className={cn(toolbarSelectionBarClassName, "size-7 min-w-7 p-0")}
+              data-slot="pages-smart-padding"
+              disabled={!fileOptions}
+              onPressedChange={(smartPadding) => onFileOptionsChange({ smartPadding })}
+              pressed={fileOptions?.smartPadding === true}
+            >
+              <BookDashed />
+            </Toggle>
+          </ToolbarTooltip>
         </SidebarPanelTools>
       </div>
     </div>

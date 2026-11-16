@@ -20,14 +20,12 @@ pub(super) struct SectionBook {
 }
 
 /// How a document of several files is laid out and saved: a blank page
-/// closing a file that would leave the next to start on an even page, and one
-/// bookmark per file above its own rather than the files' own one after
-/// another. The reader's choices, undoable, kept with the document.
+/// closing a file that would leave the next to start on an even page. The
+/// reader's choice, undoable, kept with the document.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileOptions {
     pub smart_padding: bool,
-    pub per_file_bookmarks: bool,
 }
 
 struct Section {
@@ -204,17 +202,21 @@ impl SectionBook {
     }
 
     /// New pages join `section`, checked by the caller, or else the file of
-    /// the page before them — of the one after, at the very start. `slot` is
-    /// where the first of `new` stands in `page_ids`.
+    /// the page before them — of the one after, at the very start. Among one
+    /// file's pages they join that file whatever is named: files are never
+    /// parted. `slot` is where the first of `new` stands in `page_ids`.
     fn assign(&mut self, page_ids: &[u64], new: &[u64], slot: usize, section: Option<u64>) {
-        let section = section
-            .or_else(|| {
-                slot.checked_sub(1)
-                    .and_then(|before| page_ids.get(before))
-                    .or_else(|| page_ids.get(slot + new.len()))
-                    .and_then(|page_id| self.section_of(*page_id))
-            })
-            .unwrap_or(0);
+        let file_at = |index: Option<usize>| {
+            index
+                .and_then(|index| page_ids.get(index))
+                .and_then(|page_id| self.section_of(*page_id))
+        };
+        let before = file_at(slot.checked_sub(1));
+        let after = file_at(Some(slot + new.len()));
+        let section = match (before, after) {
+            (Some(before), Some(after)) if before == after => before,
+            _ => section.or(before).or(after).unwrap_or(0),
+        };
 
         self.page_section
             .extend(new.iter().map(|page_id| (*page_id, section)));
@@ -232,6 +234,23 @@ impl SectionBook {
             Some(unknown) => Err(format!("file {unknown} is not one of this document's")),
             None => Ok(()),
         }
+    }
+
+    /// Refuses pages standing as `files`, position by position, where a file
+    /// would stand in two places: files move whole, never parted.
+    fn check_whole(files: impl IntoIterator<Item = u64>) -> Result<(), String> {
+        let mut seen = HashSet::new();
+        let mut previous = None;
+
+        for file in files {
+            if previous != Some(file) && !seen.insert(file) {
+                return Err(format!("file {file} would be parted among another's pages"));
+            }
+
+            previous = Some(file);
+        }
+
+        Ok(())
     }
 
     /// Every page's file, position by position, as a reorder lands them: a page
@@ -313,12 +332,12 @@ impl SectionBook {
     }
 
     /// The outline a Save As writes: a bookmark per run of a file's pages with
-    /// the file's own beneath its first, or the files' own one after another,
-    /// its pages counted with `padding`'s blank pages in among them.
+    /// the file's own beneath its first, its pages counted with `padding`'s
+    /// blank pages in among them.
     pub(super) fn outline(&self, page_ids: &[u64], padding: &[usize]) -> Vec<OutlineNode> {
         // One file left has no others to be told from: its own bookmarks, as
-        // the sidebar shows them, with no option left on screen to say otherwise.
-        let per_file = self.options.per_file_bookmarks && self.several(page_ids);
+        // the sidebar shows them.
+        let per_file = self.several(page_ids);
         let landed = |index: usize| index + padding.iter().filter(|after| **after < index).count();
         let position: HashMap<u64, usize> = page_ids
             .iter()
@@ -484,6 +503,40 @@ impl OpenDocument {
             .ok_or("this document has no files to lay its pages out by")?;
 
         book.check_layout(self.page_ids.len(), layout)
+    }
+
+    /// Refuses a reorder to `order`, as `indices` into the pages, that would
+    /// part a file: each lands whole, its pages together, whatever `layout`
+    /// moves between files.
+    pub(super) fn check_files_whole(
+        &self,
+        indices: &[i32],
+        layout: Option<&[u64]>,
+    ) -> Result<(), String> {
+        let Some(book) = &self.sections else {
+            return Ok(());
+        };
+
+        match layout {
+            Some(layout) => SectionBook::check_whole(layout.iter().copied()),
+            None => SectionBook::check_whole(
+                indices
+                    .iter()
+                    .filter_map(|index| book.section_of(self.page_ids[*index as usize])),
+            ),
+        }
+    }
+
+    /// Whether files can go in at 0-based `slot`: between two files, or at
+    /// either end, never among one file's pages.
+    pub(super) fn between_files(&self, slot: usize) -> bool {
+        if slot == 0 || slot >= self.page_ids.len() {
+            return true;
+        }
+
+        self.sections.as_ref().is_some_and(|book| {
+            book.section_of(self.page_ids[slot - 1]) != book.section_of(self.page_ids[slot])
+        })
     }
 
     /// The `count` pages just inserted at `slot` join `section`, or the file

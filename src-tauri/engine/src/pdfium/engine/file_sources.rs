@@ -447,6 +447,10 @@ impl PdfiumEngine {
             let Some(slot) = page_index(index, entry.page_ids.len() + 1) else {
                 return Err(format!("a page cannot go to position {index}"));
             };
+
+            if !entry.between_files(slot) {
+                return Err(format!("files go between files, not to position {index}"));
+            }
             let before = ImportRollback::of(entry)?;
 
             if entry.sections.is_none() {

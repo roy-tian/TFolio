@@ -191,8 +191,8 @@ export function useThumbnailPageOps({
     const clipboard = pageClipboard.clipboard
     const pages = pdfDocument.pages
     // A cut let go where it stands, but among another file's pages, moves no
-    // page and joins that file, as a drag let go there does — unless that
-    // would leave its own file with no page.
+    // page and joins that file — unless that would leave its own file with
+    // no page.
     const plan =
       pastePlan(clipboard, index, pdfDocument.numPages) ??
       (clipboard?.mode === "cut" &&
@@ -255,14 +255,9 @@ export function useThumbnailPageOps({
       })
   }
 
-  /** `moving` joins `section`, the file it was dropped among. */
-  const reorderPages = (order: number[], moving: number[] = [], section?: number) =>
-    editingBusy()
-      ? Promise.resolve(false)
-      : annotations.reorderPages(
-          order,
-          reorderSections(pdfDocument.pages, order, new Set(moving), section),
-        )
+  /** Every page keeps its file. */
+  const reorderPages = (order: number[]) =>
+    editingBusy() ? Promise.resolve(false) : annotations.reorderPages(order, undefined)
 
   /** Another tab's pages dragged in: copies, one undo step like a paste. The
       column they left found them standing at the release, this same turn. */

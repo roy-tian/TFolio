@@ -226,7 +226,8 @@ impl PdfiumEngine {
     /// their new sequence. The identity order changes nothing and bumps nothing.
     ///
     /// `sections`, for a document of several files, names each position's file
-    /// once the pages land: a page dropped among another file's pages joins it.
+    /// once the pages land: pages pasted among another file's pages join it.
+    /// Refused where a file would stand in two places.
     pub fn reorder_pages(
         &self,
         document_id: u64,
@@ -238,6 +239,9 @@ impl PdfiumEngine {
         entry.ensure_editable()?;
         entry.check_layout(sections)?;
         let Some(indices) = validate_page_order(order, entry.page_ids.len())? else {
+            // Standing still, only the layout can part a file.
+            entry.check_files_whole(&[], sections)?;
+
             // The pages stand still, but a move to the edge of the file beside
             // them still changes which file they belong to.
             if let (Some(book), Some(layout)) = (entry.sections.as_mut(), sections) {
@@ -246,6 +250,8 @@ impl PdfiumEngine {
 
             return Ok(structure_update(entry));
         };
+
+        entry.check_files_whole(&indices, sections)?;
 
         // A failed FPDF_MovePages may leave the document in an indeterminate
         // state, so even a pure move takes the M6 snapshot precaution.

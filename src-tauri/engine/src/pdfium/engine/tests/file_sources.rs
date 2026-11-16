@@ -28,7 +28,6 @@ fn added(engine: &PdfiumEngine, scope: &str, paths: Vec<PathBuf>) -> Vec<u64> {
 
 const PLAIN: FileOptions = FileOptions {
     smart_padding: false,
-    per_file_bookmarks: false,
 };
 
 /// Adds `ids` to a fresh one-page document of `scope`'s window.

@@ -97,7 +97,7 @@ import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import { NO_FOLDS, sectionOutlineKey, type OutlineFolds } from "@/lib/outlineFolds"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
-import { fileMoveOrder, foldedAway, pagesOfSection } from "@/lib/pageSections"
+import { fileMoveOrder, foldedAway, nearestFileEdge } from "@/lib/pageSections"
 import {
   answerSourceSignatures,
   readFileSources,
@@ -509,9 +509,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // bring into view where it landed.
     const [reveal, setReveal] = useState<{ pageNumber: number; serial: number } | null>(null)
     // Read as an edit lands, which is ahead of the render that shows it.
-    const pagesShownRef = useRef({ fileRows: sidebar.fileRows, foldedFiles, thumbnailsShown })
+    const pagesShownRef = useRef({ foldedFiles, thumbnailsShown })
 
-    pagesShownRef.current = { fileRows: sidebar.fileRows, foldedFiles, thumbnailsShown }
+    pagesShownRef.current = { foldedFiles, thumbnailsShown }
 
     // Pages a paste or an add has just put in: chosen, as what the reader
     // acts on next, and shown where they landed, which may be out of sight.
@@ -527,7 +527,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           return
         }
 
-        const byFile = shown.fileRows && (current.sections?.length ?? 0) > 1
+        const byFile = (current.sections?.length ?? 0) > 1
         const seen = landed.filter(
           (pageNumber) => !foldedAway(current.pages, pageNumber, shown.foldedFiles, byFile),
         )
@@ -586,7 +586,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         pdfDocument.pages,
         pageNumber,
         foldedFiles,
-        sidebar.fileRows && severalFiles,
+        severalFiles,
       )
         ? null
         : pageNumber
@@ -1193,8 +1193,17 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             return
           }
 
-          const before =
+          const keyed =
             beforeKey === undefined ? -1 : thumbnailIdentityRef.current.keys.indexOf(beforeKey)
+          // A paste in front of that page meanwhile joins its file, which the
+          // files would then part: they go to the nearest edge between files.
+          const before =
+            keyed < 0
+              ? -1
+              : nearestFileEdge(
+                  current.pages.map((page) => page.section),
+                  keyed,
+                )
           const landed = await annotations.insertFiles(
             read.flatMap((info) =>
               info.id === undefined
@@ -1283,11 +1292,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         }
 
         void annotations.setFileOptions(change, () => documentRef.current?.fileOptions)
-        // Only the choice made: another window may have changed the other since.
-        storeFilePreferences({
-          bookmarks: change.perFileBookmarks,
-          smartPadding: change.smartPadding,
-        })
+        storeFilePreferences(change)
       },
       [annotations],
     )
@@ -1345,7 +1350,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       const order = fileMoveOrder(pages, sectionId, before)
 
       if (order) {
-        void reorderPages(order, pagesOfSection(pages, sectionId))
+        void reorderPages(order)
       }
     }
 
@@ -2337,7 +2342,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               cutPages={cutThumbnailPages}
               documentId={pdfDocument.id}
               fileOptions={pdfDocument.fileOptions}
-              fileRows={sidebar.fileRows}
               foldedFiles={foldedFiles}
               isEditingNow={annotations.isStructureBusyNow}
               onCopyPages={pageClipboard.copyPages}
@@ -2345,7 +2349,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
               onDeletePage={deleteThumbnailPage}
               onExtractPages={extractPages}
               onFileOptionsChange={changeFileOptions}
-              onFileRowsChange={sidebar.setFileRows}
               onFocusChange={setThumbnailsFocused}
               onFoldFiles={foldFiles}
               onInsertBlankPage={insertBlankPage}

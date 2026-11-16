@@ -62,7 +62,7 @@ import {
 import { flowItems } from "@/lib/pageFlow"
 import type { ParkedPreviews } from "@/lib/parkedPreviews"
 import { paddingAroundDropped, paddingPositions, type PaddingSheet } from "@/lib/padding"
-import { emptiesItsFile, fileRuns, pagesOfSection } from "@/lib/pageSections"
+import { fileRuns, landingInFile, nearestFileEdge, pagesOfSection } from "@/lib/pageSections"
 import type { FileOptions, PdfPageInfo, PdfSection } from "@/lib/pdf"
 import { THUMBNAIL_COLUMN_GAP, THUMBNAIL_GRID_GAP, thumbnailColumns } from "@/lib/sidebar"
 import { lowestPage, type SelectionModifiers } from "@/lib/thumbnailSelection"
@@ -110,9 +110,6 @@ type ColumnDrag = {
   /** Where among the pages that stay the block lands, or null while the
       pointer is away and every page stands where it was. */
   at: number | null
-  /** The file the block joins, let go where it is: that of the page nearest
-      the pointer. Undefined for a file carried whole, which keeps its own. */
-  joins?: number
   moving: number[]
 }
 
@@ -139,9 +136,6 @@ type PageThumbnailsProps = {
   /** The files whose pages are folded away under their names. */
   foldedFiles: ReadonlySet<number>
   onFoldFiles: (sections: readonly number[], folded: boolean) => void
-  /** Whether each file of a document of several starts a row of its own. */
-  fileRows: boolean
-  onFileRowsChange: (fileRows: boolean) => void
   /** How the document's files are laid out and saved; absent with one file. */
   fileOptions: FileOptions | undefined
   onFileOptionsChange: (change: Partial<FileOptions>) => void
@@ -171,9 +165,9 @@ type PageThumbnailsProps = {
   onRemoveFile: (section: number) => void
   onRenameFile: (section: number, title: string) => void
   /** Settles once the reorder has landed or been refused: the column holds
-      the dropped order until then, rather than flash the old one. `moving`
-      joins `section`, the file it was let go among. */
-  onReorderPages: (order: number[], moving: number[], section?: number) => Promise<unknown>
+      the dropped order until then, rather than flash the old one. Every
+      page keeps its file. */
+  onReorderPages: (order: number[]) => Promise<unknown>
   /** That page alone: a page's own bar. */
   onRotatePage: (pageNumber: number, degrees: 90 | 270) => void
   onRotatePages: (degrees: 90 | 270) => void
@@ -211,10 +205,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   onExtractPages,
   isEditingNow,
   fileOptions,
-  fileRows,
   foldedFiles,
   onFileOptionsChange,
-  onFileRowsChange,
   onFocusChange,
   onFoldFiles,
   onInsertBlankPage,
@@ -337,8 +329,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         (point &&
           flowLanding(pointInColumn(column, point), cells, fileLandingRef.current?.slot ?? null)) ??
         cells.length
+      // Between files only: a file let go among another's pages never parts it.
+      const at = nearestFileEdge(
+        pagesRef.current.map((page) => page.section),
+        pagesBeforeSlot(cells, slot),
+      )
 
-      return { at: pagesBeforeSlot(cells, slot), slot }
+      return { at, slot: slotOfPages(cells, at) }
     },
     [measure],
   )
@@ -851,7 +848,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     // `at` as the flow counts it, by cells: a folded file is one, of many
     // pages. What the next landing is read against.
     let slot: number | null = null
-    let joins: number | undefined
     let point = start
     // Where the landing was last read: the blanks it shows can move the rows
     // under a still pointer, and a release there keeps what is on screen.
@@ -893,16 +889,17 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
       slot = cells ? flowLanding(pointInColumn(column, point), cells, slot) : null
 
-      const next = cells && slot !== null ? pagesBeforeSlot(cells, slot) : null
-      // Read off the cells as a release reads them, so the blanks shown in
-      // the meantime are the ones the drop lays out.
-      const nextJoins =
-        cells && next !== null && wholeFile === undefined ? sectionNear(point, cells) : undefined
+      // Pages stay in their file, and a file moves whole between the others.
+      const next =
+        cells && slot !== null
+          ? landingInFile(basis, moving, pagesBeforeSlot(cells, slot))
+          : null
 
-      if (next !== at || nextJoins !== joins) {
+      slot = cells && next !== null ? slotOfPages(cells, next) : null
+
+      if (next !== at) {
         at = next
-        joins = nextJoins
-        setDrag({ at, basis, joins, moving })
+        setDrag({ at, basis, moving })
       }
     }
     const edgeScroll = () => {
@@ -949,9 +946,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           }),
           sourceDocumentId: documentId,
         }
-        // The block gathers where the pressed page stands.
-        at = pressed - 1 - moving.filter((pageNumber) => pageNumber < pressed).length
-        slot = slotOfPages(measure((key) => movingKeys.has(key), held), at)
+        // The block gathers where the pressed page stands, if it may.
+        at = landingInFile(
+          basis,
+          moving,
+          pressed - 1 - moving.filter((pageNumber) => pageNumber < pressed).length,
+        )
+        slot = at === null ? null : slotOfPages(measure((key) => movingKeys.has(key), held), at)
 
         if (wholeFile !== undefined) {
           onSelectPages(moving, { range: false, toggle: false })
@@ -1025,18 +1026,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         commit && at !== null && pagesRef.current === basis
           ? orderWithBlockAt(moving, at, basis.length)
           : null
-      const moved = reorder?.some((pageNumber, index) => pageNumber !== index + 1) ?? false
-      // A whole file stays its own file wherever it lands; pages join the file
-      // the release's own retarget found them beside.
-      const nearest = reorder ? joins : undefined
-      // Let go where they stand but beside the next file's first page, they
-      // join it — unless that would leave their own file with no page at all:
-      // a one-page file's page let go in place stays its file's.
-      const section = !moved && emptiesItsFile(basis, moving) ? undefined : nearest
-      const regrouped =
-        section !== undefined &&
-        moving.some((pageNumber) => basis[pageNumber - 1]?.section !== section)
-      const changes = moved || (reorder !== null && regrouped)
+      const changes = reorder?.some((pageNumber, index) => pageNumber !== index + 1) ?? false
 
       // Otherwise the pages go back where they were and the ghost with them.
       if (!changes) {
@@ -1045,10 +1035,10 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       }
 
       settlingRef.current = true
-      setDrag({ at, basis, joins: section, moving })
+      setDrag({ at, basis, moving })
       setLanding({
         leadKey: changes ? leadKey : homeKey,
-        settled: changes ? onReorderPages(reorder!, moving, section) : Promise.resolve(),
+        settled: changes ? onReorderPages(reorder!) : Promise.resolve(),
       })
     }
     const release = (released: PointerEvent) => {
@@ -1088,25 +1078,14 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     menuLast = Math.max(menuLast, pageNumber)
   }
 
-  // The file the pages in hand would join, let go where they stand: the one
-  // the release itself will name. In place, a file's last pages keep it.
-  const liveDrag = drag?.basis === pages && drag.at !== null ? drag : null
-  const heldJoins =
-    liveDrag &&
-    !(
-      order.every((pageNumber, index) => pageNumber === index + 1) &&
-      emptiesItsFile(pages, liveDrag.moving)
-    )
-      ? liveDrag.joins
-      : undefined
+  const dragging = drag?.basis === pages && drag.at !== null
 
-  // Each file's name heads its first page, once the document has several and
-  // the reader keeps them apart; pages in hand stand among others for now.
-  const byFile = fileRows && sections.length > 1
+  // Each file's name heads its first page, once the document has several.
+  const byFile = sections.length > 1
   const titles = new Map(sections.map((section) => [section.id, section.title]))
   const moving = new Set(drag?.basis === pages ? drag.moving : [])
   const { blanks, blankAfterCarried } = previewBlanks({
-    drag: liveDrag ? { joins: heldJoins, moving: liveDrag.moving } : null,
+    drag: dragging,
     incoming:
       incomingAt !== null && incoming
         ? { at: incomingAt, joins: incoming.joins, sizes: incoming.carried.sizes }
@@ -1129,7 +1108,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     byFile,
     folded: foldedFiles,
     held: moving,
-    joins: heldJoins,
     order,
     pages,
   })
@@ -1200,7 +1178,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     >
       <PagesBar
         fileOptions={fileOptions}
-        fileRows={fileRows}
         folded={{ count: foldedCount, of: sections.length }}
         onDelete={() => {
           // Refused while an edit runs, and the button keeps its focus.
@@ -1210,7 +1187,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           }
         }}
         onFileOptionsChange={onFileOptionsChange}
-        onFileRowsChange={onFileRowsChange}
         onFoldAll={(folded) =>
           onFoldFiles(
             sections.map((section) => section.id),
@@ -1539,8 +1515,8 @@ function previewBlanks({
   pages,
   smartPadding,
 }: {
-  /** The pages in hand, and the file a release where they stand leaves them in. */
-  drag: { joins?: number; moving: number[] } | null
+  /** Pages are in hand, each staying in its file. */
+  drag: boolean
   /** Files held over the pages, which would land after page `at`. */
   files: { at: number; smartPadding: boolean } | null
   incoming: { at: number; joins?: number; sizes: CarriedPages["sizes"] } | null
@@ -1556,11 +1532,7 @@ function previewBlanks({
   }
 
   if (drag) {
-    const { joins } = drag
-    const held = new Set(drag.moving)
-    const files = order.map((pageNumber) =>
-      joins !== undefined && held.has(pageNumber) ? joins : pages[pageNumber - 1]!.section,
-    )
+    const files = order.map((pageNumber) => pages[pageNumber - 1]!.section)
 
     return {
       blankAfterCarried: null,

@@ -77,6 +77,52 @@ export function fileRuns(pages: readonly PdfPageInfo[]): FileRun[] {
   return runs
 }
 
+/** The place between two files nearest `at`, the later on a tie; `files`
+    is each place's file, so a document still its own file alone has only
+    its two ends. */
+export function nearestFileEdge(files: readonly (number | undefined)[], at: number): number {
+  let nearest = 0
+
+  for (let edge = 1; edge <= files.length; edge += 1) {
+    const between = edge === files.length || files[edge - 1] !== files[edge]
+
+    if (between && Math.abs(edge - at) <= Math.abs(nearest - at)) {
+      nearest = edge
+    }
+  }
+
+  return nearest
+}
+
+/**
+ * Where pages in hand may land, `at` counted among the pages that stay: a
+ * file's pages only among its own, from before its first to after its last,
+ * and a file taken whole only between files, at the edge nearest. Pages of
+ * several files land nowhere: null.
+ */
+export function landingInFile(
+  pages: readonly PdfPageInfo[],
+  moving: readonly number[],
+  at: number,
+): number | null {
+  const held = new Set(moving)
+  const files = new Set(moving.map((pageNumber) => pages[pageNumber - 1]?.section))
+
+  if (files.size !== 1) {
+    return null
+  }
+
+  const [file] = files
+  const staying = pages.flatMap((page, index) => (held.has(index + 1) ? [] : [page.section]))
+  const first = staying.indexOf(file)
+
+  if (first === -1) {
+    return nearestFileEdge(staying, at)
+  }
+
+  return Math.min(Math.max(at, first), staying.lastIndexOf(file) + 1)
+}
+
 /** Whether `moving` holds every page some file has: joined to another file
     where they stand, that file would be left with no page at all. */
 export function emptiesItsFile(

@@ -5,6 +5,8 @@ import {
   fileMoveOrder,
   fileRuns,
   foldedAway,
+  landingInFile,
+  nearestFileEdge,
   reorderSections,
   sectionAt,
   sectionsOf,
@@ -30,6 +32,53 @@ describe("sectionAt", () => {
   test("joins the last page's file at the very end", () => {
     expect(sectionAt(pages, 4)).toBe(1)
     expect(sectionAt([], 1)).toBeUndefined()
+  })
+})
+
+describe("nearestFileEdge", () => {
+  test("steps to the edge between files nearest the place", () => {
+    expect(nearestFileEdge([0, 0, 0, 1, 1], 1)).toBe(0)
+    expect(nearestFileEdge([0, 0, 0, 1, 1], 2)).toBe(3)
+    expect(nearestFileEdge([0, 0, 0, 1, 1], 5)).toBe(5)
+  })
+
+  test("takes the later edge when two are as near", () => {
+    expect(nearestFileEdge([0, 0, 1, 1], 1)).toBe(2)
+    expect(nearestFileEdge([0, 0], 1)).toBe(2)
+  })
+
+  test("has only the ends in a document still one file", () => {
+    expect(nearestFileEdge([undefined, undefined, undefined], 1)).toBe(0)
+    expect(nearestFileEdge([undefined, undefined, undefined], 2)).toBe(3)
+    expect(nearestFileEdge([], 0)).toBe(0)
+  })
+})
+
+describe("landingInFile", () => {
+  // Files 0 (pages 1-3), 1 (4-5), 2 (6).
+  const pages = [page(0), page(0), page(0), page(1), page(1), page(2)]
+
+  test("keeps a file's pages among its own", () => {
+    // Page 2 in hand: five stay, file 0's two at places 0 and 1.
+    expect(landingInFile(pages, [2], 0)).toBe(0)
+    expect(landingInFile(pages, [2], 2)).toBe(2)
+    expect(landingInFile(pages, [2], 4)).toBe(2)
+    expect(landingInFile(pages, [5], 0)).toBe(3)
+    expect(landingInFile(pages, [5], 5)).toBe(4)
+  })
+
+  test("lands a file taken whole only between files", () => {
+    expect(landingInFile(pages, [4, 5], 1)).toBe(0)
+    expect(landingInFile(pages, [4, 5], 2)).toBe(3)
+    expect(landingInFile(pages, [6], 4)).toBe(5)
+  })
+
+  test("lands pages of several files nowhere", () => {
+    expect(landingInFile(pages, [3, 4], 2)).toBeNull()
+  })
+
+  test("lands anywhere in a document still one file", () => {
+    expect(landingInFile([page(), page(), page()], [1], 2)).toBe(2)
   })
 })
 

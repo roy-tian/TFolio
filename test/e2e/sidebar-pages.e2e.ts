@@ -388,8 +388,13 @@ describe("TFolio sidebar pages", () => {
     await settledBands(4)
     const bar = (slot: string) => $(`${activeSidebar} [data-slot='pages-${slot}']`)
 
-    // One file: no file options, greyed rather than gone.
-    await expect(bar("file-options")).toBeDisabled()
+    // One file: no blanks between files to add, greyed rather than gone, and
+    // it says why.
+    await expect(bar("smart-padding")).toBeDisabled()
+    await expect(bar("smart-padding")).toHaveAttribute(
+      "aria-label",
+      "Start every file on an odd page: available once the document has several files",
+    )
 
     // Nothing chosen, nothing to act on, and each button says so.
     for (const slot of ["rotate-left", "rotate-right", "delete"]) {

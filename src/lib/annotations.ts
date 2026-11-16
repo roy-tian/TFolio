@@ -743,10 +743,7 @@ export function planFileOptions(
   next: FileOptions,
   previous: FileOptions,
 ) {
-  if (
-    next.smartPadding === previous.smartPadding &&
-    next.perFileBookmarks === previous.perFileBookmarks
-  ) {
+  if (next.smartPadding === previous.smartPadding) {
     return null
   }
 

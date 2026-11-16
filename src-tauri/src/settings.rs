@@ -59,9 +59,6 @@ struct UiPreferences {
     /// In CSS pixels; the frontend clamps it to the window it opens in.
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     sidebar_width: Option<u32>,
-    /// Whether the sidebar starts each file of a document on a row of its own.
-    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
-    sidebar_file_rows: Option<bool>,
 }
 
 /// How the next document files are added to lays them out and saves them: the
@@ -72,8 +69,6 @@ struct UiPreferences {
 struct OrganizePreferences {
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     smart_padding: Option<bool>,
-    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
-    bookmarks: Option<bool>,
 }
 
 /// A choice this version cannot read costs that choice alone, not its
@@ -263,7 +258,6 @@ mod tests {
                 sidebar: Some("hidden".into()),
                 sidebar_panel: Some("bookmarks".into()),
                 sidebar_width: Some(420),
-                sidebar_file_rows: Some(false),
             }),
             annotate: Some(AnnotatePreferences {
                 highlight_color: Some("#ffd54a".into()),
@@ -278,7 +272,6 @@ mod tests {
             page_numbers: Some(page_numbers()),
             organize: Some(OrganizePreferences {
                 smart_padding: Some(false),
-                bookmarks: None,
             }),
             signatures: Some(SignaturePreferences {
                 handling: Some("flatten".into()),
@@ -294,7 +287,6 @@ mod tests {
         let ui = read.ui.expect("the ui section should read back");
         assert_eq!(ui.theme.as_deref(), Some("dark"));
         assert_eq!(ui.sidebar_width, Some(420));
-        assert_eq!(ui.sidebar_file_rows, Some(false));
         assert_eq!(
             read.annotate
                 .and_then(|annotate| annotate.text_note)
@@ -307,7 +299,6 @@ mod tests {
             .organize
             .expect("the organize section should read back");
         assert_eq!(organize.smart_padding, Some(false));
-        assert_eq!(organize.bookmarks, None);
         assert_eq!(
             read.signatures
                 .and_then(|signatures| signatures.handling)
@@ -376,28 +367,24 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_organize_choice_costs_only_itself() {
+    fn reads_past_the_choices_an_earlier_version_kept() {
         let read = Settings::parse(
             r#"
+            [ui]
+            sidebarFileRows = false
+            language = "en"
+
             [organize]
-            bookmarks = "yes"
+            bookmarks = false
             smartPadding = false
             "#,
-        )
-        .organize
-        .expect("the readable choices should keep the section");
+        );
 
-        assert_eq!(read.bookmarks, None);
-        assert_eq!(read.smart_padding, Some(false));
-
-        let sent = Settings::sent(&serde_json::json!({
-            "organize": { "bookmarks": false, "smartPadding": 1 },
-        }))
-        .organize
-        .expect("the readable choices should keep the section");
-
-        assert_eq!(sent.bookmarks, Some(false));
-        assert_eq!(sent.smart_padding, None);
+        assert_eq!(read.ui.and_then(|ui| ui.language).as_deref(), Some("en"));
+        assert_eq!(
+            read.organize.and_then(|organize| organize.smart_padding),
+            Some(false)
+        );
     }
 
     #[test]

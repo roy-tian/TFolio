@@ -222,9 +222,7 @@ function changedTo<T>(
 }
 
 function sameFileOptions(left: FileOptions, right: FileOptions) {
-  return (
-    left.smartPadding === right.smartPadding && left.perFileBookmarks === right.perFileBookmarks
-  )
+  return left.smartPadding === right.smartPadding
 }
 
 /** Whether a save of one would write what the other already holds. */

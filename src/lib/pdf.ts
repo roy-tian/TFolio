@@ -21,7 +21,6 @@ export type PdfPageInfo = {
 
 /** How a document of several files is laid out and saved. */
 export type FileOptions = {
-  perFileBookmarks: boolean
   smartPadding: boolean
 }
 

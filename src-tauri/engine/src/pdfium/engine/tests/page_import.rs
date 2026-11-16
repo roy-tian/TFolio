@@ -186,7 +186,6 @@ fn an_added_file_s_popups_leave_nothing_aimed_at_it() {
         .expect("PDFium should open the document");
     let options = FileOptions {
         smart_padding: false,
-        per_file_bookmarks: false,
     };
 
     // The source goes once its pages are in.
@@ -479,7 +478,6 @@ fn an_added_file_s_hidden_link_still_cannot_outlive_it() {
         .expect("PDFium should open the document");
     let options = FileOptions {
         smart_padding: false,
-        per_file_bookmarks: false,
     };
 
     // Taken straight from the file, which goes once its pages are in.
