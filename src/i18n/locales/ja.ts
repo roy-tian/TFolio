@@ -596,8 +596,6 @@ const ja = {
     unfoldItem: "{{name}} を展開",
     foldAll: "すべてのファイルを折りたたむ",
     nothingToFold: "折りたたむ項目がありません",
-    allFolded: "すべて折りたたまれています",
-    nothingFolded: "折りたたまれた項目はありません",
     lastFile: "文書には少なくとも 1 つのファイルが必要なため、最後のファイルは削除できません",
     unfoldAll: "すべてのファイルを展開",
     foldBookmarks: "すべてのしおりを折りたたむ",

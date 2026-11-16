@@ -594,8 +594,6 @@ const pt = {
     unfoldItem: "Expandir {{name}}",
     foldAll: "Recolher todos os arquivos",
     nothingToFold: "Nada para recolher aqui",
-    allFolded: "Tudo já está recolhido",
-    nothingFolded: "Nada está recolhido",
     lastFile: "Um documento mantém pelo menos um arquivo, então o último não pode ser removido",
     unfoldAll: "Expandir todos os arquivos",
     foldBookmarks: "Recolher todos os marcadores",

@@ -111,6 +111,44 @@ function dragEdge(by: number, escape = false) {
   )
 }
 
+function doubleClickEdge() {
+  return browser.execute((selector: string) => {
+    document.querySelector(selector)!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
+  }, handle)
+}
+
+/** The reader's own scroll of the sidebar's pages, a page's cell brought near
+    the top. */
+function scrollPagesTo(pageNumber: number) {
+  return browser.execute(
+    (scope: string, selector: string) => {
+      const list = document.querySelector<HTMLElement>(`${scope} [data-thumbnail-scroll-root]`)!
+      const cell = document.querySelector(selector)!.closest("li")!
+      const top = cell.getBoundingClientRect().top - list.getBoundingClientRect().top
+
+      list.scrollBy({ behavior: "instant", top: top - 20 })
+    },
+    activeSidebar,
+    preview(pageNumber),
+  )
+}
+
+/** How far below the top of the sidebar's view a page's preview stands. */
+function previewTop(pageNumber: number) {
+  return browser.execute(
+    (scope: string, selector: string) => {
+      const list = document.querySelector(`${scope} [data-thumbnail-scroll-root]`)!
+
+      return Math.round(
+        document.querySelector(selector)!.getBoundingClientRect().top -
+          list.getBoundingClientRect().top,
+      )
+    },
+    activeSidebar,
+    preview(pageNumber),
+  )
+}
+
 /** Over the left edge of the target's cell is the gap before it. */
 function dragThumbBefore(from: number, target: number) {
   return browser.execute(
@@ -298,6 +336,26 @@ function viewerPage(pageNumber: number) {
   )
 }
 
+/** How far right of the viewer's middle a page's middle stands, and whether
+    the viewer scrolls across at all. */
+function acrossViewer(pageNumber: number) {
+  return browser.execute(
+    (scope: string, page: number) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+      const box = viewer.querySelector(`[data-page-number='${page}']`)!.getBoundingClientRect()
+      const view = viewer.getBoundingClientRect()
+
+      return {
+        offCentre: Math.round(box.left + box.width / 2 - (view.left + view.width / 2)),
+        overflows: viewer.scrollWidth > viewer.clientWidth,
+        width: Math.round(box.width),
+      }
+    },
+    session,
+    pageNumber,
+  )
+}
+
 /** Wide enough for rows of two, and no wider than the suite's window lets a
     docked sidebar go. */
 const TWO_COLUMNS = 440
@@ -349,12 +407,6 @@ describe("TFolio sidebar pages", () => {
   it("goes back to its narrowest on a double-click, and from there out to the pages' width", async () => {
     await openPdfFromDisk("halves.pdf", bandedPdf(4))
     await settledBands(4)
-    const doubleClick = () =>
-      browser.execute((selector: string) => {
-        document
-          .querySelector(selector)!
-          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
-      }, handle)
     const halves = () =>
       browser.execute((scope: string) => {
         const sidebar = document.querySelector(scope)!.getBoundingClientRect().width
@@ -363,19 +415,56 @@ describe("TFolio sidebar pages", () => {
 
     await dragEdge(60)
     await browser.waitUntil(async () => (await sidebarWidth()) > 300)
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256, {
       timeoutMsg: "the sidebar never went back to its narrowest",
     })
 
     // As wide as the pages beside it, where the window leaves them their room.
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) > 256)
     const { pages, sidebar } = await halves()
     expect(Math.abs(pages - sidebar)).toBeLessThanOrEqual(1)
 
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256)
+  })
+
+  it("keeps the pages in view, and the reader's page, where they stood as its columns change", async () => {
+    await openPdfFromDisk("long.pdf", bandedPdf(90))
+    await $(`${preview(1)} canvas[data-rendered='true']`).waitForExist({ timeout: 30_000 })
+
+    // Far down the column, the reader's page left out of view above.
+    await scrollPagesTo(40)
+    await $(`${preview(40)} canvas[data-rendered='true']`).waitForExist({ timeout: 30_000 })
+    const shown = await previewTop(40)
+    await browser.execute((selector: string) => {
+      const canvas = document.querySelector(`${selector} canvas`)!
+      const seen = window as Window & { __released?: boolean }
+
+      seen.__released = false
+      new MutationObserver(() => {
+        seen.__released ||= canvas.getAttribute("data-rendered") !== "true"
+      }).observe(canvas, { attributeFilter: ["data-rendered"] })
+    }, preview(40))
+
+    await doubleClickEdge()
+    await browser.waitUntil(async () => (await columns()) === 3)
+    expect(Math.abs((await previewTop(40)) - shown)).toBeLessThanOrEqual(1)
+    // Still in view, it keeps its pixels: none of it has to render again.
+    await browser.pause(500)
+    expect(
+      await browser.execute(() => (window as Window & { __released?: boolean }).__released),
+    ).toBe(false)
+
+    // The reader's page, chosen lower down, holds its place rather than the first.
+    await $(preview(44)).click()
+    await $(`${preview(44)}[aria-current='page']`).waitForExist()
+    const reading = await previewTop(44)
+
+    await doubleClickEdge()
+    await browser.waitUntil(async () => (await columns()) === 1)
+    expect(Math.abs((await previewTop(44)) - reading)).toBeLessThanOrEqual(1)
   })
 
   it("gives book view up as the reader widens the sidebar to the pages' width", async () => {
@@ -385,16 +474,10 @@ describe("TFolio sidebar pages", () => {
     await settledBands(4)
     const spreads = () =>
       browser.execute((scope: string) => document.querySelectorAll(`${scope} [data-book-spread]`).length, session)
-    const doubleClick = () =>
-      browser.execute((selector: string) => {
-        document
-          .querySelector(selector)!
-          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))
-      }, handle)
 
     await browser.waitUntil(async () => (await spreads()) > 0)
     // From its narrowest out to the pages' width, which leaves them half.
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await spreads()) === 0, {
       timeoutMsg: "book view stayed beside a sidebar half the window wide",
     })
@@ -406,10 +489,10 @@ describe("TFolio sidebar pages", () => {
     expect(await spreads()).toBeGreaterThan(0)
 
     // Narrowed, then widened again: given up again.
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await sidebarWidth()) === 256)
     expect(await spreads()).toBeGreaterThan(0)
-    await doubleClick()
+    await doubleClickEdge()
     await browser.waitUntil(async () => (await spreads()) === 0, {
       timeoutMsg: "book view stayed after the second widening",
     })
@@ -605,6 +688,82 @@ describe("TFolio sidebar pages", () => {
     expect(await shape(3)).toBe("portrait")
     expect(await pageStatus()).toBe("Page 4 of 4")
     expect(await selectedThumbs()).toEqual([4])
+  })
+
+  it("keeps a zoomed page centred across through each of its turns", async () => {
+    // Landscape at 100%: wider than the viewer either way up (1587 or 1123
+    // px), so each turn moves the offset that centres it. Kept as it was, the
+    // offset left every turn off centre, a whole turn's too, once clamped.
+    // Alone, so no other page holds the column at its width.
+    await openPdfFromDisk("centred-turns.pdf", minimalPdf(1, "0 0 1190 842"))
+    await $(preview(1)).waitForExist({ timeout: 30_000 })
+    await $(`${session} [data-slot='zoom-controls-readout']`).click()
+    await expect($(`${session} [data-slot='zoom-controls']`)).toHaveAttribute(
+      "aria-label",
+      "Zoom 100%",
+    )
+    await browser.waitUntil(async () => (await acrossViewer(1)).overflows, {
+      timeoutMsg: "the page never grew wider than the viewer",
+    })
+    await browser.execute(
+      (scope: string, by: number) => {
+        document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!.scrollLeft += by
+      },
+      session,
+      (await acrossViewer(1)).offCentre,
+    )
+    expect(Math.abs((await acrossViewer(1)).offCentre)).toBeLessThanOrEqual(1)
+
+    for (let turn = 1; turn <= 4; turn += 1) {
+      const { width } = await acrossViewer(1)
+
+      await pressControl(1, "[data-page-action='rotate-right']")
+      await browser.waitUntil(async () => (await acrossViewer(1)).width !== width, {
+        timeoutMsg: `turn ${turn} never reshaped the page`,
+      })
+      await browser.pause(300)
+      expect(Math.abs((await acrossViewer(1)).offCentre)).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it("leaves the view where it stands across when a turn keeps the column's width", async () => {
+    // At 100% the wide second page sets the column's width, which the first
+    // page, turned, stays inside.
+    await openPdfFromDisk(
+      "column-held.pdf",
+      minimalPdf(2, (index) => (index === 0 ? "0 0 595 842" : "0 0 1190 842")),
+    )
+    await $(preview(2)).waitForExist({ timeout: 30_000 })
+    await $(`${session} [data-slot='zoom-controls-readout']`).click()
+    await expect($(`${session} [data-slot='zoom-controls']`)).toHaveAttribute(
+      "aria-label",
+      "Zoom 100%",
+    )
+    await browser.waitUntil(async () => (await acrossViewer(1)).overflows, {
+      timeoutMsg: "the second page never grew wider than the viewer",
+    })
+    // Off the axis, where holding a share of the turned page would move it.
+    const scrolled = await browser.execute((scope: string) => {
+      const viewer = document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!
+
+      viewer.scrollLeft = (viewer.scrollWidth - viewer.clientWidth) / 2 + 100
+
+      return viewer.scrollLeft
+    }, session)
+    const { width } = await acrossViewer(1)
+
+    await pressControl(1, "[data-page-action='rotate-right']")
+    await browser.waitUntil(async () => (await acrossViewer(1)).width !== width, {
+      timeoutMsg: "the turn never reshaped the page",
+    })
+    await browser.pause(300)
+    expect(
+      await browser.execute(
+        (scope: string) =>
+          document.querySelector<HTMLElement>(`${scope} [data-pdf-scroll-root]`)!.scrollLeft,
+        session,
+      ),
+    ).toBe(scrolled)
   })
 
   it("holds the page being read, and the page its fit measures, through edits above it", async () => {

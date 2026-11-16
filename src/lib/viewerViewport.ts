@@ -25,6 +25,14 @@ export function viewerReadingBounds(viewer: HTMLElement) {
   )
 }
 
+/** Where on screen the pages' column has its axis, on which every page and
+    spread is centred. */
+export function viewerColumnAxis(viewer: HTMLElement) {
+  const column = (viewer.querySelector("[data-pdf-viewer-layout]") ?? viewer).getBoundingClientRect()
+
+  return column.left + column.width / 2
+}
+
 let scrollbarGutter: number | undefined
 
 /** What the vertical scrollbar takes, shown or not: nothing where the app draws

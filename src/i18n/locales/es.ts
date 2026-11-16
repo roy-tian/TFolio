@@ -592,8 +592,6 @@ const es = {
     unfoldItem: "Expandir {{name}}",
     foldAll: "Contraer todos los archivos",
     nothingToFold: "Aquí no hay nada que contraer",
-    allFolded: "Ya está todo contraído",
-    nothingFolded: "No hay nada contraído",
     lastFile: "Un documento conserva al menos un archivo: no se puede quitar el último",
     unfoldAll: "Expandir todos los archivos",
     foldBookmarks: "Contraer todos los marcadores",

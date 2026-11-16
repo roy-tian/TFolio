@@ -119,6 +119,9 @@
   WebKit restyle the whole document per DOM change or focus. Ship no breakpoint wider than the
   window's `minWidth` either (`sm:` is the widest; no `md:` and up, no `container`): Chromium
   restyles everything when a resize flips one. `toolbar-tooltips.e2e.ts` guards.
+- Smooth jumps (`scrollIntoView` and the like) take WebKit's 200 ms however far. WebView2's
+  own grows to 1.5 s, so `tauri.conf.json`'s `additionalBrowserArgs` caps it at the same 200 ms.
+  That setting replaces wry's default `--disable-features` list, so it restates that list too.
 - The borderless window keeps its outer 5px for resizing on Linux: no pointer event reaches the
   WebView there, so a bar or handle at the edge sits clear of it, and a native-pointer move
   aimed there shows nothing.
@@ -148,7 +151,9 @@
 - Render in Rust; send images as raw IPC binary decoded by `createImageBitmap` in the decode
   worker (`imageDecode.ts`), never `blob:`. Page canvases are `bitmaprenderer` canvases: read
   pixels through a 2d copy, and release bitmaps with `transferFromImageBitmap(null)`, since
-  resizing keeps them.
+  resizing keeps them. A turned page takes its new shape before its new render lands: its
+  canvas shows the bitmap it holds turned and fitted, and drops that turn under `flushSync`
+  in the task the replacement lands in.
 
 ## PDF editing and cancellation
 
@@ -226,8 +231,9 @@
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
   print show them there, and only a Save As writes them. Structure commands never see them. A
-  drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
-  step with `SectionBook::padding`).
+  drag of pages shows them where its drop would leave them by the same rule (`paddingPositions`,
+  kept in step with `SectionBook::padding`); a file carried by its name folds them away with
+  every file's pages until it lands.
 - The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
   fixed-size cells once widened (`ui.sidebarWidth`), every page in a square as wide as a paper's
   long side, so a turn moves no other page. Each page's hover bar sits on its square's bottom,
@@ -253,7 +259,10 @@
   `flowItems`): a drop lands above or below it, never inside. `flowLanding` counts cells, so
   every landing goes through `pagesBeforeSlot` before it names a page. Folding is a tab's own
   state, kept while the sidebar shows something else, never a stored preference, and lets go of
-  the pages chosen in the file: none is deleted or cut unseen.
+  the pages chosen in the file: none is deleted or cut unseen. A file carried by its name folds
+  every file to its name until it lands, as the outline's drag does, then the tab's folds stand
+  again: its name stays under the pointer, its ghost is that name alone, and no name answers the
+  pointer meanwhile.
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
 - File sources are read-only and are not documents: no `record_document`, recent files, save

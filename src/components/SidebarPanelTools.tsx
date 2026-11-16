@@ -19,49 +19,33 @@ export type FoldAll = {
 }
 
 type SidebarPanelToolsProps = {
-  /** A panel's own tools, before the fold buttons, which then end the bar at
+  /** A panel's own tools, before the fold button, which then ends the bar at
       the same place over either panel. */
   children?: ReactNode
   fold: FoldAll
 }
 
 /** The end of each sidebar panel's bar, the same over the pages and the
-    outline: folding everything there is to fold, and unfolding it all. */
+    outline: one button folding everything there is to fold, and unfolding it
+    all once nothing shown is left to fold. */
 export function SidebarPanelTools({ children, fold }: SidebarPanelToolsProps) {
   const { t } = useTranslation()
-  // Greyed, each says why: nothing to fold, all folded, or nothing folded.
-  const foldLabel = fold.canFold
-    ? fold.foldLabel
-    : fold.canUnfold
-      ? t("sidebar.allFolded")
-      : t("sidebar.nothingToFold")
-  const unfoldLabel = fold.canUnfold ? fold.unfoldLabel : t("sidebar.nothingFolded")
+  const folds = fold.canFold || !fold.canUnfold
+  const label = folds ? fold.foldLabel : fold.unfoldLabel
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-0.5">
       {children}
-      <ToolbarTooltip label={foldLabel}>
+      <ToolbarTooltip label={fold.canFold || fold.canUnfold ? label : t("sidebar.nothingToFold")}>
         <Button
-          aria-label={fold.foldLabel}
+          aria-label={label}
           data-slot="sidebar-fold-all"
-          disabled={!fold.canFold}
-          onClick={() => fold.onFold(true)}
+          disabled={!fold.canFold && !fold.canUnfold}
+          onClick={() => fold.onFold(folds)}
           size="icon-sm"
           variant="ghost"
         >
-          <ChevronsDownUp />
-        </Button>
-      </ToolbarTooltip>
-      <ToolbarTooltip label={unfoldLabel}>
-        <Button
-          aria-label={fold.unfoldLabel}
-          data-slot="sidebar-unfold-all"
-          disabled={!fold.canUnfold}
-          onClick={() => fold.onFold(false)}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <ChevronsUpDown />
+          {folds ? <ChevronsDownUp /> : <ChevronsUpDown />}
         </Button>
       </ToolbarTooltip>
     </div>
@@ -77,8 +61,8 @@ export function OutlineBar(props: SidebarPanelToolsProps) {
   )
 }
 
-/** In words, under either panel: an icon among the fold buttons was taken
-    for one of them. While a file drag offers the sidebar, the words say what
+/** In words, under either panel: an icon in the bars was taken for a fold
+    button. While a file drag offers the sidebar, the words say what
     a drop does instead: down here they cover neither the bars' buttons nor
     the first file's name. */
 export function AddFilesButton({ dropLabel, onClick }: { dropLabel: string; onClick: () => void }) {

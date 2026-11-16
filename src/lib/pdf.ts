@@ -302,6 +302,22 @@ export function dimensionsForRotation(
     : { height, width }
 }
 
+/** Turns pixels painted at `paintedRotation`, `painted` in size, on to
+    `rotation` and fits them inside `box`, until a render of the page as it
+    now stands replaces them. */
+export function heldPixelsTransform(
+  paintedRotation: number,
+  rotation: number,
+  painted: { height: number; width: number },
+  box: { height: number; width: number },
+) {
+  const turn = (rotation - paintedRotation + 360) % 360
+  const footprint = dimensionsForRotation(turn, painted.width, painted.height)
+  const fit = Math.min(box.width / footprint.width, box.height / footprint.height)
+
+  return `rotate(${turn}deg) scale(${fit})`
+}
+
 /**
  * PDFium's ordinary anti-aliasing reads visibly soft at one backing pixel
  * per CSS pixel, so low-DPI surfaces supersample to this instead of 2x.
@@ -349,9 +365,10 @@ function visibleFraction(
     scroll offset where it came to show the page, null until it has. */
 export type JumpTarget = { landedTop: number | null; page: number; since: number }
 
-// Several times what a smooth jump takes in WebKitGTK (about 0.3 s, however
-// far): until then the jump is still arriving, and one that never showed its
-// page by then was taken elsewhere by the reader.
+// Several times what a smooth jump takes (0.2 s however far: WebKit's cap, and
+// WebView2's through `additionalBrowserArgs`): until then the jump is still
+// arriving, and one that never showed its page by then was taken elsewhere by
+// the reader.
 export const JUMP_ARRIVAL_MS = 1500
 // How far the view may move from where a jump landed, as a share of its
 // height, before the reader counts as having read on from the page.
