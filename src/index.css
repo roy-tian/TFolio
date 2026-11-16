@@ -273,6 +273,15 @@ body {
 
   .native-workspace .app-sidebar[data-sidebar-mode="docked"] {
     background-color: color-mix(in oklab, var(--sidebar) 45%, transparent);
+    /* The modal backdrop's fade. */
+    transition: background-color 100ms;
+  }
+
+  /* A modal's backdrop blurs a copy of what lies beneath and draws it over the
+     original; over the desktop that copy is as see-through as the sidebar, and
+     the sidebar's sharp words would show through it. */
+  .native-workspace[data-modal-open] .app-sidebar[data-sidebar-mode="docked"] {
+    background-color: var(--sidebar);
   }
 }
 

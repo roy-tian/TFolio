@@ -1,7 +1,7 @@
 import { $, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import { minimalPdf, openPdfFromDisk, refreshApp, seedSettings } from "./helpers"
+import { clickAppMenuItem, minimalPdf, openPdfFromDisk, refreshApp, seedSettings } from "./helpers"
 import { calibratePointer, pointer } from "./nativePointer"
 
 const session = "[data-document-session][data-active='true']"
@@ -120,5 +120,44 @@ describe("TFolio viewer controls", () => {
     await browser.waitUntil(async () => (await pageWidth()) > widthAtActualSize, {
       timeoutMsg: "the pages were never laid out at the dragged zoom",
     })
+  })
+
+  // Windows and macOS let the desktop through the docked sidebar; a modal's
+  // blurred copy of it would be as see-through, leaving its words sharp.
+  it("makes the see-through sidebar solid under a modal", async () => {
+    const sidebar = "[data-slot='app-sidebar']"
+    // As the opaque sidebar would paint, and how the see-through one compares.
+    const ground = () =>
+      browser.execute((css: string) => {
+        const aside = document.querySelector<HTMLElement>(`${css}[data-sidebar-mode='docked']`)!
+        const probe = document.createElement("div")
+        probe.style.backgroundColor = "var(--sidebar)"
+        document.body.append(probe)
+        const solid = getComputedStyle(probe).backgroundColor
+        probe.remove()
+        return getComputedStyle(aside).backgroundColor === solid
+      }, sidebar)
+
+    await browser.execute(() => document.documentElement.classList.add("native-workspace"))
+    try {
+      await browser.waitUntil(async () => !(await ground()), {
+        timeoutMsg: "the docked sidebar never let the desktop through",
+      })
+
+      await clickAppMenuItem("settings")
+      await $("[data-slot='dialog-content']").waitForDisplayed({ timeout: 15_000 })
+      await browser.waitUntil(ground, { timeoutMsg: "the sidebar stayed see-through under the modal" })
+
+      await browser.keys("Escape")
+      await $("[data-slot='dialog-content']").waitForDisplayed({ reverse: true, timeout: 15_000 })
+      await browser.waitUntil(async () => !(await ground()), {
+        timeoutMsg: "the sidebar stayed solid once the modal went",
+      })
+      expect(
+        await browser.execute(() => "modalOpen" in document.documentElement.dataset),
+      ).toBe(false)
+    } finally {
+      await browser.execute(() => document.documentElement.classList.remove("native-workspace"))
+    }
   })
 })
