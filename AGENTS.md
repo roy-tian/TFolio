@@ -231,8 +231,9 @@
 - Blank pages between files are never pages of the document: the engine reports where a Save As
   will put them (`SectionBook::padding`) with every structure change, the viewer, sidebar and
   print show them there, and only a Save As writes them. Structure commands never see them. A
-  drag shows them where its drop would leave them by the same rule (`paddingPositions`, kept in
-  step with `SectionBook::padding`).
+  drag of pages shows them where its drop would leave them by the same rule (`paddingPositions`,
+  kept in step with `SectionBook::padding`); a file carried by its name folds them away with
+  every file's pages until it lands.
 - The sidebar's pages are the one place pages are arranged: one column as it opens, rows of
   fixed-size cells once widened (`ui.sidebarWidth`), every page in a square as wide as a paper's
   long side, so a turn moves no other page. Each page's hover bar sits on its square's bottom,
@@ -258,7 +259,10 @@
   `flowItems`): a drop lands above or below it, never inside. `flowLanding` counts cells, so
   every landing goes through `pagesBeforeSlot` before it names a page. Folding is a tab's own
   state, kept while the sidebar shows something else, never a stored preference, and lets go of
-  the pages chosen in the file: none is deleted or cut unseen.
+  the pages chosen in the file: none is deleted or cut unseen. A file carried by its name folds
+  every file to its name until it lands, as the outline's drag does, then the tab's folds stand
+  again: its name stays under the pointer, its ghost is that name alone, and no name answers the
+  pointer meanwhile.
 - Pages still showing as several files keep the document Save-As-only even with no foreign page
   left, so a save never drops the blanks and file bookmarks the reader sees.
 - File sources are read-only and are not documents: no `record_document`, recent files, save

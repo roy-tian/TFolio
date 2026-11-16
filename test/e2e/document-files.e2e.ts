@@ -787,7 +787,8 @@ describe("TFolio files added to an open document", () => {
       { timeoutMsg: "the name never went to its file's first page" },
     )
 
-    await dragOnto(fileName(2), `${activeSidebar} button[data-thumbnail-page='1']`, "top")
+    // Carried by its name, among the names every file folds to meanwhile.
+    await dragOnto(fileName(2), `${activeSidebar} [data-section-header='0']`, "top")
     await browser.waitUntil(
       async () => (await headings()).join() === "second.pdf,own.pdf,first.pdf",
       { timeout: 15_000, timeoutMsg: "the file never moved whole to the front" },
@@ -796,6 +797,99 @@ describe("TFolio files added to an open document", () => {
     await browser.keys(["Control", "z"])
     await browser.waitUntil(
       async () => (await headings()).join() === "own.pdf,first.pdf,second.pdf",
+    )
+  })
+
+  it("folds every file to its name while one is carried by it, which shows as that name", async () => {
+    await openPdfFromDisk("own.pdf", minimalPdf(1))
+    await addFilesFromPicker([
+      writeScratchPdf("first.pdf", minimalPdf(2)),
+      writeScratchPdf("second.pdf", minimalPdf(1)),
+    ])
+    await waitForPages(4)
+    // The reader's own fold, which the carry leaves as it found it.
+    await press(`${activeSidebar} [data-section-header='2'] [data-fold-toggle]`)
+    await waitForPages(3)
+
+    const pointer = await browser.execute((selector: string) => {
+      const name = document.querySelector(selector)!
+      const box = name.getBoundingClientRect()
+      const start = { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+
+      name.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: start.x,
+          clientY: start.y,
+          isPrimary: true,
+        }),
+      )
+      document.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: start.x,
+          clientY: start.y + 12,
+          isPrimary: true,
+        }),
+      )
+
+      return { x: start.x, y: start.y + 12 }
+    }, fileName(1))
+
+    await waitForPages(0)
+    expect(await headings()).toEqual(["own.pdf", "first.pdf", "second.pdf"])
+    expect(
+      await browser.execute(
+        (scope: string, y: number) => {
+          const ghost = document.querySelector<HTMLElement>("[data-drag-ghost]")
+          const held = document
+            .querySelector(`${scope} [data-section-header='1']`)!
+            .getBoundingClientRect()
+
+          return {
+            // Its name alone: no page, no stack, no count.
+            ghost: ghost?.textContent ?? null,
+            // Kept under the pointer as the names above it folded.
+            held: held.top <= y && y <= held.bottom,
+            // Nothing in hand lands on a name, so none answers the pointer.
+            names: Array.from(
+              document.querySelectorAll(`${scope} [data-section-header]`),
+              (heading) => getComputedStyle(heading).pointerEvents,
+            ),
+          }
+        },
+        activeSidebar,
+        pointer.y,
+      ),
+    ).toEqual({ ghost: "first.pdf", held: true, names: ["none", "none", "none"] })
+
+    await browser.execute((selector: string) => {
+      const box = document.querySelector(selector)!.getBoundingClientRect()
+
+      for (const type of ["pointermove", "pointerup"]) {
+        document.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            clientX: box.left + box.width / 2,
+            clientY: box.top + 3,
+            isPrimary: true,
+          }),
+        )
+      }
+    }, `${activeSidebar} [data-section-header='0']`)
+    await browser.waitUntil(
+      async () => (await headings()).join() === "first.pdf,own.pdf,second.pdf",
+      { timeout: 15_000, timeoutMsg: "the carried file never moved to the front" },
+    )
+    // The pages show again, under the folds the reader had.
+    await waitForPages(3)
+    expect(await pageFiles()).toEqual(["first.pdf", "first.pdf", "own.pdf"])
+
+    await browser.keys(["Control", "z"])
+    await browser.waitUntil(
+      async () => (await headings()).join() === "own.pdf,first.pdf,second.pdf",
+      { timeout: 15_000, timeoutMsg: "undo never put the file back" },
     )
   })
 
@@ -1022,7 +1116,7 @@ function holdPageBefore(scope: string, from: number, over: number) {
 }
 
 /** Presses `from` — a page, or a file's name — and holds it at the top of
-    `over` without letting go. */
+    `over`, as `over` stood when pressed, without letting go. */
 function holdBefore(from: string, over: string) {
   return browser.execute(
     (fromSelector: string, overSelector: string) => {
@@ -1093,25 +1187,26 @@ describe("TFolio blank pages between files", () => {
     await refreshApp()
   })
 
-  it("lays the blanks out where a file in hand would leave them, and lets go there", async () => {
+  it("folds the blanks away with the pages while a file is in hand, and lays them out once it lands", async () => {
     await openPdfFromDisk("own.pdf", minimalPdf(1))
     await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
     await waitForPages(3)
     // One page, so the added file would start on page 2: a blank closes it.
     await browser.waitUntil(async () => (await blanksIn(activeSidebar)).join() === "1")
 
-    // The added file held whole at the top: two pages, so the document's own
-    // starts on page 3 and needs no blank.
-    await holdBefore(fileName(1), `${activeSidebar} button[data-thumbnail-page='1']`)
-    await browser.waitUntil(async () => (await blanksIn(activeSidebar)).length === 0, {
-      timeoutMsg: "the held file never showed the blanks its drop would leave",
-    })
+    // Held by its name, every file is its name alone, blanks and all.
+    await holdBefore(fileName(1), `${activeSidebar} [data-section-header='0']`)
+    await waitForPages(0)
+    expect(await blanksIn(activeSidebar)).toEqual([])
 
+    // Let go at the top: two pages, so the document's own starts on page 3
+    // and needs no blank.
     await letGoOfPage()
     await browser.waitUntil(
       async () => (await headings()).join() === "added.pdf,own.pdf",
       { timeout: 15_000, timeoutMsg: "the held file never landed at the top" },
     )
+    await waitForPages(3)
     expect(await blanksIn(activeSidebar)).toEqual([])
   })
 

@@ -215,10 +215,11 @@ export function PaddingCell({
 
 /**
  * The name over a file's pages, in a document of several, as the outline's
- * row for the file: a press chooses the file, a drag carries it whole, its
- * arrow folds the pages away under it, and its count gives way to rename and
- * remove under the pointer. Folded, it is a cell of the flow that stands for
- * the pages — a bar a drop lands above or below.
+ * row for the file: a press chooses the file, a drag carries it whole, every
+ * file folded to its name meanwhile, its arrow folds the pages away under it,
+ * and its count gives way to rename and remove under the pointer. Folded, it
+ * is a cell of the flow that stands for the pages — a bar a drop lands above
+ * or below.
  */
 export function FileHeading({
   count,
@@ -268,8 +269,9 @@ export function FileHeading({
   return (
     <li
       // No flip key while its pages show: a heading is no page, and a drop
-      // counts none.
-      className="relative w-full basis-full"
+      // counts none. Nothing in hand lands on a name, so under a drag it
+      // neither lights up nor offers its tools.
+      className="relative w-full basis-full in-data-[pages-dragging]:pointer-events-none"
       data-flip-bar={folded ? "" : undefined}
       data-flip-key={folded ? flipKey : undefined}
       data-run-first={runFirst}

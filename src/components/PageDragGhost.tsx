@@ -1,4 +1,5 @@
 import { useImperativeHandle, useLayoutEffect, useRef, type Ref } from "react"
+import { FileText } from "lucide-react"
 import { createPortal } from "react-dom"
 
 import { DRAG_MOTION, prefersReducedMotion } from "@/lib/motion"
@@ -9,11 +10,15 @@ export type GhostPaper = {
       holds, as page bitmaps never become `blob:` URLs. */
   canvas: HTMLCanvasElement | null
   height: number
-  /** What is lifted with no canvas — a folded file, by its name — shows
-      that name instead. */
+  /** A file carried by its name: the ghost is that name alone, a strip like
+      the outline's, however many pages it holds. */
   label?: string
   width: number
 }
+
+// A name strip reaches this far left of the name it was lifted by, so its
+// padding puts the icon and the words over the name's own.
+const STRIP_INSET = 8
 
 export type PageDragGhostHandle = {
   /** Where the pointer is now, in client pixels. */
@@ -49,18 +54,19 @@ export function liftGhost(
   label?: string,
 ): PageDragGhostState {
   const box = paper.getBoundingClientRect()
+  const inset = label === undefined ? 0 : STRIP_INSET
 
   ghostsLifted += 1
 
   return {
     count,
-    grip: { x: box.left - start.x, y: box.top - start.y },
+    grip: { x: box.left - inset - start.x, y: box.top - start.y },
     id: ghostsLifted,
     paper: {
-      canvas: paper.querySelector("canvas"),
+      canvas: label === undefined ? paper.querySelector("canvas") : null,
       height: box.height,
       label,
-      width: box.width,
+      width: box.width + inset,
     },
     point,
   }
@@ -108,8 +114,9 @@ const stackTransform = (step: number) =>
 
 /**
  * The pages in hand: the pressed page lifted and tilted, a stack behind it for
- * more. It follows the pointer by writing its own transform, so the owner
- * re-renders only when the landing place changes, not on every pointer move.
+ * more; or a file carried by its name, as that name. It follows the pointer by
+ * writing its own transform, so the owner re-renders only when the landing
+ * place changes, not on every pointer move.
  */
 export function PageDragGhost({
   count,
@@ -125,6 +132,10 @@ export function PageDragGhost({
   point: { x: number; y: number }
   ref: Ref<PageDragGhostHandle>
 }) {
+  const strip = paper.label !== undefined
+  // Upright, as the outline's is: only a paper tilts as it is lifted.
+  const lifted = strip ? "none" : LIFTED
+  const stacked = count > 1 && !strip
   const frameRef = useRef<HTMLDivElement>(null)
   const liftRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -154,8 +165,8 @@ export function PageDragGhost({
         const vanish = () => [
           lift.animate(
             [
-              { opacity: 1, transform: LIFTED },
-              { opacity: 0, transform: "rotate(-2deg) scale(0.9)" },
+              { opacity: 1, transform: lifted },
+              { opacity: 0, transform: strip ? "scale(0.95)" : "rotate(-2deg) scale(0.9)" },
             ],
             { ...settle, duration: 160 },
           ),
@@ -164,11 +175,13 @@ export function PageDragGhost({
           frame.animate(
             [
               { transform: frame.style.transform },
-              { transform: `translate(${to.left}px, ${to.top}px)` },
+              {
+                transform: `translate(${to.left - (strip ? STRIP_INSET : 0)}px, ${to.top}px)`,
+              },
             ],
             settle,
           ),
-          lift.animate([{ transform: LIFTED }, { transform: "none" }], settle),
+          lift.animate([{ transform: lifted }, { transform: "none" }], settle),
           ...stackRefs.current.flatMap((card) =>
             card
               ? [
@@ -217,7 +230,7 @@ export function PageDragGhost({
 
     const pickup = { duration: 150, easing: "ease-out" }
 
-    liftRef.current?.animate([{ transform: "none" }, { transform: LIFTED }], pickup)
+    liftRef.current?.animate([{ transform: "none" }, { transform: lifted }], pickup)
     stackRefs.current.forEach((card, index) => {
       card?.animate(
         [
@@ -241,14 +254,14 @@ export function PageDragGhost({
       <div
         className="absolute inset-0"
         ref={liftRef}
-        style={{ transform: LIFTED, transformOrigin: `${-grip.x}px ${-grip.y}px` }}
+        style={{ transform: lifted, transformOrigin: `${-grip.x}px ${-grip.y}px` }}
       >
         {/* The faint `drop-shadow-xs` on each tilted card smooths its edges:
             WebKitGTK, and Chromium rastering on the GPU, paint a tilted box
             stair-stepped, but draw a filtered one upright and then resample
             it. An identity filter is skipped, and a filter blur costs frames,
             so box-shadows still cast the visible shadow. */}
-        {count > 1
+        {stacked
           ? STACK_STEPS.map((step, index) => (
               <div
                 className="absolute inset-0 bg-white opacity-70 shadow-md ring-1 ring-black/10 drop-shadow-xs"
@@ -260,19 +273,24 @@ export function PageDragGhost({
               />
             ))
           : null}
-        {/* Apart from the lead card: inside its filter, this wide shadow's
-            whole reach would be filtered again on every move. */}
-        <div className="absolute inset-0 shadow-2xl" />
-        <div className="absolute inset-0 grid place-items-center overflow-hidden bg-white text-xs text-zinc-400 ring-1 ring-black/10 drop-shadow-xs">
-          {paper.canvas ? (
-            <canvas className="absolute inset-0 block size-full" ref={canvasRef} />
-          ) : (
-            <span className="max-w-full truncate px-1 font-medium text-zinc-700">
-              {paper.label}
-            </span>
-          )}
-        </div>
-        {count > 1 ? (
+        {strip ? (
+          <div className="absolute inset-0 flex items-center gap-2 rounded-md bg-background px-2 text-sm font-medium shadow-lg ring-1 ring-border">
+            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{paper.label}</span>
+          </div>
+        ) : (
+          <>
+            {/* Apart from the lead card: inside its filter, this wide shadow's
+                whole reach would be filtered again on every move. */}
+            <div className="absolute inset-0 shadow-2xl" />
+            <div className="absolute inset-0 overflow-hidden bg-white ring-1 ring-black/10 drop-shadow-xs">
+              {paper.canvas ? (
+                <canvas className="absolute inset-0 block size-full" ref={canvasRef} />
+              ) : null}
+            </div>
+          </>
+        )}
+        {stacked ? (
           <span
             className="absolute -top-2 -right-2 grid min-w-5 place-items-center rounded-full bg-primary px-1 py-0.5 font-mono text-xs font-semibold text-primary-foreground tabular-nums shadow-md"
             ref={badgeRef}

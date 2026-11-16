@@ -101,6 +101,34 @@ function restingTop(element: HTMLElement, flow: HTMLElement) {
   return top
 }
 
+/** Scrolls `view` until `element` stands at `top` on screen again, padding the
+    view where its scroll cannot reach that far; returns what takes the
+    padding back. */
+function holdAt(view: HTMLElement, element: HTMLElement, top: number) {
+  const drift = () => element.getBoundingClientRect().top - top
+
+  view.scrollBy({ behavior: "instant", top: drift() })
+
+  const left = drift()
+
+  if (Math.abs(left) < 1) {
+    return null
+  }
+
+  const side = left < 0 ? "paddingTop" : "paddingBottom"
+  const inline = view.style[side]
+
+  view.style[side] = `${(parseFloat(getComputedStyle(view)[side]) || 0) + Math.abs(left)}px`
+
+  if (left > 0) {
+    view.scrollBy({ behavior: "instant", top: left })
+  }
+
+  return () => {
+    view.style[side] = inline
+  }
+}
+
 export type PageThumbnailsHandle = {
   /** Where files let go at a point on screen would go: the count of pages
       before them, the page count past the last. */
@@ -114,6 +142,9 @@ type ColumnDrag = {
   /** Where among the pages that stay the block lands, or null while the
       pointer is away and every page stands where it was. */
   at: number | null
+  /** A file carried whole by its name: every file folds to its name until it
+      lands, as the outline's do, so the files are a list to put in order. */
+  file?: number
   moving: number[]
 }
 
@@ -273,8 +304,10 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   const [landing, setLanding] = useState<{
     /** Where the ghost lands instead, outside this column; null fades it. */
     box?: { left: number; top: number } | null
+    /** The file carried by its name, whose pages show again once it lands. */
+    file?: number
     /** The flip key of the cell the ghost lands on: the pressed page's
-        hole, or the bar of a folded file carried whole. */
+        hole, or the bar of the file carried whole. */
     leadKey: string
     onLanded?: () => void
     settled: Promise<unknown>
@@ -419,6 +452,14 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     viewRef: listRef,
   })
   const ghostRef = useRef<PageDragGhostHandle>(null)
+  // The name a file was lifted by, and where it stood on screen: it stays
+  // under the pointer as every file folds to its name.
+  const liftedNameRef = useRef<{ file: number; top: number } | null>(null)
+  // Where the file carried by its name was let go, its name to stay there as
+  // the files show their pages again.
+  const landedNameRef = useRef<{ file: number; top: number } | null>(null)
+  // Takes back the room a lifted name was held in place by.
+  const unpadRef = useRef<(() => void) | null>(null)
   // From a release until the column is its own again, a press is no drag.
   const settlingRef = useRef(false)
   const draggedAtRef = useRef(0)
@@ -441,12 +482,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   const fittedColumnsRef = useRef(columns)
   const grid = columns > 1
   const numPages = pages.length
-  const { prime } = useFlipLayout(
+  const { forget, prime } = useFlipLayout(
     columnRef,
     drag !== null || ghost !== null || incoming !== null,
     thumbnailKeys,
   )
   primeRef.current = prime
+  const filesInHand = drag?.file !== undefined
   const order =
     drag?.basis === pages && drag.at !== null
       ? orderWithBlockAt(drag.moving, drag.at, numPages)
@@ -613,6 +655,50 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   // which wins where both move the column.
   useReflowAnchor(listRef, columnRef, columns, () => cellOf(current))
 
+  const fileNameOf = useCallback(
+    (file: number) =>
+      columnRef.current?.querySelector<HTMLElement>(`[data-section-header="${file}"]`) ?? null,
+    [],
+  )
+
+  // A file carried by its name folds every file to its name, its own held
+  // under the pointer; once it lands, they show their pages again, its name
+  // left where it was let go. After the flip layout's own effect, which the
+  // fold neither slides nor fades, and before the reader's page is followed,
+  // which wins where both move the column.
+  useLayoutEffect(() => {
+    const list = listRef.current
+    const column = columnRef.current
+    // Hidden, the drag having opened another tab, it has no place to keep.
+    const shown = list !== null && list.getClientRects().length > 0
+
+    if (filesInHand) {
+      const lifted = liftedNameRef.current
+      const name = lifted ? fileNameOf(lifted.file) : null
+
+      liftedNameRef.current = null
+
+      if (list && shown && lifted && name) {
+        unpadRef.current = holdAt(list, name, lifted.top)
+      }
+
+      // The bars slide from here on, as the landing moves among them.
+      prime()
+      return
+    }
+
+    const landed = landedNameRef.current
+    const name = landed ? fileNameOf(landed.file) : null
+
+    landedNameRef.current = null
+    unpadRef.current?.()
+    unpadRef.current = null
+
+    if (list && column && shown && landed && name) {
+      list.scrollBy({ behavior: "instant", top: restingTop(name, column) - landed.top })
+    }
+  }, [fileNameOf, filesInHand, prime])
+
   // Before the page, the file it joins is that page's; after the last, the
   // last page's.
   const insertBlank = useCallback((pageNumber: number, side: "before" | "after") => {
@@ -708,12 +794,24 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       })
       .catch(() => {})
       .then(() => {
+        const { file } = landing
+
+        if (file !== undefined) {
+          const name = fileNameOf(file)
+
+          // The pages come back under a scroll held still, not sliding out
+          // of the bars they were folded under.
+          forget()
+          // Where it rests, not where a slide still running shows it.
+          landedNameRef.current = name ? { file, top: restingTop(name, column) } : null
+        }
+
         settlingRef.current = false
         setDrag(null)
         setLanding(null)
         setCarriedOut(false)
       })
-  }, [landing])
+  }, [fileNameOf, forget, landing])
 
   // A plain click both chooses the page and goes to it; Ctrl or Shift only
   // add to the choice, leaving the reader where they are.
@@ -834,15 +932,11 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
   const startDrag = (event: ReactPointerEvent) => {
     const target = event.target as Element
-    // A file's name carries the whole file, lifted by the first page under
-    // it, or by the name itself once its pages are folded away.
+    // A file's name carries the whole file, lifted by that name.
     const heading = target.closest<HTMLElement>("[data-section-header]")
     const wholeFile = heading ? Number(heading.dataset.sectionHeader) : undefined
-    const foldedFile = heading?.dataset.flipBar !== undefined
     const paper = heading
-      ? foldedFile
-        ? heading.querySelector<HTMLElement>(FILE_HEADING_NAME)
-        : heading.nextElementSibling?.querySelector<HTMLElement>("[data-thumbnail-page]")
+      ? heading.querySelector<HTMLElement>(FILE_HEADING_NAME)
       : target.closest<HTMLElement>("[data-thumbnail-page]")
     const list = listRef.current
     const column = columnRef.current
@@ -864,8 +958,9 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       return
     }
 
-    const pressed = foldedFile
-      ? Number(heading!.dataset.runFirst)
+    // A file by the first page under its name.
+    const pressed = heading
+      ? Number(heading.dataset.runFirst)
       : Number(paper.dataset.thumbnailPage)
     const basis = pagesRef.current
     const keys = keysRef.current
@@ -874,17 +969,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
     let moving: number[] | null = null
     let held: ReadonlySet<number> = NO_PAGES
     let movingKeys: ReadonlySet<string> = new Set()
+    // The cell the ghost lands on: the pressed page's, or the file's bar.
     let leadKey = ""
-    // Where the ghost goes back to when nothing moves: a folded file parted
-    // in two stands as two bars again, and it was lifted by one of them.
-    let homeKey = ""
     let carried: CarriedPages | null = null
     // Out over the tab strip or another tab's column, where the window answers.
     let carrying = false
     let at: number | null = null
-    // `at` as the flow counts it, by cells: a folded file is one, of many
-    // pages. What the next landing is read against.
-    let slot: number | null = null
     let point = start
     // Where the landing was last read: the blanks it shows can move the rows
     // under a still pointer, and a release there keeps what is on screen.
@@ -923,20 +1013,20 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       // Cells only: a page leaving fades among them, keyless.
       const cells =
         home && pagesRef.current === basis ? measure((key) => movingKeys.has(key), held) : null
-
-      slot = cells ? flowLanding(pointInColumn(column, point), cells, slot) : null
-
+      // Where the block stands, as the flow counts it, by cells: a folded
+      // file is one, of many pages. Read against the flow as laid out now,
+      // which every file folding to its name has changed under the drag.
+      const standing = cells && at !== null ? slotOfPages(cells, at) : null
+      const slot = cells ? flowLanding(pointInColumn(column, point), cells, standing) : null
       // Pages stay in their file, and a file moves whole between the others.
       const next =
         cells && slot !== null
           ? landingInFile(basis, moving, pagesBeforeSlot(cells, slot))
           : null
 
-      slot = cells && next !== null ? slotOfPages(cells, next) : null
-
       if (next !== at) {
         at = next
-        setDrag({ at, basis, moving })
+        setDrag({ at, basis, file: wholeFile, moving })
       }
     }
     const edgeScroll = () => {
@@ -970,9 +1060,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
               : [pressed]
         held = new Set(moving)
         movingKeys = new Set(moving.map((pageNumber) => String(keyOf(pageNumber))))
-        homeKey = foldedFile ? foldedBarKey(keyOf(pressed)) : String(keyOf(pressed))
-        // A folded file lands as its bar, which goes by its first page.
-        leadKey = foldedFile ? foldedBarKey(keyOf(moving[0]!)) : homeKey
+        // A file lands as its bar, which goes by its first page.
+        leadKey = heading ? foldedBarKey(keyOf(pressed)) : String(keyOf(pressed))
         carried = {
           lead: moving.indexOf(pressed),
           pages: moving,
@@ -989,17 +1078,22 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
           moving,
           pressed - 1 - moving.filter((pageNumber) => pageNumber < pressed).length,
         )
-        slot = at === null ? null : slotOfPages(measure((key) => movingKeys.has(key), held), at)
 
-        if (wholeFile !== undefined) {
+        if (heading && wholeFile !== undefined) {
           onSelectPages(moving, { range: false, toggle: false })
-        } else if (!chosen) {
-          onSelectPage(pressed, { range: false, toggle: false })
+          // The folding primes the slides once it has laid out: from the
+          // pages as they stand now, the bars would slide in from far away.
+          liftedNameRef.current = { file: wholeFile, top: heading.getBoundingClientRect().top }
+        } else {
+          if (!chosen) {
+            onSelectPage(pressed, { range: false, toggle: false })
+          }
+
+          prime()
         }
 
-        prime()
         setHoles(new Set(moving.map(keyOf)))
-        setDrag({ at, basis, moving })
+        setDrag({ at, basis, file: wholeFile, moving })
         setGhost(
           liftGhost(
             paper,
@@ -1007,8 +1101,8 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
             start,
             point,
             // The name alone: its button holds the page count too.
-            foldedFile
-              ? (paper.querySelector(FILE_HEADING_TITLE)?.textContent ?? undefined)
+            heading
+              ? (paper.querySelector(FILE_HEADING_TITLE)?.textContent ?? "")
               : undefined,
           ),
         )
@@ -1050,12 +1144,12 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
         }
 
         at = null
-        slot = null
         settlingRef.current = true
-        setDrag({ at, basis, moving })
+        setDrag({ at, basis, file: wholeFile, moving })
         setLanding({
           box: taken ? taken.box : undefined,
-          leadKey: homeKey,
+          file: wholeFile,
+          leadKey,
           onLanded: taken?.landed,
           settled: taken?.settled ?? Promise.resolve(),
         })
@@ -1071,13 +1165,13 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
       // Otherwise the pages go back where they were and the ghost with them.
       if (!changes) {
         at = null
-        slot = null
       }
 
       settlingRef.current = true
-      setDrag({ at, basis, moving })
+      setDrag({ at, basis, file: wholeFile, moving })
       setLanding({
-        leadKey: changes ? leadKey : homeKey,
+        file: wholeFile,
+        leadKey,
         settled: changes ? onReorderPages(reorder!) : Promise.resolve(),
       })
     }
@@ -1153,7 +1247,7 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   const items = flowItems({
     breakAt: incomingAt,
     byFile,
-    folded: foldedFiles,
+    folded: filesInHand ? new Set(sections.map((section) => section.id)) : foldedFiles,
     held: moving,
     order,
     pages,

@@ -182,6 +182,7 @@ export function useFlipLayout(
   const enabledRef = useRef(false)
   const contentsRef = useRef(contents)
   const snapshotRef = useRef<Snapshot | null>(null)
+  const forgottenRef = useRef(false)
 
   // Read in render, the one moment the layout a commit replaces is still
   // there: hooks have no getSnapshotBeforeUpdate. Every render of new contents
@@ -196,6 +197,14 @@ export function useFlipLayout(
     placesRef.current =
       container && !prefersReducedMotion() ? measurePlaces(container) : null
   }, [containerRef])
+
+  // The next render jumps rather than slides, the one that clears `enabled`
+  // included, and one that brings new contents too (a reorder landing in the
+  // same batch): a relayout whose owner moves the scroll itself.
+  const forget = useCallback(() => {
+    placesRef.current = null
+    forgottenRef.current = true
+  }, [])
 
   useEffect(() => {
     const leaving = leavingRef.current
@@ -212,13 +221,15 @@ export function useFlipLayout(
   // Every render: a drag re-renders the owner only when its landing changes.
   useLayoutEffect(() => {
     const container = containerRef.current
-    const snapshot = contents !== contentsRef.current ? snapshotRef.current : null
+    const snapshot =
+      !forgottenRef.current && contents !== contentsRef.current ? snapshotRef.current : null
     const before = snapshot?.places ?? placesRef.current
     const tracking = enabled || enabledRef.current
 
     contentsRef.current = contents
     snapshotRef.current = null
     enabledRef.current = enabled
+    forgottenRef.current = false
 
     if (!container || !before || !(tracking || snapshot)) {
       placesRef.current = null
@@ -383,5 +394,5 @@ export function useFlipLayout(
     placesRef.current = enabled ? places : null
   })
 
-  return { prime }
+  return { forget, prime }
 }
