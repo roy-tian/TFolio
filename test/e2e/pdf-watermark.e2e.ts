@@ -19,6 +19,7 @@ import {
   pressRedo,
   activeSidebar,
 } from "./helpers"
+import { calibratePointer, pointer } from "./nativePointer"
 
 async function openWatermarkDialog() {
   await $("button[aria-label='Watermark']").click()
@@ -187,6 +188,39 @@ describe("TFolio document watermark", () => {
     await browser.keys("Escape")
     await openWatermarkDialog()
     await expect($("[data-testid='watermark-page-number']")).toHaveText("1 / 2")
+    await browser.keys("Escape")
+  })
+
+  it("turns the preview's page wherever its button is pressed, the button staying put", async () => {
+    await refreshApp()
+    await dropZoneButton().waitForExist({ timeout: 30_000 })
+    await openPdfFromDisk("watermark-press.pdf", bandedPdf(3))
+    await renderedPage()
+    await openWatermarkDialog()
+    await $("[data-testid='watermark-thumbnail'][data-ready='true']").waitForExist({ timeout: 15_000 })
+
+    const offset = await calibratePointer()
+    const next = "[data-testid='watermark-next-page']"
+    const box = () => browser.execute((css) => {
+      const rect = document.querySelector(css)!.getBoundingClientRect()
+      return { left: rect.left, top: rect.top, width: rect.width }
+    }, next)
+    const before = await box()
+    // Its top edge: a press that moved the button would leave the release
+    // off it, and the click with it.
+    const at = { x: before.left + before.width / 2 + offset.x, y: before.top + 3 + offset.y }
+
+    pointer(at)
+    pointer({ down: true })
+    let pressed: Awaited<ReturnType<typeof box>>
+    try {
+      pressed = await box()
+    } finally {
+      pointer({ down: false })
+    }
+
+    expect(pressed).toEqual(before)
+    await expect($("[data-testid='watermark-page-number']")).toHaveText("2 / 3")
     await browser.keys("Escape")
   })
 

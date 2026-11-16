@@ -98,7 +98,11 @@ export function DocumentWatermarkPreview({
     return null
   }
 
-  const buttonClass = "pointer-events-auto absolute top-1/2 -translate-y-1/2 rounded-full shadow-md"
+  // Centred by the row, not by a translate: a pressed button's own
+  // `translate-y-px` would replace it and drop the button from under the
+  // pointer, losing the click. Nor does a press move it at all.
+  const buttonClass =
+    "pointer-events-auto rounded-full shadow-md active:not-aria-[haspopup]:translate-y-0"
 
   return (
     <div className="flex flex-col gap-2">
@@ -122,10 +126,10 @@ export function DocumentWatermarkPreview({
           // Its own `focus-within`, as it holds the preview's only controls:
           // `group-focus-within` compiles to `:focus-within *`, for which
           // WebKit restyles the whole document on every focus change anywhere.
-          <div className="pointer-events-none absolute inset-0 z-10 opacity-0 transition-opacity group-hover/preview:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-between px-2 opacity-0 transition-opacity group-hover/preview:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
             <Button
               aria-label={t("watermark.previousPage")}
-              className={`${buttonClass} left-2`}
+              className={buttonClass}
               data-testid="watermark-previous-page"
               disabled={pageNumber === 1}
               onClick={() => setSelectedPage(pageNumber - 1)}
@@ -137,7 +141,7 @@ export function DocumentWatermarkPreview({
             </Button>
             <Button
               aria-label={t("watermark.nextPage")}
-              className={`${buttonClass} right-2`}
+              className={buttonClass}
               data-testid="watermark-next-page"
               disabled={pageNumber === document.pages.length}
               onClick={() => setSelectedPage(pageNumber + 1)}
