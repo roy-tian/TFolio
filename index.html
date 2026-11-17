@@ -1199,8 +1199,8 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
       </h1>
       <div class="hero-side">
         <p class="hero-sub">
-          <span lang="zh-CN">轻巧、快速、占内存少。读、标、改、拼都在同一个界面里：一份文档可以装下好几个文件，页面拖到哪儿就排到哪儿。</span>
-          <span lang="en">Light, fast and easy on memory. Read, mark up, rearrange and combine in one window: a document can hold several files, and pages go wherever you drag them.</span>
+          <span lang="zh-CN">轻巧、快速、占内存少。读、标、改、拼都在同一个界面里：一份文档可以装下好几个文件，页面、文件拖一下就排好。</span>
+          <span lang="en">Light, fast and easy on memory. Read, mark up, rearrange and combine in one window: a document can hold several files, and a drag puts pages and files in order.</span>
         </p>
         <div class="cta-row">
           <a class="btn btn-primary js-download" href="#download">
@@ -1210,8 +1210,8 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
           <a class="btn btn-quiet" href="#download"><span lang="zh-CN">其他平台</span><span lang="en">Other platforms</span></a>
         </div>
         <p class="hero-meta">
-          <span lang="zh-CN">版本 <span class="js-version">0.1.29</span>，MIT 开源，免费使用。支持 Windows、macOS 与 Linux。</span>
-          <span lang="en">Version <span class="js-version">0.1.29</span>. Free and open source under MIT, for Windows, macOS and Linux.</span>
+          <span lang="zh-CN">版本 <span class="js-version">0.1.31</span>，MIT 开源，免费使用。支持 Windows、macOS 与 Linux。</span>
+          <span lang="en">Version <span class="js-version">0.1.31</span>. Free and open source under MIT, for Windows, macOS and Linux.</span>
         </p>
       </div>
     </div>
@@ -1357,7 +1357,8 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
             <p><span lang="zh-CN">把侧栏拉宽，缩略图就排成一张页面网格。</span><span lang="en">Widen the sidebar and the thumbnails become a grid of pages.</span></p>
             <ul class="ticks">
               <li><span lang="zh-CN">页面拖到哪儿就排到哪儿，可以一次拖多页</span><span lang="en">Drag pages where you want them, several at a time</span></li>
-              <li><span lang="zh-CN">勾选后旋转、删除、剪切、复制、粘贴，或在前后插入空白页</span><span lang="en">Tick pages to rotate, delete, cut, copy and paste them, or insert a blank before or after</span></li>
+              <li><span lang="zh-CN">指向一页，它自己的小工具条就能单独旋转、删除这一页</span><span lang="en">Point at a page and its own bar turns or deletes that page alone</span></li>
+              <li><span lang="zh-CN">勾选几页，一起旋转、删除、剪切、复制、粘贴，或在前后插入空白页</span><span lang="en">Tick pages to rotate, delete, cut, copy and paste them together, or insert a blank before or after</span></li>
               <li><span lang="zh-CN">页面可以拖进另一个标签页，也可以在别的文档里粘贴</span><span lang="en">Drag pages into another tab, or paste them into another document</span></li>
               <li><span lang="zh-CN">拖到标签栏上，直接用这几页新建一份 PDF</span><span lang="en">Drop them on the tab strip to start a new PDF from those pages</span></li>
             </ul>
@@ -1374,8 +1375,8 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
           <img lang="en" src="assets/en/mark.webp" width="2560" height="1600" loading="lazy" alt="Marks on the meteor showers page: a translucent box over the Perseids row, a highlighted sentence and a blue note beside the title; the sidebar shows the outline, grouped by file">
         </figure>
         <figure data-chapter-shot="pages">
-          <img lang="zh-CN" src="assets/zh/pages.webp" width="2560" height="1600" loading="lazy" alt="拉宽的侧栏把页面排成三列网格，第 3、4、6 页被勾选">
-          <img lang="en" src="assets/en/pages.webp" width="2560" height="1600" loading="lazy" alt="The widened sidebar lays the pages out in three columns, with pages 3, 4 and 6 ticked">
+          <img lang="zh-CN" src="assets/zh/pages.webp" width="2560" height="1600" loading="lazy" alt="拉宽的侧栏把页面排成三列网格，第 3、4、6 页被勾选，指向的第 5 页底部露出它自己的旋转、删除按钮">
+          <img lang="en" src="assets/en/pages.webp" width="2560" height="1600" loading="lazy" alt="The widened sidebar lays the pages out in three columns, with pages 3, 4 and 6 ticked and page 5, under the pointer, showing its own turn and delete buttons">
         </figure>
       </div>
     </div>
@@ -1447,14 +1448,14 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
     <div class="combine-grid">
       <ul class="ticks">
         <li><span lang="zh-CN">文件按名字分组，可以折叠、改名、整份拖动或移除</span><span lang="en">Files are grouped by name: fold, rename, move or remove one whole</span></li>
-        <li><span lang="zh-CN">页面可以在文件之间拖动，落在哪个文件里就归哪个文件</span><span lang="en">Drag pages between files; a page belongs to the file it lands in</span></li>
+        <li><span lang="zh-CN">文件整份移动，页面只在自己的文件里调顺序，哪个文件都不会被拆散</span><span lang="en">Files move whole and pages only within their own file, so no file is ever split apart</span></li>
         <li><span lang="zh-CN">大纲里每个文件一行，它原有的书签收在下面</span><span lang="en">In the outline each file is one entry, with its own bookmarks beneath it</span></li>
         <li><span lang="zh-CN">在主页把几个文件一起拖进侧栏，直接合并成一份新 PDF</span><span lang="en">On the home tab, drop several files on the sidebar to merge them straight into a new PDF</span></li>
         <li><span lang="zh-CN">合并后的文档照样可以压缩、拆分、另存为 A4</span><span lang="en">The combined document can still be compressed, split or saved as A4</span></li>
       </ul>
       <div class="screen">
-        <img lang="zh-CN" src="assets/zh/files.webp" width="2560" height="1600" loading="lazy" alt="侧栏按文件分组显示页面：《天象年历》之后是一张虚线空白页，再往下是“观测活动通知.pdf”；文件选项里可以开关“每个文件从奇数页开始”和“为每个文件加一个书签”">
-        <img lang="en" src="assets/en/files.webp" width="2560" height="1600" loading="lazy" alt="The sidebar shows pages grouped by file: after Sky Almanac comes a dashed blank page, then Observing Notice.pdf; the file options turn “Start every file on an odd page” and “Add a bookmark for each file” on and off">
+        <img lang="zh-CN" src="assets/zh/files.webp" width="2560" height="1600" loading="lazy" alt="侧栏按文件分组显示页面：《天象年历》之后是一张虚线空白页，再往下是“观测活动通知.pdf”；页面上方的“每个文件从奇数页开始”开关已打开">
+        <img lang="en" src="assets/en/files.webp" width="2560" height="1600" loading="lazy" alt="The sidebar shows pages grouped by file: after Sky Almanac comes a dashed blank page, then Observing Notice.pdf; the “Start every file on an odd page” switch above the pages is on">
       </div>
     </div>
   </div>
@@ -1729,8 +1730,8 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
     <div class="section-head">
       <h2 id="download-title"><span lang="zh-CN">下载 TFolio</span><span lang="en">Download TFolio</span></h2>
       <p>
-        <span lang="zh-CN">当前版本 <span class="js-version">0.1.29</span>。安装后，TFolio 会在启动时检查更新，有新版本会提示你。</span>
-        <span lang="en">Current version <span class="js-version">0.1.29</span>. Once installed, TFolio checks for updates when it starts and lets you know when a new version is out.</span>
+        <span lang="zh-CN">当前版本 <span class="js-version">0.1.31</span>。安装后，TFolio 会在启动时检查更新，有新版本会提示你。</span>
+        <span lang="en">Current version <span class="js-version">0.1.31</span>. Once installed, TFolio checks for updates when it starts and lets you know when a new version is out.</span>
       </p>
     </div>
     <div class="download-grid">
@@ -1738,25 +1739,25 @@ html[data-lang="en"] .open h2 { letter-spacing: -0.03em; }
         <h3>Windows</h3>
         <p><span lang="zh-CN">Windows 10 与 11，x64</span><span lang="en">Windows 10 and 11, x64</span></p>
         <ul class="files">
-          <li><a data-file="TFolio_{v}_x64-setup.exe" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.29/TFolio_0.1.29_x64-setup.exe"><span lang="zh-CN">安装程序</span><span lang="en">Installer</span> <span class="ext">.exe</span></a></li>
-          <li><a data-file="TFolio_{v}_x64_en-US.msi" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.29/TFolio_0.1.29_x64_en-US.msi"><span lang="zh-CN">MSI 安装包</span><span lang="en">MSI package</span> <span class="ext">.msi</span></a></li>
+          <li><a data-file="TFolio_{v}_x64-setup.exe" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.31/TFolio_0.1.31_x64-setup.exe"><span lang="zh-CN">安装程序</span><span lang="en">Installer</span> <span class="ext">.exe</span></a></li>
+          <li><a data-file="TFolio_{v}_x64_en-US.msi" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.31/TFolio_0.1.31_x64_en-US.msi"><span lang="zh-CN">MSI 安装包</span><span lang="en">MSI package</span> <span class="ext">.msi</span></a></li>
         </ul>
       </div>
       <div class="platform" data-platform="mac">
         <h3>macOS</h3>
         <p><span lang="zh-CN">Apple 芯片与 Intel 处理器</span><span lang="en">Apple silicon and Intel</span></p>
         <ul class="files">
-          <li><a data-file="TFolio_{v}_aarch64.dmg" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.29/TFolio_0.1.29_aarch64.dmg"><span lang="zh-CN">Apple 芯片</span><span lang="en">Apple silicon</span> <span class="ext">.dmg</span></a></li>
-          <li><a data-file="TFolio_{v}_x64.dmg" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.29/TFolio_0.1.29_x64.dmg"><span lang="zh-CN">Intel 处理器</span><span lang="en">Intel</span> <span class="ext">.dmg</span></a></li>
+          <li><a data-file="TFolio_{v}_aarch64.dmg" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.31/TFolio_0.1.31_aarch64.dmg"><span lang="zh-CN">Apple 芯片</span><span lang="en">Apple silicon</span> <span class="ext">.dmg</span></a></li>
+          <li><a data-file="TFolio_{v}_x64.dmg" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.31/TFolio_0.1.31_x64.dmg"><span lang="zh-CN">Intel 处理器</span><span lang="en">Intel</span> <span class="ext">.dmg</span></a></li>
         </ul>
       </div>
       <div class="platform" data-platform="linux">
         <h3>Linux</h3>
         <p><span lang="zh-CN">x64，三种安装格式</span><span lang="en">x64, in three package formats</span></p>
         <ul class="files">
-          <li><a data-file="TFolio_{v}_amd64.deb" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.29/TFolio_0.1.29_amd64.deb">Debian / Ubuntu <span class="ext">.deb</span></a></li>
-          <li><a data-file="TFolio-{v}-1.x86_64.rpm" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.29/TFolio-0.1.29-1.x86_64.rpm">Fedora / openSUSE <span class="ext">.rpm</span></a></li>
-          <li><a data-file="TFolio_{v}_amd64.AppImage" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.29/TFolio_0.1.29_amd64.AppImage"><span lang="zh-CN">免安装</span><span lang="en">Portable</span> <span class="ext">.AppImage</span></a></li>
+          <li><a data-file="TFolio_{v}_amd64.deb" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.31/TFolio_0.1.31_amd64.deb">Debian / Ubuntu <span class="ext">.deb</span></a></li>
+          <li><a data-file="TFolio-{v}-1.x86_64.rpm" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.31/TFolio-0.1.31-1.x86_64.rpm">Fedora / openSUSE <span class="ext">.rpm</span></a></li>
+          <li><a data-file="TFolio_{v}_amd64.AppImage" href="https://github.com/roy-tian/TFolio/releases/download/v0.1.31/TFolio_0.1.31_amd64.AppImage"><span lang="zh-CN">免安装</span><span lang="en">Portable</span> <span class="ext">.AppImage</span></a></li>
         </ul>
       </div>
     </div>
