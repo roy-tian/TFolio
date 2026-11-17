@@ -194,9 +194,11 @@ describe("PDF overlay scrollbar", () => {
       expect((await overlayBar("y")).scroll).toBe(released.scroll)
 
       pointer({ down: true })
+      // Some forty pages on, each step rendering the pages it passes: a loaded
+      // machine takes past the default wait, still paging.
       await browser.waitUntil(
         async () => Math.abs((await overlayBar("y")).thumb.bottom - at.y) <= 1,
-        { timeoutMsg: "a held press never brought the thumb to the pointer" },
+        { timeout: 60_000, timeoutMsg: "a held press never brought the thumb to the pointer" },
       )
       await browser.pause(400)
       expect(Math.abs((await overlayBar("y")).thumb.bottom - at.y)).toBeLessThanOrEqual(1)
