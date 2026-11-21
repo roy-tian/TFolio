@@ -4,9 +4,8 @@
 use serde::Serialize;
 
 use super::io::{
-    fingerprint, is_merge_image, load_merge_source, merge_bytes_limit_error,
-    merge_file_limit_error, read_merge_source, Fingerprint, MergeDraft, SourceFile,
-    MAX_MERGE_BYTES, MAX_MERGE_FILES,
+    fingerprint, load_merge_source, merge_bytes_limit_error, merge_file_limit_error,
+    read_merge_source, Fingerprint, MergeDraft, SourceFile, MAX_MERGE_BYTES, MAX_MERGE_FILES,
 };
 use super::page_import::{lent_copy, ImportRollback};
 use super::page_ops::page_index;
@@ -103,8 +102,7 @@ impl FileSources {
 fn source_cost(file: &SourceFile) -> usize {
     match file {
         SourceFile::Pdf(bytes) => bytes.len(),
-        // PDFium keeps the decoded bitmap, not the file it came from.
-        SourceFile::Image(image) => image.width() as usize * image.height() as usize * 4,
+        SourceFile::Image(image) => image.estimated_bytes(),
     }
 }
 

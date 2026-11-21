@@ -1245,6 +1245,7 @@ mod compress;
 mod file_identity;
 mod file_sources;
 mod image_dpi;
+mod image_import;
 mod io;
 mod marks;
 mod owned_content;
@@ -1261,10 +1262,9 @@ mod watermark_preview;
 pub use a4_export::A4Copy;
 pub use file_identity::{same_file, FileKey};
 pub use file_sources::{FileSourceInfo, SOURCE_CHANGED};
-pub use io::is_merge_image;
-use io::{
-    fingerprint, image_page_document, read_image, read_pdf_bytes, read_pdf_file, Fingerprint,
-};
+pub use image_import::is_merge_image;
+use image_import::{image_page_document, read_image, PreparedImage};
+use io::{fingerprint, read_pdf_bytes, read_pdf_file, Fingerprint};
 use owned_content::OwnedContentState;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;

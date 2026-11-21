@@ -11,6 +11,9 @@ publish = false
 
 [dependencies]
 allsorts = { version = "0.17", default-features = false, features = ["flate2_rust"] }
+# Already in the app's tree via lopdf and image; used directly to measure flate
+# size on image import and to compress resampled soft masks losslessly.
+flate2 = "1"
 fontdb = "0.24.0"
 getrandom = "0.4"
 # The formats a merge may bring in as pages, plus the two the app already

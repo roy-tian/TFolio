@@ -8,14 +8,6 @@ use super::*;
 pub(super) const MAX_MERGE_FILES: usize = 256;
 pub(super) const MAX_MERGE_BYTES: u64 = 512 * 1024 * 1024;
 
-// An image is read whole before it is decoded, and a photograph is nothing
-// like a document in size, so its ceiling sits well under the PDF one.
-pub(super) const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
-
-// An A4 page scanned at 600dpi is about 35 megapixels: generous room above
-// real input while refusing a header claiming a bitmap no machine could hold.
-pub(super) const MAX_IMAGE_PIXELS: u64 = 80_000_000;
-
 /// A file written beside its destination and put in place by `commit` —
 /// every byte on disk first — or, dropped uncommitted, removed again: a
 /// destination is never left half-written. Split so a caller can let the
@@ -292,125 +284,11 @@ pub(super) fn read_pdf_file(path: &Path) -> Result<(Vec<u8>, Fingerprint), Strin
     Ok((bytes, Fingerprint::of(&metadata)))
 }
 
-pub fn is_merge_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            MERGE_IMAGE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
-        })
-}
-
-/// Decodes `path` under both ceilings. The format comes from the bytes, not the
-/// extension: a mislabelled file is a decode error, not a hazard.
-pub(super) fn read_image(path: &Path) -> Result<DynamicImage, String> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
-
-    if !metadata.is_file() {
-        return Err(format!("{} is not a file", path.display()));
-    }
-
-    if metadata.len() > MAX_IMAGE_BYTES {
-        return Err(image_limit_error());
-    }
-
-    let mut limits = image::Limits::default();
-
-    limits.max_alloc = Some(MAX_IMAGE_PIXELS * 4);
-
-    let mut reader = image::ImageReader::open(path)
-        .map_err(|error| format!("could not read {}: {error}", path.display()))?
-        .with_guessed_format()
-        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-
-    reader.limits(limits);
-
-    let unusable =
-        |error: image::ImageError| format!("{} is not a usable image: {error}", path.display());
-    let mut decoder = reader.into_decoder().map_err(unusable)?;
-    let (width, height) = decoder.dimensions();
-
-    // Off the header, before a pixel is allocated: `max_alloc` is documented as
-    // non-strict, so the size a file claims must refuse the bitmap itself.
-    if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS
-        || decoder.total_bytes() > MAX_IMAGE_PIXELS * 4
-    {
-        return Err(image_limit_error());
-    }
-
-    // Cameras record orientation in metadata, not pixels; without this a
-    // portrait photograph arrives landscape and lands sideways on the sheet.
-    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
-    let mut image = DynamicImage::from_decoder(decoder).map_err(unusable)?;
-
-    image.apply_orientation(orientation);
-
-    Ok(image)
-}
-
-/// The image laid on a turned A4 sheet, scaled to fill. An image has no page
-/// size of its own, so it is always fitted, whatever the merge's A4 option says.
-pub(super) fn image_page_document<'a>(
-    pdfium: &'a Pdfium,
-    image: &DynamicImage,
-    path: &Path,
-) -> Result<PdfDocument<'a>, String> {
-    let pixel_width = image.width() as f32;
-    let pixel_height = image.height() as f32;
-
-    if pixel_width < 1.0 || pixel_height < 1.0 {
-        return Err(format!("{} has no pixels", path.display()));
-    }
-
-    let (sheet_width, sheet_height) = if pixel_width > pixel_height {
-        (A4_LONG_POINTS, A4_SHORT_POINTS)
-    } else {
-        (A4_SHORT_POINTS, A4_LONG_POINTS)
-    };
-    let scale = (sheet_width / pixel_width).min(sheet_height / pixel_height);
-    let width = pixel_width * scale;
-    let height = pixel_height * scale;
-    let mut document = pdfium
-        .create_new_pdf()
-        .map_err(|error| format!("PDFium could not create a document: {error}"))?;
-    let mut object = PdfPageImageObject::new_with_size(
-        &document,
-        image,
-        PdfPoints::new(width),
-        PdfPoints::new(height),
-    )
-    .map_err(|error| format!("PDFium could not place {}: {error}", path.display()))?;
-
-    object
-        .translate(
-            PdfPoints::new((sheet_width - width) / 2.0),
-            PdfPoints::new((sheet_height - height) / 2.0),
-        )
-        .map_err(|error| format!("PDFium could not centre {}: {error}", path.display()))?;
-
-    let mut page = document
-        .pages_mut()
-        .create_page_at_end(PdfPagePaperSize::Custom(
-            PdfPoints::new(sheet_width),
-            PdfPoints::new(sheet_height),
-        ))
-        .map_err(|error| format!("PDFium could not create the image's sheet: {error}"))?;
-
-    page.objects_mut()
-        .add_image_object(object)
-        .map_err(|error| format!("PDFium rejected {}: {error}", path.display()))?;
-    page.regenerate_content()
-        .map_err(|error| format!("PDFium could not finish the image's sheet: {error}"))?;
-    drop(page);
-
-    Ok(document)
-}
-
-/// A merge source as read off the disk: a PDF's bytes or an image's pixels,
-/// read and decoded before PDFium, and the lock its work needs, is involved.
+/// A merge source as read off the disk: a PDF's bytes or an image's prepared
+/// payload, read and decoded before PDFium, and the lock its work needs, is involved.
 pub(super) enum SourceFile {
     Pdf(Vec<u8>),
-    Image(DynamicImage),
+    Image(PreparedImage),
 }
 
 pub(super) fn read_merge_source(path: &Path) -> Result<SourceFile, String> {
@@ -548,13 +426,6 @@ pub(super) fn append_page_fitted_to_a4<'a>(
         .map_err(|error| failed("finish the sheet for", error))?;
 
     Ok(())
-}
-
-pub(super) fn image_limit_error() -> String {
-    format!(
-        "image file exceeds the {} MiB limit",
-        MAX_IMAGE_BYTES / 1024 / 1024
-    )
 }
 
 pub(super) fn merge_file_limit_error() -> String {
