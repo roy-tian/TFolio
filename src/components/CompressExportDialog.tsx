@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -12,22 +12,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Slider } from "@/components/ui/slider"
 import type { useAnnotations } from "@/hooks/useAnnotations"
 import {
   DEFAULT_IMAGE_QUALITY,
-  IMAGE_QUALITY_LEVELS,
+  IMAGE_QUALITY_STEP,
+  MAX_IMAGE_QUALITY,
+  MIN_IMAGE_QUALITY,
   type CompressionEstimate,
   type CompressionOptions,
-  type ImageQualityLevel,
 } from "@/lib/compressExport"
 import { formatBytes } from "@/lib/formatBytes"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import type { PdfProgress } from "@/lib/progress"
 
 /** Long enough for a run of arrow keys to settle, short enough to feel live. */
-const ESTIMATE_DEBOUNCE_MS = 300
+const ESTIMATE_DEBOUNCE_MS = 250
 
 type CompressExportDialogProps = {
   document: PdfDocumentInfo
@@ -46,7 +46,12 @@ export function CompressExportDialog({
   onClose,
 }: CompressExportDialogProps) {
   const { i18n, t } = useTranslation()
-  const [imageQuality, setImageQuality] = useState<ImageQualityLevel>(DEFAULT_IMAGE_QUALITY)
+  const sliderLabelId = useId()
+  // `imageQuality` follows every drag step immediately; `committedQuality`
+  // updates on release (and on each arrow press) so dragging never stalls the
+  // backend with throwaway estimates.
+  const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY)
+  const [committedQuality, setCommittedQuality] = useState(DEFAULT_IMAGE_QUALITY)
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -58,20 +63,15 @@ export function CompressExportDialog({
   // Only the newest estimate may answer: a slower run for abandoned levels
   // must not overwrite the one the reader is looking at.
   const estimateRun = useRef(0)
-  // Answers already had, by level: the dialog is modal, so the document they
-  // measured cannot change while it is open.
-  const estimates = useRef(new Map<ImageQualityLevel, CompressionEstimate>())
+  // Answers already had, by quality percentage: the dialog is modal, so the
+  // document they measured cannot change while it is open.
+  const estimates = useRef(new Map<number, CompressionEstimate>())
   // Every estimate and export still in flight. A run that reaches the engine
   // after the release would rebuild its cache with nothing left to free it.
   const inflight = useRef<Promise<unknown>>(Promise.resolve())
   const track = <T,>(pending: Promise<T>) => {
     inflight.current = Promise.allSettled([inflight.current, pending])
     return pending
-  }
-
-  const options: CompressionOptions = {
-    imageDpi:
-      IMAGE_QUALITY_LEVELS.find(({ level }) => level === imageQuality)?.imageDpi ?? null,
   }
 
   /** Stops any estimate still running for superseded levels. An estimate
@@ -103,7 +103,7 @@ export function CompressExportDialog({
 
     const run = ++estimateRun.current
     setEstimateFailed(false)
-    const known = estimates.current.get(imageQuality)
+    const known = estimates.current.get(committedQuality)
     if (known) {
       stopEstimates()
       setEstimate(known)
@@ -112,6 +112,7 @@ export function CompressExportDialog({
     }
 
     setEstimating(true)
+    const options: CompressionOptions = { imageQuality: committedQuality }
     const timer = setTimeout(async () => {
       // The run this one replaces would otherwise hold the lock to its end.
       stopEstimates()
@@ -121,7 +122,7 @@ export function CompressExportDialog({
           { documentId: document.id, options },
         ))
         if (next !== null) {
-          estimates.current.set(imageQuality, next)
+          estimates.current.set(committedQuality, next)
         }
         if (estimateRun.current === run && next !== null) {
           setEstimate(next)
@@ -138,7 +139,7 @@ export function CompressExportDialog({
     }, ESTIMATE_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [busy, document.id, imageQuality])
+  }, [busy, document.id, committedQuality])
 
   const cancel = async () => {
     if (await invoke<boolean>("cancel_pdf_compression", { documentId: document.id }).catch(() => false)) {
@@ -147,6 +148,7 @@ export function CompressExportDialog({
   }
 
   const start = async () => {
+    const options: CompressionOptions = { imageQuality }
     setBusy(true)
     setFailed(false)
     setProgress(null)
@@ -167,20 +169,29 @@ export function CompressExportDialog({
     else onClose()
   }
 
-  const savedPercent = estimate
-    ? Math.round((1 - estimate.estimatedBytes / Math.max(estimate.originalBytes, 1)) * 100)
+  // While dragging over an already-cached stop, show that estimate right away;
+  // over an uncached stop, wait until release instead of firing IPC per pixel.
+  const dragging = imageQuality !== committedQuality
+  const shownEstimate = dragging ? (estimates.current.get(imageQuality) ?? null) : estimate
+  const waitingEstimate = dragging ? shownEstimate === null : (!estimate || estimating)
+  const savedPercent = shownEstimate
+    ? Math.round((1 - shownEstimate.estimatedBytes / Math.max(shownEstimate.originalBytes, 1)) * 100)
     : 0
 
   // A failed re-estimate must not pass the previous levels' figures off as
   // the newly selected one's.
-  const estimateLine = estimateFailed
+  const estimateLine = !dragging && estimateFailed
     ? t("compressExport.estimateFailed")
-    : !estimate || estimating
+    : waitingEstimate || !shownEstimate
       ? t("compressExport.estimating")
       : t(savedPercent > 0 ? "compressExport.estimate" : "compressExport.estimateNoSaving", {
-          size: formatBytes(estimate.estimatedBytes, i18n.language),
+          size: formatBytes(shownEstimate.estimatedBytes, i18n.language),
           percent: savedPercent,
         })
+
+  const qualityDisplay = imageQuality === MAX_IMAGE_QUALITY
+    ? t("compressExport.imageQualityOriginal")
+    : t("compressExport.imageQualityValue", { percent: imageQuality })
 
   return (
     <Dialog
@@ -198,25 +209,44 @@ export function CompressExportDialog({
           <DialogTitle>{t("compressExport.title")}</DialogTitle>
           <DialogDescription>{t("compressExport.description")}</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-2 py-2">
-          <span className="text-sm font-medium">{t("compressExport.imageQuality")}</span>
-          <RadioGroup
-            aria-label={t("compressExport.imageQuality")}
+        <div className="grid gap-2.5 py-2" data-testid="compress-quality">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+            <span className="text-sm font-medium" id={sliderLabelId}>
+              {t("compressExport.imageQuality")}
+            </span>
+            <span
+              data-testid="compress-quality-value"
+              className="text-sm tabular-nums text-muted-foreground"
+            >
+              {qualityDisplay}
+            </span>
+          </div>
+          {/* Single-thumb array: a scalar falls back to a two-thumb range. */}
+          <Slider
+            aria-labelledby={sliderLabelId}
             disabled={busy}
-            value={imageQuality}
-            onValueChange={(value) => setImageQuality(value as ImageQualityLevel)}
-            className="gap-3"
-          >
-            {IMAGE_QUALITY_LEVELS.map(({ level }) => (
-              <Label
-                key={level}
-                className="gap-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-50"
-              >
-                <RadioGroupItem value={level} data-testid={`compress-image-${level}`} />
-                <span>{t(`compressExport.imageLevels.${level}`)}</span>
-              </Label>
-            ))}
-          </RadioGroup>
+            min={MIN_IMAGE_QUALITY}
+            max={MAX_IMAGE_QUALITY}
+            step={IMAGE_QUALITY_STEP}
+            value={[imageQuality]}
+            onValueChange={(next) => {
+              const value = Array.isArray(next)
+                ? (next[0] ?? MIN_IMAGE_QUALITY)
+                : (next as number)
+              setImageQuality(value)
+            }}
+            onValueCommitted={(next) => {
+              const value = Array.isArray(next)
+                ? (next[0] ?? MIN_IMAGE_QUALITY)
+                : (next as number)
+              setImageQuality(value)
+              setCommittedQuality(value)
+            }}
+          />
+          <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs text-muted-foreground">
+            <span>{t("compressExport.smallerSize")}</span>
+            <span>{t("compressExport.keepOriginal")}</span>
+          </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
             {t("compressExport.imageQualityHint")}
           </p>

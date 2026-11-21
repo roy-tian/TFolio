@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CompressionOptions {
-    /// The resolution images are resampled toward, in pixels per inch of
-    /// their drawn size. `None` leaves the images' bytes untouched and
-    /// compresses structure alone.
-    pub image_dpi: Option<u32>,
+    /// Image quality percentage (`0..=100`). `100` leaves images' bytes
+    /// untouched and compresses structure alone; `0..=99` scales target
+    /// resolution and JPEG quality continuously.
+    pub image_quality: u8,
 }
 
 /// The dialog's bottom line. `estimated_bytes` is the pipeline's own output,

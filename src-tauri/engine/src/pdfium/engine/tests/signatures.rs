@@ -207,7 +207,7 @@ fn an_edited_signed_document_moves_to_its_copy() {
         .export_compressed(
             signed.id,
             &source,
-            CompressionOptions { image_dpi: None },
+            CompressionOptions { image_quality: 100 },
             |_, _| {},
         )
         .expect_err("nor may a compressed copy");
@@ -351,7 +351,7 @@ fn a_new_file_flattens_its_copy_and_leaves_the_document_signed() {
         .open_from_path(source)
         .expect("PDFium should open the signed PDF");
     let compressed = directory.join("compressed.pdf");
-    let options = CompressionOptions { image_dpi: None };
+    let options = CompressionOptions { image_quality: 100 };
 
     assert_eq!(
         engine.extract_pages(signed.id, &[1]).map(|info| info.id),

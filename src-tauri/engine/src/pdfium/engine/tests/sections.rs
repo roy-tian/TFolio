@@ -1004,7 +1004,7 @@ fn a_compressed_copy_of_added_files_is_what_a_save_as_writes() {
         .export_compressed(
             own.id,
             &compressed,
-            CompressionOptions { image_dpi: None },
+            CompressionOptions { image_quality: 100 },
             |_, _| {}
         )
         .expect("the compressed copy should be written"));

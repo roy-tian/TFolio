@@ -13,7 +13,7 @@ import {
 } from "./helpers"
 
 type CompressRequest = {
-  imageDpi: number | null
+  imageQuality: number
   suggestedName: string
   documentId: number
 }
@@ -36,7 +36,7 @@ describe("TFolio compress and save", () => {
     expect(await appMenuItemEnabled("export")).toBe(false)
   })
 
-  it("exports at the chosen image resolution", async () => {
+  it("exports at the chosen image quality", async () => {
     await openPdfFromDisk("compress.pdf", minimalPdf(3))
     await renderedPage()
 
@@ -50,7 +50,7 @@ describe("TFolio compress and save", () => {
         exportCompressedPdf: async (args) => {
           const { filterLabel: _filterLabel, ...request } = args
           seam.__compressRequest = {
-            imageDpi: request.options.imageDpi,
+            imageQuality: request.options.imageQuality,
             suggestedName: request.suggestedName,
             documentId: request.documentId,
           }
@@ -64,9 +64,13 @@ describe("TFolio compress and save", () => {
     await $("[data-testid='compress-dialog']").waitForDisplayed()
 
     // The estimate is the real backend's, not a stub: whatever it says, the
-    // line settles only once the answer for the chosen level has landed.
+    // line settles only once the answer for the chosen quality has landed.
     await settleEstimate()
-    await $("[data-testid='compress-image-low']").click()
+    await expect($("[data-testid='compress-quality-value']")).toHaveText("60%")
+    const thumb = await $("[data-testid='compress-quality'] [data-slot='slider-thumb']")
+    await thumb.click()
+    await browser.keys("ArrowLeft")
+    await expect($("[data-testid='compress-quality-value']")).toHaveText("55%")
     await settleEstimate()
 
     await $("[data-testid='compress-start']").click()
@@ -75,7 +79,7 @@ describe("TFolio compress and save", () => {
     const request = await browser.execute(
       () => (window as CompressSeam).__compressRequest,
     )
-    expect(request?.imageDpi).toBe(96)
+    expect(request?.imageQuality).toBe(55)
     expect(request?.suggestedName).toBe("compress-compressed.pdf")
     expect(request?.documentId).toBeGreaterThan(0)
   })
