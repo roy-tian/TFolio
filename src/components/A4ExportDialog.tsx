@@ -1,6 +1,5 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { invoke } from "@tauri-apps/api/core"
 
 import { OperationProgress } from "@/components/OperationProgress"
 import { Button } from "@/components/ui/button"
@@ -13,9 +12,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { useAnnotations } from "@/hooks/useAnnotations"
+import { useExportDialogRun } from "@/hooks/useExportDialogRun"
 import { noticeCatalogue } from "@/lib/notices"
 import { exportFailureNotice, type A4Saved, type PdfDocumentInfo } from "@/lib/pdf"
-import type { PdfProgress } from "@/lib/progress"
 
 type A4ExportDialogProps = {
   document: PdfDocumentInfo
@@ -44,52 +43,34 @@ export function A4ExportDialog({
   suggestedName,
 }: A4ExportDialogProps) {
   const { t } = useTranslation()
-  const [busy, setBusy] = useState(false)
-  const [stopping, setStopping] = useState(false)
   // Beside the button that failed, not in a corner: the refusals a reader can
   // act on in their own words, as a Save As names them.
   const [failure, setFailure] = useState<ReturnType<typeof exportFailureNotice> | null>(null)
-  const [progress, setProgress] = useState<PdfProgress | null>(null)
-  // Asked again with every report until the engine is there to hear it.
-  const stopRequested = useRef(false)
-
-  const stop = async () => {
-    if (
-      await invoke<boolean>("cancel_pdf_operation", { documentId: document.id }).catch(
-        () => false,
-      )
-    ) {
-      stopRequested.current = false
-    }
-  }
+  const { busy, progress, requestStop, run, stopping } = useExportDialogRun(
+    document.id,
+    "cancel_pdf_operation",
+  )
 
   const start = async () => {
-    setBusy(true)
-    setFailure(null)
-    setProgress(null)
-    stopRequested.current = false
+    const result = await run((onProgress) => {
+      setFailure(null)
+      return onExport(
+        {
+          filterLabel: t("annotate.exportFilter"),
+          suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("a4Export.suffix")}.pdf`,
+        },
+        onProgress,
+      )
+    })
 
-    const outcome = await onExport(
-      {
-        filterLabel: t("annotate.exportFilter"),
-        suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("a4Export.suffix")}.pdf`,
-      },
-      (next) => {
-        setProgress(next)
+    if (!result.ran || result.outcome === "busy") {
+      return
+    }
 
-        if (stopRequested.current) {
-          void stop()
-        }
-      },
-    )
-
-    setBusy(false)
-    setStopping(false)
-
-    if (outcome && "failed" in outcome) {
-      setFailure(exportFailureNotice(outcome.failed))
-    } else if (outcome) {
-      onSaved(outcome)
+    if (result.outcome && "failed" in result.outcome) {
+      setFailure(exportFailureNotice(result.outcome.failed))
+    } else if (result.outcome) {
+      onSaved(result.outcome)
     } else {
       onClose()
     }
@@ -147,9 +128,7 @@ export function A4ExportDialog({
                 return
               }
 
-              stopRequested.current = true
-              setStopping(true)
-              void stop()
+              requestStop()
             }}
             variant="outline"
           >

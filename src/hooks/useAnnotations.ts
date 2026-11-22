@@ -43,6 +43,10 @@ import {
 import type { PagePoint } from "@/lib/annotationGeometry"
 import { isDirty, markSaved } from "@/lib/documentState"
 import { e2eOverride } from "@/lib/e2e"
+import {
+  createSingleFlightGate,
+  isFileDialogBusyError,
+} from "@/lib/fileDialogGate"
 import { isSourceChanged, type SourceProgress } from "@/lib/fileSources"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
@@ -517,6 +521,10 @@ export function useAnnotations({
   // Page-moving edits in flight: a page edit must not plan against positions one
   // is about to change, and a mark made meanwhile would land on the wrong page.
   const structurePendingRef = useRef(0)
+  // One export at a time on this document's queue: prevents Save As and sibling
+  // exports from queuing a second native save dialog behind an in-flight one,
+  // while leaving other tabs free to open files during a long write.
+  const [exportGate] = useState(createSingleFlightGate)
   // React state lags until a re-render: an operation starting inside another's
   // round trip would plan against a history a step out of date.
   const historyRef = useRef<AnnotationHistory>(initial?.history ?? emptyHistory)
@@ -1487,104 +1495,194 @@ export function useAnnotations({
       was saved; marked saved only when the document is now bound to that file. */
   const exportCopy = useCallback(
     async (suggestedName: string, filterLabel: string) => {
+      const releaseDialog = exportGate.acquire()
+
+      if (!releaseDialog) {
+        return "cancelled" as const
+      }
+
       let result: "saved" | "cancelled" | "failed" = "cancelled"
 
-      await enqueue(
-        (current) => ({
-          next: markSaved(current),
-          pages: [],
-          textPages: [],
-          work: async () => {
-            const args = { documentId, filterLabel, suggestedName }
-            const override = e2eOverride("exportPdf")
-            const outcome = override
-              ? await override(args)
-              : await invoke<PdfExportOutcome | null>("export_pdf", args)
+      try {
+        await enqueue(
+          (current) => ({
+            next: markSaved(current),
+            pages: [],
+            textPages: [],
+            work: async () => {
+              try {
+                const args = { documentId, filterLabel, suggestedName }
+                const override = e2eOverride("exportPdf")
+                const outcome = override
+                  ? await override(args)
+                  : await invoke<PdfExportOutcome | null>("export_pdf", args)
 
-            if (!outcome) {
-              return false
-            }
+                if (!outcome) {
+                  return false
+                }
 
-            result = "saved"
-            onExported(documentId, outcome)
-            return outcome.savedToSource
+                result = "saved"
+                onExported(documentId, outcome)
+                return outcome.savedToSource
+              } finally {
+                // Released before the queue settles so a close waiting on it
+                // can still prompt if this Save As was cancelled. Token-owned,
+                // so the outer `finally` cannot drop a follow-up dialog's lock.
+                releaseDialog()
+              }
+            },
+          }),
+          (error) => {
+            result = "failed"
+            onExportError(error)
           },
-        }),
-        (error) => {
-          result = "failed"
-          onExportError(error)
-        },
-      )
+        )
+      } finally {
+        releaseDialog()
+      }
 
       return result as "saved" | "cancelled" | "failed"
     },
-    [documentId, enqueue, onExported, onExportError],
+    [documentId, enqueue, exportGate, onExported, onExportError],
   )
 
   const exportArchive = useCallback(
     async (request: ArchiveExportRequest, onProgress: ProgressHandler) => {
+      if (exportGate.isActive()) {
+        return "busy" as const
+      }
+
       // Images are pixels; a split PDF carries its pages' signature widgets.
       const ready =
         request.options.format === "images" ? true : signedChangeReady("export")
 
       if (ready !== true && !(await ready)) {
-        return "cancelled"
+        return "cancelled" as const
       }
 
-      let outcome: "saved" | "cancelled" | "failed" = "cancelled"
-      await enqueue((current) => ({
-        next: current,
-        pages: [],
-        textPages: [],
-        work: async () => {
-          const args = { ...request, documentId }
-          const override = e2eOverride("exportPdfArchive")
-          const path = override
-            ? await override(args, onProgress)
-            : await invoke<string | null>("export_pdf_archive", {
-                ...args,
-                onProgress: progressChannel(onProgress),
-              })
-          outcome = path ? "saved" : "cancelled"
-          return false
-        },
-      }), () => { outcome = "failed" })
-      return outcome as "saved" | "cancelled" | "failed"
+      const releaseDialog = exportGate.acquire()
+
+      if (!releaseDialog) {
+        return "busy" as const
+      }
+
+      let outcome: "saved" | "cancelled" | "failed" | "busy" = "cancelled"
+
+      try {
+        await enqueue(
+          (current) => ({
+            next: current,
+            pages: [],
+            textPages: [],
+            work: async () => {
+              try {
+                // Progress starts only after the OS dialog closes.
+                const reportProgress: ProgressHandler = (progress) => {
+                  releaseDialog()
+                  onProgress(progress)
+                }
+                const args = { ...request, documentId }
+                const override = e2eOverride("exportPdfArchive")
+                const path = override
+                  ? await override(args, reportProgress)
+                  : await invoke<string | null>("export_pdf_archive", {
+                      ...args,
+                      onProgress: progressChannel(reportProgress),
+                    })
+                outcome = path ? "saved" : "cancelled"
+                return false
+              } catch (error) {
+                if (isFileDialogBusyError(error)) {
+                  outcome = "busy"
+                  return false
+                }
+
+                throw error
+              } finally {
+                releaseDialog()
+              }
+            },
+          }),
+          () => {
+            outcome = "failed"
+          },
+        )
+      } finally {
+        releaseDialog()
+      }
+
+      return outcome as "saved" | "cancelled" | "failed" | "busy"
     },
-    [documentId, enqueue, signedChangeReady],
+    [documentId, enqueue, exportGate, signedChangeReady],
   )
 
   /** A compressed copy never touches this tab's history: like the archive
       export, it leaves for a destination the backend's own dialog picked. */
   const exportCompressed = useCallback(
     async (request: CompressedExportRequest, onProgress: ProgressHandler) => {
+      if (exportGate.isActive()) {
+        return "busy" as const
+      }
+
       const ready = signedChangeReady("export")
 
       if (ready !== true && !(await ready)) {
-        return "cancelled"
+        return "cancelled" as const
       }
 
-      let outcome: "saved" | "cancelled" | "failed" = "cancelled"
-      await enqueue((current) => ({
-        next: current,
-        pages: [],
-        textPages: [],
-        work: async () => {
-          const args = { ...request, documentId }
-          const override = e2eOverride("exportCompressedPdf")
-          const path = override
-            ? await override(args, onProgress)
-            : await invoke<string | null>("export_compressed_pdf", {
-                ...args,
-                onProgress: progressChannel(onProgress),
-              })
-          outcome = path ? "saved" : "cancelled"
-          return false
-        },
-      }), () => { outcome = "failed" })
-      return outcome as "saved" | "cancelled" | "failed"
+      const releaseDialog = exportGate.acquire()
+
+      if (!releaseDialog) {
+        return "busy" as const
+      }
+
+      let outcome: "saved" | "cancelled" | "failed" | "busy" = "cancelled"
+
+      try {
+        await enqueue(
+          (current) => ({
+            next: current,
+            pages: [],
+            textPages: [],
+            work: async () => {
+              try {
+                const reportProgress: ProgressHandler = (progress) => {
+                  releaseDialog()
+                  onProgress(progress)
+                }
+                const args = { ...request, documentId }
+                const override = e2eOverride("exportCompressedPdf")
+                const path = override
+                  ? await override(args, reportProgress)
+                  : await invoke<string | null>("export_compressed_pdf", {
+                      ...args,
+                      onProgress: progressChannel(reportProgress),
+                    })
+                outcome = path ? "saved" : "cancelled"
+                return false
+              } catch (error) {
+                if (isFileDialogBusyError(error)) {
+                  outcome = "busy"
+                  return false
+                }
+
+                throw error
+              } finally {
+                releaseDialog()
+              }
+            },
+          }),
+          () => {
+            outcome = "failed"
+          },
+        )
+      } finally {
+        releaseDialog()
+      }
+
+      return outcome as "saved" | "cancelled" | "failed" | "busy"
     },
-    [documentId, enqueue, signedChangeReady],
+    [documentId, enqueue, exportGate, signedChangeReady],
   )
 
   /** Queued behind the reader's edits, so the A4 copy holds what the pages
@@ -1594,39 +1692,73 @@ export function useAnnotations({
     async (
       request: { filterLabel: string; suggestedName: string },
       onProgress: ProgressHandler,
-    ): Promise<A4Saved | null | { failed: unknown }> => {
+    ): Promise<A4Saved | null | "busy" | { failed: unknown }> => {
+      if (exportGate.isActive()) {
+        return "busy"
+      }
+
       const ready = signedChangeReady("export")
 
       if (ready !== true && !(await ready)) {
         return null
       }
 
+      const releaseDialog = exportGate.acquire()
+
+      if (!releaseDialog) {
+        return "busy"
+      }
+
       let written: A4Saved | null = null
+      let busy = false
       let failed: { failed: unknown } | null = null
 
-      await enqueue(
-        (current) => ({
-          next: current,
-          pages: [],
-          textPages: [],
-          work: async () => {
-            const args = { ...request, documentId, onProgress: progressChannel(onProgress) }
-            const override = e2eOverride("saveA4Pdf")
+      try {
+        await enqueue(
+          (current) => ({
+            next: current,
+            pages: [],
+            textPages: [],
+            work: async () => {
+              try {
+                const reportProgress: ProgressHandler = (progress) => {
+                  releaseDialog()
+                  onProgress(progress)
+                }
+                const args = {
+                  ...request,
+                  documentId,
+                  onProgress: progressChannel(reportProgress),
+                }
+                const override = e2eOverride("saveA4Pdf")
 
-            written = override
-              ? await override(args)
-              : await invoke<A4Saved | null>("save_a4_pdf", args)
-            return false
+                written = override
+                  ? await override(args)
+                  : await invoke<A4Saved | null>("save_a4_pdf", args)
+                return false
+              } catch (error) {
+                if (isFileDialogBusyError(error)) {
+                  busy = true
+                  return false
+                }
+
+                throw error
+              } finally {
+                releaseDialog()
+              }
+            },
+          }),
+          (error) => {
+            failed = { failed: error }
           },
-        }),
-        (error) => {
-          failed = { failed: error }
-        },
-      )
+        )
+      } finally {
+        releaseDialog()
+      }
 
-      return failed ?? written
+      return busy ? "busy" : (failed ?? written)
     },
-    [documentId, enqueue, signedChangeReady],
+    [documentId, enqueue, exportGate, signedChangeReady],
   )
 
   /** Writes the document back over its own file. A clean history is a no-op —

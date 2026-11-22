@@ -45,6 +45,7 @@ import { SidebarContext, useSidebarState } from "@/hooks/useSidebar"
 import { OPEN_FILES_AT_ONCE } from "@/lib/batchLimits"
 import { hasLayerOverWorkspace, isTypingTarget } from "@/lib/contextMenu"
 import { e2eOverride, isE2eBuild } from "@/lib/e2e"
+import { createSingleFlightGate } from "@/lib/fileDialogGate"
 import { dropHit, dropPointInCss, sidebarShown } from "@/lib/fileDrop"
 import { mergeFiles } from "@/lib/fileSources"
 import {
@@ -240,7 +241,7 @@ export default function App() {
   const sessionRefs = useRef(new Map<number, DocumentSessionHandle>())
   const openChainRef = useRef<Promise<void>>(Promise.resolve())
   const openBatchesRef = useRef(0)
-  const choosingFileRef = useRef(false)
+  const [openPickerGate] = useState(createSingleFlightGate)
   const mountedRef = useRef(true)
   const activeIdRef = useRef<TabId>(HOME_TAB_ID)
   // A tab drag that left the strip: where this window's viewport sits on the
@@ -1241,29 +1242,36 @@ export default function App() {
   )
 
   const chooseFile = useCallback(async () => {
-    if (choosingFileRef.current) {
+    const releaseDialog = openPickerGate.acquire()
+
+    if (!releaseDialog) {
       return
     }
 
-    choosingFileRef.current = true
+    let path: string | null
 
     try {
       const pick = e2eOverride("pickPdfPath")
-      const path = pick
+      path = pick
         ? await pick()
         : await invoke<string | null>("pick_pdf_path", {
             filterLabel: t("viewer.openFilter"),
           })
-
-      if (typeof path === "string") {
-        await openPaths([path])
-      }
     } catch {
       notices.raise({ kind: "openFailed", owner: workspaceOwner })
+      return
     } finally {
-      choosingFileRef.current = false
+      releaseDialog()
     }
-  }, [notices, openPaths, t])
+
+    if (typeof path === "string") {
+      try {
+        await openPaths([path])
+      } catch {
+        notices.raise({ kind: "openFailed", owner: workspaceOwner })
+      }
+    }
+  }, [notices, openPaths, openPickerGate, t])
 
   const rememberAllViews = useCallback(
     () =>

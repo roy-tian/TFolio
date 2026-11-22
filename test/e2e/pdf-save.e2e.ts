@@ -255,4 +255,71 @@ describe("TFolio save", () => {
     await expect(tabNamed("other.pdf")).toHaveAttribute("aria-selected", "true")
     expect(readFileSync(heldPath).equals(held)).toBe(true)
   })
+
+  it("ignores a second Save As while the first dialog is still open", async () => {
+    const sourcePath = await openPdfFromDisk("once.pdf", textPdf())
+    const targetPath = path.join(path.dirname(sourcePath), "saved-once.pdf")
+    await renderedPage()
+
+    await browser.execute((destination: string) => {
+      const seam = window as unknown as Window & {
+        __TAURI_INTERNALS__: {
+          invoke: (command: string, args: Record<string, unknown>) => Promise<unknown>
+        }
+        __tfolioE2E?: E2eOverrides
+        __saveAsCalls?: number
+        __finishSaveAs?: () => void
+      }
+
+      seam.__saveAsCalls = 0
+      seam.__tfolioE2E = {
+        ...seam.__tfolioE2E,
+        exportPdf: ({ documentId }) => {
+          seam.__saveAsCalls = (seam.__saveAsCalls ?? 0) + 1
+
+          if (seam.__saveAsCalls === 1) {
+            return new Promise((resolve, reject) => {
+              seam.__finishSaveAs = () => {
+                seam.__TAURI_INTERNALS__
+                  .invoke("export_pdf_to", { documentId, path: destination })
+                  .then((outcome) => resolve(outcome as never), reject)
+              }
+            })
+          }
+
+          return Promise.resolve(null)
+        },
+      }
+    }, targetPath)
+
+    const calls = () =>
+      browser.execute(() => (window as Window & { __saveAsCalls?: number }).__saveAsCalls ?? 0)
+
+    await browser.keys(["Control", "Shift", "s"])
+    await browser.waitUntil(async () => (await calls()) === 1, {
+      timeout: 15_000,
+      timeoutMsg: "the first Save As never started",
+    })
+
+    // Repeated triggers while the first dialog is still open must neither open
+    // another nor queue one behind the first save.
+    await browser.keys(["Control", "Shift", "s"])
+    await clickAppMenuItem("save-as")
+
+    await browser.execute(() => {
+      ;(window as Window & { __finishSaveAs?: () => void }).__finishSaveAs?.()
+    })
+
+    await expect(tabNamed("saved-once.pdf")).toHaveAttribute("aria-selected", "true")
+    await browser.pause(300)
+    expect(await calls()).toBe(1)
+    expect(existsSync(targetPath)).toBe(true)
+
+    // Once the first Save As settles, a new Save As works again.
+    await browser.keys(["Control", "Shift", "s"])
+    await browser.waitUntil(async () => (await calls()) === 2, {
+      timeout: 15_000,
+      timeoutMsg: "Save As stayed locked after the first dialog closed",
+    })
+  })
 })

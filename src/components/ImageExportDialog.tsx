@@ -1,6 +1,5 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { invoke } from "@tauri-apps/api/core"
 
 import { OperationProgress } from "@/components/OperationProgress"
 import { Button } from "@/components/ui/button"
@@ -16,11 +15,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { useAnnotations } from "@/hooks/useAnnotations"
+import { useExportDialogRun } from "@/hooks/useExportDialogRun"
 import type { ImageFormat } from "@/lib/archiveExport"
 import { IMAGE_DPI_CHOICES } from "@/lib/archiveExport"
 import type { PdfDocumentInfo } from "@/lib/pdf"
 import { parsePageRange } from "@/lib/pageRange"
-import type { PdfProgress } from "@/lib/progress"
 
 const FORMAT_OPTIONS: Array<{
   format: ImageFormat
@@ -58,11 +57,11 @@ export function ImageExportDialog({
   const [imageFormat, setImageFormat] = useState<ImageFormat>("jpg")
   const [dpi, setDpi] = useState<number>(DEFAULT_DPI)
   const [pagesInput, setPagesInput] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [stopping, setStopping] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [progress, setProgress] = useState<PdfProgress | null>(null)
-  const stopRequested = useRef(false)
+  const { busy, progress, requestStop, run, stopping } = useExportDialogRun(
+    document.id,
+    "cancel_pdf_archive",
+  )
   const selection = parsePageRange(pagesInput, document.numPages)
   const selectionError =
     selection.kind === "invalid"
@@ -74,32 +73,26 @@ export function ImageExportDialog({
           })
         : undefined
 
-  const cancel = async () => {
-    if (await invoke<boolean>("cancel_pdf_archive", { documentId: document.id }).catch(() => false)) {
-      stopRequested.current = false
-    }
-  }
-
   const start = async () => {
-    setBusy(true)
-    setFailed(false)
-    setProgress(null)
-    stopRequested.current = false
-    const pages =
-      selection.kind === "pages"
-        ? selection.pages
-        : Array.from({ length: document.numPages }, (_, index) => index + 1)
-    const outcome = await onExport({
-      options: { format: "images", imageFormat, dpi, pages },
-      filterLabel: t("imageExport.filter"),
-      suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${imageFormat}.zip`,
-    }, (next) => {
-      setProgress(next)
-      if (stopRequested.current) void cancel()
+    const result = await run((onProgress) => {
+      setFailed(false)
+      const pages =
+        selection.kind === "pages"
+          ? selection.pages
+          : Array.from({ length: document.numPages }, (_, index) => index + 1)
+
+      return onExport(
+        {
+          options: { format: "images", imageFormat, dpi, pages },
+          filterLabel: t("imageExport.filter"),
+          suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${imageFormat}.zip`,
+        },
+        onProgress,
+      )
     })
-    setBusy(false)
-    setStopping(false)
-    if (outcome === "failed") setFailed(true)
+
+    if (!result.ran || result.outcome === "busy") return
+    if (result.outcome === "failed") setFailed(true)
     else onClose()
   }
 
@@ -215,9 +208,7 @@ export function ImageExportDialog({
                 onClose()
                 return
               }
-              stopRequested.current = true
-              setStopping(true)
-              void cancel()
+              requestStop()
             }}
             data-testid="image-export-cancel"
           >

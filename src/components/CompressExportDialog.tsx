@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Slider } from "@/components/ui/slider"
 import type { useAnnotations } from "@/hooks/useAnnotations"
+import { useExportDialogRun } from "@/hooks/useExportDialogRun"
 import {
   DEFAULT_IMAGE_QUALITY,
   IMAGE_QUALITY_STEP,
@@ -24,7 +25,6 @@ import {
 } from "@/lib/compressExport"
 import { formatBytes } from "@/lib/formatBytes"
 import type { PdfDocumentInfo } from "@/lib/pdf"
-import type { PdfProgress } from "@/lib/progress"
 
 /** Long enough for a run of arrow keys to settle, short enough to feel live. */
 const ESTIMATE_DEBOUNCE_MS = 250
@@ -52,14 +52,14 @@ export function CompressExportDialog({
   // backend with throwaway estimates.
   const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY)
   const [committedQuality, setCommittedQuality] = useState(DEFAULT_IMAGE_QUALITY)
-  const [busy, setBusy] = useState(false)
-  const [stopping, setStopping] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [progress, setProgress] = useState<PdfProgress | null>(null)
   const [estimate, setEstimate] = useState<CompressionEstimate | null>(null)
   const [estimating, setEstimating] = useState(true)
   const [estimateFailed, setEstimateFailed] = useState(false)
-  const stopRequested = useRef(false)
+  const { busy, progress, requestStop, run, stopping } = useExportDialogRun(
+    document.id,
+    "cancel_pdf_compression",
+  )
   // Only the newest estimate may answer: a slower run for abandoned levels
   // must not overwrite the one the reader is looking at.
   const estimateRun = useRef(0)
@@ -141,31 +141,26 @@ export function CompressExportDialog({
     return () => clearTimeout(timer)
   }, [busy, document.id, committedQuality])
 
-  const cancel = async () => {
-    if (await invoke<boolean>("cancel_pdf_compression", { documentId: document.id }).catch(() => false)) {
-      stopRequested.current = false
-    }
-  }
-
   const start = async () => {
-    const options: CompressionOptions = { imageQuality }
-    setBusy(true)
-    setFailed(false)
-    setProgress(null)
-    stopRequested.current = false
-    // The export must not queue behind an estimate for levels just left.
-    stopEstimates()
-    const outcome = await track(onExport({
-      options,
-      filterLabel: t("compressExport.filter"),
-      suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("compressExport.suffix")}.pdf`,
-    }, (next) => {
-      setProgress(next)
-      if (stopRequested.current) void cancel()
-    }))
-    setBusy(false)
-    setStopping(false)
-    if (outcome === "failed") setFailed(true)
+    const result = await run((onProgress) => {
+      const options: CompressionOptions = { imageQuality }
+      setFailed(false)
+      // The export must not queue behind an estimate for levels just left.
+      stopEstimates()
+      return track(
+        onExport(
+          {
+            options,
+            filterLabel: t("compressExport.filter"),
+            suggestedName: `${suggestedName.replace(/\.pdf$/i, "")}-${t("compressExport.suffix")}.pdf`,
+          },
+          onProgress,
+        ),
+      )
+    })
+
+    if (!result.ran || result.outcome === "busy") return
+    if (result.outcome === "failed") setFailed(true)
     else onClose()
   }
 
@@ -278,9 +273,7 @@ export function CompressExportDialog({
                 onClose()
                 return
               }
-              stopRequested.current = true
-              setStopping(true)
-              void cancel()
+              requestStop()
             }}
             data-testid="compress-cancel"
           >
