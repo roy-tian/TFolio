@@ -98,6 +98,7 @@ import { transientDocumentRefusals, workspaceOwner } from "@/lib/notices"
 import { NO_FOLDS, sectionOutlineKey, type OutlineFolds } from "@/lib/outlineFolds"
 import { storedSignatureHandling } from "@/lib/signatureHandling"
 import { e2eOverride } from "@/lib/e2e"
+import { createSingleFlightGate } from "@/lib/fileDialogGate"
 import { fileMoveOrder, foldedAway, nearestFileEdge } from "@/lib/pageSections"
 import {
   answerSourceSignatures,
@@ -1179,6 +1180,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // One batch at a time: a second, while the first is still being read or
     // converted, would be placed against a page count about to move.
     const addingFilesRef = useRef(false)
+    const [filesPickerGate] = useState(createSingleFlightGate)
 
     /** Files read from disk, added as files of their own in front of the
         page `slot` pages in, or at the end; signed ones wait for the reader's
@@ -1288,9 +1290,22 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     // The backend's own dialog, which also approves the chosen files for reading.
     const chooseFiles = useCallback(async () => {
+      if (addingFilesRef.current) {
+        notice.raise("pagesAppendBusy", { values: { name: fileName } })
+        return
+      }
+
+      const releaseDialog = filesPickerGate.acquire()
+
+      if (!releaseDialog) {
+        return
+      }
+
+      let paths: string[]
+
       try {
         const pick = e2eOverride("pickPdfPaths")
-        const paths = pick
+        paths = pick
           ? await pick()
           : await invoke<string[]>("pick_pdf_paths", {
               filterLabel: t(
@@ -1299,12 +1314,19 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
                   : "files.sourceFilterPlain",
               ),
             })
+      } catch {
+        notice.raise("openFailed")
+        return
+      } finally {
+        releaseDialog()
+      }
 
+      try {
         await addFiles(paths)
       } catch {
         notice.raise("openFailed")
       }
-    }, [addFiles, notice, t])
+    }, [addFiles, fileName, filesPickerGate, notice, t])
 
     const renameSection = useCallback(
       (sectionId: number, title: string) => {
@@ -2378,7 +2400,9 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         >
           {sidebarPanel === "bookmarks" && severalFiles ? (
             <FileSectionsTree
+              active={active}
               canPaste={canPastePages}
+              currentPage={currentPage}
               folds={outlineFolds}
               onFoldsChange={setOutlineFolds}
               onMove={moveFile}
@@ -2392,6 +2416,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             />
           ) : sidebarPanel === "bookmarks" ? (
             <BookmarkList
+              active={active}
+              currentPage={currentPage}
               folds={outlineFolds}
               items={outline}
               onFoldsChange={setOutlineFolds}

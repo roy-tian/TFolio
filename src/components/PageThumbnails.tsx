@@ -33,6 +33,7 @@ import {
 import { PagesBar } from "@/components/PagesBar"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { useCurrentPage, type CurrentPage } from "@/hooks/useCurrentPage"
+import { useFollowCurrentPage } from "@/hooks/useFollowCurrentPage"
 import { useFlipLayout } from "@/hooks/useFlipLayout"
 import { CARRY_KEY, useIncomingPages } from "@/hooks/useIncomingPages"
 import { usePageCarryContext, type CarryLanding } from "@/hooks/usePageCarry"
@@ -83,6 +84,7 @@ const REVEAL_MARGIN = 12
 const COLUMNS_SETTLE_MS = 150
 // What a ghost lands on in its cell: a page's paper, or a folded file's name.
 const LANDING_PAPER = `[data-thumbnail-page], ${FILE_HEADING_NAME}`
+const identityPage = (pageNumber: number) => pageNumber
 
 /** Where an element's top stands on screen by its place in the flow, which a
     slide's transform does not move: a cell a reorder has just landed still
@@ -270,7 +272,6 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
   const surfaceRef = useRef<HTMLDivElement>(null)
   const columnRef = useRef<HTMLOListElement>(null)
   const current = useCurrentPage(currentPage)
-  const followedRef = useRef<number | null>(null)
   const [menu, setMenu] = useState<{
     pageNumber: number
     pages: PdfPageInfo[]
@@ -714,31 +715,41 @@ export const PageThumbnails = forwardRef<PageThumbnailsHandle, PageThumbnailsPro
 
   useEffect(() => () => pendingLandedRef.current?.(), [])
 
-  // Only when the reader's page changes, never on every render: a reader
-  // scrolling the column to look further ahead must not be pulled back.
-  useLayoutEffect(() => {
-    const list = listRef.current
-    // Folded away, the page is where its file's name stands.
-    const paper = cellOf(current)
+  const scrollCurrentThumbnail = useCallback(
+    (behavior: ScrollBehavior) => {
+      const list = listRef.current
+      // Folded away, the page is where its file's name stands; otherwise the
+      // whole cell, its number under the paper included.
+      const cell = cellOf(current)?.closest("li") ?? null
 
-    if (
-      !active ||
-      !list ||
-      !paper ||
-      followedRef.current === current ||
-      // The columns just measured are a render away: a place found among
-      // these would be wrong once the pages stand in rows.
-      fittedColumnsRef.current !== columns ||
-      list.getClientRects().length === 0
-    ) {
-      return
-    }
+      if (
+        !list ||
+        !cell ||
+        // The columns just measured are a render away: a place found among
+        // these would be wrong once the pages stand in rows.
+        fittedColumnsRef.current !== columns ||
+        list.getClientRects().length === 0
+      ) {
+        return false
+      }
 
-    const instant = followedRef.current === null
+      bringIntoView(cell, behavior)
+      return true
+    },
+    [bringIntoView, cellOf, columns, current],
+  )
 
-    followedRef.current = current
-    bringIntoView(paper, instant ? "instant" : "smooth")
-  }, [active, bringIntoView, cellOf, columns, current])
+  // Only when the reader's page changes, or an explicit jump (`goTo`, such as
+  // search) asks for it — never on every render, so a reader scrolling the
+  // column to look further ahead is not pulled back.
+  useFollowCurrentPage({
+    active,
+    currentPage,
+    key: current,
+    keyForPage: identityPage,
+    readySignal: columns,
+    scroll: scrollCurrentThumbnail,
+  })
 
   // After the reader's page, so a page just put in the document wins the
   // column where both ask: it shows where it landed, its file's name over it,

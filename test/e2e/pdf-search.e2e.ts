@@ -5,6 +5,7 @@ import {
   activeSidebar,
   deletePageFromSidebar,
   openPdfFromDisk,
+  outlinedSearchPdf,
   pressRedo,
   refreshApp,
   seedSettings,
@@ -192,4 +193,132 @@ describe("TFolio PDF search", () => {
     await expect($("[data-search-match='0'][data-active='true']")).toBeDisplayed()
   })
 
+  it("scrolls sidebar thumbnails and bookmarks to follow search jumps", async () => {
+    await seedSettings({ ui: { language: "en", viewMode: "single" } })
+    await refreshApp()
+    await openPdfFromDisk("outlined-search.pdf", outlinedSearchPdf(30))
+    await $("[data-page-number='1'] canvas").waitForDisplayed()
+
+    const thumbnailInView = (pageNumber: number) =>
+      browser.execute(
+        (scope: string, page: number) => {
+          const list = document.querySelector<HTMLElement>(`${scope} [data-thumbnail-scroll-root]`)
+          const button = list?.querySelector<HTMLElement>(`button[data-thumbnail-page='${page}']`)
+          const cell = button?.closest("li")
+
+          if (!list || !button || !cell) {
+            return { current: false, visible: false }
+          }
+
+          const listBox = list.getBoundingClientRect()
+          const cellBox = cell.getBoundingClientRect()
+
+          return {
+            current: button.getAttribute("aria-current") === "page",
+            visible: cellBox.top >= listBox.top && cellBox.bottom <= listBox.bottom,
+          }
+        },
+        activeSidebar,
+        pageNumber,
+      )
+
+    const bookmarkInView = (title: string) =>
+      browser.execute(
+        (scope: string, label: string) => {
+          const nav = document.querySelector<HTMLElement>(`${scope} nav[aria-label='Bookmarks']`)
+          const button = Array.from(nav?.querySelectorAll<HTMLButtonElement>("button") ?? []).find(
+            (candidate) => candidate.textContent?.trim() === label,
+          )
+          const row = button?.closest<HTMLElement>("[data-outline-current]")
+
+          if (!nav || !button) {
+            return { current: false, visible: false }
+          }
+
+          const navBox = nav.getBoundingClientRect()
+          const rowBox = (row ?? button).getBoundingClientRect()
+
+          return {
+            current: button.getAttribute("aria-current") === "location" && row !== null,
+            visible: rowBox.top >= navBox.top && rowBox.bottom <= navBox.bottom,
+          }
+        },
+        activeSidebar,
+        title,
+      )
+
+    await $("button[aria-label='Search this PDF']").click()
+    const input = $("input[aria-label='Search text in current PDF']")
+    const status = $("[data-slot='pdf-search-status']")
+    const pageInput = $("input[aria-label='Page number']")
+
+    await input.setValue("Chapter 25")
+    await expect(status).toHaveText("1 / 1", { wait: 10_000 })
+    await expect(pageInput).toHaveValue("25")
+    await browser.waitUntil(
+      async () => {
+        const state = await thumbnailInView(25)
+        return state.current && state.visible
+      },
+      { timeout: 10_000, timeoutMsg: "thumbnail 25 never scrolled into view on search jump" },
+    )
+
+    // Scrolling the thumbnail sidebar away and jumping again on the same page
+    // still brings the jumped-to thumbnail back into view.
+    await browser.execute((scope: string) => {
+      document.querySelector<HTMLElement>(`${scope} [data-thumbnail-scroll-root]`)!.scrollTop = 0
+    }, activeSidebar)
+    expect((await thumbnailInView(25)).visible).toBe(false)
+
+    await $("button[aria-label='Next result']").click()
+    await browser.waitUntil(
+      async () => (await thumbnailInView(25)).visible,
+      { timeout: 10_000, timeoutMsg: "same-page search jump did not bring thumbnail 25 back" },
+    )
+
+    // Switching to bookmarks opens directly on the active chapter.
+    await $(`${activeSidebar} button[aria-label='Outline']`).click()
+    await browser.waitUntil(
+      async () => {
+        const state = await bookmarkInView("Chapter 25")
+        return state.current && state.visible
+      },
+      { timeout: 10_000, timeoutMsg: "bookmark 25 was not active and visible on open" },
+    )
+
+    await input.setValue("Chapter 3 marker")
+    await expect(status).toHaveText("1 / 1", { wait: 10_000 })
+    await expect(pageInput).toHaveValue("3")
+    await browser.waitUntil(
+      async () => {
+        const state = await bookmarkInView("Chapter 3")
+        return state.current && state.visible
+      },
+      { timeout: 10_000, timeoutMsg: "bookmark 3 never followed the search jump" },
+    )
+
+    await input.setValue("Chapter 28")
+    await expect(status).toHaveText("1 / 1", { wait: 10_000 })
+    await expect(pageInput).toHaveValue("28")
+    await browser.waitUntil(
+      async () => {
+        const state = await bookmarkInView("Chapter 28")
+        return state.current && state.visible
+      },
+      { timeout: 10_000, timeoutMsg: "bookmark 28 never followed the search jump" },
+    )
+
+    // Scrolling the bookmarks list away and jumping again on the same page
+    // brings the matching bookmark back into view.
+    await browser.execute((scope: string) => {
+      document.querySelector<HTMLElement>(`${scope} nav[aria-label='Bookmarks']`)!.scrollTop = 0
+    }, activeSidebar)
+    expect((await bookmarkInView("Chapter 28")).visible).toBe(false)
+
+    await $("button[aria-label='Next result']").click()
+    await browser.waitUntil(
+      async () => (await bookmarkInView("Chapter 28")).visible,
+      { timeout: 10_000, timeoutMsg: "same-page search jump did not bring bookmark 28 back" },
+    )
+  })
 })

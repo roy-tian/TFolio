@@ -1,6 +1,8 @@
 import {
+  useCallback,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type Ref,
@@ -23,10 +25,14 @@ import { FileMenuContent } from "@/components/PageContextMenu"
 import { dropEdgeOrigin, SidebarDropEdge } from "@/components/SidebarFileDrop"
 import { OutlineBar } from "@/components/SidebarPanelTools"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { useCurrentPageSelector, type CurrentPage } from "@/hooks/useCurrentPage"
+import { useFollowOutlineRow } from "@/hooks/useFollowCurrentPage"
 import { useListDrag } from "@/hooks/useListDrag"
 import { useDropEdgeScroll, useSidebarDrop, useSidebarDropPoint } from "@/hooks/useSidebarDrop"
 import {
+  activeFileOutlineTarget,
   fileFoldKey,
+  fileRunKey,
   foldableBookmarks,
   foldAllOf,
   nestsBookmarks,
@@ -46,7 +52,9 @@ export type FileSectionsTreeHandle = {
 }
 
 type FileSectionsTreeProps = {
+  active: boolean
   canPaste: boolean
+  currentPage: CurrentPage
   /** The files folded to their names, and their bookmarks folded, by key. */
   folds: OutlineFolds
   onFoldsChange: (folds: OutlineFolds) => void
@@ -93,7 +101,9 @@ function runLanding(list: HTMLUListElement, y: number | null) {
  * give their place to its rename and remove buttons under the pointer.
  */
 export function FileSectionsTree({
+  active,
   canPaste,
+  currentPage,
   folds,
   onFoldsChange,
   onMove,
@@ -126,13 +136,20 @@ export function FileSectionsTree({
     [],
   )
   const draggedAtRef = useRef(0)
-  const runs = fileRuns(pages)
-  const files = new Map(sections.map((section) => [section.id, section]))
-  const filePages = new Map<number, number>()
+  const runs = useMemo(() => fileRuns(pages), [pages])
+  const files = useMemo(
+    () => new Map(sections.map((section) => [section.id, section])),
+    [sections],
+  )
+  const filePages = useMemo(() => {
+    const counts = new Map<number, number>()
 
-  for (const run of runs) {
-    filePages.set(run.section, (filePages.get(run.section) ?? 0) + run.count)
-  }
+    for (const run of runs) {
+      counts.set(run.section, (counts.get(run.section) ?? 0) + run.count)
+    }
+
+    return counts
+  }, [runs])
 
   const { drag } = useListDrag({
     active: editing === null,
@@ -148,17 +165,40 @@ export function FileSectionsTree({
     pressOnly: (target) => target.closest("[data-slot='file-section-title']") === null,
   })
   const dragged = drag ? files.get(runs[drag.index]?.section ?? -1) : undefined
+  const targetKeyForPage = useCallback(
+    (pageNumber: number) => {
+      const target = activeFileOutlineTarget(runs, files, pageNumber, folds)
+      return target ? `${target.kind}:${target.key}` : null
+    },
+    [files, folds, runs],
+  )
+  const activeTargetKey = useCurrentPageSelector(currentPage, targetKeyForPage)
+  const activeFileKey = activeTargetKey?.startsWith("file:") ? activeTargetKey.slice(5) : null
+  const activeBookmarkKey = activeTargetKey?.startsWith("bookmark:")
+    ? activeTargetKey.slice(9)
+    : null
+
+  useFollowOutlineRow({
+    active,
+    activeKey: activeTargetKey,
+    currentPage,
+    keyForPage: targetKeyForPage,
+    navRef,
+    paused: drag !== null || editing !== null,
+  })
 
   // A file's bookmarks stand under its first run alone, so it folds once.
-  const foldable = sections.filter((section) => section.outline.length > 0)
-  const foldAll = foldAllOf(
-    folds,
-    foldable.map((section) => fileFoldKey(section.id)),
-    foldable.flatMap((section) => [
-      fileFoldKey(section.id),
-      ...foldableBookmarks(section.outline, sectionOutlineKey(section.id)),
-    ]),
-  )
+  const foldAll = useMemo(() => {
+    const foldable = sections.filter((section) => section.outline.length > 0)
+    return foldAllOf(
+      folds,
+      foldable.map((section) => fileFoldKey(section.id)),
+      foldable.flatMap((section) => [
+        fileFoldKey(section.id),
+        ...foldableBookmarks(section.outline, sectionOutlineKey(section.id)),
+      ]),
+    )
+  }, [folds, sections])
 
   return (
     <div className="flex h-full flex-col">
@@ -181,7 +221,7 @@ export function FileSectionsTree({
           <ul className="flex flex-col gap-0.5" ref={listRef}>
             {runs.map((run, index) => {
               const section = files.get(run.section)
-              const rowKey = `${run.section}:${run.ordinal}`
+              const rowKey = fileRunKey(run)
 
               if (!section) {
                 return null
@@ -189,6 +229,8 @@ export function FileSectionsTree({
 
               return (
                 <FileRunRow
+                  active={activeFileKey === rowKey}
+                  activeBookmark={activeBookmarkKey}
                   canPaste={canPaste}
                   dragging={drag !== null}
                   editing={editing === rowKey}
@@ -243,6 +285,8 @@ export function FileSectionsTree({
 
 /** One run of a file's pages, under the file's name. */
 function FileRunRow({
+  active,
+  activeBookmark,
   canPaste,
   dragging,
   editing,
@@ -263,6 +307,8 @@ function FileRunRow({
   run,
   section,
 }: {
+  active: boolean
+  activeBookmark: string | null
   canPaste: boolean
   dragging: boolean
   editing: boolean
@@ -304,7 +350,14 @@ function FileRunRow({
       <ContextMenu disabled={editing} onOpenChange={setMenuOpen}>
         <ContextMenuTrigger
           render={
-            <div className={FILE_ROW_CLASS} data-slot="file-section-row" />
+            <div
+              className={cn(
+                FILE_ROW_CLASS,
+                active && "bg-sidebar-accent text-sidebar-accent-foreground",
+              )}
+              data-outline-current={active ? "" : undefined}
+              data-slot="file-section-row"
+            />
           }
         >
           <button
@@ -343,13 +396,19 @@ function FileRunRow({
               cutShort={nameRef}
             >
               <button
+                aria-current={active ? "location" : undefined}
                 className={FILE_ROW_NAME_CLASS}
                 data-slot="file-section-title"
                 onClick={() => onNavigate(run.first)}
                 onDoubleClick={() => onEdit(true)}
                 type="button"
               >
-                <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                <FileText
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground",
+                    active && "text-primary",
+                  )}
+                />
                 <span className="truncate" ref={nameRef}>
                   {section.title}
                 </span>
@@ -385,6 +444,7 @@ function FileRunRow({
       {open ? (
         <ul className="pl-5">
           <BookmarkItems
+            activeKey={activeBookmark}
             folds={folds}
             items={outline}
             onFoldsChange={onFoldsChange}
