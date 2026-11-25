@@ -108,23 +108,53 @@ describe("TFolio page numbers", () => {
     // With no stored style it opens on the mirrored choice.
     const preview = $("[data-testid='page-numbers-preview']")
     const automatic = $("//button[normalize-space()='Automatic']")
+    const fixedCenter = $("//button[normalize-space()='Fixed center']")
+    const fixedRight = $("//button[normalize-space()='Fixed right']")
+    // Layout height rather than getBoundingClientRect: the dialog's zoom-in-95
+    // open animation scales client rects for 100 ms after mount.
+    const measureHeights = () =>
+      browser.execute(() => ({
+        dialog: document.querySelector<HTMLElement>(
+          "[data-testid='page-numbers-dialog']",
+        )!.offsetHeight,
+        preview: document.querySelector<HTMLElement>(
+          "[data-testid='page-numbers-preview']",
+        )!.offsetHeight,
+      }))
+
     await expect(automatic).toHaveAttribute("aria-pressed", "true")
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Even pages"),
       { timeout: 15_000, timeoutMsg: "the default never showed a mirrored pair" },
     )
+    const autoHeights = await measureHeights()
+    expect(autoHeights.dialog).toBeGreaterThan(0)
+    expect(autoHeights.preview).toBeGreaterThan(0)
 
-    await $("//button[normalize-space()='Fixed center']").click()
+    await fixedCenter.click()
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Every page"),
       { timeout: 15_000, timeoutMsg: "the fixed place never went back to one sheet" },
     )
+    expect(await preview.getText()).not.toContain("Even pages")
+    const centerHeights = await measureHeights()
+    expect(centerHeights).toEqual(autoHeights)
+
+    await fixedRight.click()
+    await expect(fixedRight).toHaveAttribute("aria-pressed", "true")
+    const rightText = await preview.getText()
+    expect(rightText).toContain("Every page")
+    expect(rightText).not.toContain("Even pages")
+    const rightHeights = await measureHeights()
+    expect(rightHeights).toEqual(autoHeights)
 
     await automatic.click()
     await browser.waitUntil(
       async () => (await preview.getText()).includes("Even pages"),
       { timeout: 15_000, timeoutMsg: "the mirrored choice never showed a pair" },
     )
+    const restoredHeights = await measureHeights()
+    expect(restoredHeights).toEqual(autoHeights)
 
     // A backwards range holds the apply button until it is valid. The fixture
     // is one page, so a valid range is 1–1.
