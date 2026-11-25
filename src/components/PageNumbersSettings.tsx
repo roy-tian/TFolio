@@ -133,7 +133,7 @@ export function PageNumbersSettings({
 }: PageNumbersSettingsProps) {
   const { t } = useTranslation()
   const about = t("pageNumbers.about")
-  const maxStart = maxPageNumbersStart(pageCount)
+  const maxStart = maxPageNumbersStart()
   const positionId = `${idPrefix}-position-label`
   const rangeId = `${idPrefix}-range`
   const startId = `${idPrefix}-start`
@@ -250,10 +250,7 @@ export function PageNumbersSettings({
                 // Half-typed numbers must not be snapped mid-entry; leaving the
                 // field is what settles it, so the clamp happens there.
                 onBlur={(event) => {
-                  const settled = clampPageNumbersStart(
-                    event.target.value,
-                    pageCount,
-                  )
+                  const settled = clampPageNumbersStart(event.target.value)
 
                   if (settled !== draft.start) {
                     onDraftChange({ ...draft, start: settled })

@@ -9,9 +9,10 @@ use tauri::{
 };
 use tfolio_engine::{
     download_fallback_font, size_limit_error, ExportOutcome, OperationTarget, PageNumbersConfig,
-    PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome, PdfSignatures,
-    PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle, SignatureDecision,
-    TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS, WORD_EXTENSIONS,
+    PageNumbersOutcome, PagePoint, PagePointsRect, PdfDocumentInfo, PdfSearchOutcome,
+    PdfSignatures, PdfStructureUpdate, PdfTextSpan, PdfiumEngine, RectEffect, RectStyle,
+    SignatureDecision, TextNoteStyle, WatermarkConfig, MAX_PDF_BYTES, MERGE_IMAGE_EXTENSIONS,
+    WORD_EXTENSIONS,
 };
 
 use crate::recent::RecentFiles;
@@ -118,6 +119,26 @@ pub async fn render_pdf_page(
     })
     .await
     .map_err(|error| format!("PDFium render task failed: {error}"))??;
+
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
+pub async fn render_pdf_padding_page(
+    document_id: u64,
+    after: usize,
+    width: i32,
+    state: State<'_, PdfiumState>,
+) -> Result<Response, String> {
+    let engine = Arc::clone(&state.engine);
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let page = engine.render_padding_page(document_id, after, width)?;
+
+        encode_png(&page)
+            .map_err(|error| format!("could not encode padding page after {after}: {error}"))
+    })
+    .await
+    .map_err(|error| format!("PDFium padding render task failed: {error}"))??;
 
     Ok(Response::new(bytes))
 }
@@ -341,18 +362,24 @@ pub async fn remove_pdf_watermark(
     .map_err(|error| format!("PDFium watermark removal task failed: {error}"))?
 }
 
-/// `false` is a run the reader stopped, as `apply_pdf_watermark` reports.
+/// `applied: false` is a run the reader stopped, as `apply_pdf_watermark` reports.
 #[tauri::command]
 pub async fn apply_pdf_page_numbers(
     document_id: u64,
     config: PageNumbersConfig,
+    stash_id: Option<u64>,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<bool, String> {
+) -> Result<PageNumbersOutcome, String> {
     let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.apply_page_numbers_with_progress(document_id, config, channel_progress(on_progress))
+        engine.apply_page_numbers_with_progress(
+            document_id,
+            config,
+            stash_id,
+            channel_progress(on_progress),
+        )
     })
     .await
     .map_err(|error| format!("PDFium page-number task failed: {error}"))?
@@ -361,16 +388,41 @@ pub async fn apply_pdf_page_numbers(
 #[tauri::command]
 pub async fn remove_pdf_page_numbers(
     document_id: u64,
+    stash_id: Option<u64>,
     on_progress: Channel<PdfProgress>,
     state: State<'_, PdfiumState>,
-) -> Result<bool, String> {
+) -> Result<PageNumbersOutcome, String> {
     let engine = Arc::clone(&state.engine);
 
     tauri::async_runtime::spawn_blocking(move || {
-        engine.remove_page_numbers_with_progress(document_id, channel_progress(on_progress))
+        engine.remove_page_numbers_with_progress(
+            document_id,
+            stash_id,
+            channel_progress(on_progress),
+        )
     })
     .await
     .map_err(|error| format!("PDFium page-number removal task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn restore_pdf_page_numbers(
+    document_id: u64,
+    stash_id: u64,
+    on_progress: Channel<PdfProgress>,
+    state: State<'_, PdfiumState>,
+) -> Result<PageNumbersOutcome, String> {
+    let engine = Arc::clone(&state.engine);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        engine.restore_page_numbers_with_progress(
+            document_id,
+            stash_id,
+            channel_progress(on_progress),
+        )
+    })
+    .await
+    .map_err(|error| format!("PDFium page-number restore task failed: {error}"))?
 }
 
 /// Deliberately not `spawn_blocking`: the operation this one must reach holds

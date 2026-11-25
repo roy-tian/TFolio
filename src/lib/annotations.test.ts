@@ -206,6 +206,32 @@ describe("pageNumbersConfig", () => {
     expect(watermarkConfig(history)).toEqual(wm)
     expect(pageNumbersConfig(history)).toEqual(first)
   })
+
+  it("allows re-applying the same config after content, structure, or padding edits", () => {
+    const applied = historyOf(pageNumbers(first))
+    const afterBlank = planInsertBlankPage(applied, 2, 3)!.history
+    const afterMark = commit(applied, highlight(1))
+    const afterPadding = commit(applied, {
+      kind: "fileOptions",
+      next: { smartPadding: false },
+      previous: { smartPadding: true },
+    })
+    const afterBlankThenWatermark = commit(afterBlank, watermark(defaultWatermarkConfig("DRAFT")))
+    const afterRename = commit(applied, {
+      kind: "renameSection",
+      previous: "a.pdf",
+      sectionId: 1,
+      title: "b.pdf",
+    })
+    const afterWatermarkOnly = commit(applied, watermark(defaultWatermarkConfig("DRAFT")))
+
+    expect(planPageNumbersChange(afterBlank, first, 4)).not.toBeNull()
+    expect(planPageNumbersChange(afterMark, first, 3)).not.toBeNull()
+    expect(planPageNumbersChange(afterPadding, first, 3)).not.toBeNull()
+    expect(planPageNumbersChange(afterBlankThenWatermark, first, 4)).not.toBeNull()
+    expect(planPageNumbersChange(afterRename, first, 3)).toBeNull()
+    expect(planPageNumbersChange(afterWatermarkOnly, first, 3)).toBeNull()
+  })
 })
 
 describe("commit", () => {

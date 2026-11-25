@@ -83,8 +83,23 @@ export function usePrint({
 
         printed.push({ pageNumber, src: pngDataUrl(bytes) })
 
-        if (padding.some((sheet) => sheet.after === pageNumber)) {
-          printed.push({ pageNumber, src: null })
+        const blank = padding.find((sheet) => sheet.after === pageNumber)
+        if (blank) {
+          if (blank.pageNumber) {
+            const blankBytes = await invoke<ArrayBuffer>("render_pdf_padding_page", {
+              after: blank.after,
+              documentId,
+              width: printRenderWidth(blank.width, dpi),
+            })
+
+            if (runRef.current !== run) {
+              return
+            }
+
+            printed.push({ blank: true, pageNumber, src: pngDataUrl(blankBytes) })
+          } else {
+            printed.push({ blank: true, pageNumber, src: null })
+          }
         }
 
         setProgress({ completed: pageNumber, total: pages.length })

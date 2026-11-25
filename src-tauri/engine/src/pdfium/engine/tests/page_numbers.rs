@@ -69,9 +69,12 @@ fn numbers_every_page_and_extracts_the_label() {
 
     let mut progress = Vec::new();
     engine
-        .apply_page_numbers_with_progress(document.id, page_numbers_config(), |completed, total| {
-            progress.push((completed, total))
-        })
+        .apply_page_numbers_with_progress(
+            document.id,
+            page_numbers_config(),
+            None,
+            |completed, total| progress.push((completed, total)),
+        )
         .expect("PDFium should number every page");
 
     assert_eq!(progress, [(0, 4), (1, 4), (2, 4), (3, 4), (4, 4)]);
@@ -99,15 +102,23 @@ fn a_stopped_run_leaves_the_document_bare() {
 
     // Stopped from the run's own progress, which puts the flag where the
     // reader's cancel puts it: set while the rebuild holds the document lock.
-    let applied = engine
-        .apply_page_numbers_with_progress(document.id, page_numbers_config(), |completed, _| {
-            if completed > 0 {
-                engine.cancel_operation(OperationTarget::Document(document.id));
-            }
-        })
+    let outcome = engine
+        .apply_page_numbers_with_progress(
+            document.id,
+            page_numbers_config(),
+            None,
+            |completed, _| {
+                if completed > 0 {
+                    engine.cancel_operation(OperationTarget::Document(document.id));
+                }
+            },
+        )
         .expect("a stopped run is not a failure");
 
-    assert!(!applied, "a stopped run reports that nothing landed");
+    assert!(
+        !outcome.applied,
+        "a stopped run reports that nothing landed"
+    );
     assert!(
         !engine.cancel_operation(OperationTarget::Document(document.id)),
         "the operation is off the list once it has returned"
@@ -145,8 +156,8 @@ fn a_stopped_replacement_keeps_the_numbers_it_had() {
     let mut replacement = page_numbers_config();
     replacement.start = Some(10);
 
-    let applied = engine
-        .apply_page_numbers_with_progress(document.id, replacement, |completed, _| {
+    let outcome = engine
+        .apply_page_numbers_with_progress(document.id, replacement, None, |completed, _| {
             if completed > 0 {
                 engine.cancel_operation(OperationTarget::Document(document.id));
             }
@@ -154,7 +165,7 @@ fn a_stopped_replacement_keeps_the_numbers_it_had() {
         .expect("a stopped replacement is not a failure");
 
     assert!(
-        !applied,
+        !outcome.applied,
         "a stopped replacement reports that nothing landed"
     );
 
@@ -187,9 +198,12 @@ fn a_replacement_checks_the_owned_tails_first_and_stops_there() {
     let mut progress = Vec::new();
 
     engine
-        .apply_page_numbers_with_progress(document.id, replacement.clone(), |completed, total| {
-            progress.push((completed, total))
-        })
+        .apply_page_numbers_with_progress(
+            document.id,
+            replacement.clone(),
+            None,
+            |completed, total| progress.push((completed, total)),
+        )
         .expect("PDFium should renumber every page");
 
     // Two pages, checked once and rebuilt in two passes: one run of six.
@@ -199,13 +213,16 @@ fn a_replacement_checks_the_owned_tails_first_and_stops_there() {
 
     // Stopped at once: the check is what it lands in, before any page moves.
     replacement.start = Some(20);
-    let applied = engine
-        .apply_page_numbers_with_progress(document.id, replacement, |_, _| {
+    let outcome = engine
+        .apply_page_numbers_with_progress(document.id, replacement, None, |_, _| {
             engine.cancel_operation(OperationTarget::Document(document.id));
         })
         .expect("a stopped check is not a failure");
 
-    assert!(!applied, "a stopped check reports that nothing landed");
+    assert!(
+        !outcome.applied,
+        "a stopped check reports that nothing landed"
+    );
 
     let text = extracted_text(engine, document.id, 1);
     assert!(
@@ -804,8 +821,222 @@ fn a_page_stays_blank_under_a_number_this_session_drew() {
         .apply_page_numbers(document.id, skipped)
         .expect("PDFium should renumber the document");
 
-    // The blank test reads the page above its own number's band, so the label
-    // the first apply drew there cannot make the page look printed-on.
+    // The blank test runs after popping the old tail, so the label the first
+    // apply drew there cannot make the page look printed-on.
     assert!(!extracted_text(engine, document.id, 2).contains('—'));
     assert!(extracted_text(engine, document.id, 3).contains('2'));
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn blank_page_stays_blank_under_a_watermark_and_rotated_label() {
+    let engine = test_engine();
+    // White-filled middle page (`base_objects == 1`, forces render blank scan).
+    let document = engine
+        .open(blank_middle_page_pdf())
+        .expect("PDFium should open the blank-middle fixture");
+
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply a watermark");
+    engine
+        .rotate_pages(document.id, &[2], 90)
+        .expect("PDFium should rotate the blank page");
+    engine
+        .apply_page_numbers(document.id, page_numbers_config())
+        .expect("PDFium should number every page");
+    assert!(extracted_text(engine, document.id, 2).contains('—'));
+
+    let mut skipped = page_numbers_config();
+    skipped.blank_numbered = false;
+    skipped.blank_counted = false;
+
+    engine
+        .apply_page_numbers(document.id, skipped)
+        .expect("PDFium should renumber without the blank page");
+
+    let page_two = extracted_text(engine, document.id, 2);
+    assert!(
+        page_two.contains("DRAFT") && !page_two.contains('—'),
+        "a blank page under a watermark and rotated label must still detect as blank, got {page_two:?}"
+    );
+    assert!(
+        extracted_text(engine, document.id, 3).contains('2'),
+        "the page after the skipped blank should take number 2"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn detects_bottom_edge_content_and_short_text_on_a4_as_non_blank() {
+    let engine = test_engine();
+    // Page 1: short text near top on A4; Page 2: rule at bottom margin (y=25pt)
+    // where the old skirt used to ignore content.
+    let stream_a4_text = "BT /F1 12 Tf 72 750 Td (Hi) Tj ET\n";
+    let stream_bottom_rule = "0 0 0 rg\n100 25 200 6 re f\n";
+    let pdf = build_pdf(&[
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n".to_string(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>\nendobj\n".to_string(),
+        "4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 7 0 R >>\nendobj\n".to_string(),
+        "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_string(),
+        format!(
+            "6 0 obj\n<< /Length {} >>\nstream\n{stream_a4_text}endstream\nendobj\n",
+            stream_a4_text.len()
+        ),
+        format!(
+            "7 0 obj\n<< /Length {} >>\nstream\n{stream_bottom_rule}endstream\nendobj\n",
+            stream_bottom_rule.len()
+        ),
+    ]);
+    let document = engine.open(pdf).expect("PDFium should open the A4 fixture");
+
+    let mut skipped = page_numbers_config();
+    skipped.blank_numbered = false;
+    skipped.blank_counted = false;
+
+    engine
+        .apply_page_numbers(document.id, skipped)
+        .expect("PDFium should scan and number both pages");
+
+    assert!(
+        extracted_text(engine, document.id, 1).contains('1'),
+        "short 12 pt text on A4 must not be mistaken for a blank page"
+    );
+    assert!(
+        extracted_text(engine, document.id, 2).contains('2'),
+        "bottom-margin content must not be mistaken for a blank page"
+    );
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn places_page_numbers_inside_a_cropped_page_box() {
+    let engine = test_engine();
+
+    for rotation in [0, 90] {
+        let pdf = build_pdf(&[
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".to_string(),
+            format!(
+                "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 800 1000] /CropBox [150 200 550 700] /Rotate {rotation} /Contents 4 0 R >>\nendobj\n"
+            ),
+            "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n".to_string(),
+        ]);
+        let document = engine
+            .open(pdf)
+            .expect("PDFium should open the cropped fixture");
+
+        engine
+            .apply_page_numbers(document.id, page_numbers_config())
+            .expect("PDFium should number the cropped page");
+
+        let image = engine
+            .render_bitmap(document.id, 1, TEST_RENDER_WIDTH, MAX_RENDER_WIDTH)
+            .expect("PDFium should render the cropped page")
+            .into_rgb8();
+        let (width, height) = (image.width() as f32, image.height() as f32);
+        let mut inside = 0u64;
+        let mut outside = 0u64;
+
+        for (x, y, pixel) in image.enumerate_pixels() {
+            let ink: u64 = pixel.0.iter().map(|c| (255 - *c) as u64).sum();
+            let centred = (x as f32) > width * 0.3 && (x as f32) < width * 0.7;
+            let low = (y as f32) > height * 0.6 && (y as f32) < height * 0.98;
+            if centred && low {
+                inside += ink;
+            } else {
+                outside += ink;
+            }
+        }
+
+        assert!(
+            inside > 0,
+            "cropped rotation {rotation} should draw its number inside the visible bottom centre"
+        );
+        assert_eq!(
+            outside, 0,
+            "cropped rotation {rotation} should leave the rest of the visible page bare"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn reapplying_same_config_after_inserting_a_blank_page_renumbers_it() {
+    let engine = test_engine();
+    let document = engine
+        .open(two_page_pdf())
+        .expect("PDFium should open the two-page fixture");
+    let config = page_numbers_config();
+
+    engine
+        .apply_page_numbers(document.id, config.clone())
+        .expect("PDFium should number the two pages");
+    engine
+        .insert_blank_page(document.id, 2, None)
+        .expect("PDFium should insert a blank page");
+    assert!(!extracted_text(engine, document.id, 2).contains('—'));
+
+    // Same config after a structure edit must rebuild instead of no-oping.
+    engine
+        .apply_page_numbers(document.id, config)
+        .expect("PDFium should renumber all three pages");
+
+    assert!(extracted_text(engine, document.id, 1).contains('1'));
+    assert!(extracted_text(engine, document.id, 2).contains('2'));
+    assert!(extracted_text(engine, document.id, 3).contains('3'));
+}
+
+#[test]
+#[ignore = "requires `bun run fonts:download`"]
+fn restore_page_numbers_undoes_across_shrink_and_watermark_preserves_stamps() {
+    let engine = test_engine();
+    let document = engine
+        .open(outlined_three_page_pdf())
+        .expect("PDFium should open the three-page fixture");
+
+    let mut ranged = page_numbers_config();
+    ranged.range = Some((2, 3));
+    engine
+        .apply_page_numbers_with_progress(document.id, ranged, Some(1), |_, _| {})
+        .expect("PDFium should apply ranged page numbers");
+    assert!(!extracted_text(engine, document.id, 1).contains('—'));
+    assert!(extracted_text(engine, document.id, 2).contains('2'));
+    assert!(extracted_text(engine, document.id, 3).contains('3'));
+
+    // Shrink the document below `ranged.range`'s upper bound (3 -> 2 pages).
+    engine
+        .delete_pages(document.id, &[3], 2)
+        .expect("PDFium should delete page 3");
+
+    // Applying a watermark must preserve page 2's existing stamp rather than
+    // failing on `ranged.range = (2, 3)` or renumbering it.
+    engine
+        .apply_watermark(document.id, watermark_config("DRAFT"))
+        .expect("PDFium should apply a watermark over shrunk ranged page numbers");
+    let page_two = extracted_text(engine, document.id, 2);
+    assert!(page_two.contains("DRAFT") && page_two.contains('2'));
+
+    // Replacing page numbers on the 2-page doc and undoing via stash 3 must
+    // restore page 2's exact stamp without failing range validation, and a
+    // subsequent restore of deleted page 3 must still pass tail verification.
+    engine
+        .apply_page_numbers_with_progress(document.id, page_numbers_config(), Some(3), |_, _| {})
+        .expect("PDFium should replace page numbers");
+    assert!(extracted_text(engine, document.id, 1).contains('1'));
+
+    assert!(
+        engine
+            .restore_page_numbers_with_progress(document.id, 3, |_, _| {})
+            .expect("undoing page numbers via stash should succeed after shrink")
+            .applied
+    );
+    assert!(!extracted_text(engine, document.id, 1).contains('—'));
+    assert!(extracted_text(engine, document.id, 2).contains('2'));
+
+    engine
+        .restore_pages(document.id, 2)
+        .expect("restoring the deleted page after page-numbers undo should pass tail checks");
+    assert!(extracted_text(engine, document.id, 3).contains('3'));
 }

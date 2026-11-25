@@ -24,10 +24,10 @@ use pdfium::{
     insert_pdf_pages_from_document, merge_pdf_sources, open_converted_from_path, open_pdf,
     open_pdf_from_path, pdf_annotation_at_point, pdf_file_changed, pdf_text_note_font,
     pick_pdf_path, pick_pdf_paths, read_pdf_sources, release_pdf_compression, release_pdf_sources,
-    remove_pdf_page_numbers, remove_pdf_watermark, rename_pdf_section, render_pdf_page,
-    render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages, restore_pdf_pages,
-    rotate_pdf_pages, save_a4_pdf, save_pdf, search_pdf_text, set_pdf_file_options, source_sizes,
-    word_conversion_available, PdfiumState,
+    remove_pdf_page_numbers, remove_pdf_watermark, rename_pdf_section, render_pdf_padding_page,
+    render_pdf_page, render_pdf_page_thumbnail, render_pdf_watermark_preview, reorder_pdf_pages,
+    restore_pdf_page_numbers, restore_pdf_pages, rotate_pdf_pages, save_a4_pdf, save_pdf,
+    search_pdf_text, set_pdf_file_options, source_sizes, word_conversion_available, PdfiumState,
 };
 #[cfg(feature = "e2e")]
 use pdfium::{export_pdf_to, save_a4_pdf_to, unload_pdf_sources};
@@ -166,6 +166,7 @@ pub fn run() {
             remove_recent_pdf,
             reveal_recent_pdf,
             render_pdf_page,
+            render_pdf_padding_page,
             render_pdf_page_thumbnail,
             render_pdf_watermark_preview,
             extract_pdf_page_text,
@@ -184,6 +185,7 @@ pub fn run() {
             remove_pdf_watermark,
             apply_pdf_page_numbers,
             remove_pdf_page_numbers,
+            restore_pdf_page_numbers,
             cancel_pdf_operation,
             cancel_word_conversion,
             cancel_word_open,

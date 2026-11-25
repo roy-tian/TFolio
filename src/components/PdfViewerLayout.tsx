@@ -8,6 +8,12 @@ import { ViewportHold, ViewportHoldContext } from "@/hooks/useNearViewport"
 import type { RectDraft } from "@/hooks/useRectTool"
 import type { TextNotePreview } from "@/hooks/useTextNoteTool"
 import type { RenderEpochs } from "@/lib/annotations"
+import {
+  PAGE_NUMBERS_BOTTOM_MARGIN,
+  PAGE_NUMBERS_FONT_SIZE,
+  PAGE_NUMBERS_FONT_STACK,
+  PAGE_NUMBERS_SIDE_MARGIN,
+} from "@/lib/pageNumbers"
 import { sheetSpreads, sheetsOf, type PaddingSheet } from "@/lib/padding"
 import type { PdfPageInfo, PdfSearchMatch } from "@/lib/pdf"
 import type { ViewMode } from "@/lib/viewMode"
@@ -76,6 +82,18 @@ type LayoutProps = {
 const BLANK_NOTE_MIN = { height: 200, width: 260 }
 const BLANK_BUTTON_MIN = { height: 48, width: 96 }
 
+/** Bottom offset matching `display_center` in `page_numbers.rs` when Save As stamps it. */
+function paddingNumberBottom(sheet: PaddingSheet, scale: number) {
+  return (
+    Math.min(
+      PAGE_NUMBERS_BOTTOM_MARGIN,
+      Math.max(0, (sheet.height - PAGE_NUMBERS_FONT_SIZE) / 2),
+    ) *
+    POINT_TO_PX *
+    scale
+  )
+}
+
 /** A blank page a Save As will add: white paper with a dashed edge, no page
     of the document's own, so no `data-page-number` for tracking to count. It
     says why it is there and how to save without it, where it has the room. */
@@ -89,15 +107,17 @@ function BlankSheet({
   sheet: PaddingSheet
 }) {
   const { t } = useTranslation()
-  const height = sheet.height * POINT_TO_PX * scale
-  const width = sheet.width * POINT_TO_PX * scale
+  const pxPerPt = POINT_TO_PX * scale
+  const height = sheet.height * pxPerPt
+  const width = sheet.width * pxPerPt
   const fits = (room: { height: number; width: number }) =>
     height >= room.height && width >= room.width
+  const sideMargin = PAGE_NUMBERS_SIDE_MARGIN * pxPerPt
 
   return (
     <div
       aria-label={t("sidebar.paddingPage")}
-      className="flex shrink-0 flex-col items-center justify-center gap-3 overflow-hidden border-2 border-dashed border-zinc-300 bg-white p-4 shadow-sm"
+      className="relative flex shrink-0 flex-col items-center justify-center gap-3 overflow-hidden border-2 border-dashed border-zinc-300 bg-white p-4 shadow-sm"
       data-padding-after={sheet.after}
       role="group"
       style={{ height, width }}
@@ -108,6 +128,45 @@ function BlankSheet({
         </p>
       ) : null}
       {fits(BLANK_BUTTON_MIN) ? <PaddingDismiss onDismiss={onDismiss} /> : null}
+      {sheet.pageNumber ? (
+        // Symmetric flex spacers shrink equally once the sheet is narrower than
+        // text + 2×sideMargin, clamping side anchors to centre like `display_center`.
+        <div
+          className="pointer-events-none absolute inset-x-0 flex items-end justify-center select-none"
+          style={{ bottom: paddingNumberBottom(sheet, scale) }}
+        >
+          {sheet.pageNumber.anchor !== "bottomCenter" ? (
+            <span
+              aria-hidden="true"
+              className="min-w-0"
+              style={{
+                flex: `${sheet.pageNumber.anchor === "bottomRight" ? 1 : 0} 1 ${sideMargin}px`,
+              }}
+            />
+          ) : null}
+          <span
+            className="shrink-0 whitespace-nowrap text-black"
+            data-anchor={sheet.pageNumber.anchor}
+            data-testid="padding-page-number"
+            style={{
+              fontFamily: PAGE_NUMBERS_FONT_STACK,
+              fontSize: PAGE_NUMBERS_FONT_SIZE * pxPerPt,
+              lineHeight: 1,
+            }}
+          >
+            {sheet.pageNumber.text}
+          </span>
+          {sheet.pageNumber.anchor !== "bottomCenter" ? (
+            <span
+              aria-hidden="true"
+              className="min-w-0"
+              style={{
+                flex: `${sheet.pageNumber.anchor === "bottomLeft" ? 1 : 0} 1 ${sideMargin}px`,
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

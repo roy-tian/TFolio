@@ -22,8 +22,8 @@ use super::{
     geometry::{
         a4_placement, annotation_color, annotation_covers, page_rect_to_pdfium,
         page_rotation_degrees, quad_points_from_rect, union_rect, unrotated_page_height,
-        unrotated_page_size, within_page_range, A4_LONG_POINTS, A4_SHORT_POINTS,
-        MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
+        unrotated_page_size, visible_unrotated_box, within_page_range, A4_LONG_POINTS,
+        A4_SHORT_POINTS, MAX_RECT_EFFECT_STRENGTH, MAX_TEXT_NOTE_CHARS, MAX_TEXT_NOTE_FONT_SIZE,
         MAX_TEXT_NOTE_LINES, MIN_RECT_EFFECT_STRENGTH, MIN_RECT_OPACITY, MIN_TEXT_NOTE_FONT_SIZE,
         MIN_TEXT_NOTE_OPACITY, TEXT_NOTE_BOUNDS_MARGIN, TEXT_NOTE_LINE_HEIGHT,
     },
@@ -31,9 +31,9 @@ use super::{
     library::bind_pdfium,
     outline::{self, OutlineNode},
     page_numbers::{
-        average_luminance, blank_scan_box, ink_color, is_blank_sample, page_number_center,
-        page_number_display_box, DisplayBox, PageNumberPlacement, PageNumbering, PageNumbersConfig,
-        FONT_SIZE as PAGE_NUMBER_FONT_SIZE,
+        average_luminance, ink_color, is_blank_sample, page_number_center_in_box,
+        page_number_display_box, DisplayBox, PaddingPageNumber, PageNumberAnchor, PageNumbering,
+        PageNumbersConfig, FONT_SIZE as PAGE_NUMBER_FONT_SIZE,
     },
     size_limit_error,
     watermark::{
@@ -129,6 +129,10 @@ struct OpenDocument {
     /// Deleted pages awaiting undo, keyed by their history entry; an occupied
     /// key is replaced, a redo of that entry stashing the same logical pages.
     stashes: HashMap<u64, PageStash>,
+    /// Page-number states saved before a page-numbers command, keyed by its
+    /// history entry id, so an undo restores exact per-page stamps even across
+    /// earlier structure edits.
+    page_number_stashes: HashMap<u64, owned_content::PageNumbersSnapshot>,
     /// Per page, this session's mark ids in annotation order. PDFium appends,
     /// so they form the annotation tail; a removal must never reach past it.
     marks: HashMap<u64, Vec<u64>>,
@@ -665,6 +669,7 @@ impl PdfiumEngine {
                 source_fingerprint,
                 source_path,
                 stashes: HashMap::new(),
+                page_number_stashes: HashMap::new(),
                 sections: None,
                 foreign_page_ids: HashSet::new(),
                 signed_added: Vec::new(),
@@ -1266,6 +1271,7 @@ pub use image_import::is_merge_image;
 use image_import::{image_page_document, read_image, PreparedImage};
 use io::{fingerprint, read_pdf_bytes, read_pdf_file, Fingerprint};
 use owned_content::OwnedContentState;
+pub use owned_content::PageNumbersOutcome;
 use page_ops::{page_index, PageStash};
 use raster::RawBitmap;
 pub use sections::{FileOptions, PdfPaddingSheet, PdfSection};

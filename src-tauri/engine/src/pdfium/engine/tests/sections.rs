@@ -1071,17 +1071,52 @@ fn a_split_by_bookmarks_of_added_files_makes_a_pdf_of_each() {
 
 #[test]
 #[ignore = "requires `bun run fonts:download`"]
-fn an_a4_copy_leaves_the_blank_between_files_bare_as_a_save_as_does() {
+fn smart_padding_blanks_follow_page_number_blank_rules_across_exports_and_duplex() {
     let _guard = sections_test_guard();
     let engine = test_engine();
     let directory = scratch_directory("sections-a4-blank");
-    let own = own_and_second(engine, &directory, true);
+    // Non-blank pages so `blank_numbered: false` hides only the padding blank:
+    // File 1 has 3 pages (odd -> padding blank after page 3), File 2 has 2 pages.
+    let own = engine
+        .open(banded_pdf(&[20, 40, 60]))
+        .expect("PDFium should open the document");
+    let ids = read_files(
+        engine,
+        vec![write_file(&directory, "second.pdf", banded_pdf(&[80, 100]))],
+    );
+    engine
+        .insert_sources(
+            SCOPE,
+            own.id,
+            &ids,
+            4,
+            "own.pdf",
+            FileOptions {
+                smart_padding: true,
+            },
+            &HashMap::new(),
+        )
+        .expect("the file should be added");
 
+    let read_text = |doc_id: u64, page: i32| {
+        let documents = engine.lock_documents().unwrap();
+        documents[&doc_id]
+            .document
+            .pages()
+            .get(page)
+            .unwrap()
+            .text()
+            .unwrap()
+            .all()
+    };
+
+    // 1. Count and show: blank sheet 4 carries `— 4 —`, second file starts at `— 5 —`,
+    // and duplex anchors follow physical sheet parity (blank=even/BottomLeft, file2 p1=odd/BottomRight).
     assert!(engine
         .apply_page_numbers(
             own.id,
             PageNumbersConfig {
-                mode: PageNumbersMode::Single,
+                mode: PageNumbersMode::Duplex,
                 position: PageNumbersPosition::BottomCenter,
                 range: None,
                 start: None,
@@ -1092,24 +1127,303 @@ fn an_a4_copy_leaves_the_blank_between_files_bare_as_a_save_as_does() {
         )
         .expect("the pages should be numbered"));
 
+    let padding = engine.padding_sheets(own.id).unwrap();
+    assert_eq!(padding.len(), 1);
+    assert_eq!(padding[0].after, 3);
+    assert_eq!(
+        padding[0].page_number,
+        Some(PaddingPageNumber {
+            text: "— 4 —".into(),
+            anchor: PageNumberAnchor::BottomLeft,
+        })
+    );
+
+    // Printing renders the padding sheet with its number drawn on it.
+    let rendered_blank = engine
+        .render_padding_page(own.id, 3, 400)
+        .expect("padding page should render");
+    let has_ink = rendered_blank
+        .pixels()
+        .any(|pixel| pixel.0.iter().any(|c| *c < 200));
+    assert!(
+        has_ink,
+        "rendered padding sheet should carry its page number"
+    );
+
+    // Save As stamps the padding blank with `— 4 —` and file 2 page 1 with `— 5 —`.
+    let saved_path = directory.join("saved-show.pdf");
+    engine.export_to(own.id, &saved_path).unwrap();
+    let saved = engine.open_from_path(saved_path).unwrap();
+    assert_eq!(saved.num_pages, 6);
+    assert!(read_text(saved.id, 2).contains('3'));
+    assert!(
+        read_text(saved.id, 3).contains('4'),
+        "got {:?}",
+        read_text(saved.id, 3)
+    );
+    assert!(
+        read_text(saved.id, 4).contains('5'),
+        "got {:?}",
+        read_text(saved.id, 4)
+    );
+    assert!(
+        read_text(saved.id, 5).contains('6'),
+        "got {:?}",
+        read_text(saved.id, 5)
+    );
+    engine.close(saved.id).unwrap();
+
+    // A4 copy matches Save As: 6 pages, blank sheet 4 carries `— 4 —`, file 2 starts at `— 5 —`.
     let fitted = engine
         .fit_to_a4(own.id, |_, _| {})
         .expect("the pages should fit")
         .expect("nobody stopped it")
         .document;
-    let text = |page: i32| {
-        let documents = engine.lock_documents().unwrap();
-        let page = documents[&fitted.id].document.pages().get(page).unwrap();
-        let text = page.text().unwrap().all();
-
-        text
-    };
-
-    // The blank after the third page, then the second file's first page,
-    // numbered on from three as the reader saw it.
     assert_eq!(fitted.num_pages, 6);
-    assert!(text(3).trim().is_empty(), "the blank should stay bare");
-    assert!(text(4).contains('4'), "got {:?}", text(4));
+    assert!(
+        read_text(fitted.id, 3).contains('4'),
+        "got {:?}",
+        read_text(fitted.id, 3)
+    );
+    assert!(
+        read_text(fitted.id, 4).contains('5'),
+        "got {:?}",
+        read_text(fitted.id, 4)
+    );
+    assert!(
+        read_text(fitted.id, 5).contains('6'),
+        "got {:?}",
+        read_text(fitted.id, 5)
+    );
+    engine.close(fitted.id).unwrap();
+
+    // 2. Count and hide: blank sheet 4 stays bare, yet still counts so file 2 starts at `— 5 —`.
+    assert!(engine
+        .apply_page_numbers(
+            own.id,
+            PageNumbersConfig {
+                mode: PageNumbersMode::Duplex,
+                position: PageNumbersPosition::BottomCenter,
+                range: None,
+                start: None,
+                smart_color: false,
+                blank_numbered: false,
+                blank_counted: true,
+            },
+        )
+        .expect("count-and-hide should apply"));
+    assert_eq!(engine.padding_sheets(own.id).unwrap()[0].page_number, None);
+
+    let hidden_path = directory.join("saved-hide.pdf");
+    engine.export_to(own.id, &hidden_path).unwrap();
+    let hidden = engine.open_from_path(hidden_path).unwrap();
+    assert_eq!(hidden.num_pages, 6);
+    assert!(
+        read_text(hidden.id, 3).trim().is_empty(),
+        "hidden blank should stay bare"
+    );
+    assert!(
+        read_text(hidden.id, 4).contains('5'),
+        "got {:?}",
+        read_text(hidden.id, 4)
+    );
+    assert!(
+        read_text(hidden.id, 5).contains('6'),
+        "got {:?}",
+        read_text(hidden.id, 5)
+    );
+    engine.close(hidden.id).unwrap();
+
+    // 3. Skip counting: blank sheet 4 stays bare and uncounted (file 2 starts at `— 4 —`),
+    // yet duplex still places file 2 page 1 on the odd physical sheet's outer edge (BottomRight).
+    assert!(engine
+        .apply_page_numbers(
+            own.id,
+            PageNumbersConfig {
+                mode: PageNumbersMode::Duplex,
+                position: PageNumbersPosition::BottomCenter,
+                range: None,
+                start: None,
+                smart_color: false,
+                blank_numbered: false,
+                blank_counted: false,
+            },
+        )
+        .expect("skip should apply"));
+    assert_eq!(engine.padding_sheets(own.id).unwrap()[0].page_number, None);
+
+    let skipped_path = directory.join("saved-skip.pdf");
+    engine.export_to(own.id, &skipped_path).unwrap();
+    let skipped = engine.open_from_path(skipped_path).unwrap();
+    assert_eq!(skipped.num_pages, 6);
+    assert!(read_text(skipped.id, 3).trim().is_empty());
+    assert!(
+        read_text(skipped.id, 4).contains('4'),
+        "got {:?}",
+        read_text(skipped.id, 4)
+    );
+    assert!(
+        read_text(skipped.id, 5).contains('5'),
+        "got {:?}",
+        read_text(skipped.id, 5)
+    );
+    engine.close(skipped.id).unwrap();
+
+    // Verify duplex stamp anchor for file 2 page 1 (physical sheet 5 -> odd -> BottomRight).
+    {
+        let documents = engine.lock_documents().unwrap();
+        let entry = &documents[&own.id];
+        let file2_first_id = entry.page_ids[3];
+        let stamp = &entry.owned_content.as_ref().unwrap().page_number_stamps[&file2_first_id];
+        assert_eq!(stamp.anchor, PageNumberAnchor::BottomRight);
+        assert_eq!(stamp.text, "— 4 —");
+    }
+
+    // 4. Range starting after the padding blank (pages 4-5, start: None) uses
+    // physical sheet position 5 for page 4, and leaves the blank before it bare.
+    assert!(engine
+        .apply_page_numbers(
+            own.id,
+            PageNumbersConfig {
+                mode: PageNumbersMode::Duplex,
+                position: PageNumbersPosition::BottomCenter,
+                range: Some((4, 5)),
+                start: None,
+                smart_color: false,
+                blank_numbered: true,
+                blank_counted: true,
+            },
+        )
+        .expect("ranged page numbers after padding blank should apply"));
+    assert_eq!(engine.padding_sheets(own.id).unwrap()[0].page_number, None);
+    {
+        let documents = engine.lock_documents().unwrap();
+        let entry = &documents[&own.id];
+        let stamps = &entry.owned_content.as_ref().unwrap().page_number_stamps;
+        assert!(!stamps.contains_key(&entry.page_ids[2]));
+        assert_eq!(stamps[&entry.page_ids[3]].text, "— 5 —");
+        assert_eq!(
+            stamps[&entry.page_ids[3]].anchor,
+            PageNumberAnchor::BottomRight
+        );
+        assert_eq!(stamps[&entry.page_ids[4]].text, "— 6 —");
+        assert_eq!(
+            stamps[&entry.page_ids[4]].anchor,
+            PageNumberAnchor::BottomLeft
+        );
+    }
+
+    // 4b. With `blank_counted: false`, a range starting after the padding blank
+    // must NOT count the preceding blank into its starting number, while duplex
+    // still tracks the physical sheet position.
+    assert!(engine
+        .apply_page_numbers(
+            own.id,
+            PageNumbersConfig {
+                mode: PageNumbersMode::Duplex,
+                position: PageNumbersPosition::BottomCenter,
+                range: Some((4, 5)),
+                start: None,
+                smart_color: false,
+                blank_numbered: false,
+                blank_counted: false,
+            },
+        )
+        .expect("uncounted ranged page numbers after padding blank should apply"));
+    {
+        let documents = engine.lock_documents().unwrap();
+        let entry = &documents[&own.id];
+        let stamps = &entry.owned_content.as_ref().unwrap().page_number_stamps;
+        assert_eq!(stamps[&entry.page_ids[3]].text, "— 4 —");
+        assert_eq!(
+            stamps[&entry.page_ids[3]].anchor,
+            PageNumberAnchor::BottomRight
+        );
+        assert_eq!(stamps[&entry.page_ids[4]].text, "— 5 —");
+        assert_eq!(
+            stamps[&entry.page_ids[4]].anchor,
+            PageNumberAnchor::BottomLeft
+        );
+    }
+
+    // 5. Turning smart_padding off and re-applying the same config renumbers without blanks.
+    let skip_config = PageNumbersConfig {
+        mode: PageNumbersMode::Duplex,
+        position: PageNumbersPosition::BottomCenter,
+        range: None,
+        start: None,
+        smart_color: false,
+        blank_numbered: false,
+        blank_counted: false,
+    };
+    assert!(engine
+        .apply_page_numbers(own.id, skip_config.clone())
+        .unwrap());
+    engine
+        .set_file_options(
+            own.id,
+            FileOptions {
+                smart_padding: false,
+            },
+        )
+        .unwrap();
+    assert!(engine
+        .apply_page_numbers(own.id, skip_config)
+        .expect("re-applying after toggling smart_padding should rebuild"));
+    {
+        let documents = engine.lock_documents().unwrap();
+        let entry = &documents[&own.id];
+        let file2_first_id = entry.page_ids[3];
+        let stamp = &entry.owned_content.as_ref().unwrap().page_number_stamps[&file2_first_id];
+        // Now physical sheet 4 -> even -> BottomLeft.
+        assert_eq!(stamp.anchor, PageNumberAnchor::BottomLeft);
+    }
+
+    // 6. Moving a page to the adjacent file in identity order changes padding
+    // layout, so re-applying the same config rebuilds and returns updated padding.
+    let show_config = PageNumbersConfig {
+        mode: PageNumbersMode::Duplex,
+        position: PageNumbersPosition::BottomCenter,
+        range: None,
+        start: None,
+        smart_color: false,
+        blank_numbered: true,
+        blank_counted: true,
+    };
+    let updated = engine
+        .set_file_options(
+            own.id,
+            FileOptions {
+                smart_padding: true,
+            },
+        )
+        .unwrap();
+    let s0 = updated.sections[0].id;
+    let s1 = updated.sections[1].id;
+    let before = engine
+        .apply_page_numbers_with_progress(own.id, show_config.clone(), None, |_, _| {})
+        .expect("show_config should apply");
+    assert!(before.applied);
+    assert_eq!(before.padding.len(), 1);
+    assert_eq!(before.padding[0].after, 3);
+
+    // Move page 3 from File 1 to File 2 without changing page order:
+    // File 1 now has 2 pages (even -> no padding blank).
+    engine
+        .reorder_pages(own.id, &[1, 2, 3, 4, 5], Some(&[s0, s0, s1, s1, s1]))
+        .expect("identity-order section reassignment should succeed");
+    let after = engine
+        .apply_page_numbers_with_progress(own.id, show_config, None, |_, _| {})
+        .expect("re-applying same config after identity-order section change should rebuild");
+    assert!(after.applied);
+    assert!(after.padding.is_empty());
+    {
+        let documents = engine.lock_documents().unwrap();
+        let entry = &documents[&own.id];
+        let stamps = &entry.owned_content.as_ref().unwrap().page_number_stamps;
+        assert_eq!(stamps[&entry.page_ids[3]].text, "— 4 —");
+        assert_eq!(stamps[&entry.page_ids[4]].text, "— 5 —");
+    }
 
     fs::remove_dir_all(directory).ok();
 }

@@ -27,10 +27,12 @@ import { FileSectionsTree, type FileSectionsTreeHandle } from "@/components/File
 import {
   NO_PADDING,
   samePadding,
+  samePaddingWithNumbers,
   sheetSpreads,
   sheetsOf,
   spreadPagesOf,
   spreadTurnTarget,
+  type PaddingSheet,
 } from "@/lib/padding"
 import type { PageMenuActions } from "@/components/PageContextMenu"
 import { PageThumbnails, type PageThumbnailsHandle } from "@/components/PageThumbnails"
@@ -886,6 +888,10 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       beforeCopyFrom: ensureSourceSignatures,
       beforeSignedChange: ensureSignatures,
       documentId: pdfDocument.id,
+      getPageCount: useCallback(
+        () => documentRef.current?.numPages ?? openedDocument.numPages,
+        [openedDocument.numPages],
+      ),
       initial: movedSeed && { history: movedSeed.history, marks: movedSeed.marks },
       onAnnotateError: useCallback(
         (error?: unknown, command?: AnnotationCommand) => {
@@ -1104,6 +1110,28 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           }
         },
         [notice],
+      ),
+      onPaddingChange: useCallback(
+        (documentId: number, nextPadding: PaddingSheet[]) => {
+          const current = documentRef.current
+
+          if (
+            !current ||
+            current.id !== documentId ||
+            samePaddingWithNumbers(current.padding ?? NO_PADDING, nextPadding)
+          ) {
+            return
+          }
+
+          const next = {
+            ...current,
+            padding: nextPadding.length > 0 ? nextPadding : undefined,
+          }
+
+          documentRef.current = next
+          setPdfDocument(next)
+        },
+        [],
       ),
       onSuccess: clearEditRefusals,
     })

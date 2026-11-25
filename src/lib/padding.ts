@@ -1,6 +1,15 @@
+import type { PaddingPageNumber } from "@/lib/pageNumbers"
+
 /** A blank page a Save As puts after page `after`, the size it shows at: the
     engine's `SectionBook::padding`, sent with every structure change. */
-export type PaddingSheet = { after: number; height: number; width: number }
+export type PaddingSheet = {
+  after: number
+  height: number
+  /** Present when this session's page numbers count and show numbers on
+      blank pages, matching what Save As will stamp. */
+  pageNumber?: PaddingPageNumber
+  width: number
+}
 
 /** What a reading view lays out: the document's pages, with the blank pages
     a Save As will add standing where it will put them. */
@@ -59,6 +68,20 @@ export function samePadding(left: readonly PaddingSheet[], right: readonly Paddi
         sheet.after === right[index]!.after &&
         sheet.width === right[index]!.width &&
         sheet.height === right[index]!.height,
+    )
+  )
+}
+
+export function samePaddingWithNumbers(
+  left: readonly PaddingSheet[],
+  right: readonly PaddingSheet[],
+) {
+  return (
+    samePadding(left, right) &&
+    left.every(
+      (sheet, index) =>
+        sheet.pageNumber?.text === right[index]!.pageNumber?.text &&
+        sheet.pageNumber?.anchor === right[index]!.pageNumber?.anchor,
     )
   )
 }

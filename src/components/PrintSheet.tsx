@@ -4,8 +4,10 @@ import { createPortal } from "react-dom"
 /** The page as the document has it: the rendered image is the page, turned
     or not. */
 export type PrintPage = {
+  /** True for a virtual padding blank a Save As adds after `pageNumber`. */
+  blank?: boolean
   pageNumber: number
-  /** Null for a blank page a Save As will add, which prints as one. */
+  /** Null for an unnumbered blank page, which prints as bare paper. */
   src: string | null
 }
 
@@ -21,8 +23,9 @@ export const PrintSheet = memo(function PrintSheet({ pages }: PrintSheetProps) {
       {pages.map((page) => (
         <div
           className="pdf-print-page"
-          data-print-page={page.src === null ? undefined : page.pageNumber}
-          key={page.src === null ? `blank-${page.pageNumber}` : page.pageNumber}
+          data-print-blank={page.blank ? page.pageNumber : undefined}
+          data-print-page={page.blank ? undefined : page.pageNumber}
+          key={page.blank ? `blank-${page.pageNumber}` : page.pageNumber}
         >
           {page.src === null ? null : <img alt="" src={page.src} />}
         </div>

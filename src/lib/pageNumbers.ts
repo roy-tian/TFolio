@@ -2,6 +2,14 @@ import { rememberSettings, storedSettings } from "@/lib/settings"
 
 export type PageNumbersMode = "single" | "duplex"
 export type PageNumbersPosition = "bottomCenter" | "bottomRight"
+export type PageNumberAnchor = "bottomCenter" | "bottomRight" | "bottomLeft"
+
+/** The label a virtual padding blank carries when page numbers count and show
+    numbers on blank pages, mirroring `PaddingPageNumber` in `page_numbers.rs`. */
+export type PaddingPageNumber = {
+  anchor: PageNumberAnchor
+  text: string
+}
 
 export type PageNumbersConfig = {
   mode: PageNumbersMode
@@ -123,10 +131,25 @@ function parseCount(value: string): number | null {
   return Number.parseInt(trimmed, 10)
 }
 
+/** A positive integer within the page-number ceiling, or null when unusable. */
+function parsePositiveCount(value: string): number | null {
+  const parsed = parseCount(value)
+
+  if (parsed === null || parsed < 1 || parsed > PAGE_NUMBERS_MAX_START) {
+    return null
+  }
+
+  return parsed
+}
+
 /** The number the range's first page would print, as far as a half-typed draft
     can say — what the preview draws on its first sheet. */
 export function draftFirstPrinted(draft: PageNumbersDraft): number {
-  return parseCount(draft.start) ?? parseCount(draft.range.split("-")[0] ?? "") ?? 1
+  return (
+    parsePositiveCount(draft.start) ??
+    parsePositiveCount(draft.range.split("-")[0] ?? "") ??
+    1
+  )
 }
 
 export function isPageNumbersPreferences(
@@ -165,17 +188,17 @@ function wholeRange(pageCount: number): string {
   return pageCount > 0 ? `1-${pageCount}` : ""
 }
 
-/** The largest number the start field takes: the document's own length, under
-    the ceiling the backend enforces. */
-export function maxPageNumbersStart(pageCount: number): number {
-  return Math.max(1, Math.min(pageCount, PAGE_NUMBERS_MAX_START))
+/** The largest number the start field takes: the ceiling the backend enforces,
+    allowing continuation documents to start past their own page count. */
+export function maxPageNumbersStart(): number {
+  return PAGE_NUMBERS_MAX_START
 }
 
 /**
  * Blank is left blank — that is the field's own meaning, each page's own
  * position — and so is anything not a number, which the field's error names.
  */
-export function clampPageNumbersStart(value: string, pageCount: number): string {
+export function clampPageNumbersStart(value: string): string {
   const trimmed = value.trim()
   const parsed = Number(trimmed)
 
@@ -184,7 +207,7 @@ export function clampPageNumbersStart(value: string, pageCount: number): string 
   }
 
   return String(
-    Math.min(Math.max(Math.round(parsed), 1), maxPageNumbersStart(pageCount)),
+    Math.min(Math.max(Math.round(parsed), 1), PAGE_NUMBERS_MAX_START),
   )
 }
 
@@ -248,9 +271,9 @@ export function parsePageNumbersDraft(
   let start: number | null = null
 
   if (draft.start.trim() !== "") {
-    const parsed = parseCount(draft.start)
+    const parsed = parsePositiveCount(draft.start)
 
-    if (parsed === null || parsed < 1 || parsed > maxPageNumbersStart(pageCount)) {
+    if (parsed === null) {
       return { config: null, error: "start" }
     }
 

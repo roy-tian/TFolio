@@ -135,6 +135,60 @@ describe("isDirty, judged by what a save would write", () => {
     expect(isDirty(relaid(reorder(2, 1, 3), reorder(2, 1, 3)))).toBe(true)
     expect(isDirty(relaid(turn([1], 90), turn([1], 270)))).toBe(true)
     expect(isDirty(after(saved, reorder(2, 1, 3), reorder(2, 1, 3)))).toBe(false)
+
+    // Re-applying page numbers while smart padding or a mark is active changes
+    // blank numbering or smart colour, so toggling back stays dirty.
+    const withOptions = after(
+      saved,
+      (history) => ({
+        history: commit(history, {
+          kind: "fileOptions",
+          next: { smartPadding: false },
+          previous: { smartPadding: true },
+        }),
+      }),
+      (history) => planPageNumbersChange(history, numbers, 3),
+      (history) => ({
+        history: commit(history, {
+          kind: "fileOptions",
+          next: { smartPadding: true },
+          previous: { smartPadding: false },
+        }),
+      }),
+    )
+    expect(isDirty(withOptions)).toBe(true)
+
+    // Toggling smart padding off and back on BEFORE re-applying leaves the
+    // exact same padding layout as saved, so re-applying is clean.
+    const roundTripOptions = after(
+      saved,
+      (history) => ({
+        history: commit(history, {
+          kind: "fileOptions",
+          next: { smartPadding: false },
+          previous: { smartPadding: true },
+        }),
+      }),
+      (history) => ({
+        history: commit(history, {
+          kind: "fileOptions",
+          next: { smartPadding: true },
+          previous: { smartPadding: false },
+        }),
+      }),
+      (history) => planPageNumbersChange(history, numbers, 3),
+    )
+    expect(isDirty(roundTripOptions)).toBe(false)
+
+    // Re-applying page numbers while a mark is present, then erasing the mark,
+    // stays dirty because the numbers were computed over the mark; re-applying
+    // after erasing returns to the saved state.
+    const withMark = commit(saved, rect)
+    const markId = withMark.past.at(-1)!.id
+    const relaidOverMark = planPageNumbersChange(withMark, numbers, 3)!.history
+    const erasedAfter = planEraseAnnotation(relaidOverMark, markId)!.history
+    expect(isDirty(erasedAfter)).toBe(true)
+    expect(isDirty(planPageNumbersChange(erasedAfter, numbers, 3)!.history)).toBe(false)
   })
 
   it("reports a file renamed and named back clean", () => {

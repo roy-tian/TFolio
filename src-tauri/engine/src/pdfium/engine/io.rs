@@ -439,6 +439,14 @@ pub(super) fn merge_bytes_limit_error() -> String {
     )
 }
 
+/// One virtual padding blank to materialize into an output copy.
+pub(super) struct PaddingSheetSpec {
+    pub(super) after: usize,
+    pub(super) width: f32,
+    pub(super) height: f32,
+    pub(super) page_number: Option<PaddingPageNumber>,
+}
+
 impl PdfiumEngine {
     /// Every Word document among `paths` as a PDF, or the refusal saying why
     /// not; the stop flag is the caller's, each pipeline under its own operation.
@@ -781,7 +789,8 @@ impl PdfiumEngine {
     }
 
     /// `bytes` with a blank page after each page `padding` names, sized as
-    /// that page shows: a copy's, so the reader's document keeps none.
+    /// that page shows and stamped with its planned page number when active:
+    /// a copy's, so the reader's document keeps none.
     fn padded(
         &self,
         bytes: Vec<u8>,
@@ -791,26 +800,36 @@ impl PdfiumEngine {
         let sheets: Vec<_> = padding
             .iter()
             .map(|after| {
-                let shown = entry
-                    .page_ids
-                    .get(*after)
-                    .and_then(|page_id| entry.page_geometry.get(page_id))
+                let page_id = entry.page_ids.get(*after).copied();
+                let shown = page_id
+                    .and_then(|page_id| entry.page_geometry.get(&page_id))
                     .copied()
                     .unwrap_or(UNMEASURED_PAGE);
+                let page_number = page_id.and_then(|page_id| {
+                    entry
+                        .owned_content
+                        .as_ref()
+                        .and_then(|state| state.padding_numbers.get(&page_id).cloned())
+                });
 
-                (*after, shown.width, shown.height)
+                PaddingSheetSpec {
+                    after: *after,
+                    width: shown.width,
+                    height: shown.height,
+                    page_number,
+                }
             })
             .collect();
 
         self.with_blank_pages(bytes, &sheets)
     }
 
-    /// `bytes` with a blank page `width` by `height` after each page index
-    /// `sheets` names, in ascending order. Under the lock.
+    /// `bytes` with a blank page after each page index `sheets` names, in
+    /// ascending order, stamped with any planned page number. Under the lock.
     pub(super) fn with_blank_pages(
         &self,
         bytes: Vec<u8>,
-        sheets: &[(usize, f32, f32)],
+        sheets: &[PaddingSheetSpec],
     ) -> Result<Vec<u8>, String> {
         if sheets.is_empty() {
             return Ok(bytes);
@@ -820,15 +839,35 @@ impl PdfiumEngine {
             .pdfium
             .load_pdf_from_byte_vec(bytes, None)
             .map_err(|error| format!("PDFium could not reread the document: {error}"))?;
+        let font = if sheets.iter().any(|sheet| sheet.page_number.is_some()) {
+            let face = self.page_number_font_bytes()?;
+            Some(
+                copy.fonts_mut()
+                    .load_true_type_from_bytes(face, true)
+                    .map_err(|error| format!("PDFium rejected the page-number font: {error}"))?,
+            )
+        } else {
+            None
+        };
 
         // From the end, so each index still names the page it was taken for.
-        for (after, width, height) in sheets.iter().rev() {
-            copy.pages_mut()
+        for sheet in sheets.iter().rev() {
+            let insert_at = sheet.after as PdfPageIndex + 1;
+            let page = copy
+                .pages_mut()
                 .create_page_at_index(
-                    PdfPagePaperSize::Custom(PdfPoints::new(*width), PdfPoints::new(*height)),
-                    *after as i32 + 1,
+                    PdfPagePaperSize::Custom(
+                        PdfPoints::new(sheet.width),
+                        PdfPoints::new(sheet.height),
+                    ),
+                    insert_at,
                 )
                 .map_err(|error| format!("PDFium could not add a blank page: {error}"))?;
+            drop(page);
+
+            if let (Some(font), Some(number)) = (font, &sheet.page_number) {
+                owned_content::stamp_page_number_on_blank(&mut copy, insert_at, font, number)?;
+            }
         }
 
         copy.save_to_bytes()

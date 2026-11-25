@@ -51,6 +51,7 @@ import { isSourceChanged, type SourceProgress } from "@/lib/fileSources"
 import type { ArchiveExportRequest } from "@/lib/archiveExport"
 import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
+import type { PaddingSheet } from "@/lib/padding"
 import type {
   A4Saved,
   FileOptions,
@@ -82,6 +83,16 @@ type StructureChangeHandler = (
   change?: PageChange,
 ) => void
 
+type PaddingChangeHandler = (
+  documentId: number,
+  padding: PaddingSheet[],
+) => void
+
+type PageNumbersOutcome = {
+  applied: boolean
+  padding: PaddingSheet[]
+}
+
 /** A change to the document itself, or a new file made of its pages. */
 export type SignedChange = "edit" | "export"
 
@@ -92,6 +103,9 @@ type UseAnnotationsOptions = {
   /** The same word from another open document whose pages are copied in. */
   beforeCopyFrom?: (sourceDocumentId: number) => true | Promise<boolean>
   documentId: number
+  /** Current page count read inside the mutation queue, so a queued layer
+      command never plans against a stale count after an earlier structure edit. */
+  getPageCount?: () => number
   /** A moved tab's history and marks, replayed as this session's own: undo,
       the dirty flag, and the export-only refusals keep answering as they did
       in the window the tab came from. Read once, at the first mount. */
@@ -107,6 +121,8 @@ type UseAnnotationsOptions = {
   /** A watermark or page-number undo or redo rebuilding the pages it covers;
       `null` once it is over, however it ended. */
   onLayerProgress?: (layer: PdfOwnedLayer, progress: PdfProgress | null) => void
+  /** Updated virtual padding blanks after an owned-layer rebuild. */
+  onPaddingChange?: PaddingChangeHandler
   onSaveError: () => void
   /** Stashes the history can no longer restore, already being discarded. */
   onStashesDropped?: (stashIds: number[]) => void
@@ -158,6 +174,7 @@ async function applyCommand(
   onStructureChange: StructureChangeHandler,
   marks: MarkStore,
   onProgress?: ProgressHandler,
+  onPaddingChange?: PaddingChangeHandler,
 ): Promise<number[]> {
   switch (command.kind) {
     case "highlight":
@@ -205,13 +222,13 @@ async function applyCommand(
       return await removeMarks(documentId, command.target.id, marks)
     case "watermark":
       if (command.config) {
-        await runOwnedLayerCommand("apply_pdf_watermark", {
+        await runWatermarkCommand("apply_pdf_watermark", {
           config: command.config,
           documentId,
           onProgress: progressChannel(onProgress),
         })
       } else {
-        await runOwnedLayerCommand("remove_pdf_watermark", {
+        await runWatermarkCommand("remove_pdf_watermark", {
           documentId,
           onProgress: progressChannel(onProgress),
         })
@@ -219,16 +236,28 @@ async function applyCommand(
       return []
     case "pageNumbers":
       if (command.config) {
-        await runOwnedLayerCommand("apply_pdf_page_numbers", {
-          config: command.config,
+        await runPageNumbersCommand(
+          "apply_pdf_page_numbers",
+          {
+            config: command.config,
+            documentId,
+            onProgress: progressChannel(onProgress),
+            stashId: entryId,
+          },
           documentId,
-          onProgress: progressChannel(onProgress),
-        })
+          onPaddingChange,
+        )
       } else {
-        await runOwnedLayerCommand("remove_pdf_page_numbers", {
+        await runPageNumbersCommand(
+          "remove_pdf_page_numbers",
+          {
+            documentId,
+            onProgress: progressChannel(onProgress),
+            stashId: entryId,
+          },
           documentId,
-          onProgress: progressChannel(onProgress),
-        })
+          onPaddingChange,
+        )
       }
       return []
     case "reorderPages":
@@ -314,14 +343,26 @@ async function applyCommand(
 }
 
 /** `false` is a long run the reader stopped, the backend already rolled back —
-    so this throws, and the queue commits no history entry for what threw. */
-async function runOwnedLayerCommand(
-  command: string,
-  args: Record<string, unknown>,
-) {
+    so this throws, and the queue commits no history entry. */
+async function runWatermarkCommand(command: string, args: Record<string, unknown>) {
   if (!(await invoke<boolean>(command, args))) {
     throw new PdfOperationCancelled()
   }
+}
+
+async function runPageNumbersCommand(
+  command: string,
+  args: Record<string, unknown>,
+  documentId: number,
+  onPaddingChange?: PaddingChangeHandler,
+) {
+  const outcome = await invoke<PageNumbersOutcome>(command, args)
+
+  if (!outcome.applied) {
+    throw new PdfOperationCancelled()
+  }
+
+  onPaddingChange?.(documentId, outcome.padding)
 }
 
 async function applyHighlight(documentId: number, command: HighlightCommand) {
@@ -362,17 +403,18 @@ async function retractCommand(
   onStructureChange: StructureChangeHandler,
   marks: MarkStore,
   onProgress?: ProgressHandler,
+  onPaddingChange?: PaddingChangeHandler,
 ): Promise<number[]> {
   switch (command.kind) {
     case "watermark":
       if (command.previous) {
-        await runOwnedLayerCommand("apply_pdf_watermark", {
+        await runWatermarkCommand("apply_pdf_watermark", {
           config: command.previous,
           documentId,
           onProgress: progressChannel(onProgress),
         })
       } else {
-        await runOwnedLayerCommand("remove_pdf_watermark", {
+        await runWatermarkCommand("remove_pdf_watermark", {
           documentId,
           onProgress: progressChannel(onProgress),
         })
@@ -380,18 +422,16 @@ async function retractCommand(
 
       return []
     case "pageNumbers":
-      if (command.previous) {
-        await runOwnedLayerCommand("apply_pdf_page_numbers", {
-          config: command.previous,
+      await runPageNumbersCommand(
+        "restore_pdf_page_numbers",
+        {
           documentId,
           onProgress: progressChannel(onProgress),
-        })
-      } else {
-        await runOwnedLayerCommand("remove_pdf_page_numbers", {
-          documentId,
-          onProgress: progressChannel(onProgress),
-        })
-      }
+          stashId: entryId,
+        },
+        documentId,
+        onPaddingChange,
+      )
 
       return []
     case "reorderPages":
@@ -496,12 +536,14 @@ export function useAnnotations({
   beforeCopyFrom,
   beforeSignedChange,
   documentId,
+  getPageCount,
   initial,
   onAnnotateError,
   onEditRefused,
   onExportError,
   onExported,
   onLayerProgress,
+  onPaddingChange,
   onSaveError,
   onStashesDropped,
   onStructureChange,
@@ -539,11 +581,13 @@ export function useAnnotations({
   const marksRef = useRef<MarkStore>(new Map(initial?.marks ?? []))
   const beforeSignedChangeRef = useRef(beforeSignedChange)
   const beforeCopyFromRef = useRef(beforeCopyFrom)
+  const getPageCountRef = useRef(getPageCount)
 
   useLayoutEffect(() => {
     beforeSignedChangeRef.current = beforeSignedChange
     beforeCopyFromRef.current = beforeCopyFrom
-  }, [beforeCopyFrom, beforeSignedChange])
+    getPageCountRef.current = getPageCount
+  }, [beforeCopyFrom, beforeSignedChange, getPageCount])
 
   // Awaited by callers only where an answer is owed: elsewhere an edit still
   // enqueues in the same turn, as the drops that need an idle queue rely on.
@@ -1260,7 +1304,8 @@ export function useAnnotations({
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
-        const planned = planWatermarkChange(current, config, pageCount)
+        const livePageCount = getPageCountRef.current?.() ?? pageCount
+        const planned = planWatermarkChange(current, config, livePageCount)
 
         if (!planned) {
           return null
@@ -1280,6 +1325,7 @@ export function useAnnotations({
               onStructureChange,
               marksRef.current,
               onProgress,
+              onPaddingChange,
             )
 
             return true
@@ -1299,7 +1345,14 @@ export function useAnnotations({
 
       return outcome
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
+    [
+      documentId,
+      enqueue,
+      onAnnotateError,
+      onPaddingChange,
+      onStructureChange,
+      signedChangeReady,
+    ],
   )
 
   const setPageNumbers = useCallback(
@@ -1317,7 +1370,8 @@ export function useAnnotations({
       let outcome: PdfLayerOutcome = "applied"
 
       await enqueue((current) => {
-        const planned = planPageNumbersChange(current, config, pageCount)
+        const livePageCount = getPageCountRef.current?.() ?? pageCount
+        const planned = planPageNumbersChange(current, config, livePageCount)
 
         if (!planned) {
           return null
@@ -1337,6 +1391,7 @@ export function useAnnotations({
               onStructureChange,
               marksRef.current,
               onProgress,
+              onPaddingChange,
             )
 
             return true
@@ -1354,7 +1409,14 @@ export function useAnnotations({
 
       return outcome
     },
-    [documentId, enqueue, onAnnotateError, onStructureChange, signedChangeReady],
+    [
+      documentId,
+      enqueue,
+      onAnnotateError,
+      onPaddingChange,
+      onStructureChange,
+      signedChangeReady,
+    ],
   )
 
   /** The one gesture that reaches a rebuild in flight. `false` is a miss, not a
@@ -1470,10 +1532,11 @@ export function useAnnotations({
           onStructureChange,
           marksRef.current,
           onProgress,
+          onPaddingChange,
         ),
       mayShiftPages(historyRef.current.past.at(-1)),
     )
-  }, [documentId, mayShiftPages, onStructureChange, runHistoryStep])
+  }, [documentId, mayShiftPages, onPaddingChange, onStructureChange, runHistoryStep])
 
   const redoCommand = useCallback(async () => {
     await runHistoryStep(
@@ -1486,10 +1549,11 @@ export function useAnnotations({
           onStructureChange,
           marksRef.current,
           onProgress,
+          onPaddingChange,
         ),
       mayShiftPages(historyRef.current.future.at(-1)),
     )
-  }, [documentId, mayShiftPages, onStructureChange, runHistoryStep])
+  }, [documentId, mayShiftPages, onPaddingChange, onStructureChange, runHistoryStep])
 
   /** Queued behind the reader's marks, so the file holds what the history says
       was saved; marked saved only when the document is now bound to that file. */

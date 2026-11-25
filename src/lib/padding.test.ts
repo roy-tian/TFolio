@@ -4,6 +4,7 @@ import {
   paddingAroundDropped,
   paddingPositions,
   samePadding,
+  samePaddingWithNumbers,
   sheetSpreads,
   sheetsOf,
   spreadPagesOf,
@@ -53,6 +54,31 @@ describe("samePadding", () => {
     expect(samePadding([blank], [{ ...blank, after: 4 }])).toBe(false)
     expect(samePadding([blank], [{ ...blank, width: 400 }])).toBe(false)
     expect(samePadding([blank], [])).toBe(false)
+  })
+})
+
+describe("samePaddingWithNumbers", () => {
+  test("compares planned page-number labels alongside blank geometry", () => {
+    const bare = { after: 3, height: 842, width: 595 }
+    const numbered = {
+      ...bare,
+      pageNumber: { anchor: "bottomLeft" as const, text: "— 4 —" },
+    }
+
+    expect(samePaddingWithNumbers([], [])).toBe(true)
+    expect(samePaddingWithNumbers([bare], [{ ...bare }])).toBe(true)
+    expect(samePaddingWithNumbers([numbered], [{ ...numbered }])).toBe(true)
+    expect(samePaddingWithNumbers([bare], [numbered])).toBe(false)
+    expect(
+      samePaddingWithNumbers([numbered], [
+        { ...bare, pageNumber: { anchor: "bottomRight", text: "— 4 —" } },
+      ]),
+    ).toBe(false)
+    expect(
+      samePaddingWithNumbers([numbered], [
+        { ...bare, pageNumber: { anchor: "bottomLeft", text: "— 5 —" } },
+      ]),
+    ).toBe(false)
   })
 })
 
