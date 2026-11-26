@@ -352,6 +352,15 @@ describe("TFolio page numbers", () => {
     await blankNumber.waitForExist({ timeout: 15_000 })
     await expect(blankNumber).toHaveText("— 2 —")
     await expect(blankNumber).toHaveAttribute("data-anchor", "bottomLeft")
+    // Page 2 sits past page 1 and the full-height padding blank, outside the
+    // text layer's viewport margin until scrolled into view.
+    await browser.execute(() => {
+      document
+        .querySelector(
+          "[data-document-session][data-active='true'] [data-page-number='2']",
+        )!
+        .scrollIntoView({ block: "center" })
+    })
     await browser.waitUntil(
       async () => {
         const text = await pageExtractedText(2)
@@ -366,8 +375,13 @@ describe("TFolio page numbers", () => {
       timeout: 15_000,
       timeoutMsg: "padding blank label should hide under count-and-hide",
     })
-    const hiddenPageTwo = await pageExtractedText(2)
-    expect(hiddenPageTwo.includes("—") && hiddenPageTwo.includes("3")).toBe(true)
+    await browser.waitUntil(
+      async () => {
+        const text = await pageExtractedText(2)
+        return text.includes("—") && text.includes("3")
+      },
+      { timeout: 20_000, timeoutMsg: "page 2 lost its number under count-and-hide" },
+    )
 
     // Skip counting: padding blank stays bare and page 2 closes up to `— 2 —`.
     await chooseBlankModeAndApply("skip")
