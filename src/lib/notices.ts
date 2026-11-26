@@ -213,7 +213,6 @@ export const noticeCatalogue = {
     textKey: "pageEdit.pastedAtEndNotice",
     tone: "info",
   },
-  printFailed: { life: "transient", textKey: "print.failed", tone: "danger" },
   revealFailed: {
     life: "transient",
     textKey: "home.revealFailed",
@@ -223,25 +222,6 @@ export const noticeCatalogue = {
     life: "transient",
     textKey: "annotate.saveFailed",
     tone: "danger",
-  },
-  // The save key's answer on an export-only document; one slot, one reason.
-  saveMergedOnly: {
-    life: "transient",
-    slot: "saveCopyOnly",
-    textKey: "annotate.saveMerged",
-    tone: "warning",
-  },
-  saveOwnedContentOnly: {
-    life: "transient",
-    slot: "saveCopyOnly",
-    textKey: "annotate.saveOwnedContent",
-    tone: "warning",
-  },
-  saveSignedOnly: {
-    life: "transient",
-    slot: "saveCopyOnly",
-    textKey: "annotate.saveSigned",
-    tone: "warning",
   },
   // A remembered answer given in the reader's place: said every time, since
   // nothing else shows the signatures were just let go.
@@ -430,7 +410,6 @@ export const documentRefusals = [
   "exportTargetOpen",
   "noteFontFailed",
   "noteFontMissing",
-  "printFailed",
   "saveFailed",
 ] as const satisfies readonly NoticeKind[]
 

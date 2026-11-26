@@ -53,7 +53,7 @@ import type { CompressedExportRequest } from "@/lib/compressExport"
 import type { PageNumbersConfig } from "@/lib/pageNumbers"
 import type { PaddingSheet } from "@/lib/padding"
 import type {
-  A4Saved,
+  A4Fitted,
   FileOptions,
   PdfExportOutcome,
   PdfStructureUpdate,
@@ -1750,79 +1750,42 @@ export function useAnnotations({
   )
 
   /** Queued behind the reader's edits, so the A4 copy holds what the pages
-      show. The copy is a document of its own, bound to the file it was
-      written to; null for a dialog cancelled or a run stopped. */
-  const exportA4 = useCallback(
+      show. The copy opens in-memory without writing to disk; null for a
+      cancelled signature prompt or a stopped build. */
+  const fitA4 = useCallback(
     async (
-      request: { filterLabel: string; suggestedName: string },
       onProgress: ProgressHandler,
-    ): Promise<A4Saved | null | "busy" | { failed: unknown }> => {
-      if (exportGate.isActive()) {
-        return "busy"
-      }
-
+    ): Promise<A4Fitted | null | { failed: unknown }> => {
       const ready = signedChangeReady("export")
 
       if (ready !== true && !(await ready)) {
         return null
       }
 
-      const releaseDialog = exportGate.acquire()
-
-      if (!releaseDialog) {
-        return "busy"
-      }
-
-      let written: A4Saved | null = null
-      let busy = false
+      let fitted: A4Fitted | null = null
       let failed: { failed: unknown } | null = null
 
-      try {
-        await enqueue(
-          (current) => ({
-            next: current,
-            pages: [],
-            textPages: [],
-            work: async () => {
-              try {
-                const reportProgress: ProgressHandler = (progress) => {
-                  releaseDialog()
-                  onProgress(progress)
-                }
-                const args = {
-                  ...request,
-                  documentId,
-                  onProgress: progressChannel(reportProgress),
-                }
-                const override = e2eOverride("saveA4Pdf")
-
-                written = override
-                  ? await override(args)
-                  : await invoke<A4Saved | null>("save_a4_pdf", args)
-                return false
-              } catch (error) {
-                if (isFileDialogBusyError(error)) {
-                  busy = true
-                  return false
-                }
-
-                throw error
-              } finally {
-                releaseDialog()
-              }
-            },
-          }),
-          (error) => {
-            failed = { failed: error }
+      await enqueue(
+        (current) => ({
+          next: current,
+          pages: [],
+          textPages: [],
+          work: async () => {
+            fitted = await invoke<A4Fitted | null>("fit_a4_pdf", {
+              documentId,
+              onProgress: progressChannel(onProgress),
+            })
+            return false
           },
-        )
-      } finally {
-        releaseDialog()
-      }
+        }),
+        (error) => {
+          failed = { failed: error }
+        },
+      )
 
-      return busy ? "busy" : (failed ?? written)
+      return failed ?? fitted
     },
-    [documentId, enqueue, exportGate, signedChangeReady],
+    [documentId, enqueue, signedChangeReady],
   )
 
   /** Writes the document back over its own file. A clean history is a no-op —
@@ -1919,10 +1882,10 @@ export function useAnnotations({
       deletePages,
       duplicatePages,
       eraseAt,
-      exportA4,
       exportCopy,
       exportArchive,
       exportCompressed,
+      fitA4,
       flattenSignatures,
       hasOwnedContentNow,
       hasPendingWorkNow,
@@ -1960,10 +1923,10 @@ export function useAnnotations({
       deletePages,
       duplicatePages,
       eraseAt,
-      exportA4,
       exportCopy,
       exportArchive,
       exportCompressed,
+      fitA4,
       flattenSignatures,
       hasOwnedContentNow,
       hasPendingWorkNow,

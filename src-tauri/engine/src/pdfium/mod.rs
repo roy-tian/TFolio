@@ -87,14 +87,6 @@ impl PdfDocumentInfo {
             signatures: update.signatures,
         }
     }
-
-    /// The same document once a write has bound it to `path`.
-    pub fn bound_to(self, path: String) -> Self {
-        Self {
-            path: Some(path),
-            ..self
-        }
-    }
 }
 
 /// The digital signatures a file opened with. `intact` is a check of their

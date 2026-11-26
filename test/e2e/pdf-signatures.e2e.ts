@@ -113,14 +113,16 @@ describe("TFolio signed documents", () => {
     )
     await closeAppMenu(save)
 
-    await browser.keys(["Control", "s"])
-    await $("[data-notice='saveSignedOnly']").waitForDisplayed()
-    expect(readFileSync(sourcePath).equals(original)).toBe(true)
+    // The toolbar save button automatically switches to Save As on an edited
+    // signed file, and Ctrl+S mirrors it — still leaving the signed original intact.
+    const toolbarSave = $("[data-active='true'] [data-slot='pdf-save-trigger']")
+    await expect(toolbarSave).toHaveAttribute("data-save-as-only", "")
+    await expect(toolbarSave).toBeEnabled()
 
     // Edited, the copy is PDFium's rewrite: the tab moves to it and may save there.
     const editedPath = path.join(path.dirname(sourcePath), "edited.pdf")
     await pointSaveAsAt(editedPath)
-    await clickAppMenuItem("save-as")
+    await browser.keys(["Control", "s"])
     await expect(tabNamed("edited.pdf")).toHaveAttribute("aria-selected", "true")
     // The kept field went into the rewrite, where its signature no longer holds.
     await expect($(`${tabBadge}[data-signatures-broken]`)).toBeDisplayed()

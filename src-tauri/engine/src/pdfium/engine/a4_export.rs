@@ -1,5 +1,5 @@
-//! A copy of a document with every page fitted onto A4, which the reader's tab
-//! then shows as the file it was saved to.
+//! An in-memory copy of a document with every page fitted onto A4, which opens
+//! in a new unsaved tab for the reader to inspect and save manually.
 
 use super::archive_export::section_outline;
 use super::io::{

@@ -145,8 +145,8 @@ export type PdfExportOutcome = {
   signatures: PdfSignatures
 }
 
-/** A written A4 copy, bound to its file. */
-export type A4Saved = {
+/** An in-memory A4 copy, unsaved until the reader chooses to save it. */
+export type A4Fitted = {
   document: PdfDocumentInfo
   /** The session's watermark or page numbers went along at the page's scale:
       they could not be lifted to be laid out again on the sheets. */

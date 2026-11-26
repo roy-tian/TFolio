@@ -48,7 +48,6 @@ import { useCurrentPageTracker } from "@/hooks/useCurrentPageTracker"
 import { useDocumentNotices, type NoticeChannel } from "@/hooks/useNotices"
 import { usePageCarryContext } from "@/hooks/usePageCarry"
 import { usePageClipboard } from "@/hooks/usePageClipboard"
-import { usePrint } from "@/hooks/usePrint"
 import type { AskSignatures } from "@/hooks/useSignaturePrompt"
 import { useThumbnailSelection } from "@/hooks/useThumbnailSelection"
 import { useDocumentSearch } from "@/hooks/useDocumentSearch"
@@ -185,7 +184,6 @@ export type DocumentSessionHandle = {
   openPageNumbers: () => void
   openSearch: () => void
   openWatermark: () => void
-  print: () => void
   rememberViewNow: () => Promise<void>
   /** Everything only this session knows about the tab it shows, for a move to
       another window — or why the move must wait, and null where there is no
@@ -238,9 +236,9 @@ type DocumentSessionProps = {
       tab now shows that file, as opening it again would. */
   onCombinedSaved: (documentId: number) => void
   onDirtyChange: (documentId: number, dirty: boolean) => void
-  /** A copy written to a file of its own that this tab now shows — Save as
-      A4's — in place of the document it was made from. */
-  onReplacedByFile: (documentId: number, document: PdfDocumentInfo) => void
+  /** An unsaved A4 copy opened in a new tab beside the document it was made
+      from, so the reader can inspect it and save manually. */
+  onOpenedA4: (documentId: number, document: PdfDocumentInfo, name: string) => void
   /** Whether this document may now be written back over its own file. Only the
       session can say: the workspace cannot see what makes it export-only. */
   onSavableChange: (documentId: number, canSave: boolean) => void
@@ -280,7 +278,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       notices,
       onCombinedSaved,
       onDirtyChange,
-      onReplacedByFile,
+      onOpenedA4,
       onSavableChange,
       onSourceChange,
       recentPath,
@@ -404,7 +402,7 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
 
     const bookApplies = hasBookSpread(pdfDocument.numPages)
     const viewMode = effectiveViewMode(preferredViewMode, pdfDocument.numPages)
-    // The blank pages a Save As will add, shown and printed where it puts them.
+    // The blank pages a Save As will add, shown where it puts them.
     const padding = pdfDocument.padding ?? NO_PADDING
     // Where the page being read stood before an edit: blanks above it coming
     // or going, a turn reshaping it, pages inserted, taken out or moved around
@@ -1463,22 +1461,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
     // open the one dialog; both openers are stable.
     const openWatermarkDialog = watermark.openDialog
     const openPageNumbersDialog = pageNumbers.openDialog
-    const print = usePrint({
-      documentId: pdfDocument.id,
-      onError: () => notice.raise("printFailed"),
-      padding,
-      pages: pdfDocument.pages,
-    })
-    const discardPrint = print.discard
-    const startPrint = print.start
-
-    // Only the tab on screen keeps a sheet: print media would otherwise run
-    // every open document's pages together, and each holds its pages as images.
-    useEffect(() => {
-      if (!active) {
-        discardPrint()
-      }
-    }, [active, discardPrint])
 
     const textSelectable =
       active && (activeTool === null || activeTool === "highlight")
@@ -2077,18 +2059,24 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             : hasSourceFile
               ? undefined
               : t("annotate.saveNoSource")
-    // With no file of its own to write back to, or holding other files'
-    // pages, a document has only a new file to go to: its save button is
-    // Save As, as its key is.
-    const saveAsOnly = !hasSourceFile || hasForeignPages
+    // Whenever a document cannot overwrite its own file — sourceless, combined,
+    // carrying watermark/page numbers, or an edited signed file — its toolbar
+    // save button and save shortcut automatically become Save As.
+    const saveAsOnly =
+      !hasSourceFile ||
+      hasForeignPages ||
+      hasOwnedContent ||
+      hasMergedPages ||
+      (signedOriginal && annotations.isDirty)
     // The toolbar's button has only its tooltip to carry the reason, so a
-    // save that cannot write back names it there rather than repeating the
-    // action's name. A document never written anywhere has none to give.
+    // Save As fallback on an existing file explains why it saves as a copy.
     const saveLabel = !hasSourceFile
       ? t("menu.saveAs")
       : canSave
         ? t("annotate.save")
-        : (saveHint ?? t("annotate.nothingToSave"))
+        : saveAsOnly
+          ? (saveHint ?? t("menu.saveAs"))
+          : t("annotate.nothingToSave")
 
     // The toolbar's and menu's action, refusal included: a watermarked
     // document, or one holding copies of such pages, may only ever be exported
@@ -2099,32 +2087,15 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
       }
     }, [annotations, canSave])
 
-    // The save key where the button would be greyed out: a document with no
-    // file asks where to put one, as Save As does; an export-only one says why
-    // the key did nothing, which a tooltip no key press shows cannot.
+    // The save key mirrors the toolbar save control: overwrite when `canSave`,
+    // Save As whenever the document needs a new file, and no-op when clean.
     const saveFromKey = useCallback(() => {
       if (canSave) {
         void annotations.save()
       } else if (saveAsOnly) {
-        // Where the save control itself is Save As, so is its key.
         void exportPdf()
-      } else if (hasOwnedContent) {
-        notice.raise("saveOwnedContentOnly")
-      } else if (signedOriginal) {
-        notice.raise("saveSignedOnly")
-      } else if (hasMergedPages) {
-        notice.raise("saveMergedOnly")
       }
-    }, [
-      annotations,
-      canSave,
-      exportPdf,
-      hasMergedPages,
-      hasOwnedContent,
-      notice,
-      saveAsOnly,
-      signedOriginal,
-    ])
+    }, [annotations, canSave, exportPdf, saveAsOnly])
 
     // A close prompt's Save: back over the file where the document may be
     // written there, otherwise Save As — a copy, for an export-only one. True
@@ -2218,7 +2189,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         openPageNumbers: openPageNumbersDialog,
         openSearch,
         openWatermark: openWatermarkDialog,
-        print: () => void startPrint(),
         redo: () => {
           if (annotations.canRedo) {
             redoStep()
@@ -2271,7 +2241,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         openSearch,
         selectAll,
         snapshotForMove,
-        startPrint,
         undoStep,
         zoom.applyPreset,
         zoom.zoomIn,
@@ -2346,9 +2315,8 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
         onCompress={() => setCompressOpen(true)}
         onExportImages={() => setImageExportOpen(true)}
         onAddFiles={() => void chooseFiles()}
-        onPrint={print.preparing ? undefined : () => void startPrint()}
+        onFitA4={() => setA4Open(true)}
         onSave={saveDocument}
-        onSaveA4={() => setA4Open(true)}
         onSaveAs={() => void exportPdf()}
         onSplit={() => setSplitOpen(true)}
         saveHint={saveHint}
@@ -2384,15 +2352,11 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           appMenu={appMenu}
           canSave={canSave}
           macOS={macOS}
-          onCompress={() => setCompressOpen(true)}
-          onSaveA4={() => setA4Open(true)}
-          onExportImages={() => setImageExportOpen(true)}
           onSave={saveDocument}
           onSaveAs={() => void exportPdf()}
           onSearchClose={search.closeSearch}
           saveAsOnly={saveAsOnly}
           onSearchOpen={openSearch}
-          onSplit={() => setSplitOpen(true)}
           onToolChange={chooseTool}
           onRedo={redoStep}
           onUndo={undoStep}
@@ -2523,20 +2487,22 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
           <A4ExportDialog
             document={pdfDocument}
             hidden={!active}
-            keepsOriginal={annotations.isDirty || saveRequired}
             onClose={() => setA4Open(false)}
-            onExport={annotations.exportA4}
-            onSaved={(saved) => {
+            onFit={annotations.fitA4}
+            onFitted={(fitted) => {
               setA4Open(false)
 
-              // The corner's, not this tab's: the copy takes the tab's place.
-              if (saved.layersScaled) {
+              // The corner's, not this tab's: the copy opens in its own tab.
+              if (fitted.layersScaled) {
                 notices.raise({ kind: "a4LayersScaled", owner: workspaceOwner })
               }
 
-              onReplacedByFile(openedDocument.id, saved.document)
+              onOpenedA4(
+                openedDocument.id,
+                fitted.document,
+                `${exportBaseName.replace(/\.pdf$/i, "")}-${t("a4Export.suffix")}.pdf`,
+              )
             }}
-            suggestedName={exportBaseName}
           />
         ) : null}
 
@@ -2666,7 +2632,6 @@ export const DocumentSession = forwardRef<DocumentSessionHandle, DocumentSession
             initialPage: currentPage.get(),
             renderEpochs: annotations.renderEpochs,
           }}
-          print={print}
           watermark={watermark}
         />
       </div>

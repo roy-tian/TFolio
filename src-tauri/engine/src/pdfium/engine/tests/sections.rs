@@ -1138,18 +1138,6 @@ fn smart_padding_blanks_follow_page_number_blank_rules_across_exports_and_duplex
         })
     );
 
-    // Printing renders the padding sheet with its number drawn on it.
-    let rendered_blank = engine
-        .render_padding_page(own.id, 3, 400)
-        .expect("padding page should render");
-    let has_ink = rendered_blank
-        .pixels()
-        .any(|pixel| pixel.0.iter().any(|c| *c < 200));
-    assert!(
-        has_ink,
-        "rendered padding sheet should carry its page number"
-    );
-
     // Save As stamps the padding blank with `— 4 —` and file 2 page 1 with `— 5 —`.
     let saved_path = directory.join("saved-show.pdf");
     engine.export_to(own.id, &saved_path).unwrap();

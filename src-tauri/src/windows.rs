@@ -504,15 +504,6 @@ pub async fn find_open_file(
     Ok(OpenFileHolder::None)
 }
 
-/// The dialog's nested loop must run on the event loop, not inside a
-/// main-thread command; it outlives this call, and no signal reports its end.
-#[tauri::command]
-pub async fn print_window(window: WebviewWindow) -> Result<(), String> {
-    window
-        .print()
-        .map_err(|error| format!("the print dialog could not be opened: {error}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

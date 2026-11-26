@@ -795,18 +795,58 @@ fn recompress_images(
     Ok(true)
 }
 
-type DrawnDpis = Arc<HashMap<lopdf::ObjectId, f32>>;
+/// Every `/Subtype /Image` stream not measured by `image_dpi::image_dpis` —
+/// images referenced only from annotation `/AP` streams, patterns, Type 3
+/// glyphs, or uncalled XObjects — excluded from pass-1 dedup so they cannot
+/// merge into a page-drawn image and get downsampled from the page's DPI.
+fn unwalked_image_ids(
+    loaded: &lopdf::Document,
+    drawn_dpis: &HashMap<lopdf::ObjectId, f32>,
+) -> HashSet<lopdf::ObjectId> {
+    loaded
+        .objects
+        .iter()
+        .filter(|(id, object)| {
+            !drawn_dpis.contains_key(id)
+                && object.as_stream().is_ok_and(|stream| {
+                    stream
+                        .dict
+                        .get(b"Subtype")
+                        .ok()
+                        .and_then(|value| value.as_name().ok())
+                        == Some(b"Image")
+                })
+        })
+        .map(|(&id, _)| id)
+        .collect()
+}
+
+/// Post-pass-1 deduplicated document paired with the drawn DPIs in its own
+/// `ObjectId` space, so every quality slider estimate clones directly without
+/// re-parsing or re-deduplicating.
+struct PreparedDocument {
+    document: lopdf::Document,
+    drawn_dpis: HashMap<lopdf::ObjectId, f32>,
+}
+
+#[derive(Clone)]
+enum CompressSnapshot {
+    /// PDFium's raw rewrite, before lopdf parsing or pass-1 deduplication.
+    Raw(Arc<Vec<u8>>),
+    /// Deduplicated document and its aligned drawn DPIs.
+    Prepared(Arc<PreparedDocument>),
+}
 
 /// The work a dialog's estimates share while the document stands still: every
 /// resolution starts from the same rewrite and the same drawn resolutions, and
 /// the export usually asks for the output the last estimate already made.
 pub(super) struct CompressCache {
     version: u64,
-    /// Whether `rewritten` has the signatures drawn in: the reader's answer
+    /// Whether the rewrite has the signatures drawn in: the reader's answer
     /// changes it without a content change, so it is part of the key.
     flattens: bool,
-    rewritten: Arc<Vec<u8>>,
-    drawn_dpis: Option<DrawnDpis>,
+    rewritten_len: u64,
+    snapshot: CompressSnapshot,
     latest: Option<(u8, Arc<Vec<u8>>)>,
 }
 
@@ -816,8 +856,8 @@ struct Basis {
     flattens: bool,
     /// The size the dialog measures savings against.
     baseline: u64,
-    rewritten: Arc<Vec<u8>>,
-    drawn_dpis: Option<DrawnDpis>,
+    rewritten_len: u64,
+    snapshot: CompressSnapshot,
     latest: Option<(u8, Arc<Vec<u8>>)>,
 }
 
@@ -856,11 +896,12 @@ fn basis(engine: &PdfiumEngine, entry: &mut OpenDocument) -> Result<Basis, Strin
                 rewritten = signatures::flattened_bytes(rewritten)?;
             }
 
+            let rewritten_len = rewritten.len() as u64;
             CompressCache {
                 version: entry.content_version,
                 flattens,
-                rewritten: Arc::new(rewritten),
-                drawn_dpis: None,
+                rewritten_len,
+                snapshot: CompressSnapshot::Raw(Arc::new(rewritten)),
                 latest: None,
             }
         }
@@ -868,9 +909,9 @@ fn basis(engine: &PdfiumEngine, entry: &mut OpenDocument) -> Result<Basis, Strin
     let basis = Basis {
         version: cache.version,
         flattens: cache.flattens,
-        baseline: entry.loaded_len.unwrap_or(cache.rewritten.len() as u64),
-        rewritten: Arc::clone(&cache.rewritten),
-        drawn_dpis: cache.drawn_dpis.clone(),
+        baseline: entry.loaded_len.unwrap_or(cache.rewritten_len),
+        rewritten_len: cache.rewritten_len,
+        snapshot: cache.snapshot.clone(),
         latest: cache.latest.clone(),
     };
 
@@ -878,9 +919,48 @@ fn basis(engine: &PdfiumEngine, entry: &mut OpenDocument) -> Result<Basis, Strin
     Ok(basis)
 }
 
-/// The compressed output and the drawn resolutions it measured, if it had to.
-/// `None` reports a stop read between the stages.
-type CompressedRun = Option<(Vec<u8>, Option<DrawnDpis>)>;
+/// The compressed output and the prepared snapshot built off the PDFium lock,
+/// when this run was the first to prepare it. `None` reports a stop read
+/// between the stages.
+type CompressedRun = Option<(Vec<u8>, Option<Arc<PreparedDocument>>)>;
+
+/// Prepares a raw rewrite once for image recompression: measures drawn DPIs
+/// first, then runs pass-1 deduplication while keeping `/SMask`/`/Mask` streams
+/// and unwalked images distinct so mask exclusivity and unwalked image
+/// resolution stay intact, and folds `drawn_dpis` onto canonical IDs.
+fn prepare_document(
+    rewritten: &[u8],
+    operation: &OperationGuard<'_>,
+) -> Result<Option<PreparedDocument>, String> {
+    let mut loaded = lopdf::Document::load_mem(rewritten)
+        .map_err(|error| format!("the rewritten document could not be reread: {error}"))?;
+    let Some(raw_dpis) = image_dpi::image_dpis(&loaded, &|| operation.is_cancelled()) else {
+        return Ok(None);
+    };
+
+    let mut excluded = mask_ids(&loaded);
+    excluded.extend(unwalked_image_ids(&loaded, &raw_dpis));
+
+    let Some(remap) =
+        dedup::deduplicate_objects(&mut loaded, &|| operation.is_cancelled(), &excluded)
+    else {
+        return Ok(None);
+    };
+
+    let mut drawn_dpis = HashMap::with_capacity(raw_dpis.len());
+    for (id, dpi) in raw_dpis {
+        let canonical = remap.get(&id).copied().unwrap_or(id);
+        drawn_dpis
+            .entry(canonical)
+            .and_modify(|existing: &mut f32| *existing = existing.min(dpi))
+            .or_insert(dpi);
+    }
+
+    Ok(Some(PreparedDocument {
+        document: loaded,
+        drawn_dpis,
+    }))
+}
 
 /// Every eligible image resampled toward the reader's resolution, then
 /// lopdf's object and cross-reference streams at flate's deepest level. lopdf
@@ -893,34 +973,58 @@ fn compressed_output(
     levels: Option<&ImageLevels>,
     on_progress: &mut dyn FnMut(usize, usize),
 ) -> Result<CompressedRun, String> {
-    let mut loaded = lopdf::Document::load_mem(&basis.rewritten)
-        .map_err(|error| format!("the rewritten document could not be reread: {error}"))?;
-    let mut measured = None;
-
-    if let Some(levels) = levels {
-        let drawn_dpis = match &basis.drawn_dpis {
-            Some(drawn_dpis) => Arc::clone(drawn_dpis),
-            None => {
-                let Some(drawn_dpis) = image_dpi::image_dpis(&loaded, &|| operation.is_cancelled())
-                else {
-                    return Ok(None);
-                };
-                let drawn_dpis = Arc::new(drawn_dpis);
-
-                measured = Some(Arc::clone(&drawn_dpis));
-                drawn_dpis
+    let mut prepared_now = None;
+    let mut loaded = match (levels, &basis.snapshot) {
+        (Some(levels), CompressSnapshot::Prepared(prepared)) => {
+            let mut doc = prepared.document.clone();
+            if !recompress_images(
+                &mut doc,
+                &prepared.drawn_dpis,
+                operation,
+                levels,
+                on_progress,
+            )? {
+                return Ok(None);
             }
-        };
-
-        if !recompress_images(&mut loaded, &drawn_dpis, operation, levels, on_progress)? {
-            return Ok(None);
+            doc
         }
-    }
+        (Some(levels), CompressSnapshot::Raw(rewritten)) => {
+            let Some(prepared) = prepare_document(rewritten, operation)? else {
+                return Ok(None);
+            };
+            let prepared = Arc::new(prepared);
+            let mut doc = prepared.document.clone();
+            if !recompress_images(
+                &mut doc,
+                &prepared.drawn_dpis,
+                operation,
+                levels,
+                on_progress,
+            )? {
+                return Ok(None);
+            }
+            prepared_now = Some(prepared);
+            doc
+        }
+        // Structure-only mode (`image_quality == 100`) skips pass-1 dedup and
+        // DPI walking, running one global dedup pass after `loaded.compress()`.
+        (None, CompressSnapshot::Prepared(prepared)) => prepared.document.clone(),
+        (None, CompressSnapshot::Raw(rewritten)) => lopdf::Document::load_mem(rewritten)
+            .map_err(|error| format!("the rewritten document could not be reread: {error}"))?,
+    };
 
     // Streams no filter ever covers are the ones flate can still take;
     // already-filtered ones (page content, the images above) pass through
     // untouched.
     loaded.compress();
+
+    // Deduplicate all identical streams and resource objects (including masks
+    // and unwalked images) after compression, and prune orphaned objects.
+    if dedup::deduplicate_objects(&mut loaded, &|| operation.is_cancelled(), &HashSet::new())
+        .is_none()
+    {
+        return Ok(None);
+    }
 
     // Object streams are a 1.5 feature, so a header older than that would
     // misdescribe the file about to be written. Real version strings run
@@ -938,12 +1042,12 @@ fn compressed_output(
         .use_xref_streams(true)
         .compression_level(9)
         .build();
-    let mut compressed = Vec::with_capacity(basis.rewritten.len());
+    let mut compressed = Vec::with_capacity(basis.rewritten_len as usize);
     loaded
         .save_with_options(&mut compressed, options)
         .map_err(|error| format!("the compressed document could not be written: {error}"))?;
 
-    Ok((!operation.is_cancelled()).then_some((compressed, measured)))
+    Ok((!operation.is_cancelled()).then_some((compressed, prepared_now)))
 }
 
 impl PdfiumEngine {
@@ -979,7 +1083,7 @@ impl PdfiumEngine {
         &self,
         document_id: u64,
         basis: &Basis,
-        measured: Option<DrawnDpis>,
+        prepared: Option<Arc<PreparedDocument>>,
         latest: (u8, Arc<Vec<u8>>),
     ) -> Result<(), String> {
         let mut documents = self.lock_documents()?;
@@ -991,8 +1095,8 @@ impl PdfiumEngine {
             return Ok(());
         };
 
-        if cache.drawn_dpis.is_none() {
-            cache.drawn_dpis = measured;
+        if let Some(prepared) = prepared {
+            cache.snapshot = CompressSnapshot::Prepared(prepared);
         }
         cache.latest = Some(latest);
 

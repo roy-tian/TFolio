@@ -16,13 +16,11 @@ use tfolio_engine::{
 };
 
 use crate::recent::RecentFiles;
-use crate::windows::{
-    page_generation, record_document, DocumentFile, DocumentOwners, PageGeneration,
-};
+use crate::windows::{page_generation, record_document, DocumentFile, DocumentOwners};
 
 use super::encode::{encode_png, encode_webp};
 use super::paths::fallback_font_destination;
-use super::{DialogOutcome, PdfProgress, PdfiumState, FILE_DIALOG_BUSY};
+use super::{DialogOutcome, PdfProgress, PdfiumState};
 
 /// A path is a string any page code can make up, so only paths the OS produced
 /// in this process's sight are acted on; the e2e build waives the check.
@@ -119,26 +117,6 @@ pub async fn render_pdf_page(
     })
     .await
     .map_err(|error| format!("PDFium render task failed: {error}"))??;
-
-    Ok(Response::new(bytes))
-}
-
-#[tauri::command]
-pub async fn render_pdf_padding_page(
-    document_id: u64,
-    after: usize,
-    width: i32,
-    state: State<'_, PdfiumState>,
-) -> Result<Response, String> {
-    let engine = Arc::clone(&state.engine);
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        let page = engine.render_padding_page(document_id, after, width)?;
-
-        encode_png(&page)
-            .map_err(|error| format!("could not encode padding page after {after}: {error}"))
-    })
-    .await
-    .map_err(|error| format!("PDFium padding render task failed: {error}"))??;
 
     Ok(Response::new(bytes))
 }
@@ -896,7 +874,7 @@ pub async fn save_pdf(document_id: u64, state: State<'_, PdfiumState>) -> Result
 
 /// A suggestion carrying directories would start the reader in a place of the
 /// page's choosing.
-pub(super) fn suggested_file_name(suggested: &str) -> String {
+fn suggested_file_name(suggested: &str) -> String {
     Path::new(suggested)
         .file_name()
         .and_then(|name| name.to_str())
@@ -982,7 +960,7 @@ pub async fn export_pdf(
 /// path `find_open_file` looks it up by — the OS's own, as the outcome's string
 /// is lossy. Moved straight after the write, so the gap an open could slip
 /// through is as short as it can be outside the documents lock.
-pub(super) fn export_and_bind(
+fn export_and_bind(
     app: &AppHandle,
     engine: &PdfiumEngine,
     document_id: u64,
@@ -997,75 +975,6 @@ pub(super) fn export_and_bind(
     }
 
     Ok(outcome)
-}
-
-/// Where a new PDF goes, asked before it is built: a cancelled dialog costs no
-/// build. The dialog is the caller's own, since a path argument would be an
-/// arbitrary-file write for any page code. `None` also for a page that reloaded
-/// or closed meanwhile, which has nothing left to show the PDF in.
-pub(super) async fn pick_new_pdf(
-    app: &AppHandle,
-    document_id: Option<u64>,
-    filter_label: String,
-    suggested_name: String,
-    window: &WebviewWindow,
-    page: PageGeneration,
-) -> Result<Option<PathBuf>, String> {
-    let state = app.state::<PdfiumState>();
-
-    match pick_export_path(
-        &state,
-        window,
-        document_id,
-        filter_label,
-        &["pdf"],
-        suggested_name,
-    )
-    .await?
-    {
-        DialogOutcome::Picked(path) => Ok((page_generation(window) == page).then_some(path)),
-        DialogOutcome::Cancelled => Ok(None),
-        DialogOutcome::Busy => Err(FILE_DIALOG_BUSY.into()),
-    }
-}
-
-/// A document just built for the window, recorded as its own and written to
-/// `path`, which it is then bound to: it opens as that file's tab, as an open
-/// of it would. `None` for a page that reloaded or closed meanwhile, which has
-/// already closed it; an unwritten one is closed, having no file to show.
-pub(super) async fn bind_new_document(
-    document: PdfDocumentInfo,
-    path: PathBuf,
-    app: AppHandle,
-    window: &WebviewWindow,
-    page: PageGeneration,
-) -> Result<Option<PdfDocumentInfo>, String> {
-    let owners = app.state::<DocumentOwners>();
-
-    record_document(&owners, window, page, document.id(), DocumentFile::None);
-
-    if !owners.owns(document.id(), window.label()) {
-        return Ok(None);
-    }
-
-    let id = document.id();
-    let engine = Arc::clone(&app.state::<PdfiumState>().engine);
-    let shown = path.to_string_lossy().into_owned();
-    let task_app = app.clone();
-    let written =
-        tauri::async_runtime::spawn_blocking(move || export_and_bind(&task_app, &engine, id, path))
-            .await
-            .map_err(|error| format!("PDFium export task failed: {error}"));
-
-    match written {
-        Ok(Ok(_)) => Ok(Some(document.bound_to(shown))),
-        Ok(Err(error)) | Err(error) => {
-            owners.release(id);
-            app.state::<PdfiumState>().close_document_detached(id);
-
-            Err(error)
-        }
-    }
 }
 
 /// `export_pdf` past its dialog, which no driver can answer. Taking the path

@@ -601,22 +601,6 @@ impl PdfiumEngine {
             .map(|parent| parent.to_path_buf())
     }
 
-    /// The refusals a new file written to `path` would meet, asked ahead of
-    /// work that could otherwise only end in one.
-    pub fn check_new_file_destination(&self, path: &Path) -> Result<(), String> {
-        let documents = self.lock_documents()?;
-
-        if is_open_document_file(&documents, path, None) {
-            return Err(EXPORT_TARGET_OPEN_ERROR.into());
-        }
-
-        if self.is_signed_file(&documents, path) {
-            return Err(signatures::EXPORT_SIGNED_ERROR.into());
-        }
-
-        Ok(())
-    }
-
     /// Writes to `path` and binds the document to it — a true save-as, after
     /// which `save` writes there and the old file stays as it was. A copy-only
     /// document with a file stays bound to it: `save` refuses that file, so

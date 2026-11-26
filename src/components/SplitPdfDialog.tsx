@@ -108,11 +108,12 @@ export function SplitPdfDialog({
             </span>
           </Label>
         </RadioGroup>
-        {mode === "bookmarks" ? (
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {t("splitExport.bookmarksSizeHint")}
-          </p>
-        ) : null}
+        <p
+          data-testid="split-warning"
+          className="text-xs leading-relaxed text-muted-foreground"
+        >
+          {t("splitExport.sizeHint")}
+        </p>
         {failed ? (
           <p role="alert" className="text-sm text-destructive">
             {t("splitExport.failed")}

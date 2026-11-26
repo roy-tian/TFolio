@@ -17,5 +17,14 @@ export type ArchiveExportRequest = {
 export const MIN_IMAGE_DPI = 72
 export const MAX_IMAGE_DPI = 600
 
-/** The named densities the dialog offers; each one's hint says what it is for. */
-export const IMAGE_DPI_CHOICES = [75, 150, 300, 600] as const
+export type ImageResolution = "high" | "medium" | "low"
+
+/** The named resolutions the dialog offers; each maps to a density without
+    exposing dpi jargon in the interface. */
+export const IMAGE_RESOLUTION_CHOICES = [
+  { key: "high", dpi: 300 },
+  { key: "medium", dpi: 150 },
+  { key: "low", dpi: 75 },
+] as const
+
+export const DEFAULT_IMAGE_RESOLUTION: ImageResolution = "medium"

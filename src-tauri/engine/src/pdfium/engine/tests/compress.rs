@@ -907,3 +907,580 @@ fn releasing_drops_the_cached_copies() {
 
     engine.close(document.id).unwrap();
 }
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn duplicate_images_masks_and_icc_profiles_deduplicate_at_full_quality() {
+    let engine = test_engine();
+    let directory = scratch_directory("compress-dedup-images");
+
+    let mut gradient = image::RgbImage::new(300, 200);
+    for (x, y, pixel) in gradient.enumerate_pixels_mut() {
+        *pixel = image::Rgb([(x * 255 / 299) as u8, (y * 255 / 199) as u8, 96]);
+    }
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 92)
+        .encode_image(&DynamicImage::ImageRgb8(gradient))
+        .unwrap();
+
+    let mut mask_samples = vec![200u8; 300 * 200];
+    mask_samples[0] = 64;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&mask_samples).unwrap();
+    let mask_flate = encoder.finish().unwrap();
+
+    // Two pages, each with its own duplicate copy of the same JPEG, soft mask,
+    // and ICC profile — with the second image carrying an indirect `/Length`.
+    let mut doc = lopdf::Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let mut kids = Vec::new();
+
+    for copy in 0..2 {
+        let profile_id = doc.add_object(lopdf::Stream::new(
+            stream_dict(&[("N", 3.into())]),
+            icc_header(b"RGB "),
+        ));
+        let cs_id = doc.add_object(lopdf::Object::Array(vec![
+            lopdf::Object::Name(b"ICCBased".to_vec()),
+            lopdf::Object::Reference(profile_id),
+        ]));
+        let mask_id = doc.add_object(lopdf::Stream::new(
+            stream_dict(&[
+                ("Type", lopdf::Object::Name(b"XObject".to_vec())),
+                ("Subtype", lopdf::Object::Name(b"Image".to_vec())),
+                ("Width", 300.into()),
+                ("Height", 200.into()),
+                ("ColorSpace", lopdf::Object::Name(b"DeviceGray".to_vec())),
+                ("BitsPerComponent", 8.into()),
+                ("Filter", lopdf::Object::Name(b"FlateDecode".to_vec())),
+            ]),
+            mask_flate.clone(),
+        ));
+        let mut image_dict = stream_dict(&[
+            ("Type", lopdf::Object::Name(b"XObject".to_vec())),
+            ("Subtype", lopdf::Object::Name(b"Image".to_vec())),
+            ("Width", 300.into()),
+            ("Height", 200.into()),
+            ("ColorSpace", lopdf::Object::Reference(cs_id)),
+            ("BitsPerComponent", 8.into()),
+            ("Filter", lopdf::Object::Name(b"DCTDecode".to_vec())),
+            ("SMask", lopdf::Object::Reference(mask_id)),
+        ]);
+        if copy == 1 {
+            let length_id = doc.add_object(lopdf::Object::Integer(jpeg.len() as i64));
+            image_dict.set("Length", lopdf::Object::Reference(length_id));
+        }
+        let image_id = doc.add_object(lopdf::Stream::new(image_dict, jpeg.clone()));
+        let content_id = doc.add_object(lopdf::Stream::new(
+            lopdf::Dictionary::new(),
+            b"q 300 0 0 200 100 300 cm /Im0 Do Q\n".to_vec(),
+        ));
+        let page_id = doc.add_object(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Page".to_vec())),
+            ("Parent", lopdf::Object::Reference(pages_id)),
+            (
+                "MediaBox",
+                lopdf::Object::Array(vec![0.into(), 0.into(), 595.into(), 842.into()]),
+            ),
+            (
+                "Resources",
+                lopdf::Object::Dictionary(stream_dict(&[(
+                    "XObject",
+                    lopdf::Object::Dictionary(stream_dict(&[(
+                        "Im0",
+                        lopdf::Object::Reference(image_id),
+                    )])),
+                )])),
+            ),
+            ("Contents", lopdf::Object::Reference(content_id)),
+        ]));
+        kids.push(lopdf::Object::Reference(page_id));
+    }
+
+    doc.objects.insert(
+        pages_id,
+        lopdf::Object::Dictionary(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Kids", lopdf::Object::Array(kids)),
+            ("Count", 2.into()),
+        ])),
+    );
+    let catalog_id = doc.add_object(stream_dict(&[
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(pages_id)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+
+    let mut source = Vec::new();
+    doc.save_to(&mut source).unwrap();
+
+    let document = engine.open(source.clone()).unwrap();
+    let destination = directory.join("deduped.pdf");
+    assert!(engine
+        .export_compressed(
+            document.id,
+            &destination,
+            CompressionOptions { image_quality: 100 },
+            |_, _| {}
+        )
+        .unwrap());
+
+    let written = fs::read(&destination).unwrap();
+    assert!(
+        written.len() + jpeg.len() / 2 < source.len(),
+        "deduplicating the repeated image should save at least half of one copy: {} vs {}",
+        written.len(),
+        source.len()
+    );
+
+    let loaded = lopdf::Document::load_mem(&written).unwrap();
+    let image_streams = loaded
+        .objects
+        .values()
+        .filter(|object| {
+            object.as_stream().is_ok_and(|stream| {
+                matches!(
+                    stream
+                        .dict
+                        .get(b"Subtype")
+                        .ok()
+                        .and_then(|o| o.as_name().ok()),
+                    Some(b"Image")
+                )
+            })
+        })
+        .count();
+    // One colour image + one soft mask (down from two colour images + two soft masks).
+    assert_eq!(image_streams, 2);
+
+    let reopened = engine.open(written).unwrap();
+    assert_eq!(reopened.num_pages, 2);
+    assert!(rendered_darkness(engine, reopened.id, 1) > 0);
+    assert_eq!(
+        rendered_darkness(engine, reopened.id, 1),
+        rendered_darkness(engine, reopened.id, 2)
+    );
+
+    engine.close(reopened.id).unwrap();
+    engine.close(document.id).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn duplicate_font_streams_and_descriptors_collapse_while_identical_pages_stay_distinct() {
+    let engine = test_engine();
+    let directory = scratch_directory("compress-dedup-fonts");
+
+    // Repeated 40 KiB pseudo-font payload across two separate Font/FontDescriptor
+    // chains plus three identical blank pages.
+    let font_payload: Vec<u8> = (0..40_960u32)
+        .map(|i| ((i.wrapping_mul(2654435761)) >> 24) as u8)
+        .collect();
+    let mut doc = lopdf::Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let mut kids = Vec::new();
+
+    for _ in 0..2 {
+        let font_file_id = doc.add_object(lopdf::Stream::new(
+            stream_dict(&[("Length1", (font_payload.len() as i64).into())]),
+            font_payload.clone(),
+        ));
+        let widths_id = doc.add_object(lopdf::Object::Array(vec![500.into(), 600.into()]));
+        let descriptor_id = doc.add_object(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"FontDescriptor".to_vec())),
+            ("FontName", lopdf::Object::Name(b"DupFont".to_vec())),
+            ("FontFile2", lopdf::Object::Reference(font_file_id)),
+        ]));
+        let font_id = doc.add_object(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Font".to_vec())),
+            ("Subtype", lopdf::Object::Name(b"TrueType".to_vec())),
+            ("BaseFont", lopdf::Object::Name(b"DupFont".to_vec())),
+            ("Widths", lopdf::Object::Reference(widths_id)),
+            ("FontDescriptor", lopdf::Object::Reference(descriptor_id)),
+        ]));
+        let content_id = doc.add_object(lopdf::Stream::new(lopdf::Dictionary::new(), Vec::new()));
+        let page_id = doc.add_object(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Page".to_vec())),
+            ("Parent", lopdf::Object::Reference(pages_id)),
+            (
+                "MediaBox",
+                lopdf::Object::Array(vec![0.into(), 0.into(), 300.into(), 400.into()]),
+            ),
+            (
+                "Resources",
+                lopdf::Object::Dictionary(stream_dict(&[(
+                    "Font",
+                    lopdf::Object::Dictionary(stream_dict(&[(
+                        "F1",
+                        lopdf::Object::Reference(font_id),
+                    )])),
+                )])),
+            ),
+            ("Contents", lopdf::Object::Reference(content_id)),
+        ]));
+        kids.push(lopdf::Object::Reference(page_id));
+    }
+
+    // Add a third identical blank page to confirm `/Type /Page` is never merged.
+    let extra_content_id = doc.add_object(lopdf::Stream::new(lopdf::Dictionary::new(), Vec::new()));
+    let extra_page_id = doc.add_object(stream_dict(&[
+        ("Type", lopdf::Object::Name(b"Page".to_vec())),
+        ("Parent", lopdf::Object::Reference(pages_id)),
+        (
+            "MediaBox",
+            lopdf::Object::Array(vec![0.into(), 0.into(), 300.into(), 400.into()]),
+        ),
+        ("Contents", lopdf::Object::Reference(extra_content_id)),
+    ]));
+    kids.push(lopdf::Object::Reference(extra_page_id));
+
+    doc.objects.insert(
+        pages_id,
+        lopdf::Object::Dictionary(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Kids", lopdf::Object::Array(kids)),
+            ("Count", 3.into()),
+        ])),
+    );
+    let catalog_id = doc.add_object(stream_dict(&[
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(pages_id)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+
+    let mut source = Vec::new();
+    doc.save_to(&mut source).unwrap();
+
+    let document = engine.open(source.clone()).unwrap();
+    let destination = directory.join("deduped-fonts.pdf");
+    assert!(engine
+        .export_compressed(
+            document.id,
+            &destination,
+            CompressionOptions { image_quality: 100 },
+            |_, _| {}
+        )
+        .unwrap());
+
+    let written = fs::read(&destination).unwrap();
+    assert!(
+        written.len() + 30_000 < source.len(),
+        "deduplicating the repeated font stream should drop the duplicate payload: {} vs {}",
+        written.len(),
+        source.len()
+    );
+
+    let loaded = lopdf::Document::load_mem(&written).unwrap();
+    let font_descriptors = loaded
+        .objects
+        .values()
+        .filter(|object| {
+            object.as_dict().is_ok_and(|dict| {
+                dict.get(b"Type").ok().and_then(|o| o.as_name().ok()) == Some(b"FontDescriptor")
+            })
+        })
+        .count();
+    assert_eq!(font_descriptors, 1);
+
+    let reopened = engine.open(written).unwrap();
+    assert_eq!(reopened.num_pages, 3);
+
+    engine.close(reopened.id).unwrap();
+    engine.close(document.id).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn distinct_images_with_identical_opaque_masks_still_drop_their_masks() {
+    let engine = test_engine();
+    let directory = scratch_directory("compress-distinct-opaque-masks");
+
+    // Two distinct JPEG photos (drawn at native size so neither is downsampled)
+    // each owning its own identical all-255 opaque FlateDecode `/SMask`.
+    // Pass-1 dedup must not merge the two masks before `recompress_images` or
+    // `exclusive` flips to false and stops crediting mask savings.
+    let mut doc = lopdf::Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let mut kids = Vec::new();
+    let opaque_mask = vec![255u8; 300 * 200];
+    let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    enc.write_all(&opaque_mask).unwrap();
+    let mask_flate = enc.finish().unwrap();
+
+    for variant in 0..2u8 {
+        let mut rgb = image::RgbImage::new(300, 200);
+        for (x, y, pixel) in rgb.enumerate_pixels_mut() {
+            let v = ((x * 7 + y * 13 + variant as u32 * 97) % 256) as u8;
+            *pixel = image::Rgb([v, v.wrapping_add(40), v.wrapping_add(80)]);
+        }
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 65)
+            .encode_image(&DynamicImage::ImageRgb8(rgb))
+            .unwrap();
+
+        let mask_id = doc.add_object(lopdf::Stream::new(
+            stream_dict(&[
+                ("Type", lopdf::Object::Name(b"XObject".to_vec())),
+                ("Subtype", lopdf::Object::Name(b"Image".to_vec())),
+                ("Width", 300.into()),
+                ("Height", 200.into()),
+                ("ColorSpace", lopdf::Object::Name(b"DeviceGray".to_vec())),
+                ("BitsPerComponent", 8.into()),
+                ("Filter", lopdf::Object::Name(b"FlateDecode".to_vec())),
+            ]),
+            mask_flate.clone(),
+        ));
+        let image_id = doc.add_object(lopdf::Stream::new(
+            stream_dict(&[
+                ("Type", lopdf::Object::Name(b"XObject".to_vec())),
+                ("Subtype", lopdf::Object::Name(b"Image".to_vec())),
+                ("Width", 300.into()),
+                ("Height", 200.into()),
+                ("ColorSpace", lopdf::Object::Name(b"DeviceRGB".to_vec())),
+                ("BitsPerComponent", 8.into()),
+                ("Filter", lopdf::Object::Name(b"DCTDecode".to_vec())),
+                ("SMask", lopdf::Object::Reference(mask_id)),
+            ]),
+            jpeg,
+        ));
+        let content_id = doc.add_object(lopdf::Stream::new(
+            lopdf::Dictionary::new(),
+            b"q 100 0 0 67 50 50 cm /Im0 Do Q\n".to_vec(),
+        ));
+        let page_id = doc.add_object(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Page".to_vec())),
+            ("Parent", lopdf::Object::Reference(pages_id)),
+            (
+                "MediaBox",
+                lopdf::Object::Array(vec![0.into(), 0.into(), 595.into(), 842.into()]),
+            ),
+            (
+                "Resources",
+                lopdf::Object::Dictionary(stream_dict(&[(
+                    "XObject",
+                    lopdf::Object::Dictionary(stream_dict(&[(
+                        "Im0",
+                        lopdf::Object::Reference(image_id),
+                    )])),
+                )])),
+            ),
+            ("Contents", lopdf::Object::Reference(content_id)),
+        ]));
+        kids.push(lopdf::Object::Reference(page_id));
+    }
+
+    doc.objects.insert(
+        pages_id,
+        lopdf::Object::Dictionary(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            ("Kids", lopdf::Object::Array(kids)),
+            ("Count", 2.into()),
+        ])),
+    );
+    let catalog_id = doc.add_object(stream_dict(&[
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(pages_id)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+
+    let mut source = Vec::new();
+    doc.save_to(&mut source).unwrap();
+
+    let document = engine.open(source).unwrap();
+    let destination = directory.join("compressed.pdf");
+    assert!(engine
+        .export_compressed(
+            document.id,
+            &destination,
+            CompressionOptions { image_quality: 0 },
+            |_, _| {}
+        )
+        .unwrap());
+
+    let loaded = lopdf::Document::load_mem(&fs::read(&destination).unwrap()).unwrap();
+    let remaining_smasks = loaded
+        .objects
+        .values()
+        .filter(|object| {
+            object
+                .as_stream()
+                .is_ok_and(|stream| stream.dict.has(b"SMask"))
+        })
+        .count();
+    assert_eq!(
+        remaining_smasks, 0,
+        "both distinct images should drop their redundant opaque SMasks"
+    );
+
+    engine.close(document.id).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+#[ignore = "requires `bun run pdfium:download`"]
+fn unwalked_annotation_image_is_not_downsampled_by_matching_page_thumbnail() {
+    let engine = test_engine();
+    let directory = scratch_directory("compress-unwalked-annot-image");
+
+    let mut rgb = image::RgbImage::new(900, 700);
+    for (x, y, pixel) in rgb.enumerate_pixels_mut() {
+        *pixel = image::Rgb([
+            (x * 5 % 256) as u8,
+            (y * 7 % 256) as u8,
+            ((x + y) % 256) as u8,
+        ]);
+    }
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 92)
+        .encode_image(&DynamicImage::ImageRgb8(rgb))
+        .unwrap();
+
+    let mut doc = lopdf::Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+
+    let make_image = |doc: &mut lopdf::Document| {
+        doc.add_object(lopdf::Stream::new(
+            stream_dict(&[
+                ("Type", lopdf::Object::Name(b"XObject".to_vec())),
+                ("Subtype", lopdf::Object::Name(b"Image".to_vec())),
+                ("Width", 900.into()),
+                ("Height", 700.into()),
+                ("ColorSpace", lopdf::Object::Name(b"DeviceRGB".to_vec())),
+                ("BitsPerComponent", 8.into()),
+                ("Filter", lopdf::Object::Name(b"DCTDecode".to_vec())),
+            ]),
+            jpeg.clone(),
+        ))
+    };
+
+    // Identical 900x700 image drawn tiny on the page (72x56 pt = 900 DPI) and
+    // separately inside an annotation `/AP` appearance stream (500x389 pt).
+    let page_img = make_image(&mut doc);
+    let annot_img = make_image(&mut doc);
+    let ap_stream = doc.add_object(lopdf::Stream::new(
+        stream_dict(&[
+            ("Type", lopdf::Object::Name(b"XObject".to_vec())),
+            ("Subtype", lopdf::Object::Name(b"Form".to_vec())),
+            (
+                "BBox",
+                lopdf::Object::Array(vec![0.into(), 0.into(), 500.into(), 389.into()]),
+            ),
+            (
+                "Resources",
+                lopdf::Object::Dictionary(stream_dict(&[(
+                    "XObject",
+                    lopdf::Object::Dictionary(stream_dict(&[(
+                        "ApIm",
+                        lopdf::Object::Reference(annot_img),
+                    )])),
+                )])),
+            ),
+        ]),
+        b"q 500 0 0 389 0 0 cm /ApIm Do Q\n".to_vec(),
+    ));
+    let annot_id = doc.add_object(stream_dict(&[
+        ("Type", lopdf::Object::Name(b"Annot".to_vec())),
+        ("Subtype", lopdf::Object::Name(b"Stamp".to_vec())),
+        (
+            "Rect",
+            lopdf::Object::Array(vec![50.into(), 200.into(), 550.into(), 589.into()]),
+        ),
+        (
+            "AP",
+            lopdf::Object::Dictionary(stream_dict(&[("N", lopdf::Object::Reference(ap_stream))])),
+        ),
+    ]));
+    let content_id = doc.add_object(lopdf::Stream::new(
+        lopdf::Dictionary::new(),
+        b"q 72 0 0 56 50 50 cm /Im0 Do Q\n".to_vec(),
+    ));
+    let page_id = doc.add_object(stream_dict(&[
+        ("Type", lopdf::Object::Name(b"Page".to_vec())),
+        ("Parent", lopdf::Object::Reference(pages_id)),
+        (
+            "MediaBox",
+            lopdf::Object::Array(vec![0.into(), 0.into(), 595.into(), 842.into()]),
+        ),
+        (
+            "Resources",
+            lopdf::Object::Dictionary(stream_dict(&[(
+                "XObject",
+                lopdf::Object::Dictionary(stream_dict(&[(
+                    "Im0",
+                    lopdf::Object::Reference(page_img),
+                )])),
+            )])),
+        ),
+        (
+            "Annots",
+            lopdf::Object::Array(vec![lopdf::Object::Reference(annot_id)]),
+        ),
+        ("Contents", lopdf::Object::Reference(content_id)),
+    ]));
+    doc.objects.insert(
+        pages_id,
+        lopdf::Object::Dictionary(stream_dict(&[
+            ("Type", lopdf::Object::Name(b"Pages".to_vec())),
+            (
+                "Kids",
+                lopdf::Object::Array(vec![lopdf::Object::Reference(page_id)]),
+            ),
+            ("Count", 1.into()),
+        ])),
+    );
+    let catalog_id = doc.add_object(stream_dict(&[
+        ("Type", lopdf::Object::Name(b"Catalog".to_vec())),
+        ("Pages", lopdf::Object::Reference(pages_id)),
+    ]));
+    doc.trailer
+        .set("Root", lopdf::Object::Reference(catalog_id));
+
+    let mut source = Vec::new();
+    doc.save_to(&mut source).unwrap();
+
+    let document = engine.open(source).unwrap();
+    let destination = directory.join("compressed.pdf");
+    assert!(engine
+        .export_compressed(
+            document.id,
+            &destination,
+            CompressionOptions { image_quality: 0 },
+            |_, _| {}
+        )
+        .unwrap());
+
+    let loaded = lopdf::Document::load_mem(&fs::read(&destination).unwrap()).unwrap();
+    let mut widths: Vec<i64> = loaded
+        .objects
+        .values()
+        .filter_map(|object| object.as_stream().ok())
+        .filter(|stream| {
+            stream
+                .dict
+                .get(b"Subtype")
+                .ok()
+                .and_then(|o| o.as_name().ok())
+                == Some(b"Image")
+        })
+        .filter_map(|stream| stream.dict.get(b"Width").ok()?.as_i64().ok())
+        .collect();
+    widths.sort_unstable();
+    // One downsampled page thumbnail (~72 px) and one untouched 900 px annotation image.
+    assert_eq!(widths.len(), 2, "widths were {widths:?}");
+    assert!(
+        widths[0] < 200,
+        "page thumbnail should downsample: {widths:?}"
+    );
+    assert_eq!(
+        widths[1], 900,
+        "annotation appearance image must keep its full 900 px width: {widths:?}"
+    );
+
+    engine.close(document.id).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}

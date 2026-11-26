@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   formatShortcut,
+  isWebViewPrintChord,
   matchesShortcut,
   shortcuts,
   zoomShortcut,
@@ -55,11 +56,28 @@ describe("matchesShortcut", () => {
     expect(matchesShortcut(alted, shortcuts.save, false)).toBe(false)
   })
 
-  test("keeps printing apart from page numbers", () => {
-    const alted = keyDown({ altKey: true, ctrlKey: true, key: "p" })
+  test("keeps plain Ctrl+P apart from page numbers", () => {
+    const alted = keyDown({ altKey: true, ctrlKey: true, code: "KeyP", key: "p" })
 
-    expect(matchesShortcut(alted, shortcuts.print, false)).toBe(false)
+    expect(isWebViewPrintChord(alted, false)).toBe(false)
     expect(matchesShortcut(alted, shortcuts.pageNumbers, false)).toBe(true)
+  })
+
+  test("blocks plain, shifted, and non-Latin WebView print chords", () => {
+    expect(isWebViewPrintChord(keyDown({ ctrlKey: true, key: "p" }), false)).toBe(true)
+    expect(
+      isWebViewPrintChord(keyDown({ ctrlKey: true, key: "P", shiftKey: true }), false),
+    ).toBe(true)
+    expect(
+      isWebViewPrintChord(keyDown({ code: "KeyP", ctrlKey: true, key: "ย" }), false),
+    ).toBe(true)
+    expect(
+      isWebViewPrintChord(keyDown({ code: "KeyP", key: "ย", metaKey: true }), true),
+    ).toBe(true)
+    expect(isWebViewPrintChord(keyDown({ ctrlKey: true, key: "p" }), true)).toBe(false)
+    expect(
+      isWebViewPrintChord(keyDown({ altKey: true, code: "KeyP", metaKey: true, key: "π" }), true),
+    ).toBe(false)
   })
 
   test("reads an Alt chord off the physical key", () => {

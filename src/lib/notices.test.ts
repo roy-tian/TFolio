@@ -214,11 +214,11 @@ describe("visibleNotices", () => {
   test("holds another document's notices back until its tab returns", () => {
     const list = raiseAll([
       { kind: "saveFailed", owner: documentOwner(1) },
-      { kind: "printFailed", owner: documentOwner(2) },
+      { kind: "annotateFailed", owner: documentOwner(2) },
     ])
 
     expect(visibleNotices(list, 2).map((notice) => notice.kind)).toEqual([
-      "printFailed",
+      "annotateFailed",
     ])
     expect(visibleNotices(list, 1).map((notice) => notice.kind)).toEqual([
       "saveFailed",
@@ -326,7 +326,7 @@ describe("overflowNotices", () => {
   test("leaves a waiting tab's notices alone, which are held rather than lost", () => {
     const list = raiseAll([
       { kind: "saveFailed", owner: documentOwner(1) },
-      { kind: "printFailed", owner: documentOwner(2) },
+      { kind: "annotateFailed", owner: documentOwner(2) },
     ])
 
     expect(overflowNotices(list, 2)).toEqual([])

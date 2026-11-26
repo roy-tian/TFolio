@@ -3,7 +3,6 @@ import path from "node:path"
 import { $, $$, browser, expect } from "@wdio/globals"
 import "@wdio/tauri-service"
 
-import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   activeSidebar,
   clickAppMenuItem,
@@ -1302,39 +1301,10 @@ describe("TFolio blank pages between files", () => {
     })
   })
 
-  it("prints the blank, and a Save As writes it", async () => {
+  it("writes the blank on Save As", async () => {
     const own = await openPdfFromDisk("own.pdf", minimalPdf(1))
     await addFilesFromPicker([writeScratchPdf("added.pdf", minimalPdf(2))])
     await waitForPages(3)
-
-    await browser.execute(() => {
-      const seam = window as Window & { __tfolioE2E?: E2eOverrides; __tfolioPrints?: number }
-
-      seam.__tfolioPrints = 0
-      seam.__tfolioE2E = {
-        ...seam.__tfolioE2E,
-        printWindow: () => {
-          seam.__tfolioPrints = (seam.__tfolioPrints ?? 0) + 1
-
-          return Promise.resolve()
-        },
-      }
-    })
-    await clickAppMenuItem("print")
-    await browser.waitUntil(
-      () =>
-        browser.execute(
-          () => ((window as Window & { __tfolioPrints?: number }).__tfolioPrints ?? 0) > 0,
-        ),
-      { timeout: 60_000, timeoutMsg: "the print dialog was never asked for" },
-    )
-    expect(
-      await browser.execute(() =>
-        Array.from(document.querySelectorAll("[data-print-sheet] .pdf-print-page"), (sheet) =>
-          sheet.querySelector("img") ? "page" : "blank",
-        ),
-      ),
-    ).toEqual(["page", "blank", "page", "page"])
 
     await pointSaveAsAt(path.join(path.dirname(own), "padded.pdf"))
     await $(saveTrigger).click()

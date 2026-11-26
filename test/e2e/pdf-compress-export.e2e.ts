@@ -4,7 +4,7 @@ import "@wdio/tauri-service"
 import type { E2eOverrides } from "../../src/lib/e2e"
 import {
   appMenuItemEnabled,
-  clickAppExportMenuItem,
+  clickAppMenuItem,
   minimalPdf,
   openPdfFromDisk,
   refreshApp,
@@ -33,7 +33,7 @@ describe("TFolio compress and save", () => {
   })
 
   it("disables compression on the home tab", async () => {
-    expect(await appMenuItemEnabled("export")).toBe(false)
+    expect(await appMenuItemEnabled("compress")).toBe(false)
   })
 
   it("exports at the chosen image quality", async () => {
@@ -60,8 +60,11 @@ describe("TFolio compress and save", () => {
       }
     })
 
-    await clickAppExportMenuItem("compress")
+    await clickAppMenuItem("compress")
     await $("[data-testid='compress-dialog']").waitForDisplayed()
+    await expect($("[data-testid='compress-dialog']")).toHaveText(
+      expect.stringContaining("Compress PDF"),
+    )
 
     // The estimate is the real backend's, not a stub: whatever it says, the
     // line settles only once the answer for the chosen quality has landed.
@@ -96,7 +99,7 @@ describe("TFolio compress and save", () => {
         },
       }
     })
-    await clickAppExportMenuItem("compress")
+    await clickAppMenuItem("compress")
     await settleEstimate()
     await $("[data-testid='compress-start']").click()
     await expect($("[data-testid='compress-dialog'] [role='alert']")).toBeDisplayed()
